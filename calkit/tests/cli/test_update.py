@@ -790,6 +790,42 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
     assert remote_names[-1] == "acme-lab/widget"
     assert calkit.load_calkit_info()["owner"] == "acme-lab"
+    # Someone not logged in is offered the login, then connected
+    import calkit.core
+
+    logged_in = {"yes": False}
+
+    def get_current_user():
+        if not logged_in["yes"]:
+            raise RuntimeError("401: Not authenticated")
+        return {"github_username": "someone"}
+
+    def run_device_flow():
+        logged_in["yes"] = True
+        return "token"
+
+    monkeypatch.setattr(calkit.hub, "get_current_user", get_current_user)
+    monkeypatch.setattr(calkit.hub, "run_device_flow", run_device_flow)
+    for answer, tty in [("n\n", True), ("", False), ("y\n", True)]:
+        monkeypatch.setattr(calkit.core, "is_tty", lambda tty=tty: tty)
+        on_hub.clear()
+        with open("calkit.yaml", "w") as f:
+            f.write("name: widget\ntitle: Widget\n")
+        result = runner.invoke(
+            update_app,
+            ["hub", "https://hub.test", "--no-commit"],
+            input=answer,
+        )
+        if answer == "y\n":
+            assert result.exit_code == 0, result.output
+            assert logged_in["yes"]
+            assert calkit.load_calkit_info()["owner"] == "acme-lab"
+        else:
+            # Declining, or with no terminal to ask in, says how to log in
+            assert result.exit_code != 0
+            assert "calkit hub login" in result.output
+            assert not logged_in["yes"]
+        assert ("Log in now?" in result.output) == tty
 
 
 def test_update_env_lock(tmp_dir, monkeypatch):

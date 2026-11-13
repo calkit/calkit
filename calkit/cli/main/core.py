@@ -1871,9 +1871,15 @@ def save(
     if not paths and not save_all:
         raise_error("Paths must be provided if not using --all")
     # Asked before anything else runs: the Git and DVC commands below read
-    # from the terminal too, and would take an answer typed ahead
-    if not dry_run and not no_push and not _has_somewhere_to_push():
-        no_push = not _offer_to_connect()
+    # from the terminal too, and would take an answer typed ahead.
+    # None pushes to DVC only if this commit stages DVC files.
+    push_dvc: bool | None = None
+    if not dry_run and not no_push:
+        if not _has_somewhere_to_push():
+            no_push = not _offer_to_connect()
+        elif not calkit.dvc.get_remotes() and (to == "dvc" or _has_dvc_data()):
+            # Accepting pushes data that was here before this commit too
+            push_dvc = _offer_dvc_remote()
     if paths is not None:
         add(paths, to=to, existing_only=existing_only, dry_run=dry_run)
     elif save_all:
@@ -1889,10 +1895,12 @@ def save(
         verbose=verbose,
     )
     if not no_push:
-        if verbose and not any_dvc:
+        if push_dvc is None:
+            push_dvc = any_dvc
+        if verbose and not push_dvc:
             typer.echo("Not pushing to DVC since no DVC files were staged")
         push(
-            no_dvc=not any_dvc,
+            no_dvc=not push_dvc,
             git_args=git_push_args,
             dvc_args=dvc_push_args,
             no_recursive=no_recursive,
@@ -2126,6 +2134,13 @@ def push(
     if selected & {"git", "dvc"} and not _has_somewhere_to_push():
         if not _offer_to_connect():
             return
+    elif (
+        "dvc" in selected
+        and not calkit.dvc.get_remotes()
+        and _has_dvc_data()
+        and not _offer_dvc_remote()
+    ):
+        selected.discard("dvc")
     if "dvc" in selected:
         remotes = calkit.dvc.get_remotes()
         if not no_check_auth:
@@ -2265,6 +2280,56 @@ def _offer_to_connect() -> bool:
         return False
     update_hub()
     return True
+
+
+def _offer_dvc_remote() -> bool:
+    """Offer a hub's storage to a project whose data has nowhere to go.
+
+    A Git remote is somewhere to push code, so ``_offer_to_connect``
+    doesn't ask, but the data would stay on this machine. True if the
+    project has a DVC remote now.
+    """
+    import calkit.hub
+    from calkit.cli.update import update_hub
+    from calkit.core import is_tty
+
+    typer.echo(
+        "This project has data in DVC but no DVC remote to push it to, so "
+        "it would stay on this machine."
+    )
+    if not is_tty():
+        warn("Skipping DVC push; run 'calkit update hub' to connect")
+        return False
+    answer = typer.prompt(
+        f"Store it on {calkit.hub.get_hub_url()}? [Y/n]",
+        default="y",
+        show_default=False,
+    )
+    if answer.strip().lower() not in ("", "y", "yes"):
+        warn(
+            "Skipping DVC push; run 'calkit update hub' to store data on a "
+            "hub, or 'dvc remote add' to use your own storage"
+        )
+        return False
+    update_hub()
+    return bool(calkit.dvc.get_remotes())
+
+
+def _has_dvc_data() -> bool:
+    """Whether DVC holds anything here: a cached output that exists.
+
+    A declared output not produced yet, e.g., by a stage this machine
+    can't run, has nothing to push.
+    """
+    try:
+        repo = calkit.dvc.get_dvc_repo()
+        return any(
+            os.path.exists(out.fs_path)
+            for out in repo.index.outs
+            if out.use_scm_ignore
+        )
+    except Exception:
+        return False
 
 
 def _has_somewhere_to_push() -> bool:

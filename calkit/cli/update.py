@@ -2331,9 +2331,23 @@ def update_hub(
     try:
         user = calkit.hub.get_current_user()
     except Exception as e:
-        raise_error(
-            f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+        from calkit.core import is_tty
+
+        if not is_tty():
+            raise_error(
+                f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+            )
+        typer.echo(f"Not logged in to {hub_url}")
+        answer = typer.prompt(
+            "Log in now? [Y/n]", default="y", show_default=False
         )
+        if answer.strip().lower() not in ("", "y", "yes"):
+            raise_error("Not logged in; run 'calkit hub login' first")
+        try:
+            calkit.hub.run_device_flow()
+            user = calkit.hub.get_current_user()
+        except Exception as e:
+            raise_error(f"Failed to log in to {hub_url}: {e}")
     owner = ck_info.get("owner") or user.get("github_username")
     # A project that already exists on the hub, e.g., one created there
     # for this repo, is connected to rather than created again, which the

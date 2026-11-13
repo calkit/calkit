@@ -3361,6 +3361,89 @@ def test_save_offers_hub_before_committing(
     assert git.Repo(bare).head.commit.message.strip() == "Add a"
 
 
+def test_save_offers_dvc_storage_for_data_with_nowhere_to_go(
+    tmp_dir, tmp_path_factory, monkeypatch
+):
+    from typer.testing import CliRunner
+
+    import calkit.cli.update
+    import calkit.core
+
+    git_config = tmp_path_factory.mktemp("git") / "config"
+    git_config.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+    for role in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Calkit Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@calkit.org")
+    subprocess.check_call(["calkit", "init"])
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
+    subprocess.check_call(["git", "init", "-q", "--bare", bare])
+    subprocess.check_call(["git", "remote", "add", "origin", bare])
+    storage = str(tmp_path_factory.mktemp("storage"))
+    events: list[str] = []
+
+    def connect():
+        events.append("connect")
+        subprocess.check_call(["dvc", "remote", "add", "-d", "store", storage])
+
+    monkeypatch.setattr(calkit.cli.update, "update_hub", connect)
+    runner = CliRunner()
+    # Code alone doesn't ask: its Git remote is somewhere to push it
+    with open("a.txt", "w") as f:
+        f.write("a")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add a"])
+    assert result.exit_code == 0, result.output
+    assert events == []
+    # Data does, and declining still commits and pushes the code
+    with open("data.bin", "wb") as f:
+        f.write(b"x" * 100)
+    result = runner.invoke(
+        calkit_app,
+        ["save", "data.bin", "--to", "dvc", "-m", "Add data"],
+        input="n\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert events == []
+    assert "no DVC remote" in result.output
+    assert "Skipping DVC push" in result.output
+    assert git.Repo(bare).head.commit.message.strip() == "Add data"
+    assert not os.listdir(storage)
+    # Without pushing there's nothing to ask about
+    with open("b.txt", "w") as f:
+        f.write("b")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add b", "--no-push"])
+    assert result.exit_code == 0, result.output
+    assert "no DVC remote" not in result.output
+    # Accepting connects, then pushes the data that was already here,
+    # though this commit stages none
+    with open("c.txt", "w") as f:
+        f.write("c")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add c"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert events == ["connect"]
+    assert os.listdir(storage)
+    assert git.Repo(bare).head.commit.message.strip() == "Add c"
+    # Once there's a remote, nothing asks again
+    with open("d.txt", "w") as f:
+        f.write("d")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add d"])
+    assert result.exit_code == 0, result.output
+    assert events == ["connect"]
+    # Push on its own offers too
+    subprocess.check_call(["dvc", "remote", "remove", "store"])
+    result = runner.invoke(calkit_app, ["push"], input="n\n")
+    assert result.exit_code == 0, result.output
+    assert "Skipping DVC push" in result.output
+    assert events == ["connect"]
+    # And without a terminal to ask in, it says how to connect instead
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    result = runner.invoke(calkit_app, ["push"])
+    assert result.exit_code == 0, result.output
+    assert "calkit update hub" in result.output
+    assert events == ["connect"]
+
+
 def test_outputs_stay_out_of_git_after_failed_run(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = calkit.load_calkit_info()

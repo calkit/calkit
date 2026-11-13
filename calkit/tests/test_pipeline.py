@@ -4403,7 +4403,7 @@ def test_table_iteration_names(tmp_dir):
         assert "matrix" in calkit.ryaml.load(f)["stages"]["ev"]
 
 
-def test_get_stage_requirements(tmp_dir):
+def test_get_stage_items(tmp_dir):
     subprocess.check_call(["git", "init", "-q"])
     subprocess.check_call(["dvc", "init", "-q"])
     requirements = [
@@ -4459,33 +4459,112 @@ def test_get_stage_requirements(tmp_dir):
     # Each item is keyed by the name DVC runs it under
     by_item = {}
     for name, stage in stages.items():
-        by_item |= calkit.pipeline.get_stage_requirements(name, stage)
+        by_item |= calkit.pipeline.get_stage_items(name, stage)
     assert sorted(by_item) == sorted(names)
     # Only the item's own names are filled in, leaving other braces
-    assert by_item["plain@libreoffice-1"] == [
+    assert by_item["plain@libreoffice-1"]["requirements"] == [
         "libreoffice",
         {"kind": "setup", "check_command": "awk '{print $1}' 1.txt"},
     ]
-    assert by_item["rows@word-1-2"][0] == "word"
-    # A stage that doesn't iterate, or whose requirements don't use its
-    # values, is one thing to check
-    assert calkit.pipeline.get_stage_requirements(
-        "s", {"requirements": ["{engine}"]}
-    ) == {"s": ["{engine}"]}
-    assert calkit.pipeline.get_stage_requirements(
-        "s", stages["plain"] | {"requirements": ["git"]}
-    ) == {"s": ["git"]}
+    assert by_item["rows@word-1-2"]["requirements"][0] == "word"
+    # The rest of the stage is left as it is
+    assert by_item["plain@libreoffice-1"]["command"] == "echo {engine}"
+    # So is an environment, unless it uses the values too
+    assert by_item["plain@word-1"]["environment"] == "_system"
+    in_env = stages["plain"] | {
+        "environment": "cluster:{engine}",
+        "requirements": ["git"],
+    }
+    assert {
+        k: v["environment"]
+        for k, v in calkit.pipeline.get_stage_items("e", in_env).items()
+    } == {"e@word-1": "cluster:word", "e@libreoffice-1": "cluster:libreoffice"}
+    # A stage that doesn't iterate, or whose environment and requirements
+    # don't use its values, is one thing
+    alone = {"requirements": ["{engine}"]}
+    assert calkit.pipeline.get_stage_items("s", alone) == {"s": alone}
+    unused = stages["plain"] | {"requirements": ["git"]}
+    assert calkit.pipeline.get_stage_items("s", unused) == {"s": unused}
     # YAML reads an unquoted {engine} as a mapping, which is an error rather
     # than an app named 'engine'
     for unquoted in [
-        [{"engine": None}],
-        [{"name": {"engine": None}}],
-        [{"kind": "setup", "check_command": {"engine": None}}],
+        {"requirements": [{"engine": None}]},
+        {"requirements": [{"name": {"engine": None}}]},
+        {
+            "requirements": [
+                {"kind": "setup", "check_command": {"engine": None}}
+            ]
+        },
+        {"environment": {"engine": None}},
     ]:
         with pytest.raises(ValueError, match="quote it"):
-            calkit.pipeline.get_stage_requirements(
-                "plain", stages["plain"] | {"requirements": unquoted}
+            calkit.pipeline.get_stage_items(
+                "plain", stages["plain"] | unquoted
             )
+
+
+def test_iterated_environment(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    for name in ["a", "b"]:
+        with open(f"{name}.txt", "w") as f:
+            f.write("")
+    ck_info = {
+        "environments": {
+            "py-a": {"kind": "uv-venv", "path": "a.txt", "prefix": ".venv-a"},
+            "py-b": {"kind": "uv-venv", "path": "b.txt", "prefix": ".venv-b"},
+            "lab": {"kind": "system"},
+        },
+        "pipeline": {
+            "stages": {
+                "fit": {
+                    "kind": "python-script",
+                    "environment": "{env}",
+                    "script_path": "fit.py",
+                    "args": ["{env}"],
+                    "iterate_over": [
+                        {"arg_name": "env", "values": ["py-a", "py-b"]}
+                    ],
+                }
+            }
+        },
+    }
+    stage = calkit.pipeline.to_dvc(ck_info=ck_info)["fit"]
+    # Each item runs in its own environment, and is rerun when any of the
+    # environments its items use changes
+    assert stage["cmd"].startswith("calkit xenv -n ${item.env} --no-check")
+    assert [d for d in stage["deps"] if "env-locks" in d] == [
+        ".calkit/env-locks/py-a",
+        ".calkit/env-locks/py-b",
+    ]
+    # Inside a machine, only the runtime can depend on an item
+    fit = ck_info["pipeline"]["stages"]["fit"]
+    fit["environment"] = "lab:{env}"
+    stage = calkit.pipeline.to_dvc(ck_info=ck_info)["fit"]
+    assert "calkit xenv -n ${item.env} --no-check" in stage["cmd"]
+    for environment, values, match in [
+        ("{env}:py-a", ["lab"], "only the inner one can"),
+        ("{env}", ["py-a", "lab"], "must be a runtime"),
+        ("{env}", ["py-a", "py-c"], "'py-c', which is not defined"),
+    ]:
+        fit["environment"] = environment
+        fit["iterate_over"][0]["values"] = values
+        with pytest.raises(ValueError, match=match):
+            calkit.pipeline.to_dvc(ck_info=ck_info)
+    # Its environments are those its items use, less those skipped
+    fit["environment"] = "{env}"
+    fit["iterate_over"][0]["values"] = ["py-a", "py-b"]
+    env_names, _, _ = calkit.environments.get_pipeline_env_names(ck_info)
+    assert env_names == ["py-a", "py-b"]
+    env_names, _, _ = calkit.environments.get_pipeline_env_names(
+        ck_info, skip_stages=["fit@py-b"]
+    )
+    assert env_names == ["py-a"]
+    # Nothing is gated for an environment it doesn't define
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, interactive=False
+    )
+    assert gated == {} and errors == {}
 
 
 def test_switch_env_compiles(tmp_dir):

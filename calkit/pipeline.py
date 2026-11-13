@@ -609,15 +609,17 @@ def _name_table_items(
     return {"foreach": items, "do": body}, renames
 
 
-def get_stage_requirements(
+def get_stage_items(
     stage_name: str, stage: dict, params: dict | None = None
-) -> dict[str, list]:
-    """A stage's own requirements, keyed by what they apply to.
+) -> dict[str, dict]:
+    """A stage, or its items when what it runs in or needs depends on them.
 
-    That's the stage, unless it iterates and its requirements use its
-    values, e.g., ``- "{engine}"``, which fills them in for each item,
-    keyed by the name DVC runs it under, e.g., ``stage@word``. Only an
-    item's own names are filled in, so other braces, e.g., awk's, stay.
+    That's the stage alone, keyed by its name, unless it iterates and its
+    ``environment`` or ``requirements`` use its values, e.g.,
+    ``environment: "{env}"`` or ``- "{engine}"``. Then it's each item, keyed
+    by the name DVC runs it under, e.g., ``stage@word``, with those values
+    filled in. Only an item's own names are filled in, so other braces,
+    e.g., awk's, stay.
     """
     import json
 
@@ -625,9 +627,9 @@ def get_stage_requirements(
 
     from calkit.models.pipeline import StageIteration
 
-    def check_quoted(obj: Any) -> None:
+    def check_quoted(obj: Any, field: str) -> None:
         # YAML reads an unquoted {var} as a mapping, {var: null}, which
-        # would otherwise pass for an app named 'var'
+        # would otherwise pass for, e.g., an app named 'var'
         if isinstance(obj, dict):
             keys = list(obj)
             if (
@@ -637,14 +639,14 @@ def get_stage_requirements(
             ):
                 raise ValueError(
                     f"Stage '{stage_name}' has {{{keys[0]}}} unquoted in its "
-                    "requirements, which YAML reads as a mapping; quote it, "
+                    f"{field}, which YAML reads as a mapping; quote it, "
                     f'e.g., "{{{keys[0]}}}"'
                 )
             for value in obj.values():
-                check_quoted(value)
+                check_quoted(value, field)
         elif isinstance(obj, list):
             for value in obj:
-                check_quoted(value)
+                check_quoted(value, field)
 
     def fill(obj: Any, values: dict) -> Any:
         if isinstance(obj, str):
@@ -662,20 +664,25 @@ def get_stage_requirements(
             return {fill(k, values): fill(v, values) for k, v in obj.items()}
         return obj
 
-    requirements = list(stage.get("requirements") or [])
     if not stage.get("iterate_over"):
-        return {stage_name: requirements}
+        return {stage_name: stage}
     arg_names = set()
     for raw in stage["iterate_over"]:
         arg_name = raw.get("arg_name") if isinstance(raw, dict) else None
         arg_names |= set(
             arg_name if isinstance(arg_name, list) else [arg_name]
         )
-    check_quoted(requirements)
+    fields = {
+        field: stage[field]
+        for field in ("environment", "requirements")
+        if stage.get(field) is not None
+    }
+    for field, value in fields.items():
+        check_quoted(value, field)
     placeholder = re.compile(r"\{(\w+)\}")
-    used = set(placeholder.findall(json.dumps(requirements, default=str)))
+    used = set(placeholder.findall(json.dumps(fields, default=str)))
     if not used & arg_names:
-        return {stage_name: requirements}
+        return {stage_name: stage}
     # The matrix compiling the stage gives DVC, which names its items
     matrix = {}
     for n, raw in enumerate(stage["iterate_over"]):
@@ -704,7 +711,7 @@ def get_stage_requirements(
                     values[key] = value
             items["-".join(fragments)] = values
     return {
-        f"{stage_name}@{item_name}": fill(requirements, values)
+        f"{stage_name}@{item_name}": dict(stage) | fill(fields, values)
         for item_name, values in items.items()
     }
 
@@ -1184,9 +1191,15 @@ def get_gated_stages(
                         return source, output
         return None
 
-    for name, stage in stages.items():
-        if stage_names is not None and name not in stage_names:
-            continue
+    # An iterated stage whose environment or requirements depend on its
+    # values is gated an item at a time
+    targets: dict[str, dict] = {}
+    for stage_name, stage in stages.items():
+        if stage_names is None or stage_name in stage_names:
+            targets |= get_stage_items(
+                stage_name, stage, params=ck_info.get("parameters")
+            )
+    for name, stage in targets.items():
         if stage.get("frozen"):
             continue
         if not manual and stage.get("kind") == "manual-step":
@@ -1252,12 +1265,16 @@ def get_gated_stages(
             machine_name, machine = env_name, env
         if machine_name is not None and not remote and reason is None:
             continue
-        # The items that can't run, when requirements are filled in for each
-        skipped_items: dict[str, tuple[str, bool]] = {}
         if reason is None:
-            env_requirements = [
-                r for _, env in resolved for r in machine_requirements(env)
-            ]
+            requirements = list(stage.get("requirements") or [])
+            for _, env in resolved:
+                requirements += machine_requirements(env)
+            reason, is_error = check(
+                ["requirements", machine_name, requirements],
+                lambda: requirements_problem(
+                    requirements, machine_name, machine
+                ),
+            )
             # A machine that is only described here could run its stages
             # from here if Calkit knew how to reach it
             local_machines = [
@@ -1267,48 +1284,27 @@ def get_gated_stages(
                 and not env.get("host")
                 and machine_requirements(env)
             ]
-            for target, stage_requirements in get_stage_requirements(
-                name, stage, params=ck_info.get("parameters")
-            ).items():
-                requirements = stage_requirements + env_requirements
-                target_reason, target_is_error = check(
-                    ["requirements", machine_name, requirements],
+            if (
+                reason is not None
+                and not is_error
+                and machine_name is None
+                and local_machines
+                and check(
+                    ["requirements", None, dict(resolved)[local_machines[0]]],
                     lambda: requirements_problem(
-                        requirements, machine_name, machine
-                    ),
-                )
-                if (
-                    target_reason is not None
-                    and not target_is_error
-                    and machine_name is None
-                    and local_machines
-                    and check(
-                        [
-                            "requirements",
-                            None,
-                            dict(resolved)[local_machines[0]],
-                        ],
-                        lambda: requirements_problem(
-                            machine_requirements(
-                                dict(resolved)[local_machines[0]]
-                            ),
-                            None,
-                            {},
+                        machine_requirements(
+                            dict(resolved)[local_machines[0]]
                         ),
-                    )[0]
-                    is not None
-                ):
-                    target_reason += (
-                        f"; giving environment '{local_machines[0]}' a "
-                        "'host' would let its stages run there from here "
-                        "over SSH"
-                    )
-                if target_reason is None:
-                    continue
-                if target == name:
-                    reason, is_error = target_reason, target_is_error
-                else:
-                    skipped_items[target] = (target_reason, target_is_error)
+                        None,
+                        {},
+                    ),
+                )[0]
+                is not None
+            ):
+                reason += (
+                    f"; giving environment '{local_machines[0]}' a 'host' "
+                    "would let its stages run there from here over SSH"
+                )
         if reason is None:
             locks = [
                 (n, env, n, env)
@@ -1324,9 +1320,6 @@ def get_gated_stages(
                     break
         if reason is not None:
             (errors if is_error else gated)[name] = reason
-            continue
-        for item_name, (item_reason, item_is_error) in skipped_items.items():
-            (errors if item_is_error else gated)[item_name] = item_reason
     # A stage that needs an output a skipped stage hasn't made can't run
     # either, and nor can the stages after it
     added = True
@@ -2560,6 +2553,7 @@ def to_dvc(
     import calkit.markdown
     import calkit.questions
     from calkit.environments import (
+        COMPOSITE_ENV_SEP,
         SWITCH_KIND,
         get_env,
         get_env_input_env_vars,
@@ -2712,6 +2706,41 @@ def to_dvc(
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
         raise ValueError(f"Pipeline is not defined properly: {e}")
+    # An iterated stage's environment may depend on its items' values, as
+    # long as only the runtime does, since a machine or a switch changes
+    # the command the items share
+    for stage_name, stage in pipeline.stages.items():
+        items = get_stage_items(
+            stage_name,
+            raw_stages.get(stage_name) or {},
+            params=ck_info.get("parameters"),
+        )
+        if list(items) == [stage_name] or "{" not in stage.environment:
+            continue
+        if stage.outer_environment != stage.inner_environment and (
+            "{" in stage.outer_environment
+        ):
+            raise ValueError(
+                f"Stage '{stage_name}' has environment "
+                f"'{stage.environment}', whose outer environment depends on "
+                "its items' values; only the inner one can"
+            )
+        for item_name, item in items.items():
+            env_name = str(item["environment"]).split(COMPOSITE_ENV_SEP)[-1]
+            env = ck_info.get("environments", {}).get(env_name)
+            if env is None:
+                raise ValueError(
+                    f"Stage '{item_name}' has environment '{env_name}', "
+                    "which is not defined in environments"
+                )
+            if env.get("kind") in ("system", "slurm", "pbs", SWITCH_KIND):
+                raise ValueError(
+                    f"Stage '{item_name}' has environment '{env_name}' of "
+                    f"kind '{env.get('kind')}', but an environment that "
+                    "depends on an item's values must be a runtime, e.g., "
+                    "'uv' or 'conda', not a machine or a switch"
+                )
+            stage._item_environments.append(env_name)
     conflicts = set(wrapper_stages) & set(pipeline.stages)
     if conflicts:
         raise ValueError(
@@ -2741,8 +2770,7 @@ def to_dvc(
     # picked up when used as the outer env in a composite environment.
     used_envs: set[str] = set()
     for stage in pipeline.stages.values():
-        used_envs.add(stage.inner_environment)
-        used_envs.add(stage.outer_environment)
+        used_envs.update(stage.environment_names)
     env_lock_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
     for env_name, env in environments.items():
@@ -2839,9 +2867,7 @@ def to_dvc(
     # Env vars each stage depends on, its own and its environments'
     for stage in pipeline.stages.values():
         names = [i.name for i in stage.inputs if isinstance(i, EnvVarInput)]
-        for env_name in dict.fromkeys(
-            [stage.outer_environment, stage.inner_environment]
-        ):
+        for env_name in stage.environment_names:
             env = environments.get(env_name) or {}
             names += get_env_input_env_vars(env)
             if env.get("kind") == SWITCH_KIND:

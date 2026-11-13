@@ -2222,8 +2222,20 @@ def get_pipeline_env_names(
                 for name in calkit.latex.get_diff_stage_names(k, v)
             )
         }
+    # An iterated stage whose environment depends on its values uses each
+    # item's
+    from calkit.pipeline import get_stage_items
+
+    items: dict[str, dict] = {}
+    for name, stage in stages.items():
+        items |= get_stage_items(name, stage, params=ck_info.get("parameters"))
     # Stages that can't run here don't need their environments
-    stages = {k: v for k, v in stages.items() if k not in (skip_stages or [])}
+    skip = set(skip_stages or [])
+    stages = {
+        k: v
+        for k, v in items.items()
+        if k not in skip and k.split("@")[0] not in skip
+    }
     envs = ck_info.get("environments", {})
     # If any environments are composite environments, we need to split them
     # up into their individual names in the list

@@ -548,6 +548,10 @@ class Stage(Model):
     # Env vars whose values this stage depends on, from its own inputs and
     # its environments', resolved when the pipeline is compiled
     _env_var_names: list[str] = PrivateAttr(default_factory=list)
+    # The runtime environment each item of an iterated stage uses, when its
+    # environment depends on their values, resolved when the pipeline is
+    # compiled
+    _item_environments: list[str] = PrivateAttr(default_factory=list)
 
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
@@ -662,6 +666,13 @@ class Stage(Model):
                 f"composite environment separator '{COMPOSITE_ENV_SEP}'"
             )
         return self.environment
+
+    @property
+    def environment_names(self) -> list[str]:
+        """The environments this stage uses, inner first, with its items'."""
+        names = [self.inner_environment, self.outer_environment]
+        names += self._item_environments
+        return [n for n in dict.fromkeys(names) if "{" not in n]
 
     @property
     def dvc_cmd(self) -> str:
@@ -3232,6 +3243,12 @@ class Pipeline(Model):
         }
         for stage in self.stages.values():
             env_name = stage.outer_environment
+            # An item's runtime, checked when the pipeline was compiled
+            if (
+                stage._item_environments
+                and env_name == stage.inner_environment
+            ):
+                continue
             if env_name != "_system" and env_name not in environments:
                 raise ValueError(
                     f"Stage '{stage.name}' has outer environment "
@@ -3289,7 +3306,10 @@ class Pipeline(Model):
                     stage.setup,
                     stage.env_default_setup,
                 )
-                if stage.inner_environment == stage.outer_environment:
+                if (
+                    stage.inner_environment == stage.outer_environment
+                    or stage._item_environments
+                ):
                     continue
                 inner_env = environments.get(stage.inner_environment)
                 if inner_env is None:
@@ -3316,7 +3336,10 @@ class Pipeline(Model):
             scheduler_label = (
                 "machine switch" if is_machine_switch else str(kind).upper()
             )
-            if stage.kind not in plain_ok_kinds:
+            if (
+                stage.kind not in plain_ok_kinds
+                and not stage._item_environments
+            ):
                 if stage.inner_environment == stage.outer_environment:
                     raise ValueError(
                         f"Stage '{stage.name}' has kind '{stage.kind}' but "
@@ -3544,13 +3567,11 @@ class Pipeline(Model):
 
         Both the stage's inner and outer environments are considered, so a
         SLURM/PBS env used as the outer half of a composite environment
-        contributes its files as stage dependencies.
+        contributes its files as stage dependencies, as are those its items
+        use, when they depend on their values.
         """
         for _, stage in self.stages.items():
-            for env_name in (
-                stage.inner_environment,
-                stage.outer_environment,
-            ):
+            for env_name in stage.environment_names:
                 for fpath in env_lock_fpaths.get(env_name, []):
                     fpath = stage.path_from_wdir(fpath)
                     if fpath not in stage.inputs:

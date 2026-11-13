@@ -1489,14 +1489,19 @@ def get_version_checked_app_names(
         SWITCH_KIND,
         runs_elsewhere,
     )
-    from calkit.pipeline import get_stage_requirements
+    from calkit.pipeline import get_stage_items
 
     envs = ck_info.get("environments") or {}
     reqs = list(get_requirements(ck_info))
     stages = (ck_info.get("pipeline") or {}).get("stages", {})
+    # With each item's values, when its environment or requirements use them
+    items: dict[str, dict] = {}
     for name, stage in stages.items():
-        if stage_names is not None and name not in stage_names:
-            continue
+        if stage_names is None or name in stage_names:
+            items |= get_stage_items(
+                name, stage, params=ck_info.get("parameters")
+            )
+    for stage in items.values():
         env_names = str(stage.get("environment") or "_system").split(
             COMPOSITE_ENV_SEP
         )
@@ -1516,11 +1521,7 @@ def get_version_checked_app_names(
                     if isinstance(o, dict)
                 ]
                 stage_envs += [o for o in options if not runs_elsewhere(o)]
-        # With each item's values, when they use them
-        for item_reqs in get_stage_requirements(
-            name, stage, params=ck_info.get("parameters")
-        ).values():
-            reqs += item_reqs
+        reqs += stage.get("requirements") or []
         for env in stage_envs:
             reqs += env.get("requirements") or []
     names = []

@@ -10,6 +10,7 @@ import git
 import pytest
 
 import calkit
+import calkit.docx
 import calkit.install
 
 
@@ -648,8 +649,6 @@ def test_check_dep_exists_conda_off_path(monkeypatch):
     monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
     assert not calkit.check_dep_exists("conda", "app")
     # Word and LibreOffice aren't run by their names
-    import calkit.docx
-
     for found in [True, False]:
         monkeypatch.setattr(calkit.docx, "word_installed", lambda: found)
         monkeypatch.setattr(

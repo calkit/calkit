@@ -4781,8 +4781,13 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
             json.dump({"hostname": "calkit-test.invalid"}, f)
     # One of a skipped stage's outputs is already here, e.g., pulled
     os.makedirs("made")
+    by_requirements: dict[str, list] = {}
+    blocked_by: dict[str, set[str]] = {}
     gated, errors = calkit.pipeline.get_gated_stages(
-        ck_info, interactive=False
+        ck_info,
+        interactive=False,
+        requirements_by_stage=by_requirements,
+        blocked_by=blocked_by,
     )
     no_sbatch = shutil.which("sbatch") is None
     assert set(gated) - {"queued"} == {
@@ -4823,6 +4828,77 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     assert "giving environment 'lab' a 'host'" in gated["in-lab"]
     assert "can't reach host 'calkit-test.invalid'" in errors["far-away"]
     assert "picks no environment" in gated["no-pick"]
+    # Those skipped for requirements are kept with them, to be offered, and
+    # say where that's done, unless it's the machine itself that's wrong
+    assert set(by_requirements) - {"queued"} == {
+        "needs-token",
+        "on-cluster",
+        "in-lab",
+        "here-token",
+        "no-app",
+    }
+    assert by_requirements["in-lab"] == [
+        {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+    ]
+    assert "'calkit check reqs --stale'" in gated["needs-token"]
+    assert "'calkit check reqs --stale'" in gated["no-app"]
+    assert "calkit check reqs" not in gated["on-cluster"]
+    # As are those skipped for what they're waiting on
+    assert blocked_by == {
+        "uses-cluster": {"on-cluster"},
+        "after-that": {"uses-cluster"},
+        "uses-far": {"far-away"},
+    }
+    # One locked to another machine isn't offered its requirements, since
+    # meeting them wouldn't let it run, and what each waits on is known
+    # once every skipped stage is, including one offered its requirements
+    token = {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+
+    def make_stage(env: str, **kwargs: object) -> dict:
+        return (
+            {"kind": "shell-command", "command": "true"}
+            | {"environment": env}
+            | kwargs
+        )
+
+    by_requirements, blocked_by = {}, {}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        {
+            "environments": ck_info["environments"],
+            "pipeline": {
+                "stages": {
+                    "pinned-token": make_stage("pinned", requirements=[token]),
+                    "lab-maker": make_stage("lab", outputs=["lab.txt"]),
+                    "needs-two": make_stage(
+                        "here", inputs=["lab.txt", "late.txt"]
+                    ),
+                    "token-after": make_stage(
+                        "here", requirements=[token], inputs=["lab.txt"]
+                    ),
+                    "late": make_stage(
+                        "here", inputs=["lab.txt"], outputs=["late.txt"]
+                    ),
+                }
+            },
+        },
+        interactive=False,
+        requirements_by_stage=by_requirements,
+        blocked_by=blocked_by,
+    )
+    assert set(gated) == {
+        "pinned-token",
+        "lab-maker",
+        "needs-two",
+        "token-after",
+        "late",
+    }
+    assert "CK_TEST_TOKEN" in gated["pinned-token"]
+    assert set(by_requirements) == {"lab-maker", "token-after"}
+    assert blocked_by == {
+        "needs-two": {"lab-maker", "late"},
+        "token-after": {"lab-maker"},
+        "late": {"lab-maker"},
+    }
     # Meeting the requirement lets the stages run
     monkeypatch.setenv("CK_TEST_TOKEN", "x")
     monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
@@ -4888,7 +4964,8 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     )
     assert gated == {
         "engines@calkit-no-such-app": (
-            "app 'calkit-no-such-app' not found on this machine"
+            "app 'calkit-no-such-app' not found on this machine; 'calkit "
+            "check reqs --stale' offers to install or set up what's missing"
         )
     }
     assert errors == {}

@@ -3234,6 +3234,8 @@ def run(
                 system_info=system_info,
                 interactive=False if spinner else None,
                 manual=can_ask,
+                requirements_by_stage=unmet_requirements,
+                blocked_by=blocked_by,
             )
             # A machine that couldn't be reached may only need asking about,
             # e.g., for its host
@@ -3358,6 +3360,10 @@ def run(
     # their environments aren't checked
     gated_stages: dict[str, str] = {}
     gate_errors: dict[str, str] = {}
+    # Those skipped for requirements, with them, which are offered for each
+    # one that would run, and those skipped for another's missing output
+    unmet_requirements: dict[str, list] = {}
+    blocked_by: dict[str, set[str]] = {}
     # Filled in by the run with the skipped stages that were out of date
     skipped_stale: dict[str, str] = {}
     # Getting ready to run takes a step per project, so one spinner says
@@ -3569,6 +3575,113 @@ def run(
             reached = calkit.pipeline.get_stages_to_gate(targets)
             if reached is None or reached - gate_stage_names:
                 gate(None if reached is None else reached - gate_stage_names)
+        # Only the stages named run with --single-item, as DVC names them,
+        # e.g., a Markdown stage's blocks
+        named = None
+        if single_item:
+            try:
+                named_targets = calkit.pipeline.translate_run_targets(
+                    deepcopy(targets or []), ck_info=ck_info
+                )[0]
+            except ValueError:
+                named_targets = list(targets or [])
+            named = {t.split("@")[0] for t in named_targets}
+        # Now that it's known which would run, what they need is offered
+        # for them, as the project's is. Their environments couldn't be
+        # checked until it was met, and checking one now can put another
+        # stage using it out of date, so that one is offered next.
+        offered = [
+            name
+            for name in unmet_requirements
+            if name in gated_stages
+            and (named is None or name.split("@")[0] in named)
+        ]
+        # Each requirement is asked about once, however many stages share it
+        asked: dict[str, str | None] = {}
+        # Those whose requirements are now met, which run once nothing they
+        # wait on is still skipped
+        reqs_met: set[str] = set()
+        while offered and can_ask and not dry and not nothing_for_dvc:
+            try:
+                would_run = calkit.pipeline.get_stages_that_would_run(
+                    offered, force=force, single_item=single_item
+                )
+            except Exception as e:
+                os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+                raise_error(f"Failed to find which stages would run: {e}")
+            met = []
+            # Those asked about, and so declined if not met
+            visited: set[str] = set()
+            with paused():
+                for gated_name in offered:
+                    if gated_name not in would_run:
+                        continue
+                    # Nothing to ask if what it waits on won't run
+                    if any(
+                        u in gated_stages
+                        and u not in reqs_met
+                        and (u not in offered or u in visited)
+                        for u in blocked_by.get(gated_name, set())
+                    ):
+                        continue
+                    visited.add(gated_name)
+                    reqs = unmet_requirements[gated_name]
+                    if any(
+                        calkit.get_requirement_key(r) not in asked
+                        for r in reqs
+                    ):
+                        typer.echo(
+                            f"Stage '{gated_name}' is out of date, but this "
+                            "machine doesn't meet its requirements yet"
+                        )
+                    try:
+                        calkit.check_requirements(
+                            requirements=reqs,
+                            system_info=system_info,
+                            interactive=True,
+                            checked=asked,
+                        )
+                    except ValueError:
+                        continue
+                    reqs_met.add(gated_name)
+            # Each runs once nothing it waits on is skipped, freeing those
+            # waiting on it, but not one still lacking its own requirements
+            freed = True
+            while freed:
+                freed = False
+                for gated_name in list(gated_stages):
+                    if gated_name in unmet_requirements:
+                        if gated_name not in reqs_met:
+                            continue
+                    elif gated_name not in blocked_by:
+                        continue
+                    if blocked_by.get(gated_name, set()) & set(gated_stages):
+                        continue
+                    del gated_stages[gated_name]
+                    met.append(gated_name)
+                    freed = True
+            if not met:
+                break
+            step("Checking environments", "📦")
+            try:
+                check_envs(ck_info, targets=met)
+            except calkit.docker.DockerNotReadyError as e:
+                os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+                raise_error(str(e))
+            # What was just set, e.g., an env var a stage reads, goes in its
+            # compiled inputs
+            step("Compiling DVC pipeline", "🔀")
+            try:
+                dvc_stages = calkit.pipeline.to_dvc(
+                    ck_info=ck_info,
+                    write=True,
+                    for_run=True,
+                    preprocess_stages=True,
+                )
+            except Exception as e:
+                os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+                raise_error(f"Pipeline compilation failed: {e}")
+            offered = [n for n in offered if n not in would_run]
     if nothing_for_dvc:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         md_stages = calkit.markdown.get_markdown_stages(ck_info)

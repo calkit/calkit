@@ -1403,7 +1403,8 @@ def add(
                 f"{'s' if len(ignored_files) > 1 else ''}"
             )
             files_txt = calkit.dvc.get_unstored_files_text(
-                [os.path.relpath(f) for f in ignored_files], rules
+                [Path(os.path.relpath(f)).as_posix() for f in ignored_files],
+                rules,
             )
             if dry_run:
                 typer.echo(
@@ -1420,7 +1421,7 @@ def add(
         if too_large:
             warn(
                 calkit.dvc.get_too_large_text(
-                    [os.path.relpath(f) for f in too_large]
+                    [Path(os.path.relpath(f)).as_posix() for f in too_large]
                 )
             )
     untracked_git_files = repo.untracked_files

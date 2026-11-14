@@ -7,7 +7,11 @@ import {
   renderProjectPicker,
 } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
-import { getEditorLabel, type LocalStatus } from "../core/local";
+import {
+  getEditorLabel,
+  type CheckoutStatus,
+  type LocalStatus,
+} from "../core/local";
 import {
   type Citation,
   type CitationProblem,
@@ -1552,6 +1556,109 @@ function renderOpenLocally(project: string, path: string): HTMLElement {
   return el("div", { style: { marginTop: "4px" } }, [open, message]);
 }
 
+/**
+ * What's on this computer that Overleaf won't see until it's saved and
+ * synced, e.g., a figure remade by running a notebook, if the extension is
+ * connected to Calkit here. Empty otherwise, so nothing nags someone who
+ * works some other way.
+ */
+function renderLocalChanges(project: string): HTMLElement {
+  const container = el("div");
+  localStatus ??= send({ type: "local.status" }).catch(() => ({
+    permitted: false,
+  }));
+  void (async () => {
+    const status = await (localStatus as Promise<LocalStatus>);
+    if (!status.version) {
+      return;
+    }
+    let checkouts: CheckoutStatus[];
+    try {
+      ({ checkouts } = await send({ type: "local.projectStatus", project }));
+    } catch (e) {
+      container.append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+      return;
+    }
+    let pendingCount = 0;
+    const plural = (n: number, word: string) =>
+      `${n} ${word}${n === 1 ? "" : "s"}`;
+    for (const checkout of checkouts) {
+      const lines: HTMLElement[] = [];
+      if (checkout.n_unsaved_files) {
+        lines.push(
+          el("div", {
+            class: "small",
+            text: `${plural(checkout.n_unsaved_files, "file")} not saved`,
+            title: checkout.unsaved_files.join("\n"),
+          }),
+        );
+      }
+      if (checkout.commits_ahead) {
+        lines.push(
+          el("div", {
+            class: "small",
+            text:
+              `${plural(checkout.commits_ahead, "saved change")} not ` +
+              "pushed to GitHub",
+          }),
+        );
+      }
+      for (const folder of checkout.overleaf) {
+        const n =
+          (folder.n_files_to_push ?? 0) + (folder.n_files_to_delete ?? 0);
+        if (folder.syncing) {
+          lines.push(el("div", { class: "small", text: "Syncing now" }));
+        } else if (folder.error) {
+          lines.push(errorMessage(folder.error));
+        } else if (n) {
+          lines.push(
+            el("div", {
+              class: "small",
+              text: `${plural(n, "file")} in ${folder.path} not synced here`,
+              title: (folder.files_to_push ?? []).join("\n"),
+            }),
+          );
+        }
+      }
+      if (!lines.length) {
+        continue;
+      }
+      pendingCount++;
+      container.append(
+        el("div", { class: "muted-box", style: { marginTop: "8px" } }, [
+          el("div", { class: "row" }, [
+            el("div", { class: "grow" }, [
+              el("div", { class: "small", text: "On this computer" }),
+              el("div", { class: "dim small", text: checkout.path }),
+            ]),
+            el("span", { class: "badge warn", text: "not synced" }),
+          ]),
+          ...lines,
+          el("div", {
+            class: "dim small",
+            style: { marginTop: "4px" },
+            text: "Run 'calkit run --save --overleaf' there to bring them here.",
+          }),
+        ]),
+      );
+    }
+    // Only checkouts with something to bring here are listed, since
+    // someone may have several, e.g., Git worktrees
+    if (checkouts.length && !pendingCount) {
+      container.append(
+        el("div", {
+          class: "dim small",
+          style: { marginTop: "6px" },
+          text: "Everything on this computer is saved and synced.",
+        }),
+      );
+    }
+  })();
+  return container;
+}
+
 /** One problem, colored by how bad it is. */
 function problemLine(problem: CitationProblem): HTMLElement {
   return el("div", {
@@ -2782,6 +2889,9 @@ function renderStatus(
       }),
     );
   }
+  body.append(
+    renderLocalChanges(`${link.project_owner_name}/${link.project_name}`),
+  );
   if (figures.length) {
     body.append(
       el("div", {

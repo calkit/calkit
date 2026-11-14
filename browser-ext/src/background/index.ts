@@ -503,6 +503,8 @@ async function handle(
         project: message.project,
         path: message.path,
       });
+    case "local.projectStatus":
+      return askLocal({ type: "project.status", project: message.project });
     case "local.openOptions":
       await chrome.runtime.openOptionsPage();
       return null;

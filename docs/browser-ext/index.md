@@ -25,8 +25,9 @@ and select "Sign in."
 <!-- TODO: needs human review -->
 
 The extension can work with projects on your computer too, e.g., open the
-script or notebook that makes a figure on Overleaf in your editor. It talks
-to Calkit on your computer directly, not through a hub.
+script or notebook that makes a figure on Overleaf in your editor, and show
+on Overleaf what's changed on your computer that isn't saved or synced yet.
+It talks to Calkit on your computer directly, not through a hub.
 
 Calkit's installer sets this up, or run:
 

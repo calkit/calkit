@@ -23,6 +23,25 @@ export interface LocalStatus {
   error?: string;
 }
 
+/** What's in a checkout that isn't saved or synced, from calkit/browser.py. */
+export interface CheckoutStatus {
+  path: string;
+  branch: string | null;
+  /** Changed, staged, or new, up to 50 of them. */
+  unsaved_files: string[];
+  n_unsaved_files: number;
+  commits_ahead: number;
+  overleaf: {
+    /** The folder synced with Overleaf. */
+    path: string;
+    files_to_push?: string[];
+    n_files_to_push?: number;
+    n_files_to_delete?: number;
+    syncing?: boolean;
+    error?: string;
+  }[];
+}
+
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;

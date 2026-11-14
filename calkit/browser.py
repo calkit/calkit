@@ -27,6 +27,8 @@ import calkit
 HOST_NAME = "io.calkit.native"
 CHROME_EXTENSION_IDS = ["idhdomgapfolnpffanajdckdaojencal"]
 FIREFOX_EXTENSION_IDS = ["browser-ext@calkit.io"]
+# How many of a checkout's files its status lists, so it fits in a message
+MAX_LISTED_FILES = 50
 # How long opening a project waits to hear it failed
 OPEN_TIMEOUT_SECONDS = 30
 # Chrome won't take a bigger message from a host
@@ -95,6 +97,8 @@ def get_reply(msg: dict) -> dict:
     - ``project.open``: open a project in its editor, as
       ``calkit open project`` does, along with a file in it if ``path`` is
       given.
+    - ``project.status``: what isn't saved or synced to Overleaf in each
+      checkout of a project, as ``get_checkout_status`` says.
     """
 
     def split_project(project: Any) -> tuple[str, str]:
@@ -176,11 +180,90 @@ def get_reply(msg: dict) -> dict:
                     )
                 raise ValueError(error)
             result = {}
+        elif kind == "project.status":
+            owner, name = split_project(msg.get("project"))
+            found = calkit.get_project_checkouts(name, owner=owner)
+            result = {
+                "checkouts": [get_checkout_status(p) for p in sorted(found)]
+            }
         else:
             raise ValueError(f"Unknown request type {kind!r}")
     except Exception as e:
         return {"id": req_id, "ok": False, "error": str(e)}
     return {"id": req_id, "ok": True, "result": result}
+
+
+def get_checkout_status(wdir: str) -> dict:
+    """What's in a checkout that isn't saved, i.e., committed and pushed,
+    or synced to Overleaf, without reaching the network, so it's quick and
+    works offline.
+
+    Overleaf's side is as of the last sync, which pulled it, so files listed
+    as to push are ones changed here since, not edits made on Overleaf.
+    """
+    from filelock import FileLock, Timeout
+
+    import calkit.git
+    import calkit.overleaf
+    from calkit.hub.link import get_workspace_git_status
+
+    git_status = get_workspace_git_status(wdir, fetch=False)
+    git_info = git_status["git"]
+    unsaved = sorted(
+        set(git_info["changed_files"])
+        | set(git_info["staged_files"])
+        | set(git_info["untracked_files"])
+    )
+    overleaf = []
+    main_repo = calkit.git.get_repo(wdir)
+    for path_in_project, sync_info in calkit.overleaf.get_sync_info(
+        wdir=wdir
+    ).items():
+        project_id = sync_info.get("project_id")
+        if not project_id:
+            continue
+        clone_path = os.path.join(
+            wdir, calkit.overleaf.get_project_dir(project_id)
+        )
+        # Not synced from this checkout yet
+        if not os.path.isdir(os.path.join(clone_path, ".git")):
+            continue
+        folder: dict[str, Any] = {"path": path_in_project}
+        # A sync going on would change what it's compared with
+        file_lock = FileLock(clone_path + ".lock")
+        try:
+            file_lock.acquire(timeout=0)
+        except Timeout:
+            overleaf.append(folder | {"syncing": True})
+            continue
+        prev_wdir = os.getcwd()
+        try:
+            os.chdir(wdir)
+            sync_status = calkit.overleaf.get_sync_status(
+                main_repo=main_repo,
+                overleaf_repo=calkit.git.get_repo(clone_path),
+                path_in_project=path_in_project,
+            )
+            to_push = [f["project_path"] for f in sync_status["files_to_push"]]
+            folder |= {
+                "files_to_push": to_push[:MAX_LISTED_FILES],
+                "n_files_to_push": len(to_push),
+                "n_files_to_delete": len(sync_status["files_to_delete"]),
+            }
+        except Exception as e:
+            folder["error"] = str(e)
+        finally:
+            os.chdir(prev_wdir)
+            file_lock.release()
+        overleaf.append(folder)
+    return {
+        "path": wdir,
+        "branch": git_info["branch"],
+        "unsaved_files": unsaved[:MAX_LISTED_FILES],
+        "n_unsaved_files": len(unsaved),
+        "commits_ahead": git_status["commits_ahead"],
+        "overleaf": overleaf,
+    }
 
 
 def serve(stdin: BinaryIO, stdout: BinaryIO) -> None:

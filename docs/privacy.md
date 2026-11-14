@@ -215,8 +215,9 @@ If you connect the extension to Calkit on your computer, from its options,
 the browser starts Calkit there and passes it the extension's requests
 directly, without the network: which project, by owner and name, and which
 file in it to open, e.g., the script that makes a figure. Calkit answers
-with its version, the editor projects open in, and where the project is on
-your computer. None of it goes to a hub. You can disconnect it by removing
+with its version, the editor projects open in, where the project is on
+your computer, and which of its files there aren't saved or synced with
+Overleaf. None of it goes to a hub. You can disconnect it by removing
 the extension's permission to communicate with cooperating native
 applications, or with `calkit browser uninstall`.
 

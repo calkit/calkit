@@ -1,6 +1,6 @@
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
-import type { LocalStatus } from "./local";
+import type { CheckoutStatus, LocalStatus } from "./local";
 import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
   CalkitYamlInfo,
@@ -240,6 +240,11 @@ export type Request =
       /** A file in it to open too, e.g., the script that makes a figure. */
       path?: string;
     }
+  | {
+      type: "local.projectStatus";
+      /** As "owner/name". */
+      project: string;
+    }
   | { type: "local.openOptions" };
 
 export interface ResponseMap {
@@ -288,6 +293,7 @@ export interface ResponseMap {
   "references.notes.put": { notes: ReferenceNote[] };
   "local.status": LocalStatus;
   "local.openProject": Record<string, never>;
+  "local.projectStatus": { checkouts: CheckoutStatus[] };
   "local.openOptions": null;
 }
 

@@ -201,3 +201,76 @@ def test_install_host(tmp_path, monkeypatch):
     uninstall_host()
     assert not chrome_path.exists() and not firefox_path.exists()
     assert not os.path.exists(chrome["path"])
+
+
+def test_get_checkout_status(tmp_path):
+    from filelock import FileLock
+
+    from calkit.browser import get_checkout_status
+
+    def git(*args, cwd):
+        subprocess.check_call(
+            ["git", "-c", "user.name=T", "-c", "user.email=t@example.com"]
+            + list(args),
+            cwd=cwd,
+        )
+
+    tex = "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n"
+    project = tmp_path / "project"
+    os.makedirs(project / "paper")
+    (project / "paper" / "main.tex").write_text(tex)
+    (project / "calkit.yaml").write_text(
+        "overleaf_sync:\n  paper:\n"
+        "    url: https://www.overleaf.com/project/abc123\n"
+    )
+    (project / ".gitignore").write_text(".calkit/overleaf\n")
+    git("init", "-q", "-b", "main", cwd=project)
+    git("add", "-A", cwd=project)
+    git("commit", "-qm", "Init", cwd=project)
+    remote = tmp_path / "remote.git"
+    git("init", "-q", "--bare", str(remote), cwd=tmp_path)
+    git("remote", "add", "origin", str(remote), cwd=project)
+    git("push", "-q", "-u", "origin", "main", cwd=project)
+    # Overleaf, as the last sync left it, with the same document
+    clone = project / ".calkit" / "overleaf" / "abc123"
+    os.makedirs(clone)
+    (clone / "main.tex").write_text(tex)
+    git("init", "-q", cwd=clone)
+    git("add", "-A", cwd=clone)
+    git("commit", "-qm", "Init", cwd=clone)
+    status = get_checkout_status(str(project))
+    assert status == {
+        "path": str(project),
+        "branch": "main",
+        "unsaved_files": [],
+        "n_unsaved_files": 0,
+        "commits_ahead": 0,
+        "overleaf": [
+            {
+                "path": "paper",
+                "files_to_push": [],
+                "n_files_to_push": 0,
+                "n_files_to_delete": 0,
+            }
+        ],
+    }
+    # A commit not pushed, a change not committed, which a sync would send
+    # to Overleaf, and a new file, which it wouldn't until it's saved
+    (project / "notes.md").write_text("Notes\n")
+    git("add", "notes.md", cwd=project)
+    git("commit", "-qm", "Notes", cwd=project)
+    (project / "paper" / "main.tex").write_text(tex + "% More\n")
+    (project / "paper" / "intro.tex").write_text("Intro\n")
+    status = get_checkout_status(str(project))
+    assert status["commits_ahead"] == 1
+    assert status["unsaved_files"] == ["paper/intro.tex", "paper/main.tex"]
+    assert status["n_unsaved_files"] == 2
+    [folder] = status["overleaf"]
+    assert folder["files_to_push"] == ["paper/main.tex"]
+    assert folder["n_files_to_push"] == 1
+    # While a sync holds the clone, it says so rather than waiting
+    with FileLock(str(clone) + ".lock"):
+        status = get_checkout_status(str(project))
+    assert status["overleaf"] == [{"path": "paper", "syncing": True}]
+    # The working directory is left as it was
+    assert os.getcwd() != str(project)

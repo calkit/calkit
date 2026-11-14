@@ -1088,10 +1088,6 @@ def map_ck_components(
     Returns what couldn't be brought in, e.g., a file the pipeline hasn't
     produced yet. Those print as ``??`` rather than failing the build.
     """
-    import calkit.git
-    import calkit.resources
-    from calkit.questions import read_evidence_file
-
     named = [] if os.path.isdir(path or ".") else [path]
     folder = os.path.dirname(path) if named else path
     docs = list(
@@ -1131,6 +1127,8 @@ def map_ck_components(
             shutil.rmtree(out)
         # Only the one Calkit wrote, and never one that's committed
         if os.path.isfile(style_path):
+            import calkit.git
+
             with open(style_path, encoding="utf-8", errors="replace") as f:
                 ours = "Calkit project components" in f.read()
             try:
@@ -1148,6 +1146,12 @@ def map_ck_components(
             if ours and not committed:
                 os.remove(style_path)
         return []
+    # Imported only here, since most documents use no components, and
+    # GitPython alone is a noticeable part of a build's startup
+    import calkit.git
+    import calkit.resources
+    from calkit.questions import read_evidence_file
+
     # Component paths are relative to the project, wherever the document is
     root = os.path.abspath(folder or ".")
     while not os.path.isfile(os.path.join(root, "calkit.yaml")):

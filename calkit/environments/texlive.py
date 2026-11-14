@@ -1058,6 +1058,19 @@ def check(
     return view_dir
 
 
+def get_run_cmd(cmd: list[str], env_vars: dict) -> list[str]:
+    """Return a command with its program looked up on an environment's PATH.
+
+    On Windows, a child's program is found on the parent's PATH, not the
+    one it's given.
+    """
+    if cmd:
+        found = shutil.which(cmd[0], path=env_vars["PATH"])
+        if found is not None:
+            return [found] + cmd[1:]
+    return cmd
+
+
 def run(
     view_dir: str,
     cmd: list[str],
@@ -1066,12 +1079,7 @@ def run(
 ) -> int:
     """Run a command in an assembled environment, returning its status."""
     env_vars = get_run_env_vars(view_dir)
-    # Looked up on the environment's PATH, since on Windows a child's
-    # program is found on the parent's
-    if cmd:
-        found = shutil.which(cmd[0], path=env_vars["PATH"])
-        if found is not None:
-            cmd = [found] + cmd[1:]
+    cmd = get_run_cmd(cmd, env_vars)
     if verbose:
         print(f"Running command: {cmd}", file=sys.stderr)
     return subprocess.call(cmd, cwd=wdir, env=env_vars)
@@ -1128,8 +1136,6 @@ def add_document_packages(
     """
     from pathlib import Path
 
-    platform = get_platform()
-    exe = ".exe" if platform == "windows" else ""
     lock_fpath = get_lock_fpath(env_name, env, wdir=wdir)
     added_for: dict[str, str] = {}
     files = [tex_file]
@@ -1145,13 +1151,11 @@ def add_document_packages(
         if not names:
             break
         view_dir = check(env_name, env, wdir=wdir)
-        # By its path, since on Windows a child's program is found on the
-        # parent's PATH, not the one it's given
+        env_vars = get_run_env_vars(view_dir)
         result = subprocess.run(
-            [os.path.join(view_dir, "bin", platform, "kpsewhich" + exe)]
-            + names,
+            get_run_cmd(["kpsewhich", *names], env_vars),
             cwd=os.path.dirname(tex_file) or ".",
-            env=get_run_env_vars(view_dir, platform),
+            env=env_vars,
             capture_output=True,
             text=True,
         )

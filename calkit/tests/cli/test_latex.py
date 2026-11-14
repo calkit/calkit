@@ -1310,7 +1310,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
 
     def run(cmd, **kwargs):
         calls.append(cmd)
-        if cmd[0] == "latexmk":
+        if "latexmk" in cmd:
             captured.append(kwargs.get("capture_output"))
             return latexmk(cmd)
         if "search" in cmd:
@@ -1332,10 +1332,11 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     def build(quiet: bool = False):
         return cli_latex._run_latexmk(
             ["latexmk", "paper/main.tex"],
-            env=None,
+            env_vars={},
             log_path=log_path,
             fdb_path=fdb_path,
             environment=None,
+            no_check=False,
             verbose=False,
             quiet=quiet,
         )
@@ -1352,7 +1353,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     state["unfetchable"] = {"nope.sty"}
     calls.clear()
     assert build() == 12
-    assert len([c for c in calls if c[0] == "latexmk"]) == 2
+    assert len([c for c in calls if "latexmk" in c]) == 2
     # A system TeX is the user's, so nothing is fetched into it
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: True)
     calls.clear()

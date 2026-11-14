@@ -170,3 +170,32 @@ stages:
       hash: md5
       md5: 837d8312fffd289dc4d9041d69b3a242
       size: 1873
+  time-latex-build:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-latex-build.py 
+      --out=results/latex-build.json
+    deps:
+    - path: ../.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: ../calkit/cli/latex.py
+      hash: md5
+      md5: a20c371aa21b08dd160d4c4cedd9297c
+      size: 188216
+    - path: ../calkit/latex.py
+      hash: md5
+      md5: cd933c4528da866218386aa428d9bafc
+      size: 129657
+    - path: ../uv.lock
+      hash: md5
+      md5: 2fec08c3e5900e1f8839101364000287
+      size: 1727901
+    - path: scripts/time-latex-build.py
+      hash: md5
+      md5: 2e3a067751d5cedafeed09af7a66fc12
+      size: 6801
+    outs:
+    - path: results/latex-build.json
+      hash: md5
+      md5: 7a8be604536d5ba9bfdb3b9fb485a1ef
+      size: 6134

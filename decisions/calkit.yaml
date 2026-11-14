@@ -130,6 +130,37 @@ questions:
           docker_pdf_s: seconds.compile.docker-pdf
           docker_lua_s: seconds.compile.docker-lualatex
           n: repeats
+  - question: >-
+      How much does 'calkit latex build' add to latexmk in a ready TeX Live
+      environment, and how much would running latexmk itself rather than
+      through 'calkit xenv', importing GitPython only for documents using
+      Calkit's components, and skipping pydantic's plugin search save?
+    answer: >-
+      With nothing to do, a build of an article with a bibliography took
+      {build_unchanged_s:.2f} s, against {latexmk_unchanged_s:.2f} s for
+      latexmk itself, and after an edit {build_edited_s:.2f} s, against
+      {latexmk_edited_s:.2f} s. The second Calkit process a build started
+      to run latexmk cost {xenv_s:.2f} s and importing GitPython
+      {git_ms:.0f} ms ({git_cpu_ms:.0f} ms of CPU time), so both were taken
+      out. Pydantic's plugin search, which every command does since Typer
+      validates options with it, cost {plugins_ms:.0f} ms
+      ({plugins_cpu_ms:.0f} ms of CPU time), too little to rely on its
+      private API to skip, so the CLI still does it. Medians of {n} runs
+      each, taking turns.
+    evidence:
+      - kind: result
+        path: results/latex-build.json
+        values:
+          build_unchanged_s: seconds.wall.build_unchanged
+          latexmk_unchanged_s: seconds.wall.latexmk_unchanged
+          build_edited_s: seconds.wall.build_edited
+          latexmk_edited_s: seconds.wall.latexmk_edited
+          xenv_s: seconds.wall.xenv
+          git_ms: ms.wall.import_git
+          git_cpu_ms: ms.cpu.import_git
+          plugins_ms: ms.wall.pydantic_plugins
+          plugins_cpu_ms: ms.cpu.pydantic_plugins
+          n: repeats
 
 environments:
   pure:
@@ -231,4 +262,17 @@ pipeline:
         - ../calkit/environments/texlive.py
       outputs:
         - path: results/texlive-env.json
+          storage: git
+    time-latex-build:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-latex-build.py
+      environment: calkit
+      args:
+        - --out=results/latex-build.json
+      inputs:
+        - ../calkit/cli/latex.py
+        - ../calkit/latex.py
+      outputs:
+        - path: results/latex-build.json
           storage: git

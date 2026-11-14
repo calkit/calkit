@@ -59,7 +59,16 @@ You can also use the `--description` flag to add more details.
 
 When this is called, Calkit will:
 
-- Compress and upload all files kept in Git and DVC to Zenodo,
+<!-- TODO: needs human review -->
+
+- Check the project's [requirements](requirements.md) are met,
+  offering to install missing apps as `calkit run` does,
+  and that the pipeline is up-to-date,
+  before anything is archived.
+- Compress all files kept in Git and DVC,
+  extract the archive and run its pipeline to check it reproduces on its
+  own,
+  then upload it to an archival service like Zenodo,
   which will produce a DOI,
   ensuring the release can be accessed even if the repo is relocated.
 - Create a Git tag. This can be used to create a release on GitHub if desired.
@@ -179,6 +188,20 @@ When creating a release, Calkit reads the authors from `CITATION.cff`; if
 none are defined yet, it will prompt you to enter them and write them to
 `CITATION.cff` (existing author entries are always preserved).
 
+The first author is prefilled with your own details, so that releasing your
+own work only takes pressing Enter.
+These come from your Calkit config, which you can set ahead of time with:
+
+```sh
+calkit config set first_name Ada
+calkit config set last_name Lovelace
+calkit config set affiliation "Analytical Engines"
+calkit config set orcid 0000-0002-1825-0097
+```
+
+If they aren't set, the name is taken from Git's `user.name`, and whatever
+you enter for the first author can be saved to the config for next time.
+
 ## Releasing other types of artifacts individually
 
 To release only one artifact, e.g., a dataset or publication,
@@ -217,6 +240,11 @@ Stages that have nothing to do with the artifact are left out.
 Before the release goes out,
 the archive is extracted and run to check it reproduces on its own.
 
+<!-- TODO: needs human review -->
+
+Since running it needs the project's requirements met,
+those are checked first, before anything is archived.
+
 <!-- prettier-ignore -->
 !!! note
 
@@ -239,3 +267,5 @@ calkit config set caltechdata_token {paste CaltechDATA token here}
 
 Then, in the `new release` command, simply add the `--to caltechdata`
 option.
+Large files are uploaded in parts straight to CaltechDATA's storage, since a
+single request that big would be refused by the proxy in front of its API.

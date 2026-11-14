@@ -609,6 +609,136 @@ def _name_table_items(
     return {"foreach": items, "do": body}, renames
 
 
+def get_iteration_items(
+    stage: dict, params: dict | None = None
+) -> dict[str, dict]:
+    """An iterated stage's items, by the name DVC gives each, and its values.
+
+    The names are those after the stage's in ``stage@item``, from the same
+    matrix compiling the stage gives DVC.
+    """
+    from dvc.parsing.interpolate import to_str
+
+    from calkit.models.pipeline import StageIteration
+
+    matrix = {}
+    for n, raw in enumerate(stage.get("iterate_over") or []):
+        iteration = StageIteration.model_validate(raw)
+        key = f"_arg{n}" if isinstance(iteration.arg_name, list) else None
+        matrix[key or str(iteration.arg_name)] = iteration.expand_values(
+            params=expand_project_parameters(params or {})
+        )
+    if not matrix:
+        return {}
+    named, _ = _name_table_items({"matrix": matrix})
+    items: dict[str, dict] = named.get("foreach") or {}
+    if items:
+        return items
+    # A table row DVC names by its position
+    keys = list(matrix)
+    for combination in itertools.product(
+        *[list(enumerate(matrix[k])) for k in keys]
+    ):
+        values: dict = {}
+        fragments = []
+        for key, (i, value) in zip(keys, combination):
+            if isinstance(value, dict):
+                fragments.append(f"{key}{i}")
+                values |= value
+            else:
+                fragments.append(to_str(value))
+                values[key] = value
+        items["-".join(fragments)] = values
+    return items
+
+
+def fill_item_values(obj: Any, values: dict) -> Any:
+    """Fill an item's values into strings, e.g., ``{engine}``, in ``obj``.
+
+    Only the item's own names are filled in, so other braces, e.g., awk's
+    or a shell's ``${HOME}``, stay as they are.
+    """
+    from dvc.parsing.interpolate import to_str
+
+    if isinstance(obj, str):
+        return re.sub(
+            r"\{(\w+)\}",
+            lambda m: (
+                to_str(values[m.group(1)])
+                if m.group(1) in values
+                else m.group(0)
+            ),
+            obj,
+        )
+    if isinstance(obj, list):
+        return [fill_item_values(o, values) for o in obj]
+    if isinstance(obj, dict):
+        return {
+            fill_item_values(k, values): fill_item_values(v, values)
+            for k, v in obj.items()
+        }
+    return obj
+
+
+def get_stage_items(
+    stage_name: str, stage: dict, params: dict | None = None
+) -> dict[str, dict]:
+    """A stage, or its items when what it runs in or needs depends on them.
+
+    That's the stage alone, keyed by its name, unless it iterates and its
+    ``environment`` or ``requirements`` use its values, e.g.,
+    ``environment: "{env}"`` or ``- "{engine}"``. Then it's each item, keyed
+    by the name DVC runs it under, e.g., ``stage@word``, with those values
+    filled in.
+    """
+    import json
+
+    def check_quoted(obj: Any, field: str) -> None:
+        # YAML reads an unquoted {var} as a mapping, {var: null}, which
+        # would otherwise pass for, e.g., an app named 'var'
+        if isinstance(obj, dict):
+            keys = list(obj)
+            if (
+                len(keys) == 1
+                and keys[0] in arg_names
+                and obj[keys[0]] is None
+            ):
+                raise ValueError(
+                    f"Stage '{stage_name}' has {{{keys[0]}}} unquoted in its "
+                    f"{field}, which YAML reads as a mapping; quote it, "
+                    f'e.g., "{{{keys[0]}}}"'
+                )
+            for value in obj.values():
+                check_quoted(value, field)
+        elif isinstance(obj, list):
+            for value in obj:
+                check_quoted(value, field)
+
+    if not stage.get("iterate_over"):
+        return {stage_name: stage}
+    arg_names = set()
+    for raw in stage["iterate_over"]:
+        arg_name = raw.get("arg_name") if isinstance(raw, dict) else None
+        arg_names |= set(
+            arg_name if isinstance(arg_name, list) else [arg_name]
+        )
+    fields = {
+        field: stage[field]
+        for field in ("environment", "requirements")
+        if stage.get(field) is not None
+    }
+    for field, value in fields.items():
+        check_quoted(value, field)
+    used = set(re.findall(r"\{(\w+)\}", json.dumps(fields, default=str)))
+    if not used & arg_names:
+        return {stage_name: stage}
+    return {
+        f"{stage_name}@{item_name}": dict(stage)
+        | fill_item_values(fields, values)
+        for item_name, values in get_iteration_items(stage, params).items()
+    }
+
+
 def _rename_lock_entries(
     renames: dict[str, str], wdir: str | None = None
 ) -> bool:
@@ -892,6 +1022,12 @@ def _status_target_matches(
     return any(_paths_overlap(norm_target, p) for p in candidate_paths)
 
 
+# Where to go for requirements a stage needs that this machine doesn't meet
+REQUIREMENTS_FIX_HINT = (
+    "'calkit check reqs --stale' offers to install or set up what's missing"
+)
+
+
 def get_gated_stages(
     ck_info: dict,
     stage_names: list[str] | set[str] | None = None,
@@ -899,6 +1035,8 @@ def get_gated_stages(
     system_info: dict | None = None,
     remote: bool = True,
     manual: bool = True,
+    requirements_by_stage: dict[str, list] | None = None,
+    blocked_by: dict[str, set[str]] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -915,6 +1053,13 @@ def get_gated_stages(
     connecting to a machine may prompt. Without ``remote``, nothing is
     checked on another machine, which would take connecting to it. Without
     ``manual``, nobody is there to do a manual step, so those can't run.
+
+    Each stage skipped only for requirements this machine doesn't meet,
+    i.e., not also for a machine lock, is added to ``requirements_by_stage``
+    with its own and its environments' requirements, which may be offered
+    later, e.g., by ``calkit run`` for a stage it would run. Each of those,
+    and each stage skipped for an output a skipped stage hasn't made, that
+    needs such an output is added to ``blocked_by`` with those stages.
     """
     import contextlib
     import json
@@ -929,9 +1074,16 @@ def get_gated_stages(
         interactive = is_tty()
     envs = ck_info.get("environments", {})
     stages = ck_info.get("pipeline", {}).get("stages", {})
+    # An item of an iterated stage, e.g., one being retried, is checked
+    # with its stage, which is otherwise what these name
+    requested = set(stage_names) if stage_names is not None else set()
+    if stage_names is not None:
+        stage_names = {name.split("@")[0] for name in stage_names}
     gated: dict[str, str] = {}
     errors: dict[str, str] = {}
     cache: dict[str, tuple[str | None, bool]] = {}
+    # Each requirement checked here, so one many stages share is checked once
+    checked: dict[str, str | None] = {}
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
     # The app each export kind needs
@@ -1014,8 +1166,20 @@ def get_gated_stages(
                 requirements=requirements,
                 interactive=False,
                 system_info=system_info,
+                checked=checked,
             )
         except ValueError as e:
+            from calkit.core import _normalize_requirement
+
+            # A machine property can't be installed, but the rest may be
+            kinds = [
+                _normalize_requirement(r)["kind"]
+                for r in requirements
+                if checked.get(calkit.get_requirement_key(r))
+            ]
+            property_kinds = calkit.system_property_requirement_kinds()
+            if kinds and not any(k in property_kinds for k in kinds):
+                return f"{e}; {REQUIREMENTS_FIX_HINT}", False
             return str(e), False
         return None, False
 
@@ -1058,33 +1222,61 @@ def get_gated_stages(
                 out.append(Path(path).as_posix().rstrip("/"))
         return out
 
-    def missing_output(stage: dict) -> tuple[str, str] | None:
-        """A skipped stage, and its output this stage needs but lacks."""
+    def get_skipped_outputs(skipped: str) -> list[str]:
+        """The literal paths a skipped stage, or item of one, would make."""
+        stage_name, _, item_name = skipped.partition("@")
+        outputs = stages[stage_name].get("outputs") or []
+        if item_name:
+            values = get_iteration_items(
+                stages[stage_name], params=ck_info.get("parameters")
+            ).get(item_name)
+            if values is not None:
+                outputs = fill_item_values(outputs, values)
+        return paths(outputs)
+
+    def get_missing_outputs(stage: dict) -> list[tuple[str, str]]:
+        """Skipped stages, and their outputs this stage needs but lacks."""
+        found = []
+        skipped = list(gated) + list(errors)
         for input_path in paths(stage.get("inputs") or []):
-            for upstream in list(gated) + list(errors):
-                for output in paths(stages[upstream].get("outputs") or []):
+            for upstream in skipped:
+                for output in get_skipped_outputs(upstream):
                     related = (
                         input_path == output
                         or input_path.startswith(output + "/")
                         or output.startswith(input_path + "/")
                     )
                     if related and not os.path.exists(output):
-                        return upstream, output
+                        found.append((upstream, output))
         for item in stage.get("inputs") or []:
             source = (
                 item.get("from_stage_outputs", "")
                 if isinstance(item, dict)
                 else ""
             )
-            if source in gated or source in errors:
-                for output in paths(stages[source].get("outputs") or []):
+            for upstream in skipped:
+                if upstream.split("@")[0] != source:
+                    continue
+                for output in get_skipped_outputs(upstream):
                     if not os.path.exists(output):
-                        return source, output
-        return None
+                        found.append((upstream, output))
+        return found
 
-    for name, stage in stages.items():
-        if stage_names is not None and name not in stage_names:
+    # An iterated stage whose environment or requirements depend on its
+    # values is gated an item at a time
+    targets: dict[str, dict] = {}
+    for stage_name, stage in stages.items():
+        if stage_names is not None and stage_name not in stage_names:
             continue
+        items = get_stage_items(
+            stage_name, stage, params=ck_info.get("parameters")
+        )
+        # Only the items named, unless the stage is
+        named = {k for k in requested if k.startswith(stage_name + "@")}
+        if named and stage_name not in requested:
+            items = {k: v for k, v in items.items() if k in named} or items
+        targets |= items
+    for name, stage in targets.items():
         if stage.get("frozen"):
             continue
         if not manual and stage.get("kind") == "manual-step":
@@ -1150,6 +1342,8 @@ def get_gated_stages(
             machine_name, machine = env_name, env
         if machine_name is not None and not remote and reason is None:
             continue
+        # Requirements that, once met here, would let the stage run
+        unmet = None
         if reason is None:
             requirements = list(stage.get("requirements") or [])
             for _, env in resolved:
@@ -1160,6 +1354,8 @@ def get_gated_stages(
                     requirements, machine_name, machine
                 ),
             )
+            if reason is not None and not is_error and machine_name is None:
+                unmet = requirements
             # A machine that is only described here could run its stages
             # from here if Calkit knew how to reach it
             local_machines = [
@@ -1190,23 +1386,32 @@ def get_gated_stages(
                     f"; giving environment '{local_machines[0]}' a 'host' "
                     "would let its stages run there from here over SSH"
                 )
-        if reason is None:
+        # Locks are checked for a stage that only lacks requirements too,
+        # since meeting them wouldn't let it run if a lock rules it out
+        wants_unmet = unmet is not None and requirements_by_stage is not None
+        if reason is None or wants_unmet:
             locks = [
                 (n, env, n, env)
                 for n, env in resolved
                 if env.get("kind") == "system"
             ] + switch_locks
             for lock_name, lock_env, m_name, m_env in locks:
-                reason, is_error = check(
+                lock_reason, lock_is_error = check(
                     ["lock", lock_name],
                     lambda: lock_problem(lock_name, lock_env, m_name, m_env),
                 )
-                if reason is not None:
+                if lock_reason is not None:
+                    unmet = None
+                    if reason is None:
+                        reason, is_error = lock_reason, lock_is_error
                     break
+        if unmet is not None and requirements_by_stage is not None:
+            requirements_by_stage[name] = unmet
         if reason is not None:
             (errors if is_error else gated)[name] = reason
     # A stage that needs an output a skipped stage hasn't made can't run
     # either, and nor can the stages after it
+    waiting: set[str] = set()
     added = True
     while added:
         added = False
@@ -1218,16 +1423,31 @@ def get_gated_stages(
                 or stage.get("frozen")
             ):
                 continue
-            found = missing_output(stage)
-            if found is None:
+            found = get_missing_outputs(stage)
+            if not found:
                 continue
-            upstream, output = found
+            upstream, output = found[0]
+            waiting.add(name)
             (errors if upstream in errors else gated)[name] = (
                 f"it needs '{output}' from stage '{upstream}', which "
                 "can't run here and hasn't made it; if it was made "
                 "elsewhere, 'calkit pull' gets it"
             )
             added = True
+    # What each is waiting on, once every skipped stage is known, including
+    # those offered their requirements, which need these too
+    if blocked_by is not None:
+        offered = {n for n in requirements_by_stage or {} if n in gated}
+        for name in waiting | offered:
+            upstream_names = {
+                u
+                for u, _ in get_missing_outputs(
+                    targets.get(name) or stages[name]
+                )
+                if u != name
+            }
+            if upstream_names:
+                blocked_by[name] = upstream_names
     return gated, errors
 
 
@@ -1819,7 +2039,9 @@ def get_status(
                 ignored_files_in_inputs.setdefault(name, {})[dep_path] = files
         gated_stages = result.get("gated_stages", {})
         for display_name, stale_stage in ordered_stale_stages.items():
-            reason = gated_stages.get(display_name.split("@")[0])
+            reason = gated_stages.get(
+                display_name, gated_stages.get(display_name.split("@")[0])
+            )
             if reason is not None:
                 stale_stage.cannot_run_here = reason
         result["stale_stages"] = ordered_stale_stages
@@ -2310,10 +2532,12 @@ def _write_markdown_environments(
 def _write_managed_gitignore_block(
     gitignore_path: str, marker: str, lines: list[str]
 ) -> bool:
-    """Create or update a marker-delimited block in a ``.gitignore`` file.
+    """Create or update a marker-delimited block in a ``.gitignore`` file, or
+    one written like it, e.g., ``.dvcignore``.
 
     The block is replaced in place if it already exists (so it stays free of
-    duplicate/stale entries across recompiles) and appended otherwise.
+    duplicate/stale entries across recompiles) and appended otherwise, unless
+    it would be empty.
     Returns True if the file was modified.
     """
     begin = f"# >>> {marker} (managed by calkit) >>>"
@@ -2333,6 +2557,9 @@ def _write_managed_gitignore_block(
         with open(gitignore_path, "w") as f:
             f.write(updated)
         return True
+    # Nothing to add
+    if not lines:
+        return False
     parent = os.path.dirname(gitignore_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -2436,6 +2663,7 @@ def to_dvc(
     import calkit.markdown
     import calkit.questions
     from calkit.environments import (
+        COMPOSITE_ENV_SEP,
         SWITCH_KIND,
         get_env,
         get_env_input_env_vars,
@@ -2588,6 +2816,41 @@ def to_dvc(
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
         raise ValueError(f"Pipeline is not defined properly: {e}")
+    # An iterated stage's environment may depend on its items' values, as
+    # long as only the runtime does, since a machine or a switch changes
+    # the command the items share
+    for stage_name, stage in pipeline.stages.items():
+        items = get_stage_items(
+            stage_name,
+            raw_stages.get(stage_name) or {},
+            params=ck_info.get("parameters"),
+        )
+        if list(items) == [stage_name] or "{" not in stage.environment:
+            continue
+        if stage.outer_environment != stage.inner_environment and (
+            "{" in stage.outer_environment
+        ):
+            raise ValueError(
+                f"Stage '{stage_name}' has environment "
+                f"'{stage.environment}', whose outer environment depends on "
+                "its items' values; only the inner one can"
+            )
+        for item_name, item in items.items():
+            env_name = str(item["environment"]).split(COMPOSITE_ENV_SEP)[-1]
+            env = ck_info.get("environments", {}).get(env_name)
+            if env is None:
+                raise ValueError(
+                    f"Stage '{item_name}' has environment '{env_name}', "
+                    "which is not defined in environments"
+                )
+            if env.get("kind") in ("system", "slurm", "pbs", SWITCH_KIND):
+                raise ValueError(
+                    f"Stage '{item_name}' has environment '{env_name}' of "
+                    f"kind '{env.get('kind')}', but an environment that "
+                    "depends on an item's values must be a runtime, e.g., "
+                    "'uv' or 'conda', not a machine or a switch"
+                )
+            stage._item_environments.append(env_name)
     conflicts = set(wrapper_stages) & set(pipeline.stages)
     if conflicts:
         raise ValueError(
@@ -2617,8 +2880,7 @@ def to_dvc(
     # picked up when used as the outer env in a composite environment.
     used_envs: set[str] = set()
     for stage in pipeline.stages.values():
-        used_envs.add(stage.inner_environment)
-        used_envs.add(stage.outer_environment)
+        used_envs.update(stage.environment_names)
     env_lock_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
     for env_name, env in environments.items():
@@ -2715,9 +2977,7 @@ def to_dvc(
     # Env vars each stage depends on, its own and its environments'
     for stage in pipeline.stages.values():
         names = [i.name for i in stage.inputs if isinstance(i, EnvVarInput)]
-        for env_name in dict.fromkeys(
-            [stage.outer_environment, stage.inner_environment]
-        ):
+        for env_name in stage.environment_names:
             env = environments.get(env_name) or {}
             names += get_env_input_env_vars(env)
             if env.get("kind") == SWITCH_KIND:
@@ -2790,6 +3050,11 @@ def to_dvc(
             for i in stage.inputs:
                 if isinstance(i, ScheduleInput):
                     i.write_period_file(wdir=wdir)
+        # The window and last full day of each date-range period, so an item
+        # goes out of date daily while its period is open. Only when
+        # preprocessing, since these can be committed.
+        if preprocess_stages:
+            pipeline.write_date_range_state(wdir=wdir)
         # Remove files left by stages that were renamed, deleted, or no
         # longer need one, since the command files are committed
         for gen_dir, kept in [
@@ -2821,6 +3086,8 @@ def to_dvc(
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
+    output_dvcignores: list[str] = []
+    output_gitignores: list[str] = []
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
@@ -2960,11 +3227,13 @@ def to_dvc(
                 return f"{wdir_rel_posix}/{p}" if wdir_rel_posix != "." else p
 
             # Ensure we catch any Jupyter Notebook outputs
-            outputs = stage.outputs.copy()
+            outputs: list[str | PathOutput] = list(stage.outputs or [])
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
             elif stage.kind == "marimo-html-wasm":
                 outputs += stage.app_outputs
+            elif stage.kind == "references-check":
+                outputs += stage.check_outputs
             sched_log = stage.scheduler_log_output
             if sched_log is not None:
                 outputs.append(sched_log)
@@ -3006,6 +3275,13 @@ def to_dvc(
                         repo, path=_repo_rel(out.path)
                     )
                     calkit.dvc.zip.add(out.path, is_stage_output=True)
+        # What's left out of outputs, by DVC, and by Git for those it stores
+        for out in stage.outputs or []:
+            if isinstance(out, PathOutput) and out.ignore:
+                patterns = out.get_ignore_patterns(wdir=stage.wdir)
+                output_dvcignores += patterns
+                if out.storage == "git":
+                    output_gitignores += patterns
         # For LaTeX stages, warn on a latexmkrc/output_dir mismatch and keep
         # the generated aux files out of Git via a managed .gitignore block.
         # Globs (not per-file git check-ignore) keep this cheap for large
@@ -3014,6 +3290,18 @@ def to_dvc(
             _warn_on_latexmkrc_out_dir_mismatch(stage, wdir=wdir)
             if manage_gitignore:
                 _ensure_latex_aux_gitignore(stage, wdir=wdir)
+    # Written whenever compiling writes, even for a status check, since what
+    # .dvcignore excludes changes the outputs' hashes
+    if write:
+        for fname, lines in [
+            (".dvcignore", output_dvcignores),
+            (".gitignore", output_gitignores),
+        ]:
+            _write_managed_gitignore_block(
+                os.path.join(wdir or ".", fname),
+                marker="calkit output ignores",
+                lines=lines,
+            )
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
         stage_output_paths: list[str] = []
@@ -3395,6 +3683,37 @@ def get_stages_to_gate(targets: list[str] | None) -> set[str] | None:
         # E.g., a stage that isn't compiled yet
         return None
     return names
+
+
+def get_stages_that_would_run(
+    stage_names: Iterable[str], force: bool = False, single_item: bool = False
+) -> set[str]:
+    """Of these stages, the ones a run would reproduce, by name.
+
+    That's every one with ``force``, or else those out of date, or after
+    one that is, since a stage that runs may change what they read, unless
+    ``single_item`` says the stages before them won't run.
+    """
+    from dvc.exceptions import DvcException
+
+    import calkit.dvc
+
+    stage_names = set(stage_names)
+    if force or not stage_names:
+        return stage_names
+    repo = calkit.dvc.get_dvc_repo()
+    # A stage DVC doesn't have, e.g., one not compiled, can't run
+    upstream = {}
+    for name in stage_names:
+        try:
+            stages = repo.stage.collect(name, with_deps=not single_item)
+        except DvcException:
+            continue
+        upstream[name] = {s.addressing for s in stages}
+    if not upstream:
+        return set()
+    stale = set(repo.status(targets=list(upstream), with_deps=not single_item))
+    return {name for name, found in upstream.items() if found & stale}
 
 
 def stages_by_output(

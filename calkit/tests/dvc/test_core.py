@@ -17,6 +17,8 @@ from dvc.config_schema import SCHEMA, Invalid
 from dvc_objects.fs import known_implementations
 
 import calkit
+import calkit.latex
+import calkit.pipeline
 from calkit.dvc import register_ck_scheme
 from calkit.dvc.core import _tolerate_lock_release_failures
 
@@ -969,6 +971,21 @@ def test_get_storage_problems(tmp_dir):
         f.write("/values.tex\n")
     assert problems()["values.tex"]["kind"] == "ignored"
     os.remove("values.tex")
+    # And a declared reference report
+    ck_info["pipeline"]["stages"]["refs"] = {
+        "kind": "references-check",
+        "target_path": "main.tex",
+        "outputs": ["refs.json"],
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("refs.json", "w") as f:
+        f.write("{}")
+    with open(".gitignore", "a") as f:
+        f.write("/refs.json\n")
+    assert problems()["refs.json"]["kind"] == "ignored"
+    os.remove("refs.json")
+    del ck_info["pipeline"]["stages"]["refs"]
+    calkit.save_calkit_info(ck_info)
     # A path stored zipped and tracked by Git
     os.makedirs("zipped")
     with open("zipped/a.txt", "w") as f:
@@ -990,6 +1007,284 @@ def test_get_storage_problems(tmp_dir):
     ]
     assert "big.txt" in large
     assert "big.bin" not in large
+
+
+def test_get_git_output_paths(tmp_dir: str) -> None:
+    def get_paths(dvc_repo: dvc.repo.Repo | None = None) -> dict[str, str]:
+        base = Path(".").resolve()
+        return {
+            Path(path).relative_to(base).as_posix(): name
+            for path, name in calkit.dvc.get_git_output_paths(
+                dvc_repo=dvc_repo
+            ).items()
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    with open("README.md", "w") as f:
+        f.write(
+            "```sh calkit stage name=plot "
+            "outputs=[{path: figures, storage: git}, other.png]\n"
+            "echo\n"
+            "```\n"
+        )
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo",
+                "outputs": [
+                    {"path": "results", "storage": "git"},
+                    "data",
+                    {"path": "scratch", "storage": None},
+                ],
+            },
+            # Blocks of Markdown are stages of their own
+            "README.md": {"kind": "markdown", "target_path": "README.md"},
+            # Only an iterated stage's outputs stored in Git, though another's
+            # path would match its template
+            "it": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo {v}",
+                "iterate_over": [{"arg_name": "v", "values": ["a", "b"]}],
+                "outputs": [
+                    {"path": "data/{v}.csv", "storage": "git"},
+                    {"path": "data/{v}.full.csv", "storage": None},
+                ],
+            },
+            # As is each diff of a LaTeX document
+            "paper": {
+                "kind": "latex",
+                "environment": "_system",
+                "target_path": "paper/paper.tex",
+                "pdf_storage": "git",
+                "diffs": ["v1"],
+                "diff_pdf_storage": "git",
+            },
+        }
+    }
+    # An inline subproject's stages are run from here, but not an isolated
+    # one's, which has its own DVC repo
+    for sp, isolated in [("sub", False), ("iso", True)]:
+        os.makedirs(
+            os.path.join(sp, ".dvc" if isolated else ""), exist_ok=True
+        )
+        with open(os.path.join(sp, "calkit.yaml"), "w") as f:
+            calkit.ryaml.dump(
+                {
+                    "pipeline": {
+                        "stages": {
+                            "c": {
+                                "kind": "shell-command",
+                                "environment": "_system",
+                                "command": "echo",
+                                "outputs": [{"path": "out", "storage": "git"}],
+                            }
+                        }
+                    }
+                },
+                f,
+            )
+    ck_info["subprojects"] = [{"path": "sub"}, {"path": "iso"}]
+    calkit.save_calkit_info(ck_info)
+    diff_path = calkit.latex.get_diff_path("paper/paper.tex", "v1", "HEAD")
+    expected = {
+        "results": "make",
+        "figures": "README.md/plot",
+        "paper/paper.pdf": "paper",
+        diff_path: calkit.latex.get_diff_stage_name("paper", "v1", "HEAD"),
+        "sub/out": "sub/dvc.yaml:c",
+    }
+    # An iterated stage's are found in DVC's index, once compiled
+    assert get_paths() == expected
+    calkit.pipeline.to_dvc(write=True)
+    dvc_repo = calkit.dvc.get_dvc_repo()
+    try:
+        assert get_paths(dvc_repo) == expected | {
+            "data/a.csv": "it@a",
+            "data/b.csv": "it@b",
+        }
+    finally:
+        dvc_repo.close()
+
+
+def test_get_unstored_output_files(tmp_dir: str) -> None:
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def get_unstored(
+        stages: list[str] | None = None, tracked: bool = False
+    ) -> dict:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+        try:
+            return {
+                u["path"]: u
+                for u in calkit.dvc.get_unstored_output_files(
+                    dvc_repo=dvc_repo, stages=stages, tracked=tracked
+                )
+            }
+        finally:
+            dvc_repo.close()
+
+    def get_problems() -> dict:
+        return {
+            p["path"]: p
+            for p in calkit.dvc.get_storage_problems(large_mb=None)
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    # Only the outputs are run, so nothing is staged by the run itself
+    subprocess.check_call(["dvc", "config", "core.autostage", "false"])
+    with open(".gitignore", "a") as f:
+        f.write("*.log\n*.tmp\n/whole/\n")
+    with open(".dvcignore", "a") as f:
+        f.write("*.tmp\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": (
+                    "mkdir -p logs/sub data/cache whole "
+                    "&& echo a > logs/a.txt && echo l > logs/sub/run.log "
+                    "&& echo s > logs/skip.tmp && echo l > single.log "
+                    "&& echo d > data/d.csv && echo t > data/t.tmp "
+                    "&& echo w > whole/w.txt && echo s > scratch.log"
+                ),
+                "outputs": [
+                    {"path": "logs", "storage": "git"},
+                    {"path": "single.log", "storage": "git"},
+                    {"path": "whole", "storage": "git"},
+                    # Untracked on purpose
+                    {"path": "scratch.log", "storage": None},
+                    "data",
+                ],
+            },
+            "other": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p other && echo o > other/o.log",
+                "outputs": [{"path": "other", "storage": "git"}],
+            },
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run"])
+    # Running un-ignores outputs stored in Git, so ignore them again
+    with open(".gitignore", "a") as f:
+        f.write("/single.log\n/whole/\n")
+    # Neither stores what Git ignores in an output stored in Git, unless
+    # .dvcignore excludes it too
+    unstored = get_unstored()
+    assert set(unstored) == {"logs", "single.log", "whole", "other"}
+    assert unstored["logs"] == {
+        "path": "logs",
+        "stage": "make",
+        "files": ["logs/sub/run.log"],
+        "rules": ["'*.log' in .gitignore"],
+    }
+    assert unstored["single.log"]["files"] == ["single.log"]
+    assert unstored["whole"]["rules"] == ["'/whole/' in .gitignore"]
+    # Only for the stages asked about
+    assert set(get_unstored(stages=["other"])) == {"other"}
+    # As storage problems, an output ignored as a whole is that rather than
+    # files in it
+    problems = get_problems()
+    assert problems["whole"]["kind"] == "ignored"
+    assert problems["single.log"]["kind"] == "ignored"
+    assert problems["logs"]["kind"] == "ignored-files"
+    assert problems["logs"]["store_in"] == "git"
+    assert problems["logs"]["files"] == ["logs/sub/run.log"]
+    assert problems["logs"]["message"] == (
+        "logs is stored in Git, but Git ignores 1 file in it: "
+        "logs/sub/run.log ('*.log' in .gitignore)"
+    )
+    assert "data" not in problems
+    # Once in Git, they're stored, though one that both leave out shouldn't
+    # be
+    git("add", "-f", "logs", "single.log", "whole", "other")
+    assert get_unstored() == {}
+    (problem,) = get_problems().values()
+    assert problem["kind"] == "excluded-tracked"
+    assert problem["files"] == ["logs/skip.tmp"]
+    assert get_unstored(tracked=True)["logs"]["files"] == ["logs/skip.tmp"]
+    git("rm", "-q", "--cached", "logs/skip.tmp")
+    assert get_problems() == {}
+    # A file DVC leaves out of a directory it caches, but Git tracks anyway,
+    # isn't tracked by both, though the rest of the directory can be
+    git("add", "-f", "data/t.tmp")
+    assert get_problems() == {}
+    git("add", "-f", "data/d.csv")
+    problem = get_problems()["data"]
+    assert problem["kind"] == "both"
+    assert problem["files"] == ["data/d.csv"]
+
+
+def test_stage_git_outputs(tmp_dir: str) -> None:
+    repo = git.Repo.init()
+    os.makedirs("out")
+    for fname in ["a.txt", "gone.txt"]:
+        with open(os.path.join("out", fname), "w") as f:
+            f.write(fname)
+    repo.git.add("out")
+    repo.git.commit("-qm", "Add")
+    os.remove(os.path.join("out", "gone.txt"))
+    with open(os.path.join("out", "new.txt"), "w") as f:
+        f.write("new")
+    with open(os.path.join("out", "big.bin"), "wb") as f:
+        f.truncate((calkit.dvc.LARGE_MB + 1) * 1024**2)
+    # Deletions and new files are staged, but not one too large for Git
+    assert calkit.dvc.stage_git_outputs(repo, ["out"]) == ["out/big.bin"]
+    assert repo.git.diff("--cached", "--name-status").split() == [
+        "D",
+        "out/gone.txt",
+        "A",
+        "out/new.txt",
+    ]
+    # A notebook goes into Git as DVC hashes it, not as a clean filter like
+    # nbstripout would leave it, whether added or force-added
+    repo.git.config("filter.strip.clean", "sed s/output//")
+    with open(".gitattributes", "w") as f:
+        f.write("*.ipynb filter=strip\n")
+    with open(".gitignore", "w") as f:
+        f.write("ignored/\n")
+    for dname in ["out", "ignored"]:
+        os.makedirs(dname, exist_ok=True)
+        with open(os.path.join(dname, "n.ipynb"), "w") as f:
+            f.write("output\n")
+    calkit.dvc.stage_git_outputs(repo, ["out"])
+    calkit.dvc.force_add_ignored_files(repo, ["ignored/n.ipynb"])
+    # Paths are only themselves, not patterns
+    for fname in ["d[1].csv", "d1.csv"]:
+        with open(os.path.join("ignored", fname), "w") as f:
+            f.write("d")
+    calkit.dvc.force_add_ignored_files(repo, ["ignored/d[1].csv"])
+    assert repo.git.ls_files("ignored").split() == [
+        "ignored/d[1].csv",
+        "ignored/n.ipynb",
+    ]
+    for dname in ["out", "ignored"]:
+        assert repo.git.show(f":{dname}/n.ipynb") == "output"
+
+
+def test_autostage_enabled(tmp_dir: str) -> None:
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "dvc", "remote", "add", "-f", "calkit", "ck://a/b"]
+    )
+    assert calkit.dvc.autostage_enabled()
+    # Read before anything else opens the repo, which then accepts the 'ck'
+    # remote, in a process of its own, since what's registered is global
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-c",
+            "import calkit.dvc as d; d.autostage_enabled(); d.get_dvc_repo()",
+        ]
+    )
 
 
 def test_split_lock_stage_name():

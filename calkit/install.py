@@ -132,6 +132,18 @@ _R_INSTALLER: dict[Platform, Installer] = {
     },
 }
 
+# Through pixi everywhere: Linux packages of Node are often old, and version
+# managers like nvm only put it on PATH in shells set up for them
+_NODE_VIA_PIXI: Installer = {
+    "script": "pixi global install nodejs",
+    "path_add": "~/.pixi/bin",
+    "requires": ["pixi"],
+}
+_NODE_INSTALLER: dict[Platform, Installer] = {
+    "unix": _NODE_VIA_PIXI,
+    "windows": _NODE_VIA_PIXI,
+}
+
 
 # name -> platform -> Installer
 INSTALLERS: dict[str, dict[Platform, Installer]] = {
@@ -218,14 +230,31 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "requires": ["brew"],
         },
         "linux": {
-            # Docker's convenience script; it needs root, and afterward the
-            # user may still need adding to the docker group
-            "script": "curl -fsSL https://get.docker.com | sudo sh",
+            # Docker's convenience script, which needs root, then joining
+            # the docker group so Docker can be used without it
+            "script": (
+                "curl -fsSL https://get.docker.com | sudo sh "
+                # $USER isn't always set, e.g., in a container
+                '&& sudo usermod -aG docker "$(id -un)"'
+            ),
             "path_add": "/usr/bin",
         },
         "windows": {
             "script": _WINGET + "Docker.DockerDesktop",
             "path_add": "%ProgramFiles%\\Docker\\Docker\\resources\\bin",
+        },
+    },
+    # Runs Docker in a VM without Docker Desktop, which is no use without
+    # the Docker CLI, so that comes too unless one is already on PATH,
+    # e.g., from Docker Desktop
+    "colima": {
+        "mac": {
+            "script": (
+                "brew install colima && "
+                "{ command -v docker >/dev/null || brew install docker; }"
+            ),
+            "path_add": _BREW_BINS,
+            "requires": ["brew"],
         },
     },
     "code": {
@@ -252,6 +281,7 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "conda": _MINIFORGE_INSTALLER,
     "R": _R_INSTALLER,
+    "node": _NODE_INSTALLER,
     # Converts LaTeX documents to Word without Word, with its Math
     # component, which Linux distributions package separately and without
     # which equations come out empty
@@ -301,6 +331,11 @@ INSTALLERS["cargo"] = _RUSTUP_INSTALLER
 INSTALLERS["julia"] = _JULIAUP_INSTALLER
 INSTALLERS["mamba"] = _MINIFORGE_INSTALLER
 INSTALLERS["Rscript"] = _R_INSTALLER
+INSTALLERS["npm"] = _NODE_INSTALLER
+INSTALLERS["npx"] = _NODE_INSTALLER
+# Names an app goes by that aren't a binary it provides, which is what an
+# install is checked for afterward
+NAME_ALIASES = {"nodejs": "node"}
 
 
 # Apps that are known to be unsupported on a given platform, mapped to the
@@ -329,6 +364,18 @@ _PLATFORM_UNSUPPORTED: dict[str, dict[Platform, str]] = {
         "linux": (
             "Install Git with your system package manager, e.g., "
             "'sudo apt install git'."
+        ),
+    },
+    "colima": {
+        "linux": (
+            "Colima isn't needed on Linux, where Docker runs natively; "
+            "install Docker Engine with 'calkit install docker', or, to "
+            "install Colima anyway, see "
+            "https://github.com/abiosoft/colima/blob/main/docs/INSTALL.md."
+        ),
+        "windows": (
+            "Colima doesn't run on Windows; install Docker Desktop with "
+            "'calkit install docker' instead."
         ),
     },
     "code": {
@@ -515,16 +562,18 @@ def add_vscode_recs(code: str) -> None:
         json.dump(recommended | current, f, indent=2)
 
 
-def install(app: str) -> bool:
+def install(app: str, entry: Installer | None = None) -> bool:
     """Run the registered install script for ``app`` and update ``PATH``.
 
-    Anything the entry ``requires`` is installed first. Returns True iff
-    the install command exits 0 AND the binary is then findable on
-    ``PATH`` (after prepending the installer's known output directory).
-    Both must hold -- exiting 0 isn't enough if the binary landed
-    somewhere we still can't see.
+    ``entry`` is used in place of the registered one, e.g., for a project
+    that says how it gets the app. Anything the entry ``requires`` is
+    installed first. Returns True iff the install command exits 0 AND the
+    binary is then findable on ``PATH`` (after prepending the installer's
+    known output directory). Both must hold -- exiting 0 isn't enough if
+    the binary landed somewhere we still can't see.
     """
-    entry = get_installer(app)
+    if entry is None:
+        entry = get_installer(app)
     if entry is None:
         return False
     for req in entry.get("requires", []):
@@ -542,14 +591,20 @@ def install(app: str) -> bool:
     return ok
 
 
-def prompt_and_install(app: str, *, interactive: bool) -> bool:
+def prompt_and_install(
+    app: str, *, interactive: bool, entry: Installer | None = None
+) -> bool:
     """Ask the user (if on a TTY) whether to install ``app`` and do it.
 
-    Returns True iff the app is installed and on ``PATH`` afterward.
-    Non-interactive callers always get False here -- they're expected to
-    surface the missing dep so the user can install it themselves.
+    ``entry`` is used in place of the registered one, as for
+    :func:`install`. Returns True iff the app is installed and on ``PATH``
+    afterward. Non-interactive callers always get False here -- they're
+    expected to surface the missing dep so the user can install it
+    themselves.
     """
-    entry = get_installer(app)
+    registered = entry is None
+    if entry is None:
+        entry = get_installer(app)
     if entry is None:
         return False
     if not interactive:
@@ -564,6 +619,19 @@ def prompt_and_install(app: str, *, interactive: bool) -> bool:
             print(f"'{app}' is installed with '{req}', which is missing.")
             if not prompt_and_install(req, interactive=interactive):
                 return False
+    if app == "docker":
+        from calkit.core import is_wsl
+
+        # Docker Desktop on Windows can serve WSL too, and then the same
+        # Docker works on both sides
+        if is_wsl():
+            print(
+                "  Docker Desktop on Windows can also provide Docker here: "
+                "install it in Windows, then enable this distro in its "
+                "Settings > Resources > WSL integration. "
+                "Otherwise, Docker Engine can be installed in WSL, "
+                "which needs systemd enabled."
+            )
     # Shown before the question rather than after a refusal: agreeing to a
     # command you haven't been shown isn't agreeing to much, and this is
     # often the first thing Calkit asks anyone
@@ -573,9 +641,11 @@ def prompt_and_install(app: str, *, interactive: bool) -> bool:
     except EOFError:
         answer = "n"
     if answer not in ("", "y", "yes"):
-        print(f"  Skipped. Run 'calkit install {app}' when you want it.")
+        # Only the registry's way can be run later by name
+        later = f"calkit install {app}" if registered else entry["script"]
+        print(f"  Skipped. Run '{later}' when you want it.")
         return False
-    ok = install(app)
+    ok = install(app, entry=entry)
     if not ok:
         print(
             f"  Install ran but '{app}' is still not on PATH; restart your "

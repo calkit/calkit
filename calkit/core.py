@@ -836,6 +836,27 @@ def ensure_local_dir(wdir: str | None = None) -> str:
     return base
 
 
+def write_if_changed(path: str, content: str | bytes) -> bool:
+    """Write a file only if its content differs, returning whether it did,
+    so whatever goes by its content or timestamp, e.g., DVC or latexmk,
+    doesn't rerun for nothing.
+
+    Text is written as UTF-8 bytes, so it's byte-identical on every
+    platform, where text mode would write CRLF on Windows.
+    """
+    data = content.encode("utf-8") if isinstance(content, str) else content
+    try:
+        with open(path, "rb") as f:
+            if f.read() == data:
+                return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return True
+
+
 NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
 
 
@@ -985,6 +1006,20 @@ def is_tty() -> bool:
         return False
 
 
+def is_wsl() -> bool:
+    """Whether this is Linux running under the Windows Subsystem for Linux."""
+    if not sys.platform.startswith("linux"):
+        return False
+    # A container on a Windows host shares the WSL kernel, but it isn't WSL
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return False
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+
 def is_mintty(stream: Any) -> bool:
     """True when a stream is a Git Bash or Cygwin (mintty) terminal.
 
@@ -1062,6 +1097,15 @@ def check_dep_exists(
 
         exe = find_conda_exe() if name == "conda" else find_mamba_exe()
         return exe is not None
+    # Apps that aren't run by their name, or not on every OS
+    if name == "word":
+        from calkit.docx import word_installed
+
+        return word_installed()
+    if name == "libreoffice":
+        from calkit.docx import find_soffice
+
+        return find_soffice() is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -1191,11 +1235,12 @@ def _normalize_requirement(req) -> dict:
     if not isinstance(req, dict):
         raise malformed()
     keys = list(req.keys())
-    # Flat form with explicit kind: only requires ``name`` for kinds where
-    # name is the identity (app, env-var). Setup requirements may omit it,
-    # and property requirements have none to give.
-    if "kind" in keys:
+    # Flat form, an app unless it gives a kind: only requires ``name`` for
+    # kinds where name is the identity (app, env-var). Setup requirements
+    # may omit it, and property requirements have none to give.
+    if "kind" in keys or "name" in keys:
         out = dict(req)
+        out.setdefault("kind", "app")
         if "name" not in out:
             kind = out["kind"]
             if kind in system_property_requirement_kinds():
@@ -1217,10 +1262,12 @@ def _normalize_requirement(req) -> dict:
                 )
             else:
                 raise ValueError(f"Requirement missing required 'name': {req}")
-        return out
-    if "name" in keys:
-        out = dict(req)
-        out.setdefault("kind", "app")
+        # YAML reads an unquoted name in braces, e.g., {var}, as a mapping
+        if not isinstance(out["name"], str):
+            raise ValueError(
+                f"Malformed requirement {req!r}; its 'name' must be text, "
+                'so quote it if it\'s in braces, e.g., name: "{var}"'
+            )
         return out
     if len(keys) != 1:
         raise malformed()
@@ -1442,13 +1489,19 @@ def get_version_checked_app_names(
         SWITCH_KIND,
         runs_elsewhere,
     )
+    from calkit.pipeline import get_stage_items
 
     envs = ck_info.get("environments") or {}
     reqs = list(get_requirements(ck_info))
     stages = (ck_info.get("pipeline") or {}).get("stages", {})
+    # With each item's values, when its environment or requirements use them
+    items: dict[str, dict] = {}
     for name, stage in stages.items():
-        if stage_names is not None and name not in stage_names:
-            continue
+        if stage_names is None or name in stage_names:
+            items |= get_stage_items(
+                name, stage, params=ck_info.get("parameters")
+            )
+    for stage in items.values():
         env_names = str(stage.get("environment") or "_system").split(
             COMPOSITE_ENV_SEP
         )
@@ -1483,6 +1536,18 @@ def get_version_checked_app_names(
     return list(dict.fromkeys(names))
 
 
+def get_requirement_key(req: Any, wdir: str | None = None) -> str:
+    """Identify a requirement however it's written, e.g., to cache its check.
+
+    One checked by running something in the project, e.g., a setup step's
+    ``check_command``, is identified by that project's directory too.
+    """
+    normalized = _normalize_requirement(req)
+    if normalized["kind"] in ("setup", "aws-credentials"):
+        normalized = normalized | {"_wdir": os.path.abspath(wdir or ".")}
+    return json.dumps(normalized, sort_keys=True, default=str)
+
+
 def check_requirements(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -1491,6 +1556,7 @@ def check_requirements(
     use_cache: bool = True,
     requirements: list | None = None,
     described_as: str = "this machine",
+    checked: dict[str, str | None] | None = None,
 ) -> None:
     """Check that a project's declared requirements are satisfied.
 
@@ -1498,6 +1564,13 @@ def check_requirements(
     which describes the host -- the built-in ``_system`` environment. A
     ``system`` environment passes its own list here instead, for the
     machine it names.
+
+    With ``checked``, each requirement is checked once across calls: its
+    outcome, None or what's wrong, is kept there under
+    :func:`get_requirement_key` and reused, so one many stages share is only
+    asked about once. Every requirement of a kind is then checked, and what
+    isn't met reported together, but not those of later kinds, which may
+    depend on them.
 
     ``setup`` requirements are verified via
     :func:`calkit.requirements.check_setup_dep`, which runs the
@@ -1553,6 +1626,40 @@ def check_requirements(
             buckets.setdefault("_other", []).append(req)
         else:
             buckets[kind].append(req)
+    if checked is not None:
+        # One at a time, in the order below, so each outcome is known
+        if buckets["_property"] and system_info is None:
+            system_info = get_machine_properties()
+        for bucket in (
+            "_property",
+            "env-var",
+            "app",
+            "_other",
+            "setup",
+            "aws-credentials",
+        ):
+            problems = []
+            for req in buckets.get(bucket, []):
+                key = get_requirement_key(req, wdir=wdir)
+                if key not in checked:
+                    try:
+                        check_requirements(
+                            wdir=wdir,
+                            system_info=system_info,
+                            interactive=interactive,
+                            use_cache=use_cache,
+                            requirements=[req],
+                            described_as=described_as,
+                        )
+                        checked[key] = None
+                    except ValueError as e:
+                        checked[key] = str(e)
+                problem = checked[key]
+                if problem is not None:
+                    problems.append(problem)
+            if problems:
+                raise ValueError("; ".join(problems))
+        return
     if buckets["_property"]:
         # Read the machine only when something asks about it; describing a
         # system shells out for a version from every package manager it can
@@ -1607,13 +1714,33 @@ def check_requirements(
                     described_as=described_as,
                 )
             continue
-        # Offer the registered native installer when we have one.
+        # Offer the project's own way to install it, or else the registered
+        # native installer when we have one
         from calkit import install as _install
 
-        if _install.get_installer(req_name) is not None:
+        setup_command = req.get("setup_command")
+        description = (req.get("description") or "").strip()
+        registered = _install.get_installer(req_name)
+        # Only the project's own command is an override; the registered
+        # installer goes through by name, so declining it points at
+        # 'calkit install' rather than its raw script
+        override: _install.Installer | None = None
+        if setup_command:
+            override = {"script": setup_command, "path_add": []}
+            if registered is not None:
+                # The app tends to land in the same place however it's
+                # installed, e.g., ~/.local/bin, so keep where to look for
+                # it, but not the registry's prerequisites, which the
+                # project's command may not need
+                override["path_add"] = registered["path_add"]
+                if "binary" in registered:
+                    override["binary"] = registered["binary"]
+        if override is not None or registered is not None:
             print(f"App '{req_name}' is not installed.")
+            if description and interactive:
+                print(f"  {description}")
             if _install.prompt_and_install(
-                req_name, interactive=interactive
+                req_name, interactive=interactive, entry=override
             ) and check_dep_exists(req_name, "app", system_info=system_info):
                 if spec:
                     check_app_version(
@@ -1625,10 +1752,15 @@ def check_requirements(
                 continue
         # Some apps have no installer here but a known way in, e.g., a
         # system package manager on Linux
-        hint = _install.get_unsupported_message(req_name)
+        hint = (
+            None
+            if setup_command
+            else _install.get_unsupported_message(req_name)
+        )
         raise ValueError(
             f"app '{req_name}' not found on {described_as}"
             + (f"; {hint}" if hint else "")
+            + (f"\n  {description}" if description else "")
         )
     for req in buckets.get("_other", []):
         req_name = req["name"]
@@ -2188,3 +2320,35 @@ def set_env_vars(ck_info: dict, cli: bool = True) -> None:
         os.environ[str(k)] = str(v)
     if os.path.expanduser("~") != home:
         os.environ.setdefault(USER_HOME_ENV_VAR, home)
+
+
+def normalize_orcid(orcid: str) -> str:
+    """Check an ORCID, bare or as a URL, and return it as its URL.
+
+    Raises ``ValueError`` if it isn't shaped like one or its check digit
+    doesn't match the rest.
+    """
+    match = re.fullmatch(
+        r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
+        r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
+        orcid.strip(),
+    )
+    if match is None:
+        raise ValueError(
+            f"orcid must look like 0000-0002-1825-0097 (got {orcid!r})"
+        )
+    bare = match.group(1).upper()
+    # The last character is an ISO 7064 MOD 11-2 check digit over the
+    # other 15, so a typo is caught here rather than by whoever later
+    # finds the identifier resolves to a stranger, or to nobody.
+    total = 0
+    for digit in bare[:-1].replace("-", ""):
+        total = (total + int(digit)) * 2
+    result = (12 - total % 11) % 11
+    expected = "X" if result == 10 else str(result)
+    if bare[-1] != expected:
+        raise ValueError(
+            f"orcid {orcid!r} has check digit {bare[-1]} but its other "
+            f"digits call for {expected}, so one of them is mistyped"
+        )
+    return f"https://orcid.org/{bare}"

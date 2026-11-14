@@ -213,6 +213,16 @@ Answering no is fine too.
 The commit has already been made,
 and the project can be connected later with `calkit update hub`.
 
+<!-- TODO: needs human review -->
+
+A project cloned from GitHub can push its code there,
+but not its data.
+When you save or push data in DVC,
+`calkit save` and `calkit push` offer a hub's storage
+instead of leaving the data on your machine,
+and log you in to the hub first if you aren't.
+Answer no and they won't ask again on that machine.
+
 ## Next steps
 
 Add your own data and a script to process it with

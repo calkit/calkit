@@ -7,6 +7,8 @@
 - The VS Code extension lives in `vscode-ext`
 - The Chrome extension lives in `browser-ext`
 - The Calkit Assistant desktop app lives in `assistant`
+- The agent plugin for Claude Code, Codex, and OpenCode lives in
+  `agent-plugin`
 - GitHub Actions live in `actions`, e.g., `calkit/calkit/actions/run`
 - Docker images we publish live in `images`, e.g., `images/latex`, which
   is released on its own `latex-image/vX.Y.Z` tag rather than with the CLI
@@ -65,6 +67,10 @@ comments instead. This only applies to blank lines we write, not ones the
 formatter inserts, e.g., ruff-format adds one after an in-function import
 block. Don't hoist imports to module scope just to avoid those; imports are
 kept inside functions to keep CLI startup fast.
+
+Put the imports a function always needs at its top, not partway through;
+only an import on a conditional path belongs where it's used.
+Module scope is fine for anything that won't slow CLI startup.
 
 For prose, only use one space after punctuation.
 

@@ -1202,7 +1202,7 @@ def sync(
         ):
             # Push to the project remote
             typer.echo("Pushing changes to project Git remote")
-            repo.git.push()
+            repo.git.push(*calkit.git.get_set_upstream_args(repo))
         # Built outputs DVC tracks are only recorded in Git by their hash
         if built and push_dvc:
             calkit_push(targets=["dvc"])

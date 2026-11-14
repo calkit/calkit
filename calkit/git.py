@@ -91,6 +91,72 @@ def get_default_branch(repo: git.Repo) -> str | None:
     return None
 
 
+def get_set_upstream_args(
+    repo: git.Repo, push_args: list[str] | None = None
+) -> list[str]:
+    """Arguments that let a plain ``git push`` publish a new branch.
+
+    Git refuses to push a branch with no upstream unless
+    ``push.autoSetupRemote`` is on, so the first push of a project, e.g.,
+    right after connecting it to a hub, would fail. Returns nothing when
+    the branch already tracks one, ``push_args`` say what or where to
+    push, Git pushes to a remote other than the one it pulls from, or
+    there's no obvious remote to choose.
+    """
+
+    def get_config(key: str) -> str:
+        # Through Git, since its keys are case-insensitive and config files
+        # can include others
+        return str(repo.git.config("--get", key, with_exceptions=False))
+
+    # These pick their own refs, so naming the branch would change them
+    ref_flags = {
+        "--all",
+        "--branches",
+        "--mirror",
+        "--tags",
+        "--delete",
+        "-d",
+        "--prune",
+    }
+    for arg in push_args or []:
+        if not arg.startswith("-") or arg in ref_flags:
+            return []
+        # A remote named this way loses to one given as an argument
+        if arg == "--repo" or arg.startswith("--repo="):
+            return []
+    # Neither pushes just the current branch, which naming it would do
+    if get_config("push.default") in ("nothing", "matching"):
+        return []
+    try:
+        branch = repo.active_branch
+    except TypeError:
+        # Detached HEAD
+        return []
+    if branch.tracking_branch() is not None:
+        return []
+    push_remote = get_config(f"branch.{branch.name}.pushRemote") or get_config(
+        "remote.pushDefault"
+    )
+    pull_remote = get_config(f"branch.{branch.name}.remote")
+    # Git already pushes a new branch to a push remote that isn't the one
+    # it pulls from, and setting an upstream would change where it pulls
+    if push_remote and push_remote != (pull_remote or "origin"):
+        return []
+    remote_names = [r.name for r in repo.remotes]
+    if push_remote:
+        remote = push_remote
+    elif pull_remote in remote_names:
+        remote = pull_remote
+    elif "origin" in remote_names:
+        remote = "origin"
+    elif len(remote_names) == 1:
+        remote = remote_names[0]
+    else:
+        return []
+    return ["--set-upstream", remote, branch.name]
+
+
 def check_branch_is_current(
     repo: git.Repo, branch: str | None = None, fetch: bool = True
 ) -> str | None:
@@ -497,7 +563,8 @@ def ensure_path_is_not_ignored(
                 lines.remove(no_ignore_line)
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
-        f.write("\n".join(lines))
+        # Ending in a newline, so a rule appended later stays its own
+        f.write("".join(line + "\n" for line in lines))
     # If the path is still ignored after updating this gitignore file (e.g.,
     # because a subdirectory .gitignore also contains a matching rule), fix
     # that file as well. Depth-limit guards against pathological gitignore
@@ -507,15 +574,22 @@ def ensure_path_is_not_ignored(
     return True
 
 
-def get_dirty_gitignores(repo: git.Repo) -> dict[str, str]:
-    """Each .gitignore with changes not yet committed, relative to the repo
-    root, and what it holds.
+def get_dirty_gitignores(
+    repo: git.Repo, fnames: tuple[str, ...] = (".gitignore",)
+) -> dict[str, str]:
+    """Each .gitignore, or file named one of ``fnames``, with changes not yet
+    committed, relative to the repo root, and what it holds.
     """
-    status = repo.git.status("--porcelain", "--untracked-files=all")
+    status = repo.git.status(
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        *[f":(top,glob)**/{fname}" for fname in fnames],
+    )
     dirty = {}
     for line in status.splitlines():
         path = line[3:].strip('"')
-        if path.endswith(".gitignore"):
+        if path.rsplit("/", 1)[-1] in fnames:
             fpath = os.path.join(repo.working_dir, path)
             exists = os.path.isfile(fpath)
             dirty[path] = open(fpath).read() if exists else ""
@@ -523,17 +597,19 @@ def get_dirty_gitignores(repo: git.Repo) -> dict[str, str]:
 
 
 def stage_gitignores(
-    repo: git.Repo, dirty_before: dict[str, str]
+    repo: git.Repo,
+    dirty_before: dict[str, str],
+    fnames: tuple[str, ...] = (".gitignore",),
 ) -> list[str]:
-    """Stage each .gitignore changed since ``dirty_before`` was taken with
-    ``get_dirty_gitignores``.
+    """Stage each .gitignore, or file named one of ``fnames``, changed since
+    ``dirty_before`` was taken with ``get_dirty_gitignores``.
 
     One that already had changes isn't staged, since that would commit
     them too, though DVC may have staged it already if it autostages.
     Returns a warning for each that couldn't be staged cleanly.
     """
     messages = []
-    for gitignore, text in sorted(get_dirty_gitignores(repo).items()):
+    for gitignore, text in sorted(get_dirty_gitignores(repo, fnames).items()):
         if gitignore in dirty_before:
             if text == dirty_before[gitignore]:
                 continue

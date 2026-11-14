@@ -1,0 +1,16 @@
+{
+  "name": "calkit",
+  "description": "Agent skills for working with Calkit projects.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/calkit/calkit.git",
+    "directory": "agent-plugin"
+  },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./server": "./index.js"
+  }
+}

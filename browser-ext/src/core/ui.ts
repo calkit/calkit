@@ -245,6 +245,17 @@ input, select, textarea {
   font-family: inherit;
 }
 textarea { min-height: 70px; resize: vertical; }
+input[type="checkbox"] { width: auto; margin: 0; }
+label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: normal;
+  white-space: nowrap;
+  cursor: pointer;
+}
 label { display: block; font-size: 11px; font-weight: 600; margin: 6px 0 2px; }
 .error { color: var(--ck-danger); }
 .stack { display: flex; flex-direction: column; gap: 6px; }
@@ -280,7 +291,16 @@ button.twisty {
   color: var(--ck-dim);
   cursor: pointer;
 }
-.actions { display: flex; gap: 6px; margin-top: 8px; }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+/* A message on its own line in a row of actions, once there is one */
+.actions .line-message { flex-basis: 100%; }
+.actions .line-message:empty { display: none; }
 .spinner {
   width: 12px;
   height: 12px;
@@ -323,6 +343,24 @@ button.twisty {
   flex-wrap: wrap;
 }
 .overlay .toolbar .spacer { flex: 1; }
+pre.log {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--ck-subtle-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.overlay pre.log {
+  flex: 1;
+  overflow: auto;
+  border-radius: 0;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+}
 .overlay .viewport {
   flex: 1;
   min-height: 0;

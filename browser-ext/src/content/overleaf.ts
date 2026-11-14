@@ -8,6 +8,11 @@ import {
 } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import {
+  getEditorLabel,
+  type CheckoutStatus,
+  type LocalStatus,
+} from "../core/local";
+import {
   type Citation,
   type CitationProblem,
   canBeCreatedByPerson,
@@ -17,6 +22,7 @@ import {
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import {
+  isExtensionAlive,
   isUnsupportedByHub,
   type Request,
   RequestFailed,
@@ -41,6 +47,7 @@ import {
   launcherPosition,
   errorMessage,
   loading,
+  mountOverlay,
   mountPanel,
   type Panel,
   STYLES,
@@ -817,6 +824,18 @@ function renderRunIt(
   saved: StageFromScriptOrNotebookResponse,
   link: OverleafLinkPublic,
 ): HTMLElement {
+  if (link.local_path) {
+    return el("div", { class: "muted-box", style: { marginTop: "6px" } }, [
+      el("div", {
+        class: "small",
+        text:
+          `Added stage ${saved.stage_name}. It hasn't run yet. Run it on ` +
+          "this computer, and its results come into this paper when it " +
+          "finishes:",
+      }),
+      renderRuns(link, true),
+    ]);
+  }
   const folder = saved.git_repo_url
     .replace(/\.git$/, "")
     .split("/")
@@ -871,6 +890,14 @@ let runsRequest: { key: string; promise: Promise<void> } | null = null;
 let runsFailures = 0;
 // A start from a run button, kept across their redraws
 let starting: { key: string; busy: boolean; error?: string } | null = null;
+// Whether a run on this computer saves and syncs with Overleaf after, as
+// last chosen, and whether the latest one did
+const SYNC_AFTER_RUN_KEY = "syncAfterRun";
+let syncAfterRun = true;
+let lastRunSynced = true;
+void chrome.storage.local.get(SYNC_AFTER_RUN_KEY).then((stored) => {
+  syncAfterRun = stored[SYNC_AFTER_RUN_KEY] ?? true;
+});
 // Where the open panel shows them, redrawn as they change
 const runsBoxes = new Set<{
   box: HTMLElement;
@@ -914,6 +941,8 @@ function refreshRuns(link: OverleafLinkPublic): Promise<void> {
     clearTimeout(runsTimer);
     const delay = runsFailures
       ? Math.min(15_000 * 2 ** runsFailures, 300_000)
+      : activeRun()?.location === "local"
+      ? 2_000
       : activeRun()
       ? 15_000
       : 60_000;
@@ -950,7 +979,7 @@ function refreshRuns(link: OverleafLinkPublic): Promise<void> {
         void refreshRailPipeline(link);
       }
       if (runs.runs[0]?.status === "succeeded") {
-        await syncAfterRun(link);
+        await bringInRun(link);
       } else {
         pipelineRuns.notice = undefined;
       }
@@ -980,12 +1009,14 @@ async function syncOverleaf(
 ): Promise<OverleafSyncResponse> {
   syncing = true;
   drawRail();
+  drawStatusParts();
   remountLauncher();
   try {
     return await send({ type: "overleaf.sync", owner, project, path });
   } finally {
     syncing = false;
     drawRail();
+    drawStatusParts();
     remountLauncher();
   }
 }
@@ -993,6 +1024,12 @@ async function syncOverleaf(
 /** Look again at what's synced and shown, now that a sync changed it. */
 function afterSync(): void {
   provenanceCache.clear();
+  checkingAfterSync = true;
+  drawStatusParts();
+  // What was just built and synced, rather than what was
+  if (localPdf) {
+    showLocalPdf(localPdf.link, localPdf.path);
+  }
   if (!currentProjectId) {
     return;
   }
@@ -1040,16 +1077,21 @@ function syncNow(
   return { button, message };
 }
 
-/** Start the pipeline on GitHub Actions, which syncs here when it's done. */
+/**
+ * Start the pipeline on this computer, saving and syncing after if chosen,
+ * or else on GitHub Actions, which syncs here when it's done.
+ */
 async function startRun(link: OverleafLinkPublic): Promise<void> {
   const key = linkKey(link);
   starting = { key, busy: true };
+  lastRunSynced = !link.local_path || syncAfterRun;
   drawRuns();
   try {
     const run = await send({
       type: "project.startPipelineRun",
       owner: link.project_owner_name,
       project: link.project_name,
+      sync: lastRunSynced,
     });
     starting = null;
     // Listed as soon as it's recorded, before GitHub lists it
@@ -1075,11 +1117,17 @@ async function startRun(link: OverleafLinkPublic): Promise<void> {
 }
 
 /** Bring what a finished run made into this paper. */
-async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
+async function bringInRun(link: OverleafLinkPublic): Promise<void> {
   if (!pipelineRuns) {
     return;
   }
-  if (canWrite(link)) {
+  // 'calkit run --save --overleaf' synced already, unless it was only run
+  if (pipelineRuns.runs.runs[0]?.location === "local") {
+    pipelineRuns.notice = lastRunSynced
+      ? "The pipeline ran on this computer, and its results were saved " +
+        "and synced here."
+      : "The pipeline ran on this computer. Sync to bring its results here.";
+  } else if (canWrite(link)) {
     try {
       await syncOverleaf(link.project_owner_name, link.project_name, link.path);
       pipelineRuns.notice =
@@ -1111,6 +1159,7 @@ function renderRuns(link: OverleafLinkPublic, offer: boolean): HTMLElement {
 }
 
 function drawRuns(): void {
+  drawStatusParts();
   for (const entry of runsBoxes) {
     const { box, link, offer } = entry;
     if (!box.isConnected && box.dataset.drawn) {
@@ -1142,13 +1191,30 @@ function drawRuns(): void {
           el("div", {
             class: "grow small",
             text:
-              run.status === "running"
-                ? `Running on GitHub Actions${since}`
-                : "Waiting to run on GitHub Actions",
+              run.location === "local"
+                ? getRunActivity(run)
+                : run.status === "running"
+                ? `Running ${getRunPlace(run)}${since}`
+                : `Waiting to run ${getRunPlace(run)}`,
           }),
-          view(run, "View"),
+          run.location === "local"
+            ? el("button", {
+                class: "action secondary",
+                text: "Show log",
+                onClick: () => openRunLog(link, run),
+              })
+            : view(run, "View"),
         ]),
       );
+      // The last of what it's printed, with the rest a click away
+      if (run.location === "local" && run.output) {
+        box.append(
+          el("pre", {
+            class: "log",
+            text: run.output.split("\n").slice(-3).join("\n"),
+          }),
+        );
+      }
       continue;
     }
     if (notice) {
@@ -1158,9 +1224,18 @@ function drawRuns(): void {
         el("div", { class: "row" }, [
           el("div", {
             class: "grow small",
-            text: "The last run on GitHub Actions failed.",
+            text:
+              `The last run ${getRunPlace(latest)} failed` +
+              (latest.error ? `: ${latest.error}` : "."),
+            title: latest.output ?? "",
           }),
-          view(latest, "See why"),
+          latest.location === "local"
+            ? el("button", {
+                class: "action secondary",
+                text: "Show log",
+                onClick: () => openRunLog(link, latest),
+              })
+            : view(latest, "See why"),
         ]),
       );
     }
@@ -1169,28 +1244,172 @@ function drawRuns(): void {
     const staleShown = editorProblems?.found.some((problems) =>
       problems.some((p) => p.kind === "stale"),
     );
-    if (!offer && !staleShown && latest?.status !== "failed") {
+    // Running here is quick to start, so it's always on offer
+    if (
+      !link.local_path &&
+      !offer &&
+      !staleShown &&
+      latest?.status !== "failed"
+    ) {
       continue;
     }
     const mine = starting?.key === linkKey(link) ? starting : null;
+    const syncAfter = el("input", { type: "checkbox" }) as HTMLInputElement;
+    syncAfter.checked = syncAfterRun;
+    syncAfter.addEventListener("change", () => {
+      syncAfterRun = syncAfter.checked;
+      void chrome.storage.local.set({ [SYNC_AFTER_RUN_KEY]: syncAfterRun });
+    });
     const start = el("button", {
       class: "action",
-      text: "Run and sync",
+      text: link.local_path ? "Run" : "Run and sync",
       disabled: !canWrite(link) || !runs.can_start || Boolean(mine?.busy),
       title: !canWrite(link)
         ? "You need write access to this project to run it"
         : runs.cannot_start_reason ??
-          "Run the pipeline on GitHub Actions, then sync what it makes here",
+          (link.local_path
+            ? "Run the pipeline on this computer"
+            : "Run the pipeline on GitHub Actions, then sync what it " +
+              "makes here"),
       onClick: () => void startRun(link),
     });
     box.append(
-      el("div", { class: "actions" }, [start]),
+      el("div", { class: "actions" }, [
+        start,
+        link.local_path
+          ? el(
+              "label",
+              {
+                class: "check",
+                title: "Save it and sync what it makes with Overleaf after",
+              },
+              [syncAfter, document.createTextNode("Sync with Overleaf after")],
+            )
+          : null,
+      ]),
       mine?.busy
         ? loading("Starting")
         : mine?.error
         ? errorMessage(mine.error)
         : el("div"),
     );
+  }
+}
+
+/** What a run on this computer is doing now, as a line would say it. */
+function getRunActivity(run: PipelineRun): string {
+  const progress = run.progress;
+  if (run.status === "queued") {
+    return "Waiting to run on this computer";
+  }
+  const of = progress?.n_stages ? ` of ${progress.n_stages}` : "";
+  switch (progress?.phase) {
+    case "syncing":
+      return "Syncing with Overleaf";
+    case "running":
+      return progress.stage
+        ? `Running stage ${progress.n_done + 1}${of}: ${progress.stage}`
+        : `Checking stages (${progress.n_done}${of} done)`;
+    case "finishing":
+      return "Finishing up";
+    case "saving":
+      return "Saving the project";
+    default:
+      return "Getting ready to run on this computer";
+  }
+}
+
+/**
+ * Show the whole log of a run on this computer, kept up to date while it
+ * runs.
+ */
+function openRunLog(link: OverleafLinkPublic, run: PipelineRun): void {
+  const started = run.started ?? run.created;
+  const overlay = mountOverlay({
+    id: "calkit-run-log",
+    title: `Run on this computer, ${new Date(started).toLocaleString([], {
+      dateStyle: "medium",
+      timeStyle: "short",
+    })}`,
+  });
+  const log = el("pre", { class: "log", text: "Loading…" });
+  overlay.viewport.append(log);
+  const refresh = async () => {
+    if (!overlay.host.isConnected) {
+      return;
+    }
+    try {
+      const { log: text } = await send({
+        type: "project.pipelineRunLog",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        runId: run.id,
+      });
+      // Kept at the end as it grows, unless scrolled back to read
+      const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+      log.textContent = text || "Nothing printed yet.";
+      if (atEnd) {
+        log.scrollTop = log.scrollHeight;
+      }
+    } catch (e) {
+      log.textContent = e instanceof Error ? e.message : String(e);
+    }
+    const latest = pipelineRuns?.runs.runs.find((r) => r.id === run.id);
+    if (latest && ["queued", "running"].includes(latest.status)) {
+      setTimeout(() => void refresh(), 2_000);
+    }
+  };
+  void refresh();
+}
+
+// The parts of the open panel's status that a run or sync going on makes
+// out of date, set aside meanwhile rather than shown as current
+const statusParts = new Set<{
+  link: OverleafLinkPublic;
+  hide: HTMLElement[];
+  busy: HTMLElement;
+}>();
+// Whether what's shown is from before a run or sync that's just ended, until
+// it's been checked again
+let checkingAfterSync = false;
+
+/** What's going on that makes the status shown out of date, if anything. */
+function getStatusBusyText(link: OverleafLinkPublic): string | null {
+  if (syncing) {
+    return "Syncing with Overleaf";
+  }
+  const run = pipelineRuns?.key === linkKey(link) ? activeRun() : null;
+  if (run) {
+    return run.progress?.phase === "syncing"
+      ? "Syncing with Overleaf"
+      : "What to sync is checked again once the run is done.";
+  }
+  return checkingAfterSync ? "Checking what's synced now" : null;
+}
+
+function drawStatusParts(): void {
+  for (const entry of statusParts) {
+    if (!entry.busy.isConnected && entry.busy.dataset.drawn) {
+      statusParts.delete(entry);
+      continue;
+    }
+    entry.busy.dataset.drawn = "1";
+    const text = getStatusBusyText(entry.link);
+    for (const part of entry.hide) {
+      part.style.display = text ? "none" : "";
+    }
+    clear(entry.busy);
+    if (text) {
+      entry.busy.append(
+        text.endsWith(".")
+          ? el("div", {
+              class: "dim small",
+              style: { marginTop: "8px" },
+              text,
+            })
+          : el("div", { style: { marginTop: "8px" } }, [loading(text)]),
+      );
+    }
   }
 }
 
@@ -1450,6 +1669,14 @@ function renderProvenance(
               ],
         ),
       );
+      if (!provenance.stage_app) {
+        container.append(
+          renderOpenLocally(
+            `${link.project_owner_name}/${link.project_name}`,
+            provenance.source,
+          ),
+        );
+      }
     }
     if (provenance.inputs.length) {
       container.append(
@@ -1484,6 +1711,302 @@ function renderProvenance(
       }),
     ]),
   );
+}
+
+// Whether Calkit on this computer answers, asked once per page, since the
+// browser starts it to find out
+let localStatus: Promise<LocalStatus> | null = null;
+
+/**
+ * A button that opens the project in the editor on this computer, at a
+ * file if given, e.g., the notebook that makes a figure, through Calkit
+ * here rather than a hub, or installs the editor first if it isn't there.
+ */
+function renderOpenLocally(
+  project: string,
+  path?: string,
+  inline = false,
+): HTMLElement {
+  localStatus ??= send({ type: "local.status" }).catch(() => ({
+    permitted: false,
+  }));
+  const open = el("button", {
+    class: "action secondary",
+    text: "Open in editor",
+    title: path ? `Open ${path} on this computer` : "Open it on this computer",
+  });
+  const message = el("div", { class: "small" });
+  const label = (status: LocalStatus) => {
+    const editor = getEditorLabel(status.editor);
+    open.textContent =
+      status.editorInstalled === false
+        ? `Install ${editor}`
+        : `Open in ${editor}`;
+  };
+  void localStatus.then(label);
+  open.addEventListener("click", async () => {
+    const status = await (localStatus as Promise<LocalStatus>);
+    if (!status.version) {
+      // Asked again next time, e.g., once it's been connected
+      localStatus = null;
+      clear(message).append(
+        el("span", {
+          text: status.permitted
+            ? `${status.error ?? "Calkit on this computer didn't answer"}. `
+            : "Connect the extension to Calkit on this computer first. ",
+        }),
+        el("button", {
+          class: "action secondary",
+          text: "Connect",
+          onClick: () => void send({ type: "local.openOptions" }),
+        }),
+      );
+      return;
+    }
+    open.disabled = true;
+    try {
+      if (status.editorInstalled === false) {
+        clear(message).append(
+          loading(`Installing ${getEditorLabel(status.editor)}`),
+        );
+        await send({ type: "local.installEditor", project });
+        localStatus = send({ type: "local.status" });
+        label(await localStatus);
+      }
+      clear(message).append(loading("Opening"));
+      await send({ type: "local.openProject", project, path });
+      clear(message);
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    } finally {
+      open.disabled = false;
+    }
+  });
+  if (inline) {
+    message.classList.add("line-message");
+    return el("div", { style: { display: "contents" } }, [open, message]);
+  }
+  return el("div", { style: { marginTop: "4px" } }, [open, message]);
+}
+
+/**
+ * What's on this computer that Overleaf won't see until it's saved and
+ * synced, e.g., a figure remade by running a notebook, or a way to connect
+ * if the extension isn't connected to Calkit here. With ``localPath``, the
+ * checkout the panel already works with, only what the panel doesn't show
+ * otherwise, i.e., what isn't saved or pushed.
+ */
+function renderLocalChanges(
+  project: string,
+  reload: () => void,
+  localPath?: string | null,
+): HTMLElement {
+  const container = el("div");
+  localStatus ??= send({ type: "local.status" }).catch(() => ({
+    permitted: false,
+  }));
+  void (async () => {
+    const status = await (localStatus as Promise<LocalStatus>);
+    if (!status.version) {
+      // Asked again next time, e.g., once it's been connected
+      localStatus = null;
+      container.append(
+        el("div", { class: "row", style: { marginTop: "8px" } }, [
+          el("div", {
+            class: "dim small grow",
+            text: status.permitted
+              ? `${status.error ?? "Calkit on this computer didn't answer"}.`
+              : "Connect this computer to see what's on it that Overleaf " +
+                "doesn't have yet.",
+          }),
+          el("button", {
+            class: "action secondary",
+            text: "Connect",
+            onClick: () => void send({ type: "local.openOptions" }),
+          }),
+        ]),
+      );
+      return;
+    }
+    // Not here yet, so offered, since working on it here is the point
+    const local = await send({ type: "local.checkout", project }).catch(
+      () => null,
+    );
+    if (local && !local.path) {
+      container.append(renderClone(project, reload));
+      return;
+    }
+    // Which of several, e.g., worktrees, answers for it
+    if (local && local.paths.length > 1) {
+      const choice = el(
+        "select",
+        { class: "small", title: "The checkout this panel uses" },
+        local.paths.map((p) => el("option", { text: p, value: p })),
+      );
+      choice.value = local.path ?? "";
+      choice.addEventListener("change", async () => {
+        await send({
+          type: "local.chooseCheckout",
+          project,
+          path: choice.value,
+        });
+        reload();
+      });
+      container.append(
+        el("div", { class: "row small", style: { marginTop: "8px" } }, [
+          el("span", { class: "dim", text: "Using" }),
+          choice,
+        ]),
+      );
+    }
+    let checkouts: CheckoutStatus[];
+    try {
+      ({ checkouts } = await send({ type: "local.projectStatus", project }));
+    } catch (e) {
+      container.append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+      return;
+    }
+    let pendingCount = 0;
+    const plural = (n: number, word: string) =>
+      `${n} ${word}${n === 1 ? "" : "s"}`;
+    if (localPath) {
+      checkouts = checkouts.filter((c) => c.path === localPath);
+    }
+    for (const checkout of checkouts) {
+      const lines: HTMLElement[] = [];
+      if (checkout.n_unsaved_files) {
+        lines.push(
+          el("div", {
+            class: "small",
+            text: `${plural(checkout.n_unsaved_files, "file")} not saved`,
+            title: checkout.unsaved_files.join("\n"),
+          }),
+        );
+      }
+      if (checkout.commits_ahead) {
+        lines.push(
+          el("div", {
+            class: "small",
+            text:
+              `${plural(checkout.commits_ahead, "saved change")} not ` +
+              "pushed to GitHub",
+          }),
+        );
+      }
+      // The panel lists what a sync would send for its own checkout
+      for (const folder of localPath ? [] : checkout.overleaf) {
+        const n =
+          (folder.n_files_to_push ?? 0) + (folder.n_files_to_delete ?? 0);
+        if (folder.syncing) {
+          lines.push(el("div", { class: "small", text: "Syncing now" }));
+        } else if (folder.never_synced) {
+          lines.push(
+            el("div", {
+              class: "small",
+              text: `${folder.path} hasn't been synced from here yet`,
+            }),
+          );
+        } else if (folder.error) {
+          lines.push(errorMessage(folder.error));
+        } else if (n) {
+          lines.push(
+            el("div", {
+              class: "small",
+              text: `${plural(n, "file")} in ${folder.path} not synced here`,
+              title: (folder.files_to_push ?? []).join("\n"),
+            }),
+          );
+        }
+      }
+      if (!lines.length) {
+        continue;
+      }
+      pendingCount++;
+      if (localPath) {
+        container.append(el("div", { style: { marginTop: "6px" } }, lines));
+        continue;
+      }
+      container.append(
+        el("div", { class: "muted-box", style: { marginTop: "8px" } }, [
+          el("div", { class: "row" }, [
+            el("div", { class: "grow" }, [
+              el("div", { class: "small", text: "On this computer" }),
+              el("div", { class: "dim small", text: checkout.path }),
+            ]),
+            el("span", { class: "badge warn", text: "not synced" }),
+          ]),
+          ...lines,
+          el("div", {
+            class: "dim small",
+            style: { marginTop: "4px" },
+            text: "Run and sync there to bring them here.",
+          }),
+        ]),
+      );
+    }
+    // Only checkouts with something to bring here are listed, since
+    // someone may have several, e.g., Git worktrees
+    if (checkouts.length && !pendingCount && !localPath) {
+      container.append(
+        el("div", {
+          class: "dim small",
+          style: { marginTop: "6px" },
+          text: "Everything on this computer is saved and synced.",
+        }),
+      );
+    }
+  })();
+  return container;
+}
+
+/**
+ * Clone a project that isn't on this computer, so this panel works with
+ * it here from then on.
+ */
+function renderClone(project: string, reload: () => void): HTMLElement {
+  const name = project.split("/")[1];
+  const location = el("input", {
+    class: "small",
+    type: "text",
+    value: `~/calkit/${name}`,
+    title: "Where to put it",
+  });
+  const message = el("div", { class: "small" });
+  const clone = el("button", {
+    class: "action",
+    text: "Clone to this computer",
+  });
+  clone.addEventListener("click", async () => {
+    clone.disabled = true;
+    clear(message).append(loading("Cloning"));
+    try {
+      await send({
+        type: "local.clone",
+        project,
+        location: location.value.trim() || undefined,
+      });
+      reload();
+    } catch (e) {
+      clone.disabled = false;
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  return el("div", { class: "muted-box", style: { marginTop: "8px" } }, [
+    el("div", {
+      class: "small",
+      text:
+        "This project isn't on this computer. Clone it to run, save, and " +
+        "sync from here:",
+    }),
+    el("div", { class: "row", style: { marginTop: "6px" } }, [location, clone]),
+    message,
+  ]);
 }
 
 /** One problem, colored by how bad it is. */
@@ -1672,8 +2195,14 @@ function bringUpToDate(
  * anyway.
  */
 function watchEditor(): void {
-  window.addEventListener("message", (event) => {
+  const listener = (event: MessageEvent) => {
     if (event.source !== window || event.data?.calkit !== "editor") {
+      return;
+    }
+    // Cut off by the extension reloading, so the script put in after
+    // answers instead, rather than this one taking a tooltip it can't fill
+    if (!isExtensionAlive()) {
+      window.removeEventListener("message", listener);
       return;
     }
     const message = event.data as FromEditor;
@@ -1684,7 +2213,11 @@ function watchEditor(): void {
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
     }
-  });
+  };
+  window.addEventListener("message", listener);
+  // What the open document shows, in case this script came in after the
+  // editor last said
+  toEditor({ type: "rescan" });
 }
 
 /** Where a problem lands in the PDF, in points from the page's top left. */
@@ -2658,6 +3191,234 @@ function fileRow(file: OverleafSyncStatusFile): HTMLElement {
   ]);
 }
 
+// The PDF from this computer shown over Overleaf's, if it is
+let localPdf: {
+  host: HTMLElement;
+  link: OverleafLinkPublic;
+  path: string;
+} | null = null;
+
+/**
+ * Show the PDF a synced folder builds to on this computer, e.g., from a
+ * pipeline run, over Overleaf's, so there's no waiting on Overleaf to
+ * compile, until it's turned off. Overleaf's own PDF features, e.g.,
+ * double-clicking to go to the source, don't work in it.
+ */
+function showLocalPdf(link: OverleafLinkPublic, path: string): void {
+  hideLocalPdf();
+  const pane = getPdfPane();
+  if (!pane) {
+    return;
+  }
+  const params = new URLSearchParams({
+    localProject: `${link.project_owner_name}/${link.project_name}`,
+    folder: path,
+  });
+  const frame = el("iframe", {
+    title: "PDF from this computer",
+    style: { flex: "1", width: "100%", border: "none", background: "#fff" },
+  });
+  frame.src = `${chrome.runtime.getURL("viewer.html")}?${params}`;
+  const edits =
+    lastCheck && linkKey(lastCheck.link) === linkKey(link)
+      ? lastCheck.status.commits_from_overleaf
+      : 0;
+  const bar = el(
+    "div",
+    {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "4px 8px",
+        background: "#f3f4f6",
+        font: "12px -apple-system, BlinkMacSystemFont, sans-serif",
+        color: "#111827",
+      },
+    },
+    [
+      el("span", {
+        style: { flex: "1" },
+        text: edits
+          ? `PDF from this computer, without ${edits} edit${
+              edits === 1 ? "" : "s"
+            } made on Overleaf since the last sync`
+          : "PDF from this computer",
+      }),
+    ],
+  );
+  const host = el("div", {}, [bar, frame]);
+  Object.assign(host.style, {
+    display: "flex",
+    flexDirection: "column",
+    background: "#fff",
+    position: "absolute",
+    inset: "0",
+    zIndex: "20",
+  });
+  if (getComputedStyle(pane).position === "static") {
+    pane.style.position = "relative";
+  }
+  pane.append(host);
+  localPdf = { host, link, path };
+  mountPdfSwitch();
+}
+
+function hideLocalPdf(): void {
+  localPdf?.host.remove();
+  localPdf = null;
+  mountPdfSwitch();
+}
+
+/** The pane Overleaf shows its PDF in, around pdf.js's pages. */
+function getPdfPane(): HTMLElement | null {
+  const viewer = document.querySelector<HTMLElement>(".pdfViewer");
+  return (
+    viewer?.closest<HTMLElement>(".pdf-viewer, .pdfjs-viewer, .pdf") ??
+    viewer?.parentElement ??
+    null
+  );
+}
+
+/** Keep the PDF switch in the toolbar as Overleaf redraws it. */
+function watchPdfSwitch(): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(mountPdfSwitch, 200);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+/** Which PDF someone last chose for an Overleaf project, by its ID. */
+const PDF_SOURCE_KEY = "pdfSources";
+
+/**
+ * A switch in Overleaf's PDF toolbar between its PDF and the one built on
+ * this computer, for a project checked out here, remembered per Overleaf
+ * project. Mounted again whenever Overleaf redraws the toolbar.
+ */
+function mountPdfSwitch(): void {
+  const check = lastCheck;
+  // Beside Recompile, the logs, and download
+  const toolbar = document.querySelector<HTMLElement>(".toolbar-pdf-left");
+  const existing = document.getElementById("calkit-pdf-switch");
+  if (!check?.link.local_path || !toolbar || !isExtensionAlive()) {
+    existing?.remove();
+    return;
+  }
+  // Redrawn by Overleaf, so shown again where it now is
+  if (localPdf && !localPdf.host.isConnected) {
+    showLocalPdf(localPdf.link, localPdf.path);
+    return;
+  }
+  const local = Boolean(localPdf);
+  if (
+    existing?.parentElement === toolbar &&
+    existing.dataset.local === `${local}`
+  ) {
+    return;
+  }
+  existing?.remove();
+  const choose = (useLocal: boolean) => {
+    void chrome.storage.local.get(PDF_SOURCE_KEY).then((stored) => {
+      const sources: Record<string, string> = stored[PDF_SOURCE_KEY] ?? {};
+      sources[check.overleafProjectId] = useLocal ? "local" : "overleaf";
+      void chrome.storage.local.set({ [PDF_SOURCE_KEY]: sources });
+    });
+    if (useLocal) {
+      showLocalPdf(check.link, check.status.path);
+    } else {
+      hideLocalPdf();
+    }
+  };
+  const option = (text: string, useLocal: boolean) =>
+    el("button", {
+      text,
+      title: useLocal
+        ? "The PDF the pipeline built on this computer, without waiting " +
+          "on Overleaf to compile"
+        : "Overleaf's own PDF",
+      style: {
+        border: "none",
+        padding: "2px 8px",
+        borderRadius: "999px",
+        cursor: "pointer",
+        font: "inherit",
+        fontSize: "12px",
+        whiteSpace: "nowrap",
+        background: useLocal === local ? "#009688" : "transparent",
+        color: useLocal === local ? "#fff" : "inherit",
+      },
+      onClick: () => {
+        if (useLocal !== local) {
+          choose(useLocal);
+        }
+      },
+    });
+  const toggle = el(
+    "div",
+    {
+      attrs: { id: "calkit-pdf-switch", title: "Which PDF to show" },
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "2px",
+        marginLeft: "8px",
+        padding: "2px",
+        borderRadius: "999px",
+        background: "rgba(127, 127, 127, 0.18)",
+      },
+    },
+    [option("Overleaf", false), option("This computer", true)],
+  );
+  toggle.dataset.local = `${local}`;
+  toolbar.append(toggle);
+  // The first time it's shown for this project, the last choice applies
+  if (!existing) {
+    void chrome.storage.local.get(PDF_SOURCE_KEY).then((stored) => {
+      const source = (stored[PDF_SOURCE_KEY] ?? {})[check.overleafProjectId];
+      if (source === "local" && !localPdf && lastCheck === check) {
+        showLocalPdf(check.link, check.status.path);
+      }
+    });
+  }
+}
+
+/**
+ * Where the panel's answers come from: the checkout on this computer, or
+ * the hub, with, from the hub, a way to work on the project without
+ * installing anything.
+ */
+function renderWhere(link: OverleafLinkPublic): HTMLElement {
+  if (link.local_path) {
+    return el("div", {
+      class: "dim small",
+      text: `On this computer: ${link.local_path}`,
+    });
+  }
+  return el("div", { class: "dim small" }, [
+    document.createTextNode(`Via ${new URL(hubWebUrl).host}`),
+    ...(link.github_repo_url
+      ? [
+          document.createTextNode(" \u00b7 "),
+          el("a", {
+            text: "Open in Codespaces",
+            href: `https://codespaces.new${
+              new URL(link.github_repo_url).pathname
+            }?quickstart=1`,
+            title: "Work on the project in a GitHub Codespace",
+            attrs: { target: "_blank" },
+          }),
+        ]
+      : []),
+  ]);
+}
+
+/** Where a run of the pipeline happens, as a sentence would say it. */
+function getRunPlace(run: PipelineRun | undefined): string {
+  return run?.location === "local" ? "on this computer" : "on GitHub Actions";
+}
+
 function renderStatus(
   body: HTMLElement,
   link: OverleafLinkPublic,
@@ -2667,57 +3428,58 @@ function renderStatus(
   clear(body);
   const figures = status.files_to_push.filter((f) => f.figure);
   const others = status.files_to_push.filter((f) => !f.figure);
+  const project = `${link.project_owner_name}/${link.project_name}`;
+  // Worked on here, so the hub's parts stay out of the way
+  const local = Boolean(link.local_path);
+  const badge = status.in_sync
+    ? el("span", { class: "badge ok", text: "in sync" })
+    : el("span", {
+        class: figures.length ? "badge danger" : "badge warn",
+        text: figures.length
+          ? `${figures.length} figure${figures.length === 1 ? "" : "s"} to sync`
+          : "out of sync",
+      });
+  // What a sync would do, set aside while a run or sync makes it out of
+  // date, with what's going on said instead
+  const details = el("div");
+  const busy = el("div");
   body.append(
     el("div", { class: "row" }, [
       el("div", { class: "grow" }, [
-        el("a", {
-          text: `${link.project_owner_name}/${link.project_name}`,
-          href: projectUrl(
-            hubWebUrl,
-            link.project_owner_name,
-            link.project_name,
-          ),
-        }),
+        local
+          ? el("div", { text: project })
+          : el("a", {
+              text: project,
+              href: projectUrl(
+                hubWebUrl,
+                link.project_owner_name,
+                link.project_name,
+              ),
+            }),
         el("div", {
           class: "dim small",
           text: `Synced folder: ${status.path}`,
         }),
-        // Where to work on what the paper shows, without installing anything
-        link.github_repo_url
-          ? el("a", {
-              class: "small",
-              text: "Open in Codespaces",
-              href: `https://codespaces.new${
-                new URL(link.github_repo_url).pathname
-              }?quickstart=1`,
-              title: "Work on the project in a GitHub Codespace",
-              attrs: { target: "_blank" },
-            })
-          : null,
+        renderWhere(link),
       ]),
-      status.in_sync
-        ? el("span", { class: "badge ok", text: "in sync" })
-        : el("span", {
-            class: figures.length ? "badge danger" : "badge warn",
-            text: figures.length
-              ? `${figures.length} figure${
-                  figures.length === 1 ? "" : "s"
-                } to sync`
-              : "out of sync",
-          }),
+      badge,
     ]),
   );
+  body.append(renderLocalChanges(project, reload, link.local_path));
+  body.append(busy, details);
   if (status.in_sync) {
-    body.append(
+    details.append(
       el("div", {
         class: "dim small",
         style: { paddingTop: "6px" },
-        text: "Everything here matches the Calkit project.",
+        text: local
+          ? "Overleaf has everything from this computer."
+          : "Everything here matches the Calkit project.",
       }),
     );
   }
   if (figures.length) {
-    body.append(
+    details.append(
       el("div", {
         class: "small",
         style: { marginTop: "8px", fontWeight: "600" },
@@ -2727,7 +3489,7 @@ function renderStatus(
     );
   }
   if (others.length) {
-    body.append(
+    details.append(
       el("div", {
         class: "small",
         style: { marginTop: "8px", fontWeight: "600" },
@@ -2737,7 +3499,7 @@ function renderStatus(
     );
   }
   if (status.files_to_delete.length) {
-    body.append(
+    details.append(
       el("div", {
         class: "small",
         style: { marginTop: "8px", fontWeight: "600" },
@@ -2748,7 +3510,7 @@ function renderStatus(
   }
   if (status.commits_from_overleaf > 0) {
     const count = status.commits_from_overleaf;
-    body.append(
+    details.append(
       el("div", {
         class: "dim small",
         style: { marginTop: "8px" },
@@ -2816,6 +3578,8 @@ function renderStatus(
   body.append(
     el("div", { class: "actions" }, [
       status.in_sync ? null : syncButton,
+      // Its button in this row, and anything it says below it
+      local ? renderOpenLocally(project, undefined, true) : null,
       el("button", {
         class: "action secondary",
         text: "Refresh",
@@ -2824,6 +3588,8 @@ function renderStatus(
     ]),
     message,
   );
+  statusParts.add({ link, hide: [badge, details, syncButton], busy });
+  drawStatusParts();
 }
 
 /**
@@ -3422,24 +4188,27 @@ async function load(overleafProjectId: string): Promise<void> {
   try {
     hubWebUrl = await getHubWebUrl();
     const settings = await send({ type: "settings.get" });
-    const pickers = el(
-      "div",
-      { class: "muted-box stack", style: { marginBottom: "8px" } },
-      [
-        await renderHubPicker(reload),
-        await renderProjectPicker({
-          activeProject: settings.activeProject,
-          onChange: reload,
-        }),
-      ],
-    );
+    // Filled in as the hub answers, without holding up the rest, which
+    // for a project on this computer doesn't need the hub at all
+    const pickers = el("div", {
+      class: "muted-box stack",
+      style: { marginBottom: "8px" },
+    });
+    void Promise.all([
+      renderHubPicker(reload),
+      renderProjectPicker({
+        activeProject: settings.activeProject,
+        onChange: reload,
+      }),
+    ]).then((parts) => pickers.append(...parts));
     const cached =
       lastCheck?.overleafProjectId === overleafProjectId &&
       lastCheck.hubWebUrl === hubWebUrl
         ? lastCheck
         : null;
     const content = el("div");
-    clear(body).append(pickers, content);
+    // The hub's pickers are beside the point for a project worked on here
+    clear(body).append(...(cached?.link.local_path ? [] : [pickers]), content);
     const showNotice = () => {
       if (cached?.notice) {
         content.append(
@@ -3498,18 +4267,40 @@ async function load(overleafProjectId: string): Promise<void> {
     // A folder in more than one project is rare, so the first link is the
     // one shown, with the rest offered as alternatives underneath
     const link = links[0];
+    if (link.local_path) {
+      pickers.remove();
+    } else if (!pickers.isConnected) {
+      body.prepend(pickers);
+    }
     if (!cached) {
       clear(content).append(
         loading(`Checking ${link.project_owner_name}/${link.project_name}`),
       );
     }
-    const statuses = await send({
+    const statusRequest = {
       type: "overleaf.status",
       owner: link.project_owner_name,
       project: link.project_name,
       overleafProjectId,
       path: link.path,
-    });
+    } as const;
+    // On this computer, what's known from the last pull comes at once,
+    // and is shown while Overleaf is asked for anything newer
+    if (link.local_path) {
+      const known = await send({ ...statusRequest, pull: false }).catch(
+        () => [],
+      );
+      if (!current()) {
+        return;
+      }
+      if (known.length && !known[0].pulled) {
+        // As of the last sync, e.g., by a run that just ended
+        checkingAfterSync = false;
+        renderStatus(content, link, known[0], reload);
+        content.append(loading("Checking Overleaf for new edits"));
+      }
+    }
+    const statuses = await send(statusRequest);
     if (!current()) {
       return;
     }
@@ -3529,6 +4320,8 @@ async function load(overleafProjectId: string): Promise<void> {
     currentLink = link;
     void checkCitations();
     lastCheck = { overleafProjectId, hubWebUrl, link, status: statuses[0] };
+    // Checked since the last run or sync, so it's current again
+    checkingAfterSync = false;
     renderStatus(content, link, statuses[0], reload);
     showNotice();
     content.append(renderInsert(link, statuses[0].path, reload));
@@ -3545,6 +4338,7 @@ async function load(overleafProjectId: string): Promise<void> {
     if (!current()) {
       return;
     }
+    checkingAfterSync = false;
     clear(body);
     if (e instanceof RequestFailed && e.notSignedIn) {
       // With a hub picker alongside, since credentials are per hub and a
@@ -3808,7 +4602,10 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     lastCheck = statuses.length
       ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
       : null;
+    checkingAfterSync = false;
+    drawStatusParts();
     drawRail();
+    mountPdfSwitch();
     // Nothing to say if the panel was opened in the meantime, or if the
     // page moved on to another project
     if (panel || currentProjectId !== overleafProjectId) {
@@ -4080,6 +4877,50 @@ async function refreshRailPipeline(link: OverleafLinkPublic): Promise<void> {
 }
 
 function drawRail(): void {
+  // One of the pipeline's runs, opening its log, or GitHub's page for it
+  const renderRunItem = (link: OverleafLinkPublic, run: PipelineRun) => {
+    const when = new Date(run.started ?? run.created).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const active = ["queued", "running"].includes(run.status);
+    const parts = [
+      active
+        ? el("span", { class: "spinner" })
+        : el("span", {
+            class: `dot ${
+              run.status === "succeeded"
+                ? ""
+                : run.status === "failed"
+                ? "error"
+                : "unknown"
+            }`,
+          }),
+      // All here, or all on GitHub, as the panel says above
+      el("span", { class: "grow small", text: when }),
+      el("span", { class: "dim small", text: run.status }),
+    ];
+    if (run.location === "local") {
+      return el(
+        "button",
+        {
+          class: "item",
+          title: run.error ?? "Show its log",
+          onClick: () => openRunLog(link, run),
+        },
+        parts,
+      );
+    }
+    return run.url
+      ? el(
+          "a",
+          { class: "item", href: run.url, attrs: { target: "_blank" } },
+          parts,
+        )
+      : el("div", { class: "item" }, parts);
+  };
   if (!railPane) {
     return;
   }
@@ -4113,17 +4954,7 @@ function drawRail(): void {
         href: base,
         attrs: { target: "_blank" },
       }),
-      link.github_repo_url
-        ? el("a", {
-            class: "small",
-            text: "Open in Codespaces",
-            href: `https://codespaces.new${
-              new URL(link.github_repo_url).pathname
-            }?quickstart=1`,
-            title: "Work on the project in a GitHub Codespace",
-            attrs: { target: "_blank" },
-          })
-        : null,
+      renderWhere(link),
     ]),
   );
   // What's going on between the paper and its project
@@ -4137,9 +4968,11 @@ function drawRail(): void {
   } else if (running) {
     body.append(
       loading(
-        running.status === "running"
-          ? "Running on GitHub Actions"
-          : "Waiting to run on GitHub Actions",
+        running.location === "local"
+          ? getRunActivity(running)
+          : running.status === "running"
+          ? `Running ${getRunPlace(running)}`
+          : `Waiting to run ${getRunPlace(running)}`,
       ),
     );
   } else if (status?.in_sync) {
@@ -4272,6 +5105,15 @@ function drawRail(): void {
     );
   }
   body.append(renderRuns(link, true));
+  // The latest runs, each with its log
+  const runs =
+    pipelineRuns?.key === linkKey(link) ? pipelineRuns.runs.runs : [];
+  if (runs.length) {
+    body.append(el("h3", { text: "Runs" }));
+    for (const run of runs.slice(0, 5)) {
+      body.append(renderRunItem(link, run));
+    }
+  }
 }
 
 /**
@@ -4415,6 +5257,7 @@ watchPdf();
 watchIntegrations();
 watchRail();
 watchContextMenu();
+watchPdfSwitch();
 runContentScript({
   id: "overleaf",
   sync,

@@ -238,6 +238,63 @@ async function renderActiveProjectSection(
   renderList();
 }
 
+/**
+ * Whether the extension can reach Calkit on this computer, which lets it
+ * work with projects here, e.g., open a figure's script in an editor,
+ * without going through a hub.
+ */
+async function renderLocalSection(container: HTMLElement): Promise<void> {
+  clear(container).append(loading("Looking for Calkit on this computer"));
+  const status = await send({ type: "local.status" });
+  clear(container);
+  if (status.permitted && status.version) {
+    container.append(
+      el("div", {
+        class: "small",
+        text: `Connected to Calkit ${status.version} on this computer.`,
+      }),
+    );
+    return;
+  }
+  if (status.needsReload) {
+    // Chrome gives the background the API only once it restarts, which
+    // closes this page, so it's opened again afterwards
+    await chrome.storage.local.set({ reopenOptions: true });
+    chrome.runtime.reload();
+    return;
+  }
+  const message = el("div", { class: "small" });
+  if (status.error) {
+    message.append(errorMessage(status.error));
+  }
+  const connect = el("button", {
+    class: "action",
+    text: status.permitted ? "Try again" : "Connect",
+  });
+  connect.addEventListener("click", async () => {
+    // Asked for here, since only an extension page can, and only when
+    // someone clicks
+    const granted = await chrome.permissions.request({
+      permissions: ["nativeMessaging"],
+    });
+    if (granted) {
+      void renderLocalSection(container);
+    }
+  });
+  container.append(
+    el("div", {
+      class: "dim small",
+      text:
+        "Lets the extension work with projects on this computer, e.g., " +
+        "open the script that makes a figure in your editor. It talks to " +
+        "Calkit here directly, not through a hub. Calkit needs to be " +
+        "installed, which sets this up, or run 'calkit browser-link install'.",
+    }),
+    el("div", { class: "row" }, [connect]),
+    message,
+  );
+}
+
 async function render(): Promise<void> {
   clear(app).append(
     el("header", {}, [el("span", { text: "Calkit options" })]),
@@ -248,10 +305,20 @@ async function render(): Promise<void> {
   clear(app).append(el("header", {}, [el("span", { text: "Calkit options" })]));
   const main = el("main", { class: "stack" });
   app.append(main);
+  const localContainer = el("div", { class: "stack" });
   const hubContainer = el("div", { class: "stack" });
   const projectContainer = el("div");
+  // This computer comes first, since working on projects here is the main
+  // way to use the extension, and nothing waits on another section's hub
+  // requests
   main.append(
-    hubContainer,
+    el("div", {
+      class: "small",
+      style: { fontWeight: "600" },
+      text: "This computer",
+    }),
+    localContainer,
+    el("div", { style: { marginTop: "12px" } }, [hubContainer]),
     el("div", {
       class: "small",
       style: { fontWeight: "600", marginTop: "12px" },
@@ -268,8 +335,11 @@ async function render(): Promise<void> {
     }),
     projectContainer,
   );
-  await renderHubSection(hubContainer, settings.hubName, hubs);
-  await renderActiveProjectSection(projectContainer, settings.activeProject);
+  await Promise.all([
+    renderLocalSection(localContainer),
+    renderHubSection(hubContainer, settings.hubName, hubs),
+    renderActiveProjectSection(projectContainer, settings.activeProject),
+  ]);
 }
 
 void render();

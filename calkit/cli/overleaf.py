@@ -104,6 +104,24 @@ def _get_overleaf_session_from_hub(stale: str | None = None) -> str | None:
     return str(session)
 
 
+def _get_overleaf_token_from_hub(stale: str | None = None) -> str | None:
+    """Get an Overleaf Git token saved to the hub, other than a ``stale``
+    one, and store it in config.
+    """
+    try:
+        token = calkit.hub.get(
+            "/user/overleaf-token", allow_login=False, max_retries=2
+        )["access_token"]
+    except Exception:
+        return None
+    if not token or token == stale:
+        return None
+    calkit_config = calkit.config.read()
+    calkit_config.overleaf_token = token
+    calkit_config.write()
+    return str(token)
+
+
 def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
     """Get a Git token, or, if only a session is available, a web client
     for syncing without Overleaf Premium.
@@ -116,17 +134,10 @@ def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
         return calkit_config.overleaf_token
     if calkit_config.overleaf_session:
         return calkit.overleaf.WebClient(calkit_config.overleaf_session)
-    try:
-        token = calkit.hub.get(
-            "/user/overleaf-token", allow_login=False, max_retries=2
-        )["access_token"]
-    except Exception:
-        token = None
+    token = _get_overleaf_token_from_hub()
     if token:
         typer.echo("Using the Overleaf token saved to the hub")
-        calkit_config.overleaf_token = token
-        calkit_config.write()
-        return str(token)
+        return token
     session = _get_overleaf_session_from_hub()
     if session:
         typer.echo("Using the Overleaf session saved to the hub")
@@ -184,6 +195,13 @@ def _get_pulled_overleaf_repo(
                     get_new_session(stale=auth.session, error=e)
                 )
             else:
+                # A newer token on the hub, e.g., one made on another
+                # computer, replaces one that expired
+                token = _get_overleaf_token_from_hub(stale=auth)
+                if token:
+                    typer.echo("Using the Overleaf token saved to the hub")
+                    auth = token
+                    continue
                 # A token stops working when Premium ends, but a browser
                 # session still does
                 session = (

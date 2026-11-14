@@ -43,6 +43,7 @@ from calkit.cli import (
     warn,
     warn_app_control,
 )
+from calkit.cli.browser_link import browser_link_app
 from calkit.cli.check import (
     check_app,
     check_conda_env,
@@ -97,6 +98,11 @@ app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(open_app, name="open", help="Open things.")
+app.add_typer(
+    browser_link_app,
+    name="browser-link",
+    help="Link the browser extension to Calkit on this machine.",
+)
 app.add_typer(
     export_app,
     name="export",
@@ -359,6 +365,7 @@ def init(
         repo.git.add(os.path.abspath("calkit.yaml"))
         if not no_commit and calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
+    calkit.record_project_path()
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
     # TODO: Add a sane LICENSE file?
@@ -486,6 +493,7 @@ def clone(
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")
     os.chdir(location)
+    calkit.record_project_path()
     # So Git merges dvc.lock and stage run records stage by stage
     calkit.merge.configure_driver()
     # Setup auth for any Calkit remotes

@@ -507,6 +507,52 @@ def test_web_client():
     assert calkit.overleaf._find_entity(tree, "other/a.png") is None
 
 
+def test_pull_mirror(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import zipfile
+
+    files = {"main.tex": "Hi\n", "figs/a.png": "png"}
+
+    class Overleaf:
+        def download(self, project_id: str) -> bytes:
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                z.writestr("figs/", "")
+                for name, text in files.items():
+                    z.writestr(name, text)
+            return buf.getvalue()
+
+    def pull() -> str:
+        calkit.overleaf.pull_mirror(mirror, Overleaf(), "p1")  # type: ignore
+        return mirror.head.commit.hexsha
+
+    mirror = calkit.overleaf.get_mirror("p1", dest="mirror")
+    first = pull()
+    assert mirror.git.rev_parse(calkit.overleaf.MIRROR_REF) == first
+    # Unchanged on Overleaf, it's left as it is, with Git only asked about it
+    commands = []
+    real_execute = git.cmd.Git.execute
+
+    def execute(self, command, *args, **kwargs):  # type: ignore
+        commands.append(command[1])
+        return real_execute(self, command, *args, **kwargs)
+
+    monkeypatch.setattr(git.cmd.Git, "execute", execute)
+    assert pull() == first
+    assert set(commands) <= {"rev-parse", "status", "cat-file"}
+    monkeypatch.undo()
+    # Unless something was left in it, e.g., by a sync that failed partway
+    with open(os.path.join(mirror.working_dir, "left.txt"), "w") as f:
+        f.write("Left\n")
+    assert pull() == first
+    assert not os.path.exists(os.path.join(mirror.working_dir, "left.txt"))
+    # A change on Overleaf is committed
+    files["main.tex"] = "Hi there\n"
+    second = pull()
+    assert second != first
+    assert mirror.git.show(f"{second}:main.tex") == "Hi there"
+
+
 def test_ensure_sync_base(tmp_dir: str) -> None:
     import io
     import tempfile

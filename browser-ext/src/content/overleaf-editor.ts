@@ -42,7 +42,10 @@ export type ToEditor =
       version: number;
       items: { index: number; severity: "error" | "warning" }[];
     }
-  | { calkit: "lint"; type: "goto"; line: number; column: number };
+  | { calkit: "lint"; type: "goto"; line: number; column: number }
+  // From a script put in after the extension reloaded, which missed the
+  // last scan
+  | { calkit: "lint"; type: "rescan" };
 
 // CodeMirror comes from Overleaf's bundle at runtime, so it's untyped here
 type View = any;
@@ -203,6 +206,10 @@ window.addEventListener("message", (event) => {
   if (message.type === "problems") {
     checked = true;
     active?.mark(message);
+  } else if (message.type === "rescan") {
+    if (active) {
+      scan(active.view);
+    }
   } else if (message.type === "goto" && active) {
     const doc = active.view.state.doc;
     if (message.line < 1 || message.line > doc.lines) {

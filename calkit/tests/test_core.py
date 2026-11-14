@@ -47,6 +47,37 @@ def test_find_project_dirs():
         assert calkit.find_project_dirs(relative=False)
 
 
+def test_get_project_checkouts(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CALKIT_USER_HOME", str(home))
+    # Named in calkit.yaml in any of the ways YAML allows, or by the remote
+    projects = {
+        "plain": ("owner: me\nname: proj\n", None),
+        "quoted": ("owner: me\nname: 'proj'  # It's this\n", None),
+        "folded": ("owner: me\nname: >-\n  proj\n", None),
+        "other": ("owner: me\nname: other\n", None),
+        "remote": ("owner: me\n", "https://github.com/me/proj.git"),
+        "other-remote": ("owner: me\n", "https://github.com/me/else.git"),
+        "not-mine": ("owner: you\nname: proj\n", None),
+    }
+    for dirname, (text, remote_url) in projects.items():
+        path = home / "calkit" / dirname
+        os.makedirs(path)
+        (path / "calkit.yaml").write_text(text)
+        repo = git.Repo.init(path)
+        if remote_url:
+            repo.create_remote("origin", remote_url)
+    found = calkit.get_project_checkouts("proj", owner="me")
+    assert sorted(os.path.basename(p) for p in found) == [
+        "folded",
+        "plain",
+        "quoted",
+        "remote",
+    ]
+    assert set(found.values()) == {"me"}
+
+
 def test_to_kebab_case():
     assert calkit.to_kebab_case("THIS IS") == "this-is"
     assert calkit.to_kebab_case("this_is_my-Project") == "this-is-my-project"

@@ -1,5 +1,6 @@
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
+import type { CheckoutStatus, LocalStatus } from "./local";
 import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
   CalkitYamlInfo,
@@ -156,7 +157,20 @@ export type Request =
     }
   | { type: "project.pipeline"; owner: string; project: string }
   | { type: "project.pipelineRuns"; owner: string; project: string }
-  | { type: "project.startPipelineRun"; owner: string; project: string }
+  | {
+      /** The whole log of a run on this computer, as far as it's got. */
+      type: "project.pipelineRunLog";
+      owner: string;
+      project: string;
+      runId: string;
+    }
+  | {
+      type: "project.startPipelineRun";
+      owner: string;
+      project: string;
+      /** Whether to save and sync with Overleaf after, when run here. */
+      sync?: boolean;
+    }
   | {
       type: "project.addExportStage";
       owner: string;
@@ -183,6 +197,11 @@ export type Request =
       project: string;
       overleafProjectId?: string;
       path?: string;
+      /**
+       * False for what's known from the last pull from Overleaf, without
+       * pulling, when answered on this computer, to show while it pulls.
+       */
+      pull?: boolean;
     }
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }
@@ -230,6 +249,38 @@ export type Request =
       path: string;
       bibKey: string;
       notes: ReferenceNote[];
+    }
+  | { type: "local.status" }
+  | {
+      type: "local.openProject";
+      /** As "owner/name". */
+      project: string;
+      /** A file in it to open too, e.g., the script that makes a figure. */
+      path?: string;
+    }
+  | {
+      type: "local.projectStatus";
+      /** As "owner/name". */
+      project: string;
+    }
+  | { type: "local.openOptions" }
+  /** Install the editor projects open in, i.e., VS Code. */
+  | { type: "local.installEditor"; project: string }
+  | {
+      type: "local.checkout";
+      /** As "owner/name". */
+      project: string;
+    }
+  | {
+      type: "local.chooseCheckout";
+      project: string;
+      path: string;
+    }
+  | {
+      type: "local.clone";
+      project: string;
+      /** Where to, by default ~/calkit/NAME. */
+      location?: string;
     };
 
 export interface ResponseMap {
@@ -260,6 +311,7 @@ export interface ResponseMap {
   "project.pipeline": ProjectPipeline;
   "project.pipelineRuns": PipelineRuns;
   "project.startPipelineRun": PipelineRun;
+  "project.pipelineRunLog": { log: string };
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;
@@ -276,6 +328,23 @@ export interface ResponseMap {
   "references.add": { message: string };
   "references.notes.get": { notes: ReferenceNote[] };
   "references.notes.put": { notes: ReferenceNote[] };
+  "local.status": LocalStatus;
+  "local.openProject": Record<string, never>;
+  "local.projectStatus": { checkouts: CheckoutStatus[] };
+  "local.openOptions": null;
+  "local.installEditor": null;
+  /**
+   * The checkout used for a project here, and the others, or none when the
+   * extension isn't connected or the project isn't here; ``connected``
+   * says which.
+   */
+  "local.checkout": {
+    connected: boolean;
+    path: string | null;
+    paths: string[];
+  };
+  "local.chooseCheckout": { path: string; paths: string[] };
+  "local.clone": { path: string };
 }
 
 /**

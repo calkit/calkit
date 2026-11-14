@@ -1,3 +1,4 @@
+import { askLocal } from "../core/local";
 import { send } from "../core/messages";
 import { clear, el, errorMessage, loading } from "../core/ui";
 
@@ -33,8 +34,98 @@ function kindFor(path: string): Kind {
   return "other";
 }
 
+interface PdfChunk {
+  path: string;
+  size: number;
+  offset: number;
+  /** Base64. */
+  data: string;
+  /** With the first part only. */
+  built?: number;
+  commit_sha?: string | null;
+  changed_since_commit?: boolean | null;
+  edited_since_built?: boolean;
+}
+
+/**
+ * The PDF a folder synced with Overleaf builds to on this computer, read
+ * from Calkit here a part at a time, since a message to or from it can't
+ * be over 1 MB, with how fresh it is.
+ */
+async function renderLocalPdf(
+  main: HTMLElement,
+  project: string,
+  folder: string,
+): Promise<void> {
+  const status = el("div", { class: "small" }, [loading("Reading the PDF")]);
+  main.append(status);
+  const parts: Uint8Array[] = [];
+  let first: PdfChunk | null = null;
+  try {
+    let offset = 0;
+    do {
+      const chunk: PdfChunk = await askLocal({
+        type: "publication.pdf",
+        project,
+        folder,
+        offset,
+      });
+      first ??= chunk;
+      const bytes = Uint8Array.from(atob(chunk.data), (c) => c.charCodeAt(0));
+      parts.push(bytes);
+      offset += bytes.length;
+      if (!bytes.length) {
+        break;
+      }
+    } while (offset < first.size);
+  } catch (e) {
+    clear(status).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+    return;
+  }
+  const built = new Date((first.built ?? 0) * 1000).toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const saved = first.commit_sha
+    ? first.changed_since_commit
+      ? "not saved since it was rebuilt"
+      : `saved in ${first.commit_sha.slice(0, 7)}`
+    : null;
+  const notes = [
+    `Built on this computer ${built}`,
+    saved,
+    first.edited_since_built ? `${folder} has changed since` : null,
+  ].filter(Boolean);
+  clear(status).append(
+    el("div", {
+      class: first.edited_since_built ? "small" : "dim small",
+      text: `${first.path}: ${notes.join("; ")}.`,
+    }),
+  );
+  const frame = el("iframe", {
+    style: {
+      width: "100%",
+      height: "calc(100vh - 48px)",
+      border: "none",
+    },
+  });
+  frame.src = URL.createObjectURL(
+    new Blob(parts as BlobPart[], { type: "application/pdf" }),
+  );
+  main.append(frame);
+}
+
 async function render(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
+  const localProject = params.get("localProject");
+  if (localProject) {
+    const main = el("main", { class: "stack" });
+    clear(app).append(main);
+    await renderLocalPdf(main, localProject, params.get("folder") ?? "");
+    return;
+  }
   const url = params.get("url");
   const path = params.get("path") ?? "artifact";
   const hubFileUrl = params.get("hubUrl");

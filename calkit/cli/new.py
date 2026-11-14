@@ -426,6 +426,7 @@ def new_project(
         prj = calkit.detect_project_name(wdir=abs_path)
         hub_url = calkit.hub.get_hub_url()
         add_msg = f"\n\nYou can view your project at {hub_url}/{prj}"
+        calkit.record_project_path(abs_path)
         typer.echo(success_message + add_msg)
         return
     # If using a template, clone it first
@@ -563,6 +564,7 @@ def new_project(
         repo.git.add(".")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Create new project from {template_name}"])
+        calkit.record_project_path(abs_path)
         typer.echo(success_message)
         return
     os.makedirs(abs_path, exist_ok=True)
@@ -619,6 +621,7 @@ def new_project(
             warn(f"Failed to set up Calkit DVC remote: {e}")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
+    calkit.record_project_path(abs_path)
     typer.echo(success_message)
 
 

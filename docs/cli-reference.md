@@ -2971,9 +2971,9 @@ calkit browser-link install [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default | Description                                                                         |
-| ---------------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------- |
-| `--extension-id` | str  | no       |         | ID of another extension that may connect, e.g., one loaded unpacked in development. |
+| Option           | Type      | Required | Default | Description                                                                         |
+| ---------------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--extension-id` | list[str] | no       |         | ID of another extension that may connect, e.g., one loaded unpacked in development. |
 
 <a id="subcommand-browser-link-uninstall"></a>
 

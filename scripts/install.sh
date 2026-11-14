@@ -64,7 +64,8 @@ if [ "$COMPLETION" = 1 ]; then
     done
 fi
 
-if [ "$BROWSER" = 1 ]; then
+# Skipped for a Calkit without the command, e.g., before a release has it
+if [ "$BROWSER" = 1 ] && calkit --help 2>/dev/null | grep -q browser-link; then
     if ! calkit browser-link install; then
         echo "⚠️ Failed to set up Calkit for the browser extension; run 'calkit browser-link install' to try again"
     fi

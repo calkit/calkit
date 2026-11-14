@@ -413,10 +413,33 @@ def pull_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
     Anything left by a sync that failed partway is discarded first, as with
     ``pull``.
     """
+    import hashlib
     import io
     import zipfile
 
     archive = zipfile.ZipFile(io.BytesIO(client.download(project_id)))
+    # Nothing to do, which is usual, if Overleaf has what was last pulled and
+    # nothing's been left since, which Git hashes of its files tell without
+    # writing them
+    if (
+        repo.head.is_valid()
+        and is_mirror(repo)
+        and repo.head.commit == repo.commit(MIRROR_REF)
+        and not repo.git.status("--porcelain", "--ignored", "-uall")
+    ):
+        pulled = {
+            b.path: b.hexsha
+            for b in repo.head.commit.tree.traverse()
+            if isinstance(b, git.Blob)
+        }
+        files = {}
+        for entry in archive.infolist():
+            if not entry.is_dir():
+                data = archive.read(entry)
+                header = f"blob {len(data)}\0".encode()
+                files[entry.filename] = hashlib.sha1(header + data).hexdigest()
+        if files == pulled:
+            return
     if repo.head.is_valid():
         repo.git.reset("--hard", MIRROR_REF if is_mirror(repo) else "HEAD")
         repo.git.rm("-r", "-q", "--cached", "--ignore-unmatch", ".")

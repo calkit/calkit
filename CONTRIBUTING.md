@@ -30,7 +30,7 @@ This guide will help you get started.
    - [Pixi](https://pixi.sh/latest/)
    - [Juliaup](https://github.com/JuliaLang/juliaup)
    - [R](https://www.r-project.org/)
-   - [Node.js](https://nodejs.org/)
+   - [Node.js](https://nodejs.org/en/download)
    - [gh](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)
 1. **Create the virtual environment:**
    ```bash

@@ -3544,6 +3544,12 @@
           "title": "Always Run",
           "type": "boolean"
         },
+        "arxiv": {
+          "default": false,
+          "description": "Whether to export into a .zip file ready to upload to ArXiv",
+          "title": "Arxiv",
+          "type": "boolean"
+        },
         "aux_dir": {
           "anyOf": [
             {

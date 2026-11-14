@@ -47,6 +47,7 @@ import {
   launcherPosition,
   errorMessage,
   loading,
+  mountOverlay,
   mountPanel,
   type Panel,
   STYLES,
@@ -940,6 +941,8 @@ function refreshRuns(link: OverleafLinkPublic): Promise<void> {
     clearTimeout(runsTimer);
     const delay = runsFailures
       ? Math.min(15_000 * 2 ** runsFailures, 300_000)
+      : activeRun()?.location === "local"
+      ? 2_000
       : activeRun()
       ? 15_000
       : 60_000;
@@ -1006,12 +1009,14 @@ async function syncOverleaf(
 ): Promise<OverleafSyncResponse> {
   syncing = true;
   drawRail();
+  drawStatusParts();
   remountLauncher();
   try {
     return await send({ type: "overleaf.sync", owner, project, path });
   } finally {
     syncing = false;
     drawRail();
+    drawStatusParts();
     remountLauncher();
   }
 }
@@ -1019,6 +1024,8 @@ async function syncOverleaf(
 /** Look again at what's synced and shown, now that a sync changed it. */
 function afterSync(): void {
   provenanceCache.clear();
+  checkingAfterSync = true;
+  drawStatusParts();
   // What was just built and synced, rather than what was
   if (localPdf) {
     showLocalPdf(localPdf.link, localPdf.path);
@@ -1152,6 +1159,7 @@ function renderRuns(link: OverleafLinkPublic, offer: boolean): HTMLElement {
 }
 
 function drawRuns(): void {
+  drawStatusParts();
   for (const entry of runsBoxes) {
     const { box, link, offer } = entry;
     if (!box.isConnected && box.dataset.drawn) {
@@ -1183,13 +1191,30 @@ function drawRuns(): void {
           el("div", {
             class: "grow small",
             text:
-              run.status === "running"
+              run.location === "local"
+                ? getRunActivity(run)
+                : run.status === "running"
                 ? `Running ${getRunPlace(run)}${since}`
                 : `Waiting to run ${getRunPlace(run)}`,
           }),
-          view(run, "View"),
+          run.location === "local"
+            ? el("button", {
+                class: "action secondary",
+                text: "Show log",
+                onClick: () => openRunLog(link, run),
+              })
+            : view(run, "View"),
         ]),
       );
+      // The last of what it's printed, with the rest a click away
+      if (run.location === "local" && run.output) {
+        box.append(
+          el("pre", {
+            class: "log",
+            text: run.output.split("\n").slice(-3).join("\n"),
+          }),
+        );
+      }
       continue;
     }
     if (notice) {
@@ -1204,7 +1229,13 @@ function drawRuns(): void {
               (latest.error ? `: ${latest.error}` : "."),
             title: latest.output ?? "",
           }),
-          view(latest, "See why"),
+          latest.location === "local"
+            ? el("button", {
+                class: "action secondary",
+                text: "Show log",
+                onClick: () => openRunLog(link, latest),
+              })
+            : view(latest, "See why"),
         ]),
       );
     }
@@ -1262,6 +1293,123 @@ function drawRuns(): void {
         ? errorMessage(mine.error)
         : el("div"),
     );
+  }
+}
+
+/** What a run on this computer is doing now, as a line would say it. */
+function getRunActivity(run: PipelineRun): string {
+  const progress = run.progress;
+  if (run.status === "queued") {
+    return "Waiting to run on this computer";
+  }
+  const of = progress?.n_stages ? ` of ${progress.n_stages}` : "";
+  switch (progress?.phase) {
+    case "syncing":
+      return "Syncing with Overleaf";
+    case "running":
+      return progress.stage
+        ? `Running stage ${progress.n_done + 1}${of}: ${progress.stage}`
+        : `Checking stages (${progress.n_done}${of} done)`;
+    case "finishing":
+      return "Finishing up";
+    case "saving":
+      return "Saving the project";
+    default:
+      return "Getting ready to run on this computer";
+  }
+}
+
+/**
+ * Show the whole log of a run on this computer, kept up to date while it
+ * runs.
+ */
+function openRunLog(link: OverleafLinkPublic, run: PipelineRun): void {
+  const started = run.started ?? run.created;
+  const overlay = mountOverlay({
+    id: "calkit-run-log",
+    title: `Run on this computer, ${new Date(started).toLocaleString([], {
+      dateStyle: "medium",
+      timeStyle: "short",
+    })}`,
+  });
+  const log = el("pre", { class: "log", text: "Loading…" });
+  overlay.viewport.append(log);
+  const refresh = async () => {
+    if (!overlay.host.isConnected) {
+      return;
+    }
+    try {
+      const { log: text } = await send({
+        type: "project.pipelineRunLog",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        runId: run.id,
+      });
+      // Kept at the end as it grows, unless scrolled back to read
+      const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+      log.textContent = text || "Nothing printed yet.";
+      if (atEnd) {
+        log.scrollTop = log.scrollHeight;
+      }
+    } catch (e) {
+      log.textContent = e instanceof Error ? e.message : String(e);
+    }
+    const latest = pipelineRuns?.runs.runs.find((r) => r.id === run.id);
+    if (latest && ["queued", "running"].includes(latest.status)) {
+      setTimeout(() => void refresh(), 2_000);
+    }
+  };
+  void refresh();
+}
+
+// The parts of the open panel's status that a run or sync going on makes
+// out of date, set aside meanwhile rather than shown as current
+const statusParts = new Set<{
+  link: OverleafLinkPublic;
+  hide: HTMLElement[];
+  busy: HTMLElement;
+}>();
+// Whether what's shown is from before a run or sync that's just ended, until
+// it's been checked again
+let checkingAfterSync = false;
+
+/** What's going on that makes the status shown out of date, if anything. */
+function getStatusBusyText(link: OverleafLinkPublic): string | null {
+  if (syncing) {
+    return "Syncing with Overleaf";
+  }
+  const run = pipelineRuns?.key === linkKey(link) ? activeRun() : null;
+  if (run) {
+    return run.progress?.phase === "syncing"
+      ? "Syncing with Overleaf"
+      : "What to sync is checked again once the run is done.";
+  }
+  return checkingAfterSync ? "Checking what's synced now" : null;
+}
+
+function drawStatusParts(): void {
+  for (const entry of statusParts) {
+    if (!entry.busy.isConnected && entry.busy.dataset.drawn) {
+      statusParts.delete(entry);
+      continue;
+    }
+    entry.busy.dataset.drawn = "1";
+    const text = getStatusBusyText(entry.link);
+    for (const part of entry.hide) {
+      part.style.display = text ? "none" : "";
+    }
+    clear(entry.busy);
+    if (text) {
+      entry.busy.append(
+        text.endsWith(".")
+          ? el("div", {
+              class: "dim small",
+              style: { marginTop: "8px" },
+              text,
+            })
+          : el("div", { style: { marginTop: "8px" } }, [loading(text)]),
+      );
+    }
   }
 }
 
@@ -3273,6 +3421,18 @@ function renderStatus(
   const project = `${link.project_owner_name}/${link.project_name}`;
   // Worked on here, so the hub's parts stay out of the way
   const local = Boolean(link.local_path);
+  const badge = status.in_sync
+    ? el("span", { class: "badge ok", text: "in sync" })
+    : el("span", {
+        class: figures.length ? "badge danger" : "badge warn",
+        text: figures.length
+          ? `${figures.length} figure${figures.length === 1 ? "" : "s"} to sync`
+          : "out of sync",
+      });
+  // What a sync would do, set aside while a run or sync makes it out of
+  // date, with what's going on said instead
+  const details = el("div");
+  const busy = el("div");
   body.append(
     el("div", { class: "row" }, [
       el("div", { class: "grow" }, [
@@ -3292,20 +3452,13 @@ function renderStatus(
         }),
         renderWhere(link),
       ]),
-      status.in_sync
-        ? el("span", { class: "badge ok", text: "in sync" })
-        : el("span", {
-            class: figures.length ? "badge danger" : "badge warn",
-            text: figures.length
-              ? `${figures.length} figure${
-                  figures.length === 1 ? "" : "s"
-                } to sync`
-              : "out of sync",
-          }),
+      badge,
     ]),
   );
+  body.append(renderLocalChanges(project, reload, link.local_path));
+  body.append(busy, details);
   if (status.in_sync) {
-    body.append(
+    details.append(
       el("div", {
         class: "dim small",
         style: { paddingTop: "6px" },
@@ -3315,9 +3468,8 @@ function renderStatus(
       }),
     );
   }
-  body.append(renderLocalChanges(project, reload, link.local_path));
   if (figures.length) {
-    body.append(
+    details.append(
       el("div", {
         class: "small",
         style: { marginTop: "8px", fontWeight: "600" },
@@ -3327,7 +3479,7 @@ function renderStatus(
     );
   }
   if (others.length) {
-    body.append(
+    details.append(
       el("div", {
         class: "small",
         style: { marginTop: "8px", fontWeight: "600" },
@@ -3337,7 +3489,7 @@ function renderStatus(
     );
   }
   if (status.files_to_delete.length) {
-    body.append(
+    details.append(
       el("div", {
         class: "small",
         style: { marginTop: "8px", fontWeight: "600" },
@@ -3348,7 +3500,7 @@ function renderStatus(
   }
   if (status.commits_from_overleaf > 0) {
     const count = status.commits_from_overleaf;
-    body.append(
+    details.append(
       el("div", {
         class: "dim small",
         style: { marginTop: "8px" },
@@ -3426,6 +3578,8 @@ function renderStatus(
     ]),
     message,
   );
+  statusParts.add({ link, hide: [badge, details, syncButton], busy });
+  drawStatusParts();
 }
 
 /**
@@ -4139,6 +4293,8 @@ async function load(overleafProjectId: string): Promise<void> {
     currentLink = link;
     void checkCitations();
     lastCheck = { overleafProjectId, hubWebUrl, link, status: statuses[0] };
+    // Checked since the last run or sync, so it's current again
+    checkingAfterSync = false;
     renderStatus(content, link, statuses[0], reload);
     showNotice();
     content.append(renderInsert(link, statuses[0].path, reload));
@@ -4155,6 +4311,7 @@ async function load(overleafProjectId: string): Promise<void> {
     if (!current()) {
       return;
     }
+    checkingAfterSync = false;
     clear(body);
     if (e instanceof RequestFailed && e.notSignedIn) {
       // With a hub picker alongside, since credentials are per hub and a
@@ -4418,6 +4575,8 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     lastCheck = statuses.length
       ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
       : null;
+    checkingAfterSync = false;
+    drawStatusParts();
     drawRail();
     mountPdfSwitch();
     // Nothing to say if the panel was opened in the meantime, or if the
@@ -4691,6 +4850,50 @@ async function refreshRailPipeline(link: OverleafLinkPublic): Promise<void> {
 }
 
 function drawRail(): void {
+  // One of the pipeline's runs, opening its log, or GitHub's page for it
+  const renderRunItem = (link: OverleafLinkPublic, run: PipelineRun) => {
+    const when = new Date(run.started ?? run.created).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const active = ["queued", "running"].includes(run.status);
+    const parts = [
+      active
+        ? el("span", { class: "spinner" })
+        : el("span", {
+            class: `dot ${
+              run.status === "succeeded"
+                ? ""
+                : run.status === "failed"
+                ? "error"
+                : "unknown"
+            }`,
+          }),
+      // All here, or all on GitHub, as the panel says above
+      el("span", { class: "grow small", text: when }),
+      el("span", { class: "dim small", text: run.status }),
+    ];
+    if (run.location === "local") {
+      return el(
+        "button",
+        {
+          class: "item",
+          title: run.error ?? "Show its log",
+          onClick: () => openRunLog(link, run),
+        },
+        parts,
+      );
+    }
+    return run.url
+      ? el(
+          "a",
+          { class: "item", href: run.url, attrs: { target: "_blank" } },
+          parts,
+        )
+      : el("div", { class: "item" }, parts);
+  };
   if (!railPane) {
     return;
   }
@@ -4738,7 +4941,9 @@ function drawRail(): void {
   } else if (running) {
     body.append(
       loading(
-        running.status === "running"
+        running.location === "local"
+          ? getRunActivity(running)
+          : running.status === "running"
           ? `Running ${getRunPlace(running)}`
           : `Waiting to run ${getRunPlace(running)}`,
       ),
@@ -4873,6 +5078,15 @@ function drawRail(): void {
     );
   }
   body.append(renderRuns(link, true));
+  // The latest runs, each with its log
+  const runs =
+    pipelineRuns?.key === linkKey(link) ? pipelineRuns.runs.runs : [];
+  if (runs.length) {
+    body.append(el("h3", { text: "Runs" }));
+    for (const run of runs.slice(0, 5)) {
+      body.append(renderRunItem(link, run));
+    }
+  }
 }
 
 /**

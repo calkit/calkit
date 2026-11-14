@@ -620,6 +620,9 @@ def test_start_job(tmp_path, monkeypatch):
 
     done = run("print('Ran it')")
     assert done["status"] == "succeeded" and done["output"] == "Ran it"
+    # Its whole log can be read, as it's written while it runs
+    reply = get_reply({"type": "job.log", "job_id": job["id"]})
+    assert reply["result"] == {"log": "Ran it\n"}
     assert done["started"] and done["finished"] and done["returncode"] == 0
     failed = run("print('Error: It broke'); print('Bye'); raise SystemExit(1)")
     assert failed["status"] == "failed" and failed["error"] == "It broke"
@@ -646,6 +649,57 @@ def test_start_job(tmp_path, monkeypatch):
         {"type": "jobs.list", "project": "me/proj", "kind": "run"}
     )
     assert [j["id"] for j in reply["result"]] == [job["id"]]
+
+
+def test_get_job_progress(tmp_path):
+    from calkit.browser_link import get_job_progress, get_n_pipeline_stages
+
+    # Each of a stage's iterations is counted, as DVC runs them
+    (tmp_path / "dvc.yaml").write_text(
+        "stages:\n"
+        "  a:\n    cmd: echo a\n"
+        "  sweep:\n    cmd: echo ${item.n} ${item.m}\n"
+        "    matrix:\n      n: [1, 2, 3]\n      m: [x, y]\n"
+        "  each:\n    cmd: echo ${item}\n    foreach: [p, q]\n"
+    )
+    assert get_n_pipeline_stages(str(tmp_path)) == 9
+    assert get_n_pipeline_stages(str(tmp_path / "nope")) is None
+    # From what 'calkit run --save --overleaf' prints as it goes
+    lines = [
+        "💻 Getting system information",
+        "Syncing paper with Overleaf project ID abc",
+        "Pulling the latest version from Overleaf",
+        "🔀 Compiling DVC pipeline",
+        "Stage 'a' didn't change, skipping",
+        "Running stage 'sweep@n1-mx':",
+        "> echo 1 x",
+        "Updating lock file 'dvc.lock'",
+        "Running stage 'sweep@n1-my':",
+        "Pipeline completed successfully ✅",
+        "Saving the project after successful run",
+        "Syncing paper with Overleaf project ID abc",
+    ]
+    expected = [
+        {"phase": "starting", "stage": None, "n_done": 0},
+        {"phase": "syncing", "stage": None, "n_done": 0},
+        {"phase": "syncing", "stage": None, "n_done": 0},
+        {"phase": "running", "stage": None, "n_done": 0},
+        {"phase": "running", "stage": None, "n_done": 1},
+        {"phase": "running", "stage": "sweep@n1-mx", "n_done": 1},
+        {"phase": "running", "stage": "sweep@n1-mx", "n_done": 1},
+        {"phase": "running", "stage": "sweep@n1-mx", "n_done": 1},
+        {"phase": "running", "stage": "sweep@n1-my", "n_done": 2},
+        {"phase": "finishing", "stage": None, "n_done": 3},
+        {"phase": "saving", "stage": None, "n_done": 3},
+        {"phase": "syncing", "stage": None, "n_done": 3},
+    ]
+    for i, want in enumerate(expected):
+        log = "\n".join(lines[: i + 1])
+        assert get_job_progress(log, 9) == want | {"n_stages": 9}
+    # More seen than the pipeline has, e.g., a subproject's, still adds up
+    log = "\n".join(f"Stage 's{i}' didn't change, skipping" for i in range(4))
+    assert get_job_progress(log, 2)["n_stages"] == 4
+    assert get_job_progress("", None)["n_stages"] is None
 
 
 def test_get_pdf_chunk(tmp_path, monkeypatch):

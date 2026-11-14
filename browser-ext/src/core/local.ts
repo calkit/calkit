@@ -7,6 +7,8 @@
  * options page, and 'calkit browser-link install', which the installer runs.
  */
 
+import type { RunProgress } from "./types";
+
 export const HOST_NAME = "io.calkit.native";
 
 /** How long the host is kept running once nothing's waiting on it. */
@@ -103,7 +105,7 @@ export class LocalError extends Error {
  */
 export interface LocalJob {
   id: string;
-  kind: "run" | "sync" | "clone";
+  kind: "run" | "sync" | "clone" | "install-editor";
   project: string;
   wdir: string;
   status: "queued" | "running" | "succeeded" | "failed";
@@ -112,8 +114,10 @@ export interface LocalJob {
   finished: string | null;
   git_rev: string | null;
   branch: string | null;
-  /** The end of what it printed, once it's done. */
+  /** The end of what it's printed, as it runs and once it's done. */
   output: string | null;
+  /** What it's doing, while it runs. */
+  progress?: RunProgress;
   error: string | null;
   /** The hub's status for the same failure, e.g., 401 for credentials. */
   error_status?: number;

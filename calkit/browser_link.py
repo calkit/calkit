@@ -31,6 +31,9 @@ CHROME_EXTENSION_IDS = ["idhdomgapfolnpffanajdckdaojencal"]
 FIREFOX_EXTENSION_IDS = ["browser-ext@calkit.io"]
 # How many of a checkout's files its status lists, so it fits in a message
 MAX_LISTED_FILES = 50
+# The most of a job's log sent at once, and how much shows while it runs
+MAX_LOG_CHARS = 200_000
+LIVE_OUTPUT_LINES = 8
 # How long opening a project waits to hear it failed
 OPEN_TIMEOUT_SECONDS = 30
 # Chrome won't take a bigger message from a host
@@ -244,6 +247,8 @@ def get_reply(msg: dict) -> dict:
             result = start_job(msg)
         elif kind == "job.get":
             result = get_job(str(msg.get("job_id")))
+        elif kind == "job.log":
+            result = {"log": get_job_log(str(msg.get("job_id")))}
         elif kind == "jobs.list":
             owner, name = split_project(msg.get("project"))
             result = [
@@ -717,6 +722,85 @@ def get_job_path(job_id: str) -> str:
     return os.path.join(get_jobs_dir(), f"{job_id}.json")
 
 
+def get_job_log_path(job_id: str) -> str:
+    return get_job_path(job_id).removesuffix(".json") + ".log"
+
+
+def get_job_log(job_id: str) -> str:
+    """What a job has printed so far, without terminal colors, up to its
+    last ``MAX_LOG_CHARS``, so it fits in a message.
+    """
+    log_path = get_job_log_path(job_id)
+    if not os.path.isfile(log_path):
+        return ""
+    with open(log_path, "rb") as f:
+        f.seek(max(0, os.path.getsize(log_path) - MAX_LOG_CHARS))
+        text = f.read().decode(errors="replace")
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def get_n_pipeline_stages(wdir: str) -> int | None:
+    """How many stages a run of the pipeline in ``wdir`` goes through, with
+    each of a stage's iterations, e.g., from ``iterate_over``, counted, as
+    DVC lists them as it runs.
+    """
+    import math
+
+    dvc_yaml_path = os.path.join(wdir, "dvc.yaml")
+    if not os.path.isfile(dvc_yaml_path):
+        return None
+    try:
+        with open(dvc_yaml_path) as f:
+            stages = calkit.ryaml.load(f).get("stages") or {}
+    except Exception:
+        return None
+    n_stages = 0
+    for stage in stages.values():
+        if "matrix" in stage:
+            n_stages += math.prod(len(v) for v in stage["matrix"].values())
+        elif "foreach" in stage:
+            n_stages += len(stage["foreach"])
+        else:
+            n_stages += 1
+    return n_stages
+
+
+def get_job_progress(log: str, n_stages: int | None) -> dict:
+    """What a job is doing now, from what it's printed: getting ready,
+    syncing with Overleaf, running a stage, or saving, and for stages, the
+    one running and how many are done out of ``n_stages``.
+    """
+    phase = "starting"
+    stage = None
+    seen: list[str] = []
+    for line in log.splitlines():
+        line = line.strip()
+        if match := re.match(r"(?:Running stage|Stage) '([^']+)'", line):
+            name = match.group(1)
+            if name not in seen:
+                seen.append(name)
+            running = line.startswith("Running stage")
+            phase = "running"
+            stage = name if running else None
+        elif "Compiling DVC pipeline" in line:
+            phase = "running"
+        elif re.match(r"Syncing .* with Overleaf", line):
+            phase = "syncing"
+        elif line.startswith("Saving the project"):
+            phase = "saving"
+        elif line.startswith("Pipeline completed"):
+            phase = "finishing"
+            stage = None
+    n_done = len(seen) - (1 if stage else 0)
+    return {
+        "phase": phase,
+        "stage": stage,
+        "n_done": n_done,
+        # More than it said, e.g., from a subproject's pipeline
+        "n_stages": max(n_stages, len(seen)) if n_stages else None,
+    }
+
+
 def get_job(job_id: str) -> dict:
     """A job's record, with how it ended, and the end of what it printed
     once it has.
@@ -730,6 +814,17 @@ def get_job(job_id: str) -> dict:
     if job["status"] == "running" and not is_running(job.get("pid")):
         job["status"] = "failed"
         job["error"] = "It stopped without finishing"
+    # What it's doing, and the last of what it printed, while it runs
+    if job["status"] == "running":
+        log = get_job_log(job_id)
+        n_stages = (
+            get_n_pipeline_stages(job["wdir"])
+            if job["kind"] == "run"
+            else None
+        )
+        job["progress"] = get_job_progress(log, n_stages)
+        lines = [x.strip() for x in log.splitlines() if x.strip()]
+        job["output"] = "\n".join(lines[-LIVE_OUTPUT_LINES:])
     return job
 
 
@@ -924,7 +1019,9 @@ def run_job(job_id: str) -> None:
     before = {}
     if job["kind"] == "sync":
         before = {"project": get_head(job["wdir"]), **get_overleaf_heads()}
-    with tempfile.TemporaryFile("w+") as out:
+    # Written as it goes, unbuffered, so how far it's got can be read while
+    # it runs
+    with open(get_job_log_path(job_id), "w") as out:
         try:
             returncode = subprocess.call(
                 job["cmd"],
@@ -932,13 +1029,13 @@ def run_job(job_id: str) -> None:
                 stdout=out,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
+                env=os.environ | {"PYTHONUNBUFFERED": "1"},
                 text=True,
             )
         except OSError as e:
             out.write(str(e))
             returncode = 1
-        out.seek(0)
-        output = re.sub(r"\x1b\[[0-9;]*m", "", out.read())
+    output = get_job_log(job_id)
     lines = [x.strip() for x in output.splitlines() if x.strip()]
     job |= {
         "returncode": returncode,

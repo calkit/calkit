@@ -277,6 +277,18 @@ export interface PipelineRun {
   /** For one on this computer, why it failed, and the end of its output. */
   error?: string | null;
   output?: string | null;
+  /** For one on this computer that's running, what it's doing now. */
+  progress?: RunProgress | null;
+}
+
+/** How far a run on this computer has got, from what it's printed. */
+export interface RunProgress {
+  phase: "starting" | "syncing" | "running" | "finishing" | "saving";
+  /** The stage running now, if one is, e.g., "sweep@1". */
+  stage: string | null;
+  n_done: number;
+  /** Unknown until the pipeline's been compiled. */
+  n_stages: number | null;
 }
 
 export interface PipelineRuns {

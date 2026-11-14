@@ -158,6 +158,13 @@ export type Request =
   | { type: "project.pipeline"; owner: string; project: string }
   | { type: "project.pipelineRuns"; owner: string; project: string }
   | {
+      /** The whole log of a run on this computer, as far as it's got. */
+      type: "project.pipelineRunLog";
+      owner: string;
+      project: string;
+      runId: string;
+    }
+  | {
       type: "project.startPipelineRun";
       owner: string;
       project: string;
@@ -299,6 +306,7 @@ export interface ResponseMap {
   "project.pipeline": ProjectPipeline;
   "project.pipelineRuns": PipelineRuns;
   "project.startPipelineRun": PipelineRun;
+  "project.pipelineRunLog": { log: string };
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

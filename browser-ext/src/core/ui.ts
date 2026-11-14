@@ -343,6 +343,24 @@ button.twisty {
   flex-wrap: wrap;
 }
 .overlay .toolbar .spacer { flex: 1; }
+pre.log {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--ck-subtle-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.overlay pre.log {
+  flex: 1;
+  overflow: auto;
+  border-radius: 0;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+}
 .overlay .viewport {
   flex: 1;
   min-height: 0;

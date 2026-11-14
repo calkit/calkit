@@ -215,6 +215,7 @@ function toPipelineRun(job: LocalJob): PipelineRun {
     branch: job.branch,
     error: job.error,
     output: job.output,
+    progress: job.progress ?? null,
   };
 }
 
@@ -422,6 +423,12 @@ async function handle(
         `${projectPath(message.owner, message.project)}/pipeline/runs`,
       );
     }
+    case "project.pipelineRunLog":
+      // Only runs on this computer keep a log here; GitHub has the others'
+      return askLocal<{ log: string }>({
+        type: "job.log",
+        job_id: message.runId,
+      });
     case "project.startPipelineRun": {
       const project = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(project)).path) {

@@ -518,8 +518,19 @@ def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
     ]
     assert status["files_to_push"][0]["stage_status"] is None
     assert not status["in_sync"]
+    assert status["pulled"]
     assert get_overleaf_sync_statuses(str(project), path="paper") == [status]
     assert get_overleaf_sync_statuses(str(project), "other-id") == []
+    # Without pulling, the copy from the last pull is used, with no
+    # credentials needed, unless there isn't one yet
+    pulled.clear()
+    monkeypatch.setattr(calkit.cli.overleaf, "_get_overleaf_auth", None)
+    [quick] = get_overleaf_sync_statuses(str(project), pull=False)
+    assert not pulled and not quick["pulled"]
+    assert quick | {"pulled": True} == status
+    monkeypatch.setattr(
+        calkit.cli.overleaf, "_get_overleaf_auth", lambda: "token"
+    )
     with pytest.raises(ValueError, match="isn't synced"):
         get_overleaf_sync_statuses(str(project), path="nope")
     # Without credentials, it says so as the hub does, so the extension

@@ -2195,8 +2195,14 @@ function bringUpToDate(
  * anyway.
  */
 function watchEditor(): void {
-  window.addEventListener("message", (event) => {
+  const listener = (event: MessageEvent) => {
     if (event.source !== window || event.data?.calkit !== "editor") {
+      return;
+    }
+    // Cut off by the extension reloading, so the script put in after
+    // answers instead, rather than this one taking a tooltip it can't fill
+    if (!isExtensionAlive()) {
+      window.removeEventListener("message", listener);
       return;
     }
     const message = event.data as FromEditor;
@@ -2207,7 +2213,11 @@ function watchEditor(): void {
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
     }
-  });
+  };
+  window.addEventListener("message", listener);
+  // What the open document shows, in case this script came in after the
+  // editor last said
+  toEditor({ type: "rescan" });
 }
 
 /** Where a problem lands in the PDF, in points from the page's top left. */
@@ -4267,13 +4277,28 @@ async function load(overleafProjectId: string): Promise<void> {
         loading(`Checking ${link.project_owner_name}/${link.project_name}`),
       );
     }
-    const statuses = await send({
+    const statusRequest = {
       type: "overleaf.status",
       owner: link.project_owner_name,
       project: link.project_name,
       overleafProjectId,
       path: link.path,
-    });
+    } as const;
+    // On this computer, what's known from the last pull comes at once,
+    // and is shown while Overleaf is asked for anything newer
+    if (link.local_path) {
+      const known = await send({ ...statusRequest, pull: false }).catch(
+        () => [],
+      );
+      if (!current()) {
+        return;
+      }
+      if (known.length && !known[0].pulled) {
+        renderStatus(content, link, known[0], reload);
+        content.append(loading("Checking Overleaf for new edits"));
+      }
+    }
+    const statuses = await send(statusRequest);
     if (!current()) {
       return;
     }

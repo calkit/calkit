@@ -51,6 +51,8 @@ export interface OverleafSyncStatusFile {
 
 export interface OverleafSyncStatus {
   path: string;
+  /** Whether Overleaf was asked just now, when answered on this computer. */
+  pulled?: boolean;
   overleaf_project_id?: string | null;
   overleaf_url?: string | null;
   last_sync_commit?: string | null;

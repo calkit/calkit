@@ -40,7 +40,9 @@ OPEN_TIMEOUT_SECONDS = 30
 MAX_MESSAGE_BYTES = 1024 * 1024
 # How long the checkouts found for a project are trusted, since finding
 # them means searching the home folder
-CHECKOUTS_TTL_SECONDS = 60
+# Kept on disk, since each process the browser starts would otherwise
+# search the home folder again
+CHECKOUTS_TTL_SECONDS = 600
 # How often an Overleaf project no checkout here syncs with is looked for
 # again, since that searches the home folder too
 LOOKUP_RESCAN_SECONDS = 600
@@ -233,6 +235,7 @@ def get_reply(msg: dict) -> dict:
                 paths[0],
                 overleaf_project_id=msg.get("overleaf_project_id"),
                 path=msg.get("path"),
+                pull=msg.get("pull", True) is not False,
             )
         elif kind == "publication.pdf":
             owner, name = split_project(msg.get("project"))
@@ -360,12 +363,24 @@ def get_checkout_paths(owner: str, name: str) -> list[str]:
     import time
 
     key = get_checkouts_key(owner, name)
+    cache_path = os.path.join(get_host_dir(), "checkouts.json")
+    if not _checkouts_found and os.path.isfile(cache_path):
+        try:
+            with open(cache_path) as f:
+                _checkouts_found.update(
+                    {k: (v[0], v[1]) for k, v in json.load(f).items()}
+                )
+        except (OSError, ValueError, TypeError, IndexError):
+            pass
     found_at, paths = _checkouts_found.get(key, (0.0, []))
     if time.time() - found_at > CHECKOUTS_TTL_SECONDS or not all(
-        os.path.isdir(p) for p in paths
+        os.path.isfile(os.path.join(p, "calkit.yaml")) for p in paths
     ):
         paths = sorted(calkit.get_project_checkouts(name, owner=owner))
         _checkouts_found[key] = (time.time(), paths)
+        os.makedirs(get_host_dir(), exist_ok=True)
+        with open(cache_path, "w") as f:
+            json.dump({k: list(v) for k, v in _checkouts_found.items()}, f)
     return sort_checkouts(owner, name, paths)
 
 
@@ -522,10 +537,15 @@ def get_overleaf_sync_statuses(
     wdir: str,
     overleaf_project_id: str | None = None,
     path: str | None = None,
+    pull: bool = True,
 ) -> list[dict]:
     """What a sync of each folder of a checkout synced with Overleaf would
     do, after pulling from Overleaf, as the hub's status reports it,
     optionally only for one ``path`` or Overleaf project.
+
+    Without ``pull``, a folder's copy of Overleaf from the last pull or sync
+    is used, if there is one, which takes a fraction of the time, so
+    something can be shown while Overleaf is asked.
 
     Overleaf credentials come from Calkit's config, or else the hub, as for
     ``calkit overleaf sync``.
@@ -587,12 +607,19 @@ def get_overleaf_sync_statuses(
                     continue
                 if not project_id:
                     continue
-                if auth is None:
-                    auth = _get_overleaf_auth()
+                clone_path = calkit.overleaf.get_project_dir(project_id)
+                pulled = pull or not os.path.isdir(
+                    os.path.join(clone_path, ".git")
+                )
                 with calkit.overleaf.lock(project_id, lambda _: None):
-                    overleaf_repo, auth = _get_pulled_overleaf_repo(
-                        project_id, auth
-                    )
+                    if pulled:
+                        if auth is None:
+                            auth = _get_overleaf_auth()
+                        overleaf_repo, auth = _get_pulled_overleaf_repo(
+                            project_id, auth
+                        )
+                    else:
+                        overleaf_repo = calkit.git.get_repo(clone_path)
                     status = calkit.overleaf.get_sync_status(
                         main_repo=main_repo,
                         overleaf_repo=overleaf_repo,
@@ -621,6 +648,7 @@ def get_overleaf_sync_statuses(
                             for f in status["files_to_delete"]
                         ],
                         "in_sync": status["in_sync"],
+                        "pulled": pulled,
                     }
                 )
     except (typer.Exit, SystemExit):

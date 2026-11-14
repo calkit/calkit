@@ -217,7 +217,19 @@ directly, without the network: which project, by owner and name, and which
 file in it to open, e.g., the script that makes a figure. Calkit answers
 with its version, the editor projects open in, where the project is on
 your computer, and which of its files there aren't saved or synced with
-Overleaf. None of it goes to a hub. You can disconnect it by removing
+Overleaf. None of it goes to a hub.
+
+<!-- TODO: needs human review -->
+
+On Overleaf, the extension also asks Calkit there which of your projects
+syncs with the Overleaf project you're on, and to run, save, sync, or
+clone a project, and to send the PDF it built. Calkit keeps a list of
+your projects' Overleaf projects, the checkout to use for each project,
+and a record of each run, sync, and clone in `~/.calkit/browser-link`.
+Running, saving, and syncing reach GitHub, Overleaf, and your hub, as
+the same commands do from a terminal.
+
+You can disconnect it by removing
 the extension's permission to communicate with cooperating native
 applications, or with `calkit browser-link uninstall`.
 

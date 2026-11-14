@@ -2052,6 +2052,15 @@ def test_overleaf_credentials(monkeypatch):
 
     monkeypatch.setattr(calkit.overleaf, "get_repo", get_repo)
     monkeypatch.setattr(calkit.overleaf, "pull", pull)
+    # Nothing's saved to the hub until a test says so
+    hub_saved: dict = {}
+
+    def hub_get(path, **kwargs):
+        if path not in hub_saved:
+            raise RuntimeError("Not found")
+        return hub_saved[path]
+
+    monkeypatch.setattr(calkit.hub, "get", hub_get)
 
     class Terminal(io.StringIO):
         def isatty(self):
@@ -2079,6 +2088,19 @@ def test_overleaf_credentials(monkeypatch):
     with pytest.raises(typer.Exit):
         _get_pulled_overleaf_repo("abc", "expired")
     assert saved == ["fresh"]
+    # A newer token saved to the hub, e.g., from another computer, is used
+    # instead, without asking
+    hub_saved["/user/overleaf-token"] = {"access_token": "from-hub"}
+    tokens_tried.clear()
+    repo, token = _get_pulled_overleaf_repo("abc", "expired")
+    assert tokens_tried == ["expired", "from-hub"]
+    assert token == "from-hub" and saved == ["fresh", "from-hub"]
+    # But not the one just rejected
+    hub_saved["/user/overleaf-token"] = {"access_token": "expired"}
+    with pytest.raises(typer.Exit):
+        _get_pulled_overleaf_repo("abc", "expired")
+    del hub_saved["/user/overleaf-token"]
+    saved.remove("from-hub")
     # A rejected session should prompt for a new one the same way
     sessions_tried = []
 
@@ -2198,7 +2220,9 @@ def test_overleaf_credentials(monkeypatch):
         _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))
     assert warnings == ["Session expired"]
     # A rejected Git token falls back to a browser session if there is one,
-    # since tokens stop working when Premium ends, and is forgotten
+    # since tokens stop working when Premium ends, and is forgotten, unless
+    # the hub has a newer token
+    del hub["/user/overleaf-token"]
     config.overleaf_token = calkit.config.KeyringOptionalSecret("expired")
     config.overleaf_session = calkit.config.KeyringOptionalSecret("fresh")
     tokens_tried.clear()

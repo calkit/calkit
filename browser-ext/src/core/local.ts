@@ -84,6 +84,40 @@ export function describeHostError(message: string): string {
   return message;
 }
 
+/** A request Calkit here refused, with the hub's status for the same. */
+export class LocalError extends Error {
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "LocalError";
+    this.status = status;
+  }
+}
+
+/**
+ * A job Calkit here runs in a process of its own, e.g., a pipeline run,
+ * from calkit/browser_link.py.
+ */
+export interface LocalJob {
+  id: string;
+  kind: "run" | "sync" | "clone";
+  project: string;
+  wdir: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  created: string;
+  started: string | null;
+  finished: string | null;
+  git_rev: string | null;
+  branch: string | null;
+  /** The end of what it printed, once it's done. */
+  output: string | null;
+  error: string | null;
+  /** The hub's status for the same failure, e.g., 401 for credentials. */
+  error_status?: number;
+  result: Record<string, unknown> | null;
+}
+
 function getPort(): chrome.runtime.Port {
   if (port) {
     return port;
@@ -99,7 +133,8 @@ function getPort(): chrome.runtime.Port {
     if (msg.ok) {
       waiting.resolve((msg as { result: unknown }).result);
     } else {
-      waiting.reject(new Error((msg as { error?: string }).error ?? "Failed"));
+      const { error, status } = msg as { error?: string; status?: number };
+      waiting.reject(new LocalError(error ?? "Failed", status));
     }
     keepAliveUntilIdle();
   });

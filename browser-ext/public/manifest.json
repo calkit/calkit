@@ -102,7 +102,11 @@
   "web_accessible_resources": [
     {
       "resources": ["viewer.html"],
-      "matches": ["https://github.com/*"]
+      "matches": [
+        "https://github.com/*",
+        "https://www.overleaf.com/*",
+        "https://overleaf.com/*"
+      ]
     }
   ]
 }

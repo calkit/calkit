@@ -245,7 +245,23 @@ export type Request =
       /** As "owner/name". */
       project: string;
     }
-  | { type: "local.openOptions" };
+  | { type: "local.openOptions" }
+  | {
+      type: "local.checkout";
+      /** As "owner/name". */
+      project: string;
+    }
+  | {
+      type: "local.chooseCheckout";
+      project: string;
+      path: string;
+    }
+  | {
+      type: "local.clone";
+      project: string;
+      /** Where to, by default ~/calkit/NAME. */
+      location?: string;
+    };
 
 export interface ResponseMap {
   "auth.state": AuthState;
@@ -295,6 +311,18 @@ export interface ResponseMap {
   "local.openProject": Record<string, never>;
   "local.projectStatus": { checkouts: CheckoutStatus[] };
   "local.openOptions": null;
+  /**
+   * The checkout used for a project here, and the others, or none when the
+   * extension isn't connected or the project isn't here; ``connected``
+   * says which.
+   */
+  "local.checkout": {
+    connected: boolean;
+    path: string | null;
+    paths: string[];
+  };
+  "local.chooseCheckout": { path: string; paths: string[] };
+  "local.clone": { path: string };
 }
 
 /**

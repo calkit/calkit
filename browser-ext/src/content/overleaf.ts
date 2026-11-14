@@ -822,6 +822,18 @@ function renderRunIt(
   saved: StageFromScriptOrNotebookResponse,
   link: OverleafLinkPublic,
 ): HTMLElement {
+  if (link.local_path) {
+    return el("div", { class: "muted-box", style: { marginTop: "6px" } }, [
+      el("div", {
+        class: "small",
+        text:
+          `Added stage ${saved.stage_name}. It hasn't run yet. Run it on ` +
+          "this computer, and its results come into this paper when it " +
+          "finishes:",
+      }),
+      renderRuns(link, true),
+    ]);
+  }
   const folder = saved.git_repo_url
     .replace(/\.git$/, "")
     .split("/")
@@ -998,6 +1010,10 @@ async function syncOverleaf(
 /** Look again at what's synced and shown, now that a sync changed it. */
 function afterSync(): void {
   provenanceCache.clear();
+  // What was just built and synced, rather than what was
+  if (localPdf) {
+    showLocalPdf(localPdf.link, localPdf.path);
+  }
   if (!currentProjectId) {
     return;
   }
@@ -1084,7 +1100,12 @@ async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
   if (!pipelineRuns) {
     return;
   }
-  if (canWrite(link)) {
+  // 'calkit run --save --overleaf' synced already
+  if (pipelineRuns.runs.runs[0]?.location === "local") {
+    pipelineRuns.notice =
+      "The pipeline ran on this computer, and its results were saved and " +
+      "synced here.";
+  } else if (canWrite(link)) {
     try {
       await syncOverleaf(link.project_owner_name, link.project_name, link.path);
       pipelineRuns.notice =
@@ -1148,8 +1169,8 @@ function drawRuns(): void {
             class: "grow small",
             text:
               run.status === "running"
-                ? `Running on GitHub Actions${since}`
-                : "Waiting to run on GitHub Actions",
+                ? `Running ${getRunPlace(run)}${since}`
+                : `Waiting to run ${getRunPlace(run)}`,
           }),
           view(run, "View"),
         ]),
@@ -1163,7 +1184,10 @@ function drawRuns(): void {
         el("div", { class: "row" }, [
           el("div", {
             class: "grow small",
-            text: "The last run on GitHub Actions failed.",
+            text:
+              `The last run ${getRunPlace(latest)} failed` +
+              (latest.error ? `: ${latest.error}` : "."),
+            title: latest.output ?? "",
           }),
           view(latest, "See why"),
         ]),
@@ -1185,7 +1209,11 @@ function drawRuns(): void {
       title: !canWrite(link)
         ? "You need write access to this project to run it"
         : runs.cannot_start_reason ??
-          "Run the pipeline on GitHub Actions, then sync what it makes here",
+          (link.local_path
+            ? "Run the pipeline on this computer, then save it and sync " +
+              "what it makes here"
+            : "Run the pipeline on GitHub Actions, then sync what it " +
+              "makes here"),
       onClick: () => void startRun(link),
     });
     box.append(
@@ -1561,7 +1589,7 @@ function renderOpenLocally(project: string, path: string): HTMLElement {
  * synced, e.g., a figure remade by running a notebook, or a way to connect
  * if the extension isn't connected to Calkit here.
  */
-function renderLocalChanges(project: string): HTMLElement {
+function renderLocalChanges(project: string, reload: () => void): HTMLElement {
   const container = el("div");
   localStatus ??= send({ type: "local.status" }).catch(() => ({
     permitted: false,
@@ -1588,6 +1616,37 @@ function renderLocalChanges(project: string): HTMLElement {
         ]),
       );
       return;
+    }
+    // Not here yet, so offered, since working on it here is the point
+    const local = await send({ type: "local.checkout", project }).catch(
+      () => null,
+    );
+    if (local && !local.path) {
+      container.append(renderClone(project, reload));
+      return;
+    }
+    // Which of several, e.g., worktrees, answers for it
+    if (local && local.paths.length > 1) {
+      const choice = el(
+        "select",
+        { class: "small", title: "The checkout this panel uses" },
+        local.paths.map((p) => el("option", { text: p, value: p })),
+      );
+      choice.value = local.path ?? "";
+      choice.addEventListener("change", async () => {
+        await send({
+          type: "local.chooseCheckout",
+          project,
+          path: choice.value,
+        });
+        reload();
+      });
+      container.append(
+        el("div", { class: "row small", style: { marginTop: "8px" } }, [
+          el("span", { class: "dim", text: "Using" }),
+          choice,
+        ]),
+      );
     }
     let checkouts: CheckoutStatus[];
     try {
@@ -1681,6 +1740,52 @@ function renderLocalChanges(project: string): HTMLElement {
     }
   })();
   return container;
+}
+
+/**
+ * Clone a project that isn't on this computer, so this panel works with
+ * it here from then on.
+ */
+function renderClone(project: string, reload: () => void): HTMLElement {
+  const name = project.split("/")[1];
+  const location = el("input", {
+    class: "small",
+    type: "text",
+    value: `~/calkit/${name}`,
+    title: "Where to put it",
+  });
+  const message = el("div", { class: "small" });
+  const clone = el("button", {
+    class: "action",
+    text: "Clone to this computer",
+  });
+  clone.addEventListener("click", async () => {
+    clone.disabled = true;
+    clear(message).append(loading("Cloning"));
+    try {
+      await send({
+        type: "local.clone",
+        project,
+        location: location.value.trim() || undefined,
+      });
+      reload();
+    } catch (e) {
+      clone.disabled = false;
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  return el("div", { class: "muted-box", style: { marginTop: "8px" } }, [
+    el("div", {
+      class: "small",
+      text:
+        "This project isn't on this computer. Clone it to run, save, and " +
+        "sync from here:",
+    }),
+    el("div", { class: "row", style: { marginTop: "6px" } }, [location, clone]),
+    message,
+  ]);
 }
 
 /** One problem, colored by how bad it is. */
@@ -2855,6 +2960,139 @@ function fileRow(file: OverleafSyncStatusFile): HTMLElement {
   ]);
 }
 
+// The PDF from this computer shown over Overleaf's, if it is
+let localPdf: {
+  host: HTMLElement;
+  link: OverleafLinkPublic;
+  path: string;
+} | null = null;
+
+/**
+ * Show the PDF a synced folder builds to on this computer, e.g., from a
+ * pipeline run, over Overleaf's, so there's no waiting on Overleaf to
+ * compile, until it's turned off. Overleaf's own PDF features, e.g.,
+ * double-clicking to go to the source, don't work in it.
+ */
+function showLocalPdf(link: OverleafLinkPublic, path: string): void {
+  hideLocalPdf();
+  // pdf.js's pages, inside the pane Overleaf shows its PDF in
+  const viewer = document.querySelector<HTMLElement>(".pdfViewer");
+  const pane =
+    viewer?.closest<HTMLElement>(".pdf-viewer, .pdfjs-viewer, .pdf") ??
+    viewer?.parentElement ??
+    null;
+  const params = new URLSearchParams({
+    localProject: `${link.project_owner_name}/${link.project_name}`,
+    folder: path,
+  });
+  const frame = el("iframe", {
+    title: "PDF from this computer",
+    style: { flex: "1", width: "100%", border: "none", background: "#fff" },
+  });
+  frame.src = `${chrome.runtime.getURL("viewer.html")}?${params}`;
+  const edits =
+    lastCheck && linkKey(lastCheck.link) === linkKey(link)
+      ? lastCheck.status.commits_from_overleaf
+      : 0;
+  const bar = el(
+    "div",
+    {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "4px 8px",
+        background: "#f3f4f6",
+        font: "12px -apple-system, BlinkMacSystemFont, sans-serif",
+        color: "#111827",
+      },
+    },
+    [
+      el("span", {
+        style: { flex: "1" },
+        text: edits
+          ? `PDF from this computer, without ${edits} edit${
+              edits === 1 ? "" : "s"
+            } made on Overleaf since the last sync`
+          : "PDF from this computer",
+      }),
+      el("button", { text: "Show Overleaf's", onClick: hideLocalPdf }),
+    ],
+  );
+  const host = el("div", {}, [bar, frame]);
+  Object.assign(
+    host.style,
+    {
+      display: "flex",
+      flexDirection: "column",
+      background: "#fff",
+    },
+    // Over the pane, or, without one, e.g., with only the editor showing,
+    // down the right side
+    pane
+      ? { position: "absolute", inset: "0", zIndex: "20" }
+      : {
+          position: "fixed",
+          top: "48px",
+          right: "0",
+          bottom: "0",
+          width: "45vw",
+          zIndex: "2147483000",
+          boxShadow: "0 0 12px rgba(0, 0, 0, 0.2)",
+        },
+  );
+  if (pane) {
+    if (getComputedStyle(pane).position === "static") {
+      pane.style.position = "relative";
+    }
+    pane.append(host);
+  } else {
+    document.body.append(host);
+  }
+  localPdf = { host, link, path };
+}
+
+function hideLocalPdf(): void {
+  localPdf?.host.remove();
+  localPdf = null;
+}
+
+/**
+ * Where the panel's answers come from: the checkout on this computer, or
+ * the hub, with, from the hub, a way to work on the project without
+ * installing anything.
+ */
+function renderWhere(link: OverleafLinkPublic): HTMLElement {
+  if (link.local_path) {
+    return el("div", {
+      class: "dim small",
+      text: "On this computer",
+      title: link.local_path,
+    });
+  }
+  return el("div", { class: "dim small" }, [
+    document.createTextNode(`Via ${new URL(hubWebUrl).host}`),
+    ...(link.github_repo_url
+      ? [
+          document.createTextNode(" \u00b7 "),
+          el("a", {
+            text: "Open in Codespaces",
+            href: `https://codespaces.new${
+              new URL(link.github_repo_url).pathname
+            }?quickstart=1`,
+            title: "Work on the project in a GitHub Codespace",
+            attrs: { target: "_blank" },
+          }),
+        ]
+      : []),
+  ]);
+}
+
+/** Where a run of the pipeline happens, as a sentence would say it. */
+function getRunPlace(run: PipelineRun | undefined): string {
+  return run?.location === "local" ? "on this computer" : "on GitHub Actions";
+}
+
 function renderStatus(
   body: HTMLElement,
   link: OverleafLinkPublic,
@@ -2879,18 +3117,7 @@ function renderStatus(
           class: "dim small",
           text: `Synced folder: ${status.path}`,
         }),
-        // Where to work on what the paper shows, without installing anything
-        link.github_repo_url
-          ? el("a", {
-              class: "small",
-              text: "Open in Codespaces",
-              href: `https://codespaces.new${
-                new URL(link.github_repo_url).pathname
-              }?quickstart=1`,
-              title: "Work on the project in a GitHub Codespace",
-              attrs: { target: "_blank" },
-            })
-          : null,
+        renderWhere(link),
       ]),
       status.in_sync
         ? el("span", { class: "badge ok", text: "in sync" })
@@ -2913,8 +3140,33 @@ function renderStatus(
       }),
     );
   }
+  if (link.local_path) {
+    const toggle = el("button", {
+      class: "action secondary",
+      text: localPdf ? "Show Overleaf's PDF" : "Show this computer's PDF",
+      title:
+        "Show the PDF the pipeline built on this computer instead of " +
+        "waiting on Overleaf to compile",
+      onClick: () => {
+        if (localPdf) {
+          hideLocalPdf();
+        } else {
+          showLocalPdf(link, status.path);
+        }
+        toggle.textContent = localPdf
+          ? "Show Overleaf's PDF"
+          : "Show this computer's PDF";
+      },
+    });
+    body.append(
+      el("div", { class: "actions", style: { marginTop: "8px" } }, [toggle]),
+    );
+  }
   body.append(
-    renderLocalChanges(`${link.project_owner_name}/${link.project_name}`),
+    renderLocalChanges(
+      `${link.project_owner_name}/${link.project_name}`,
+      reload,
+    ),
   );
   if (figures.length) {
     body.append(
@@ -4313,17 +4565,7 @@ function drawRail(): void {
         href: base,
         attrs: { target: "_blank" },
       }),
-      link.github_repo_url
-        ? el("a", {
-            class: "small",
-            text: "Open in Codespaces",
-            href: `https://codespaces.new${
-              new URL(link.github_repo_url).pathname
-            }?quickstart=1`,
-            title: "Work on the project in a GitHub Codespace",
-            attrs: { target: "_blank" },
-          })
-        : null,
+      renderWhere(link),
     ]),
   );
   // What's going on between the paper and its project
@@ -4338,8 +4580,8 @@ function drawRail(): void {
     body.append(
       loading(
         running.status === "running"
-          ? "Running on GitHub Actions"
-          : "Waiting to run on GitHub Actions",
+          ? `Running ${getRunPlace(running)}`
+          : `Waiting to run ${getRunPlace(running)}`,
       ),
     );
   } else if (status?.in_sync) {

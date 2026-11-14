@@ -302,3 +302,363 @@ def test_get_checkout_status(tmp_path):
     assert status["overleaf"] == [{"path": "paper", "syncing": True}]
     # The working directory is left as it was
     assert os.getcwd() != str(project)
+
+
+def git(*args, cwd):
+    subprocess.check_call(
+        ["git", "-c", "user.name=T", "-c", "user.email=t@example.com"]
+        + list(args),
+        cwd=cwd,
+    )
+
+
+def make_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    os.makedirs(home)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("CALKIT_USER_HOME", str(home))
+    return home
+
+
+def test_get_checkout_paths(tmp_path, monkeypatch):
+    from calkit.browser_link import get_checkout_paths
+
+    home = make_home(tmp_path, monkeypatch)
+    main = home / "calkit" / "proj"
+    make_project(main, "me", "proj")
+    git("add", "-A", cwd=main)
+    git("commit", "-q", "-m", "Init", cwd=main)
+    worktree = home / "dev" / "proj-wt"
+    os.makedirs(worktree.parent)
+    git("worktree", "add", "-q", str(worktree), cwd=main)
+    main_path = os.path.realpath(main)
+    wt_path = os.path.realpath(worktree)
+    # The one in ~/calkit first, as 'calkit open project' picks
+    assert get_checkout_paths("me", "proj") == [main_path, wt_path]
+    reply = get_reply({"type": "checkouts.get", "project": "me/proj"})
+    assert reply["result"] == {
+        "paths": [main_path, wt_path],
+        "path": main_path,
+    }
+    # Unless another was chosen, which is remembered
+    reply = get_reply(
+        {"type": "checkouts.choose", "project": "me/proj", "path": wt_path}
+    )
+    assert reply["ok"] and reply["result"]["path"] == wt_path
+    assert get_checkout_paths("me", "proj") == [wt_path, main_path]
+    reply = get_reply(
+        {"type": "checkouts.choose", "project": "me/proj", "path": "/x"}
+    )
+    assert not reply["ok"] and "isn't a checkout" in reply["error"]
+    reply = get_reply({"type": "checkouts.get", "project": "me/gone"})
+    assert reply["result"] == {"paths": [], "path": None}
+
+
+def test_get_overleaf_links(tmp_path, monkeypatch):
+    import time
+
+    import calkit.browser_link
+    from calkit.browser_link import get_overleaf_links
+
+    home = make_home(tmp_path, monkeypatch)
+    project = home / "calkit" / "paper-proj"
+    make_project(project, "me", "paper-proj")
+    git(
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:me/paper-proj.git",
+        cwd=project,
+    )
+    with open(project / "calkit.yaml", "a") as f:
+        f.write(
+            "title: A paper\noverleaf_sync:\n  paper:\n"
+            "    url: https://www.overleaf.com/project/abc123\n"
+        )
+    scans = []
+    real_find = calkit.find_project_dirs
+
+    def find_project_dirs(*args, **kwargs):
+        scans.append(1)
+        return real_find(*args, **kwargs)
+
+    monkeypatch.setattr(calkit, "find_project_dirs", find_project_dirs)
+    link = {
+        "overleaf_project_id": "abc123",
+        "path": "paper",
+        "project_owner_name": "me",
+        "project_name": "paper-proj",
+        "project_title": "A paper",
+        "current_user_access": "write",
+        "github_repo_url": "https://github.com/me/paper-proj",
+        "local_path": os.path.realpath(project),
+    }
+    # Searched for the first time, then found in the index
+    assert get_overleaf_links("abc123") == [link]
+    assert get_overleaf_links("abc123") == [link]
+    assert len(scans) == 1
+    reply = get_reply(
+        {"type": "overleaf.lookup", "overleaf_project_id": "abc123"}
+    )
+    assert reply["result"] == {
+        "links": [link],
+        "projects_scanned": 1,
+        "projects_remaining": 0,
+    }
+    # One no project here syncs with isn't searched for again for a while
+    assert get_overleaf_links("other") == []
+    assert len(scans) == 1
+    # A project's calkit.yaml changing is noticed without searching
+    text = (project / "calkit.yaml").read_text()
+    (project / "calkit.yaml").write_text(text.replace("abc123", "def456"))
+    os.utime(project / "calkit.yaml", (time.time() + 5, time.time() + 5))
+    assert get_overleaf_links("abc123") == []
+    assert get_overleaf_links("def456")[0]["overleaf_project_id"] == "def456"
+    assert len(scans) == 1
+    # A new one is found once the last search is old enough
+    other = home / "calkit" / "other"
+    make_project(other, "me", "other")
+    with open(other / "calkit.yaml", "a") as f:
+        f.write(
+            "overleaf_sync:\n  doc:\n"
+            "    url: https://www.overleaf.com/project/new789\n"
+        )
+    assert get_overleaf_links("new789") == []
+    monkeypatch.setattr(calkit.browser_link, "LOOKUP_RESCAN_SECONDS", -1)
+    [found] = get_overleaf_links("new789")
+    assert (
+        found["project_title"] == "other" and found["github_repo_url"] is None
+    )
+
+
+def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
+    import git as gitpython
+
+    import calkit.cli.overleaf
+    from calkit.browser_link import get_overleaf_sync_statuses
+    from calkit.cli.core import raise_error
+
+    make_home(tmp_path, monkeypatch)
+    tex = "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n"
+    project = tmp_path / "project"
+    os.makedirs(project / "paper")
+    (project / "paper" / "main.tex").write_text(tex)
+    (project / "calkit.yaml").write_text(
+        "owner: me\nname: project\n"
+        "overleaf_sync:\n  paper:\n"
+        "    url: https://www.overleaf.com/project/abc123\n"
+    )
+    (project / ".gitignore").write_text(".calkit/overleaf\n")
+    git("init", "-q", "-b", "main", cwd=project)
+    git("add", "-A", cwd=project)
+    git("commit", "-qm", "Init", cwd=project)
+    clone = project / ".calkit" / "overleaf" / "abc123"
+    os.makedirs(clone)
+    (clone / "main.tex").write_text(tex)
+    git("init", "-q", cwd=clone)
+    git("add", "-A", cwd=clone)
+    git("commit", "-qm", "Init", cwd=clone)
+    pulled = []
+
+    def get_pulled_repo(project_id, auth):
+        # What's printed would go to the browser, so it's kept from it
+        print("Pulling the latest version from Overleaf")
+        pulled.append((project_id, auth))
+        return gitpython.Repo(clone), auth
+
+    monkeypatch.setattr(
+        calkit.cli.overleaf, "_get_overleaf_auth", lambda: "token"
+    )
+    monkeypatch.setattr(
+        calkit.cli.overleaf, "_get_pulled_overleaf_repo", get_pulled_repo
+    )
+    # A change here, which a sync would send, as the hub's status says it
+    (project / "paper" / "main.tex").write_text(tex + "% More\n")
+    git("commit", "-qam", "Edit", cwd=project)
+    out = io.StringIO()
+    monkeypatch.setattr("sys.stdout", out)
+    [status] = get_overleaf_sync_statuses(str(project))
+    assert out.getvalue() == ""
+    assert pulled == [("abc123", "token")]
+    assert status["path"] == "paper"
+    assert status["overleaf_project_id"] == "abc123"
+    assert status["overleaf_url"] == "https://www.overleaf.com/project/abc123"
+    assert [f["project_path"] for f in status["files_to_push"]] == [
+        "paper/main.tex"
+    ]
+    assert status["files_to_push"][0]["stage_status"] is None
+    assert not status["in_sync"]
+    assert get_overleaf_sync_statuses(str(project), path="paper") == [status]
+    assert get_overleaf_sync_statuses(str(project), "other-id") == []
+    with pytest.raises(ValueError, match="isn't synced"):
+        get_overleaf_sync_statuses(str(project), path="nope")
+    # Without credentials, it says so as the hub does, so the extension
+    # asks for them
+    monkeypatch.setattr(
+        calkit.cli.overleaf,
+        "_get_overleaf_auth",
+        lambda: raise_error(
+            "Set one with 'calkit config set overleaf_token' and try again"
+        ),
+    )
+    calkit.record_project_path(str(project))
+    reply = get_reply({"type": "overleaf.status", "project": "me/project"})
+    assert reply["status"] == 401 and "Overleaf credentials" in reply["error"]
+    assert os.getcwd() != str(project)
+
+
+def test_start_job(tmp_path, monkeypatch):
+    import calkit.browser_link
+    from calkit.browser_link import get_job, list_jobs, run_job, start_job
+
+    home = make_home(tmp_path, monkeypatch)
+    project = home / "calkit" / "proj"
+    make_project(project, "me", "proj")
+    git("commit", "-q", "--allow-empty", "-m", "Init", cwd=project)
+    started = []
+    real_popen = subprocess.Popen
+
+    def popen(cmd, **kwargs):
+        if cmd[1:3] == ["-m", "calkit.browser_link"]:
+            started.append(cmd)
+            return None
+        return real_popen(cmd, **kwargs)
+
+    monkeypatch.setattr("subprocess.Popen", popen)
+    # A run saves and syncs, in a process of its own that runs the job
+    job = start_job({"kind": "run", "project": "me/proj"})
+    assert job["status"] == "queued" and job["wdir"] == os.path.realpath(
+        project
+    )
+    assert job["cmd"][1:] == ["-m", "calkit", "run", "--save", "--overleaf"]
+    assert job["branch"] and len(job["git_rev"]) == 40
+    assert started == [
+        [sys.executable, "-m", "calkit.browser_link", "job", job["id"]]
+    ]
+    assert get_reply({"type": "job.get", "job_id": job["id"]})["result"] == job
+    # One at a time
+    reply = get_reply(
+        {"type": "job.start", "kind": "run", "project": "me/proj"}
+    )
+    assert not reply["ok"] and "already running" in reply["error"]
+    for msg, error in [
+        ({"kind": "rm", "project": "me/proj"}, "Unknown kind"),
+        ({"kind": "sync", "project": "me/proj"}, "folder"),
+        ({"kind": "run", "project": "me/gone"}, "isn't on this computer"),
+        (
+            {"kind": "clone", "project": "me/proj", "location": str(project)},
+            "isn't empty",
+        ),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            start_job(msg)
+    with pytest.raises(ValueError):
+        get_job("../../etc/passwd")
+    # Running it records how it went, with the error it ended with
+    job_path = calkit.browser_link.get_job_path(job["id"])
+
+    def run(code):
+        with open(job_path) as f:
+            record = json.load(f)
+        record["cmd"] = [sys.executable, "-c", code]
+        with open(job_path, "w") as f:
+            json.dump(record, f)
+        run_job(job["id"])
+        return get_job(job["id"])
+
+    done = run("print('Ran it')")
+    assert done["status"] == "succeeded" and done["output"] == "Ran it"
+    assert done["started"] and done["finished"] and done["returncode"] == 0
+    failed = run("print('Error: It broke'); print('Bye'); raise SystemExit(1)")
+    assert failed["status"] == "failed" and failed["error"] == "It broke"
+    # Missing Overleaf credentials are reported as the hub reports them
+    failed = run(
+        "print(\"Error: Set one with 'calkit config set overleaf_token'\");"
+        "raise SystemExit(1)"
+    )
+    assert failed["error_status"] == 401
+    # One whose process died without saying so has failed
+    with open(job_path) as f:
+        record = json.load(f)
+    record |= {"status": "running", "pid": 2**22 + 12345}
+    with open(job_path, "w") as f:
+        json.dump(record, f)
+    assert get_job(job["id"])["status"] == "failed"
+    # Listed by project, newest first
+    clone = start_job(
+        {"kind": "clone", "project": "me/other", "location": "~/calkit/o"}
+    )
+    assert clone["location"] == os.path.join(str(home), "calkit", "o")
+    assert [j["id"] for j in list_jobs()] == [clone["id"], job["id"]]
+    reply = get_reply(
+        {"type": "jobs.list", "project": "me/proj", "kind": "run"}
+    )
+    assert [j["id"] for j in reply["result"]] == [job["id"]]
+
+
+def test_get_pdf_chunk(tmp_path, monkeypatch):
+    import base64
+    import time
+
+    import calkit.browser_link
+    from calkit.browser_link import get_pdf_chunk, get_pdf_path
+
+    home = make_home(tmp_path, monkeypatch)
+    project = home / "calkit" / "proj"
+    make_project(project, "me", "proj")
+    with open(project / "calkit.yaml", "a") as f:
+        f.write(
+            "publications:\n  - path: paper/main.pdf\n"
+            "pipeline:\n  stages:\n    build-notes:\n      kind: latex\n"
+            "      target_path: notes/notes.tex\n"
+        )
+    os.makedirs(project / "paper")
+    (project / "paper" / "main.tex").write_text("Hi\n")
+    pdf = b"%PDF-1.5\n" + bytes(range(256)) * 10
+    (project / "paper" / "main.pdf").write_bytes(pdf)
+    git("add", "-A", cwd=project)
+    git("commit", "-qm", "Build", cwd=project)
+    # A publication's, or else a LaTeX stage's
+    assert get_pdf_path(str(project), "paper") == "paper/main.pdf"
+    assert get_pdf_path(str(project), "notes") == "notes/notes.pdf"
+    assert get_pdf_path(str(project), "pap") is None
+    # Read a part at a time, with how fresh it is in the first
+    monkeypatch.setattr(calkit.browser_link, "PDF_CHUNK_BYTES", 1000)
+    first = get_pdf_chunk(str(project), "paper", 0)
+    assert first["size"] == len(pdf) and first["path"] == "paper/main.pdf"
+    assert len(first["commit_sha"]) == 40
+    assert first["changed_since_commit"] is False
+    assert first["edited_since_built"] is False
+    data = base64.b64decode(first["data"])
+    while len(data) < len(pdf):
+        reply = get_reply(
+            {
+                "type": "publication.pdf",
+                "project": "me/proj",
+                "folder": "paper",
+                "offset": len(data),
+            }
+        )
+        assert "built" not in reply["result"]
+        data += base64.b64decode(reply["result"]["data"])
+    assert data == pdf
+    # Its source changing after it was built, and it being rebuilt without
+    # saving, are both said
+    later = time.time() + 10
+    os.utime(project / "paper" / "main.tex", (later, later))
+    assert get_pdf_chunk(str(project), "paper", 0)["edited_since_built"]
+    (project / "paper" / "main.pdf").write_bytes(pdf + b"more")
+    assert get_pdf_chunk(str(project), "paper", 0)["changed_since_commit"]
+    with pytest.raises(ValueError, match="hasn't been built"):
+        get_pdf_chunk(str(project), "notes", 0)
+    for offset in [-1, "0"]:
+        reply = get_reply(
+            {
+                "type": "publication.pdf",
+                "project": "me/proj",
+                "folder": "paper",
+                "offset": offset,
+            }
+        )
+        assert "whole number" in reply["error"]

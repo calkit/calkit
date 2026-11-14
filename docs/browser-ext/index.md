@@ -42,6 +42,25 @@ unless set otherwise, e.g., with
 e.g., Cursor, VSCodium, Positron, or Antigravity, gets Calkit's extension
 if it doesn't have it.
 
+<!-- TODO: needs human review -->
+
+When it's connected, the Overleaf panel works with the project on your
+computer rather than through calkit.io, and says **On this computer**.
+It finds the project from its `calkit.yaml`, and **Sync** runs
+`calkit overleaf sync` there, and **Run and sync** runs
+`calkit run --save --overleaf` there, instead of on GitHub Actions.
+**Show this computer's PDF** shows the PDF built there in place of
+Overleaf's, so you don't wait for Overleaf to compile it.
+If the project isn't on your computer, the panel offers to clone it,
+to `~/calkit/NAME` unless you choose another folder, and if it's there
+more than once, e.g., as Git worktrees, it uses the one in `~/calkit`, or
+the one you pick.
+Overleaf credentials come from your Calkit account, as for
+`calkit overleaf sync`, so connecting Overleaf once works on every
+computer you use.
+Without the connection, or for a project that isn't on your computer,
+the panel works through calkit.io as before.
+
 ## Overleaf
 
 <!-- prettier-ignore -->

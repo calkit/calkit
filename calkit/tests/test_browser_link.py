@@ -255,6 +255,10 @@ def test_get_checkout_status(tmp_path):
     git("init", "-q", "--bare", str(remote), cwd=tmp_path)
     git("remote", "add", "origin", str(remote), cwd=project)
     git("push", "-q", "-u", "origin", "main", cwd=project)
+    # Before a sync from here, e.g., when the hub syncs it, there's nothing
+    # to compare with
+    status = get_checkout_status(str(project))
+    assert status["overleaf"] == [{"path": "paper", "never_synced": True}]
     # Overleaf, as the last sync left it, with the same document
     clone = project / ".calkit" / "overleaf" / "abc123"
     os.makedirs(clone)

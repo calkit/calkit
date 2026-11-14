@@ -38,6 +38,8 @@ export interface CheckoutStatus {
     n_files_to_push?: number;
     n_files_to_delete?: number;
     syncing?: boolean;
+    /** Not synced from this checkout, e.g., since the hub syncs it. */
+    never_synced?: boolean;
     error?: string;
   }[];
 }

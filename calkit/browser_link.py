@@ -227,10 +227,12 @@ def get_checkout_status(wdir: str) -> dict:
         clone_path = os.path.join(
             wdir, calkit.overleaf.get_project_dir(project_id)
         )
-        # Not synced from this checkout yet
-        if not os.path.isdir(os.path.join(clone_path, ".git")):
-            continue
         folder: dict[str, Any] = {"path": path_in_project}
+        # Without a sync from this checkout, e.g., when the hub syncs it,
+        # there's nothing here to compare with
+        if not os.path.isdir(os.path.join(clone_path, ".git")):
+            overleaf.append(folder | {"never_synced": True})
+            continue
         # A sync going on would change what it's compared with
         file_lock = FileLock(clone_path + ".lock")
         try:

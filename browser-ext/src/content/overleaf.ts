@@ -1558,9 +1558,8 @@ function renderOpenLocally(project: string, path: string): HTMLElement {
 
 /**
  * What's on this computer that Overleaf won't see until it's saved and
- * synced, e.g., a figure remade by running a notebook, if the extension is
- * connected to Calkit here. Empty otherwise, so nothing nags someone who
- * works some other way.
+ * synced, e.g., a figure remade by running a notebook, or a way to connect
+ * if the extension isn't connected to Calkit here.
  */
 function renderLocalChanges(project: string): HTMLElement {
   const container = el("div");
@@ -1570,6 +1569,24 @@ function renderLocalChanges(project: string): HTMLElement {
   void (async () => {
     const status = await (localStatus as Promise<LocalStatus>);
     if (!status.version) {
+      // Asked again next time, e.g., once it's been connected
+      localStatus = null;
+      container.append(
+        el("div", { class: "row", style: { marginTop: "8px" } }, [
+          el("div", {
+            class: "dim small grow",
+            text: status.permitted
+              ? `${status.error ?? "Calkit on this computer didn't answer"}.`
+              : "Connect this computer to see what's on it that Overleaf " +
+                "doesn't have yet.",
+          }),
+          el("button", {
+            class: "action secondary",
+            text: "Connect",
+            onClick: () => void send({ type: "local.openOptions" }),
+          }),
+        ]),
+      );
       return;
     }
     let checkouts: CheckoutStatus[];
@@ -1610,6 +1627,13 @@ function renderLocalChanges(project: string): HTMLElement {
           (folder.n_files_to_push ?? 0) + (folder.n_files_to_delete ?? 0);
         if (folder.syncing) {
           lines.push(el("div", { class: "small", text: "Syncing now" }));
+        } else if (folder.never_synced) {
+          lines.push(
+            el("div", {
+              class: "small",
+              text: `${folder.path} hasn't been synced from here yet`,
+            }),
+          );
         } else if (folder.error) {
           lines.push(errorMessage(folder.error));
         } else if (n) {

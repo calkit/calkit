@@ -62,6 +62,11 @@ RUN fmtutil-sys --all
 # mnras ask for. Without it TeX generates bitmaps at run time, which
 # needs a writable texmf-var and produces worse PDFs; texmf-var is made
 # writable below anyway, for whatever else wants to generate a font.
+# dvipng, type1cm and underscore are for Matplotlib's text.usetex,
+# which runs latex and dvipng itself, so nothing fetches what's missing
+# on demand, and dvipng is a compiled tool anyway. With them, a Docker
+# environment built on this image can render plot labels with LaTeX.
+# About 1 MB together.
 # The last four are asked for by documents rather than by any class:
 # units, cross-references and algorithm listings. About 110 kB together.
 RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
@@ -123,6 +128,9 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
             cm-super \
             sectsty \
             cite \
+            dvipng \
+            type1cm \
+            underscore \
             siunitx \
             cleveref \
             algorithms \

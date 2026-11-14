@@ -134,6 +134,15 @@ export type Request =
       shows?: string;
       /** Which of the script's outputs that is. */
       produces?: string;
+      /**
+       * Data it reads from outside the project, to read from the project
+       * instead, with any files uploaded, base64-encoded.
+       */
+      data?: {
+        external: string;
+        path: string;
+        files: { path: string; content: string }[];
+      }[];
       save?: boolean;
     }
   | {
@@ -178,6 +187,9 @@ export type Request =
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }
   | { type: "overleaf.connectSession" }
+  | { type: "overleaf.openTokenSettings" }
+  | { type: "overleaf.tokenTab" }
+  | { type: "overleaf.returnFromTokenTab" }
   | {
       type: "overleaf.import";
       owner: string;
@@ -255,6 +267,9 @@ export interface ResponseMap {
   "overleaf.sync": OverleafSyncResponse;
   "overleaf.setToken": { message: string };
   "overleaf.connectSession": { message: string };
+  "overleaf.openTokenSettings": null;
+  "overleaf.tokenTab": { requested: boolean };
+  "overleaf.returnFromTokenTab": { returned: boolean };
   "overleaf.import": { path: string; title: string };
   "references.list": References[];
   "references.search": ReferenceSearchMatch[];

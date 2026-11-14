@@ -9,6 +9,7 @@ from app.pipeline import (
     StageStatus,
     _precompute_storage_presence,
     calc_overall_pipeline_status,
+    color_mermaid_by_status,
     compute_stage_statuses,
     find_frozen_tainted_stages,
     find_stage_for_path,
@@ -1198,3 +1199,25 @@ def test_find_frozen_tainted_stages() -> None:
         )
         == set()
     )
+
+
+def test_color_mermaid_by_status() -> None:
+    # Labels are escaped as Mermaid entity codes, which are matched decoded
+    mermaid = "\n".join(
+        [
+            "flowchart TD",
+            '\tnode1["plot"]',
+            '\tnode2["say#34;hi#34;@1"]',
+            '\tnode3["other"]',
+        ]
+    )
+    colored = color_mermaid_by_status(
+        mermaid,
+        {
+            "plot": StageStatus(status="stale"),
+            'say"hi"@1': StageStatus(status="up-to-date"),
+        },
+    )
+    assert "\tclass node1 stale" in colored
+    assert "\tclass node2 up-to-date" in colored
+    assert "node3 " not in colored.split("classDef", 1)[1]

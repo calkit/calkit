@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 import calkit
 import calkit.docker
+import calkit.environments.docker
 import calkit.resources
 from calkit.cli.update import update_app
 
@@ -28,9 +29,7 @@ def test_update_project_config(tmp_dir, monkeypatch):
     result = runner.invoke(update_app, ["devcontainer"])
     assert result.exit_code == 0
     with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
-        assert json.load(f) == calkit.resources.load_json(
-            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
-        )
+        assert f.read() == calkit.resources.make_devcontainer_spec({})
     result = runner.invoke(update_app, ["vscode-config"])
     assert result.exit_code == 0
     for fname in calkit.resources.VSCODE_FNAMES:
@@ -50,6 +49,16 @@ def test_update_project_config(tmp_dir, monkeypatch):
     assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
     assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     assert not repo.git.status("--porcelain")
+    # A project with a Julia environment gets Julia installed too
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"jl": {"kind": "julia", "julia": "1.11"}}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        assert json.load(f) == calkit.resources.load_json(
+            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+        )
 
 
 def test_update_dataset(tmp_dir):
@@ -396,6 +405,7 @@ def test_update_conda_env(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+@pytest.mark.needs("juliaup")
 def test_update_environment(tmp_dir):
     # Test we can update an environment
     subprocess.check_call(["calkit", "init"])
@@ -450,6 +460,12 @@ def test_update_agent_skills_renames_skill_name_in_frontmatter(fake_home):
     ):
         content = (skills_dir / skill_name / "SKILL.md").read_text()
         assert f"name: {skill_name}" in content
+    # Frontmatter must be strict YAML, since Codex skips skills that aren't
+    for skill_md in skills_dir.glob("calkit-*/SKILL.md"):
+        frontmatter = skill_md.read_text().split("---")[1]
+        data = calkit.ryaml.load(frontmatter)
+        assert data["name"] == skill_md.parent.name
+        assert data["description"]
 
 
 def test_update_agent_skills_preserves_custom_skill(fake_home):
@@ -509,7 +525,7 @@ def test_update_docker_env_registry(tmp_dir):
     assert result.exit_code == 0, result.output
     env = calkit.load_calkit_info()["environments"]["main"]
     assert env["registry"] is None
-    assert calkit.docker.resolve_registry_prefix(env) is None
+    assert calkit.environments.docker.resolve_registry_prefix(env) is None
     with open("calkit.yaml") as f:
         assert "registry: none" not in f.read()
     # Nothing to update is a mistake worth reporting, not a no-op
@@ -551,15 +567,19 @@ def test_update_latex_image(tmp_dir, monkeypatch):
         },
     }
     calkit.save_calkit_info(ck_info)
-    lock_fpath = calkit.environments.get_all_docker_lock_fpaths("tex")[0]
+    lock_fpath = calkit.environments.docker.get_lock_fpaths("tex")[0]
     os.makedirs(os.path.dirname(lock_fpath))
     with open(lock_fpath, "w") as f:
         json.dump({"RepoDigests": ["sha256:old"]}, f)
     relocked = []
+    forced = []
     monkeypatch.setattr(
         calkit.cli.check,
         "check_environment",
-        lambda env_name, verbose=False: relocked.append(env_name),
+        lambda env_name, force=False, **kwargs: (
+            relocked.append(env_name),
+            forced.append(force),
+        ),
     )
     # Environments on Calkit's or TeX Live's image move to the pinned one and
     # are relocked, with stale locks removed so the old image isn't pulled
@@ -582,6 +602,12 @@ def test_update_latex_image(tmp_dir, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "No LaTeX environments to update" in result.output
     assert relocked == []
+    # Relocking a Docker env forces a rebuild, as 'update env --lock' does
+    forced.clear()
+    result = runner.invoke(update_app, ["docker-env", "-n", "tex", "--relock"])
+    assert result.exit_code == 0, result.output
+    assert relocked == ["tex"]
+    assert forced == [True]
 
 
 def test_update_imported_from_detects_the_kind(tmp_dir):
@@ -667,8 +693,16 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
 
     existing: set[str] = set()
     on_hub: dict[str, dict] = {}
+    # What looking up the user raises, and whether each lookup could log in
+    user_error: dict[str, Exception | None] = {"error": None}
+    login_allowed: list[bool] = []
 
-    def get(path, params=None, **kwargs):
+    def get(path, params=None, allow_login=True, **kwargs):
+        if path == "/user":
+            login_allowed.append(allow_login)
+            if user_error["error"] is not None:
+                raise user_error["error"]
+            return {"github_username": "someone"}
         if path == "/projects":
             found = on_hub.get(params["github_repo"].lower())
             return {
@@ -687,9 +721,6 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
 
     monkeypatch.setattr(calkit.hub, "post", post)
     monkeypatch.setattr(calkit.hub, "get", get)
-    monkeypatch.setattr(
-        calkit.hub, "get_current_user", lambda: {"github_username": "someone"}
-    )
     monkeypatch.setattr(calkit.hub, "get_hub_url", lambda: "https://hub.test")
     monkeypatch.setattr(calkit.dvc, "configure_remote", configure_remote)
     monkeypatch.setattr(
@@ -731,6 +762,12 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     existing.add("/projects/someone/my-project")
     n_posted = len(posted)
     git("remote", "set-url", "origin", remote["url"])
+    # Nor is anything pushed to it meanwhile, e.g., by a collaborator,
+    # dropped from the history, where a push would be refused instead
+    other = str(tmp_path_factory.mktemp("other"))
+    git("clone", "-q", remote["url"], other)
+    git("commit", "-q", "--allow-empty", "-m", "Meanwhile", cwd=other)
+    git("push", "-q", "origin", "main", cwd=other)
     with open("calkit.yaml", "w") as f:
         f.write("name: my-project\ntitle: My project\n")
     git("commit", "-q", "-am", "Disconnect")
@@ -739,13 +776,16 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert "already exists" in result.output
     assert len(posted) == n_posted
     assert calkit.load_calkit_info()["hub"] == "https://hub.test"
+    assert "Meanwhile" not in git("log", "--format=%s")
     # An org's repo already on the hub is found by its URL, and the remote
     # is named for the account that owns it there, which is lowercase
     on_hub["acme-lab/widget"] = {
         "owner_account_name": "acme-lab",
         "name": "widget",
     }
-    git("remote", "set-url", "origin", "git@github.com:Acme-Lab/widget.git")
+    # A remote not named 'origin' is used if it's the only one
+    git("remote", "rename", "origin", "github")
+    git("remote", "set-url", "github", "git@github.com:Acme-Lab/widget.git")
     with open("calkit.yaml", "w") as f:
         f.write("title: Widget\n")
     result = runner.invoke(
@@ -770,6 +810,52 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
     assert remote_names[-1] == "acme-lab/widget"
     assert calkit.load_calkit_info()["owner"] == "acme-lab"
+    # Someone not logged in is offered the login, then connected, but the
+    # lookup never logs in on its own, so declining is possible
+    import calkit.core
+
+    def run_device_flow():
+        user_error["error"] = None
+        return "token"
+
+    monkeypatch.setattr(calkit.hub, "run_device_flow", run_device_flow)
+    for answer, tty, no_login, error in [
+        ("n\n", True, False, ValueError("No token")),
+        ("", False, False, ValueError("No token")),
+        ("", True, True, ValueError("No token")),
+        ("", True, False, RuntimeError("503: Unavailable")),
+        ("y\n", True, False, ValueError("No token")),
+    ]:
+        monkeypatch.setattr(calkit.core, "is_tty", lambda tty=tty: tty)
+        if no_login:
+            monkeypatch.setenv("CALKIT_NO_INTERACTIVE_LOGIN", "1")
+        else:
+            monkeypatch.delenv("CALKIT_NO_INTERACTIVE_LOGIN", raising=False)
+        user_error["error"] = error
+        on_hub.clear()
+        with open("calkit.yaml", "w") as f:
+            f.write("name: widget\ntitle: Widget\n")
+        result = runner.invoke(
+            update_app,
+            ["hub", "https://hub.test", "--no-commit"],
+            input=answer,
+        )
+        asked = "Log in now?" in result.output
+        if answer == "y\n":
+            assert result.exit_code == 0, result.output
+            assert user_error["error"] is None
+            assert calkit.load_calkit_info()["owner"] == "acme-lab"
+        elif isinstance(error, RuntimeError):
+            # Logging in can't fix a hub that's down
+            assert result.exit_code != 0
+            assert "Failed to reach" in result.output
+            assert not asked
+        else:
+            # Declining, or with no way to ask, says how to log in
+            assert result.exit_code != 0
+            assert "calkit hub login" in result.output
+            assert asked == (tty and not no_login)
+    assert login_allowed and not any(login_allowed)
 
 
 def test_update_env_lock(tmp_dir, monkeypatch):
@@ -797,6 +883,7 @@ def test_update_env_lock(tmp_dir, monkeypatch):
             "path": "requirements.txt",
             "prefix": ".venv",
         },
+        "job": {"kind": "slurm", "host": "cluster.invalid"},
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -819,6 +906,28 @@ def test_update_env_lock(tmp_dir, monkeypatch):
     assert envs.read_system_env_lock(
         env_name="bench", env=env
     ) == envs.get_system_lock_data(["os", "cpu-count"])
+    # Any other kind is rebuilt from its spec, taking the newest versions it
+    # allows rather than the ones its lock pins
+    with open("requirements.txt", "w") as f:
+        f.write("six\n")
+    py_env = ck_info["environments"]["py"]
+    py_lock_fpath = envs.get_env_lock_fpath(
+        env=py_env, env_name="py", as_posix=False
+    )
+    assert py_lock_fpath is not None
+    os.makedirs(os.path.dirname(py_lock_fpath), exist_ok=True)
+    with open(py_lock_fpath, "w") as f:
+        f.write("six==1.15.0\n")
+    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(py_lock_fpath) as f:
+        relocked = f.read()
+    assert "six==" in relocked
+    assert "six==1.15.0" not in relocked
+    # A scheduler env is locked to its config, so there's nothing to redo
+    result = runner.invoke(update_app, ["env", "-n", "job", "--lock"])
+    assert result.exit_code == 0, result.output
+    assert "nothing to relock" in result.output
     # A remote env is locked to the far end, not this machine
     monkeypatch.setattr(
         calkit.workspace,
@@ -838,8 +947,6 @@ def test_update_env_lock(tmp_dir, monkeypatch):
         assert json.load(f) == envs.get_system_lock_data(["os"])
     # Nothing to relock without machine properties or a machine
     result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
-    assert result.exit_code != 0
-    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
     assert result.exit_code != 0
     result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
     assert result.exit_code != 0
@@ -1195,3 +1302,132 @@ def test_update_question(tmp_dir):
     assert q["validations"] == [{"by": ada}]
     assert q["verifications"][0]["notes"] == "Read the code."
     assert ProjectInfo.model_validate(calkit.load_calkit_info())
+
+
+def test_update_markdown(tmp_dir):
+    def run(*args):
+        return subprocess.run(
+            ["calkit", "update", "markdown", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    subprocess.run(["git", "init", "-q"], check=True)
+    with open("calkit.yaml", "w") as f:
+        f.write("name: blog\n")
+    os.makedirs("_posts")
+    os.makedirs("_data")
+    with open("_data/r.json", "w") as f:
+        json.dump({"summary": {"frac": 0.6}, "n": 15}, f)
+    post = (
+        "Only <!-- ckvalue _data/r.json summary.frac .0% -->?"
+        "<!-- /ckvalue --> of\n"
+        "<!-- ckvalue _data/r.json n -->?<!-- /ckvalue --> runs.\n"
+    )
+    with open("_posts/a.md", "w") as f:
+        f.write(post)
+    with open("_posts/b.md", "w") as f:
+        f.write("No values here.\n")
+    # With no files named and no markdown stages, there's nothing to do
+    res = run()
+    assert res.returncode != 0
+    assert "none are declared as markdown stages" in res.stdout + res.stderr
+    # Checking reports what's stale without writing it
+    res = run("--check", "_posts/a.md", "_posts/b.md")
+    assert res.returncode != 0
+    assert "Values in _posts/a.md are out of date" in res.stdout
+    with open("_posts/a.md") as f:
+        assert f.read() == post
+    # Updating writes only the file that shows values
+    res = run("_posts/a.md", "_posts/b.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert res.stdout.strip() == "Updated values in _posts/a.md"
+    with open("_posts/a.md") as f:
+        text = f.read()
+    assert "-->60%<!-- /ckvalue -->" in text
+    assert "n -->15<!-- /ckvalue -->" in text
+    assert run("--check", "_posts/a.md").returncode == 0
+    # A block that isn't ended fails with what to add, and a bracketed
+    # format, as LaTeX's \\ckvalue takes one, is moved after the key
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "<!-- calkit values path=_data/r.json -->\n\n"
+            "N is <!-- calkit value key=n -->15<!-- /calkit value -->.\n"
+        )
+    res = run("_posts/old.md")
+    assert res.returncode != 0
+    assert "_posts/old.md:1" in res.stdout + res.stderr
+    assert "add '<!-- /calkit values -->'" in res.stdout + res.stderr
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "N is <!-- ckvalue[.1f] _data/r.json n -->15<!-- /ckvalue -->\n"
+        )
+    assert run("--check", "_posts/old.md").returncode != 0
+    res = run("_posts/old.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("_posts/old.md") as f:
+        assert f.read() == (
+            "N is <!-- ckvalue _data/r.json n .1f -->15.0<!-- /ckvalue -->\n"
+        )
+    # A markdown stage's file is updated with no files named
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "name: blog\npipeline:\n  stages:\n    post:\n"
+            "      kind: markdown\n      target_path: _posts/a.md\n"
+        )
+    with open("_data/r.json", "w") as f:
+        json.dump({"summary": {"frac": 0.8}, "n": 15}, f)
+    res = run()
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("_posts/a.md") as f:
+        assert "-->80%<!-- /ckvalue -->" in f.read()
+    # A key the results file doesn't have is reported with its line
+    with open("_posts/a.md", "a") as f:
+        f.write("<!-- ckvalue _data/r.json missing -->?<!-- /ckvalue -->\n")
+    res = run("_posts/a.md")
+    assert res.returncode != 0
+    assert "_posts/a.md:3" in res.stdout + res.stderr
+    assert "no key 'missing'" in res.stdout + res.stderr
+    # Images are checked against their imports, whether written from the
+    # project root, as a website serves them, or relative to the file.
+    # Ones that weren't imported, or that only appear in code, are not.
+    os.makedirs("images/p")
+    for name in ["a.png", "b.png", "photo.jpg"]:
+        with open(f"images/p/{name}", "w") as f:
+            f.write(name)
+    ck_info = calkit.load_calkit_info()
+    ck_info["figures"] = [
+        {"path": f"images/p/{name}", "imported_from": {"project": "o/p"}}
+        for name in ["a.png", "b.png"]
+    ]
+    calkit.save_calkit_info(ck_info)
+    for name in ["a.png", "b.png"]:
+        path = f"images/p/{name}"
+        calkit.provenance.write_import_lock(
+            path, {"hash": calkit.provenance.hash_path(path)}
+        )
+    with open("_posts/c.md", "w") as f:
+        f.write(
+            "![A](/images/p/a.png)\n![B](../images/p/b.png)\n"
+            "![Photo](/images/p/photo.jpg)\n`![C](/images/p/c.png)`\n"
+        )
+    res = run("--check", "_posts/c.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("images/p/a.png", "a") as f:
+        f.write("edited")
+    os.remove("images/p/b.png")
+    res = run("_posts/c.md")
+    out = res.stdout + res.stderr
+    # Reported, but nothing to update, so not a failure unless checking
+    assert res.returncode == 0, out
+    assert "images/p/a.png, which has been edited since it was imported" in (
+        out
+    )
+    assert "images/p/b.png, imported from o/p, which does not exist" in out
+    assert "photo.jpg" not in out
+    assert "c.png" not in out
+    res = run("--check", "_posts/c.md")
+    assert res.returncode != 0
+    assert "2 imported image(s) don't match their imports" in (
+        res.stdout + res.stderr
+    )

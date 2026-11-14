@@ -1,8 +1,8 @@
 [build-system]
 requires = [
-  # 1.32.1 made the build hook interface take two type parameters, which
-  # hatch-jupyter-builder (last released 2024) subscripts with one
-  "hatchling>=1.5.0,<1.32.5",
+  # 1.32.1 and 1.32.3 gave the build hook interface a second type parameter,
+  # breaking hatch-jupyter-builder (subscripts it with one); 1.32.4 reverted it
+  "hatchling>=1.5.0,<1.33.1",
   "jupyter-builder>=1.2.3",
   "hatch-nodejs-version>=0.3.2",
   "hatch-vcs>=0.3.0",
@@ -34,7 +34,6 @@ dependencies = [
   "docx2pdf",
   "dulwich>=1.2.5",
   "dvc[all]==3.67.1",
-  "fastapi",
   "filelock",
   "gitpython",
   "keyring",
@@ -50,7 +49,7 @@ dependencies = [
   # DVC) still reads Trie._NONE_STEP in longest_prefix, so every DVC index
   # diff raises AttributeError; see treeverse/sqltrie#97
   "pygtrie<2.6.0",
-  "pyjwt",
+  "pyjwt[crypto]",
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
@@ -62,8 +61,8 @@ dependencies = [
   # and without it DVC just falls back to pure Python
   "ruamel.yaml.clib>=0.2.15; platform_python_implementation == 'CPython' and python_version < '3.15' and (sys_platform == 'darwin' or (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64' or platform_machine == 'i686')) or (sys_platform == 'win32' and (platform_machine == 'AMD64' or platform_machine == 'x86')))",
   "rich",
-  "typer==0.27.3",
-  "uvicorn",
+  "typer==0.29.1",
+  "websockets",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
   "papermill>=2.6.0",
@@ -216,6 +215,7 @@ module = [
     "psutil",
     "simpy",
     "pypandoc",
+    "configobj",
 ]
 ignore_missing_imports = true
 
@@ -269,7 +269,12 @@ members = ["hub/backend"]
 # Version is dynamic, derived from the Git tags by hatch-vcs; see the same
 # setting in hub/backend/pyproject.toml for why uv needs to be told that
 [tool.uv]
-cache-keys = [{ git = { commit = true, tags = true } }]
+# Listing any key replaces uv's default of pyproject.toml, without which
+# an uncommitted dependency change is ignored
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
+]
 # 'emails' and 'encutils' (via the hub backend and cssutils) ask for chardet
 # with no upper bound, so resolution picks up 7.x. requests asserts chardet
 # < 6 at import and warns on every single command when it doesn't hold, which

@@ -4,9 +4,12 @@ import logging
 import os
 import stat
 import subprocess
+import sys
+from pathlib import Path
 
 import dvc.repo
 import git
+import jwt
 import pytest
 import zc.lockfile
 from configobj import ConfigObj
@@ -14,6 +17,8 @@ from dvc.config_schema import SCHEMA, Invalid
 from dvc_objects.fs import known_implementations
 
 import calkit
+import calkit.latex
+import calkit.pipeline
 from calkit.dvc import register_ck_scheme
 from calkit.dvc.core import _tolerate_lock_release_failures
 
@@ -146,6 +151,67 @@ def test_tolerate_lock_release_failures(tmp_dir, caplog):
         )
     finally:
         zc.lockfile._unlock_file = original
+
+
+def test_tolerate_purged_rwlock_entries(
+    tmp_dir: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    import sys
+
+    import dvc.rwlock
+
+    # Importing calkit.dvc installs the patch
+    import calkit.dvc  # noqa: F401
+
+    ours = {"pid": 1, "cmd": "dvc repro s@a"}
+    theirs = {"pid": 2, "cmd": "dvc repro s@b"}
+    lock = {
+        "write": {"a.txt": ours, "b.txt": theirs},
+        "read": {"dep.txt": [ours, theirs], "a.txt": [ours]},
+    }
+    # Releasing entries that are still there removes only ours
+    with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+        dvc.rwlock._release_write(lock, ours, ["a.txt"])
+        dvc.rwlock._release_read(lock, ours, ["dep.txt", "a.txt"])
+    assert lock == {"write": {"b.txt": theirs}, "read": {"dep.txt": [theirs]}}
+    assert not caplog.records
+    # Entries another process already removed are skipped with a warning
+    # rather than failing a bare assert
+    with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+        dvc.rwlock._release_write(lock, ours, ["a.txt"])
+        dvc.rwlock._release_read(lock, ours, ["dep.txt", "a.txt"])
+        dvc.rwlock._release_write({}, ours, ["a.txt"])
+        dvc.rwlock._release_read({}, ours, ["a.txt"])
+    assert lock == {"write": {"b.txt": theirs}, "read": {"dep.txt": [theirs]}}
+    assert len(caplog.records) == 4
+    assert "removed DVC's lock on 'a.txt'" in caplog.records[0].getMessage()
+    # A stage whose entries are purged mid-run, as a DVC process on another
+    # machine does since it can't see our PID, still succeeds and is recorded
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    with open("purge.py", "w") as f:
+        f.write(
+            "import json\n"
+            "with open('.dvc/tmp/rwlock', 'w') as f:\n"
+            "    json.dump({}, f)\n"
+            "with open('out.txt', 'w') as f:\n"
+            "    f.write('sup')\n"
+        )
+    py = sys.executable.replace("\\", "/")
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  purged:\n"
+            f"    cmd: '\"{py}\" purge.py'\n"
+            "    deps:\n"
+            "      - purge.py\n"
+            "    outs:\n"
+            "      - out.txt\n"
+        )
+    assert calkit.dvc.run_dvc_command(["repro"]) == 0
+    with open("dvc.lock") as f:
+        lock_file = calkit.ryaml.load(f)
+    assert lock_file["stages"]["purged"]["outs"][0]["path"] == "out.txt"
 
 
 def test_memoized_hashes(tmp_dir, monkeypatch):
@@ -282,6 +348,16 @@ def test_detect_calkit_remote_type():
         calkit.dvc.detect_calkit_remote_type(http_name, "ssh://git@host/repo")
         is None
     )
+    # Schemes in any case, since DVC takes them so, but not others that
+    # merely start like HTTP
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "HTTPS://evil.example")
+        == "http"
+    )
+    assert calkit.dvc.detect_calkit_remote_type(ck_name, "CK://o/p") == "ck"
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "httpx://evil") is None
+    )
 
 
 def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
@@ -393,11 +469,9 @@ def test_set_remote_auth_ck_remote_clears_local_http_auth(
             "    url = https://example.com\n"
         )
     calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+    # Along with the URL it was stored for, so the repo's ck:// one is used
     cfg = ConfigObj(str(fpath), encoding="utf-8")
-    section = cfg[f'remote "{remote_name}"']
-    assert "custom_auth_header" not in section
-    assert "password" not in section
-    assert section["url"] == "https://example.com"  # type: ignore
+    assert f'remote "{remote_name}"' not in cfg
 
 
 def test_data_status_as_posix():
@@ -588,6 +662,200 @@ def test_commit_path_with_missing_dep(tmp_dir):
     assert "md5" in lock["stages"]["my-stage"]["outs"][0]
 
 
+def test_set_remote_auth_only_for_hub_remotes(monkeypatch, tmp_path):
+    remote_name = calkit.dvc.make_remote_name()
+    monkeypatch.setattr(
+        calkit.hub, "get_base_url", lambda: "https://api.calkit.io"
+    )
+    calls = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda args, cwd=None: calls.append(args) or 0,
+    )
+    settings = calkit.config.read()
+    monkeypatch.setattr(settings, "dvc_token", "ckp_token", raising=False)
+    monkeypatch.setattr(calkit.config, "read", lambda: settings)
+    for url, sent in [
+        ("https://api.calkit.io/projects/o/p/dvc", True),
+        ("HTTPS://API.calkit.io:443/projects/o/p/dvc", True),
+        # A repo can name a remote like the hub's and point it anywhere
+        ("https://attacker.example/dvc", False),
+        ("https://api.calkit.io.attacker.example/dvc", False),
+        ("HTTPS://attacker.example/dvc", False),
+        ("https://api.calkit.io@attacker.example/dvc", False),
+        ("https://api.calkit.io:8443/dvc", False),
+        ("http://api.calkit.io/dvc", False),
+    ]:
+        calls.clear()
+        monkeypatch.setattr(
+            calkit.dvc.core,
+            "get_remotes",
+            lambda wdir=None, url=url: {remote_name: url},
+        )
+        # Set while it pointed at the hub, which a pull can change
+        (tmp_path / ".dvc").mkdir(exist_ok=True)
+        fpath = tmp_path / ".dvc" / "config.local"
+        fpath.write_text(
+            f'[remote "{remote_name}"]\n'
+            "    custom_auth_header = Authorization\n"
+            "    password = Bearer ckp_token\n"
+        )
+        calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+        assert bool(calls) == sent, url
+        if sent:
+            assert calls[-1][-1] == "Bearer ckp_token"
+            # With the URL it's for, first, which the repo can't change
+            assert calls[0][-2:] == ["url", url]
+        else:
+            assert "ckp_token" not in fpath.read_text(), url
+    # In a hub link's session, nothing's made or written, since its tokens
+    # are short-lived and can't make lasting ones, but a remote set up
+    # before keeps its token
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "get_remotes",
+        lambda wdir=None: {remote_name: "https://api.calkit.io/p/dvc"},
+    )
+    monkeypatch.setenv(calkit.hub.LINK_SOCKET_ENV, "/nowhere")
+    monkeypatch.setenv(calkit.hub.LINK_API_URL_ENV, "https://api.calkit.io")
+    monkeypatch.setattr(calkit.config, "read", lambda: 1 / 0)
+    warnings = []
+    monkeypatch.setattr(
+        calkit.dvc.core.logger, "warning", lambda msg: warnings.append(msg)
+    )
+    for kept in [True, False]:
+        calls.clear()
+        # Stored with the URL it's for, as set up before
+        fpath.write_text(
+            f'[remote "{remote_name}"]\n'
+            "    url = https://api.calkit.io/p/dvc\n"
+            "    password = Bearer ckp_token\n"
+            if kept
+            else ""
+        )
+        calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+        assert calls == []
+        assert ("ckp_token" in fpath.read_text()) == kept
+        assert bool(warnings) != kept
+        assert all("ck://" in w for w in warnings)
+
+
+def test_clear_off_hub_auth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dvc_dir = tmp_path / ".dvc"
+    dvc_dir.mkdir()
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    hub_url = "https://api.calkit.io/projects/o/p/dvc"
+    # The repo says where remotes are, which a pull can change
+    (dvc_dir / "config").write_text(
+        "['remote \"calkit\"']\n"
+        f"    url = {hub_url}\n"
+        "['remote \"calkit:o/q\"']\n"
+        "    url = https://attacker.example/dvc\n"
+        "['remote \"dav\"']\n"
+        "    url = webdavs://attacker.example/dvc\n"
+        "['remote \"mine\"']\n"
+        "    url = https://storage.example/dvc\n"
+        "['remote \"keyed\"']\n"
+        "    url = https://storage.example/keyed\n"
+        "['remote \"legacy\"']\n"
+        "    url = https://attacker.example/legacy\n"
+        "['remote \"older\"']\n"
+        f"    url = {hub_url}\n"
+        "['remote \"session\"']\n"
+        "    url = https://attacker.example/session\n"
+    )
+    legacy = jwt.encode({"sub": "u", "token_id": "t"}, "k", algorithm="HS256")
+    session = jwt.encode(
+        {"sub": "u", "machine_id": "m"}, "k", algorithm="HS256"
+    )
+    local = dvc_dir / "config.local"
+    local.write_text(
+        # Stored with the URL it's for, which the repo still says
+        "['remote \"calkit\"']\n"
+        f"    url = {hub_url}\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+        # Stored for the hub, but the repo now points it elsewhere
+        "['remote \"calkit:o/q\"']\n"
+        "    url = https://api.calkit.io/projects/o/q/dvc\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+        # Stored without a URL, as before they were, so its origin is unknown
+        "['remote \"dav\"']\n"
+        "    token = ckp_token\n"
+        "    ssl_verify = false\n"
+        # The user's own credentials for a remote of their own stay
+        "['remote \"mine\"']\n"
+        "    user = me\n"
+        "    password = hunter2\n"
+        "['remote \"keyed\"']\n"
+        "    custom_auth_header = X-Api-Key\n"
+        "    password = their-key\n"
+        # Older hub tokens are JWTs
+        "['remote \"legacy\"']\n"
+        "    custom_auth_header = Authorization\n"
+        f"    password = Bearer {legacy}\n"
+        # Stored without one by an older version, for a URL on the hub,
+        # which it's pinned to
+        "['remote \"older\"']\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+        # As are a hub link's sessions', stored without one too
+        "['remote \"session\"']\n"
+        "    custom_auth_header = Authorization\n"
+        f"    password = Bearer {session}\n"
+        # A remote only this machine has, stored with its URL
+        "['remote \"local-only\"']\n"
+        f"    url = {hub_url}\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+    )
+    monkeypatch.setattr(
+        calkit.hub, "get_base_url", lambda: "https://api.calkit.io"
+    )
+    # Found from a folder inside the project, as DVC finds it
+    cleared = calkit.dvc.clear_off_hub_auth(wdir=str(sub))
+    assert sorted(cleared) == ["calkit:o/q", "dav", "legacy", "session"]
+    cfg = ConfigObj(str(local), encoding="utf-8")
+    assert cfg['remote "calkit"']["password"] == "Bearer ckp_token"
+    # The repo's URL wins again, without the token
+    assert 'remote "calkit:o/q"' not in cfg
+    assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}
+    assert cfg['remote "mine"']["password"] == "hunter2"
+    assert cfg['remote "keyed"']["password"] == "their-key"
+    assert 'remote "legacy"' not in cfg
+    assert cfg['remote "older"']["url"] == hub_url
+    assert cfg['remote "older"']["password"] == "Bearer ckp_token"
+    assert cfg['remote "local-only"']["password"] == "Bearer ckp_token"
+    # Every DVC command Calkit runs clears it first, in the repo DVC's own
+    # --cd names, if given
+    cfg['remote "dav"']["token"] = "ckp_token"
+    cfg.write()
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_cli", lambda argv: 0)
+    assert calkit.dvc.run_dvc_command(["pull"], cwd=str(sub)) == 0
+    cfg = ConfigObj(str(local), encoding="utf-8")
+    assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}
+    other = tmp_path.parent / f"{tmp_path.name}-nodvc"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    for argv in [
+        ["--cd", str(tmp_path), "pull"],
+        [f"--cd={tmp_path}", "pull"],
+    ]:
+        cfg['remote "dav"']["token"] = "ckp_token"
+        cfg.write()
+        assert calkit.dvc.run_dvc_command(argv) == 0
+        cfg = ConfigObj(str(local), encoding="utf-8")
+        assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}, argv
+    # Nothing to clear, or no DVC at all, changes nothing
+    assert calkit.dvc.clear_off_hub_auth(wdir=str(tmp_path)) == []
+    assert calkit.dvc.clear_off_hub_auth(wdir=str(other)) == []
+
+
 def test_ck_fs_reads_content_only_for_dirs() -> None:
     from calkit.dvc.core import CalkitDVCFileSystem
 
@@ -703,6 +971,21 @@ def test_get_storage_problems(tmp_dir):
         f.write("/values.tex\n")
     assert problems()["values.tex"]["kind"] == "ignored"
     os.remove("values.tex")
+    # And a declared reference report
+    ck_info["pipeline"]["stages"]["refs"] = {
+        "kind": "references-check",
+        "target_path": "main.tex",
+        "outputs": ["refs.json"],
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("refs.json", "w") as f:
+        f.write("{}")
+    with open(".gitignore", "a") as f:
+        f.write("/refs.json\n")
+    assert problems()["refs.json"]["kind"] == "ignored"
+    os.remove("refs.json")
+    del ck_info["pipeline"]["stages"]["refs"]
+    calkit.save_calkit_info(ck_info)
     # A path stored zipped and tracked by Git
     os.makedirs("zipped")
     with open("zipped/a.txt", "w") as f:
@@ -726,6 +1009,284 @@ def test_get_storage_problems(tmp_dir):
     assert "big.bin" not in large
 
 
+def test_get_git_output_paths(tmp_dir: str) -> None:
+    def get_paths(dvc_repo: dvc.repo.Repo | None = None) -> dict[str, str]:
+        base = Path(".").resolve()
+        return {
+            Path(path).relative_to(base).as_posix(): name
+            for path, name in calkit.dvc.get_git_output_paths(
+                dvc_repo=dvc_repo
+            ).items()
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    with open("README.md", "w") as f:
+        f.write(
+            "```sh calkit stage name=plot "
+            "outputs=[{path: figures, storage: git}, other.png]\n"
+            "echo\n"
+            "```\n"
+        )
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo",
+                "outputs": [
+                    {"path": "results", "storage": "git"},
+                    "data",
+                    {"path": "scratch", "storage": None},
+                ],
+            },
+            # Blocks of Markdown are stages of their own
+            "README.md": {"kind": "markdown", "target_path": "README.md"},
+            # Only an iterated stage's outputs stored in Git, though another's
+            # path would match its template
+            "it": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo {v}",
+                "iterate_over": [{"arg_name": "v", "values": ["a", "b"]}],
+                "outputs": [
+                    {"path": "data/{v}.csv", "storage": "git"},
+                    {"path": "data/{v}.full.csv", "storage": None},
+                ],
+            },
+            # As is each diff of a LaTeX document
+            "paper": {
+                "kind": "latex",
+                "environment": "_system",
+                "target_path": "paper/paper.tex",
+                "pdf_storage": "git",
+                "diffs": ["v1"],
+                "diff_pdf_storage": "git",
+            },
+        }
+    }
+    # An inline subproject's stages are run from here, but not an isolated
+    # one's, which has its own DVC repo
+    for sp, isolated in [("sub", False), ("iso", True)]:
+        os.makedirs(
+            os.path.join(sp, ".dvc" if isolated else ""), exist_ok=True
+        )
+        with open(os.path.join(sp, "calkit.yaml"), "w") as f:
+            calkit.ryaml.dump(
+                {
+                    "pipeline": {
+                        "stages": {
+                            "c": {
+                                "kind": "shell-command",
+                                "environment": "_system",
+                                "command": "echo",
+                                "outputs": [{"path": "out", "storage": "git"}],
+                            }
+                        }
+                    }
+                },
+                f,
+            )
+    ck_info["subprojects"] = [{"path": "sub"}, {"path": "iso"}]
+    calkit.save_calkit_info(ck_info)
+    diff_path = calkit.latex.get_diff_path("paper/paper.tex", "v1", "HEAD")
+    expected = {
+        "results": "make",
+        "figures": "README.md/plot",
+        "paper/paper.pdf": "paper",
+        diff_path: calkit.latex.get_diff_stage_name("paper", "v1", "HEAD"),
+        "sub/out": "sub/dvc.yaml:c",
+    }
+    # An iterated stage's are found in DVC's index, once compiled
+    assert get_paths() == expected
+    calkit.pipeline.to_dvc(write=True)
+    dvc_repo = calkit.dvc.get_dvc_repo()
+    try:
+        assert get_paths(dvc_repo) == expected | {
+            "data/a.csv": "it@a",
+            "data/b.csv": "it@b",
+        }
+    finally:
+        dvc_repo.close()
+
+
+def test_get_unstored_output_files(tmp_dir: str) -> None:
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def get_unstored(
+        stages: list[str] | None = None, tracked: bool = False
+    ) -> dict:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+        try:
+            return {
+                u["path"]: u
+                for u in calkit.dvc.get_unstored_output_files(
+                    dvc_repo=dvc_repo, stages=stages, tracked=tracked
+                )
+            }
+        finally:
+            dvc_repo.close()
+
+    def get_problems() -> dict:
+        return {
+            p["path"]: p
+            for p in calkit.dvc.get_storage_problems(large_mb=None)
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    # Only the outputs are run, so nothing is staged by the run itself
+    subprocess.check_call(["dvc", "config", "core.autostage", "false"])
+    with open(".gitignore", "a") as f:
+        f.write("*.log\n*.tmp\n/whole/\n")
+    with open(".dvcignore", "a") as f:
+        f.write("*.tmp\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": (
+                    "mkdir -p logs/sub data/cache whole "
+                    "&& echo a > logs/a.txt && echo l > logs/sub/run.log "
+                    "&& echo s > logs/skip.tmp && echo l > single.log "
+                    "&& echo d > data/d.csv && echo t > data/t.tmp "
+                    "&& echo w > whole/w.txt && echo s > scratch.log"
+                ),
+                "outputs": [
+                    {"path": "logs", "storage": "git"},
+                    {"path": "single.log", "storage": "git"},
+                    {"path": "whole", "storage": "git"},
+                    # Untracked on purpose
+                    {"path": "scratch.log", "storage": None},
+                    "data",
+                ],
+            },
+            "other": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p other && echo o > other/o.log",
+                "outputs": [{"path": "other", "storage": "git"}],
+            },
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run"])
+    # Running un-ignores outputs stored in Git, so ignore them again
+    with open(".gitignore", "a") as f:
+        f.write("/single.log\n/whole/\n")
+    # Neither stores what Git ignores in an output stored in Git, unless
+    # .dvcignore excludes it too
+    unstored = get_unstored()
+    assert set(unstored) == {"logs", "single.log", "whole", "other"}
+    assert unstored["logs"] == {
+        "path": "logs",
+        "stage": "make",
+        "files": ["logs/sub/run.log"],
+        "rules": ["'*.log' in .gitignore"],
+    }
+    assert unstored["single.log"]["files"] == ["single.log"]
+    assert unstored["whole"]["rules"] == ["'/whole/' in .gitignore"]
+    # Only for the stages asked about
+    assert set(get_unstored(stages=["other"])) == {"other"}
+    # As storage problems, an output ignored as a whole is that rather than
+    # files in it
+    problems = get_problems()
+    assert problems["whole"]["kind"] == "ignored"
+    assert problems["single.log"]["kind"] == "ignored"
+    assert problems["logs"]["kind"] == "ignored-files"
+    assert problems["logs"]["store_in"] == "git"
+    assert problems["logs"]["files"] == ["logs/sub/run.log"]
+    assert problems["logs"]["message"] == (
+        "logs is stored in Git, but Git ignores 1 file in it: "
+        "logs/sub/run.log ('*.log' in .gitignore)"
+    )
+    assert "data" not in problems
+    # Once in Git, they're stored, though one that both leave out shouldn't
+    # be
+    git("add", "-f", "logs", "single.log", "whole", "other")
+    assert get_unstored() == {}
+    (problem,) = get_problems().values()
+    assert problem["kind"] == "excluded-tracked"
+    assert problem["files"] == ["logs/skip.tmp"]
+    assert get_unstored(tracked=True)["logs"]["files"] == ["logs/skip.tmp"]
+    git("rm", "-q", "--cached", "logs/skip.tmp")
+    assert get_problems() == {}
+    # A file DVC leaves out of a directory it caches, but Git tracks anyway,
+    # isn't tracked by both, though the rest of the directory can be
+    git("add", "-f", "data/t.tmp")
+    assert get_problems() == {}
+    git("add", "-f", "data/d.csv")
+    problem = get_problems()["data"]
+    assert problem["kind"] == "both"
+    assert problem["files"] == ["data/d.csv"]
+
+
+def test_stage_git_outputs(tmp_dir: str) -> None:
+    repo = git.Repo.init()
+    os.makedirs("out")
+    for fname in ["a.txt", "gone.txt"]:
+        with open(os.path.join("out", fname), "w") as f:
+            f.write(fname)
+    repo.git.add("out")
+    repo.git.commit("-qm", "Add")
+    os.remove(os.path.join("out", "gone.txt"))
+    with open(os.path.join("out", "new.txt"), "w") as f:
+        f.write("new")
+    with open(os.path.join("out", "big.bin"), "wb") as f:
+        f.truncate((calkit.dvc.LARGE_MB + 1) * 1024**2)
+    # Deletions and new files are staged, but not one too large for Git
+    assert calkit.dvc.stage_git_outputs(repo, ["out"]) == ["out/big.bin"]
+    assert repo.git.diff("--cached", "--name-status").split() == [
+        "D",
+        "out/gone.txt",
+        "A",
+        "out/new.txt",
+    ]
+    # A notebook goes into Git as DVC hashes it, not as a clean filter like
+    # nbstripout would leave it, whether added or force-added
+    repo.git.config("filter.strip.clean", "sed s/output//")
+    with open(".gitattributes", "w") as f:
+        f.write("*.ipynb filter=strip\n")
+    with open(".gitignore", "w") as f:
+        f.write("ignored/\n")
+    for dname in ["out", "ignored"]:
+        os.makedirs(dname, exist_ok=True)
+        with open(os.path.join(dname, "n.ipynb"), "w") as f:
+            f.write("output\n")
+    calkit.dvc.stage_git_outputs(repo, ["out"])
+    calkit.dvc.force_add_ignored_files(repo, ["ignored/n.ipynb"])
+    # Paths are only themselves, not patterns
+    for fname in ["d[1].csv", "d1.csv"]:
+        with open(os.path.join("ignored", fname), "w") as f:
+            f.write("d")
+    calkit.dvc.force_add_ignored_files(repo, ["ignored/d[1].csv"])
+    assert repo.git.ls_files("ignored").split() == [
+        "ignored/d[1].csv",
+        "ignored/n.ipynb",
+    ]
+    for dname in ["out", "ignored"]:
+        assert repo.git.show(f":{dname}/n.ipynb") == "output"
+
+
+def test_autostage_enabled(tmp_dir: str) -> None:
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "dvc", "remote", "add", "-f", "calkit", "ck://a/b"]
+    )
+    assert calkit.dvc.autostage_enabled()
+    # Read before anything else opens the repo, which then accepts the 'ck'
+    # remote, in a process of its own, since what's registered is global
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-c",
+            "import calkit.dvc as d; d.autostage_enabled(); d.get_dvc_repo()",
+        ]
+    )
+
+
 def test_split_lock_stage_name():
     assert calkit.dvc.split_lock_stage_name("a") == (None, "a")
     assert calkit.dvc.split_lock_stage_name("sub/dvc.yaml:a") == ("sub", "a")
@@ -734,3 +1295,44 @@ def test_split_lock_stage_name():
     assert calkit.dvc.split_lock_stage_name("sub\\dvc.yaml:a") == ("sub", "a")
     # A colon that isn't after a dvc.yaml is part of the name
     assert calkit.dvc.split_lock_stage_name("a:b") == (None, "a:b")
+
+
+def test_ensure_writable_site_cache(tmp_path, monkeypatch):
+    import dvc.dirs
+
+    if sys.platform == "win32":
+        pytest.skip("relies on POSIX permissions")
+    if os.geteuid() == 0:
+        pytest.skip("root can write anywhere")
+    shared = tmp_path / "var-tmp" / "dvc"
+    fallback = str(tmp_path / "cache" / "dvc" / "site")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.delenv("DVC_SITE_CACHE_DIR", raising=False)
+    monkeypatch.setattr(
+        dvc.dirs,
+        "site_cache_dir",
+        lambda config=None: os.getenv("DVC_SITE_CACHE_DIR") or str(shared),
+    )
+    # Missing under a writable parent, so DVC can create it
+    calkit.dvc.ensure_writable_site_cache()
+    assert "DVC_SITE_CACHE_DIR" not in os.environ
+    # Another user's, which we can't write to
+    (shared / "repo").mkdir(parents=True)
+    (shared / "repo").chmod(0o555)
+    try:
+        calkit.dvc.ensure_writable_site_cache()
+        assert os.environ["DVC_SITE_CACHE_DIR"] == fallback
+        # DVC then opens repos with the fallback
+        monkeypatch.chdir(tmp_path)
+        subprocess.check_call(["git", "init", "-q", "proj"])
+        subprocess.check_call(["dvc", "init", "-q"], cwd="proj")
+        monkeypatch.delenv("DVC_SITE_CACHE_DIR")
+        repo = calkit.dvc.get_dvc_repo("proj")
+        assert repo.site_cache_dir.startswith(fallback)
+        repo.close()
+        # One the user set is left alone
+        monkeypatch.setenv("DVC_SITE_CACHE_DIR", "/somewhere")
+        calkit.dvc.ensure_writable_site_cache()
+        assert os.environ["DVC_SITE_CACHE_DIR"] == "/somewhere"
+    finally:
+        (shared / "repo").chmod(0o755)

@@ -30,7 +30,7 @@ class EnvVarInput(Model):
     name: str = Field(description="Name of the environment variable.")
 
 
-def _get_tzinfo(name: str) -> Any:
+def get_tzinfo(name: str) -> Any:
     """The time zone named, without needing tzdata for UTC, e.g., on Windows."""
     import datetime
     import zoneinfo
@@ -50,6 +50,7 @@ _PERIOD_UNITS = {
     "day": ["d", "day", "days", "daily"],
     "week": ["w", "wk", "wks", "week", "weeks", "weekly"],
     "month": ["mo", "mon", "mos", "month", "months", "monthly"],
+    "quarter": ["q", "qtr", "qtrs", "quarter", "quarters", "quarterly"],
     "year": ["y", "yr", "yrs", "year", "years", "yearly", "annually"],
 }
 
@@ -74,6 +75,91 @@ def parse_period(value: str) -> tuple[int, str]:
     )
 
 
+# How many months each period counted in months spans
+_MONTHS_PER_UNIT = {"month": 1, "quarter": 3, "year": 12}
+
+
+def get_now(timezone: str) -> Any:
+    """The time now in a time zone, or the time ``CALKIT_NOW`` names."""
+    import datetime
+
+    tz = get_tzinfo(timezone)
+    override = os.environ.get("CALKIT_NOW")
+    if not override:
+        return datetime.datetime.now(tz)
+    # Python 3.10 can't read a trailing 'Z' for UTC
+    if override.endswith(("Z", "z")):
+        override = override[:-1] + "+00:00"
+    now = datetime.datetime.fromisoformat(override)
+    now = now.replace(tzinfo=tz) if now.tzinfo is None else now
+    return now.astimezone(tz)
+
+
+def floor_period(when: Any, count: int, unit: str) -> Any:
+    """The start of the period a time falls in, as a wall time without a
+    time zone.
+
+    Periods are counted in the time's own zone, so a day starts at midnight
+    there, and multiples are counted from the start of 1970 (or for weeks,
+    its first Monday), so every machine agrees where one starts.
+    """
+    import datetime
+
+    wall = when.replace(tzinfo=None)
+    if unit in _MONTHS_PER_UNIT:
+        months = (wall.year - 1970) * 12 + wall.month - 1
+        months -= months % (count * _MONTHS_PER_UNIT[unit])
+        return datetime.datetime(1970 + months // 12, months % 12 + 1, 1)
+    step = _period_timedelta(count, unit)
+    # The first Monday of 1970, so weeks start on Mondays
+    epoch = datetime.datetime(1970, 1, 5 if unit == "week" else 1)
+    return epoch + (wall - epoch) // step * step
+
+
+def next_period(start: Any, count: int, unit: str) -> Any:
+    """The start of the period after the one starting at ``start``."""
+    import datetime
+
+    if unit in _MONTHS_PER_UNIT:
+        months = start.year * 12 + start.month - 1
+        months += count * _MONTHS_PER_UNIT[unit]
+        return datetime.datetime(months // 12, months % 12 + 1, 1)
+    return start + _period_timedelta(count, unit)
+
+
+def _period_timedelta(count: int, unit: str) -> Any:
+    import datetime
+
+    return (
+        count
+        * {
+            "minute": datetime.timedelta(minutes=1),
+            "hour": datetime.timedelta(hours=1),
+            "day": datetime.timedelta(days=1),
+            "week": datetime.timedelta(weeks=1),
+        }[unit]
+    )
+
+
+def format_period(start: Any, unit: str) -> str:
+    """Name a period by its start, e.g., '2026-10-20', '2026-W43', '2026-10',
+    '2026Q4', or '2026'.
+    """
+    if unit == "year":
+        return f"{start.year:04d}"
+    if unit == "quarter":
+        return f"{start.year:04d}Q{(start.month - 1) // 3 + 1}"
+    if unit == "month":
+        return f"{start.year:04d}-{start.month:02d}"
+    formats = {
+        "minute": "%Y-%m-%dT%H:%M",
+        "hour": "%Y-%m-%dT%H:%M",
+        "day": "%Y-%m-%d",
+        "week": "%G-W%V",
+    }
+    return str(start.strftime(formats[unit]))
+
+
 class ScheduleInput(Model):
     """A schedule a stage runs on, e.g., once a day.
 
@@ -94,8 +180,8 @@ class ScheduleInput(Model):
     period: str = Field(
         description="How often the stage runs, i.e., once per this period, "
         "e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are "
-        "minutes, hours, days, weeks (starting on Monday), months, and "
-        "years; 'm' is a minute and 'mo' a month."
+        "minutes, hours, days, weeks (starting on Monday), months, quarters, "
+        "and years; 'm' is a minute and 'mo' a month."
     )
     timezone: str = Field(
         default="UTC",
@@ -111,7 +197,7 @@ class ScheduleInput(Model):
     @field_validator("timezone")
     @classmethod
     def _known_timezone(cls, value: str) -> str:
-        _get_tzinfo(value)
+        get_tzinfo(value)
         return value
 
     @property
@@ -124,63 +210,17 @@ class ScheduleInput(Model):
 
     def get_current_period(self) -> str:
         """The start of the current period, e.g., '2026-10-20' for a day."""
-        import datetime
-
-        tz = _get_tzinfo(self.timezone)
-        override = os.environ.get("CALKIT_NOW")
-        if override:
-            # Python 3.10 can't read a trailing 'Z' for UTC
-            if override.endswith(("Z", "z")):
-                override = override[:-1] + "+00:00"
-            now = datetime.datetime.fromisoformat(override)
-            now = now.replace(tzinfo=tz) if now.tzinfo is None else now
-            now = now.astimezone(tz)
-        else:
-            now = datetime.datetime.now(tz)
         count, unit = parse_period(self.period)
-        # Periods are counted in local time, so a day starts at midnight there
-        wall = now.replace(tzinfo=None)
-        if unit == "year":
-            years = wall.year - 1970
-            return str(1970 + years - years % count)
-        if unit == "month":
-            months = (wall.year - 1970) * 12 + wall.month - 1
-            months -= months % count
-            return f"{1970 + months // 12:04d}-{months % 12 + 1:02d}"
-        units = {
-            "minute": datetime.timedelta(minutes=1),
-            "hour": datetime.timedelta(hours=1),
-            "day": datetime.timedelta(days=1),
-            "week": datetime.timedelta(weeks=1),
-        }
-        # The first Monday of 1970, so weeks start on Mondays
-        epoch = datetime.datetime(1970, 1, 5 if unit == "week" else 1)
-        n = (wall - epoch) // (units[unit] * count)
-        start = epoch + n * count * units[unit]
-        formats = {
-            "minute": "%Y-%m-%dT%H:%M",
-            "hour": "%Y-%m-%dT%H:%M",
-            "day": "%Y-%m-%d",
-            "week": "%G-W%V",
-        }
-        return start.strftime(formats[unit])
+        now = get_now(self.timezone)
+        return format_period(floor_period(now, count, unit), unit)
 
     def write_period_file(self, wdir: str | None = None) -> str:
         """Write the current period, if it changed, and return the path."""
-        from calkit.core import ensure_local_dir
+        from calkit.core import ensure_local_dir, write_if_changed
 
         ensure_local_dir(wdir=wdir)
         fpath = os.path.join(wdir or ".", self.period_file_path)
-        content = self.get_current_period() + "\n"
-        try:
-            with open(fpath) as f:
-                if f.read() == content:
-                    return self.period_file_path
-        except OSError:
-            pass
-        os.makedirs(os.path.dirname(fpath), exist_ok=True)
-        with open(fpath, "w", newline="\n") as f:
-            f.write(content)
+        write_if_changed(fpath, self.get_current_period() + "\n")
         return self.period_file_path
 
 
@@ -247,8 +287,47 @@ class PathOutput(Model):
         default=True,
         description="Delete this output before the stage runs.",
     )
+    ignore: list[str] | None = Field(
+        default=None,
+        description="Files to leave out of this output directory (neither "
+        "stored nor hashed), as .gitignore patterns relative to it.",
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def check_ignore_storage(self) -> "PathOutput":
+        if self.ignore and self.storage not in ("git", "dvc"):
+            raise ValueError(
+                "'ignore' only applies to outputs stored with Git or DVC"
+            )
+        return self
+
+    def get_ignore_patterns(self, wdir: str | None = None) -> list[str]:
+        """Get ``ignore`` as patterns for the .gitignore or .dvcignore in the
+        directory that ``wdir``, the stage's, is relative to.
+
+        An iterated stage's ``{arg}`` matches any one directory.
+        """
+        import re
+
+        out_path = os.path.normpath(os.path.join(wdir or "", self.path))
+        out_path = out_path.replace(os.sep, "/").strip("/")
+        # Glob characters in the path match only themselves
+        out_path = re.sub(r"([*?\[\\])", r"\\\1", out_path)
+        out_path = re.sub(r"\{[^/]*?\}", "*", out_path)
+        patterns = []
+        for pattern in self.ignore or []:
+            negate = pattern.startswith("!")
+            pattern = pattern.removeprefix("!")
+            if pattern.startswith("/") or "/" in pattern.rstrip("/"):
+                # Relative to the output
+                pattern = f"/{out_path}/{pattern.lstrip('/')}"
+            else:
+                # At any depth in it
+                pattern = f"/{out_path}/**/{pattern}"
+            patterns.append(("!" if negate else "") + pattern)
+        return patterns
 
 
 class DatabaseTableOutput(Model):

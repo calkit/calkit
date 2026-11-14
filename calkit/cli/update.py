@@ -50,12 +50,9 @@ def update_devcontainer(
     os.makedirs(out_dir, exist_ok=True)
     out_fpath = os.path.join(out_dir, "devcontainer.json")
     typer.echo(f"Writing to {out_fpath}")
+    ck_info = calkit.load_calkit_info(wdir=wdir)
     with open(out_fpath, "w", encoding="utf-8") as f:
-        f.write(
-            calkit_resources.read_text(
-                "devcontainer", calkit_resources.DEVCONTAINER_FNAME
-            )
-        )
+        f.write(calkit_resources.make_devcontainer_spec(ck_info, wdir=wdir))
     if not no_commit:
         repo = calkit.git.get_repo(wdir)
         rel_path = os.path.join(".devcontainer", "devcontainer.json")
@@ -303,28 +300,9 @@ def update_release(
                     service=publisher.lower(),  # type: ignore
                     as_json=False,  # We only get a 204 back
                 )
-            typer.echo(f"Uploading {filename}")
-            fpath = os.path.join(release_files_dir, filename)
-            # First, initiate the file upload
-            calkit.invenio.post(
-                f"/records/{record_id}/draft/files",
-                json=[{"key": filename}],
-                service=publisher.lower(),  # type: ignore
-            )
-            # Then upload the file content
-            with open(fpath, "rb") as f:
-                file_data = f.read()
-                resp = calkit.invenio.put(
-                    f"/records/{record_id}/draft/files/{filename}/content",
-                    headers={"Content-Type": "application/octet-stream"},
-                    as_json=False,
-                    service=publisher.lower(),  # type: ignore
-                    data=file_data,
-                )
-                typer.echo(f"Status code: {resp.status_code}")
-            # Commit the file
-            calkit.invenio.post(
-                f"/records/{record_id}/draft/files/{filename}/commit",
+            calkit.invenio.upload_file_with_progress(
+                record_id,
+                os.path.join(release_files_dir, filename),
                 service=publisher.lower(),  # type: ignore
             )
     # TODO: Add ability to update metadata
@@ -521,6 +499,107 @@ def update_notebook(
             )
     except Exception as e:
         raise_error(f"Failed to update notebook: {e}")
+
+
+@update_app.command(name="markdown")
+def update_markdown(
+    paths: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Markdown files to update. Defaults to those declared as "
+                "markdown stages."
+            )
+        ),
+    ] = None,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help=(
+                "Change nothing, and fail if any file shows a value its "
+                "results file no longer holds, or an imported image that "
+                "doesn't match its import."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Update the values Markdown files show, and check their imported images.
+
+    Each value marker's text, e.g., the 0.29 in
+    '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is
+    rewritten from the JSON, YAML, or TOML results file and key it names.
+    A format written in brackets, 'ckvalue[.2f] ...', as LaTeX's \\ckvalue
+    takes one, is moved after the key. Nothing else in the file changes. This is the update 'calkit run' makes after running
+    the pipeline, for a project without one, e.g., one whose results are
+    imported.
+
+    Each local image a file shows that calkit.yaml records as imported,
+    including one written from the project root like /images/fig.png, is
+    checked against what the import fetched: it should exist and not have
+    been edited since. Images are only checked, never changed; 'calkit
+    sync import' is what brings in a newer version.
+    """
+    import calkit.markdown
+    import calkit.provenance
+
+    ck_info = calkit.load_calkit_info()
+    locks = calkit.provenance.read_import_locks()
+    if not paths:
+        paths = sorted(
+            set(calkit.markdown.get_markdown_stages(ck_info).values())
+        )
+    if not paths:
+        raise_error(
+            "No Markdown files given, and none are declared as markdown stages"
+        )
+    results = calkit.markdown.results_by_name(ck_info)
+    stale = []
+    problems = []
+    for path in paths:
+        if not os.path.isfile(path):
+            raise_error(f"{path} does not exist")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        for image in calkit.markdown.get_image_paths(text, path, rooted=True):
+            found = calkit.provenance.find_artifact(ck_info, image)
+            if found is None or not found[1].get("imported_from"):
+                continue
+            source = calkit.provenance.describe_source(
+                found[1]["imported_from"]
+            )
+            if not os.path.isfile(image):
+                problems.append(
+                    f"{path} shows {image}, imported from {source}, which "
+                    "does not exist; run 'calkit sync import' to fetch it"
+                )
+            elif calkit.provenance.local_edit(image, locks.get(image)):
+                problems.append(
+                    f"{path} shows {image}, which has been edited since it "
+                    f"was imported from {source}"
+                )
+        try:
+            new_text, changed = calkit.markdown.set_values(
+                text, path, results=results
+            )
+        except calkit.markdown.MarkdownParseError as e:
+            raise_error(str(e))
+        if not changed:
+            continue
+        stale.append(path)
+        if check:
+            typer.echo(f"Values in {path} are out of date")
+            continue
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(new_text)
+        typer.echo(f"Updated values in {path}")
+    for problem in problems:
+        warn(problem)
+    if check and (stale or problems):
+        raise_error(
+            f"{len(stale)} file(s) show out-of-date values and "
+            f"{len(problems)} imported image(s) don't match their imports"
+        )
 
 
 @update_app.command(name="agent-skills")
@@ -901,6 +980,7 @@ def update_docker_env(
         bool,
         typer.Option(
             "--lock",
+            "--relock",
             help=(
                 "Rebuild or repull the image and write fresh lock files for "
                 "every architecture."
@@ -909,11 +989,6 @@ def update_docker_env(
     ] = False,
 ) -> None:
     """Update a docker environment."""
-    from calkit.environments import (
-        get_all_docker_lock_fpaths,
-        get_env_lock_fpath,
-    )
-
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "docker":
         raise_error(f"Environment '{env_name}' is not a docker environment")
@@ -933,24 +1008,8 @@ def update_docker_env(
     if image is not None or registry is not None:
         calkit.save_calkit_info(ck_info)
         typer.echo(f"Updated docker environment '{env_name}'")
-    if not lock:
-        return
-    # Relocking throws away the existing lock files so the image is fetched or
-    # rebuilt from the environment's spec, which is the only way to pick up an
-    # image whose tag has been moved out from under a recorded digest
-    for lock_fpath in get_all_docker_lock_fpaths(env_name=env_name):
-        if os.path.isfile(lock_fpath):
-            typer.echo(f"Removing lock file: {lock_fpath}")
-            os.remove(lock_fpath)
-    legacy_lock_fpath = get_env_lock_fpath(
-        env=env, env_name=env_name, as_posix=False, legacy=True
-    )
-    if legacy_lock_fpath is not None and os.path.isfile(legacy_lock_fpath):
-        os.remove(legacy_lock_fpath)
-    from calkit.cli.check import check_environment
-
-    typer.echo(f"Relocking docker environment '{env_name}'")
-    check_environment(env_name=env_name, verbose=True)
+    if lock:
+        calkit.environments.relock(env_name=env_name, env=env)
 
 
 @update_app.command(name="latex-image")
@@ -1130,17 +1189,18 @@ def update_environment(
             "--lock",
             "--relock",
             help=(
-                "Record this machine's properties in a system "
-                "environment's lock file, replacing the machine it is "
-                "locked to. Invalidates every stage that depends on it."
+                "Rebuild the environment from its spec and lock it again, "
+                "taking the newest versions the spec allows, or for a "
+                "system environment, lock it to this machine. Reruns every "
+                "stage that depends on it."
             ),
         ),
     ] = False,
 ) -> None:
     """Update an environment.
 
-    Currently supports adding packages to Julia and Nix (flake) envs, and
-    re-locking a system environment to this machine.
+    Supports relocking any environment, and adding packages to Julia and
+    Nix (flake) envs.
     """
     from calkit.cli.main import run_in_env
 
@@ -1160,11 +1220,8 @@ def update_environment(
         env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
-            raise_error(
-                f"Environment '{env_name}' is not a system or switch "
-                "environment, so it has no machine to lock; its lock file is "
-                "derived from its spec"
-            )
+            calkit.environments.relock(env_name=env_name, env=env)
+            return
         # A switch's lock describes the machine its pick runs on
         machine_name, machine_env = env_name, env
         if kind == calkit.environments.SWITCH_KIND:
@@ -1238,7 +1295,7 @@ def update_environment(
     if add_packages is None:
         raise_error(
             "No updates specified. Use --add to specify packages to add, or "
-            "--lock to re-lock a system environment to this machine."
+            "--lock to relock the environment."
         )
     env = found
     assert isinstance(add_packages, list)
@@ -2151,8 +2208,7 @@ def is_connected_to_hub() -> bool:
     import calkit.dvc
 
     try:
-        repo = calkit.git.get_repo()
-        has_git_remote = "origin" in [r.name for r in repo.remotes]
+        has_git_remote = bool(calkit.git.get_repo().remotes)
     except Exception:
         return False
     if not has_git_remote:
@@ -2239,13 +2295,27 @@ def update_hub(
     git_repo_url = ck_info.get("git_repo_url")
     if git_repo_url is None:
         try:
-            url = calkit.git.get_repo().remotes.origin.url
+            remotes = list(calkit.git.get_repo().remotes)
+        except Exception:
+            remotes = []
+        # A project with one remote pushes there, whatever it's called
+        remote = next((r for r in remotes if r.name == "origin"), None)
+        if remote is None and len(remotes) == 1:
+            remote = remotes[0]
+        if remote is None and remotes:
+            raise_error(
+                "This project has several Git remotes and none named "
+                "'origin'; set 'git_repo_url' in calkit.yaml to the one to "
+                "connect"
+            )
+        if remote is not None:
+            url = remote.url
             # The hub identifies repos by their https URL
             if url.startswith("git@github.com:"):
                 url = "https://github.com/" + url.split(":", 1)[1]
             git_repo_url = url.removesuffix(".git")
-        except Exception:
-            git_repo_url = None
+    # Only a repo the hub creates can hold commits of its own to join
+    hub_makes_repo = git_repo_url is None
     if git_repo_url is None and not create_repo:
         from calkit.core import is_tty
 
@@ -2271,12 +2341,32 @@ def update_hub(
         ck_info["hub"] = hub
     hub_url = calkit.hub.get_hub_url()
     typer.echo(f"Connecting '{name}' to {hub_url}")
+    # Logging in is asked about here, not started by the lookup itself, so
+    # someone can decline it
     try:
-        user = calkit.hub.get_current_user()
+        user = calkit.hub.get("/user", allow_login=False)
     except Exception as e:
-        raise_error(
-            f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+        from calkit.core import is_tty
+
+        # No token raises ValueError; a rejected one, 401 or 403
+        status_code = getattr(getattr(e, "response", None), "status_code", 0)
+        if not isinstance(e, ValueError) and status_code not in (401, 403):
+            raise_error(f"Failed to reach {hub_url}: {e}")
+        if not is_tty() or not calkit.hub.is_interactive_login_allowed():
+            raise_error(
+                f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+            )
+        typer.echo(f"Not logged in to {hub_url}")
+        answer = typer.prompt(
+            "Log in now? [Y/n]", default="y", show_default=False
         )
+        if answer.strip().lower() not in ("", "y", "yes"):
+            raise_error("Not logged in; run 'calkit hub login' first")
+        try:
+            calkit.hub.run_device_flow()
+            user = calkit.hub.get("/user", allow_login=False)
+        except Exception as e:
+            raise_error(f"Failed to log in to {hub_url}: {e}")
     owner = ck_info.get("owner") or user.get("github_username")
     # A project that already exists on the hub, e.g., one created there
     # for this repo, is connected to rather than created again, which the
@@ -2334,7 +2424,7 @@ def update_hub(
     if isinstance(resp, dict) and resp.get("git_repo_url"):
         git_repo_url = resp["git_repo_url"]
         repo = calkit.git.get_repo()
-        if "origin" not in [r.name for r in repo.remotes]:
+        if not repo.remotes:
             typer.echo(f"Adding Git remote: {git_repo_url}")
             repo.git.remote(["add", "origin", git_repo_url])
         ck_info["git_repo_url"] = git_repo_url
@@ -2383,7 +2473,10 @@ def update_hub(
         if to_commit:
             typer.echo("Committing changes")
             repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
-        _adopt_hub_history(repo)
+        # Joining an existing repo's history this way would drop whatever
+        # was pushed to it that this clone doesn't have yet
+        if hub_makes_repo and resp is not None:
+            _adopt_hub_history(repo)
     calkit.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
 
 

@@ -1,0 +1,24 @@
+{
+  "name": "calkit",
+  "version": "0.4.0",
+  "description": "Agent skills for working with Calkit projects.",
+  "author": {
+    "name": "Calkit",
+    "url": "https://calkit.org"
+  },
+  "homepage": "https://docs.calkit.org/ai-tools/",
+  "repository": "https://github.com/calkit/calkit",
+  "license": "MIT",
+  "keywords": ["reproducibility", "research", "pipelines"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Calkit",
+    "shortDescription": "Make research projects reproducible with Calkit",
+    "longDescription": "Skills for working with Calkit projects: building and extending reproducible pipelines, connecting Overleaf documents, checking reproducibility, reviewing questions and answers, and resolving merge conflicts.",
+    "developerName": "Calkit",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://calkit.org",
+    "defaultPrompt": ["Make this project reproducible with a Calkit pipeline."]
+  }
+}

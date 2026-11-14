@@ -51,8 +51,6 @@ import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
 const PANEL_ID = "calkit-overleaf-panel";
 const LAUNCHER_ID = "calkit-overleaf-launcher";
 const TOKEN_PANEL_ID = "calkit-overleaf-token-panel";
-const OVERLEAF_GIT_SETTINGS =
-  "https://www.overleaf.com/user/settings#git-integration";
 const OVERLEAF_TOKEN_RE = /\bolp_[A-Za-z0-9]{20,}\b/;
 
 let panel: Panel | null = null;
@@ -150,6 +148,9 @@ async function insertIntoEditor(text: string): Promise<"inserted" | "copied"> {
   return "copied";
 }
 
+/** All the data that can be uploaded with a script, as the hub allows. */
+const MAX_SCRIPT_DATA_BYTES = 50_000_000;
+
 /** A value as it reads in a panel row. */
 function valueText(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
@@ -192,6 +193,45 @@ function renderAddScript(
     scriptPath: string;
     content?: string;
   } | null = null;
+  // Data the script reads from outside the project, by how it names it,
+  // and the files that go in the project in its place
+  const data = new Map<
+    string,
+    { path: string; files: { path: string; file: File }[] }
+  >();
+  // Contents are only read to save; until then, where it goes is enough to
+  // see the script read it from there
+  const dataRequest = (withContent: boolean) =>
+    Promise.all(
+      [...data].map(async ([external, { path, files }]) => ({
+        external,
+        path,
+        files: withContent
+          ? await Promise.all(
+              files.map(async (f) => ({
+                path: f.path,
+                content: await fileBase64(f.file),
+              })),
+            )
+          : [],
+      })),
+    );
+  const reread = async () => {
+    if (!request) {
+      return;
+    }
+    const detected = await send({
+      type: "project.stageFromScriptOrNotebook",
+      owner,
+      project,
+      ...request,
+      shows,
+      data: await dataRequest(false),
+    });
+    clear(message);
+    clear(review);
+    renderReview(detected);
+  };
   const fail = (e: unknown) =>
     clear(message).append(
       errorMessage(e instanceof Error ? e.message : String(e)),
@@ -207,6 +247,7 @@ function renderAddScript(
     }
     read.disabled = true;
     message.append(loading("Reading"));
+    data.clear();
     try {
       request = upload
         ? {
@@ -215,21 +256,127 @@ function renderAddScript(
             content: await fileBase64(upload),
           }
         : { scriptPath: typed };
-      const detected = await send({
-        type: "project.stageFromScriptOrNotebook",
-        owner,
-        project,
-        ...request,
-        shows,
-      });
-      clear(message);
-      renderReview(detected);
+      await reread();
     } catch (e) {
       fail(e);
     } finally {
       read.disabled = false;
     }
   });
+  // Where data from outside the project goes in it, uploaded from this
+  // computer, which is likely the one the script ran on
+  const renderExternal = (
+    external: string,
+    detected: StageFromScriptOrNotebookResponse,
+  ) => {
+    const chosen = data.get(external);
+    const name = external.split(/[\\/]/).filter(Boolean).pop() ?? "data";
+    const dest = textInput({ value: chosen?.path ?? `data/${name}` });
+    const files = el("input", {
+      type: "file",
+      attrs: { multiple: "" },
+      style: { display: "none" },
+    });
+    const folder = el("input", {
+      type: "file",
+      attrs: { webkitdirectory: "" },
+      style: { display: "none" },
+    });
+    const pickFiles = el("button", {
+      class: "action secondary",
+      text: "Choose files",
+    });
+    const pickFolder = el("button", {
+      class: "action secondary",
+      text: "Choose a folder",
+    });
+    const note = el("div", { class: "small" });
+    const use = async (picked: { path: string; file: File }[]) => {
+      const size = [...data]
+        .filter(([other]) => other !== external)
+        .flatMap(([, d]) => d.files)
+        .concat(picked)
+        .reduce((n, f) => n + f.file.size, 0);
+      if (size > MAX_SCRIPT_DATA_BYTES) {
+        clear(note).append(
+          errorMessage(
+            `That's ${Math.ceil(size / 1e6)} MB, more than the ` +
+              `${MAX_SCRIPT_DATA_BYTES / 1e6} MB that can be uploaded here.`,
+          ),
+        );
+        return;
+      }
+      data.set(external, {
+        path: dest.value.trim() || `data/${name}`,
+        files: picked,
+      });
+      clear(note).append(loading("Reading"));
+      try {
+        await reread();
+      } catch (e) {
+        data.delete(external);
+        clear(note).append(
+          errorMessage(e instanceof Error ? e.message : String(e)),
+        );
+      }
+    };
+    pickFiles.addEventListener("click", () => files.click());
+    pickFolder.addEventListener("click", () => folder.click());
+    files.addEventListener("change", () => {
+      const list = [...(files.files ?? [])];
+      // One file is the data itself when it's the one the script names, or
+      // else one in that folder
+      const single = list.length === 1 && list[0].name === name;
+      if (list.length) {
+        void use(list.map((file) => ({ path: single ? "" : file.name, file })));
+      }
+    });
+    folder.addEventListener("change", () => {
+      const list = [...(folder.files ?? [])];
+      if (list.length) {
+        void use(
+          list.map((file) => ({
+            path: file.webkitRelativePath.split("/").slice(1).join("/"),
+            file,
+          })),
+        );
+      }
+    });
+    dest.addEventListener("change", () => {
+      if (chosen) {
+        void use(chosen.files);
+      }
+    });
+    const n = chosen?.files.length ?? 0;
+    const status = !chosen
+      ? `Reads ${external}, which is outside the project, so it will only ` +
+        "run on the computer it came from. Upload it to read it from the " +
+        "project instead:"
+      : detected.rewritten?.includes(external)
+      ? `Reads ${external}, outside the project. ${n} ` +
+        `${n === 1 ? "file" : "files"} will be uploaded to ${chosen.path}, ` +
+        "and the script will read them from there."
+      : `${n} ${n === 1 ? "file" : "files"} will be uploaded to ` +
+        `${chosen.path}, but Calkit couldn't find where the script names ` +
+        `${external}; change it to read ${chosen.path}.`;
+    return el("div", { class: "stack", style: { marginTop: "4px" } }, [
+      el("div", {
+        class: "small",
+        style: {
+          color:
+            chosen && detected.rewritten?.includes(external)
+              ? ""
+              : "var(--ck-warning)",
+        },
+        text: status,
+      }),
+      dest,
+      el("div", { class: "actions" }, [pickFiles, pickFolder]),
+      files,
+      folder,
+      note,
+    ]);
+  };
   const renderReview = (detected: StageFromScriptOrNotebookResponse) => {
     review.append(
       el("div", { class: "small" }, [
@@ -267,6 +414,12 @@ function renderAddScript(
             "Add it, or record where it came from, before running.",
         }),
       );
+    }
+    for (const external of new Set([
+      ...data.keys(),
+      ...(detected.external_inputs ?? []),
+    ])) {
+      review.append(renderExternal(external, detected));
     }
     // Which output this is, when the script writes several or names it
     // differently from the paper
@@ -317,7 +470,7 @@ function renderAddScript(
         return;
       }
       save.disabled = true;
-      clear(message).append(loading("Saving"));
+      clear(message).append(loading(data.size ? "Uploading" : "Saving"));
       try {
         const saved = await send({
           type: "project.stageFromScriptOrNotebook",
@@ -326,6 +479,7 @@ function renderAddScript(
           ...request,
           shows,
           produces: chosen(),
+          data: await dataRequest(true),
           save: true,
         });
         // Brings the \ckfigure into the editor
@@ -2266,7 +2420,23 @@ function renderTokenForm(
   const input = textInput({ placeholder: "olp_..." });
   input.type = "password";
   const message = el("div", { class: "small" });
-  const save = el("button", { class: "action", text: "Save token" });
+  const get = el("button", {
+    class: "action",
+    text: "Get a token from Overleaf",
+  });
+  get.addEventListener("click", async () => {
+    try {
+      await send({ type: "overleaf.openTokenSettings" });
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  const save = el("button", {
+    class: "action secondary",
+    text: "Save token",
+  });
   save.addEventListener("click", async () => {
     const token = input.value.trim();
     if (!token.startsWith("olp_")) {
@@ -2294,15 +2464,14 @@ function renderTokenForm(
         : "Calkit needs an Overleaf Git token to read this project.",
     }),
     el("div", { class: "dim small", style: { marginTop: "6px" } }, [
-      document.createTextNode("Generate one under Git Integration in "),
-      el("a", {
-        text: "your Overleaf account settings",
-        href: OVERLEAF_GIT_SETTINGS,
-        attrs: { target: "_blank" },
-      }),
       document.createTextNode(
-        ". Calkit offers to save it from there, or paste it here.",
+        "Opens your Overleaf settings, where you click Generate token. " +
+          "Calkit saves it and brings you back here.",
       ),
+    ]),
+    el("div", { class: "actions" }, [get]),
+    el("div", { class: "dim small", style: { marginTop: "12px" } }, [
+      document.createTextNode("Or paste one you have:"),
     ]),
     input,
     el("div", { class: "actions" }, [
@@ -2336,65 +2505,121 @@ function renderOverleafFailure(e: unknown, reload: () => void): HTMLElement {
 }
 
 /**
- * Offer to save an Overleaf Git token to Calkit as soon as Overleaf shows
- * one, which it only does once, right after it's generated.
+ * Save an Overleaf Git token to Calkit as soon as Overleaf shows one, which
+ * it only does once, right after it's generated.
  *
- * Only ever on the user's click: the token is read from the page they're
- * looking at, and nothing is sent until they say so.
+ * In a tab the Calkit panel opened for this, the user already asked for the
+ * token to be saved, so it is, and they go back to their project. Anywhere
+ * else it's only offered: nothing is read or sent until they click.
  */
-function watchForNewToken(): void {
+async function watchForNewToken(): Promise<void> {
   if (tokenWatcher) {
+    return;
+  }
+  // Set now so a second sync doesn't start another while this one asks
+  const placeholder = new MutationObserver(() => undefined);
+  tokenWatcher = placeholder;
+  const { requested } = await send({ type: "overleaf.tokenTab" }).catch(() => ({
+    requested: false,
+  }));
+  if (tokenWatcher !== placeholder) {
+    // Torn down meanwhile
     return;
   }
   const texts = (): string[] => [
     ...Array.from(document.querySelectorAll("input"), (input) => input.value),
     document.body.innerText,
   ];
-  // Only whether one is showing until the user asks to save it, so the
-  // token itself is never held before then
+  const message = el("div", { class: "small" });
+  const save = async (tokenPanel: Panel): Promise<void> => {
+    const token = texts()
+      .map((text) => text.match(OVERLEAF_TOKEN_RE)?.[0])
+      .find(Boolean);
+    if (!token) {
+      clear(message).append(errorMessage("The token is no longer on the page"));
+      return;
+    }
+    clear(message).append(loading("Saving"));
+    try {
+      await send({ type: "overleaf.setToken", token });
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+      return;
+    }
+    clear(tokenPanel.body).append(
+      el("div", {
+        class: "small",
+        text: "Saved. Your Overleaf projects can sync with Calkit now.",
+      }),
+    );
+    if (requested) {
+      await send({ type: "overleaf.returnFromTokenTab" }).catch(
+        () => undefined,
+      );
+    }
+  };
+  // Point at the button that makes one, which Overleaf labels by whether
+  // the account has a token already
+  let pointed = false;
+  const pointAtGenerate = (): void => {
+    const button = Array.from(document.querySelectorAll("button")).find((b) =>
+      /^\s*(generate token|add another token)\s*$/i.test(b.textContent ?? ""),
+    );
+    if (!button) {
+      return;
+    }
+    pointed = true;
+    button.scrollIntoView({ block: "center" });
+    button.style.outline = "3px solid #f0ad4e";
+    button.style.outlineOffset = "2px";
+  };
+  const guide = requested
+    ? mountPanel({ id: TOKEN_PANEL_ID, title: "Calkit" })
+    : null;
+  if (guide) {
+    guide.body.append(
+      el("div", {
+        class: "small",
+        text:
+          "Click Generate token under Git integration. Calkit saves the " +
+          "token and takes you back to your project.",
+      }),
+      message,
+    );
+    pointAtGenerate();
+  }
+  // Only whether one is showing until it's saved, so the token itself is
+  // never held before then
   let showing = false;
   tokenWatcher = new MutationObserver(() => {
+    if (requested && !pointed) {
+      pointAtGenerate();
+    }
     const visible = texts().some((text) => OVERLEAF_TOKEN_RE.test(text));
     if (visible === showing) {
       return;
     }
     showing = visible;
+    if (guide) {
+      if (visible) {
+        void save(guide);
+      }
+      return;
+    }
     if (!visible) {
       document.getElementById(TOKEN_PANEL_ID)?.remove();
       return;
     }
     const tokenPanel = mountPanel({ id: TOKEN_PANEL_ID, title: "Calkit" });
-    const message = el("div", { class: "small" });
-    const save = el("button", { class: "action", text: "Save to Calkit" });
-    save.addEventListener("click", async () => {
-      const token = texts()
-        .map((text) => text.match(OVERLEAF_TOKEN_RE)?.[0])
-        .find(Boolean);
-      if (!token) {
-        clear(message).append(
-          errorMessage("The token is no longer on the page"),
-        );
-        return;
-      }
-      save.disabled = true;
-      clear(message).append(loading("Saving"));
-      try {
-        await send({ type: "overleaf.setToken", token });
-        clear(tokenPanel.body).append(
-          el("div", {
-            class: "small",
-            text:
-              "Saved. Go back to your Overleaf project and press Check " +
-              "again in the Calkit panel.",
-          }),
-        );
-      } catch (e) {
-        save.disabled = false;
-        clear(message).append(
-          errorMessage(e instanceof Error ? e.message : String(e)),
-        );
-      }
+    const button = el("button", { class: "action", text: "Save to Calkit" });
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      await save(tokenPanel);
+      button.disabled = false;
     });
+    clear(message);
     tokenPanel.body.append(
       el("div", {
         class: "small",
@@ -2402,7 +2627,7 @@ function watchForNewToken(): void {
           "Save this Overleaf Git token to Calkit, so it can check and " +
           "sync your Overleaf projects?",
       }),
-      el("div", { class: "actions" }, [save]),
+      el("div", { class: "actions" }, [button]),
       message,
     );
   });
@@ -2457,6 +2682,18 @@ function renderStatus(
           class: "dim small",
           text: `Synced folder: ${status.path}`,
         }),
+        // Where to work on what the paper shows, without installing anything
+        link.github_repo_url
+          ? el("a", {
+              class: "small",
+              text: "Open in Codespaces",
+              href: `https://codespaces.new${
+                new URL(link.github_repo_url).pathname
+              }?quickstart=1`,
+              title: "Work on the project in a GitHub Codespace",
+              attrs: { target: "_blank" },
+            })
+          : null,
       ]),
       status.in_sync
         ? el("span", { class: "badge ok", text: "in sync" })
@@ -3489,7 +3726,7 @@ function teardown(): void {
 
 function sync(): void {
   if (new URL(window.location.href).pathname.startsWith("/user/settings")) {
-    watchForNewToken();
+    void watchForNewToken();
     return;
   }
   const overleafProjectId = getOverleafProjectId(window.location.href);
@@ -3772,6 +4009,10 @@ const RAIL_STYLES = `
     padding: 10px 12px; min-height: 100%; box-sizing: border-box;
     color: var(--ck-fg); background: var(--ck-bg);
   }
+  .rail .project {
+    flex-direction: column; align-items: flex-start; gap: 2px;
+    overflow-wrap: anywhere;
+  }
   .rail h3 {
     font-size: 12px; font-weight: 600; margin: 14px 0 4px;
     text-transform: uppercase; letter-spacing: 0.04em;
@@ -3866,11 +4107,24 @@ function drawRail(): void {
     link.project_name,
   );
   body.append(
-    el("a", {
-      text: linkKey(link),
-      href: base,
-      attrs: { target: "_blank" },
-    }),
+    el("div", { class: "row project" }, [
+      el("a", {
+        text: linkKey(link),
+        href: base,
+        attrs: { target: "_blank" },
+      }),
+      link.github_repo_url
+        ? el("a", {
+            class: "small",
+            text: "Open in Codespaces",
+            href: `https://codespaces.new${
+              new URL(link.github_repo_url).pathname
+            }?quickstart=1`,
+            title: "Work on the project in a GitHub Codespace",
+            attrs: { target: "_blank" },
+          })
+        : null,
+    ]),
   );
   // What's going on between the paper and its project
   const running = activeRun();

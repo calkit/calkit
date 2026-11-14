@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -362,6 +363,24 @@ def test_write_keeps_secrets_it_never_read(
     reread.write()
     assert (app, "github_token") not in fake_keyring.store
     assert fake_keyring.writes == ["github_token"]
+    # A keyring that refuses writes, e.g., the login keychain from a service
+    # started at boot, leaves the secret in the user-only file instead
+
+    def refuse(*args):
+        raise keyring.errors.PasswordSetError("(-61, 'Unknown Error')")
+
+    monkeypatch.setattr(fake_keyring, "set_password", refuse)
+    reread.access_token = "access-secret"
+    with pytest.warns(UserWarning, match="access_token.*config.yaml"):
+        reread.write()
+    with open(tmp_path / "config.yaml") as f:
+        assert yaml.safe_load(f)["access_token"] == "access-secret"
+    # Only the user can read it, where permissions say so
+    if sys.platform != "win32":
+        mode = os.stat(tmp_path / "config.yaml").st_mode & 0o777
+        assert oct(mode) == "0o600"
+    monkeypatch.setattr(config, "_secret_cache", {})
+    assert config.read().access_token == "access-secret"
 
 
 def test_macos_secrets_go_through_the_security_tool(
@@ -608,3 +627,28 @@ def test_secrets_round_trip_on_linux(fake_keyring, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "_secret_cache", {})
     assert config.get_secret("github_token") == "gh-secret"
     assert config.read().github_token == "gh-secret"
+
+
+def test_orcid_is_checked():
+    settings = config.Settings(orcid="0000-0002-1825-0097")
+    assert settings.orcid == "https://orcid.org/0000-0002-1825-0097"
+    with pytest.raises(ValueError, match="check digit"):
+        config.Settings(orcid="0000-0002-1825-0098")
+
+
+def test_get_user_author(monkeypatch):
+    settings = config.Settings(orcid="https://orcid.org/0000-0002-1825-0097")
+    monkeypatch.setattr(config, "read", lambda: settings)
+    monkeypatch.setattr(
+        config.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="Ada King Lovelace\n"),
+    )
+    # A name missing from the config comes from Git, split at the last space
+    assert config.get_user_author() == {
+        "first_name": "Ada King",
+        "last_name": "Lovelace",
+        "affiliation": None,
+        "orcid": "0000-0002-1825-0097",
+    }
+    assert config.get_user_author(git_fallback=False)["first_name"] is None

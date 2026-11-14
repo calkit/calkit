@@ -7,6 +7,8 @@
 - The VS Code extension lives in `vscode-ext`
 - The Chrome extension lives in `browser-ext`
 - The Calkit Assistant desktop app lives in `assistant`
+- The agent plugin for Claude Code, Codex, and OpenCode lives in
+  `agent-plugin`
 - GitHub Actions live in `actions`, e.g., `calkit/calkit/actions/run`
 - Docker images we publish live in `images`, e.g., `images/latex`, which
   is released on its own `latex-image/vX.Y.Z` tag rather than with the CLI
@@ -66,6 +68,10 @@ formatter inserts, e.g., ruff-format adds one after an in-function import
 block. Don't hoist imports to module scope just to avoid those; imports are
 kept inside functions to keep CLI startup fast.
 
+Put the imports a function always needs at its top, not partway through;
+only an import on a conditional path belongs where it's used.
+Module scope is fine for anything that won't slow CLI startup.
+
 For prose, only use one space after punctuation.
 
 Always put a comma after "i.e." and "e.g.".
@@ -78,15 +84,35 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Start function names with a verb, e.g., `get_evidence_kind` rather than
+`evidence_kind`.
+Name functions for what they return,
+e.g., `get_image_name` rather than `get_image`,
+which could just as well return an image.
+
+Name a value for what it holds, so the name tells its type:
+a commit hash is `commit_sha`, not `commit`, which reads as an object;
+a path is `*_path`; a count is `n_*`.
+
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.
 
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
 
+Keep a subclass in the module of the class it extends,
+so a class's variants are found where it's defined.
+The only exceptions are classes written to be subclassed,
+e.g., `calkit.models.base.Model` and `calkit.cli.core.OptionalValueCommand`,
+and classes from other packages, e.g., pydantic's `BaseModel`.
+
 Don't be verbose in comments. One sentence is usually fine, if anything at all.
 
-Agents should typically not be writing prose for human consumption.
-If some is needed, notify
-the human developer and ask them to write in a given file at a specified
-line and make a commit.
+Agents may make minor corrections to prose for human consumption,
+e.g., fixing a sentence a change made inaccurate, without changing what it
+argues.
+Major writing, e.g., a new section or explanation, needs the human
+developer's approval first.
+Flag any new prose an agent writes as needing human attention:
+put a `<!-- TODO: needs human review -->` comment above it in Markdown,
+and call it out in the PR description.

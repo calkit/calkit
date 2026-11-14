@@ -210,6 +210,21 @@ Or with Windows Command Prompt or PowerShell:
 powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 ```
 
+Both install shell completion for `calkit` and `ck`.
+To also [link this machine to the hub](https://docs.calkit.org/compute),
+which connects its workspaces to it,
+pass `--link`:
+
+```sh
+curl -LsSf install.calkit.org | sh -s -- --link
+```
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1.calkit.org))) --link"
+```
+
+Pass `--no-shell-completion` to skip installing shell completion.
+
 If you already have uv installed, install Calkit with:
 
 ```sh
@@ -627,6 +642,16 @@ and a collaborator can clone the project and reproduce it with
 Answering no is fine too.
 The commit has already been made,
 and the project can be connected later with `calkit update hub`.
+
+<!-- TODO: needs human review -->
+
+A project cloned from GitHub can push its code there,
+but not its data.
+When you save or push data in DVC,
+`calkit save` and `calkit push` offer a hub's storage
+instead of leaving the data on your machine,
+and log you in to the hub first if you aren't.
+Answer no and they won't ask again on that machine.
 
 ### Next steps
 

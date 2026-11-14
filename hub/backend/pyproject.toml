@@ -25,7 +25,7 @@ dependencies = [
   # Beyond template dependencies
   "s3fs==2026.4.0",
   "python-slugify==8.0.4",
-  "cryptography==43.0.0",
+  "cryptography==50.0.2",
   "gitpython>=3.1.47",
   "ruamel-yaml==0.19.1",
   "bibtexparser==1.4.1",

@@ -2047,8 +2047,14 @@ function bringUpToDate(
  * anyway.
  */
 function watchEditor(): void {
-  window.addEventListener("message", (event) => {
+  const listener = (event: MessageEvent) => {
     if (event.source !== window || event.data?.calkit !== "editor") {
+      return;
+    }
+    // Cut off by the extension reloading, so the script put in after
+    // answers instead, rather than this one taking a tooltip it can't fill
+    if (!isExtensionAlive()) {
+      window.removeEventListener("message", listener);
       return;
     }
     const message = event.data as FromEditor;
@@ -2059,7 +2065,11 @@ function watchEditor(): void {
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
     }
-  });
+  };
+  window.addEventListener("message", listener);
+  // What the open document shows, in case this script came in after the
+  // editor last said
+  toEditor({ type: "rescan" });
 }
 
 /** Where a problem lands in the PDF, in points from the page's top left. */

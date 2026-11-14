@@ -3219,7 +3219,7 @@ def run(
         list[str] | None,
         typer.Argument(
             help="Stages to run.",
-            shell_complete=complete_stage_names,
+            autocompletion=complete_stage_names,
         ),
     ] = None,
     quiet: Annotated[
@@ -3272,7 +3272,7 @@ def run(
         typer.Option(
             "--downstream",
             help="Start from the specified stage and run all downstream.",
-            shell_complete=complete_stage_names,
+            autocompletion=complete_stage_names,
         ),
     ] = None,
     force_downstream: Annotated[

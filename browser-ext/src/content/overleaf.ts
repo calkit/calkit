@@ -3122,7 +3122,7 @@ function getPdfPane(): HTMLElement | null {
   );
 }
 
-/** Keep the PDF switch on the pane as Overleaf redraws it, e.g., compiling. */
+/** Keep the PDF switch in the toolbar as Overleaf redraws it. */
 function watchPdfSwitch(): void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   new MutationObserver(() => {
@@ -3135,15 +3135,16 @@ function watchPdfSwitch(): void {
 const PDF_SOURCE_KEY = "pdfSources";
 
 /**
- * A switch on Overleaf's PDF pane between its PDF and the one built on
+ * A switch in Overleaf's PDF toolbar between its PDF and the one built on
  * this computer, for a project checked out here, remembered per Overleaf
- * project. Mounted again whenever Overleaf redraws the pane.
+ * project. Mounted again whenever Overleaf redraws the toolbar.
  */
 function mountPdfSwitch(): void {
   const check = lastCheck;
-  const pane = getPdfPane();
+  // Beside Recompile, the logs, and download
+  const toolbar = document.querySelector<HTMLElement>(".toolbar-pdf-left");
   const existing = document.getElementById("calkit-pdf-switch");
-  if (!check?.link.local_path || !pane || !isExtensionAlive()) {
+  if (!check?.link.local_path || !toolbar || !isExtensionAlive()) {
     existing?.remove();
     return;
   }
@@ -3154,7 +3155,7 @@ function mountPdfSwitch(): void {
   }
   const local = Boolean(localPdf);
   if (
-    existing?.parentElement === pane &&
+    existing?.parentElement === toolbar &&
     existing.dataset.local === `${local}`
   ) {
     return;
@@ -3181,12 +3182,14 @@ function mountPdfSwitch(): void {
         : "Overleaf's own PDF",
       style: {
         border: "none",
-        padding: "4px 10px",
+        padding: "2px 8px",
         borderRadius: "999px",
         cursor: "pointer",
-        font: "12px -apple-system, BlinkMacSystemFont, sans-serif",
-        background: useLocal === local ? "#0f766e" : "transparent",
-        color: useLocal === local ? "#fff" : "#111827",
+        font: "inherit",
+        fontSize: "12px",
+        whiteSpace: "nowrap",
+        background: useLocal === local ? "#009688" : "transparent",
+        color: useLocal === local ? "#fff" : "inherit",
       },
       onClick: () => {
         if (useLocal !== local) {
@@ -3197,28 +3200,21 @@ function mountPdfSwitch(): void {
   const toggle = el(
     "div",
     {
-      attrs: { id: "calkit-pdf-switch" },
+      attrs: { id: "calkit-pdf-switch", title: "Which PDF to show" },
       style: {
-        position: "absolute",
-        bottom: "12px",
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: "21",
-        display: "flex",
+        display: "inline-flex",
+        alignItems: "center",
         gap: "2px",
+        marginLeft: "8px",
         padding: "2px",
         borderRadius: "999px",
-        background: "#f3f4f6",
-        boxShadow: "0 1px 4px rgba(0, 0, 0, 0.25)",
+        background: "rgba(127, 127, 127, 0.18)",
       },
     },
     [option("Overleaf", false), option("This computer", true)],
   );
   toggle.dataset.local = `${local}`;
-  if (getComputedStyle(pane).position === "static") {
-    pane.style.position = "relative";
-  }
-  pane.append(toggle);
+  toolbar.append(toggle);
   // The first time it's shown for this project, the last choice applies
   if (!existing) {
     void chrome.storage.local.get(PDF_SOURCE_KEY).then((stored) => {
@@ -4028,17 +4024,19 @@ async function load(overleafProjectId: string): Promise<void> {
   try {
     hubWebUrl = await getHubWebUrl();
     const settings = await send({ type: "settings.get" });
-    const pickers = el(
-      "div",
-      { class: "muted-box stack", style: { marginBottom: "8px" } },
-      [
-        await renderHubPicker(reload),
-        await renderProjectPicker({
-          activeProject: settings.activeProject,
-          onChange: reload,
-        }),
-      ],
-    );
+    // Filled in as the hub answers, without holding up the rest, which
+    // for a project on this computer doesn't need the hub at all
+    const pickers = el("div", {
+      class: "muted-box stack",
+      style: { marginBottom: "8px" },
+    });
+    void Promise.all([
+      renderHubPicker(reload),
+      renderProjectPicker({
+        activeProject: settings.activeProject,
+        onChange: reload,
+      }),
+    ]).then((parts) => pickers.append(...parts));
     const cached =
       lastCheck?.overleafProjectId === overleafProjectId &&
       lastCheck.hubWebUrl === hubWebUrl

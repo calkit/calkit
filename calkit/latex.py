@@ -178,6 +178,9 @@ _MISSING_FILE_RE = re.compile(r"File `([^']+)' not found")
 _MISSING_TFM_RE = re.compile(
     r"Font \S+=(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
 )
+# LuaTeX's require() of a module no package installed, e.g., pdftexcmds
+# under LuaLaTeX, which only says so as a Lua error
+_MISSING_LUA_RE = re.compile(r"module '([^']+)' not found")
 
 
 def get_texmf_cache_dir(wdir: str | None = None) -> str:
@@ -199,10 +202,50 @@ def find_missing_tex_files(log: str) -> list[str]:
     missing is named as its ``.tfm`` file, which is what finds the package
     providing it.
     """
-    found = _MISSING_FILE_RE.findall(log) + [
-        f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)
-    ]
+    found = (
+        _MISSING_FILE_RE.findall(log)
+        + [f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)]
+        + [f"{name}.lua" for name in _MISSING_LUA_RE.findall(log)]
+    )
     return list(dict.fromkeys(found))
+
+
+def find_named_tex_files(tex_file: str) -> list[str]:
+    """List the classes, packages, and bibliography styles a document names.
+
+    Read from the document and the files it inputs, so a missing package
+    can be found before compiling rather than one failed run at a time.
+    Names built from macros are skipped.
+    """
+    tex_dir = os.path.dirname(tex_file)
+    exts = {
+        "documentclass": ".cls",
+        "usepackage": ".sty",
+        "RequirePackage": ".sty",
+        "bibliographystyle": ".bst",
+    }
+    names: list[str] = []
+    queue = [tex_file]
+    seen = {os.path.normpath(tex_file)}
+    while queue:
+        try:
+            with open(queue.pop(), encoding="utf-8", errors="replace") as f:
+                tex = _strip_comments(f.read())
+        except OSError:
+            continue
+        for command, arg in _INPUT_RE.findall(tex):
+            for raw in [n.strip() for n in arg.split(",")]:
+                if not raw or "#" in raw or "\\" in raw:
+                    continue
+                if command in exts:
+                    names.append(raw + exts[command])
+                elif command in ("input", "include", "subfile"):
+                    for name in (raw, raw + ".tex"):
+                        path = os.path.normpath(os.path.join(tex_dir, name))
+                        if path not in seen and os.path.isfile(path):
+                            seen.add(path)
+                            queue.append(path)
+    return list(dict.fromkeys(names))
 
 
 def _ref_dirname(ref: str) -> str:

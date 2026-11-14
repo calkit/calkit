@@ -702,6 +702,7 @@ class Environment(Model):
         "uv-venv",
         "renv",
         "switch",
+        "texlive",
     ] = Field(description="What kind of environment this is.")
     # Note: ``path`` is declared on the specific subclasses that need it (most
     # of them, required; optional for Docker) rather than here, so subclasses
@@ -804,6 +805,41 @@ class NixEnvironment(Environment):
         description=(
             "Name of the dev shell to enter, passed as #<shell> to "
             "'nix develop'. Defaults to the flake's default dev shell."
+        ),
+    )
+
+
+class TexLiveEnvironment(Environment):
+    kind: Literal["texlive"] = "texlive"
+    release: int | None = Field(
+        default=None,
+        description=(
+            "TeX Live release, e.g., 2025, to install packages from. A "
+            "past release's repository is frozen, so its lock pins every "
+            "package for good. Defaults to the latest frozen release."
+        ),
+    )
+    packages: list[str] = Field(
+        default=[],
+        description=(
+            "TeX Live packages to install, beyond the base set every "
+            "TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). "
+            "What they depend on comes with them, and packages a build "
+            "finds missing are added here."
+        ),
+    )
+    platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "TeX Live platforms to lock for. Defaults to macOS, Windows, "
+            "and Linux on x86_64 and ARM."
+        ),
+    )
+    repository: str | None = Field(
+        default=None,
+        description=(
+            "TeX Live repository URL to install from instead of the one "
+            "for 'release', e.g., a local mirror."
         ),
     )
 
@@ -1377,6 +1413,7 @@ InlineEnvironment = Annotated[
     | UvEnvironment
     | UvVenvEnvironment
     | NixEnvironment
+    | TexLiveEnvironment
     | SystemEnvironment,
     Discriminator("kind"),
 ]
@@ -2329,6 +2366,7 @@ class ProjectInfo(Model):
             | UvEnvironment
             | UvVenvEnvironment
             | NixEnvironment
+            | TexLiveEnvironment
             | SystemEnvironment
             | SwitchEnvironment,
             Discriminator("kind"),

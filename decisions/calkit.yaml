@@ -99,6 +99,37 @@ questions:
           help_ms: cpu_ms.help
           commands: commands.all
           n: repeats
+  - question: >-
+      How much does a TeX Live environment, which needs no Docker, cost to
+      set up and to compile in, against Calkit's LaTeX Docker image?
+    answer: >-
+      A new environment with only the base packages took {cold_s:.0f} s to
+      set up from nothing here, downloading {download_mb:.0f} MB, and the
+      store held {store_mb:.0f} MB afterwards, against {image_mb:.0f} MB
+      for the image unpacked here. The same environment in another project
+      took {second_s:.2f} s, adding a package {add_s:.1f} s and
+      {add_mb:.1f} MB, and checking a ready one {ready_ms:.1f} ms. A small
+      article built with latexmk in {pdf_s:.1f} s with pdfLaTeX and
+      {lua_s:.1f} s with LuaLaTeX, against {docker_pdf_s:.1f} s and
+      {docker_lua_s:.1f} s in the image, where LuaLaTeX indexes its fonts
+      again in every new container. Medians of {n} builds each.
+    evidence:
+      - kind: result
+        path: results/texlive-env.json
+        values:
+          cold_s: seconds.cold
+          download_mb: mb.download
+          store_mb: mb.store
+          image_mb: mb.docker_image
+          second_s: seconds.second_project
+          add_s: seconds.add_package
+          add_mb: mb.add_package
+          ready_ms: ms.ready_check
+          pdf_s: seconds.compile.texlive-pdf
+          lua_s: seconds.compile.texlive-lualatex
+          docker_pdf_s: seconds.compile.docker-pdf
+          docker_lua_s: seconds.compile.docker-lualatex
+          n: repeats
 
 environments:
   pure:
@@ -188,4 +219,16 @@ pipeline:
         - ../calkit/cli/__init__.py
       outputs:
         - path: results/cli-build.json
+          storage: git
+    time-texlive-env:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-texlive-env.py
+      environment: calkit
+      args:
+        - --out=results/texlive-env.json
+      inputs:
+        - ../calkit/environments/texlive.py
+      outputs:
+        - path: results/texlive-env.json
           storage: git

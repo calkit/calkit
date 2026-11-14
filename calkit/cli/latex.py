@@ -469,9 +469,10 @@ def _run_latexmk(
     """Run latexmk, fetching the TeX packages it's missing and retrying.
 
     Only where what's fetched is kept with the project, i.e., Calkit's
-    LaTeX image, run directly or as a Docker environment built on it. A
-    system TeX is the user's to manage, and anything installed in another
-    container is gone when it exits. Returns latexmk's exit status.
+    LaTeX image, run directly or as a Docker environment built on it, or a
+    TeX Live environment, whose spec gains the packages. A system TeX is
+    the user's to manage, and anything installed in another container is
+    gone when it exits. Returns latexmk's exit status.
 
     ``quiet`` hides latexmk's output, for a caller that reports what went
     wrong from the log itself.
@@ -522,6 +523,39 @@ def _run_latexmk(
         ]
         if not missing:
             return status
+        # A TeX Live environment records what it was missing in its spec,
+        # so the lock pins it and the next build anywhere has it too
+        tex_env = (
+            calkit.load_calkit_info()
+            .get("environments", {})
+            .get(environment or "", {})
+        )
+        if tex_env.get("kind") == "texlive":
+            from calkit.environments import texlive as env_texlive
+
+            assert environment is not None
+            lock = env_texlive.read_lock(
+                env_texlive.get_lock_fpath(environment, tex_env)
+            )
+            if lock is None:
+                return status
+            try:
+                owners = env_texlive.find_packages_for_files(lock, missing)
+            except (ValueError, OSError) as e:
+                warn(f"Could not look up TeX Live packages: {e}")
+                return status
+            packages = list(dict.fromkeys(owners.values()))
+            if not packages:
+                return status
+            typer.echo(
+                f"Adding TeX Live packages to environment '{environment}' "
+                f"for {', '.join(owners)}: {', '.join(packages)}"
+            )
+            env_texlive.add_packages(environment, packages)
+            fetched.update(missing)
+            if os.path.isfile(fdb_path):
+                os.remove(fdb_path)
+            continue
         if fetchable is None:
             fetchable = can_fetch()
         if not fetchable:
@@ -763,6 +797,28 @@ def build(
     if verbose:
         typer.echo(f"Latexmk command: {cmd}")
     log_dir = aux_dir or output_dir or tex_dir
+    # A TeX Live environment gets the packages the document names before
+    # compiling, since LaTeX stops at the first one missing
+    tex_env = (
+        calkit.load_calkit_info(read_only=True)
+        .get("environments", {})
+        .get(environment or "", {})
+    )
+    if tex_env.get("kind") == "texlive":
+        from calkit.environments import texlive as env_texlive
+
+        assert environment is not None
+        try:
+            owners = env_texlive.add_document_packages(
+                environment, tex_env, tex_file
+            )
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{environment}': {e}")
+        if owners:
+            typer.echo(
+                f"Added TeX Live packages to environment '{environment}': "
+                + ", ".join(dict.fromkeys(owners.values()))
+            )
     # A little early, for file systems that keep times coarsely
     started = time.time() - 2
     if _run_latexmk(

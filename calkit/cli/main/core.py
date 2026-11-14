@@ -5355,6 +5355,22 @@ def run_in_env(
             subprocess.check_call(nix_cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in Nix environment")
+    elif env["kind"] == "texlive":
+        from calkit.environments import texlive as env_texlive
+
+        # Checked even with --no-check, since that's what finds the
+        # environment, and it only reads the lock when the env is ready
+        try:
+            view_dir = env_texlive.check(env_name, env, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{env_name}': {e}")
+        save_env_check_cache()
+        status = env_texlive.run(view_dir, cmd, wdir=wdir, verbose=verbose)
+        if status:
+            raise_error(
+                "Failed to run in TeX Live environment: command exited "
+                f"with status {status}"
+            )
     elif env["kind"] == "matlab":
         if not no_check:
             check_matlab_env(

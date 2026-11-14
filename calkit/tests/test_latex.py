@@ -878,3 +878,28 @@ def test_flatten(tmp_dir):
         ("paper/main.tex", 4, "\\includegraphics{fig}"),
         ("paper/main.tex", 5, ""),
     ]
+
+
+def test_find_named_tex_files(tmp_dir):
+    os.makedirs("paper/sections")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass[11pt]{revtex4-2}\n"
+            "\\usepackage[utf8]{inputenc}\n"
+            "\\usepackage{amsmath, booktabs}\n"
+            "% \\usepackage{commented}\n"
+            "\\usepackage{\\mypkg}\n"
+            "\\input{sections/intro}\n"
+            "\\input{missing}\n"
+            "\\bibliographystyle{plainnat}\n"
+        )
+    with open("paper/sections/intro.tex", "w") as f:
+        f.write("\\RequirePackage{siunitx}\n\\usepackage{amsmath}\n")
+    assert calkit.latex.find_named_tex_files("paper/main.tex") == [
+        "revtex4-2.cls",
+        "inputenc.sty",
+        "amsmath.sty",
+        "booktabs.sty",
+        "plainnat.bst",
+        "siunitx.sty",
+    ]

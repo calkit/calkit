@@ -531,6 +531,62 @@ def test_build_output_and_aux_dirs(tmp_dir):
             assert f.read().count(b"/ID [<") == 1, pdf
 
 
+@pytest.mark.xdist_group("texlive")
+def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    subprocess.check_call(["git", "init", "-q"])
+    calkit.save_calkit_info(
+        {
+            "name": "tex",
+            "environments": {"tex": {"kind": "texlive"}},
+            "pipeline": {
+                "stages": {
+                    "build-paper": {
+                        "kind": "latex",
+                        "target_path": "paper/main.tex",
+                        "environment": "tex",
+                    }
+                }
+            },
+        }
+    )
+    os.makedirs("paper")
+    # siunitx needs array.sty, from tools, which the document doesn't name,
+    # so that's read from siunitx itself. A package named by a macro can't
+    # be read from the source, so that's added after a failed compile.
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{amsmath}\n"
+            "\\usepackage{siunitx} % \\usepackage{nonexistent}\n"
+            "\\newcommand{\\tablepkg}{booktabs}\n"
+            "\\usepackage{\\tablepkg}\n"
+            "\\begin{document}\n\\SI{3}{\\meter}, $\\text{a}$\n"
+            "\\end{document}\n"
+        )
+    subprocess.check_call(
+        ["calkit", "latex", "build", "-e", "tex", "paper/main.tex"]
+    )
+    assert os.path.isfile("paper/main.pdf")
+    # What it was missing is recorded in the spec, and the lock pins it
+    packages = calkit.load_calkit_info()["environments"]["tex"]["packages"]
+    assert packages[:2] == ["amsmath", "siunitx"]
+    assert packages[-1] == "booktabs"
+    assert "tools" in packages
+    with open(".calkit/env-locks/tex.json") as f:
+        lock = json.load(f)
+    assert {"amsmath", "booktabs", "siunitx", "tools"} <= set(lock["packages"])
+    # A stage builds in it, with the lock as a dependency, and nothing is
+    # out of date afterwards
+    os.remove("paper/main.pdf")
+    subprocess.check_call(["calkit", "run"])
+    assert os.path.isfile("paper/main.pdf")
+    with open("dvc.yaml") as f:
+        assert ".calkit/env-locks/tex.json" in f.read()
+    out = subprocess.check_output(["calkit", "status"], text=True)
+    assert "Pipeline is up to date" in out
+
+
 def test_build_localizes_synctex(tmp_dir, monkeypatch):
     import gzip
 
@@ -1225,8 +1281,13 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
         "! Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable: Metric (TFM) "
         "file not found.\n"
         "! LaTeX Error: File `xurl.sty' not found.\n"
+        "[\\directlua]:1: module 'pdftexcmds' not found:\n"
     )
-    assert find_missing_tex_files(log) == ["xurl.sty", "pcrr7t.tfm"]
+    assert find_missing_tex_files(log) == [
+        "xurl.sty",
+        "pcrr7t.tfm",
+        "pdftexcmds.lua",
+    ]
     assert find_missing_tex_files("Output written on main.pdf") == []
     os.makedirs("paper")
     log_path = os.path.join("paper", "main.log")

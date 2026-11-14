@@ -60,7 +60,7 @@ dependencies = [
   # and without it DVC just falls back to pure Python
   "ruamel.yaml.clib>=0.2.15; platform_python_implementation == 'CPython' and python_version < '3.15' and (sys_platform == 'darwin' or (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64' or platform_machine == 'i686')) or (sys_platform == 'win32' and (platform_machine == 'AMD64' or platform_machine == 'x86')))",
   "rich",
-  "typer==0.29.0",
+  "typer==0.29.1",
   "websockets",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
@@ -268,7 +268,12 @@ members = ["hub/backend"]
 # Version is dynamic, derived from the Git tags by hatch-vcs; see the same
 # setting in hub/backend/pyproject.toml for why uv needs to be told that
 [tool.uv]
-cache-keys = [{ git = { commit = true, tags = true } }]
+# Listing any key replaces uv's default of pyproject.toml, without which
+# an uncommitted dependency change is ignored
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
+]
 # 'emails' and 'encutils' (via the hub backend and cssutils) ask for chardet
 # with no upper bound, so resolution picks up 7.x. requests asserts chardet
 # < 6 at import and warns on every single command when it doesn't hold, which

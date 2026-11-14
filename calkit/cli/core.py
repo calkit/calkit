@@ -83,16 +83,8 @@ class OptionalValueCommand(TyperCommand):
         return super().parse_args(ctx, new_args)
 
 
-def complete_stage_names(
-    ctx: object, param: object, incomplete: str
-) -> list[str]:
-    """Return pipeline stage names for shell tab-completion.
-
-    ``ctx`` and ``param`` are part of the Click completion-callback signature
-    but are unused here, so they accept anything, e.g., ``None`` when called
-    directly in tests. Typer bundles its own Click, so its types would only
-    tie this to that copy.
-    """
+def complete_stage_names(incomplete: str) -> list[str]:
+    """Return pipeline stage names for shell tab-completion."""
     if not os.path.isfile("calkit.yaml"):
         return []
     try:

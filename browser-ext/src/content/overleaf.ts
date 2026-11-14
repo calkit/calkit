@@ -1249,7 +1249,7 @@ function drawRuns(): void {
           ? el(
               "label",
               {
-                class: "small row",
+                class: "check",
                 title: "Save it and sync what it makes with Overleaf after",
               },
               [syncAfter, document.createTextNode("Sync with Overleaf after")],
@@ -1574,7 +1574,11 @@ let localStatus: Promise<LocalStatus> | null = null;
  * file if given, e.g., the notebook that makes a figure, through Calkit
  * here rather than a hub, or installs the editor first if it isn't there.
  */
-function renderOpenLocally(project: string, path?: string): HTMLElement {
+function renderOpenLocally(
+  project: string,
+  path?: string,
+  inline = false,
+): HTMLElement {
   localStatus ??= send({ type: "local.status" }).catch(() => ({
     permitted: false,
   }));
@@ -1632,6 +1636,10 @@ function renderOpenLocally(project: string, path?: string): HTMLElement {
       open.disabled = false;
     }
   });
+  if (inline) {
+    message.classList.add("line-message");
+    return el("div", { style: { display: "contents" } }, [open, message]);
+  }
   return el("div", { style: { marginTop: "4px" } }, [open, message]);
 }
 
@@ -3412,7 +3420,8 @@ function renderStatus(
   body.append(
     el("div", { class: "actions" }, [
       status.in_sync ? null : syncButton,
-      local ? renderOpenLocally(project) : null,
+      // Its button in this row, and anything it says below it
+      local ? renderOpenLocally(project, undefined, true) : null,
       el("button", {
         class: "action secondary",
         text: "Refresh",

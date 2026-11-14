@@ -693,13 +693,32 @@ async function handle(
 }
 
 // Back from the reload the options page asks for once the extension may
-// reach Calkit on this computer
-void chrome.storage.local.get("reopenOptions").then(({ reopenOptions }) => {
-  if (reopenOptions) {
-    void chrome.storage.local.remove("reopenOptions");
-    void chrome.runtime.openOptionsPage();
-  }
-});
+// reach Calkit on this computer. The reload cuts off the scripts in tabs
+// already open, e.g., Overleaf, so new ones are put in rather than leaving
+// those tabs needing a refresh.
+void chrome.storage.local
+  .get("reopenOptions")
+  .then(async ({ reopenOptions }) => {
+    if (!reopenOptions) {
+      return;
+    }
+    await chrome.storage.local.remove("reopenOptions");
+    for (const script of chrome.runtime.getManifest().content_scripts ?? []) {
+      // Scripts in the page's own world don't depend on the extension, so
+      // they're still running
+      if ((script as { world?: string }).world === "MAIN" || !script.js) {
+        continue;
+      }
+      for (const tab of await chrome.tabs.query({ url: script.matches })) {
+        if (tab.id !== undefined) {
+          await chrome.scripting
+            .executeScript({ target: { tabId: tab.id }, files: script.js })
+            .catch(() => undefined);
+        }
+      }
+    }
+    await chrome.runtime.openOptionsPage();
+  });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Only this extension's own pages and content scripts may drive the API.

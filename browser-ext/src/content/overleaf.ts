@@ -22,6 +22,7 @@ import {
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import {
+  isExtensionAlive,
   isUnsupportedByHub,
   type Request,
   RequestFailed,
@@ -2975,12 +2976,10 @@ let localPdf: {
  */
 function showLocalPdf(link: OverleafLinkPublic, path: string): void {
   hideLocalPdf();
-  // pdf.js's pages, inside the pane Overleaf shows its PDF in
-  const viewer = document.querySelector<HTMLElement>(".pdfViewer");
-  const pane =
-    viewer?.closest<HTMLElement>(".pdf-viewer, .pdfjs-viewer, .pdf") ??
-    viewer?.parentElement ??
-    null;
+  const pane = getPdfPane();
+  if (!pane) {
+    return;
+  }
   const params = new URLSearchParams({
     localProject: `${link.project_owner_name}/${link.project_name}`,
     folder: path,
@@ -3016,45 +3015,147 @@ function showLocalPdf(link: OverleafLinkPublic, path: string): void {
             } made on Overleaf since the last sync`
           : "PDF from this computer",
       }),
-      el("button", { text: "Show Overleaf's", onClick: hideLocalPdf }),
     ],
   );
   const host = el("div", {}, [bar, frame]);
-  Object.assign(
-    host.style,
-    {
-      display: "flex",
-      flexDirection: "column",
-      background: "#fff",
-    },
-    // Over the pane, or, without one, e.g., with only the editor showing,
-    // down the right side
-    pane
-      ? { position: "absolute", inset: "0", zIndex: "20" }
-      : {
-          position: "fixed",
-          top: "48px",
-          right: "0",
-          bottom: "0",
-          width: "45vw",
-          zIndex: "2147483000",
-          boxShadow: "0 0 12px rgba(0, 0, 0, 0.2)",
-        },
-  );
-  if (pane) {
-    if (getComputedStyle(pane).position === "static") {
-      pane.style.position = "relative";
-    }
-    pane.append(host);
-  } else {
-    document.body.append(host);
+  Object.assign(host.style, {
+    display: "flex",
+    flexDirection: "column",
+    background: "#fff",
+    position: "absolute",
+    inset: "0",
+    zIndex: "20",
+  });
+  if (getComputedStyle(pane).position === "static") {
+    pane.style.position = "relative";
   }
+  pane.append(host);
   localPdf = { host, link, path };
+  mountPdfSwitch();
 }
 
 function hideLocalPdf(): void {
   localPdf?.host.remove();
   localPdf = null;
+  mountPdfSwitch();
+}
+
+/** The pane Overleaf shows its PDF in, around pdf.js's pages. */
+function getPdfPane(): HTMLElement | null {
+  const viewer = document.querySelector<HTMLElement>(".pdfViewer");
+  return (
+    viewer?.closest<HTMLElement>(".pdf-viewer, .pdfjs-viewer, .pdf") ??
+    viewer?.parentElement ??
+    null
+  );
+}
+
+/** Keep the PDF switch on the pane as Overleaf redraws it, e.g., compiling. */
+function watchPdfSwitch(): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(mountPdfSwitch, 200);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+/** Which PDF someone last chose for an Overleaf project, by its ID. */
+const PDF_SOURCE_KEY = "pdfSources";
+
+/**
+ * A switch on Overleaf's PDF pane between its PDF and the one built on
+ * this computer, for a project checked out here, remembered per Overleaf
+ * project. Mounted again whenever Overleaf redraws the pane.
+ */
+function mountPdfSwitch(): void {
+  const check = lastCheck;
+  const pane = getPdfPane();
+  const existing = document.getElementById("calkit-pdf-switch");
+  if (!check?.link.local_path || !pane || !isExtensionAlive()) {
+    existing?.remove();
+    return;
+  }
+  // Redrawn by Overleaf, so shown again where it now is
+  if (localPdf && !localPdf.host.isConnected) {
+    showLocalPdf(localPdf.link, localPdf.path);
+    return;
+  }
+  const local = Boolean(localPdf);
+  if (
+    existing?.parentElement === pane &&
+    existing.dataset.local === `${local}`
+  ) {
+    return;
+  }
+  existing?.remove();
+  const choose = (useLocal: boolean) => {
+    void chrome.storage.local.get(PDF_SOURCE_KEY).then((stored) => {
+      const sources: Record<string, string> = stored[PDF_SOURCE_KEY] ?? {};
+      sources[check.overleafProjectId] = useLocal ? "local" : "overleaf";
+      void chrome.storage.local.set({ [PDF_SOURCE_KEY]: sources });
+    });
+    if (useLocal) {
+      showLocalPdf(check.link, check.status.path);
+    } else {
+      hideLocalPdf();
+    }
+  };
+  const option = (text: string, useLocal: boolean) =>
+    el("button", {
+      text,
+      title: useLocal
+        ? "The PDF the pipeline built on this computer, without waiting " +
+          "on Overleaf to compile"
+        : "Overleaf's own PDF",
+      style: {
+        border: "none",
+        padding: "4px 10px",
+        borderRadius: "999px",
+        cursor: "pointer",
+        font: "12px -apple-system, BlinkMacSystemFont, sans-serif",
+        background: useLocal === local ? "#0f766e" : "transparent",
+        color: useLocal === local ? "#fff" : "#111827",
+      },
+      onClick: () => {
+        if (useLocal !== local) {
+          choose(useLocal);
+        }
+      },
+    });
+  const toggle = el(
+    "div",
+    {
+      attrs: { id: "calkit-pdf-switch" },
+      style: {
+        position: "absolute",
+        bottom: "12px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: "21",
+        display: "flex",
+        gap: "2px",
+        padding: "2px",
+        borderRadius: "999px",
+        background: "#f3f4f6",
+        boxShadow: "0 1px 4px rgba(0, 0, 0, 0.25)",
+      },
+    },
+    [option("Overleaf", false), option("This computer", true)],
+  );
+  toggle.dataset.local = `${local}`;
+  if (getComputedStyle(pane).position === "static") {
+    pane.style.position = "relative";
+  }
+  pane.append(toggle);
+  // The first time it's shown for this project, the last choice applies
+  if (!existing) {
+    void chrome.storage.local.get(PDF_SOURCE_KEY).then((stored) => {
+      const source = (stored[PDF_SOURCE_KEY] ?? {})[check.overleafProjectId];
+      if (source === "local" && !localPdf && lastCheck === check) {
+        showLocalPdf(check.link, check.status.path);
+      }
+    });
+  }
 }
 
 /**
@@ -3138,28 +3239,6 @@ function renderStatus(
         style: { paddingTop: "6px" },
         text: "Everything here matches the Calkit project.",
       }),
-    );
-  }
-  if (link.local_path) {
-    const toggle = el("button", {
-      class: "action secondary",
-      text: localPdf ? "Show Overleaf's PDF" : "Show this computer's PDF",
-      title:
-        "Show the PDF the pipeline built on this computer instead of " +
-        "waiting on Overleaf to compile",
-      onClick: () => {
-        if (localPdf) {
-          hideLocalPdf();
-        } else {
-          showLocalPdf(link, status.path);
-        }
-        toggle.textContent = localPdf
-          ? "Show Overleaf's PDF"
-          : "Show this computer's PDF";
-      },
-    });
-    body.append(
-      el("div", { class: "actions", style: { marginTop: "8px" } }, [toggle]),
     );
   }
   body.append(
@@ -4261,6 +4340,7 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
       : null;
     drawRail();
+    mountPdfSwitch();
     // Nothing to say if the panel was opened in the meantime, or if the
     // page moved on to another project
     if (panel || currentProjectId !== overleafProjectId) {
@@ -4857,6 +4937,7 @@ watchPdf();
 watchIntegrations();
 watchRail();
 watchContextMenu();
+watchPdfSwitch();
 runContentScript({
   id: "overleaf",
   sync,

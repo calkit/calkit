@@ -23,6 +23,9 @@ from calkit.models.core import (
 )
 from calkit.models.pipeline import Stage
 
+# Typer's groups aren't commands, though both are documented the same way
+CommandObj = TyperCommand | TyperGroup
+
 SYSTEM_LOCK_START = "<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:START -->"
 SYSTEM_LOCK_END = "<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:END -->"
 ENV_START = "<!-- AUTO-GENERATED: ENV-KINDS:START -->"
@@ -98,14 +101,14 @@ def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
-def _command_text(cmd: TyperCommand) -> str:
+def _command_text(cmd: CommandObj) -> str:
     # CLI helps are written in RST style; convert so prettier doesn't
     # rewrite the generated file and fail the pre-commit hook.
     text = (cmd.help or cmd.short_help or "").strip()
     return rst_to_markdown(text)
 
 
-def _command_desc(cmd: TyperCommand) -> str:
+def _command_desc(cmd: CommandObj) -> str:
     text = _command_text(cmd)
     if not text:
         return ""
@@ -115,7 +118,7 @@ def _command_desc(cmd: TyperCommand) -> str:
     return m.group(1) if m else first_para
 
 
-def _command_desc_full(cmd: TyperCommand) -> str:
+def _command_desc_full(cmd: CommandObj) -> str:
     text = _command_text(cmd)
     if not text:
         return ""
@@ -127,9 +130,9 @@ def _command_desc_full(cmd: TyperCommand) -> str:
     return "\n\n".join(paragraphs)
 
 
-def _list_commands(group: TyperGroup) -> list[tuple[str, TyperCommand]]:
+def _list_commands(group: TyperGroup) -> list[tuple[str, CommandObj]]:
     return [
-        (name, cmd)
+        (name, cast(CommandObj, cmd))
         for name, cmd in group.commands.items()
         if not getattr(cmd, "hidden", False)
     ]
@@ -137,9 +140,9 @@ def _list_commands(group: TyperGroup) -> list[tuple[str, TyperCommand]]:
 
 def _list_unique_commands(
     group: TyperGroup,
-) -> list[tuple[list[str], TyperCommand]]:
+) -> list[tuple[list[str], CommandObj]]:
     alias_re = re.compile(r"\balias for ['\"]([^'\"]+)['\"]", re.IGNORECASE)
-    commands: list[tuple[list[str], TyperCommand]] = []
+    commands: list[tuple[list[str], CommandObj]] = []
     for name, cmd in _list_commands(group):
         desc = _command_text(cmd)
         if alias_re.search(desc):
@@ -148,15 +151,14 @@ def _list_unique_commands(
     return commands
 
 
-def _type_name(param_type: Any) -> str:
-    # Asked for rather than type-checked: the parameter type is Click's
-    # Choice or Typer's vendored one depending on the version, and what
-    # the reference needs from either is the list of values. Without it
-    # the table says 'choice' and leaves the reader to guess them.
-    choices = getattr(param_type, "choices", None)
+def _type_name(param: TyperOption | TyperArgument, cmd_obj: CommandObj) -> str:
+    # Without the values, the table would leave the reader to guess them
+    choices = param.type_descriptor.choices
     if choices is not None:
-        return "choice(" + ", ".join(str(c) for c in choices) + ")"
-    return getattr(param_type, "name", str(param_type))
+        values = [c.value if isinstance(c, Enum) else c for c in choices]
+        return "choice(" + ", ".join(str(v) for v in values) + ")"
+    name = param.display_type(typer.Context(cmd_obj)).strip("<>")
+    return "boolean" if name == "bool" else name
 
 
 def _default_value(param: TyperOption | TyperArgument) -> str:
@@ -184,7 +186,7 @@ def _param_help(param: TyperOption | TyperArgument) -> str:
     return " ".join(help_text.split())
 
 
-def _usage(command_path: str, cmd_obj: TyperCommand) -> str:
+def _usage(command_path: str, cmd_obj: CommandObj) -> str:
     parts = [command_path]
 
     has_visible_options = any(
@@ -210,13 +212,13 @@ def _usage(command_path: str, cmd_obj: TyperCommand) -> str:
     return " ".join(parts)
 
 
-def _args_table(cmd_obj: TyperCommand) -> str:
+def _args_table(cmd_obj: CommandObj) -> str:
     rows: list[list[str]] = []
     for param in cmd_obj.params:
         if not isinstance(param, TyperArgument):
             continue
         name = f"`{param.name}`"
-        ptype = _type_name(param.type)
+        ptype = _type_name(param, cmd_obj)
         required = "yes" if param.required else "no"
         default = _default_value(param)
         help_txt = _param_help(param)
@@ -231,11 +233,11 @@ def _args_table(cmd_obj: TyperCommand) -> str:
     )
 
 
-def _has_args(cmd_obj: TyperCommand) -> bool:
+def _has_args(cmd_obj: CommandObj) -> bool:
     return any(isinstance(param, TyperArgument) for param in cmd_obj.params)
 
 
-def _opts_table(cmd_obj: TyperCommand) -> str:
+def _opts_table(cmd_obj: CommandObj) -> str:
     rows: list[list[str]] = []
     for param in cmd_obj.params:
         if not isinstance(param, TyperOption):
@@ -244,7 +246,7 @@ def _opts_table(cmd_obj: TyperCommand) -> str:
             continue
         option_names = [*param.opts, *param.secondary_opts]
         options = ", ".join(f"`{opt}`" for opt in option_names)
-        ptype = _type_name(param.type)
+        ptype = _type_name(param, cmd_obj)
         required = "yes" if param.required else "no"
         default = _default_value(param)
         help_txt = _param_help(param)
@@ -259,7 +261,7 @@ def _opts_table(cmd_obj: TyperCommand) -> str:
     )
 
 
-def _has_visible_options(cmd_obj: TyperCommand) -> bool:
+def _has_visible_options(cmd_obj: CommandObj) -> bool:
     for param in cmd_obj.params:
         if not isinstance(param, TyperOption):
             continue
@@ -275,7 +277,7 @@ def _has_visible_options(cmd_obj: TyperCommand) -> bool:
 def _append_command_details(
     lines: list[str],
     command_path: str,
-    cmd_obj: TyperCommand,
+    cmd_obj: CommandObj,
     heading: str = "###",
     anchor: str | None = None,
 ) -> None:
@@ -393,7 +395,7 @@ def generate_cli_markdown() -> str:
     lines.append("## Top-level commands")
     lines.append("")
 
-    def _top_table_anchor(names: list[str], cmd_obj: TyperCommand) -> str:
+    def _top_table_anchor(names: list[str], cmd_obj: CommandObj) -> str:
         is_group_with_subcommands = isinstance(cmd_obj, TyperGroup) and bool(
             cmd_obj.commands
         )

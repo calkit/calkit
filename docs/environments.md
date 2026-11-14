@@ -1174,6 +1174,53 @@ Calkit itself is also available as a flake — see
 CLI to your own Nix environments via `inputs.calkit.url =
 "github:calkit/calkit"`.
 
+<!-- TODO: needs human review -->
+
+### TeX Live
+
+A `texlive` environment builds LaTeX documents without Docker or a TeX
+installation of your own.
+Calkit downloads the TeX Live packages the environment needs, once per
+computer, into `~/.calkit/texlive`, and every project that uses the same
+packages shares them.
+
+```yaml
+environments:
+  tex:
+    kind: texlive
+    packages:
+      - amsmath
+      - booktabs
+      - siunitx
+```
+
+Every TeX Live environment has pdfLaTeX, LuaLaTeX, latexmk, and BibTeX.
+List any other [TeX Live packages](https://ctan.org/) the document uses
+under `packages`, or leave them out:
+when `calkit latex build -e tex` or a LaTeX stage finds the document
+needs a package the environment doesn't have,
+Calkit adds it to the environment's lock for you,
+so `packages` stays as you wrote it.
+
+Packages come from a past TeX Live release, 2025 by default, whose
+packages never change, so the lock Calkit writes to
+`.calkit/env-locks/tex.json` means the same TeX on every computer, years
+later.
+The lock covers macOS, Linux, and Windows at once.
+Set `release` to use another, e.g., `release: 2024`.
+To drop packages a document no longer needs, delete the lock;
+the next build adds back the ones it still uses.
+
+Run any TeX program in it with `calkit xenv`, e.g.:
+
+```sh
+calkit xenv -n tex -- latexmk -lualatex paper.tex
+```
+
+The environment only sees fonts from TeX Live packages, not those
+installed on your computer, so a document builds the same everywhere.
+XeLaTeX, Biber, and TeX4ht aren't supported yet.
+
 ### R
 
 R environments can be managed with Conda, Pixi, or `renv` (recommended).
@@ -1576,6 +1623,20 @@ stale inputs; the paths are taken from the stage instead.
 | relock        | Literal['manual'\|'auto']                                                                                                                                                                                                                                                                                                                                                    | no       | What happens on a machine whose locked properties differ from the lock. 'manual' keeps the lock, and a stage that needs to run there is skipped by 'calkit run', and refused by 'calkit xenv', until 'calkit update env --lock' is run. 'auto' rewrites the lock, rerunning the stages that depend on it, for results that should follow the machine, e.g., ones that depend on the version of a tool Calkit doesn't manage.                                                                                                                      |
 | requirements  | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| AwsCredentialsRequirement \| Requirement \| dict[str, RequirementAttrs]]                                                                                                                                                                                                                | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                                                                                                                                                                                                                                                                                                    |
 | description   | str                                                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+#### `texlive`
+
+Model class: `TexLiveEnvironment`
+
+| Parameter   | Type                     | Required | Description                                                                                                                                                                                                                  |
+| ----------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['texlive']       | yes      | What kind of environment this is.                                                                                                                                                                                            |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.                                      |
+| release     | int                      | no       | TeX Live release, e.g., 2025, to install packages from. A past release's repository is frozen, so its lock pins every package for good. Defaults to the latest frozen release.                                               |
+| packages    | list[str]                | no       | TeX Live packages to install, beyond the base set every TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). What they depend on comes with them, and packages a build finds missing are added to the lock, not here. |
+| platforms   | list[str]                | no       | TeX Live platforms to lock for. Defaults to macOS, Windows, and Linux on x86_64 and ARM.                                                                                                                                     |
+| repository  | str                      | no       | TeX Live repository URL to install from instead of the one for 'release', e.g., a local mirror.                                                                                                                              |
+| description | str                      | no       | A description of the environment.                                                                                                                                                                                            |
 
 #### `uv`
 

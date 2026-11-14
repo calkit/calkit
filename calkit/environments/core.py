@@ -405,6 +405,8 @@ def language_from_env(env: dict) -> str | None:
         return "python"
     if kind == "docker" and "texlive" in env.get("image", "").lower():
         return "latex"
+    if kind == "texlive":
+        return "latex"
     return None
 
 
@@ -682,7 +684,9 @@ def get_env_lock_fpath(
             )
             if for_dvc:
                 lock_fpath = os.path.dirname(lock_fpath)
-    elif env_kind == "matlab":
+    elif env_kind in ("matlab", "texlive"):
+        # A TeX Live lock covers every platform it was locked for, so
+        # there's one
         lock_fpath += ".json"
     elif env_kind == "julia":
         env_path = env.get("path")
@@ -1115,6 +1119,7 @@ def write_switch_env_lock(
             "nix",
             "pixi",
             "renv",
+            "texlive",
             "uv",
             "uv-venv",
             "venv",
@@ -3631,7 +3636,7 @@ def detect_env_for_stage(
         "r": ["renv", "conda", "pixi"],
         "julia": ["julia"],
         "matlab": ["matlab"],
-        "latex": ["docker"],
+        "latex": ["docker", "texlive"],
         "shell": ["system"],
     }
     preferred_kinds = (

@@ -11264,6 +11264,7 @@
                   "renv": "#/$defs/REnvironment",
                   "slurm": "#/$defs/SlurmEnvironment",
                   "system": "#/$defs/SystemEnvironment",
+                  "texlive": "#/$defs/TexLiveEnvironment",
                   "uv": "#/$defs/UvEnvironment",
                   "uv-venv": "#/$defs/UvVenvEnvironment",
                   "venv": "#/$defs/VenvEnvironment"
@@ -11306,6 +11307,9 @@
                 },
                 {
                   "$ref": "#/$defs/NixEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/TexLiveEnvironment"
                 },
                 {
                   "$ref": "#/$defs/SystemEnvironment"
@@ -11831,6 +11835,105 @@
         "path"
       ],
       "title": "TableEvidence",
+      "type": "object"
+    },
+    "TexLiveEnvironment": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
+        "kind": {
+          "const": "texlive",
+          "default": "texlive",
+          "title": "Kind",
+          "type": "string"
+        },
+        "packages": {
+          "default": [],
+          "description": "TeX Live packages to install, beyond the base set every TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). What they depend on comes with them, and packages a build finds missing are added to the lock, not here.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Packages",
+          "type": "array"
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TeX Live platforms to lock for. Defaults to macOS, Windows, and Linux on x86_64 and ARM.",
+          "title": "Platforms"
+        },
+        "release": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TeX Live release, e.g., 2025, to install packages from. A past release's repository is frozen, so its lock pins every package for good. Defaults to the latest frozen release.",
+          "title": "Release"
+        },
+        "repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TeX Live repository URL to install from instead of the one for 'release', e.g., a local mirror.",
+          "title": "Repository"
+        }
+      },
+      "title": "TexLiveEnvironment",
       "type": "object"
     },
     "UvEnvironment": {
@@ -12869,6 +12972,7 @@
             "slurm": "#/$defs/SlurmEnvironment",
             "switch": "#/$defs/SwitchEnvironment",
             "system": "#/$defs/SystemEnvironment",
+            "texlive": "#/$defs/TexLiveEnvironment",
             "uv": "#/$defs/UvEnvironment",
             "uv-venv": "#/$defs/UvVenvEnvironment",
             "venv": "#/$defs/VenvEnvironment"
@@ -12911,6 +13015,9 @@
           },
           {
             "$ref": "#/$defs/NixEnvironment"
+          },
+          {
+            "$ref": "#/$defs/TexLiveEnvironment"
           },
           {
             "$ref": "#/$defs/SystemEnvironment"

@@ -219,7 +219,7 @@ with its version, the editor projects open in, where the project is on
 your computer, and which of its files there aren't saved or synced with
 Overleaf. None of it goes to a hub. You can disconnect it by removing
 the extension's permission to communicate with cooperating native
-applications, or with `calkit browser uninstall`.
+applications, or with `calkit browser-link uninstall`.
 
 ### What is never collected
 

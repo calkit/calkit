@@ -7,15 +7,17 @@ its standard input and output, each message a JSON object preceded by its
 length. Only the extensions the host's manifest names can start it, and it
 listens on nothing, so no other program or web page can reach it.
 
-Run as ``python -m calkit.browser``, which skips the CLI, since the browser
+Run as ``python -m calkit.browser_link``, which skips the CLI, since the browser
 waits on it to start.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import platform
+import re
 import struct
 import subprocess
 import sys
@@ -282,7 +284,9 @@ def serve(stdin: BinaryIO, stdout: BinaryIO) -> None:
 def get_host_dir() -> str:
     """Where the host's launcher and Windows manifest are kept."""
     return os.path.join(
-        calkit.get_user_home(), ".calkit", f"browser{calkit.get_env_suffix()}"
+        calkit.get_user_home(),
+        ".calkit",
+        f"browser-link{calkit.get_env_suffix()}",
     )
 
 
@@ -297,8 +301,8 @@ def get_launcher_text() -> str:
     terminal does.
     """
     if os.name == "nt":
-        return f'@echo off\r\n"{sys.executable}" -m calkit.browser %*\r\n'
-    return f'#!/bin/sh\nexec "{sys.executable}" -m calkit.browser "$@"\n'
+        return f'@echo off\r\n"{sys.executable}" -m calkit.browser_link %*\r\n'
+    return f'#!/bin/sh\nexec "{sys.executable}" -m calkit.browser_link "$@"\n'
 
 
 def get_manifest(browser: str, extension_ids: list[str] = []) -> dict:
@@ -369,6 +373,81 @@ def install_host(extension_ids: list[str] = []) -> list[str]:
         ) as k:
             winreg.SetValueEx(k, "", 0, winreg.REG_SZ, path)
     return list(WINDOWS_REGISTRY_KEYS)
+
+
+def get_host_status() -> dict:
+    """Whether the extension can start the host here: the launcher and the
+    Python it runs, the browsers it's registered with, by browser, with the
+    extensions each allows, or None, and whether it answers when started
+    as a browser starts it, with its ``version`` or an ``error``.
+    """
+
+    def get_allowed_ids(manifest_path: str | None) -> list[str] | None:
+        if not manifest_path:
+            return None
+        try:
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if "allowed_extensions" in manifest:
+            return list(manifest["allowed_extensions"])
+        return [
+            o.removeprefix("chrome-extension://").rstrip("/")
+            for o in manifest.get("allowed_origins", [])
+        ]
+
+    launcher_path = get_launcher_path()
+    status: dict[str, Any] = {
+        "launcher_path": launcher_path,
+        "python_path": None,
+        "browsers": {},
+        "version": None,
+        "error": None,
+    }
+    if sys.platform == "win32":
+        import winreg
+
+        for browser, key in WINDOWS_REGISTRY_KEYS.items():
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER, f"{key}\\{HOST_NAME}"
+                ) as k:
+                    manifest_path = winreg.QueryValue(k, None)
+            except OSError:
+                manifest_path = None
+            status["browsers"][browser] = get_allowed_ids(manifest_path)
+    else:
+        for browser, path in get_manifest_paths().items():
+            status["browsers"][browser] = get_allowed_ids(path)
+    if not os.path.isfile(launcher_path):
+        status["error"] = "Not installed"
+        return status
+    with open(launcher_path) as f:
+        match = re.search(r'"([^"]+)" -m calkit', f.read())
+    if match:
+        status["python_path"] = match.group(1)
+    # Started as Chrome starts it, naming the extension connecting
+    ping = json.dumps({"type": "ping", "id": 1}).encode()
+    try:
+        res = subprocess.run(
+            [launcher_path, f"chrome-extension://{CHROME_EXTENSION_IDS[0]}/"],
+            input=struct.pack("=I", len(ping)) + ping,
+            capture_output=True,
+            timeout=60,
+        )
+        reply = read_message(io.BytesIO(res.stdout))
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        status["error"] = str(e)
+        return status
+    if reply is None or not reply.get("ok"):
+        detail = res.stderr.decode(errors="replace").strip().splitlines()
+        status["error"] = (
+            detail[-1] if detail else "It started, but didn't answer"
+        )
+        return status
+    status["version"] = reply["result"]["version"]
+    return status
 
 
 def uninstall_host() -> None:

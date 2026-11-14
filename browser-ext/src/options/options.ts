@@ -281,7 +281,7 @@ async function renderLocalSection(container: HTMLElement): Promise<void> {
         "Lets the extension work with projects on this computer, e.g., " +
         "open the script that makes a figure in your editor. It talks to " +
         "Calkit here directly, not through a hub. Calkit needs to be " +
-        "installed, which sets this up, or run 'calkit browser install'.",
+        "installed, which sets this up, or run 'calkit browser-link install'.",
     }),
     el("div", { class: "row" }, [connect]),
     message,

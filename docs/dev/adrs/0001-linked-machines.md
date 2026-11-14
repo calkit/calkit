@@ -90,8 +90,8 @@ the same machine.
 
 Since then, the browser extension reaches Calkit on the machine it runs
 on directly, through the browser's native messaging, which starts
-`python -m calkit.browser` and talks to it over its standard input and
-output, so nothing listens on a port (`calkit/browser.py`).
+`python -m calkit.browser_link` and talks to it over its standard input and
+output, so nothing listens on a port (`calkit/browser_link.py`).
 The relay stays the way to reach other machines, and the hub's pages.
 SSH environments remain the way to run on other machines without the hub.
 

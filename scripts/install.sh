@@ -65,8 +65,8 @@ if [ "$COMPLETION" = 1 ]; then
 fi
 
 if [ "$BROWSER" = 1 ]; then
-    if ! calkit browser install; then
-        echo "⚠️ Failed to set up Calkit for the browser extension; run 'calkit browser install' to try again"
+    if ! calkit browser-link install; then
+        echo "⚠️ Failed to set up Calkit for the browser extension; run 'calkit browser-link install' to try again"
     fi
 fi
 

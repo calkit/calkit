@@ -85,7 +85,7 @@ describe("askLocal", () => {
     const asked = askLocal({ type: "ping" });
     await settle();
     ports[0].close("Specified native messaging host not found.");
-    await expect(asked).rejects.toThrow("calkit browser install");
+    await expect(asked).rejects.toThrow("calkit browser-link install");
     // The next request starts it again
     const again = askLocal({ type: "ping" });
     await settle();

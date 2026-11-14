@@ -44,7 +44,7 @@
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`open`](#command-group-open)                    | Open things.                                                                                                 |
-| [`browser`](#command-group-browser)              | Connect the browser extension to this machine.                                                               |
+| [`browser-link`](#command-group-browser-link)    | Link the browser extension to Calkit on this machine.                                                        |
 | [`export`](#command-group-export)                | Export data and artifacts from various applications.                                                         |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
@@ -2945,27 +2945,28 @@ Options:
 | `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder.                              |
 | `--hub`        | str     | no       |         | Hub to clone it from if it isn't here, e.g., https://calkit.example.edu, or localhost for a development hub. Defaults to calkit.io. |
 
-<a id="command-group-browser"></a>
+<a id="command-group-browser-link"></a>
 
-### `calkit browser`
+### `calkit browser-link`
 
-Connect the browser extension to this machine.
+Link the browser extension to Calkit on this machine.
 
-| Command                                      | Description                                                       |
-| -------------------------------------------- | ----------------------------------------------------------------- |
-| [`install`](#subcommand-browser-install)     | Let the browser extension work with projects on this machine.     |
-| [`uninstall`](#subcommand-browser-uninstall) | Stop the browser extension working with projects on this machine. |
+| Command                                           | Description                                                           |
+| ------------------------------------------------- | --------------------------------------------------------------------- |
+| [`install`](#subcommand-browser-link-install)     | Let the browser extension work with projects on this machine.         |
+| [`uninstall`](#subcommand-browser-link-uninstall) | Stop the browser extension working with projects on this machine.     |
+| [`status`](#subcommand-browser-link-status)       | Check whether the browser extension can reach Calkit on this machine. |
 
-<a id="subcommand-browser-install"></a>
+<a id="subcommand-browser-link-install"></a>
 
-#### `calkit browser install`
+#### `calkit browser-link install`
 
 Let the browser extension work with projects on this machine.
 
 Usage:
 
 ```text
-calkit browser install [OPTIONS]
+calkit browser-link install [OPTIONS]
 ```
 
 Options:
@@ -2974,16 +2975,28 @@ Options:
 | ---------------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------- |
 | `--extension-id` | str  | no       |         | ID of another extension that may connect, e.g., one loaded unpacked in development. |
 
-<a id="subcommand-browser-uninstall"></a>
+<a id="subcommand-browser-link-uninstall"></a>
 
-#### `calkit browser uninstall`
+#### `calkit browser-link uninstall`
 
 Stop the browser extension working with projects on this machine.
 
 Usage:
 
 ```text
-calkit browser uninstall
+calkit browser-link uninstall
+```
+
+<a id="subcommand-browser-link-status"></a>
+
+#### `calkit browser-link status`
+
+Check whether the browser extension can reach Calkit on this machine.
+
+Usage:
+
+```text
+calkit browser-link status
 ```
 
 <a id="command-group-export"></a>

@@ -43,7 +43,7 @@ from calkit.cli import (
     warn,
     warn_app_control,
 )
-from calkit.cli.browser import browser_app
+from calkit.cli.browser_link import browser_link_app
 from calkit.cli.check import (
     check_app,
     check_conda_env,
@@ -99,9 +99,9 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(open_app, name="open", help="Open things.")
 app.add_typer(
-    browser_app,
-    name="browser",
-    help="Connect the browser extension to this machine.",
+    browser_link_app,
+    name="browser-link",
+    help="Link the browser extension to Calkit on this machine.",
 )
 app.add_typer(
     export_app,

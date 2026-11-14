@@ -32,7 +32,7 @@ It talks to Calkit on your computer directly, not through a hub.
 Calkit's installer sets this up, or run:
 
 ```sh
-calkit browser install
+calkit browser-link install
 ```
 
 Then, in the extension's options, click **Connect** under

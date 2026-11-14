@@ -54,7 +54,7 @@ if ($InstallCompletion -and $policy -eq "Restricted" -and -not $byGroupPolicy) {
 # installing again doesn't add it again
 if ($InstallCompletion) { if ($policy -notin @("RemoteSigned", "Unrestricted", "Bypass")) { Write-Warning "Skipping shell completion, since your execution policy ($policy) won't let your PowerShell profile run" } else { Write-Host "Installing shell completion"; foreach ($cmd in @("calkit", "ck")) { $script = (& $cmd --show-completion powershell) -join "`n"; if ($LASTEXITCODE -ne 0 -or -not $script) { Write-Warning "Failed to get shell completion for '$cmd'" } elseif ((Test-Path $PROFILE) -and (Select-String -Path $PROFILE -SimpleMatch -Pattern "-CommandName $cmd -ScriptBlock" -Quiet)) { Write-Host "Shell completion for '$cmd' is already in $PROFILE" } else { New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null; Add-Content -Path $PROFILE -Value $script; Write-Host "Installed shell completion for '$cmd' in $PROFILE" } } } }
 
-if ($InstallBrowser) { & calkit browser install; if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to set up Calkit for the browser extension; run 'calkit browser install' to try again" } }
+if ($InstallBrowser) { & calkit browser-link install; if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to set up Calkit for the browser extension; run 'calkit browser-link install' to try again" } }
 
 if ($InstallLink) { Write-Host "Linking this machine to the hub"; & calkit hub link install; if ($LASTEXITCODE -ne 0) { throw "Failed to link this machine; run 'calkit hub link install' to try again" } }
 

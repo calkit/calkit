@@ -1,10 +1,10 @@
 /**
  * Calkit on this computer, which the browser starts when the extension
  * connects to it, so the extension can work with projects here directly
- * rather than through a hub. See calkit/browser.py.
+ * rather than through a hub. See calkit/browser_link.py.
  *
  * It needs the optional nativeMessaging permission, asked for from the
- * options page, and 'calkit browser install', which the installer runs.
+ * options page, and 'calkit browser-link install', which the installer runs.
  */
 
 export const HOST_NAME = "io.calkit.native";
@@ -23,7 +23,7 @@ export interface LocalStatus {
   error?: string;
 }
 
-/** What's in a checkout that isn't saved or synced, from calkit/browser.py. */
+/** What's in a checkout that isn't saved or synced, from calkit/browser_link.py. */
 export interface CheckoutStatus {
   path: string;
   branch: string | null;
@@ -62,13 +62,13 @@ export function describeHostError(message: string): string {
   if (/not found/i.test(message)) {
     return (
       "Calkit isn't set up for the browser on this computer; install it, " +
-      "or run 'calkit browser install'"
+      "or run 'calkit browser-link install'"
     );
   }
   if (/forbidden/i.test(message)) {
     return (
       "Calkit on this computer doesn't allow this extension; run " +
-      "'calkit browser install'"
+      "'calkit browser-link install'"
     );
   }
   if (/exited/i.test(message)) {

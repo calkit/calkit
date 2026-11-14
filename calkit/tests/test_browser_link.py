@@ -1,4 +1,4 @@
-"""Tests for ``calkit.browser``."""
+"""Tests for ``calkit.browser_link``."""
 
 import io
 import json
@@ -12,7 +12,8 @@ import pytest
 
 import calkit
 import calkit.config
-from calkit.browser import (
+from calkit.browser_link import (
+    get_host_status,
     get_manifest,
     get_reply,
     install_host,
@@ -198,15 +199,38 @@ def test_install_host(tmp_path, monkeypatch):
             "editor": calkit.config.read().default_editor,
         },
     }
+    # Its status says where it's registered, for which extensions, and that
+    # it answers
+    status = get_host_status()
+    assert status == {
+        "launcher_path": chrome["path"],
+        "python_path": sys.executable,
+        "browsers": {
+            "chrome": ["idhdomgapfolnpffanajdckdaojencal", "abc"],
+            "firefox": ["browser-ext@calkit.io", "dev@calkit.io"],
+        },
+        "version": calkit.__version__,
+        "error": None,
+    }
+    # A launcher whose Python is gone, e.g., after reinstalling Calkit with
+    # another, doesn't answer
+    with open(chrome["path"], "w") as f:
+        f.write('#!/bin/sh\nexec "/gone/python" -m calkit.browser_link\n')
+    status = get_host_status()
+    assert status["python_path"] == "/gone/python"
+    assert status["version"] is None and status["error"]
     uninstall_host()
     assert not chrome_path.exists() and not firefox_path.exists()
     assert not os.path.exists(chrome["path"])
+    status = get_host_status()
+    assert status["error"] == "Not installed"
+    assert status["browsers"] == {"chrome": None, "firefox": None}
 
 
 def test_get_checkout_status(tmp_path):
     from filelock import FileLock
 
-    from calkit.browser import get_checkout_status
+    from calkit.browser_link import get_checkout_status
 
     def git(*args, cwd):
         subprocess.check_call(

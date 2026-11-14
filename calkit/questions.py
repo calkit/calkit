@@ -2146,7 +2146,7 @@ def question_index(questions: list, ref: str) -> int:
 def format_letters(check: QuestionCheck) -> str:
     """The H A V V row: hypothesis, answer, verified, and validated, colored
     as the hub colors them, with a dash for each that isn't there yet."""
-    import click
+    import typer
 
     answer = {
         "unanswered": None,
@@ -2162,7 +2162,7 @@ def format_letters(check: QuestionCheck) -> str:
         ("V", sign_off[check.validation_status]),
     ]
     return " ".join(
-        click.style(letter, fg=color) if color else click.style("-", dim=True)
+        typer.style(letter, fg=color) if color else typer.style("-", dim=True)
         for letter, color in letters
     )
 

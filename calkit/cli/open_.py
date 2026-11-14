@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 
@@ -231,8 +231,6 @@ def find_or_install_vscode() -> str | None:
     install it, optionally with Calkit's recommended extensions and
     settings.
     """
-    import click
-
     from calkit import install
     from calkit.core import is_tty
 
@@ -263,7 +261,7 @@ def find_or_install_vscode() -> str | None:
         "4. Don't install it; open the folder\n"
         "Choose",
         default="1",
-        type=click.Choice(["1", "2", "3", "4"]),
+        type=Literal["1", "2", "3", "4"],
     )
     if choice == "3":
         typer.launch(download_url)

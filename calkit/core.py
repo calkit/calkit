@@ -677,7 +677,32 @@ def get_project_checkouts(
             continue
         try:
             # Most projects say their name, which rules them out without
-            # asking Git for a remote
+            # asking Git for a remote, or, for one written plainly on its
+            # own line, even parsing the file
+            with open(os.path.join(path, "calkit.yaml"), "rb") as f:
+                text = f.read()
+            match = re.search(
+                rb"^name:[ \t]*([\"']?)([\w.-]+)\1[ \t]*(?:#.*)?$",
+                text,
+                flags=re.MULTILINE,
+            )
+            if match and match.group(2).decode() not in (
+                name,
+                "null",
+                "Null",
+                "NULL",
+                "~",
+            ):
+                continue
+            # One that says none takes it from its Git remote, so it's in
+            # the repo's config, unless that's elsewhere, as a worktree's is
+            git_config_path = os.path.join(path, ".git", "config")
+            if not re.search(
+                rb"^name[ \t]*:", text, flags=re.MULTILINE
+            ) and os.path.isfile(git_config_path):
+                with open(git_config_path, "rb") as f:
+                    if name.encode() not in f.read():
+                        continue
             info = load_calkit_info(wdir=path, read_only=True)
             declared = info.get("name") if isinstance(info, dict) else None
             if declared is not None and declared != name:

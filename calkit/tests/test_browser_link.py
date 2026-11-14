@@ -49,8 +49,8 @@ def test_messages():
         read_message(io.BytesIO(struct.pack("=I", 2) + b"[]"))
     with pytest.raises(ValueError):
         write_message(io.BytesIO(), {"big": "x" * 1024 * 1024})
-    # Serving answers each in turn, until the input ends, carrying on past
-    # one it can't read
+    # Serving answers each, in whatever order they're done, until the input
+    # ends, carrying on past one it can't read
     requests = b"".join(
         struct.pack("=I", len(m)) + m
         for m in [
@@ -65,14 +65,14 @@ def test_messages():
     replies = []
     while (msg := read_message(out)) is not None:
         replies.append(msg)
-    assert replies == [
+    assert sorted(replies, key=lambda r: str(r["id"])) == [
         {
             "id": 1,
             "ok": True,
             "result": {"version": calkit.__version__} | get_editor_info(),
         },
-        {"id": None, "ok": False, "error": "A message must be a JSON object"},
         {"id": 2, "ok": False, "error": "Unknown request type 'nope'"},
+        {"id": None, "ok": False, "error": "A message must be a JSON object"},
     ]
 
 
@@ -125,6 +125,7 @@ def test_get_reply(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "calkit.hub.link.login_shell_path", lambda: "/login/bin"
     )
+    calkit.browser_link.get_login_shell_env.cache_clear()
     # It's opened, or is still opening, e.g., JupyterLab's server, or says
     # why it couldn't be
     for returncode, output, ok in [
@@ -380,6 +381,18 @@ def test_get_checkout_paths(tmp_path, monkeypatch):
         {"type": "checkouts.choose", "project": "me/proj", "path": "/x"}
     )
     assert not reply["ok"] and "isn't a checkout" in reply["error"]
+    # One made since they were looked for is found when it's chosen
+    newer = home / "dev" / "proj-newer"
+    git("worktree", "add", "-q", str(newer), cwd=main)
+    newer_path = os.path.realpath(newer)
+    assert get_checkout_paths("me", "proj") == [wt_path, main_path]
+    reply = get_reply(
+        {"type": "checkouts.choose", "project": "me/proj", "path": newer_path}
+    )
+    assert reply["result"] == {
+        "paths": [newer_path, main_path, wt_path],
+        "path": newer_path,
+    }
     reply = get_reply({"type": "checkouts.get", "project": "me/gone"})
     assert reply["result"] == {"paths": [], "path": None}
 
@@ -464,6 +477,7 @@ def test_get_overleaf_links(tmp_path, monkeypatch):
 def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
     import git as gitpython
 
+    import calkit.browser_link
     import calkit.cli.overleaf
     from calkit.browser_link import get_overleaf_sync_statuses
     from calkit.cli.core import raise_error
@@ -496,9 +510,15 @@ def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
         pulled.append((project_id, auth))
         return gitpython.Repo(clone), auth
 
-    monkeypatch.setattr(
-        calkit.cli.overleaf, "_get_overleaf_auth", lambda: "token"
-    )
+    n_auth_reads = []
+
+    def get_auth():
+        n_auth_reads.append(1)
+        return "token"
+
+    monkeypatch.setattr(calkit.browser_link, "_overleaf_auth", None)
+    monkeypatch.setattr(calkit.browser_link, "_overleaf_pulled_at", {})
+    monkeypatch.setattr(calkit.cli.overleaf, "_get_overleaf_auth", get_auth)
     monkeypatch.setattr(
         calkit.cli.overleaf, "_get_pulled_overleaf_repo", get_pulled_repo
     )
@@ -519,8 +539,15 @@ def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
     assert status["files_to_push"][0]["stage_status"] is None
     assert not status["in_sync"]
     assert status["pulled"]
+    # Pulled only a moment ago, so not again
     assert get_overleaf_sync_statuses(str(project), path="paper") == [status]
     assert get_overleaf_sync_statuses(str(project), "other-id") == []
+    assert len(pulled) == 1
+    # Later it is, with the credentials that worked, rather than reading them
+    # again
+    monkeypatch.setattr(calkit.browser_link, "PULL_FRESH_SECONDS", 0)
+    assert get_overleaf_sync_statuses(str(project)) == [status]
+    assert len(pulled) == 2 and len(n_auth_reads) == 1
     # Without pulling, the copy from the last pull is used, with no
     # credentials needed, unless there isn't one yet
     pulled.clear()
@@ -535,6 +562,7 @@ def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
         get_overleaf_sync_statuses(str(project), path="nope")
     # Without credentials, it says so as the hub does, so the extension
     # asks for them
+    monkeypatch.setattr(calkit.browser_link, "_overleaf_auth", None)
     monkeypatch.setattr(
         calkit.cli.overleaf,
         "_get_overleaf_auth",
@@ -631,10 +659,40 @@ def test_start_job(tmp_path, monkeypatch):
 
     done = run("print('Ran it')")
     assert done["status"] == "succeeded" and done["output"] == "Ran it"
-    # Its whole log can be read, as it's written while it runs
+    assert "progress" not in done and not done["log_path"]
     reply = get_reply({"type": "job.log", "job_id": job["id"]})
-    assert reply["result"] == {"log": "Ran it\n"}
+    assert reply["result"] == {"log": "Ran it"}
     assert done["started"] and done["finished"] and done["returncode"] == 0
+    assert os.listdir(calkit.browser_link.get_jobs_dir()) == [
+        f"{job['id']}.json"
+    ]
+    # A run's log is the one Calkit keeps in the project, not an older one,
+    # then what came after, e.g., saving
+    logs_dir = project / ".calkit" / "local" / "logs"
+    os.makedirs(logs_dir)
+    (logs_dir / "2000-01-01T00-00-00-old.log").write_text("Old\n")
+    script = tmp_path / "run.py"
+    script.write_text(
+        "import datetime, os\n"
+        "now = datetime.datetime.now(datetime.timezone.utc)\n"
+        "name = now.strftime('%Y-%m-%dT%H-%M-%S') + '-new.log'\n"
+        "with open(os.path.join('.calkit', 'local', 'logs', name), 'w') as f:\n"
+        "    f.write(\"Running stage 'a':\\n--- calkit stage output ---\\n\")\n"
+        "    f.write('\\x1b[1mHi\\x1b[0m\\n--- end calkit stage output ---\\n')\n"
+        "print(\"Running stage 'a':\")\n"
+        "print('Hi')\n"
+        "print('Pipeline completed successfully')\n"
+        "print('Saving the project after successful run')\n"
+    )
+    done = run(f"exec(open({str(script)!r}).read())")
+    assert done["log_path"].endswith("-new.log")
+    reply = get_reply({"type": "job.log", "job_id": job["id"]})
+    assert reply["result"]["log"].splitlines() == [
+        "Running stage 'a':",
+        "Hi",
+        "Pipeline completed successfully",
+        "Saving the project after successful run",
+    ]
     failed = run("print('Error: It broke'); print('Bye'); raise SystemExit(1)")
     assert failed["status"] == "failed" and failed["error"] == "It broke"
     # Missing Overleaf credentials are reported as the hub reports them

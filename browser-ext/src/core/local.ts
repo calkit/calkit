@@ -14,6 +14,11 @@ export const HOST_NAME = "io.calkit.native";
 /** How long the host is kept running once nothing's waiting on it. */
 const IDLE_MS = 5 * 60 * 1000;
 const TIMEOUT_MS = 60 * 1000;
+/**
+ * How long Calkit answering here is trusted, so each request routed here
+ * doesn't ask first.
+ */
+const STATUS_TTL_MS = 30 * 1000;
 
 export interface LocalStatus {
   /** Whether the extension may start Calkit here. */
@@ -63,6 +68,7 @@ let port: chrome.runtime.Port | null = null;
 let nextId = 1;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 const pending = new Map<number, Pending>();
+let knownStatus: { at: number; status: Promise<LocalStatus> } | null = null;
 
 export async function isLocalPermitted(): Promise<boolean> {
   return chrome.permissions.contains({ permissions: ["nativeMessaging"] });
@@ -150,6 +156,7 @@ function getPort(): chrome.runtime.Port {
     );
     if (port === p) {
       port = null;
+      knownStatus = null;
     }
     for (const [id, waiting] of pending) {
       clearTimeout(waiting.timer);
@@ -204,7 +211,10 @@ export async function askLocal<T>(
   });
 }
 
-/** Whether Calkit on this computer can be reached, and its version. */
+/**
+ * Whether Calkit on this computer can be reached, and its version, as it
+ * last said within ``STATUS_TTL_MS``.
+ */
 export async function getLocalStatus(): Promise<LocalStatus> {
   if (!(await isLocalPermitted())) {
     return { permitted: false };
@@ -212,24 +222,42 @@ export async function getLocalStatus(): Promise<LocalStatus> {
   if (typeof chrome.runtime.connectNative !== "function") {
     return { permitted: true, needsReload: true };
   }
-  try {
-    const reply = await askLocal<{
-      version: string;
-      editor?: string;
-      editor_installed?: boolean;
-    }>({ type: "ping" });
-    return {
-      permitted: true,
-      version: reply.version,
-      editor: reply.editor,
-      editorInstalled: reply.editor_installed,
-    };
-  } catch (e) {
-    return {
-      permitted: true,
-      error: e instanceof Error ? e.message : String(e),
-    };
+  if (knownStatus && Date.now() - knownStatus.at < STATUS_TTL_MS) {
+    return knownStatus.status;
   }
+  const status = (async (): Promise<LocalStatus> => {
+    try {
+      const reply = await askLocal<{
+        version: string;
+        editor?: string;
+        editor_installed?: boolean;
+      }>({ type: "ping" });
+      return {
+        permitted: true,
+        version: reply.version,
+        editor: reply.editor,
+        editorInstalled: reply.editor_installed,
+      };
+    } catch (e) {
+      return {
+        permitted: true,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  })();
+  knownStatus = { at: Date.now(), status };
+  // Only an answer is kept, so a failure's asked about again
+  void status.then((s) => {
+    if (!s.version && knownStatus?.status === status) {
+      knownStatus = null;
+    }
+  });
+  return status;
+}
+
+/** Ask again next time, e.g., once an editor's been installed. */
+export function forgetLocalStatus(): void {
+  knownStatus = null;
 }
 
 /** The editor's name, as a button would say it. */

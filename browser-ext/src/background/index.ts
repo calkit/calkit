@@ -8,6 +8,7 @@ import {
 import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
 import {
   askLocal,
+  forgetLocalStatus,
   getLocalStatus,
   LocalError,
   type LocalJob,
@@ -686,6 +687,8 @@ async function handle(
           project: message.project,
         }),
       );
+      // So it's known to be installed now
+      forgetLocalStatus();
       return null;
     case "local.checkout":
       return getLocalCheckout(message.project);

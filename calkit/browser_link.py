@@ -13,6 +13,7 @@ waits on it to start.
 
 from __future__ import annotations
 
+import functools
 import io
 import json
 import os
@@ -31,24 +32,52 @@ CHROME_EXTENSION_IDS = ["idhdomgapfolnpffanajdckdaojencal"]
 FIREFOX_EXTENSION_IDS = ["browser-ext@calkit.io"]
 # How many of a checkout's files its status lists, so it fits in a message
 MAX_LISTED_FILES = 50
-# The most of a job's log sent at once, and how much shows while it runs
+# The most of a run's log sent at once, how much of what a job prints its
+# record keeps, and how much of that shows while it runs
 MAX_LOG_CHARS = 200_000
+OUTPUT_LINES_KEPT = 40
 LIVE_OUTPUT_LINES = 8
+# How often a running job's record is brought up to date
+JOB_SAVE_SECONDS = 0.5
+# The lines that say how far a job has got, as get_job_progress reads them
+PROGRESS_LINE_RE = re.compile(
+    r"Running stage|Stage '|Compiling DVC pipeline|Syncing .* with Overleaf"
+    r"|Saving the project|Pipeline completed"
+)
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 # How long opening a project waits to hear it failed
 OPEN_TIMEOUT_SECONDS = 30
 # Chrome won't take a bigger message from a host
 MAX_MESSAGE_BYTES = 1024 * 1024
 # How long the checkouts found for a project are trusted, since finding
-# them means searching the home folder
-# Kept on disk, since each process the browser starts would otherwise
-# search the home folder again
-CHECKOUTS_TTL_SECONDS = 600
+# them means searching the home folder, kept on disk, since each process
+# the browser starts would otherwise search again; not finding any is
+# trusted for less, since it may be cloned any time
+CHECKOUTS_TTL_SECONDS = 24 * 3600
+NO_CHECKOUTS_TTL_SECONDS = 600
+# How long after pulling from Overleaf a status is taken as up to date,
+# e.g., for the same panel loading twice
+PULL_FRESH_SECONDS = 10
 # How often an Overleaf project no checkout here syncs with is looked for
 # again, since that searches the home folder too
 LOOKUP_RESCAN_SECONDS = 600
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
 JOB_KINDS = ("run", "sync", "clone", "install-editor")
+# The requests answered alongside others, since they don't change the
+# working directory or start anything that has to be one at a time, e.g.,
+# opening a project, which can wait a while to hear it failed
+CONCURRENT_REQUEST_TYPES = (
+    "ping",
+    "projects.find",
+    "project.open",
+    "checkouts.get",
+    "overleaf.lookup",
+    "publication.pdf",
+    "job.get",
+    "job.log",
+    "jobs.list",
+)
 # How many of a project's finished jobs are kept
 MAX_JOBS_KEPT = 20
 # How much of a PDF goes in each message, which base64 makes a third
@@ -201,9 +230,11 @@ def get_reply(msg: dict) -> dict:
             result = {}
         elif kind == "project.status":
             owner, name = split_project(msg.get("project"))
-            found = calkit.get_project_checkouts(name, owner=owner)
             result = {
-                "checkouts": [get_checkout_status(p) for p in sorted(found)]
+                "checkouts": [
+                    get_checkout_status(p)
+                    for p in sorted(get_checkout_paths(owner, name))
+                ]
             }
         elif kind == "checkouts.get":
             owner, name = split_project(msg.get("project"))
@@ -212,7 +243,10 @@ def get_reply(msg: dict) -> dict:
         elif kind == "checkouts.choose":
             owner, name = split_project(msg.get("project"))
             path = msg.get("path")
-            if path not in get_checkout_paths(owner, name):
+            # E.g., a worktree made since they were last looked for
+            if path not in get_checkout_paths(owner, name) and (
+                path not in get_checkout_paths(owner, name, refresh=True)
+            ):
                 raise ValueError(f"{path} isn't a checkout of {owner}/{name}")
             remember_checkout(owner, name, path)
             result = {"paths": get_checkout_paths(owner, name), "path": path}
@@ -289,12 +323,12 @@ def get_editor_info() -> dict[str, Any]:
         cmd = split_command(EDITOR_COMMANDS.get(editor, editor))
         if not cmd:
             return None
-        env = get_login_shell_env() or os.environ
-        found = shutil.which(cmd[0], path=env.get("PATH"))
+        found = shutil.which(cmd[0], path=search_path)
         if found is None and editor == "vscode":
             found = install.find("code")
         return found
 
+    search_path: str | None = (get_login_shell_env() or os.environ).get("PATH")
     settings = read_config()
     if "default_editor" in settings.model_fields_set:
         editor = settings.default_editor
@@ -312,10 +346,11 @@ def get_editor_info() -> dict[str, Any]:
     return {"editor": "vscode", "editor_installed": False}
 
 
+@functools.cache
 def get_login_shell_env() -> dict[str, str] | None:
     """The environment to run Calkit or an editor in, with the login
     shell's PATH, since a browser started from the Dock, e.g., has only the
-    system's folders on its PATH.
+    system's folders on its PATH, asked for once while the host runs.
     """
     if os.name == "nt":
         return None
@@ -344,43 +379,62 @@ def remember_checkout(owner: str, name: str, path: str) -> None:
     os.makedirs(os.path.dirname(choices_path), exist_ok=True)
     with open(choices_path, "w") as f:
         json.dump(choices, f, indent=2)
-    _checkouts_found.pop(get_checkouts_key(owner, name), None)
 
 
-# The checkouts found for each project, and when, while the host runs
-_checkouts_found: dict[str, tuple[float, list[str]]] = {}
+def get_checkouts_found_path() -> str:
+    return os.path.join(get_host_dir(), "checkouts-found.json")
+
+
+def get_checkouts_found() -> dict[str, list]:
+    """When each project's checkouts here were last looked for, by home
+    folder, which is where they're searched for, and owner and name, and
+    what was found.
+    """
+    try:
+        with open(get_checkouts_found_path()) as f:
+            found = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def save_checkouts_found(found: dict[str, list]) -> None:
+    os.makedirs(get_host_dir(), exist_ok=True)
+    tmp_path = get_checkouts_found_path() + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(found, f)
+    os.replace(tmp_path, get_checkouts_found_path())
 
 
 def get_checkouts_key(owner: str, name: str) -> str:
-    # By home folder too, which is where they're searched for
     return f"{calkit.get_user_home()}:{owner}/{name}"
 
 
-def get_checkout_paths(owner: str, name: str) -> list[str]:
+def get_checkout_paths(
+    owner: str, name: str, refresh: bool = False
+) -> list[str]:
     """A project's checkouts here, the one to use first: the one chosen
-    last, else one in ~/calkit, as ``calkit open project`` picks.
+    last, else one in ~/calkit, as ``calkit open project`` picks, searched
+    for again if ``refresh``.
     """
     import time
 
     key = get_checkouts_key(owner, name)
-    cache_path = os.path.join(get_host_dir(), "checkouts.json")
-    if not _checkouts_found and os.path.isfile(cache_path):
-        try:
-            with open(cache_path) as f:
-                _checkouts_found.update(
-                    {k: (v[0], v[1]) for k, v in json.load(f).items()}
-                )
-        except (OSError, ValueError, TypeError, IndexError):
-            pass
-    found_at, paths = _checkouts_found.get(key, (0.0, []))
-    if time.time() - found_at > CHECKOUTS_TTL_SECONDS or not all(
-        os.path.isfile(os.path.join(p, "calkit.yaml")) for p in paths
+    found = get_checkouts_found()
+    try:
+        found_at, paths = float(found[key][0]), list(found[key][1])
+    except (KeyError, TypeError, ValueError, IndexError):
+        found_at, paths = 0.0, []
+    ttl = CHECKOUTS_TTL_SECONDS if paths else NO_CHECKOUTS_TTL_SECONDS
+    if (
+        refresh
+        or time.time() - found_at > ttl
+        or not all(
+            os.path.isfile(os.path.join(p, "calkit.yaml")) for p in paths
+        )
     ):
         paths = sorted(calkit.get_project_checkouts(name, owner=owner))
-        _checkouts_found[key] = (time.time(), paths)
-        os.makedirs(get_host_dir(), exist_ok=True)
-        with open(cache_path, "w") as f:
-            json.dump({k: list(v) for k, v in _checkouts_found.items()}, f)
+        save_checkouts_found(found | {key: [time.time(), paths]})
     return sort_checkouts(owner, name, paths)
 
 
@@ -528,9 +582,18 @@ def get_overleaf_links(overleaf_project_id: str) -> list[dict]:
         links = get_links(index)
     if changed:
         os.makedirs(os.path.dirname(index_path), exist_ok=True)
-        with open(index_path, "w") as f:
+        # Whole, for a lookup answered alongside
+        with open(index_path + ".tmp", "w") as f:
             json.dump(index, f)
+        os.replace(index_path + ".tmp", index_path)
     return links
+
+
+# The Overleaf credentials that last worked, while the host runs, since
+# reading them can take a while, e.g., from the system keyring, and when
+# each copy of an Overleaf project here was last pulled
+_overleaf_auth: Any = None
+_overleaf_pulled_at: dict[str, float] = {}
 
 
 def get_overleaf_sync_statuses(
@@ -545,12 +608,14 @@ def get_overleaf_sync_statuses(
 
     Without ``pull``, a folder's copy of Overleaf from the last pull or sync
     is used, if there is one, which takes a fraction of the time, so
-    something can be shown while Overleaf is asked.
+    something can be shown while Overleaf is asked. It's used with ``pull``
+    too if this pulled it only ``PULL_FRESH_SECONDS`` ago.
 
     Overleaf credentials come from Calkit's config, or else the hub, as for
     ``calkit overleaf sync``.
     """
     import contextlib
+    import time
     from copy import deepcopy
     from pathlib import Path
 
@@ -563,6 +628,8 @@ def get_overleaf_sync_statuses(
         _get_overleaf_auth,
         _get_pulled_overleaf_repo,
     )
+
+    global _overleaf_auth
 
     def to_status_file(file_info: dict) -> dict:
         return {
@@ -596,7 +663,6 @@ def get_overleaf_sync_statuses(
                 if path not in sync_info:
                     raise ValueError(f"{path} isn't synced with Overleaf")
             main_repo = calkit.git.get_repo()
-            auth = None
             statuses = []
             for path_in_project, sync_info_for_path in sync_info.items():
                 project_id = sync_info_for_path.get("project_id")
@@ -608,15 +674,27 @@ def get_overleaf_sync_statuses(
                 if not project_id:
                     continue
                 clone_path = calkit.overleaf.get_project_dir(project_id)
-                pulled = pull or not os.path.isdir(
+                pulled_at = _overleaf_pulled_at.get(
+                    os.path.abspath(clone_path)
+                )
+                fresh = (
+                    pulled_at is not None
+                    and time.time() - pulled_at < PULL_FRESH_SECONDS
+                )
+                pulled = (pull and not fresh) or not os.path.isdir(
                     os.path.join(clone_path, ".git")
                 )
                 with calkit.overleaf.lock(project_id, lambda _: None):
                     if pulled:
-                        if auth is None:
-                            auth = _get_overleaf_auth()
-                        overleaf_repo, auth = _get_pulled_overleaf_repo(
-                            project_id, auth
+                        if _overleaf_auth is None:
+                            _overleaf_auth = _get_overleaf_auth()
+                        overleaf_repo, _overleaf_auth = (
+                            _get_pulled_overleaf_repo(
+                                project_id, _overleaf_auth
+                            )
+                        )
+                        _overleaf_pulled_at[os.path.abspath(clone_path)] = (
+                            time.time()
                         )
                     else:
                         overleaf_repo = calkit.git.get_repo(clone_path)
@@ -648,7 +726,7 @@ def get_overleaf_sync_statuses(
                             for f in status["files_to_delete"]
                         ],
                         "in_sync": status["in_sync"],
-                        "pulled": pulled,
+                        "pulled": pulled or (pull and fresh),
                     }
                 )
     except (typer.Exit, SystemExit):
@@ -750,21 +828,61 @@ def get_job_path(job_id: str) -> str:
     return os.path.join(get_jobs_dir(), f"{job_id}.json")
 
 
-def get_job_log_path(job_id: str) -> str:
-    return get_job_path(job_id).removesuffix(".json") + ".log"
+def get_run_log_path(wdir: str, started: str) -> str | None:
+    """The log ``calkit run`` writes in a project's ``.calkit/local/logs``
+    for the run started at or after ``started``, if it's begun one.
+    """
+    from datetime import datetime
+
+    logs_dir = os.path.join(wdir, ".calkit", "local", "logs")
+    if not os.path.isdir(logs_dir):
+        return None
+    # Each is named for the time, in UTC, its run started
+    since = datetime.fromisoformat(started).strftime("%Y-%m-%dT%H-%M-%S")
+    names = [
+        n
+        for n in os.listdir(logs_dir)
+        if n.endswith(".log") and n[: len(since)] >= since
+    ]
+    return os.path.join(logs_dir, max(names)) if names else None
 
 
 def get_job_log(job_id: str) -> str:
-    """What a job has printed so far, without terminal colors, up to its
-    last ``MAX_LOG_CHARS``, so it fits in a message.
+    """A job's log, without terminal colors: for a run, the one Calkit keeps
+    in the project, up to its last ``MAX_LOG_CHARS``, so it fits in a
+    message, then what came after, e.g., saving and syncing, and otherwise
+    the end of what it printed.
     """
-    log_path = get_job_log_path(job_id)
-    if not os.path.isfile(log_path):
-        return ""
+    from calkit.cli.main.core import STAGE_OUTPUT_END, STAGE_OUTPUT_START
+
+    job_path = get_job_path(job_id)
+    if not os.path.isfile(job_path):
+        raise ValueError(f"No job {job_id!r}")
+    with open(job_path) as f:
+        job = json.load(f)
+    output_lines = (job.get("output") or "").splitlines()
+    log_path = job.get("log_path")
+    if not log_path or not os.path.isfile(log_path):
+        return "\n".join(output_lines)
     with open(log_path, "rb") as f:
         f.seek(max(0, os.path.getsize(log_path) - MAX_LOG_CHARS))
-        text = f.read().decode(errors="replace")
-    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+        text = ANSI_ESCAPE_RE.sub("", f.read().decode(errors="replace"))
+    lines = [
+        x
+        for x in text.splitlines()
+        if x not in (STAGE_OUTPUT_START, STAGE_OUTPUT_END)
+    ]
+    done_at = next(
+        (
+            i
+            for i in reversed(range(len(output_lines)))
+            if output_lines[i].startswith("Pipeline completed")
+        ),
+        None,
+    )
+    if done_at is not None:
+        lines += output_lines[done_at:]
+    return "\n".join(lines)
 
 
 def get_n_pipeline_stages(wdir: str) -> int | None:
@@ -842,16 +960,9 @@ def get_job(job_id: str) -> dict:
     if job["status"] == "running" and not is_running(job.get("pid")):
         job["status"] = "failed"
         job["error"] = "It stopped without finishing"
-    # What it's doing, and the last of what it printed, while it runs
-    if job["status"] == "running":
-        log = get_job_log(job_id)
-        n_stages = (
-            get_n_pipeline_stages(job["wdir"])
-            if job["kind"] == "run"
-            else None
-        )
-        job["progress"] = get_job_progress(log, n_stages)
-        lines = [x.strip() for x in log.splitlines() if x.strip()]
+    # The last of what it's printed, while it runs
+    if job["status"] == "running" and job.get("output"):
+        lines = job["output"].splitlines()
         job["output"] = "\n".join(lines[-LIVE_OUTPUT_LINES:])
     return job
 
@@ -1007,6 +1118,8 @@ def start_job(msg: dict) -> dict:
 
 def run_job(job_id: str) -> None:
     """Run a job started with ``start_job``, recording how it went."""
+    import collections
+    import threading
     from datetime import datetime, timezone
 
     import calkit.git
@@ -1047,29 +1160,67 @@ def run_job(job_id: str) -> None:
     before = {}
     if job["kind"] == "sync":
         before = {"project": get_head(job["wdir"]), **get_overleaf_heads()}
-    # Written as it goes, unbuffered, so how far it's got can be read while
-    # it runs
-    with open(get_job_log_path(job_id), "w") as out:
-        try:
-            returncode = subprocess.call(
-                job["cmd"],
-                cwd=job["wdir"],
-                stdout=out,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                env=os.environ | {"PYTHONUNBUFFERED": "1"},
-                text=True,
-            )
-        except OSError as e:
-            out.write(str(e))
-            returncode = 1
-    output = get_job_log(job_id)
-    lines = [x.strip() for x in output.splitlines() if x.strip()]
+    # What it prints, read as it goes: the end of it, and the lines that say
+    # how far it's got, are kept in its record, since a run's whole log is
+    # in the project
+    n_stages = (
+        get_n_pipeline_stages(job["wdir"]) if job["kind"] == "run" else None
+    )
+    tail: collections.deque[str] = collections.deque(maxlen=OUTPUT_LINES_KEPT)
+    progress_lines: list[str] = []
+    lock = threading.Lock()
+
+    def read_output(stream: Any) -> None:
+        for line in stream:
+            line = ANSI_ESCAPE_RE.sub("", line).rstrip()
+            if not line.strip():
+                continue
+            with lock:
+                tail.append(line)
+                if PROGRESS_LINE_RE.search(line):
+                    progress_lines.append(line)
+
+    def update(job: dict) -> None:
+        with lock:
+            job |= {
+                "output": "\n".join(tail),
+                "progress": get_job_progress(
+                    "\n".join(progress_lines), n_stages
+                ),
+            }
+        if job["kind"] == "run" and not job.get("log_path"):
+            job["log_path"] = get_run_log_path(job["wdir"], job["started"])
+
+    try:
+        proc = subprocess.Popen(
+            job["cmd"],
+            cwd=job["wdir"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            env=os.environ | {"PYTHONUNBUFFERED": "1"},
+            text=True,
+            errors="replace",
+        )
+        reader = threading.Thread(target=read_output, args=(proc.stdout,))
+        reader.start()
+        while True:
+            try:
+                returncode = proc.wait(timeout=JOB_SAVE_SECONDS)
+                break
+            except subprocess.TimeoutExpired:
+                update(job)
+                save(job)
+        reader.join()
+    except OSError as e:
+        tail.append(str(e))
+        returncode = 1
+    update(job)
+    lines = list(tail)
+    job.pop("progress")
     job |= {
         "returncode": returncode,
         "finished": datetime.now(timezone.utc).isoformat(),
-        # The end, which says how it went, and fits in a message
-        "output": "\n".join(lines[-40:]),
     }
     if returncode != 0:
         error = next(
@@ -1088,6 +1239,11 @@ def run_job(job_id: str) -> None:
         if job["kind"] == "clone":
             job["result"] = {"path": job["location"]}
             calkit.record_project_path(job["location"])
+            # So it's found, rather than none being, until that's looked
+            # into again
+            found = get_checkouts_found()
+            found.pop(get_checkouts_key(*job["project"].split("/", 1)), None)
+            save_checkouts_found(found)
         elif job["kind"] == "sync":
             after = {"project": get_head(job["wdir"]), **get_overleaf_heads()}
             overleaf_ids = [k for k in after if k != "project"]
@@ -1181,16 +1337,58 @@ def get_checkout_status(wdir: str) -> dict:
 
 
 def serve(stdin: BinaryIO, stdout: BinaryIO) -> None:
-    """Answer the browser's requests until it disconnects."""
+    """Answer the browser's requests until it disconnects, each in a thread
+    of its own, so a quick one, e.g., checking on a job, isn't held up by a
+    slow one, though those not in ``CONCURRENT_REQUEST_TYPES``, some of
+    which change the working directory, take turns.
+    """
+    import threading
+
+    write_lock = threading.Lock()
+    turn_lock = threading.Lock()
+
+    def warm_up() -> None:
+        # What the slower requests need, imported while the first ones are
+        # answered, rather than once they're asked
+        import calkit.cli.overleaf  # noqa: F401
+        import calkit.dvc  # noqa: F401
+        import calkit.overleaf  # noqa: F401
+        import calkit.pipeline  # noqa: F401
+
+    def answer(msg: dict) -> None:
+        if msg.get("type") in CONCURRENT_REQUEST_TYPES:
+            reply = get_reply(msg)
+        else:
+            with turn_lock:
+                reply = get_reply(msg)
+        with write_lock:
+            try:
+                write_message(stdout, reply)
+            except ValueError as e:
+                write_message(
+                    stdout, {"id": msg.get("id"), "ok": False, "error": str(e)}
+                )
+
+    threading.Thread(target=warm_up, daemon=True).start()
+    answering: list[threading.Thread] = []
     while True:
         try:
             msg = read_message(stdin)
         except ValueError as e:
-            write_message(stdout, {"id": None, "ok": False, "error": str(e)})
+            with write_lock:
+                write_message(
+                    stdout, {"id": None, "ok": False, "error": str(e)}
+                )
             continue
         if msg is None:
-            return
-        write_message(stdout, get_reply(msg))
+            break
+        thread = threading.Thread(target=answer, args=(msg,), daemon=True)
+        thread.start()
+        answering = [t for t in answering if t.is_alive()] + [thread]
+    # What was asked is finished, e.g., a job started, even with no one left
+    # to tell
+    for thread in answering:
+        thread.join()
 
 
 def get_host_dir() -> str:

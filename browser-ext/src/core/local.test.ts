@@ -117,9 +117,14 @@ describe("askLocal", () => {
       editor: "vscode",
       editorInstalled: false,
     });
+    // Without asking again for a while
+    expect((await getLocalStatus()).version).toBe("1.2.3");
+    expect(ports[0].sent).toHaveLength(1);
+    // Unless it stopped
+    ports[0].close("Native host has exited.");
     const failed = getLocalStatus();
     await settle();
-    ports[0].close("Native host has exited.");
+    ports[1].close("Native host has exited.");
     expect(await failed).toEqual({
       permitted: true,
       error: "Calkit on this computer stopped unexpectedly",

@@ -303,11 +303,16 @@ def remember_checkout(owner: str, name: str, path: str) -> None:
     os.makedirs(os.path.dirname(choices_path), exist_ok=True)
     with open(choices_path, "w") as f:
         json.dump(choices, f, indent=2)
-    _checkouts_found.pop(f"{owner}/{name}", None)
+    _checkouts_found.pop(get_checkouts_key(owner, name), None)
 
 
 # The checkouts found for each project, and when, while the host runs
 _checkouts_found: dict[str, tuple[float, list[str]]] = {}
+
+
+def get_checkouts_key(owner: str, name: str) -> str:
+    # By home folder too, which is where they're searched for
+    return f"{calkit.get_user_home()}:{owner}/{name}"
 
 
 def get_checkout_paths(owner: str, name: str) -> list[str]:
@@ -316,7 +321,7 @@ def get_checkout_paths(owner: str, name: str) -> list[str]:
     """
     import time
 
-    key = f"{owner}/{name}"
+    key = get_checkouts_key(owner, name)
     found_at, paths = _checkouts_found.get(key, (0.0, []))
     if time.time() - found_at > CHECKOUTS_TTL_SECONDS or not all(
         os.path.isdir(p) for p in paths

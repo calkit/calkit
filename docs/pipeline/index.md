@@ -97,6 +97,41 @@ An output's `storage` decides which system tracks it:
 | `dvc-zip` | Zip the directory and track the archive with DVC, for directories of many small files. See [large folders of many small files](../version-control.md#large-folders-of-many-small-files). |
 | null      | Leave the path untracked, i.e., produced but neither committed nor cached.                                                                                                               |
 
+<!-- TODO: needs human review -->
+
+Everything a stage writes into an output is part of it,
+so an output stored in Git is committed whole,
+even files a `.gitignore` rule would leave out,
+e.g., logs matched by a general `*.log` rule.
+Otherwise a fresh copy of the project would be missing them,
+and the stage, and everything after it, would look out of date.
+`calkit run` stages the outputs stored in Git of the stages it ran,
+and it and `calkit add` say which ignored files they added.
+Files larger than 50 MB aren't added to Git;
+they're reported instead.
+
+To leave files out of an output, so they're neither stored nor
+counted as part of it, list them under `ignore`,
+written like `.gitignore` patterns, relative to the output:
+
+```yaml
+outputs:
+  - path: results
+    storage: git
+    ignore:
+      - "*.log"
+      - /scratch/
+```
+
+Changing `ignore` changes what counts as the output,
+so its stage will run again,
+and files Git already has that it now leaves out
+are removed from Git, but kept on disk.
+
+`calkit status` and `calkit check storage` list files in outputs
+that are stored nowhere,
+and `calkit fix storage` adds them.
+
 By default an output is removed before the stage runs,
 so each run starts from a clean slate
 rather than building on the previous run's file.
@@ -886,11 +921,12 @@ since a stage rewritten back to calkit.yaml (see
 
 #### `PathOutput`
 
-| Parameter           | Type                                     | Required | Default | Description                                                 |
-| ------------------- | ---------------------------------------- | -------- | ------- | ----------------------------------------------------------- |
-| `path`              | str                                      | yes      |         | Path to the output file or directory.                       |
-| `storage`           | Literal['git', 'dvc', 'dvc-zip'] \| None | no       | 'dvc'   | Where to store this output. Use null to leave it untracked. |
-| `delete_before_run` | bool                                     | no       | True    | Delete this output before the stage runs.                   |
+| Parameter           | Type                                     | Required | Default | Description                                                                                                     |
+| ------------------- | ---------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `path`              | str                                      | yes      |         | Path to the output file or directory.                                                                           |
+| `storage`           | Literal['git', 'dvc', 'dvc-zip'] \| None | no       | 'dvc'   | Where to store this output. Use null to leave it untracked.                                                     |
+| `delete_before_run` | bool                                     | no       | True    | Delete this output before the stage runs.                                                                       |
+| `ignore`            | list[str] \| None                        | no       | null    | Files to leave out of this output directory (neither stored nor hashed), as .gitignore patterns relative to it. |
 
 #### `StageIteration`
 

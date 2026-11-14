@@ -6,7 +6,7 @@ description: Build the pipeline stages a manuscript's TODO comments ask for,
   invokes `/calkit:build-paper-pipeline`, leaves TODO comments in a manuscript
   for an agent to address, or asks to work backwards from the writing to the
   project behind it. Only for TODOs in a manuscript, and only in a Calkit
-  project: not TODO comments in source code, not GitHub issues, not a task
+  project; not TODO comments in source code, not GitHub issues, not a task
   list in someone's notes.
 ---
 

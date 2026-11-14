@@ -2208,8 +2208,7 @@ def is_connected_to_hub() -> bool:
     import calkit.dvc
 
     try:
-        repo = calkit.git.get_repo()
-        has_git_remote = "origin" in [r.name for r in repo.remotes]
+        has_git_remote = bool(calkit.git.get_repo().remotes)
     except Exception:
         return False
     if not has_git_remote:
@@ -2296,13 +2295,27 @@ def update_hub(
     git_repo_url = ck_info.get("git_repo_url")
     if git_repo_url is None:
         try:
-            url = calkit.git.get_repo().remotes.origin.url
+            remotes = list(calkit.git.get_repo().remotes)
+        except Exception:
+            remotes = []
+        # A project with one remote pushes there, whatever it's called
+        remote = next((r for r in remotes if r.name == "origin"), None)
+        if remote is None and len(remotes) == 1:
+            remote = remotes[0]
+        if remote is None and remotes:
+            raise_error(
+                "This project has several Git remotes and none named "
+                "'origin'; set 'git_repo_url' in calkit.yaml to the one to "
+                "connect"
+            )
+        if remote is not None:
+            url = remote.url
             # The hub identifies repos by their https URL
             if url.startswith("git@github.com:"):
                 url = "https://github.com/" + url.split(":", 1)[1]
             git_repo_url = url.removesuffix(".git")
-        except Exception:
-            git_repo_url = None
+    # Only a repo the hub creates can hold commits of its own to join
+    hub_makes_repo = git_repo_url is None
     if git_repo_url is None and not create_repo:
         from calkit.core import is_tty
 
@@ -2328,12 +2341,32 @@ def update_hub(
         ck_info["hub"] = hub
     hub_url = calkit.hub.get_hub_url()
     typer.echo(f"Connecting '{name}' to {hub_url}")
+    # Logging in is asked about here, not started by the lookup itself, so
+    # someone can decline it
     try:
-        user = calkit.hub.get_current_user()
+        user = calkit.hub.get("/user", allow_login=False)
     except Exception as e:
-        raise_error(
-            f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+        from calkit.core import is_tty
+
+        # No token raises ValueError; a rejected one, 401 or 403
+        status_code = getattr(getattr(e, "response", None), "status_code", 0)
+        if not isinstance(e, ValueError) and status_code not in (401, 403):
+            raise_error(f"Failed to reach {hub_url}: {e}")
+        if not is_tty() or not calkit.hub.is_interactive_login_allowed():
+            raise_error(
+                f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+            )
+        typer.echo(f"Not logged in to {hub_url}")
+        answer = typer.prompt(
+            "Log in now? [Y/n]", default="y", show_default=False
         )
+        if answer.strip().lower() not in ("", "y", "yes"):
+            raise_error("Not logged in; run 'calkit hub login' first")
+        try:
+            calkit.hub.run_device_flow()
+            user = calkit.hub.get("/user", allow_login=False)
+        except Exception as e:
+            raise_error(f"Failed to log in to {hub_url}: {e}")
     owner = ck_info.get("owner") or user.get("github_username")
     # A project that already exists on the hub, e.g., one created there
     # for this repo, is connected to rather than created again, which the
@@ -2391,7 +2424,7 @@ def update_hub(
     if isinstance(resp, dict) and resp.get("git_repo_url"):
         git_repo_url = resp["git_repo_url"]
         repo = calkit.git.get_repo()
-        if "origin" not in [r.name for r in repo.remotes]:
+        if not repo.remotes:
             typer.echo(f"Adding Git remote: {git_repo_url}")
             repo.git.remote(["add", "origin", git_repo_url])
         ck_info["git_repo_url"] = git_repo_url
@@ -2440,7 +2473,10 @@ def update_hub(
         if to_commit:
             typer.echo("Committing changes")
             repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
-        _adopt_hub_history(repo)
+        # Joining an existing repo's history this way would drop whatever
+        # was pushed to it that this clone doesn't have yet
+        if hub_makes_repo and resp is not None:
+            _adopt_hub_history(repo)
     calkit.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
 
 

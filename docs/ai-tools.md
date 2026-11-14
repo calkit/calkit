@@ -112,9 +112,53 @@ the calkit marketplace, and toggle auto-update on. Or update manually:
 /plugin marketplace update
 ```
 
-### Other AI agents like OpenCode and OpenAI Codex
+<!-- TODO: needs human review -->
 
-Simply run:
+### Codex
+
+Calkit is also a Codex plugin marketplace with the same skills.
+From a terminal, run:
+
+```bash
+codex plugin marketplace add calkit/calkit \
+  --sparse .agents/plugins --sparse agent-plugin
+codex plugin add calkit@calkit
+```
+
+The `--sparse` options keep Codex from cloning the whole Calkit repo.
+You can also run `/plugins` in Codex and install it from the Calkit tab.
+Start a new session afterward.
+Type `$` to pick a skill like `calkit:create-pipeline` explicitly.
+
+Codex checks for updates when it starts and installs them automatically.
+To update by hand, run:
+
+```bash
+codex plugin marketplace upgrade calkit
+```
+
+<!-- TODO: needs human review -->
+
+### OpenCode
+
+With OpenCode 2 or newer, run:
+
+```bash
+opencode plugin add 'git+https://github.com/calkit/calkit.git#main::path:agent-plugin'
+```
+
+This adds the skills with a `calkit-` prefix, e.g., `calkit-create-pipeline`.
+OpenCode checks for plugin updates when it starts, but doesn't install them
+on its own.
+To update, run:
+
+```bash
+opencode plugin update
+```
+
+### Other AI agents
+
+For other agents that read skills from `~/.agents/skills`, run:
 
 ```bash
 calkit update agent-skills
@@ -129,8 +173,8 @@ For command details, see the
 
 ## What the Calkit conventions cover
 
-The skills installed by `calkit update agent-skills` (or loaded by the Claude
-Code plugin) include:
+The skills loaded by the plugins (or installed by
+`calkit update agent-skills`) include:
 
 - The `calkit.yaml` schema: All top-level sections and their purpose
 - All pipeline stage kinds and their required/optional fields

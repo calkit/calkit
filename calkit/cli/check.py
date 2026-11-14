@@ -2081,9 +2081,13 @@ def check_storage(
     """Check that paths are tracked where they're declared to be stored.
 
     That is, nothing is tracked by both Git and DVC, no pipeline output
-    stored in Git is ignored by it, and nothing in Git is too large for it.
+    stored in Git, or file in one, is ignored by it, and nothing in Git is
+    too large for it.
+    Large files are only reported.
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
+    Files Git ignores in an output stored in Git are added in spite of the
+    rule, unless they're in the output's 'ignore' list or too large.
     """
     import calkit.dvc
     import calkit.git
@@ -2114,14 +2118,43 @@ def check_storage(
     to_record = []
     for problem in problems:
         path = os.path.abspath(problem["path"])
-        if problem["store_in"] == "dvc":
-            repo.git.rm("-r", "-q", "--cached", "--", path)
+        if problem["kind"] == "excluded-tracked":
+            # Left out of the output, so stored in neither, as declared
+            calkit.dvc.untrack_files(repo, problem["files"])
+        elif problem["store_in"] == "dvc":
+            # Only those in both, if a directory has others only in Git
+            to_untrack = [
+                os.path.abspath(p) for p in problem.get("files", [])
+            ] or [path]
+            for i in range(0, len(to_untrack), 100):
+                repo.git.rm(
+                    "-r",
+                    "-q",
+                    "--cached",
+                    "--",
+                    *[f":(literal){p}" for p in to_untrack[i : i + 100]],
+                )
             calkit.git.ensure_path_is_ignored(repo, path)
             if problem["kind"] == "both":
                 to_record.append(problem)
         elif problem["store_in"] == "git":
-            calkit.git.ensure_path_is_not_ignored(repo, path)
-            repo.git.add("--", path)
+            too_large = []
+            if problem["kind"] == "ignored":
+                calkit.git.ensure_path_is_not_ignored(repo, path)
+                too_large = calkit.dvc.stage_git_outputs(repo, [path])
+            # Files in it Git ignores are added in spite of the rule, which
+            # for an output ignored as a whole can be one besides its own
+            too_large += calkit.dvc.force_add_ignored_files(
+                repo, problem.get("files", [])
+            )
+            if too_large:
+                warn(
+                    calkit.dvc.get_too_large_text(
+                        list(dict.fromkeys(too_large))
+                    )
+                )
+                unfixed.append(problem)
+                continue
         else:
             unfixed.append(problem)
             continue

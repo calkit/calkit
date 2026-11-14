@@ -4294,6 +4294,8 @@ async function load(overleafProjectId: string): Promise<void> {
         return;
       }
       if (known.length && !known[0].pulled) {
+        // As of the last sync, e.g., by a run that just ended
+        checkingAfterSync = false;
         renderStatus(content, link, known[0], reload);
         content.append(loading("Checking Overleaf for new edits"));
       }

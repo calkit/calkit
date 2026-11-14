@@ -109,12 +109,13 @@ describe("askLocal", () => {
     ports[0].reply({
       id: ports[0].sent[0].id,
       ok: true,
-      result: { version: "1.2.3", editor: "vscode" },
+      result: { version: "1.2.3", editor: "vscode", editor_installed: false },
     });
     expect(await status).toEqual({
       permitted: true,
       version: "1.2.3",
       editor: "vscode",
+      editorInstalled: false,
     });
     const failed = getLocalStatus();
     await settle();

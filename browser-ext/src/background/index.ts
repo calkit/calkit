@@ -426,7 +426,12 @@ async function handle(
       const project = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(project)).path) {
         return toPipelineRun(
-          await askLocal<LocalJob>({ type: "job.start", kind: "run", project }),
+          await askLocal<LocalJob>({
+            type: "job.start",
+            kind: "run",
+            project,
+            sync: message.sync ?? true,
+          }),
         );
       }
       return request<PipelineRun>(
@@ -664,6 +669,15 @@ async function handle(
       return askLocal({ type: "project.status", project: message.project });
     case "local.openOptions":
       await chrome.runtime.openOptionsPage();
+      return null;
+    case "local.installEditor":
+      await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "install-editor",
+          project: message.project,
+        }),
+      );
       return null;
     case "local.checkout":
       return getLocalCheckout(message.project);

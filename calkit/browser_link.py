@@ -43,7 +43,7 @@ CHECKOUTS_TTL_SECONDS = 60
 LOOKUP_RESCAN_SECONDS = 600
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
-JOB_KINDS = ("run", "sync", "clone")
+JOB_KINDS = ("run", "sync", "clone", "install-editor")
 # How many of a project's finished jobs are kept
 MAX_JOBS_KEPT = 20
 # How much of a PDF goes in each message, which base64 makes a third
@@ -147,12 +147,7 @@ def get_reply(msg: dict) -> dict:
     kind = msg.get("type")
     try:
         if kind == "ping":
-            from calkit.config import read as read_config
-
-            result: Any = {
-                "version": calkit.__version__,
-                "editor": read_config().default_editor,
-            }
+            result: Any = {"version": calkit.__version__} | get_editor_info()
         elif kind == "projects.find":
             owner, name = split_project(msg.get("project"))
             found = calkit.get_project_checkouts(name, owner=owner)
@@ -160,7 +155,7 @@ def get_reply(msg: dict) -> dict:
         elif kind == "project.open":
             owner, name = split_project(msg.get("project"))
             cmd = [sys.executable, "-m", "calkit", "open", "project"]
-            cmd.append(f"{owner}/{name}")
+            cmd += [f"{owner}/{name}", "--with", get_editor_info()["editor"]]
             path = msg.get("path")
             if path is not None:
                 if not isinstance(path, str):
@@ -269,6 +264,44 @@ def get_reply(msg: dict) -> dict:
 
 class OverleafAuthMissing(Exception):
     """Calkit here has no Overleaf credentials that work, and can't ask."""
+
+
+def get_editor_info() -> dict[str, Any]:
+    """The editor projects open in here, and whether it's installed: the one
+    set in Calkit's config, or else the first installed of those built on VS
+    Code, VS Code first, or VS Code, which can be installed.
+    """
+    import shutil
+
+    from calkit import install
+    from calkit.cli.open_ import EDITOR_COMMANDS, split_command
+    from calkit.config import read as read_config
+
+    def find(editor: str) -> str | None:
+        cmd = split_command(EDITOR_COMMANDS.get(editor, editor))
+        if not cmd:
+            return None
+        env = get_login_shell_env() or os.environ
+        found = shutil.which(cmd[0], path=env.get("PATH"))
+        if found is None and editor == "vscode":
+            found = install.find("code")
+        return found
+
+    settings = read_config()
+    if "default_editor" in settings.model_fields_set:
+        editor = settings.default_editor
+        return {"editor": editor, "editor_installed": find(editor) is not None}
+    for editor in [
+        "vscode",
+        "cursor",
+        "positron",
+        "vscodium",
+        "antigravity",
+        "windsurf",
+    ]:
+        if find(editor) is not None:
+            return {"editor": editor, "editor_installed": True}
+    return {"editor": "vscode", "editor_installed": False}
 
 
 def get_login_shell_env() -> dict[str, str] | None:
@@ -736,7 +769,8 @@ def list_jobs() -> list[dict]:
 
 def start_job(msg: dict) -> dict:
     """Start a job for a project, in a process of its own: running its
-    pipeline and saving, as ``calkit run --save --overleaf`` does, syncing a
+    pipeline, then saving and syncing with Overleaf unless ``sync`` is
+    false, as ``calkit run --save --overleaf`` does, syncing a
     folder with Overleaf, or cloning it to a ``location``, returning its
     record.
     """
@@ -751,7 +785,11 @@ def start_job(msg: dict) -> dict:
     if not owner or not name or "/" in name:
         raise ValueError("A project is given as 'owner/name'")
     calkit_cmd = [sys.executable, "-m", "calkit"]
-    if kind == "clone":
+    if kind == "install-editor":
+        # VS Code, the only editor Calkit installs, for opening the project
+        wdir = calkit.get_user_home()
+        cmd = calkit_cmd + ["install", "code", "--yes"]
+    elif kind == "clone":
         location = msg.get("location") or os.path.join(
             calkit.get_user_home(), "calkit", name
         )
@@ -777,7 +815,10 @@ def start_job(msg: dict) -> dict:
                     and job["status"] in ("queued", "running")
                 ):
                     raise ValueError("The pipeline is already running here")
-            cmd = calkit_cmd + ["run", "--save", "--overleaf"]
+            # Saved and synced with Overleaf after unless asked not to
+            cmd = calkit_cmd + ["run"]
+            if msg.get("sync", True):
+                cmd += ["--save", "--overleaf"]
         else:
             folder = msg.get("path")
             if not isinstance(folder, str):
@@ -785,7 +826,7 @@ def start_job(msg: dict) -> dict:
             cmd = calkit_cmd + ["overleaf", "sync", folder]
     job_id = uuid.uuid4().hex
     repo_info: dict[str, Any] = {"git_rev": None, "branch": None}
-    if kind != "clone":
+    if kind not in ("clone", "install-editor"):
         from calkit.git import get_repo
 
         repo = get_repo(wdir)

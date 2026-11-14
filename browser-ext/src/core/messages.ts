@@ -157,7 +157,13 @@ export type Request =
     }
   | { type: "project.pipeline"; owner: string; project: string }
   | { type: "project.pipelineRuns"; owner: string; project: string }
-  | { type: "project.startPipelineRun"; owner: string; project: string }
+  | {
+      type: "project.startPipelineRun";
+      owner: string;
+      project: string;
+      /** Whether to save and sync with Overleaf after, when run here. */
+      sync?: boolean;
+    }
   | {
       type: "project.addExportStage";
       owner: string;
@@ -246,6 +252,8 @@ export type Request =
       project: string;
     }
   | { type: "local.openOptions" }
+  /** Install the editor projects open in, i.e., VS Code. */
+  | { type: "local.installEditor"; project: string }
   | {
       type: "local.checkout";
       /** As "owner/name". */
@@ -311,6 +319,7 @@ export interface ResponseMap {
   "local.openProject": Record<string, never>;
   "local.projectStatus": { checkouts: CheckoutStatus[] };
   "local.openOptions": null;
+  "local.installEditor": null;
   /**
    * The checkout used for a project here, and the others, or none when the
    * extension isn't connected or the project isn't here; ``connected``

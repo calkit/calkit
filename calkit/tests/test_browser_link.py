@@ -4,6 +4,7 @@ import io
 import json
 import os
 import platform
+import shutil
 import struct
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import pytest
 import calkit
 import calkit.config
 from calkit.browser_link import (
+    get_editor_info,
     get_host_status,
     get_manifest,
     get_reply,
@@ -67,10 +69,7 @@ def test_messages():
         {
             "id": 1,
             "ok": True,
-            "result": {
-                "version": calkit.__version__,
-                "editor": calkit.config.read().default_editor,
-            },
+            "result": {"version": calkit.__version__} | get_editor_info(),
         },
         {"id": None, "ok": False, "error": "A message must be a JSON object"},
         {"id": 2, "ok": False, "error": "Unknown request type 'nope'"},
@@ -144,10 +143,45 @@ def test_get_reply(tmp_path, monkeypatch):
         assert cmd == [
             sys.executable,
             *["-m", "calkit", "open", "project", "me/far"],
-            *["--path", "a.ipynb"],
+            *["--with", get_editor_info()["editor"], "--path", "a.ipynb"],
         ]
         if os.name != "nt":
             assert env["PATH"].startswith("/login/bin" + os.pathsep)
+    # The editor is the one set, or else the first installed of those built
+    # on VS Code, VS Code first, or else VS Code, to be installed
+    installed: list[str] = []
+    real_which = shutil.which
+
+    def which(cmd, path=None, **kwargs):
+        if cmd in ("code", "cursor", "positron", "codium"):
+            return f"/login/bin/{cmd}" if cmd in installed else None
+        return real_which(cmd, path=path, **kwargs)
+
+    monkeypatch.setattr("shutil.which", which)
+    monkeypatch.setattr("calkit.install.find", lambda app: None)
+    for set_editor, now_installed, expected in [
+        (None, [], {"editor": "vscode", "editor_installed": False}),
+        (
+            None,
+            ["cursor", "positron"],
+            {"editor": "cursor", "editor_installed": True},
+        ),
+        (
+            None,
+            ["code", "cursor"],
+            {"editor": "vscode", "editor_installed": True},
+        ),
+        (
+            "positron",
+            ["code"],
+            {"editor": "positron", "editor_installed": False},
+        ),
+    ]:
+        installed[:] = now_installed
+        if set_editor:
+            settings = calkit.config.Settings(default_editor=set_editor)
+            monkeypatch.setattr(calkit.config, "read", lambda: settings)
+        assert get_editor_info() == expected
 
 
 def test_install_host(tmp_path, monkeypatch):
@@ -191,14 +225,9 @@ def test_install_host(tmp_path, monkeypatch):
         capture_output=True,
         timeout=60,
     )
-    assert read_message(io.BytesIO(res.stdout)) == {
-        "id": 7,
-        "ok": True,
-        "result": {
-            "version": calkit.__version__,
-            "editor": calkit.config.read().default_editor,
-        },
-    }
+    reply = read_message(io.BytesIO(res.stdout))
+    assert reply["ok"] and reply["result"]["version"] == calkit.__version__
+    assert set(reply["result"]) == {"version", "editor", "editor_installed"}
     # Its status says where it's registered, for which extensions, and that
     # it answers
     status = get_host_status()
@@ -542,6 +571,28 @@ def test_start_job(tmp_path, monkeypatch):
         {"type": "job.start", "kind": "run", "project": "me/proj"}
     )
     assert not reply["ok"] and "already running" in reply["error"]
+    # Without syncing after, it only runs
+    job_path = calkit.browser_link.get_job_path(job["id"])
+    with open(job_path) as f:
+        record = json.load(f)
+    with open(job_path, "w") as f:
+        json.dump(record | {"status": "succeeded"}, f)
+    run_only = start_job({"kind": "run", "project": "me/proj", "sync": False})
+    assert run_only["cmd"][1:] == ["-m", "calkit", "run"]
+    os.remove(calkit.browser_link.get_job_path(run_only["id"]))
+    # VS Code, the editor Calkit installs, from the user's home folder
+    installing = start_job({"kind": "install-editor", "project": "me/proj"})
+    assert installing["cmd"][1:] == [
+        "-m",
+        "calkit",
+        "install",
+        "code",
+        "--yes",
+    ]
+    assert installing["wdir"] == calkit.get_user_home()
+    os.remove(calkit.browser_link.get_job_path(installing["id"]))
+    with open(job_path, "w") as f:
+        json.dump(record, f)
     for msg, error in [
         ({"kind": "rm", "project": "me/proj"}, "Unknown kind"),
         ({"kind": "sync", "project": "me/proj"}, "folder"),

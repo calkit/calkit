@@ -889,6 +889,14 @@ let runsRequest: { key: string; promise: Promise<void> } | null = null;
 let runsFailures = 0;
 // A start from a run button, kept across their redraws
 let starting: { key: string; busy: boolean; error?: string } | null = null;
+// Whether a run on this computer saves and syncs with Overleaf after, as
+// last chosen, and whether the latest one did
+const SYNC_AFTER_RUN_KEY = "syncAfterRun";
+let syncAfterRun = true;
+let lastRunSynced = true;
+void chrome.storage.local.get(SYNC_AFTER_RUN_KEY).then((stored) => {
+  syncAfterRun = stored[SYNC_AFTER_RUN_KEY] ?? true;
+});
 // Where the open panel shows them, redrawn as they change
 const runsBoxes = new Set<{
   box: HTMLElement;
@@ -968,7 +976,7 @@ function refreshRuns(link: OverleafLinkPublic): Promise<void> {
         void refreshRailPipeline(link);
       }
       if (runs.runs[0]?.status === "succeeded") {
-        await syncAfterRun(link);
+        await bringInRun(link);
       } else {
         pipelineRuns.notice = undefined;
       }
@@ -1062,16 +1070,21 @@ function syncNow(
   return { button, message };
 }
 
-/** Start the pipeline on GitHub Actions, which syncs here when it's done. */
+/**
+ * Start the pipeline on this computer, saving and syncing after if chosen,
+ * or else on GitHub Actions, which syncs here when it's done.
+ */
 async function startRun(link: OverleafLinkPublic): Promise<void> {
   const key = linkKey(link);
   starting = { key, busy: true };
+  lastRunSynced = !link.local_path || syncAfterRun;
   drawRuns();
   try {
     const run = await send({
       type: "project.startPipelineRun",
       owner: link.project_owner_name,
       project: link.project_name,
+      sync: lastRunSynced,
     });
     starting = null;
     // Listed as soon as it's recorded, before GitHub lists it
@@ -1097,15 +1110,16 @@ async function startRun(link: OverleafLinkPublic): Promise<void> {
 }
 
 /** Bring what a finished run made into this paper. */
-async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
+async function bringInRun(link: OverleafLinkPublic): Promise<void> {
   if (!pipelineRuns) {
     return;
   }
-  // 'calkit run --save --overleaf' synced already
+  // 'calkit run --save --overleaf' synced already, unless it was only run
   if (pipelineRuns.runs.runs[0]?.location === "local") {
-    pipelineRuns.notice =
-      "The pipeline ran on this computer, and its results were saved and " +
-      "synced here.";
+    pipelineRuns.notice = lastRunSynced
+      ? "The pipeline ran on this computer, and its results were saved " +
+        "and synced here."
+      : "The pipeline ran on this computer. Sync to bring its results here.";
   } else if (canWrite(link)) {
     try {
       await syncOverleaf(link.project_owner_name, link.project_name, link.path);
@@ -1199,26 +1213,49 @@ function drawRuns(): void {
     const staleShown = editorProblems?.found.some((problems) =>
       problems.some((p) => p.kind === "stale"),
     );
-    if (!offer && !staleShown && latest?.status !== "failed") {
+    // Running here is quick to start, so it's always on offer
+    if (
+      !link.local_path &&
+      !offer &&
+      !staleShown &&
+      latest?.status !== "failed"
+    ) {
       continue;
     }
     const mine = starting?.key === linkKey(link) ? starting : null;
+    const syncAfter = el("input", { type: "checkbox" }) as HTMLInputElement;
+    syncAfter.checked = syncAfterRun;
+    syncAfter.addEventListener("change", () => {
+      syncAfterRun = syncAfter.checked;
+      void chrome.storage.local.set({ [SYNC_AFTER_RUN_KEY]: syncAfterRun });
+    });
     const start = el("button", {
       class: "action",
-      text: "Run and sync",
+      text: link.local_path ? "Run" : "Run and sync",
       disabled: !canWrite(link) || !runs.can_start || Boolean(mine?.busy),
       title: !canWrite(link)
         ? "You need write access to this project to run it"
         : runs.cannot_start_reason ??
           (link.local_path
-            ? "Run the pipeline on this computer, then save it and sync " +
-              "what it makes here"
+            ? "Run the pipeline on this computer"
             : "Run the pipeline on GitHub Actions, then sync what it " +
               "makes here"),
       onClick: () => void startRun(link),
     });
     box.append(
-      el("div", { class: "actions" }, [start]),
+      el("div", { class: "actions" }, [
+        start,
+        link.local_path
+          ? el(
+              "label",
+              {
+                class: "small row",
+                title: "Save it and sync what it makes with Overleaf after",
+              },
+              [syncAfter, document.createTextNode("Sync with Overleaf after")],
+            )
+          : null,
+      ]),
       mine?.busy
         ? loading("Starting")
         : mine?.error
@@ -1533,23 +1570,28 @@ function renderProvenance(
 let localStatus: Promise<LocalStatus> | null = null;
 
 /**
- * A button that opens the file that makes something in the paper, e.g., a
- * notebook, in the editor on this computer, through Calkit here rather
- * than a hub.
+ * A button that opens the project in the editor on this computer, at a
+ * file if given, e.g., the notebook that makes a figure, through Calkit
+ * here rather than a hub, or installs the editor first if it isn't there.
  */
-function renderOpenLocally(project: string, path: string): HTMLElement {
+function renderOpenLocally(project: string, path?: string): HTMLElement {
   localStatus ??= send({ type: "local.status" }).catch(() => ({
     permitted: false,
   }));
   const open = el("button", {
     class: "action secondary",
     text: "Open in editor",
-    title: `Open ${path} on this computer`,
+    title: path ? `Open ${path} on this computer` : "Open it on this computer",
   });
   const message = el("div", { class: "small" });
-  void localStatus.then((status) => {
-    open.textContent = `Open in ${getEditorLabel(status.editor)}`;
-  });
+  const label = (status: LocalStatus) => {
+    const editor = getEditorLabel(status.editor);
+    open.textContent =
+      status.editorInstalled === false
+        ? `Install ${editor}`
+        : `Open in ${editor}`;
+  };
+  void localStatus.then(label);
   open.addEventListener("click", async () => {
     const status = await (localStatus as Promise<LocalStatus>);
     if (!status.version) {
@@ -1570,8 +1612,16 @@ function renderOpenLocally(project: string, path: string): HTMLElement {
       return;
     }
     open.disabled = true;
-    clear(message).append(loading("Opening"));
     try {
+      if (status.editorInstalled === false) {
+        clear(message).append(
+          loading(`Installing ${getEditorLabel(status.editor)}`),
+        );
+        await send({ type: "local.installEditor", project });
+        localStatus = send({ type: "local.status" });
+        label(await localStatus);
+      }
+      clear(message).append(loading("Opening"));
       await send({ type: "local.openProject", project, path });
       clear(message);
     } catch (e) {
@@ -1588,9 +1638,15 @@ function renderOpenLocally(project: string, path: string): HTMLElement {
 /**
  * What's on this computer that Overleaf won't see until it's saved and
  * synced, e.g., a figure remade by running a notebook, or a way to connect
- * if the extension isn't connected to Calkit here.
+ * if the extension isn't connected to Calkit here. With ``localPath``, the
+ * checkout the panel already works with, only what the panel doesn't show
+ * otherwise, i.e., what isn't saved or pushed.
  */
-function renderLocalChanges(project: string, reload: () => void): HTMLElement {
+function renderLocalChanges(
+  project: string,
+  reload: () => void,
+  localPath?: string | null,
+): HTMLElement {
   const container = el("div");
   localStatus ??= send({ type: "local.status" }).catch(() => ({
     permitted: false,
@@ -1661,6 +1717,9 @@ function renderLocalChanges(project: string, reload: () => void): HTMLElement {
     let pendingCount = 0;
     const plural = (n: number, word: string) =>
       `${n} ${word}${n === 1 ? "" : "s"}`;
+    if (localPath) {
+      checkouts = checkouts.filter((c) => c.path === localPath);
+    }
     for (const checkout of checkouts) {
       const lines: HTMLElement[] = [];
       if (checkout.n_unsaved_files) {
@@ -1682,7 +1741,8 @@ function renderLocalChanges(project: string, reload: () => void): HTMLElement {
           }),
         );
       }
-      for (const folder of checkout.overleaf) {
+      // The panel lists what a sync would send for its own checkout
+      for (const folder of localPath ? [] : checkout.overleaf) {
         const n =
           (folder.n_files_to_push ?? 0) + (folder.n_files_to_delete ?? 0);
         if (folder.syncing) {
@@ -1710,6 +1770,10 @@ function renderLocalChanges(project: string, reload: () => void): HTMLElement {
         continue;
       }
       pendingCount++;
+      if (localPath) {
+        container.append(el("div", { style: { marginTop: "6px" } }, lines));
+        continue;
+      }
       container.append(
         el("div", { class: "muted-box", style: { marginTop: "8px" } }, [
           el("div", { class: "row" }, [
@@ -1723,14 +1787,14 @@ function renderLocalChanges(project: string, reload: () => void): HTMLElement {
           el("div", {
             class: "dim small",
             style: { marginTop: "4px" },
-            text: "Run 'calkit run --save --overleaf' there to bring them here.",
+            text: "Run and sync there to bring them here.",
           }),
         ]),
       );
     }
     // Only checkouts with something to bring here are listed, since
     // someone may have several, e.g., Git worktrees
-    if (checkouts.length && !pendingCount) {
+    if (checkouts.length && !pendingCount && !localPath) {
       container.append(
         el("div", {
           class: "dim small",
@@ -3167,8 +3231,7 @@ function renderWhere(link: OverleafLinkPublic): HTMLElement {
   if (link.local_path) {
     return el("div", {
       class: "dim small",
-      text: "On this computer",
-      title: link.local_path,
+      text: `On this computer: ${link.local_path}`,
     });
   }
   return el("div", { class: "dim small" }, [
@@ -3203,17 +3266,22 @@ function renderStatus(
   clear(body);
   const figures = status.files_to_push.filter((f) => f.figure);
   const others = status.files_to_push.filter((f) => !f.figure);
+  const project = `${link.project_owner_name}/${link.project_name}`;
+  // Worked on here, so the hub's parts stay out of the way
+  const local = Boolean(link.local_path);
   body.append(
     el("div", { class: "row" }, [
       el("div", { class: "grow" }, [
-        el("a", {
-          text: `${link.project_owner_name}/${link.project_name}`,
-          href: projectUrl(
-            hubWebUrl,
-            link.project_owner_name,
-            link.project_name,
-          ),
-        }),
+        local
+          ? el("div", { text: project })
+          : el("a", {
+              text: project,
+              href: projectUrl(
+                hubWebUrl,
+                link.project_owner_name,
+                link.project_name,
+              ),
+            }),
         el("div", {
           class: "dim small",
           text: `Synced folder: ${status.path}`,
@@ -3237,16 +3305,13 @@ function renderStatus(
       el("div", {
         class: "dim small",
         style: { paddingTop: "6px" },
-        text: "Everything here matches the Calkit project.",
+        text: local
+          ? "Overleaf has everything from this computer."
+          : "Everything here matches the Calkit project.",
       }),
     );
   }
-  body.append(
-    renderLocalChanges(
-      `${link.project_owner_name}/${link.project_name}`,
-      reload,
-    ),
-  );
+  body.append(renderLocalChanges(project, reload, link.local_path));
   if (figures.length) {
     body.append(
       el("div", {
@@ -3347,6 +3412,7 @@ function renderStatus(
   body.append(
     el("div", { class: "actions" }, [
       status.in_sync ? null : syncButton,
+      local ? renderOpenLocally(project) : null,
       el("button", {
         class: "action secondary",
         text: "Refresh",
@@ -3970,7 +4036,8 @@ async function load(overleafProjectId: string): Promise<void> {
         ? lastCheck
         : null;
     const content = el("div");
-    clear(body).append(pickers, content);
+    // The hub's pickers are beside the point for a project worked on here
+    clear(body).append(...(cached?.link.local_path ? [] : [pickers]), content);
     const showNotice = () => {
       if (cached?.notice) {
         content.append(
@@ -4029,6 +4096,11 @@ async function load(overleafProjectId: string): Promise<void> {
     // A folder in more than one project is rare, so the first link is the
     // one shown, with the rest offered as alternatives underneath
     const link = links[0];
+    if (link.local_path) {
+      pickers.remove();
+    } else if (!pickers.isConnected) {
+      body.prepend(pickers);
+    }
     if (!cached) {
       clear(content).append(
         loading(`Checking ${link.project_owner_name}/${link.project_name}`),

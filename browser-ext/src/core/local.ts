@@ -25,6 +25,8 @@ export interface LocalStatus {
   version?: string;
   /** The editor projects open in, e.g., "vscode". */
   editor?: string;
+  /** Whether it's installed, or else it can be. */
+  editorInstalled?: boolean;
   error?: string;
 }
 
@@ -207,11 +209,17 @@ export async function getLocalStatus(): Promise<LocalStatus> {
     return { permitted: true, needsReload: true };
   }
   try {
-    const { version, editor } = await askLocal<{
+    const reply = await askLocal<{
       version: string;
       editor?: string;
+      editor_installed?: boolean;
     }>({ type: "ping" });
-    return { permitted: true, version, editor };
+    return {
+      permitted: true,
+      version: reply.version,
+      editor: reply.editor,
+      editorInstalled: reply.editor_installed,
+    };
   } catch (e) {
     return {
       permitted: true,

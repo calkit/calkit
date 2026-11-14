@@ -305,10 +305,20 @@ async function render(): Promise<void> {
   clear(app).append(el("header", {}, [el("span", { text: "Calkit options" })]));
   const main = el("main", { class: "stack" });
   app.append(main);
+  const localContainer = el("div", { class: "stack" });
   const hubContainer = el("div", { class: "stack" });
   const projectContainer = el("div");
+  // This computer comes first, since working on projects here is the main
+  // way to use the extension, and nothing waits on another section's hub
+  // requests
   main.append(
-    hubContainer,
+    el("div", {
+      class: "small",
+      style: { fontWeight: "600" },
+      text: "This computer",
+    }),
+    localContainer,
+    el("div", { style: { marginTop: "12px" } }, [hubContainer]),
     el("div", {
       class: "small",
       style: { fontWeight: "600", marginTop: "12px" },
@@ -325,18 +335,11 @@ async function render(): Promise<void> {
     }),
     projectContainer,
   );
-  const localContainer = el("div", { class: "stack" });
-  main.append(
-    el("div", {
-      class: "small",
-      style: { fontWeight: "600", marginTop: "12px" },
-      text: "This computer",
-    }),
-    localContainer,
-  );
-  await renderHubSection(hubContainer, settings.hubName, hubs);
-  await renderActiveProjectSection(projectContainer, settings.activeProject);
-  await renderLocalSection(localContainer);
+  await Promise.all([
+    renderLocalSection(localContainer),
+    renderHubSection(hubContainer, settings.hubName, hubs),
+    renderActiveProjectSection(projectContainer, settings.activeProject),
+  ]);
 }
 
 void render();

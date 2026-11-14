@@ -326,10 +326,25 @@ def resolve_packages(
     )
 
 
-def create_lock(env: dict) -> dict:
-    """Resolve an environment's spec into a lock, fetching the database."""
+def get_lock_entry(tlpdb: dict[str, dict], name: str) -> dict:
+    """Return what a lock records for a package."""
+    return {
+        "revision": tlpdb[name]["revision"],
+        "size": tlpdb[name]["size"],
+        "sha512": tlpdb[name]["sha512"],
+    }
+
+
+def create_lock(env: dict, added: list[str] | None = None) -> dict:
+    """Resolve an environment's spec into a lock, fetching the database.
+
+    ``added`` are packages builds added beyond the spec, which are kept as
+    long as the release has them.
+    """
     repository = get_repository_url(env)
-    tlpdb = load_tlpdb(repository)
+    # A moving repository's database is fetched again, since relocking is
+    # how a lock it has outgrown is fixed
+    tlpdb = load_tlpdb(repository, max_age_s=0)
     platforms = get_lock_platforms(env)
     release = get_tlpdb_release(tlpdb)
     if env.get("release") and int(env["release"]) != release:
@@ -337,21 +352,19 @@ def create_lock(env: dict) -> dict:
             f"TeX Live {env['release']} isn't available; the current "
             f"release is {release}"
         )
-    names = resolve_packages(tlpdb, get_spec_packages(env), platforms)
+    spec_packages = get_spec_packages(env)
+    added = sorted(
+        p for p in set(added or []) if p in tlpdb and p not in spec_packages
+    )
+    names = resolve_packages(tlpdb, spec_packages + added, platforms)
     return {
         "lock_format": LOCK_FORMAT_VERSION,
         "spec_md5": calc_spec_md5(env),
         "release": release,
         "repository": repository,
         "platforms": platforms,
-        "packages": {
-            n: {
-                "revision": tlpdb[n]["revision"],
-                "size": tlpdb[n]["size"],
-                "sha512": tlpdb[n]["sha512"],
-            }
-            for n in names
-        },
+        "added": added,
+        "packages": {n: get_lock_entry(tlpdb, n) for n in names},
     }
 
 
@@ -496,16 +509,12 @@ def install_packages(
                 f.write(url + "\n")
             pkg_dir = get_package_dir(name, info["revision"])
             os.makedirs(os.path.dirname(pkg_dir), exist_ok=True)
-            if os.path.isfile(os.path.join(pkg_dir, COMPLETE_MARKER)):
-                # Another process installed it meanwhile
-                return
-            if os.path.isdir(pkg_dir):
-                # Left behind by an install that never finished
-                shutil.rmtree(pkg_dir)
+            # Moved into place whole, marker included, so a package's
+            # directory is either absent or complete, and one that exists
+            # is another process's finished install
             try:
                 os.rename(unpack_dir, pkg_dir)
             except OSError:
-                # Another process got there first
                 if not os.path.isfile(os.path.join(pkg_dir, COMPLETE_MARKER)):
                     raise
         if verbose:
@@ -1028,7 +1037,7 @@ def check(
     lock = read_lock(lock_fpath)
     if lock is None or lock.get("spec_md5") != calc_spec_md5(env):
         print(f"Locking TeX Live environment '{env_name}'", file=sys.stderr)
-        lock = create_lock(env)
+        lock = create_lock(env, added=(lock or {}).get("added"))
         write_lock(lock, lock_fpath)
     platform = get_platform()
     if platform not in lock["platforms"]:
@@ -1113,11 +1122,15 @@ def add_document_packages(
     new document gets everything it needs in a few lookups rather than one
     failed compile per package. A name a package only loads conditionally
     is added too, which costs a little space rather than a failed build.
+    What's added goes in the lock, not the spec.
 
     Returns each missing file mapped to the package added for it.
     """
     from pathlib import Path
 
+    platform = get_platform()
+    exe = ".exe" if platform == "windows" else ""
+    lock_fpath = get_lock_fpath(env_name, env, wdir=wdir)
     added_for: dict[str, str] = {}
     files = [tex_file]
     for _ in range(max_rounds):
@@ -1132,10 +1145,13 @@ def add_document_packages(
         if not names:
             break
         view_dir = check(env_name, env, wdir=wdir)
+        # By its path, since on Windows a child's program is found on the
+        # parent's PATH, not the one it's given
         result = subprocess.run(
-            ["kpsewhich", *names],
+            [os.path.join(view_dir, "bin", platform, "kpsewhich" + exe)]
+            + names,
             cwd=os.path.dirname(tex_file) or ".",
-            env=get_run_env_vars(view_dir),
+            env=get_run_env_vars(view_dir, platform),
             capture_output=True,
             text=True,
         )
@@ -1145,17 +1161,16 @@ def add_document_packages(
             if line.strip()
         }
         missing = [n for n in names if n not in found]
-        lock = read_lock(get_lock_fpath(env_name, env, wdir=wdir))
+        lock = read_lock(lock_fpath)
         if not missing or lock is None:
             break
         owners = find_packages_for_files(lock, missing)
-        added = add_packages(env_name, list(owners.values()), wdir=wdir)
+        added = add_packages(env_name, env, list(owners.values()), wdir=wdir)
         added_for.update(owners)
         if not added:
             break
-        env = calkit.load_calkit_info(wdir=wdir)["environments"][env_name]
         check(env_name, env, wdir=wdir)
-        lock = read_lock(get_lock_fpath(env_name, env, wdir=wdir)) or lock
+        lock = read_lock(lock_fpath) or lock
         files = [
             str(fpath)
             for name in added
@@ -1170,29 +1185,54 @@ def add_document_packages(
 
 
 def add_packages(
-    env_name: str, packages: list[str], wdir: str | None = None
+    env_name: str, env: dict, packages: list[str], wdir: str | None = None
 ) -> list[str]:
-    """Add packages to an environment's spec in calkit.yaml.
+    """Add packages a build found missing to an environment's lock.
 
-    Returns those that weren't already there.
+    The spec stays as written. The lock lists what was added beyond it,
+    which relocking keeps, so the next build anywhere has them; deleting
+    the lock drops them, and builds add back what's still needed.
+
+    Returns those that weren't already locked.
     """
-    ck_info = calkit.load_calkit_info(wdir=wdir)
-    env = ck_info.get("environments", {}).get(env_name)
-    if env is None:
-        raise ValueError(f"Environment '{env_name}' does not exist")
-    existing = [str(p) for p in env.get("packages") or []]
-    added = [
-        p
-        for p in dict.fromkeys(packages)
-        if p not in existing and p not in BASE_PACKAGES
-    ]
+    lock_fpath = get_lock_fpath(env_name, env, wdir=wdir)
+    lock = read_lock(lock_fpath)
+    if lock is None:
+        raise ValueError(f"TeX Live environment '{env_name}' isn't locked")
+    added = [p for p in dict.fromkeys(packages) if p not in lock["packages"]]
     if not added:
         return []
-    if "packages" not in env or env["packages"] is None:
-        env["packages"] = []
-    for p in added:
-        env["packages"].append(p)
-    fpath = os.path.join(wdir or ".", "calkit.yaml")
-    with open(fpath, "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    tlpdb = load_tlpdb(lock["repository"])
+    for name in resolve_packages(tlpdb, added, lock["platforms"]):
+        lock["packages"].setdefault(name, get_lock_entry(tlpdb, name))
+    lock["added"] = sorted(set(lock.get("added", [])) | set(added))
+    write_lock(lock, lock_fpath)
     return added
+
+
+def get_selected_env(
+    env_name: str | None, wdir: str | None = None
+) -> tuple[str, dict] | None:
+    """Return the TeX Live environment a name runs in here, if it's one.
+
+    A switch is resolved to the option it picks on this machine.
+    """
+    from calkit.environments import SWITCH_KIND, get_env, resolve_switch
+
+    if env_name is None:
+        return None
+    envs = calkit.load_calkit_info(wdir=wdir, read_only=True).get(
+        "environments", {}
+    )
+    env = get_env(env_name, envs)
+    if env is not None and env.get("kind") == SWITCH_KIND:
+        try:
+            picked = resolve_switch(env_name, envs)
+        except ValueError:
+            return None
+        if picked is None:
+            return None
+        env_name, env = picked, get_env(picked, envs)
+    if env is None or env.get("kind") != "texlive":
+        return None
+    return env_name, env

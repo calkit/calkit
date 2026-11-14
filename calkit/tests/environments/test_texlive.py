@@ -128,10 +128,56 @@ def test_parse_and_resolve(tmp_path, monkeypatch):
     )
     # A missing file is found in the database the lock came from, and a
     # release's copy wins over the development format's
-    monkeypatch.setattr(texlive, "load_tlpdb", lambda repository: tlpdb)
+    monkeypatch.setattr(
+        texlive, "load_tlpdb", lambda repository, max_age_s=0: tlpdb
+    )
     assert texlive.find_packages_for_files(
         {"repository": "x"}, ["array.sty", "article.cls", "nope.sty"]
     ) == {"array.sty": "tools", "article.cls": "latex"}
+    # Packages a build adds go in the lock, not the spec, and relocking
+    # keeps them, unless the spec has them or the release doesn't
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(texlive, "BASE_PACKAGES", ["latex-bin"])
+    monkeypatch.setattr(texlive, "get_repository_url", lambda env: "x")
+    env = {"kind": "texlive", "platforms": ["windows"]}
+    calkit.save_calkit_info({"environments": {"tex": env}})
+    lock_fpath = texlive.get_lock_fpath("tex", env)
+    texlive.write_lock(texlive.create_lock(env), lock_fpath)
+    assert texlive.add_packages("tex", env, ["tools", "latex"]) == ["tools"]
+    assert texlive.add_packages("tex", env, ["tools"]) == []
+    lock = texlive.read_lock(lock_fpath)
+    assert lock is not None
+    assert lock["added"] == ["tools"]
+    assert sorted(lock["packages"]) == [
+        "latex",
+        "latex-bin",
+        "latex-bin.windows",
+        "tools",
+    ]
+    assert calkit.load_calkit_info()["environments"]["tex"] == env
+    relocked = texlive.create_lock(
+        {**env, "packages": ["latex-tools-dev"]},
+        added=lock["added"] + ["latex-tools-dev", "gone"],
+    )
+    assert relocked["added"] == ["tools"]
+    assert {"tools", "latex-tools-dev"} <= set(relocked["packages"])
+    # A switch is resolved to the TeX Live environment it picks here
+    calkit.save_calkit_info(
+        {
+            "environments": {
+                "tex": env,
+                "py": {"kind": "uv", "path": "pyproject.toml"},
+                "any": {"kind": "switch", "switch": [{"use": "tex"}]},
+                "inline": {"kind": "switch", "switch": [{"use": env}]},
+            }
+        }
+    )
+    assert texlive.get_selected_env("tex") == ("tex", env)
+    assert texlive.get_selected_env("any") == ("tex", env)
+    assert texlive.get_selected_env("inline") == ("inline.1", env)
+    assert texlive.get_selected_env("py") is None
+    assert texlive.get_selected_env("nope") is None
+    assert texlive.get_selected_env(None) is None
 
 
 def test_extract_container(tmp_path):
@@ -290,8 +336,13 @@ def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch):
     assert view_dir == texlive.get_view_dir(lock, platform)
     # Its programs find its own configuration, with nothing from elsewhere
     # on the machine, e.g., a user's own texmf tree
+    exe = ".exe" if platform == "windows" else ""
     out = subprocess.run(
-        ["kpsewhich", "-var-value", "TEXMFHOME"],
+        [
+            os.path.join(view_dir, "bin", platform, "kpsewhich" + exe),
+            "-var-value",
+            "TEXMFHOME",
+        ],
         env=texlive.get_run_env_vars(view_dir),
         capture_output=True,
         text=True,
@@ -320,7 +371,7 @@ def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch):
         assert status == 0, engine
         assert os.path.isfile("doc.pdf")
     # A document naming a package the environment lacks gets it added to
-    # the spec, and the environment assembled again reuses the store
+    # the lock, and the environment assembled again reuses the store
     with open("doc2.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n\\usepackage{booktabs}\n"
@@ -331,10 +382,12 @@ def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch):
     formats_before = sorted(os.listdir(formats_dir))
     added = texlive.add_document_packages("tex", env, "doc2.tex")
     assert added == {"booktabs.sty": "booktabs"}
-    env = calkit.load_calkit_info()["environments"]["tex"]
     assert texlive.add_document_packages("tex", env, "doc2.tex") == {}
-    assert texlive.add_packages("tex", ["booktabs", "latex-bin"]) == []
-    assert env["packages"] == ["booktabs"]
+    assert texlive.add_packages("tex", env, ["booktabs", "latex-bin"]) == []
+    assert "packages" not in calkit.load_calkit_info()["environments"]["tex"]
+    lock = texlive.read_lock(lock_fpath)
+    assert lock is not None
+    assert lock["added"] == ["booktabs"]
     new_view_dir = texlive.check("tex", env)
     assert new_view_dir != view_dir
     assert os.path.isdir(view_dir)

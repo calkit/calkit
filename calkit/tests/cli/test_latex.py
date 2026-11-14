@@ -568,14 +568,14 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
         ["calkit", "latex", "build", "-e", "tex", "paper/main.tex"]
     )
     assert os.path.isfile("paper/main.pdf")
-    # What it was missing is recorded in the spec, and the lock pins it
-    packages = calkit.load_calkit_info()["environments"]["tex"]["packages"]
-    assert packages[:2] == ["amsmath", "siunitx"]
-    assert packages[-1] == "booktabs"
-    assert "tools" in packages
+    # What it was missing is recorded in the lock, and the spec stays as
+    # written
+    env = calkit.load_calkit_info()["environments"]["tex"]
+    assert env == {"kind": "texlive"}
     with open(".calkit/env-locks/tex.json") as f:
         lock = json.load(f)
-    assert {"amsmath", "booktabs", "siunitx", "tools"} <= set(lock["packages"])
+    assert {"amsmath", "booktabs", "siunitx", "tools"} <= set(lock["added"])
+    assert set(lock["added"]) <= set(lock["packages"])
     # A stage builds in it, with the lock as a dependency, and nothing is
     # out of date afterwards
     os.remove("paper/main.pdf")

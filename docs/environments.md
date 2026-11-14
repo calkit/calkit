@@ -1199,7 +1199,8 @@ List any other [TeX Live packages](https://ctan.org/) the document uses
 under `packages`, or leave them out:
 when `calkit latex build -e tex` or a LaTeX stage finds the document
 needs a package the environment doesn't have,
-Calkit adds it to `packages` for you.
+Calkit adds it to the environment's lock for you,
+so `packages` stays as you wrote it.
 
 Packages come from a past TeX Live release, 2025 by default, whose
 packages never change, so the lock Calkit writes to
@@ -1207,6 +1208,8 @@ packages never change, so the lock Calkit writes to
 later.
 The lock covers macOS, Linux, and Windows at once.
 Set `release` to use another, e.g., `release: 2024`.
+To drop packages a document no longer needs, delete the lock;
+the next build adds back the ones it still uses.
 
 Run any TeX program in it with `calkit xenv`, e.g.:
 
@@ -1625,15 +1628,15 @@ stale inputs; the paths are taken from the stage instead.
 
 Model class: `TexLiveEnvironment`
 
-| Parameter   | Type                     | Required | Description                                                                                                                                                                                                 |
-| ----------- | ------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind        | Literal['texlive']       | yes      | What kind of environment this is.                                                                                                                                                                           |
-| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.                     |
-| release     | int                      | no       | TeX Live release, e.g., 2025, to install packages from. A past release's repository is frozen, so its lock pins every package for good. Defaults to the latest frozen release.                              |
-| packages    | list[str]                | no       | TeX Live packages to install, beyond the base set every TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). What they depend on comes with them, and packages a build finds missing are added here. |
-| platforms   | list[str]                | no       | TeX Live platforms to lock for. Defaults to macOS, Windows, and Linux on x86_64 and ARM.                                                                                                                    |
-| repository  | str                      | no       | TeX Live repository URL to install from instead of the one for 'release', e.g., a local mirror.                                                                                                             |
-| description | str                      | no       | A description of the environment.                                                                                                                                                                           |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                                                                  |
+| ----------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['texlive']       | yes      | What kind of environment this is.                                                                                                                                                                                            |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.                                      |
+| release     | int                      | no       | TeX Live release, e.g., 2025, to install packages from. A past release's repository is frozen, so its lock pins every package for good. Defaults to the latest frozen release.                                               |
+| packages    | list[str]                | no       | TeX Live packages to install, beyond the base set every TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). What they depend on comes with them, and packages a build finds missing are added to the lock, not here. |
+| platforms   | list[str]                | no       | TeX Live platforms to lock for. Defaults to macOS, Windows, and Linux on x86_64 and ARM.                                                                                                                                     |
+| repository  | str                      | no       | TeX Live repository URL to install from instead of the one for 'release', e.g., a local mirror.                                                                                                                              |
+| description | str                      | no       | A description of the environment.                                                                                                                                                                                            |
 
 #### `uv`
 

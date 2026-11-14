@@ -825,7 +825,7 @@ class TexLiveEnvironment(Environment):
             "TeX Live packages to install, beyond the base set every "
             "TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). "
             "What they depend on comes with them, and packages a build "
-            "finds missing are added here."
+            "finds missing are added to the lock, not here."
         ),
     )
     platforms: list[str] | None = Field(

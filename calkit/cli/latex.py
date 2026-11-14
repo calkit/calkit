@@ -470,7 +470,7 @@ def _run_latexmk(
 
     Only where what's fetched is kept with the project, i.e., Calkit's
     LaTeX image, run directly or as a Docker environment built on it, or a
-    TeX Live environment, whose spec gains the packages. A system TeX is
+    TeX Live environment, whose lock gains the packages. A system TeX is
     the user's to manage, and anything installed in another container is
     gone when it exits. Returns latexmk's exit status.
 
@@ -523,35 +523,32 @@ def _run_latexmk(
         ]
         if not missing:
             return status
-        # A TeX Live environment records what it was missing in its spec,
-        # so the lock pins it and the next build anywhere has it too
-        tex_env = (
-            calkit.load_calkit_info()
-            .get("environments", {})
-            .get(environment or "", {})
-        )
-        if tex_env.get("kind") == "texlive":
-            from calkit.environments import texlive as env_texlive
+        # A TeX Live environment records what it was missing in its lock,
+        # so the next build anywhere has it too
+        from calkit.environments import texlive as env_texlive
 
-            assert environment is not None
+        texlive_env = env_texlive.get_selected_env(environment)
+        if texlive_env is not None:
+            tex_env_name, tex_env = texlive_env
             lock = env_texlive.read_lock(
-                env_texlive.get_lock_fpath(environment, tex_env)
+                env_texlive.get_lock_fpath(tex_env_name, tex_env)
             )
             if lock is None:
                 return status
             try:
                 owners = env_texlive.find_packages_for_files(lock, missing)
+                packages = list(dict.fromkeys(owners.values()))
+                if not packages:
+                    return status
+                typer.echo(
+                    "Adding TeX Live packages to environment "
+                    f"'{tex_env_name}' for {', '.join(owners)}: "
+                    + ", ".join(packages)
+                )
+                env_texlive.add_packages(tex_env_name, tex_env, packages)
             except (ValueError, OSError) as e:
-                warn(f"Could not look up TeX Live packages: {e}")
+                warn(f"Could not add TeX Live packages: {e}")
                 return status
-            packages = list(dict.fromkeys(owners.values()))
-            if not packages:
-                return status
-            typer.echo(
-                f"Adding TeX Live packages to environment '{environment}' "
-                f"for {', '.join(owners)}: {', '.join(packages)}"
-            )
-            env_texlive.add_packages(environment, packages)
             fetched.update(missing)
             if os.path.isfile(fdb_path):
                 os.remove(fdb_path)
@@ -697,6 +694,8 @@ def build(
     """
     import time
 
+    from calkit.environments import texlive as env_texlive
+
     def rel_to_tex_dir(path: str) -> str:
         """Express a current-directory-relative path from the .tex file's
         directory.
@@ -799,24 +798,18 @@ def build(
     log_dir = aux_dir or output_dir or tex_dir
     # A TeX Live environment gets the packages the document names before
     # compiling, since LaTeX stops at the first one missing
-    tex_env = (
-        calkit.load_calkit_info(read_only=True)
-        .get("environments", {})
-        .get(environment or "", {})
-    )
-    if tex_env.get("kind") == "texlive":
-        from calkit.environments import texlive as env_texlive
-
-        assert environment is not None
+    texlive_env = env_texlive.get_selected_env(environment)
+    if texlive_env is not None:
+        tex_env_name, tex_env = texlive_env
         try:
             owners = env_texlive.add_document_packages(
-                environment, tex_env, tex_file
+                tex_env_name, tex_env, tex_file
             )
         except (ValueError, RuntimeError, OSError) as e:
-            raise_error(f"Environment '{environment}': {e}")
+            raise_error(f"Environment '{tex_env_name}': {e}")
         if owners:
             typer.echo(
-                f"Added TeX Live packages to environment '{environment}': "
+                f"Added TeX Live packages to environment '{tex_env_name}': "
                 + ", ".join(dict.fromkeys(owners.values()))
             )
     # A little early, for file systems that keep times coarsely

@@ -190,6 +190,11 @@ export type Request =
       project: string;
       overleafProjectId?: string;
       path?: string;
+      /**
+       * False for what's known from the last pull from Overleaf, without
+       * pulling, when answered on this computer, to show while it pulls.
+       */
+      pull?: boolean;
     }
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }

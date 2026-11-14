@@ -4123,13 +4123,28 @@ async function load(overleafProjectId: string): Promise<void> {
         loading(`Checking ${link.project_owner_name}/${link.project_name}`),
       );
     }
-    const statuses = await send({
+    const statusRequest = {
       type: "overleaf.status",
       owner: link.project_owner_name,
       project: link.project_name,
       overleafProjectId,
       path: link.path,
-    });
+    } as const;
+    // On this computer, what's known from the last pull comes at once,
+    // and is shown while Overleaf is asked for anything newer
+    if (link.local_path) {
+      const known = await send({ ...statusRequest, pull: false }).catch(
+        () => [],
+      );
+      if (!current()) {
+        return;
+      }
+      if (known.length && !known[0].pulled) {
+        renderStatus(content, link, known[0], reload);
+        content.append(loading("Checking Overleaf for new edits"));
+      }
+    }
+    const statuses = await send(statusRequest);
     if (!current()) {
       return;
     }

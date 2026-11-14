@@ -503,6 +503,7 @@ async function handle(
           project,
           overleaf_project_id: message.overleafProjectId,
           path: message.path,
+          pull: message.pull ?? true,
         });
       }
       return request<OverleafSyncStatus[]>(

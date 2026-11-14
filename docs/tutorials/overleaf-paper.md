@@ -40,33 +40,33 @@ You don't need to have used Calkit before, or Git, or Docker.
 - A [GitHub](https://github.com) account, where the project's files are
   kept.
 - An account on [calkit.io](https://calkit.io), which you can make with
-  your GitHub account. It passes messages between Overleaf and your laptop
-  and keeps your sign-ins for Overleaf and Google, but your analysis runs
-  on your laptop.
+  your GitHub account. It shows the project, its figures, and where they
+  came from, so you can share it, and it's where you connect your GitHub,
+  Overleaf, and Google accounts. Your analysis runs on your laptop.
 - [VS Code](https://code.visualstudio.com) with the
   [Calkit extension](https://marketplace.visualstudio.com/items?itemName=calkit.calkit-vscode).
 - The [Calkit browser extension](../browser-ext/index.md), signed in.
 - A Google account, for the diagram drawn in Google Slides.
-- Calkit, installed and linked to calkit.io, as below.
+- Calkit, installed as below.
 - For the last part, an AI agent with Calkit's skills, e.g.,
   [Claude Code](https://claude.com/claude-code) with the
   [Calkit plugin](../ai-tools.md#step-2-install-calkit-skills-globally).
 
-To install Calkit and link your laptop to calkit.io, run this in a
-terminal on macOS or Linux:
+To install Calkit, run this in a terminal on macOS or Linux:
 
 ```sh
-curl -LsSf install.calkit.org | sh -s -- --link
+curl -LsSf install.calkit.org | sh
 ```
 
 or this in PowerShell on Windows:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1.calkit.org))) --link"
+powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 ```
 
-Linking lets the browser extension ask your laptop to do things, e.g., run
-a notebook, while you're on Overleaf.
+This also lets the browser extension ask Calkit on your laptop to do
+things, e.g., run a notebook, while you're on Overleaf. It talks to your
+laptop directly, not through calkit.io.
 
 ## Get the starter files
 
@@ -205,10 +205,9 @@ and the diagram marked red. -->
 
 The spectra plot is still red. Hover over its `\includegraphics` line and
 click **Define origin**, then pick `plot_spectra.py` from the list of your
-project's scripts and notebooks. Your laptop does the rest, through the
-link you set up when installing Calkit: it records the script the same way
-`xr` did, runs it, saves the project, and syncs the paper, while the card
-on Overleaf shows how it's going.
+project's scripts and notebooks. Calkit on your laptop does the rest: it
+records the script the same way `xr` did, runs it, saves the project, and
+syncs the paper, while the card on Overleaf shows how it's going.
 
 <!-- Screenshot: img/overleaf-paper/define-origin-script.png
 Defining the spectra plot's origin by picking plot_spectra.py. -->

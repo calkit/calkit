@@ -238,6 +238,56 @@ async function renderActiveProjectSection(
   renderList();
 }
 
+/**
+ * Whether the extension can reach Calkit on this computer, which lets it
+ * work with projects here, e.g., open a figure's script in an editor,
+ * without going through a hub.
+ */
+async function renderLocalSection(container: HTMLElement): Promise<void> {
+  clear(container).append(loading("Looking for Calkit on this computer"));
+  const status = await send({ type: "local.status" });
+  clear(container);
+  if (status.permitted && status.version) {
+    container.append(
+      el("div", {
+        class: "small",
+        text: `Connected to Calkit ${status.version} on this computer.`,
+      }),
+    );
+    return;
+  }
+  const message = el("div", { class: "small" });
+  if (status.error) {
+    message.append(errorMessage(status.error));
+  }
+  const connect = el("button", {
+    class: "action",
+    text: status.permitted ? "Try again" : "Connect",
+  });
+  connect.addEventListener("click", async () => {
+    // Asked for here, since only an extension page can, and only when
+    // someone clicks
+    const granted = await chrome.permissions.request({
+      permissions: ["nativeMessaging"],
+    });
+    if (granted) {
+      void renderLocalSection(container);
+    }
+  });
+  container.append(
+    el("div", {
+      class: "dim small",
+      text:
+        "Lets the extension work with projects on this computer, e.g., " +
+        "open the script that makes a figure in your editor. It talks to " +
+        "Calkit here directly, not through a hub. Calkit needs to be " +
+        "installed, which sets this up, or run 'calkit browser install'.",
+    }),
+    el("div", { class: "row" }, [connect]),
+    message,
+  );
+}
+
 async function render(): Promise<void> {
   clear(app).append(
     el("header", {}, [el("span", { text: "Calkit options" })]),
@@ -268,8 +318,18 @@ async function render(): Promise<void> {
     }),
     projectContainer,
   );
+  const localContainer = el("div", { class: "stack" });
+  main.append(
+    el("div", {
+      class: "small",
+      style: { fontWeight: "600", marginTop: "12px" },
+      text: "This computer",
+    }),
+    localContainer,
+  );
   await renderHubSection(hubContainer, settings.hubName, hubs);
   await renderActiveProjectSection(projectContainer, settings.activeProject);
+  await renderLocalSection(localContainer);
 }
 
 void render();

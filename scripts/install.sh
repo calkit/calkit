@@ -6,13 +6,17 @@
 #                          its workspaces to the hub
 #                          (or set CALKIT_INSTALL_LINK=1)
 #   --no-shell-completion  Skip installing shell completion
+#   --no-browser           Skip letting the browser extension work with
+#                          projects on this machine
 
 LINK="${CALKIT_INSTALL_LINK:-0}"
 COMPLETION=1
+BROWSER=1
 for arg in "$@"; do
     case "$arg" in
         --link) LINK=1 ;;
         --no-shell-completion) COMPLETION=0 ;;
+        --no-browser) BROWSER=0 ;;
         *) echo "⚠️ Ignoring unknown option '$arg'" ;;
     esac
 done
@@ -58,6 +62,12 @@ if [ "$COMPLETION" = 1 ]; then
             echo "✅ Shell completion installed for '$cmd'"
         fi
     done
+fi
+
+if [ "$BROWSER" = 1 ]; then
+    if ! calkit browser install; then
+        echo "⚠️ Failed to set up Calkit for the browser extension; run 'calkit browser install' to try again"
+    fi
 fi
 
 if [ "$LINK" = 1 ]; then

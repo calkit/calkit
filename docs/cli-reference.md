@@ -44,6 +44,7 @@
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`open`](#command-group-open)                    | Open things.                                                                                                 |
+| [`browser`](#command-group-browser)              | Connect the browser extension to this machine.                                                               |
 | [`export`](#command-group-export)                | Export data and artifacts from various applications.                                                         |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
@@ -2921,7 +2922,7 @@ Open things.
 
 Open a project on this machine in its editor, from anywhere.
 
-Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor', or the one given with '--with'.
+Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, or wherever Calkit created or cloned it, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor', or the one given with '--with'. Editors built on VS Code, e.g., Cursor, VSCodium, Positron, or Antigravity, get Calkit's extension if they don't have it.
 
 Usage:
 
@@ -2939,9 +2940,51 @@ Options:
 
 | Option         | Type    | Required | Default | Description                                                                                                                         |
 | -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `--path`, `-p` | str     | no       |         | File in the project to open too, e.g., a notebook.                                                                                  |
 | `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                                                |
 | `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder.                              |
 | `--hub`        | str     | no       |         | Hub to clone it from if it isn't here, e.g., https://calkit.example.edu, or localhost for a development hub. Defaults to calkit.io. |
+
+<a id="command-group-browser"></a>
+
+### `calkit browser`
+
+Connect the browser extension to this machine.
+
+| Command                                      | Description                                                       |
+| -------------------------------------------- | ----------------------------------------------------------------- |
+| [`install`](#subcommand-browser-install)     | Let the browser extension work with projects on this machine.     |
+| [`uninstall`](#subcommand-browser-uninstall) | Stop the browser extension working with projects on this machine. |
+
+<a id="subcommand-browser-install"></a>
+
+#### `calkit browser install`
+
+Let the browser extension work with projects on this machine.
+
+Usage:
+
+```text
+calkit browser install [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                         |
+| ---------------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--extension-id` | str  | no       |         | ID of another extension that may connect, e.g., one loaded unpacked in development. |
+
+<a id="subcommand-browser-uninstall"></a>
+
+#### `calkit browser uninstall`
+
+Stop the browser extension working with projects on this machine.
+
+Usage:
+
+```text
+calkit browser uninstall
+```
 
 <a id="command-group-export"></a>
 

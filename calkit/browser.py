@@ -1,0 +1,318 @@
+"""Calkit's side of the browser extension: a native messaging host, which
+the browser starts so the extension can work with projects on this machine
+directly, rather than through a hub.
+
+The browser runs the host when the extension connects, and talks to it over
+its standard input and output, each message a JSON object preceded by its
+length. Only the extensions the host's manifest names can start it, and it
+listens on nothing, so no other program or web page can reach it.
+
+Run as ``python -m calkit.browser``, which skips the CLI, since the browser
+waits on it to start.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+import struct
+import subprocess
+import sys
+import tempfile
+from typing import Any, BinaryIO
+
+import calkit
+
+HOST_NAME = "io.calkit.native"
+CHROME_EXTENSION_IDS = ["idhdomgapfolnpffanajdckdaojencal"]
+FIREFOX_EXTENSION_IDS = ["browser-ext@calkit.io"]
+# How long opening a project waits to hear it failed
+OPEN_TIMEOUT_SECONDS = 30
+# Chrome won't take a bigger message from a host
+MAX_MESSAGE_BYTES = 1024 * 1024
+# Where each browser looks for hosts' manifests in the home folder, by
+# platform; each is only written if the folder above it exists, i.e., the
+# browser has been run
+MANIFEST_DIRS = {
+    "Darwin": {
+        "chrome": "Library/Application Support/Google/Chrome",
+        "chromium": "Library/Application Support/Chromium",
+        "edge": "Library/Application Support/Microsoft Edge",
+        "brave": "Library/Application Support/BraveSoftware/Brave-Browser",
+        "firefox": "Library/Application Support/Mozilla",
+    },
+    "Linux": {
+        "chrome": ".config/google-chrome",
+        "chromium": ".config/chromium",
+        "edge": ".config/microsoft-edge",
+        "brave": ".config/BraveSoftware/Brave-Browser",
+        "firefox": ".mozilla",
+    },
+}
+# Windows finds a manifest through the registry instead, from a key under
+# HKEY_CURRENT_USER, which Chromium and Brave read from Chrome's
+WINDOWS_REGISTRY_KEYS = {
+    "chrome": r"Software\Google\Chrome\NativeMessagingHosts",
+    "edge": r"Software\Microsoft\Edge\NativeMessagingHosts",
+    "firefox": r"Software\Mozilla\NativeMessagingHosts",
+}
+
+
+def read_message(stream: BinaryIO) -> dict | None:
+    """Read a message from the browser, or None once it's gone."""
+    header = stream.read(4)
+    if len(header) < 4:
+        return None
+    (n_bytes,) = struct.unpack("=I", header)
+    data = stream.read(n_bytes)
+    if len(data) < n_bytes:
+        return None
+    msg = json.loads(data)
+    if not isinstance(msg, dict):
+        raise ValueError("A message must be a JSON object")
+    return msg
+
+
+def write_message(stream: BinaryIO, msg: dict) -> None:
+    data = json.dumps(msg).encode("utf-8")
+    if len(data) > MAX_MESSAGE_BYTES:
+        raise ValueError(f"A reply can't be over {MAX_MESSAGE_BYTES} bytes")
+    stream.write(struct.pack("=I", len(data)) + data)
+    stream.flush()
+
+
+def get_reply(msg: dict) -> dict:
+    """Answer a request from the extension.
+
+    Requests have a ``type``, and an ``id`` the reply repeats, so several
+    can be waited on at once:
+
+    - ``ping``: Calkit's version, to tell the extension it's here, and
+      the editor projects open in.
+    - ``projects.find``: the folders a project, given as ``owner/name``,
+      is checked out in.
+    - ``project.open``: open a project in its editor, as
+      ``calkit open project`` does, along with a file in it if ``path`` is
+      given.
+    """
+
+    def split_project(project: Any) -> tuple[str, str]:
+        owner, _, name = (
+            project.partition("/")
+            if isinstance(project, str)
+            else ("", "", "")
+        )
+        if not owner or not name or "/" in name:
+            raise ValueError("A project is given as 'owner/name'")
+        return owner, name
+
+    req_id = msg.get("id")
+    kind = msg.get("type")
+    try:
+        if kind == "ping":
+            from calkit.config import read as read_config
+
+            result: Any = {
+                "version": calkit.__version__,
+                "editor": read_config().default_editor,
+            }
+        elif kind == "projects.find":
+            owner, name = split_project(msg.get("project"))
+            found = calkit.get_project_checkouts(name, owner=owner)
+            result = {"paths": sorted(found)}
+        elif kind == "project.open":
+            owner, name = split_project(msg.get("project"))
+            cmd = [sys.executable, "-m", "calkit", "open", "project"]
+            cmd.append(f"{owner}/{name}")
+            path = msg.get("path")
+            if path is not None:
+                if not isinstance(path, str):
+                    raise ValueError("A path must be a string")
+                cmd += ["--path", path]
+            # A browser started from the Dock, e.g., has only the system's
+            # folders on its PATH, so not the editor's command
+            env = None
+            if os.name != "nt":
+                from calkit.hub.link import login_shell_path
+
+                login_path = login_shell_path()
+                if login_path:
+                    env = os.environ | {
+                        "PATH": os.pathsep.join(
+                            [login_path, os.environ.get("PATH", "")]
+                        )
+                    }
+            # Never cloning, which needs someone to say where. An editor
+            # that keeps running, e.g., JupyterLab's server, has opened it
+            # once it's still going a while later, and is left running in
+            # its own session, past the host
+            with tempfile.TemporaryFile("w+") as out:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=out,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    env=env,
+                    text=True,
+                    start_new_session=True,
+                )
+                try:
+                    returncode = proc.wait(timeout=OPEN_TIMEOUT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    returncode = 0
+                out.seek(0)
+                lines = out.read().strip().splitlines()
+            if returncode != 0:
+                error = (
+                    (lines[-1] if lines else "Failed to open it")
+                    .removeprefix("Error: ")
+                    .strip()
+                )
+                if "isn't on this machine" in error:
+                    error = (
+                        f"{owner}/{name} isn't on this computer; clone it "
+                        f"with 'calkit clone {owner}/{name}'"
+                    )
+                raise ValueError(error)
+            result = {}
+        else:
+            raise ValueError(f"Unknown request type {kind!r}")
+    except Exception as e:
+        return {"id": req_id, "ok": False, "error": str(e)}
+    return {"id": req_id, "ok": True, "result": result}
+
+
+def serve(stdin: BinaryIO, stdout: BinaryIO) -> None:
+    """Answer the browser's requests until it disconnects."""
+    while True:
+        try:
+            msg = read_message(stdin)
+        except ValueError as e:
+            write_message(stdout, {"id": None, "ok": False, "error": str(e)})
+            continue
+        if msg is None:
+            return
+        write_message(stdout, get_reply(msg))
+
+
+def get_host_dir() -> str:
+    """Where the host's launcher and Windows manifest are kept."""
+    return os.path.join(
+        calkit.get_user_home(), ".calkit", f"browser{calkit.get_env_suffix()}"
+    )
+
+
+def get_launcher_path() -> str:
+    name = "calkit-native-host" + (".bat" if os.name == "nt" else "")
+    return os.path.join(get_host_dir(), name)
+
+
+def get_launcher_text() -> str:
+    """A script that starts the host with this Python, since a manifest
+    names one program to run, and the browser may not have the PATH a
+    terminal does.
+    """
+    if os.name == "nt":
+        return f'@echo off\r\n"{sys.executable}" -m calkit.browser %*\r\n'
+    return f'#!/bin/sh\nexec "{sys.executable}" -m calkit.browser "$@"\n'
+
+
+def get_manifest(browser: str, extension_ids: list[str] = []) -> dict:
+    """The host's manifest for a browser, naming the extensions that may
+    start it, and any others given, e.g., an unpacked one in development.
+    """
+    manifest: dict[str, Any] = {
+        "name": HOST_NAME,
+        "description": "Calkit",
+        "path": get_launcher_path(),
+        "type": "stdio",
+    }
+    if browser == "firefox":
+        manifest["allowed_extensions"] = FIREFOX_EXTENSION_IDS + [
+            i for i in extension_ids if "@" in i
+        ]
+    else:
+        manifest["allowed_origins"] = [
+            f"chrome-extension://{i}/"
+            for i in CHROME_EXTENSION_IDS
+            + [i for i in extension_ids if "@" not in i]
+        ]
+    return manifest
+
+
+def get_manifest_paths() -> dict[str, str]:
+    """Where each browser that's been run here looks for the host's
+    manifest, by browser, leaving out Windows, which uses the registry.
+    """
+    home = calkit.get_user_home()
+    paths = {}
+    for browser, base in MANIFEST_DIRS.get(platform.system(), {}).items():
+        base_path = os.path.join(home, base)
+        if not os.path.isdir(base_path):
+            continue
+        subdir = "NativeMessagingHosts"
+        if browser == "firefox" and platform.system() == "Linux":
+            subdir = "native-messaging-hosts"
+        paths[browser] = os.path.join(base_path, subdir, f"{HOST_NAME}.json")
+    return paths
+
+
+def install_host(extension_ids: list[str] = []) -> list[str]:
+    """Let the extension start the host, returning the browsers it can do
+    so from.
+    """
+    os.makedirs(get_host_dir(), exist_ok=True)
+    launcher_path = get_launcher_path()
+    with open(launcher_path, "w", newline="") as f:
+        f.write(get_launcher_text())
+    if sys.platform != "win32":
+        os.chmod(launcher_path, 0o755)
+        browsers = []
+        for browser, path in get_manifest_paths().items():
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(get_manifest(browser, extension_ids), f, indent=2)
+            browsers.append(browser)
+        return browsers
+    import winreg
+
+    for browser, key in WINDOWS_REGISTRY_KEYS.items():
+        path = os.path.join(get_host_dir(), f"{HOST_NAME}.{browser}.json")
+        with open(path, "w") as f:
+            json.dump(get_manifest(browser, extension_ids), f, indent=2)
+        with winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER, f"{key}\\{HOST_NAME}"
+        ) as k:
+            winreg.SetValueEx(k, "", 0, winreg.REG_SZ, path)
+    return list(WINDOWS_REGISTRY_KEYS)
+
+
+def uninstall_host() -> None:
+    """Remove what lets the extension start the host."""
+    import shutil
+
+    if sys.platform == "win32":
+        import winreg
+
+        for key in WINDOWS_REGISTRY_KEYS.values():
+            try:
+                winreg.DeleteKey(
+                    winreg.HKEY_CURRENT_USER, f"{key}\\{HOST_NAME}"
+                )
+            except FileNotFoundError:
+                pass
+    for path in get_manifest_paths().values():
+        if os.path.isfile(path):
+            os.remove(path)
+    shutil.rmtree(get_host_dir(), ignore_errors=True)
+
+
+if __name__ == "__main__":
+    # Windows would otherwise turn a newline in a message into two bytes
+    if sys.platform == "win32":
+        import msvcrt
+
+        msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+    serve(sys.stdin.buffer, sys.stdout.buffer)

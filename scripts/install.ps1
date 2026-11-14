@@ -7,6 +7,8 @@
 #                          (or set CALKIT_INSTALL_LINK=1, which also works
 #                          with `irm ... | iex`)
 #   --no-shell-completion  Skip installing shell completion
+#   --no-browser           Skip letting the browser extension work with
+#                          projects on this machine
 
 # Every statement below is kept on a single line so the script still does the
 # right thing when a shell feeds it to `iex` one line at a time, which is what
@@ -15,6 +17,7 @@
 
 $InstallLink = ($args -contains "--link") -or ($env:CALKIT_INSTALL_LINK -eq "1")
 $InstallCompletion = -not ($args -contains "--no-shell-completion")
+$InstallBrowser = -not ($args -contains "--no-browser")
 
 # Check if uv is installed
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Write-Host "Installing uv"; powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" } else { Write-Host "uv is already installed" }
@@ -50,6 +53,8 @@ if ($InstallCompletion -and $policy -eq "Restricted" -and -not $byGroupPolicy) {
 # Per command name, so the `ck` alias gets it too, and only once, so
 # installing again doesn't add it again
 if ($InstallCompletion) { if ($policy -notin @("RemoteSigned", "Unrestricted", "Bypass")) { Write-Warning "Skipping shell completion, since your execution policy ($policy) won't let your PowerShell profile run" } else { Write-Host "Installing shell completion"; foreach ($cmd in @("calkit", "ck")) { $script = (& $cmd --show-completion powershell) -join "`n"; if ($LASTEXITCODE -ne 0 -or -not $script) { Write-Warning "Failed to get shell completion for '$cmd'" } elseif ((Test-Path $PROFILE) -and (Select-String -Path $PROFILE -SimpleMatch -Pattern "-CommandName $cmd -ScriptBlock" -Quiet)) { Write-Host "Shell completion for '$cmd' is already in $PROFILE" } else { New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null; Add-Content -Path $PROFILE -Value $script; Write-Host "Installed shell completion for '$cmd' in $PROFILE" } } } }
+
+if ($InstallBrowser) { & calkit browser install; if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to set up Calkit for the browser extension; run 'calkit browser install' to try again" } }
 
 if ($InstallLink) { Write-Host "Linking this machine to the hub"; & calkit hub link install; if ($LASTEXITCODE -ne 0) { throw "Failed to link this machine; run 'calkit hub link install' to try again" } }
 

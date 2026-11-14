@@ -6,6 +6,7 @@ import {
   signOut,
 } from "../core/auth";
 import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
+import { askLocal, getLocalStatus } from "../core/local";
 import {
   isLoopbackHost,
   resolveHubByWebUrl,
@@ -494,6 +495,17 @@ async function handle(
           body: { path: message.path, notes: message.notes },
         },
       );
+    case "local.status":
+      return getLocalStatus();
+    case "local.openProject":
+      return askLocal({
+        type: "project.open",
+        project: message.project,
+        path: message.path,
+      });
+    case "local.openOptions":
+      await chrome.runtime.openOptionsPage();
+      return null;
   }
 }
 

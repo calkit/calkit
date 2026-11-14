@@ -7,6 +7,7 @@ import {
   renderProjectPicker,
 } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
+import { getEditorLabel, type LocalStatus } from "../core/local";
 import {
   type Citation,
   type CitationProblem,
@@ -1450,6 +1451,14 @@ function renderProvenance(
               ],
         ),
       );
+      if (!provenance.stage_app) {
+        container.append(
+          renderOpenLocally(
+            `${link.project_owner_name}/${link.project_name}`,
+            provenance.source,
+          ),
+        );
+      }
     }
     if (provenance.inputs.length) {
       container.append(
@@ -1484,6 +1493,63 @@ function renderProvenance(
       }),
     ]),
   );
+}
+
+// Whether Calkit on this computer answers, asked once per page, since the
+// browser starts it to find out
+let localStatus: Promise<LocalStatus> | null = null;
+
+/**
+ * A button that opens the file that makes something in the paper, e.g., a
+ * notebook, in the editor on this computer, through Calkit here rather
+ * than a hub.
+ */
+function renderOpenLocally(project: string, path: string): HTMLElement {
+  localStatus ??= send({ type: "local.status" }).catch(() => ({
+    permitted: false,
+  }));
+  const open = el("button", {
+    class: "action secondary",
+    text: "Open in editor",
+    title: `Open ${path} on this computer`,
+  });
+  const message = el("div", { class: "small" });
+  void localStatus.then((status) => {
+    open.textContent = `Open in ${getEditorLabel(status.editor)}`;
+  });
+  open.addEventListener("click", async () => {
+    const status = await (localStatus as Promise<LocalStatus>);
+    if (!status.version) {
+      // Asked again next time, e.g., once it's been connected
+      localStatus = null;
+      clear(message).append(
+        el("span", {
+          text: status.permitted
+            ? `${status.error ?? "Calkit on this computer didn't answer"}. `
+            : "Connect the extension to Calkit on this computer first. ",
+        }),
+        el("button", {
+          class: "action secondary",
+          text: "Connect",
+          onClick: () => void send({ type: "local.openOptions" }),
+        }),
+      );
+      return;
+    }
+    open.disabled = true;
+    clear(message).append(loading("Opening"));
+    try {
+      await send({ type: "local.openProject", project, path });
+      clear(message);
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    } finally {
+      open.disabled = false;
+    }
+  });
+  return el("div", { style: { marginTop: "4px" } }, [open, message]);
 }
 
 /** One problem, colored by how bad it is. */

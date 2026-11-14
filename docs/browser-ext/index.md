@@ -20,6 +20,27 @@ From a compatible website,
 click the Calkit toolbar button in the bottom right corner of the page
 and select "Sign in."
 
+## Working with projects on your computer
+
+<!-- TODO: needs human review -->
+
+The extension can work with projects on your computer too, e.g., open the
+script or notebook that makes a figure on Overleaf in your editor. It talks
+to Calkit on your computer directly, not through a hub.
+
+Calkit's installer sets this up, or run:
+
+```sh
+calkit browser install
+```
+
+Then, in the extension's options, click **Connect** under
+**This computer**. The editor is Calkit's `default_editor` setting, VS Code
+unless set otherwise, e.g., with
+`calkit config set default_editor cursor`. An editor built on VS Code,
+e.g., Cursor, VSCodium, Positron, or Antigravity, gets Calkit's extension
+if it doesn't have it.
+
 ## Overleaf
 
 <!-- prettier-ignore -->

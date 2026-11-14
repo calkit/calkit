@@ -1,5 +1,6 @@
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
+import type { LocalStatus } from "./local";
 import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
   CalkitYamlInfo,
@@ -230,7 +231,16 @@ export type Request =
       path: string;
       bibKey: string;
       notes: ReferenceNote[];
-    };
+    }
+  | { type: "local.status" }
+  | {
+      type: "local.openProject";
+      /** As "owner/name". */
+      project: string;
+      /** A file in it to open too, e.g., the script that makes a figure. */
+      path?: string;
+    }
+  | { type: "local.openOptions" };
 
 export interface ResponseMap {
   "auth.state": AuthState;
@@ -276,6 +286,9 @@ export interface ResponseMap {
   "references.add": { message: string };
   "references.notes.get": { notes: ReferenceNote[] };
   "references.notes.put": { notes: ReferenceNote[] };
+  "local.status": LocalStatus;
+  "local.openProject": Record<string, never>;
+  "local.openOptions": null;
 }
 
 /**

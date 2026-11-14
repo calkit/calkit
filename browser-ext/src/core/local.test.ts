@@ -123,6 +123,16 @@ describe("askLocal", () => {
       permitted: true,
       error: "Calkit on this computer stopped unexpectedly",
     });
+    // Granted after the background started, which Chrome doesn't give the
+    // API to until the extension reloads
+    vi.stubGlobal("chrome", {
+      permissions: { contains: async () => true },
+      runtime: {},
+    });
+    expect(await getLocalStatus()).toEqual({
+      permitted: true,
+      needsReload: true,
+    });
   });
 });
 

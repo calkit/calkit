@@ -511,6 +511,15 @@ async function handle(
   }
 }
 
+// Back from the reload the options page asks for once the extension may
+// reach Calkit on this computer
+void chrome.storage.local.get("reopenOptions").then(({ reopenOptions }) => {
+  if (reopenOptions) {
+    void chrome.storage.local.remove("reopenOptions");
+    void chrome.runtime.openOptionsPage();
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Only this extension's own pages and content scripts may drive the API.
   // Page scripts can't reach here (there's no externally_connectable), but

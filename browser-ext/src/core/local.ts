@@ -16,6 +16,11 @@ const TIMEOUT_MS = 60 * 1000;
 export interface LocalStatus {
   /** Whether the extension may start Calkit here. */
   permitted: boolean;
+  /**
+   * Whether the permission was granted after the background started, which
+   * Chrome only gives the API to once the extension reloads.
+   */
+  needsReload?: boolean;
   /** Calkit's version here, if it answered. */
   version?: string;
   /** The editor projects open in, e.g., "vscode". */
@@ -162,6 +167,9 @@ export async function askLocal<T>(
 export async function getLocalStatus(): Promise<LocalStatus> {
   if (!(await isLocalPermitted())) {
     return { permitted: false };
+  }
+  if (typeof chrome.runtime.connectNative !== "function") {
+    return { permitted: true, needsReload: true };
   }
   try {
     const { version, editor } = await askLocal<{

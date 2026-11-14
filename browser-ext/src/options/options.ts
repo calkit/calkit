@@ -256,6 +256,13 @@ async function renderLocalSection(container: HTMLElement): Promise<void> {
     );
     return;
   }
+  if (status.needsReload) {
+    // Chrome gives the background the API only once it restarts, which
+    // closes this page, so it's opened again afterwards
+    await chrome.storage.local.set({ reopenOptions: true });
+    chrome.runtime.reload();
+    return;
+  }
   const message = el("div", { class: "small" });
   if (status.error) {
     message.append(errorMessage(status.error));

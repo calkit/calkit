@@ -1,7 +1,8 @@
 """Tests for ``calkit.models.pipeline``."""
 
 import json
-import shlex
+import subprocess
+import sys
 
 import pytest
 from pydantic import ValidationError
@@ -29,6 +30,7 @@ from calkit.models.pipeline import (
     StageIteration,
     WordToPdfStage,
     quote_arg,
+    quote_literal_arg,
 )
 
 
@@ -784,23 +786,60 @@ def test_jsontolatexstage():
     assert sd["cmd"] == (
         "calkit latex from-json data/results.json more.json "
         "--output paper/results.tex --output paper/results2.tex "
-        "--command theresults --format-json "
-        '"{\\"result1\\": \\"{value1:.2f}\\", '
-        '\\"result2\\": \\"{value2}\\"}"'
+        '--command theresults --format "result1={value1:.2f}" '
+        '--format "result2={value2}"'
     )
-    # Paths with spaces are double quoted, and the format survives a shell
-    s = JsonToLatexStage(
+    # Each arg reaches the program unchanged through the shell DVC uses,
+    # which is cmd.exe on Windows
+    s2 = JsonToLatexStage(
         name="json2latex",
-        inputs=["my results/a.json"],
+        inputs=["my results/a(1).json", "b&c.json"],
         outputs=["paper/results.tex"],
-        keys=["cases.a.cp"],
-        format={"pct": "{a * 100:.1f} %"},
+        keys=["cases.a;b"],
+        format={
+            "pct": "{a * 100:.1f} %",
+            "padded": "{x:>10}|{y:^8}",
+            "escaped": "{a:.1f}\\%",
+        },
     )
-    args = shlex.split(s.to_dvc()["cmd"])
-    assert args[3] == "my results/a.json"
-    assert args[args.index("--key") + 1] == "cases.a.cp"
-    fmt_json = args[args.index("--format-json") + 1]
-    assert json.loads(fmt_json) == {"pct": "{a * 100:.1f} %"}
+    script = "import sys, json; print(json.dumps(sys.argv[1:]))"
+    cmd = s2.to_dvc()["cmd"].replace(
+        "calkit latex from-json",
+        f'{quote_literal_arg(sys.executable)} -c "{script}"',
+    )
+    out = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True, check=True
+    )
+    assert json.loads(out.stdout) == [
+        "my results/a(1).json",
+        "b&c.json",
+        "--output",
+        "paper/results.tex",
+        "--key",
+        "cases.a;b",
+        "--format",
+        "pct={a * 100:.1f} %",
+        "--format",
+        "padded={x:>10}|{y:^8}",
+        "--format",
+        "escaped={a:.1f}\\%",
+    ]
+    # What one shell or the other would change is refused, not passed on
+    for kwargs in [
+        dict(keys=["$HOME"]),
+        dict(format={"q": 'say "{a}"'}),
+        dict(inputs=["a`b`.json"]),
+        dict(inputs=["a\\\\b.json"]),
+    ]:
+        with pytest.raises(ValidationError):
+            JsonToLatexStage.model_validate(
+                {
+                    "name": "j",
+                    "inputs": ["a.json"],
+                    "outputs": ["out.tex"],
+                    **kwargs,
+                }
+            )
     dvc_outs = s.dvc_outs
     assert {
         "paper/results.tex": {"cache": False, "persist": False}

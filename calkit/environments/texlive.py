@@ -53,6 +53,13 @@ TEX4HT_PACKAGES = ["make4ht", "tex4ht", "luaxml"]
 # The latest TeX Live release whose repository is frozen, so locking against
 # it pins every package for good
 DEFAULT_RELEASE = 2025
+# The environment an Overleaf import creates, with its release written out,
+# as 'calkit new texlive-env' does
+DEFAULT_ENVIRONMENT = {
+    "kind": "texlive",
+    "release": DEFAULT_RELEASE,
+    "description": "TeX Live, installed by Calkit.",
+}
 FROZEN_REPOSITORY_TEMPLATE = (
     "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/"
     "{release}/tlnet-final"

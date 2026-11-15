@@ -54,6 +54,17 @@ def test_set_content_id(tmp_dir):
     assert not calkit.latex.set_content_id("main.pdf")
 
 
+def test_is_latex_env():
+    assert calkit.latex.is_latex_env({"kind": "texlive"})
+    assert calkit.latex.is_latex_env(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
+    assert calkit.latex.is_latex_env(
+        {"kind": "docker", "image": "texlive/texlive:latest-full"}
+    )
+    assert not calkit.latex.is_latex_env({"kind": "docker", "image": "python"})
+    assert not calkit.latex.is_latex_env({"kind": "docker"})
+    assert not calkit.latex.is_latex_env({"kind": "uv", "path": "texlive"})
+
+
 def test_localize_synctex(tmp_dir):
     # Nothing to localize is not an error
     assert (

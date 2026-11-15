@@ -60,6 +60,7 @@ import calkit
 import calkit.core
 import calkit.detect
 import calkit.environments
+import calkit.environments.texlive
 import calkit.latex
 import calkit.pipeline
 import calkit.provenance
@@ -7223,27 +7224,18 @@ async def post_project_overleaf_publication(
     # is either a TeX Live image or Calkit's own
     envs = ck_info.get("environments", {})
     env_name = environment_name
-
-    def is_tex_image(image: str) -> bool:
-        return "texlive" in image or "calkit/latex" in image
-
     if not env_name:
         for en, e in envs.items():
-            if e.get("kind") == "docker" and is_tex_image(e.get("image", "")):
+            if calkit.latex.is_latex_env(e):
                 env_name = en
                 logger.info(f"Detected TeX Live env '{en}'")
                 break
     elif env_name and env_name in envs:
         env = envs[env_name]
-        if env.get("kind") != "docker" and not is_tex_image(
-            env.get("image", "")
-        ):
+        if not calkit.latex.is_latex_env(env):
             raise HTTPException(
                 400,
-                (
-                    f"Environment {env_name} exists, "
-                    "but is not a TeXLive Docker environment"
-                ),
+                f"Environment {env_name} exists, but is not a TeX Live one",
             )
     if not env_name:
         env_name = "tex"
@@ -7251,7 +7243,7 @@ async def post_project_overleaf_publication(
         while env_name in envs:
             env_name = f"tex-{n}"
             n += 1
-        env = dict(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
+        env = dict(calkit.environments.texlive.DEFAULT_ENVIRONMENT)
         envs[env_name] = env
         ck_info["environments"] = envs
     # Determine mode: link vs zip

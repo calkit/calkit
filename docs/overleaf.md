@@ -127,7 +127,7 @@ Push paths are relative to the publication folder,
 and multiple can be specified.
 
 If necessary, this command will also
-create a TeXlive Docker [environment](environments.md)
+create a TeX Live [environment](environments.md#tex-live)
 and a build stage in the [pipeline](pipeline/index.md),
 which will build and cache the PDF upon calling `calkit run`.
 

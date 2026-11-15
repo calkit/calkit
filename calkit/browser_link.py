@@ -1348,6 +1348,25 @@ def run_job(job_id: str) -> None:
                 "committed_project": after["project"] != before["project"],
             }
     save(job)
+    # TeX Live takes up to a minute to set up from nothing, so it's done now
+    # rather than in the first run, which waits on it otherwise
+    if job["kind"] == "clone" and job["status"] == "succeeded":
+        try:
+            envs = calkit.load_calkit_info(wdir=job["location"]).get(
+                "environments", {}
+            )
+        except Exception:
+            envs = {}
+        for name, env in (envs or {}).items():
+            if env.get("kind") == "texlive":
+                subprocess.run(
+                    [sys.executable, "-m", "calkit", "check", "env"]
+                    + ["--name", name],
+                    cwd=job["location"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
 
 def get_figures(wdir: str) -> dict:

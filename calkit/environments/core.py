@@ -2632,6 +2632,8 @@ def env_from_name_or_path(
     if name_or_path is None and language is not None:
         # Look for a docker environment matching the language
         for env_name, env in envs.items():
+            if language.lower() == "latex" and env.get("kind") == "texlive":
+                return EnvDetectResult(name=env_name, env=env, exists=True)
             if env.get("kind") == "docker":
                 image = env.get("image", "").lower()
                 # Check if this looks like a language environment

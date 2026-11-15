@@ -466,24 +466,19 @@ def import_publication(
     # Check that we have a LaTeX environment
     typer.echo("Checking that this project has a LaTeX environment")
     envs = ck_info.get("environments", {})
-    tex_env_name = None
-    for name, env in envs.items():
-        image = env.get("image", "")
-        if env.get("kind") == "docker" and (
-            "texlive" in image or "calkit/latex" in image
-        ):
-            tex_env_name = name
-            break
+    tex_env_name = next(
+        (n for n, e in envs.items() if calkit.latex.is_latex_env(e)), None
+    )
     if tex_env_name is None:
-        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+        from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
-        typer.echo("Creating TeX Live Docker environment")
+        typer.echo("Creating TeX Live environment")
         tex_env_name = "tex"
         n = 1
         while tex_env_name in envs:
             tex_env_name = f"tex-{n}"
             n += 1
-        envs[tex_env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
+        envs[tex_env_name] = dict(DEFAULT_ENVIRONMENT)
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)

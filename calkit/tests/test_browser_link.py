@@ -743,6 +743,32 @@ def test_start_job(tmp_path, monkeypatch):
         {"type": "jobs.list", "project": "me/proj", "kind": "run"}
     )
     assert [j["id"] for j in reply["result"]] == [job["id"]]
+    # A clone sets up its TeX Live environments after, not the first run
+    clone_dir = home / "calkit" / "o"
+    clone_dir.mkdir()
+    (clone_dir / "calkit.yaml").write_text(
+        "environments:\n"
+        "  tex:\n    kind: texlive\n"
+        "  py:\n    kind: uv\n    path: pyproject.toml\n"
+    )
+    clone_path = calkit.browser_link.get_job_path(clone["id"])
+    with open(clone_path) as f:
+        record = json.load(f)
+    with open(clone_path, "w") as f:
+        json.dump(record | {"cmd": [sys.executable, "-c", "pass"]}, f)
+    checked = []
+    real_run = subprocess.run
+
+    def run_checks(cmd, **kwargs):
+        if cmd[1:4] == ["-m", "calkit", "check"]:
+            checked.append((cmd[4:], kwargs["cwd"]))
+            return None
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr("subprocess.run", run_checks)
+    run_job(clone["id"])
+    assert get_job(clone["id"])["status"] == "succeeded"
+    assert checked == [(["env", "--name", "tex"], str(clone_dir))]
 
 
 def test_get_job_progress(tmp_path):

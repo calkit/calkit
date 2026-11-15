@@ -15,7 +15,7 @@ import typer
 from typer.testing import CliRunner
 
 import calkit
-import calkit.latex
+import calkit.environments.texlive
 from calkit.cli.overleaf import (
     _extract_title_from_tex,
     _get_overleaf_auth,
@@ -92,8 +92,7 @@ def test_overleaf(tmp_dir):
     # Check the TeX environment and pipeline was created properly
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["tex"]
-    assert env["kind"] == "docker"
-    assert env["image"] == calkit.latex.DEFAULT_LATEX_IMAGE
+    assert env == calkit.environments.texlive.DEFAULT_ENVIRONMENT
     stage = ck_info["pipeline"]["stages"]["build-ol-project"]
     assert stage["kind"] == "latex"
     assert stage["environment"] == "tex"

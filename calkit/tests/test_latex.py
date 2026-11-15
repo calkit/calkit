@@ -56,7 +56,9 @@ def test_set_content_id(tmp_dir):
 
 def test_is_latex_env():
     assert calkit.latex.is_latex_env({"kind": "texlive"})
-    assert calkit.latex.is_latex_env(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
+    assert calkit.latex.is_latex_env(
+        {"kind": "docker", "image": calkit.latex.DEFAULT_LATEX_IMAGE}
+    )
     assert calkit.latex.is_latex_env(
         {"kind": "docker", "image": "texlive/texlive:latest-full"}
     )

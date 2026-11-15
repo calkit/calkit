@@ -53,8 +53,11 @@ TEX4HT_PACKAGES = ["make4ht", "tex4ht", "luaxml"]
 # The latest TeX Live release whose repository is frozen, so locking against
 # it pins every package for good
 DEFAULT_RELEASE = 2025
-# The environment an Overleaf import creates, with its release written out,
-# as 'calkit new texlive-env' does
+# The environment created for a LaTeX document that doesn't have one,
+# wherever that happens: a new publication, an Overleaf import, or a stage
+# whose environment is worked out from what it runs. Its release is written
+# out, as 'calkit new texlive-env' does. Copied where it's used, since
+# what's written into a project is the caller's to amend.
 DEFAULT_ENVIRONMENT = {
     "kind": "texlive",
     "release": DEFAULT_RELEASE,

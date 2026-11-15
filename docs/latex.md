@@ -64,8 +64,11 @@ calkit new publication paper \
 Available templates are `latex/article` (generic), `latex/ieee-conference`
 (IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
 (chapters, for a thesis or technical report).
-The environment created uses Calkit's LaTeX Docker image,
-which can build all of them.
+
+<!-- TODO: needs human review -->
+
+The environment created is a [TeX Live environment](environments.md#tex-live),
+which downloads the packages a document uses the first time it's built.
 
 ## Packages
 

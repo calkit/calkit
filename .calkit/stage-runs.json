@@ -93,6 +93,25 @@
       "memory_gb": 64.0
     }
   },
+  "latex-word-round-trip": {
+    "start_time": "2026-11-15T14:28:43.876000",
+    "end_time": "2026-11-15T14:29:34.774000",
+    "environment": "dev",
+    "git_rev": "b8f4f8d11bdb6a25c72a7b4e25595c22ca702f13",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:01a5b85da9da2d9b6c4c3be3af560cb9f6c9e84ccb30348bf32eadd2cbc24771",
+    "calkit_version": "0.51.1.dev45+gb8f4f8d11.d20261115",
+    "calkit_git_rev": "b8f4f8d11bdb6a25c72a7b4e25595c22ca702f13",
+    "system": {
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.2.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
+    }
+  },
   "latex-word-round-trip-figure": {
     "start_time": "2026-11-15T14:20:18.341000",
     "end_time": "2026-11-15T14:20:22.944000",

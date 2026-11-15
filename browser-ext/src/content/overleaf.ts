@@ -18,6 +18,7 @@ import {
   canBeCreatedByPerson,
   citationProblems,
   citationText,
+  getShownValue,
   citationCandidates,
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
@@ -1436,6 +1437,7 @@ function renderProvenance(
   link: OverleafLinkPublic,
   citation: Citation,
   provenance: Provenance,
+  named = true,
 ): void {
   const base = projectUrl(
     hubWebUrl,
@@ -1557,16 +1559,39 @@ function renderProvenance(
     }
     return list;
   };
-  // A file is named as the project has it, not as written
+  // A file is named as the project has it, not as written. In the
+  // sidebar's list, its row already names it.
   const path = citation.kind === "value" ? citation.path : provenance.path;
   const label = citation.key ? `${path}: ${citation.key}` : path;
-  container.append(el("div", { class: "name", text: label }));
+  if (named) {
+    container.append(el("div", { class: "name", text: label }));
+  }
   const problems = citationProblems(citation, provenance);
   for (const problem of problems) {
     container.append(problemLine(problem));
-    if (problem.kind === "origin" && link.current_user_access !== "read") {
-      container.append(renderDefineOrigin(link, citation, problem.path));
-    }
+  }
+  // Defined in one place, since several components can be made from it
+  if (
+    problems.some((p) => p.kind === "origin") &&
+    link.current_user_access !== "read"
+  ) {
+    container.append(
+      el("div", { class: "small" }, [
+        el("a", {
+          text: named ? "Define it in the Calkit sidebar" : "Define it above",
+          onClick: (event) => {
+            event.preventDefault();
+            if (!railOpen) {
+              setRail(true);
+            }
+            // In the sidebar's shadow root
+            railPane?.body
+              .querySelector("#calkit-origin-needed")
+              ?.scrollIntoView({ block: "start", behavior: "smooth" });
+          },
+        }),
+      ]),
+    );
   }
   if (provenance.copied_from) {
     container.append(
@@ -1590,8 +1615,9 @@ function renderProvenance(
   ) {
     container.append(
       el("div", {
-        style: { fontSize: "18px", fontWeight: "600", margin: "4px 0" },
-        text: valueText(provenance.value),
+        style: { fontWeight: "600", margin: "4px 0" },
+        title: valueText(provenance.value),
+        text: getShownValue(provenance.value, citation.options),
       }),
     );
   }
@@ -1620,17 +1646,12 @@ function renderProvenance(
           document.createTextNode("Stage "),
           el("a", {
             text: provenance.stage,
+            title: provenance.stage_kind ?? undefined,
             href: `${base}/pipeline?stage=${encodeURIComponent(
               provenance.stage,
             )}`,
             attrs: { target: "_blank" },
           }),
-          provenance.stage_kind
-            ? el("span", {
-                class: "dim",
-                text: ` \u00b7 ${provenance.stage_kind}`,
-              })
-            : null,
         ]),
         !provenance.stale_reason &&
         provenance.stage_status?.status === "up-to-date"
@@ -1663,20 +1684,17 @@ function renderProvenance(
                 source,
               ]
             : [
-                document.createTextNode("Edit "),
+                document.createTextNode("Made by "),
                 source,
-                document.createTextNode(" to change it."),
+                document.createTextNode(" "),
+                renderOpenLocally(
+                  `${link.project_owner_name}/${link.project_name}`,
+                  provenance.source,
+                  true,
+                ),
               ],
         ),
       );
-      if (!provenance.stage_app) {
-        container.append(
-          renderOpenLocally(
-            `${link.project_owner_name}/${link.project_name}`,
-            provenance.source,
-          ),
-        );
-      }
     }
     if (provenance.inputs.length) {
       container.append(
@@ -2065,6 +2083,7 @@ async function checkCitations(): Promise<void> {
   editorProblems = { version: snapshot.version, found };
   drawRuns();
   drawRail();
+  markRailTab();
   toEditor({
     type: "problems",
     version: snapshot.version,
@@ -2139,7 +2158,7 @@ async function fillCard(
   try {
     const provenance = await citationProvenance(link, item.citation);
     clear(body);
-    renderProvenance(body, link, item.citation, provenance);
+    renderProvenance(body, link, item.citation, provenance, false);
     body.append(bringUpToDate(link, item.citation, provenance));
   } catch (e) {
     clear(body).append(
@@ -2230,9 +2249,15 @@ interface PdfBox {
   message: string;
   line: number;
   column: number;
+  /** A figure's graphics options, since SyncTeX gives its unscaled size. */
+  options?: string;
+  /** Where the text block starts, for a figure sized by its width. */
+  textLeft?: number;
+  /** A value as shown, to box it rather than its whole line. */
+  text?: string;
 }
 
-type SynctexBox = Omit<PdfBox, "message">;
+type SynctexBox = Omit<PdfBox, "message" | "options" | "textLeft" | "text">;
 
 /** The PDF Overleaf last built, which synctex lookups have to name. */
 interface PdfBuild {
@@ -2348,8 +2373,37 @@ async function drawPdfBoxes(): Promise<void> {
         kept.push(box);
       }
     }
+    const { citation } = item;
+    // The value as shown, which is somewhere in its line's box
+    const provenance =
+      citation.kind === "value" && currentLink
+        ? await citationProvenance(currentLink, citation).catch(() => null)
+        : null;
+    const text =
+      provenance && !provenance.value_error && provenance.value !== undefined
+        ? getShownValue(provenance.value, citation.options)
+        : undefined;
     for (const box of kept) {
-      boxes.push({ ...box, message: error.message });
+      const same = boxes.find(
+        (b) =>
+          b.page === box.page &&
+          b.h === box.h &&
+          b.v === box.v &&
+          b.text === text,
+      );
+      if (same) {
+        if (!same.message.includes(error.message)) {
+          same.message += `; ${error.message}`;
+        }
+        continue;
+      }
+      boxes.push({
+        ...box,
+        message: error.message,
+        options: citation.kind === "figure" ? citation.options : undefined,
+        textLeft: Math.min(...found.map((b) => b.h)),
+        text,
+      });
     }
   }
   if (pdfBuild !== build || editorCitations !== snapshot) {
@@ -2360,7 +2414,100 @@ async function drawPdfBoxes(): Promise<void> {
 }
 
 /**
- * Put a red box around each error on the PDF's pages.
+ * A figure's width on the page, in points, from its graphics options,
+ * since SyncTeX gives the image's own size. A width relative to the text
+ * assumes margins as wide on both sides.
+ */
+function getFigureWidth(box: PdfBox, pageWidth: number): number {
+  const options = box.options ?? "";
+  const pt: Record<string, number> = {
+    pt: 72 / 72.27,
+    bp: 1,
+    in: 72,
+    cm: 72 / 2.54,
+    mm: 72 / 25.4,
+  };
+  const textWidth =
+    box.textLeft !== undefined && box.textLeft <= box.h
+      ? pageWidth - 2 * box.textLeft
+      : box.width;
+  const relative =
+    /width\s*=\s*([\d.]*)\s*\\(?:textwidth|linewidth|columnwidth|hsize)/.exec(
+      options,
+    );
+  const absolute =
+    /(?:^|[,\s])(width|height)\s*=\s*([\d.]+)\s*(pt|bp|in|cm|mm)/.exec(options);
+  const scale = /scale\s*=\s*([\d.]+)/.exec(options);
+  let width = box.width;
+  if (relative) {
+    width = (relative[1] ? Number(relative[1]) : 1) * textWidth;
+  } else if (absolute) {
+    const length = Number(absolute[2]) * pt[absolute[3]];
+    width =
+      absolute[1] === "width" ? length : (box.width * length) / box.height;
+  } else if (scale) {
+    width = Number(scale[1]) * box.width;
+  }
+  // Never off the page, whatever the options say
+  return Math.max(Math.min(width, pageWidth - box.h), 1);
+}
+
+/**
+ * Where a value's text is in its line on a page, in points, from the text
+ * layer, which can split it, e.g., at a decimal point.
+ */
+function findValueRect(
+  page: HTMLElement,
+  box: PdfBox,
+  scale: number,
+): { h: number; v: number; width: number; height: number } | null {
+  const text = box.text;
+  if (!text) {
+    return null;
+  }
+  const origin = page.getBoundingClientRect();
+  const left = origin.left + page.clientLeft;
+  const top = origin.top + page.clientTop;
+  // The page's text in order, and where each character came from
+  let joined = "";
+  const at: { node: Text; offset: number }[] = [];
+  for (const span of page.querySelectorAll<HTMLElement>(".textLayer span")) {
+    const node = span.firstChild;
+    if (!(node instanceof Text)) {
+      continue;
+    }
+    for (let offset = 0; offset < node.data.length; offset++) {
+      joined += node.data[offset];
+      at.push({ node, offset });
+    }
+  }
+  for (let i = joined.indexOf(text); i >= 0; i = joined.indexOf(text, i + 1)) {
+    const first = at[i];
+    const last = at[i + text.length - 1];
+    const range = document.createRange();
+    range.setStart(first.node, first.offset);
+    range.setEnd(last.node, last.offset + 1);
+    const rect = range.getBoundingClientRect();
+    const v = (rect.bottom - top) / scale;
+    const height = rect.height / scale;
+    // On the line the value's command is on
+    if (v - height > box.v + 2 || v < box.v - box.height - 2) {
+      continue;
+    }
+    return {
+      h: (rect.left - left) / scale,
+      v,
+      width: rect.width / scale,
+      height,
+    };
+  }
+  return null;
+}
+
+/**
+ * Put a red box around each error on the PDF's pages, with a dot beside
+ * it in the margin that says what's wrong on hover and goes to it in the
+ * editor on a click.
  *
  * pdf.js clears a page it redraws, e.g., on zooming, so this runs whenever
  * the viewer changes, and leaves a page alone that already has its boxes.
@@ -2368,7 +2515,24 @@ async function drawPdfBoxes(): Promise<void> {
  * goes up from there; for a scaled figure, it's the unscaled height.
  */
 function placePdfBoxes(): void {
-  const color = "#e5484d";
+  if (!document.getElementById("calkit-pdf-box-style")) {
+    const style = document.createElement("style");
+    style.id = "calkit-pdf-box-style";
+    style.textContent = `
+      .calkit-pdf-box { position: absolute; border: 2px solid #e5484d;
+        border-radius: 2px; box-sizing: border-box; pointer-events: none;
+        z-index: 5; }
+      .calkit-pdf-tag { position: absolute; display: flex; align-items: center; gap: 4px;
+        height: 16px; min-width: 16px; padding: 0 5px; box-sizing: border-box;
+        border: none; border-radius: 8px; background: #e5484d; color: #fff;
+        font: 700 11px/16px -apple-system, BlinkMacSystemFont, sans-serif;
+        cursor: pointer; pointer-events: auto; white-space: nowrap;
+        z-index: 6; }
+      .calkit-pdf-tag .calkit-pdf-message { display: none; font-weight: 600; }
+      .calkit-pdf-tag:hover .calkit-pdf-message { display: inline; }
+    `;
+    document.head.append(style);
+  }
   for (const page of document.querySelectorAll<HTMLElement>(
     ".pdfViewer .page[data-page-number]",
   )) {
@@ -2379,7 +2543,9 @@ function placePdfBoxes(): void {
     const wanted = Number.isFinite(scale)
       ? pdfBoxes.filter((box) => box.page === number)
       : [];
-    const signature = `${scale}|${wanted
+    // Values are found in the text layer, which comes after the page
+    const texts = page.querySelector(".textLayer span") ? "t" : "";
+    const signature = `${scale}|${texts}|${wanted
       .map((box) => [box.h, box.v, box.width, box.height].join(","))
       .join(";")}`;
     const existing = page.querySelectorAll(":scope > .calkit-pdf-box");
@@ -2390,46 +2556,53 @@ function placePdfBoxes(): void {
       continue;
     }
     existing.forEach((node) => node.remove());
+    page
+      .querySelectorAll(":scope > .calkit-pdf-tag")
+      .forEach((node) => node.remove());
     page.dataset.calkitBoxes = signature;
+    const pageWidth = page.clientWidth / scale;
+    // Dots already in the margin, by height, so ones on a line go in a row
+    const dots = new Map<number, number>();
     for (const box of wanted) {
-      const tag = el("button", {
-        text: box.message,
-        title: `${box.message}. Click to show it in the editor.`,
-        onClick: () =>
-          toEditor({ type: "goto", line: box.line, column: box.column }),
-      });
-      Object.assign(tag.style, {
-        position: "absolute",
-        left: "-2px",
-        bottom: "100%",
-        maxWidth: "320px",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        padding: "1px 5px",
-        border: "none",
-        borderRadius: "3px 3px 0 0",
-        background: color,
-        color: "#fff",
-        font: "600 11px/1.4 -apple-system, BlinkMacSystemFont, sans-serif",
-        cursor: "pointer",
-        pointerEvents: "auto",
-      });
-      const outline = el("div", { class: "calkit-pdf-box" }, [tag]);
+      let placed = { h: box.h, v: box.v, width: box.width, height: box.height };
+      if (box.options !== undefined) {
+        const width = getFigureWidth(box, pageWidth);
+        placed = { ...placed, width, height: (box.height * width) / box.width };
+      } else if (box.text) {
+        placed = findValueRect(page, box, scale) ?? placed;
+      }
+      const pad = box.text ? 2 : 0;
+      const tag = el(
+        "button",
+        {
+          class: "calkit-pdf-tag",
+          title: `${box.message}. Click to show it in the editor.`,
+          onClick: () =>
+            toEditor({ type: "goto", line: box.line, column: box.column }),
+        },
+        [
+          el("span", { text: "!" }),
+          el("span", { class: "calkit-pdf-message", text: box.message }),
+        ],
+      );
+      const outline = el("div", { class: "calkit-pdf-box" });
+      const top = (placed.v - placed.height - pad) * scale;
       Object.assign(outline.style, {
-        position: "absolute",
-        left: `${box.h * scale}px`,
-        top: `${(box.v - box.height) * scale}px`,
-        width: `${box.width * scale}px`,
-        height: `${box.height * scale}px`,
-        border: `2px solid ${color}`,
-        borderRadius: "2px",
-        boxSizing: "border-box",
-        // Left to the PDF, so a double click still goes to the source
-        pointerEvents: "none",
-        zIndex: "5",
+        left: `${(placed.h - pad) * scale}px`,
+        top: `${top}px`,
+        width: `${(placed.width + 2 * pad) * scale}px`,
+        height: `${(placed.height + 2 * pad) * scale}px`,
       });
-      page.append(outline);
+      // In the margin beside the line, off the text, expanding leftward
+      const row = Math.round(top / 8);
+      const n = dots.get(row) ?? 0;
+      dots.set(row, n + 1);
+      const margin = Math.min(box.textLeft ?? placed.h, placed.h) * scale;
+      Object.assign(tag.style, {
+        right: `calc(100% - ${margin - 6 - n * 20}px)`,
+        top: `${top + Math.min(placed.height * scale, 16) / 2 - 8}px`,
+      });
+      page.append(outline, tag);
     }
   }
 }
@@ -4669,6 +4842,96 @@ let railPane: { host: HTMLElement; body: HTMLElement } | null = null;
 // The component opened in the sidebar, kept through redraws, which come
 // with every edit
 let railCard: { key: string; element: HTMLElement } | null = null;
+// The stage whose details are open in the sidebar
+let railStage: string | null = null;
+
+/**
+ * A stage's details in the sidebar: why it's out of date, what it runs,
+ * reads, and makes, with ways to open it in the editor on this computer
+ * or on the hub.
+ */
+function renderStageCard(
+  link: OverleafLinkPublic,
+  pipeline: ProjectPipeline,
+  name: string,
+): HTMLElement {
+  const base = projectUrl(
+    hubWebUrl,
+    link.project_owner_name,
+    link.project_name,
+  );
+  const stage = pipeline.dvc_stages?.[name];
+  const status = pipeline.stage_statuses[name];
+  const cmd = [stage?.cmd ?? ""].flat().join(" ");
+  // Environment locks and the like are inputs, but not anyone's concern
+  const deps = (stage?.deps ?? []).filter(
+    (d) => !d.startsWith(".calkit/") && !/(^|\/)(uv|pixi)\.lock$/.test(d),
+  );
+  // A manual step names its file in what it says to do, not to run it
+  const manual = /calkit manual-step --message '((?:[^']|'\\'')*)'/.exec(cmd);
+  const source = manual ? undefined : deps.find((d) => cmd.includes(d));
+  const outs = (stage?.outs ?? []).map((o) =>
+    typeof o === "string" ? o : Object.keys(o)[0],
+  );
+  const list = (label: string, paths: string[]) =>
+    paths.length
+      ? el("div", { class: "small" }, [
+          el("span", { class: "dim", text: `${label} ` }),
+          document.createTextNode(
+            paths.length > 4
+              ? `${paths.slice(0, 4).join(", ")}, and ${paths.length - 4} more`
+              : paths.join(", "),
+          ),
+        ])
+      : null;
+  const changed = [
+    ...(status?.modified_command ? ["its command"] : []),
+    ...(status?.modified_inputs ?? []),
+  ];
+  const project = `${link.project_owner_name}/${link.project_name}`;
+  return el("div", { class: "card" }, [
+    changed.length
+      ? el("div", {
+          class: "small",
+          style: { color: "var(--ck-warning)" },
+          text: `Changed since it last ran: ${changed.join(", ")}`,
+        })
+      : status?.missing_outputs.length
+      ? el("div", {
+          class: "small",
+          style: { color: "var(--ck-warning)" },
+          text: `Missing: ${status.missing_outputs.join(", ")}`,
+        })
+      : null,
+    manual
+      ? el("div", { class: "small" }, [
+          el("span", { class: "dim", text: "Manual step: " }),
+          document.createTextNode(manual[1].replace(/'\\''/g, "'")),
+        ])
+      : null,
+    source
+      ? el("div", { class: "small" }, [
+          el("span", { class: "dim", text: "Runs " }),
+          document.createTextNode(source),
+        ])
+      : null,
+    list(
+      "Reads",
+      deps.filter((d) => d !== source),
+    ),
+    list("Makes", outs),
+    el("div", { class: "actions", style: { alignItems: "center" } }, [
+      link.local_path ? renderOpenLocally(project, source, true) : null,
+      el("a", {
+        class: "small",
+        text: "Open in Calkit",
+        href: `${base}/pipeline?stage=${encodeURIComponent(name)}`,
+        attrs: { target: "_blank" },
+      }),
+    ]),
+  ]);
+}
+
 let railPipeline: {
   key: string;
   pipeline?: ProjectPipeline;
@@ -4706,6 +4969,12 @@ function watchRail(): void {
       color: #009688;
     }
     #${RAIL_TAB_ID}.active svg { color: #fff; }
+    #${RAIL_TAB_ID} { position: relative; }
+    #${RAIL_TAB_ID} .calkit-rail-dot {
+      position: absolute; top: 4px; right: 6px; width: 8px; height: 8px;
+      border-radius: 50%; background: #e5484d;
+      box-shadow: 0 0 0 2px var(--bg-primary-themed, #fff);
+    }
   `;
   document.head.append(style);
   // One of Overleaf's own tabs brings its pane back. The one it thinks is
@@ -4756,6 +5025,7 @@ function watchRail(): void {
         tabs.append(tab);
       }
     }
+    markRailTab();
     // Overleaf underlines the tab whose pane is open by open-rail
     tab.classList.toggle("active", railOpen);
     tab.classList.toggle("open-rail", railOpen);
@@ -4768,6 +5038,57 @@ function watchRail(): void {
     clearTimeout(timer);
     timer = setTimeout(ensure, 100);
   }).observe(document.body, { childList: true, subtree: true });
+}
+
+/**
+ * What the open document's components are made from that has no origin
+ * defined, with a component made from each and what they all show.
+ */
+function getOriginGaps(): Map<string, { citation: Citation; uses: string[] }> {
+  const gaps = new Map<string, { citation: Citation; uses: string[] }>();
+  const items = editorCitations?.items ?? [];
+  if (editorProblems?.version !== editorCitations?.version) {
+    return gaps;
+  }
+  editorProblems?.found.forEach((problems, index) => {
+    const citation = items[index]?.citation;
+    for (const problem of problems) {
+      if (problem.kind !== "origin" || !citation) {
+        continue;
+      }
+      const gap = gaps.get(problem.path) ?? { citation, uses: [] };
+      const use = citation.key
+        ? `${citation.path} \u00b7 ${citation.key}`
+        : citation.path;
+      if (!gap.uses.includes(use)) {
+        gap.uses.push(use);
+      }
+      gaps.set(problem.path, gap);
+    }
+  });
+  return gaps;
+}
+
+/** A dot on the Calkit tab while something here needs an origin defined. */
+function markRailTab(): void {
+  const tab = document.getElementById(RAIL_TAB_ID);
+  if (!tab) {
+    return;
+  }
+  const n = currentLink ? getOriginGaps().size : 0;
+  let dot = tab.querySelector<HTMLElement>(".calkit-rail-dot");
+  if (!n) {
+    dot?.remove();
+    tab.title = "Calkit";
+    return;
+  }
+  if (!dot) {
+    dot = el("span", { class: "calkit-rail-dot" });
+    tab.append(dot);
+  }
+  tab.title =
+    `Calkit: ${n} file${n === 1 ? "" : "s"} this document is made from ` +
+    `need${n === 1 ? "s" : ""} an origin defined`;
 }
 
 function setRail(open: boolean): void {
@@ -4834,6 +5155,8 @@ const RAIL_STYLES = `
     margin: 2px 0 8px 14px; padding: 6px 8px; font-size: 12px;
     border-left: 2px solid var(--ck-border);
   }
+  .card > * + * { margin-top: 3px; }
+  .card button.action { padding: 1px 6px; font-size: 11px; }
 `;
 
 /** Put the pane in the sidebar, where Overleaf may have redrawn it away. */
@@ -4993,6 +5316,40 @@ function drawRail(): void {
       message,
     );
   }
+  // Upstream of the components, so not in their list, but where Calkit
+  // can't tell where something came from
+  const gaps = getOriginGaps();
+  if (gaps.size) {
+    body.append(
+      el("h3", {
+        text: "Origin needed",
+        attrs: { id: "calkit-origin-needed" },
+      }),
+      el("div", {
+        class: "dim small",
+        text:
+          "Calkit can't tell where these came from. Components here are " +
+          "made from them.",
+      }),
+    );
+    for (const [path, gap] of gaps) {
+      body.append(
+        el("div", { class: "card" }, [
+          el("div", { class: "row small" }, [
+            el("span", { class: "dot error" }),
+            el("span", { class: "grow", text: path }),
+          ]),
+          el("div", {
+            class: "dim small",
+            text: `Used by ${gap.uses.join(", ")}`,
+          }),
+          link.current_user_access === "read"
+            ? null
+            : renderDefineOrigin(link, gap.citation, path),
+        ]),
+      );
+    }
+  }
   // Components the open document shows, each with what's wrong with it
   body.append(el("h3", { text: "Components" }));
   const items = editorCitations?.items ?? [];
@@ -5078,12 +5435,14 @@ function drawRail(): void {
     const toRun = Boolean(running) && due;
     body.append(
       el(
-        "a",
+        "button",
         {
           class: "item",
-          href: `${base}/pipeline?stage=${encodeURIComponent(name)}`,
-          attrs: { target: "_blank" },
           title: status,
+          onClick: () => {
+            railStage = railStage === name ? null : name;
+            drawRail();
+          },
         },
         [
           toRun
@@ -5103,6 +5462,9 @@ function drawRail(): void {
         ],
       ),
     );
+    if (railStage === name && pipeline) {
+      body.append(renderStageCard(link, pipeline, name));
+    }
   }
   body.append(renderRuns(link, true));
   // The latest runs, each with its log

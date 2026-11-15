@@ -258,6 +258,15 @@ export interface ProjectPipeline {
   stage_statuses: Record<string, StageStatus>;
   status: "up-to-date" | "stale" | "unknown";
   error?: string | null;
+  /** The compiled DVC stages, by name, with what each runs and reads. */
+  dvc_stages?: Record<
+    string,
+    {
+      cmd?: string | string[];
+      deps?: string[] | null;
+      outs?: (string | Record<string, unknown>)[] | null;
+    }
+  >;
 }
 
 /** A run of the pipeline, wherever it ran. */

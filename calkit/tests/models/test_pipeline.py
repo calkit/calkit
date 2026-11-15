@@ -1,6 +1,8 @@
 """Tests for ``calkit.models.pipeline``."""
 
 import json
+import subprocess
+import sys
 
 import pytest
 from pydantic import ValidationError
@@ -28,6 +30,7 @@ from calkit.models.pipeline import (
     StageIteration,
     WordToPdfStage,
     quote_arg,
+    quote_literal_arg,
 )
 
 
@@ -781,11 +784,62 @@ def test_jsontolatexstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        "calkit latex from-json 'data/results.json' 'more.json' "
-        "--output 'paper/results.tex' --output 'paper/results2.tex' "
-        "--command theresults --format-json "
-        '\'{"result1": "{value1:.2f}", "result2": "{value2}"}\''
+        "calkit latex from-json data/results.json more.json "
+        "--output paper/results.tex --output paper/results2.tex "
+        '--command theresults --format "result1={value1:.2f}" '
+        '--format "result2={value2}"'
     )
+    # Each arg reaches the program unchanged through the shell DVC uses,
+    # which is cmd.exe on Windows
+    s2 = JsonToLatexStage(
+        name="json2latex",
+        inputs=["my results/a(1).json", "b&c.json"],
+        outputs=["paper/results.tex"],
+        keys=["cases.a;b"],
+        format={
+            "pct": "{a * 100:.1f} %",
+            "padded": "{x:>10}|{y:^8}",
+            "escaped": "{a:.1f}\\%",
+        },
+    )
+    script = "import sys, json; print(json.dumps(sys.argv[1:]))"
+    cmd = s2.to_dvc()["cmd"].replace(
+        "calkit latex from-json",
+        f'{quote_literal_arg(sys.executable)} -c "{script}"',
+    )
+    out = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True, check=True
+    )
+    assert json.loads(out.stdout) == [
+        "my results/a(1).json",
+        "b&c.json",
+        "--output",
+        "paper/results.tex",
+        "--key",
+        "cases.a;b",
+        "--format",
+        "pct={a * 100:.1f} %",
+        "--format",
+        "padded={x:>10}|{y:^8}",
+        "--format",
+        "escaped={a:.1f}\\%",
+    ]
+    # What one shell or the other would change is refused, not passed on
+    for kwargs in [
+        dict(keys=["$HOME"]),
+        dict(format={"q": 'say "{a}"'}),
+        dict(inputs=["a`b`.json"]),
+        dict(inputs=["a\\\\b.json"]),
+    ]:
+        with pytest.raises(ValidationError):
+            JsonToLatexStage.model_validate(
+                {
+                    "name": "j",
+                    "inputs": ["a.json"],
+                    "outputs": ["out.tex"],
+                    **kwargs,
+                }
+            )
     dvc_outs = s.dvc_outs
     assert {
         "paper/results.tex": {"cache": False, "persist": False}
@@ -1182,8 +1236,7 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
         }
     )
     cmd = stage.dvc_cmd
-    assert "'a.json'" in cmd
-    assert "'b.json'" in cmd
+    assert cmd.startswith("calkit latex from-json a.json b.json --output")
     assert "PathInput" not in cmd
     assert "from_stage_outputs" not in cmd
     # A schedule's period file is a dependency, but not data to read
@@ -1197,7 +1250,7 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
     period_file = ".calkit/local/current-periods/1-day-utc.txt"
     assert period_file in stage.to_dvc()["deps"]
     assert "current-periods" not in stage.dvc_cmd
-    assert "'a.json'" in stage.dvc_cmd
+    assert " a.json " in stage.dvc_cmd
 
 
 def test_system_env_can_wrap_a_runtime():

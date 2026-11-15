@@ -615,6 +615,9 @@ function renderPanel(): void {
         (t.issue
           ? `<a data-act="issue" title="${esc(t.issue)}">Issue</a>`
           : "") +
+        (t.overleaf
+          ? '<span title="Kept in step with a comment on Overleaf">Overleaf</span>'
+          : "") +
         (t.unplaced
           ? '<span title="Its paragraph was not found in the PDF">Not placed</span>'
           : "") +

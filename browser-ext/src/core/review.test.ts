@@ -7,6 +7,7 @@ import {
   getPlainText,
   getReply,
   getReviewThreads,
+  getOverleafSyncedLines,
   getThreadEdit,
 } from "./review";
 
@@ -137,5 +138,157 @@ describe("comment edits", () => {
     expect(() => getThreadEdit(MAIN, { id: "00000000" }, null)).toThrow(
       "no longer in the source",
     );
+  });
+});
+
+describe("getOverleafSyncedLines", () => {
+  const text = [
+    "\\section{Results}",
+    "",
+    "We towed a cylinder at four speeds",
+    "and measured the profile at four speeds.",
+    "",
+    "The wake recovers downstream.",
+  ];
+  const offsetOf = (needle: string, from = 0) =>
+    text.join("\n").indexOf(needle, from);
+  const pat = { first_name: "Pat", last_name: "Lee", email: "pat@x.org" };
+  test("brings new Overleaf threads into the source", () => {
+    const { lines, synced } = getOverleafSyncedLines(
+      text,
+      [
+        {
+          thread: "a1",
+          text: "four speeds",
+          offset: offsetOf("four speeds", offsetOf("profile")),
+        },
+        { thread: "b2", text: "wake", offset: offsetOf("wake") },
+        // A thread with no messages yet is left until it has one
+        { thread: "c3", text: "towed", offset: offsetOf("towed") },
+      ],
+      {
+        a1: {
+          messages: [
+            {
+              content: "Which\nspeeds?",
+              timestamp: Date.UTC(2026, 10, 1, 10, 0),
+              user: pat,
+            },
+          ],
+        },
+        b2: { messages: [{ content: "Nice." }], resolved: true },
+        c3: { messages: [] },
+      },
+      {},
+      "Jo Doe",
+    );
+    expect(lines[2]).toMatch(
+      /^% COMMENT id=[0-9a-f]{8} highlight=\{text: "four speeds", occ: 1\} overleaf=a1$/,
+    );
+    expect(lines.slice(3, 5)).toEqual([
+      "%   Pat Lee <pat@x.org> (2026-11-01 10:00):",
+      "%     Which speeds?",
+    ]);
+    expect(lines.slice(5, 7)).toEqual(text.slice(2, 4));
+    expect(lines[8]).toMatch(
+      /^% COMMENT id=[0-9a-f]{8} resolved=true highlight=\{text: "wake"\} overleaf=b2$/,
+    );
+    expect(lines.slice(9, 12)).toEqual([
+      "%   Someone on Overleaf:",
+      "%     Nice.",
+      text[5],
+    ]);
+    expect(synced).toEqual({
+      a1: { resolved: false, messages: 1 },
+      b2: { resolved: true, messages: 1 },
+    });
+  });
+  test("keeps threads in step with Overleaf", () => {
+    const source = [
+      "% COMMENT id=11111111 overleaf=a1",
+      "%   Pat:",
+      "%     Why?",
+      "First paragraph.",
+      "",
+      "% COMMENT id=22222222 resolved=true overleaf=b2",
+      "%   Pat:",
+      "%     Fix this.",
+      "Second paragraph.",
+      "",
+      "% COMMENT id=33333333 overleaf=c3",
+      "%   Pat:",
+      "%     Gone?",
+      "Third paragraph.",
+    ];
+    const { lines, pushes, synced } = getOverleafSyncedLines(
+      source,
+      [],
+      {
+        // A reply on Overleaf
+        a1: {
+          messages: [{ content: "Why?" }, { content: "Because.", user: pat }],
+        },
+        // Resolved in the source only, so it stays resolved
+        b2: { messages: [{ content: "Fix this." }] },
+      },
+      {
+        a1: { resolved: false, messages: 1 },
+        b2: { resolved: false, messages: 1 },
+        // Deleted on Overleaf
+        c3: { resolved: false, messages: 1 },
+      },
+      "Jo Doe",
+    );
+    expect(lines).toEqual([
+      ...source.slice(0, 3),
+      "%   Pat Lee <pat@x.org>:",
+      "%     Because.",
+      ...source.slice(3, 10),
+      "Third paragraph.",
+    ]);
+    expect(pushes).toEqual([{ thread: "b2", replies: [], resolved: true }]);
+    expect(synced).toEqual({
+      a1: { resolved: false, messages: 2 },
+      b2: { resolved: true, messages: 1 },
+    });
+    // Reopened on Overleaf since it was resolved in step
+    expect(
+      getOverleafSyncedLines(
+        source.slice(5, 9),
+        [],
+        { b2: { messages: [{ content: "Fix this." }], resolved: false } },
+        { b2: { resolved: true, messages: 1 } },
+        "Jo Doe",
+      ).lines[0],
+    ).toBe("% COMMENT id=22222222 overleaf=b2");
+    // Replied to on both sides since they were in step
+    const both = getOverleafSyncedLines(
+      [
+        "% COMMENT id=44444444 overleaf=d4",
+        "%   Pat:",
+        "%     Why?",
+        "%   Jo Doe:",
+        "%     Because.",
+        "%   Sam:",
+        "%     Agreed.",
+        "Text.",
+      ],
+      [],
+      {
+        d4: {
+          messages: [
+            { content: "Why?" },
+            { content: "Any news?", user: { first_name: "Pat" } },
+          ],
+        },
+      },
+      { d4: { resolved: false, messages: 1 } },
+      "Jo Doe",
+    );
+    expect(both.lines.slice(7, 9)).toEqual(["%   Pat:", "%     Any news?"]);
+    expect(both.pushes).toEqual([
+      { thread: "d4", replies: ["Because.", "Sam: Agreed."] },
+    ]);
+    expect(both.synced).toEqual({ d4: { resolved: false, messages: 4 } });
   });
 });

@@ -58,11 +58,15 @@ import {
   type CommentAuthor,
   type FromReview,
   type LineEdit,
+  type OverleafComment,
+  type OverleafSynced,
+  type OverleafThread,
   type PdfRect,
   type ToReview,
   findParagraphByText,
   getAddEdit,
   getEditedLines,
+  getOverleafSyncedLines,
   getReply,
   getReviewThreads,
   getThreadEdit,
@@ -3630,18 +3634,7 @@ async function getOverleafTexts(
     .filter((e) => e.type === "doc")
     .map((e) => e.path.replace(/^\//, ""))
     .filter(wanted);
-  const ids = new Map<string, string>();
-  for (const node of document.querySelectorAll<HTMLElement>(
-    '[data-file-type="doc"][data-file-id]',
-  )) {
-    const parts: string[] = [];
-    let item = node.closest('[role="treeitem"]');
-    while (item) {
-      parts.unshift(item.getAttribute("aria-label") ?? "");
-      item = item.parentElement?.closest('[role="treeitem"]') ?? null;
-    }
-    ids.set(parts.join("/"), node.dataset.fileId ?? "");
-  }
+  const ids = getDocIds();
   if (paths.every((p) => ids.get(p))) {
     const texts = await Promise.all(
       paths.map(async (p) => {
@@ -3662,6 +3655,201 @@ async function getOverleafTexts(
   }
   return getZipTexts(await zip.arrayBuffer(), wanted);
 }
+
+/**
+ * The IDs of the documents the file tree shows, by their paths. Those in
+ * closed folders aren't shown.
+ */
+function getDocIds(): Map<string, string> {
+  const ids = new Map<string, string>();
+  for (const node of document.querySelectorAll<HTMLElement>(
+    '[data-file-type="doc"][data-file-id]',
+  )) {
+    const parts: string[] = [];
+    let item = node.closest('[role="treeitem"]');
+    while (item) {
+      parts.unshift(item.getAttribute("aria-label") ?? "");
+      item = item.parentElement?.closest('[role="treeitem"]') ?? null;
+    }
+    ids.set(parts.join("/"), node.dataset.fileId ?? "");
+  }
+  return ids;
+}
+
+/**
+ * The comments made on Overleaf, by the file each is in, and their
+ * threads. A file the tree doesn't show is found by the comments' text
+ * being where they say.
+ */
+async function getOverleafComments(
+  projectId: string,
+  texts: Map<string, string>,
+): Promise<{
+  byFile: Map<string, OverleafComment[]>;
+  threads: Record<string, OverleafThread>;
+}> {
+  const read = async <T>(path: string): Promise<T> => {
+    const response = await fetch(`/project/${projectId}/${path}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`Couldn't read Overleaf's comments (${response.status})`);
+    }
+    return response.json();
+  };
+  const [ranges, threads] = await Promise.all([
+    read<
+      {
+        id: string;
+        ranges?: { comments?: { op: { c: string; p: number; t: string } }[] };
+      }[]
+    >("ranges"),
+    read<Record<string, OverleafThread>>("threads"),
+  ]);
+  const paths = new Map([...getDocIds()].map(([path, id]) => [id, path]));
+  const byFile = new Map<string, OverleafComment[]>();
+  for (const doc of ranges) {
+    const comments = (doc.ranges?.comments ?? []).map(({ op }) => ({
+      thread: op.t,
+      text: op.c,
+      offset: op.p,
+    }));
+    if (!comments.length) {
+      continue;
+    }
+    const path =
+      paths.get(doc.id) ??
+      [...texts].find(([, text]) =>
+        comments.every(
+          (c) => text.slice(c.offset, c.offset + c.text.length) === c.text,
+        ),
+      )?.[0];
+    if (path) {
+      byFile.set(path, comments);
+    }
+  }
+  return { byFile, threads };
+}
+
+/** How each Overleaf thread was when last in step, by Overleaf project. */
+const OVERLEAF_SYNCED_KEY = "overleafCommentsSynced";
+
+/**
+ * Bring the open file's Overleaf comments into its source, through the
+ * editor, and remember how each thread now is. Only the open one, so
+ * someone's file isn't switched under them; each catches up when opened.
+ * Says whether the source changed.
+ */
+async function syncOverleafComments(
+  projectId: string,
+  file: string,
+  sources: { current: Map<string, string> },
+): Promise<boolean> {
+  const { byFile, threads } = await getOverleafComments(
+    projectId,
+    sources.current,
+  );
+  const lines = (sources.current.get(file) ?? "").split("\n");
+  const comments = byFile.get(file) ?? [];
+  if (!comments.length && !lines.some((l) => /overleaf=/.test(l))) {
+    return false;
+  }
+  const stored = (await chrome.storage.local.get(OVERLEAF_SYNCED_KEY))[
+    OVERLEAF_SYNCED_KEY
+  ] as Record<string, Record<string, OverleafSynced>> | undefined;
+  const known = stored?.[projectId] ?? {};
+  const {
+    lines: next,
+    pushes,
+    synced,
+  } = getOverleafSyncedLines(
+    lines,
+    comments,
+    threads,
+    known,
+    getCommentAuthor().name,
+  );
+  // Overleaf first, so if it refuses, nothing's changed and it's tried
+  // again next time
+  const docId = getDocIds().get(file);
+  const csrf =
+    document.querySelector<HTMLMetaElement>('meta[name="ol-csrfToken"]')
+      ?.content ?? "";
+  const post = async (path: string, body?: object) => {
+    const response = await fetch(`/project/${projectId}/${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Csrf-Token": csrf,
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Overleaf didn't take a change to a comment (${response.status})`,
+      );
+    }
+  };
+  for (const push of pushes) {
+    for (const content of push.replies) {
+      await post(`thread/${push.thread}/messages`, { content });
+    }
+    if (push.resolved !== undefined && docId) {
+      await post(
+        `doc/${docId}/thread/${push.thread}/${
+          push.resolved ? "resolve" : "reopen"
+        }`,
+      );
+    }
+  }
+  const changed = next.join("\n") !== lines.join("\n");
+  if (changed) {
+    // Only what changed, so the rest of the file is left as it is
+    let prefix = 0;
+    while (
+      prefix < lines.length &&
+      prefix < next.length &&
+      lines[prefix] === next[prefix]
+    ) {
+      prefix++;
+    }
+    let suffix = 0;
+    while (
+      suffix < lines.length - prefix &&
+      suffix < next.length - prefix &&
+      lines[lines.length - 1 - suffix] === next[next.length - 1 - suffix]
+    ) {
+      suffix++;
+    }
+    await editEditor(
+      {
+        line: prefix + 1,
+        count: lines.length - prefix - suffix,
+        insert: next.slice(prefix, next.length - suffix),
+      },
+      lines,
+    );
+    sources.current.set(file, next.join("\n"));
+  }
+  // This file's threads replace what was known of them
+  const here = new Set([
+    ...comments.map((c) => c.thread),
+    ...getReviewThreads(new Map([[file, lines.join("\n")]])).flatMap((t) =>
+      t.overleaf ? [t.overleaf] : [],
+    ),
+  ]);
+  const kept = Object.fromEntries(
+    Object.entries(known).filter(([id]) => !here.has(id)),
+  );
+  await chrome.storage.local.set({
+    [OVERLEAF_SYNCED_KEY]: { ...stored, [projectId]: { ...kept, ...synced } },
+  });
+  return changed;
+}
+
+// The file whose Overleaf comments were last brought into its source
+let overleafSyncedFile: string | null = null;
 
 /** The address of the viewer with comments, for this page. */
 function getReviewUrl(params: URLSearchParams): string {
@@ -3799,6 +3987,19 @@ async function refreshReviewThreads(full: boolean): Promise<void> {
     const live = file && sources.current.has(file) ? await readEditor() : null;
     if (file && live !== null) {
       sources.current.set(file, live);
+      // Overleaf's comments are asked for with a new build, or a file just
+      // opened, not on every edit
+      if (full || overleafSyncedFile !== file) {
+        overleafSyncedFile = file;
+        try {
+          await syncOverleafComments(projectId, file, sources);
+        } catch (e) {
+          postToReview({
+            type: "status",
+            text: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
     }
     const threads = getReviewThreads(sources.current);
     const build = pdfBuild;
@@ -4026,6 +4227,8 @@ async function onReviewMessage(message: FromReview): Promise<void> {
         return;
     }
     postToReview({ type: "status", text: "" });
+    // So a change to a thread kept in step with Overleaf goes there now
+    overleafSyncedFile = null;
     await refreshReviewThreads(false);
   } catch (e) {
     postToReview({

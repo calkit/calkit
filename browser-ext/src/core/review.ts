@@ -28,6 +28,8 @@ export interface ReviewThread extends TexThread {
   key: string;
   start?: PdfRect;
   end?: PdfRect;
+  /** The Overleaf comment thread it's kept in step with, if any. */
+  overleaf?: string | null;
 }
 
 /** Messages from the page the viewer is on to the viewer. */
@@ -152,6 +154,7 @@ export function getReviewThreads(files: Map<string, string>): ReviewThread[] {
           text: getPlainText(lines.slice(para.start - 1, para.end)),
         },
         messages: t.entries.map((e) => ({ ...e })),
+        overleaf: getOverleafThreadId(t),
       });
     }
   }
@@ -283,4 +286,182 @@ export function getEditedLines(lines: string[], edit: LineEdit): string[] {
     ...edit.insert,
     ...lines.slice(edit.line - 1 + edit.count),
   ];
+}
+
+/** The Overleaf thread a source thread is kept in step with, if any. */
+function getOverleafThreadId(t: SourceThread): string | null {
+  const raw = t.attrs.find(([key]) => key === "overleaf")?.[1];
+  return raw ? raw.replace(/^"|"$/g, "") : null;
+}
+
+/** A comment on Overleaf: its thread, the text it's on, and where. */
+export interface OverleafComment {
+  thread: string;
+  text: string;
+  /** Characters into the file. */
+  offset: number;
+}
+
+/** A comment thread as Overleaf keeps it. */
+export interface OverleafThread {
+  messages?: {
+    content: string;
+    timestamp?: number | string;
+    user?: { first_name?: string; last_name?: string; email?: string };
+  }[];
+  resolved?: boolean;
+}
+
+/** What to do on Overleaf to bring a thread there into step. */
+export interface OverleafPush {
+  thread: string;
+  replies: string[];
+  resolved?: boolean;
+}
+
+/** How a thread was on both sides when they were last in step. */
+export interface OverleafSynced {
+  resolved: boolean;
+  messages: number;
+}
+
+/**
+ * A file's lines with its Overleaf comments brought into the source: a
+ * thread for each new one, above its paragraph, and new replies and
+ * resolving or reopening on Overleaf since they were last in step. A thread
+ * deleted on Overleaf after being in step is deleted from the source too.
+ * Also what to do on Overleaf for replies and resolving or reopening done
+ * in the source, with replies others wrote named, since they're posted by
+ * `me`, and how each thread will be on both sides, for next time.
+ */
+export function getOverleafSyncedLines(
+  lines: string[],
+  comments: OverleafComment[],
+  threads: Record<string, OverleafThread>,
+  synced: Record<string, OverleafSynced>,
+  me: string,
+): {
+  lines: string[];
+  pushes: OverleafPush[];
+  synced: Record<string, OverleafSynced>;
+} {
+  const toEntry = (m: NonNullable<OverleafThread["messages"]>[number]) => {
+    const name = [m.user?.first_name, m.user?.last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    return {
+      author: name || m.user?.email || "Someone on Overleaf",
+      email: m.user?.email ?? null,
+      date:
+        m.timestamp === undefined ? null : commentDate(new Date(m.timestamp)),
+      text: m.content.replace(/\s+/g, " ").trim(),
+    };
+  };
+  // Every edit is to the lines as they are, then made from the bottom up
+  const edits: LineEdit[] = [];
+  const pushes: OverleafPush[] = [];
+  const next: Record<string, OverleafSynced> = {};
+  const inSource = new Set<string>();
+  for (const t of parseComments(lines)) {
+    const id = getOverleafThreadId(t);
+    if (!id) {
+      continue;
+    }
+    inSource.add(id);
+    const thread = threads[id];
+    if (!thread) {
+      if (synced[id]) {
+        edits.push({ line: t.lineno, count: t.nlines, insert: [] });
+      }
+      continue;
+    }
+    const messages = thread.messages ?? [];
+    const resolved = Boolean(thread.resolved);
+    // Replies on each side since they were in step, which, never in step
+    // here before, are those past what both have
+    const base =
+      synced[id]?.messages ?? Math.min(messages.length, t.entries.length);
+    const push: OverleafPush = {
+      thread: id,
+      replies: t.entries
+        .slice(base)
+        .map((e) => (e.author === me ? e.text : `${e.author}: ${e.text}`)),
+    };
+    let changed = t;
+    if (messages.length > base) {
+      changed = {
+        ...changed,
+        entries: [...changed.entries, ...messages.slice(base).map(toEntry)],
+      };
+    }
+    // Resolved or reopened on one side since they were in step, or, never
+    // in step here, as it is on Overleaf
+    if (resolved !== t.resolved) {
+      if (synced[id]?.resolved === resolved) {
+        push.resolved = t.resolved;
+      } else {
+        changed = { ...changed, resolved };
+      }
+    }
+    if (push.replies.length || push.resolved !== undefined) {
+      pushes.push(push);
+    }
+    if (changed !== t) {
+      edits.push({
+        line: t.lineno,
+        count: t.nlines,
+        insert: renderComment({ ...changed, id: changed.id ?? newCommentId() }),
+      });
+    }
+    next[id] = { resolved: changed.resolved, messages: changed.entries.length };
+  }
+  const text = lines.join("\n");
+  // The character each line starts at
+  const starts = [0];
+  for (const line of lines) {
+    starts.push(starts[starts.length - 1] + line.length + 1);
+  }
+  for (const c of comments) {
+    const thread = threads[c.thread];
+    if (inSource.has(c.thread) || !thread?.messages?.length) {
+      continue;
+    }
+    inSource.add(c.thread);
+    const line = text.slice(0, c.offset).split("\n").length;
+    const start = paragraphStart(lines, line);
+    if (start === null) {
+      continue;
+    }
+    // Which time its text appears in the paragraph, counting from 0
+    const before = text.slice(starts[start - 1], c.offset);
+    const highlight = c.text.includes("\\")
+      ? getPlainText([c.text])
+      : c.text.replace(/\s+/g, " ").trim();
+    const entries = thread.messages.map(toEntry);
+    edits.push({
+      line: start,
+      count: 0,
+      insert: renderComment({
+        entries,
+        highlight: highlight || null,
+        occ: highlight ? before.split(c.text).length - 1 : 0,
+        resolved: Boolean(thread.resolved),
+        id: newCommentId(),
+        issue: null,
+        attrs: [["overleaf", c.thread]],
+        lineno: 0,
+        nlines: 0,
+      }),
+    });
+    next[c.thread] = {
+      resolved: Boolean(thread.resolved),
+      messages: entries.length,
+    };
+  }
+  let out = lines;
+  for (const edit of edits.sort((a, b) => b.line - a.line)) {
+    out = getEditedLines(out, edit);
+  }
+  return { lines: out, pushes, synced: next };
 }

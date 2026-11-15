@@ -247,7 +247,11 @@ def get_latexmk_programs(latexmk_cmd: list[str], wdir: str = ".") -> list[str]:
     def read_perl(code: str) -> None:
         # Assignments in the order they appear, which is enough for an rc
         # file setting a mode or a command
-        code = re.sub(r"(?m)^\s*#.*$", "", code)
+        code = re.sub(
+            r"""('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$#)|#.*""",
+            lambda m: m.group(1) or "",
+            code,
+        )
         for m in re.finditer(
             r"\$(pdf_mode|dvi_mode|xdv_mode)\s*=\s*(\d+)"
             r"|\$(pdflatex|lualatex|xelatex|latex|dvipdf|dvips|ps2pdf)"

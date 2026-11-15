@@ -181,7 +181,7 @@ results["seconds"]["compile"] = {
 }
 results["samples"] = samples
 results["release"] = lock["release"]
-results["repository"] = lock["repository"]
+results["repository"] = lock["repository_url"]
 results["repeats"] = args.repeats
 results["machine"] = {
     "platform": platform.platform(),

@@ -115,7 +115,8 @@ BASE_PACKAGES = [
     "tlperl.windows",
 ]
 # TeX variables pointing at trees outside the environment, which would let
-# whatever happens to be on the machine into a build
+# whatever happens to be on the machine into a build, besides the rest of
+# those in texmf.cnf
 LEAKY_ENV_VARS = [
     "TEXMFCNF",
     "TEXMFHOME",
@@ -1169,15 +1170,26 @@ def assemble_view(lock: dict, platform: str, verbose: bool = False) -> str:
 def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
     """Return the environmental variables a command in an environment gets.
 
-    The environment's programs come first on PATH, and TeX variables that
-    would point kpathsea elsewhere are dropped. Nothing else is needed for
-    TeX: the programs find the environment's configuration from where they
-    are. XeTeX's fontconfig doesn't, except on Windows, so it's pointed at
-    the environment's.
+    The environment's programs come first on PATH, and every variable
+    kpathsea would take from the environment over ``texmf.cnf``, e.g.,
+    ``TEXINPUTS`` or ``TEXINPUTS.xelatex``, is dropped. Nothing else is
+    needed for TeX: the programs find the environment's configuration from
+    where they are. XeTeX's fontconfig doesn't, except on Windows, so it's
+    pointed at the environment's.
     """
     platform = platform or get_platform()
+    names = set(LEAKY_ENV_VARS)
+    cnf_fpath = os.path.join(view_dir, "texmf-dist", "web2c", "texmf.cnf")
+    if os.path.isfile(cnf_fpath):
+        with open(cnf_fpath, encoding="utf-8", errors="replace") as f:
+            names.update(re.findall(r"(?m)^([A-Z][A-Z0-9_]*)[\s.=]", f.read()))
+    # kpathsea also reads VAR.program and VAR_program
+    pattern = re.compile(
+        "(" + "|".join(sorted(names)) + r")([._][A-Za-z0-9_-]+)?",
+        re.IGNORECASE,
+    )
     env_vars = {
-        k: v for k, v in os.environ.items() if k.upper() not in LEAKY_ENV_VARS
+        k: v for k, v in os.environ.items() if not pattern.fullmatch(k)
     }
     bin_dir = os.path.join(view_dir, "bin", platform)
     env_vars["PATH"] = bin_dir + os.pathsep + env_vars.get("PATH", "")

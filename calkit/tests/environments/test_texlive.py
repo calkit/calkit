@@ -443,6 +443,29 @@ def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch, capsys):
         check=True,
     ).stdout.strip()
     assert out.replace("\\", "/").startswith(view_dir.replace("\\", "/"))
+    # Search paths set on the machine are dropped too, including ones for
+    # one program
+    monkeypatch.setenv("TEXINPUTS", "/elsewhere:")
+    monkeypatch.setenv("TEXINPUTS.xelatex", "/elsewhere:")
+    monkeypatch.setenv("osfontdir_lualatex", "/elsewhere")
+    monkeypatch.setenv("TEXINPUTSX", "kept")
+    env_vars = texlive.get_run_env_vars(view_dir)
+    for name in ["TEXINPUTS", "TEXINPUTS.xelatex", "osfontdir_lualatex"]:
+        assert name not in env_vars
+    assert env_vars["TEXINPUTSX"] == "kept"
+    out = subprocess.run(
+        [
+            os.path.join(view_dir, "bin", platform, "kpsewhich" + exe),
+            "-progname=xelatex",
+            "-var-value",
+            "TEXINPUTS",
+        ],
+        env=env_vars,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "elsewhere" not in out
     # XeTeX's fontconfig is pointed at the environment's fonts alone
     fonts_conf = texlive.get_run_env_vars(view_dir)["FONTCONFIG_FILE"]
     with open(fonts_conf) as f:

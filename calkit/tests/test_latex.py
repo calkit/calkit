@@ -937,6 +937,13 @@ def test_get_latexmk_programs(tmp_dir):
     with open(".latexmkrc", "w") as f:
         f.write("$pdflatex = 'xelatex %O %S';\n")
     assert get_latexmk_programs(base + ["main.tex"]) == ["xelatex"]
+    # Comments after code are ignored, but not a # in a string
+    with open(".latexmkrc", "w") as f:
+        f.write("$max_repeat = 5; # $pdflatex = 'xelatex %O %S';\n")
+    assert get_latexmk_programs(base + ["main.tex"]) == ["pdflatex"]
+    with open(".latexmkrc", "w") as f:
+        f.write("$pdflatex = 'xe#latex %O'; # $pdflatex = 'lualatex';\n")
+    assert get_latexmk_programs(base + ["main.tex"]) == ["xe#latex"]
     os.remove(".latexmkrc")
     # One given with -r is read where it appears
     os.makedirs("paper")

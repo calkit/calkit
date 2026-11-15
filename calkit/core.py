@@ -607,22 +607,48 @@ def get_recorded_project_paths() -> list[str]:
     return [p for p in paths if isinstance(p, str)]
 
 
+def write_json(path: str, data: Any, **kwargs: Any) -> None:
+    """Write JSON to a file all at once, so it's never read half written,
+    through a temporary file of its own, so writers don't share one.
+    """
+    import tempfile
+
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=folder, prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, **kwargs)
+        os.replace(tmp_path, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+        raise
+
+
 def record_project_path(wdir: str = ".") -> None:
     """Remember where a project is on this machine, so it's found wherever
     it is, e.g., by 'calkit open project' or the browser extension.
     """
+    from filelock import FileLock
+
     path = os.path.realpath(wdir)
-    paths = get_recorded_project_paths()
-    if path in paths:
+    if path in get_recorded_project_paths():
         return
-    # Ones since moved or deleted are dropped while it's being written
-    paths = [
-        p for p in paths if os.path.isfile(os.path.join(p, "calkit.yaml"))
-    ]
     fpath = get_project_paths_path()
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
-    with open(fpath, "w") as f:
-        json.dump(paths + [path], f, indent=2)
+    # Read again once it's ours, so another process's addition isn't lost
+    with FileLock(fpath + ".lock", timeout=60):
+        paths = get_recorded_project_paths()
+        if path in paths:
+            return
+        # Ones since moved or deleted are dropped while it's being written
+        paths = [
+            p for p in paths if os.path.isfile(os.path.join(p, "calkit.yaml"))
+        ]
+        write_json(fpath, paths + [path], indent=2)
 
 
 def find_project_dirs(relative=False, max_depth=3) -> list[str]:

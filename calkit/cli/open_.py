@@ -93,6 +93,16 @@ def open_project(
             ),
         ),
     ] = None,
+    checkout: Annotated[
+        str | None,
+        typer.Option(
+            "--checkout",
+            help=(
+                "Checkout to open, e.g., one of its Git worktrees, rather "
+                "than finding one."
+            ),
+        ),
+    ] = None,
     hub: Annotated[
         str | None,
         typer.Option(
@@ -130,53 +140,60 @@ def open_project(
     editor = with_editor or calkit.config.read().default_editor
     home = os.path.expanduser("~")
     default_path = os.path.join(home, "calkit", name)
-    found = calkit.get_project_checkouts(name, owner=owner, warn=warn)
-    owners = sorted(set(found.values()))
-    if len(owners) > 1:
-        raise_error(
-            f"More than one project named '{name}' is on this machine; "
-            "give its owner, e.g., "
-            + ", ".join(f"'calkit open project {o}/{name}'" for o in owners)
-        )
-    paths = sorted(found)
-    # Clone it if it isn't here
-    if not paths:
-        if not owner:
+    if checkout is not None:
+        paths = [os.path.realpath(checkout)]
+        if not os.path.isfile(os.path.join(paths[0], "calkit.yaml")):
+            raise_error(f"{checkout} isn't a Calkit project")
+    else:
+        found = calkit.get_project_checkouts(name, owner=owner, warn=warn)
+        owners = sorted(set(found.values()))
+        if len(owners) > 1:
             raise_error(
-                f"No project named '{name}' is on this machine; give its "
-                f"owner to clone it, e.g., 'calkit open project OWNER/{name}'"
-            )
-        if os.path.exists(default_path):
-            raise_error(f"{default_path} exists, but isn't {owner}/{name}")
-        if not yes:
-            if not is_tty():
-                raise_error(
-                    f"{owner}/{name} isn't on this machine; rerun with --yes "
-                    f"to clone it into {default_path}"
+                f"More than one project named '{name}' is on this machine; "
+                "give its owner, e.g., "
+                + ", ".join(
+                    f"'calkit open project {o}/{name}'" for o in owners
                 )
-            if not typer.confirm(
-                f"{owner}/{name} isn't on this machine. Clone it into "
-                f"{default_path}?",
-                default=True,
-            ):
-                raise typer.Exit(1)
-        from calkit.cli.main.core import clone
-
-        clone(url=project, location=default_path, hub=hub)
-        paths = [default_path]
-    # With more than one checkout, e.g., Git worktrees, prefer the one in
-    # ~/calkit, then the main checkout, whose .git is a folder rather than a
-    # file pointing to it
-    if len(paths) > 1:
-        preferred = [
-            p for p in paths if p == os.path.realpath(default_path)
-        ] or [p for p in paths if os.path.isdir(os.path.join(p, ".git"))]
-        if len(preferred) != 1:
-            raise_error(
-                f"{owner or found[paths[0]]}/{name} is in more than one "
-                "place; open one with 'code PATH': " + ", ".join(paths)
             )
-        paths = preferred
+        paths = sorted(found)
+        # Clone it if it isn't here
+        if not paths:
+            if not owner:
+                raise_error(
+                    f"No project named '{name}' is on this machine; give its "
+                    f"owner to clone it, e.g., 'calkit open project OWNER/{name}'"
+                )
+            if os.path.exists(default_path):
+                raise_error(f"{default_path} exists, but isn't {owner}/{name}")
+            if not yes:
+                if not is_tty():
+                    raise_error(
+                        f"{owner}/{name} isn't on this machine; rerun with --yes "
+                        f"to clone it into {default_path}"
+                    )
+                if not typer.confirm(
+                    f"{owner}/{name} isn't on this machine. Clone it into "
+                    f"{default_path}?",
+                    default=True,
+                ):
+                    raise typer.Exit(1)
+            from calkit.cli.main.core import clone
+
+            clone(url=project, location=default_path, hub=hub)
+            paths = [default_path]
+        # With more than one checkout, e.g., Git worktrees, prefer the one in
+        # ~/calkit, then the main checkout, whose .git is a folder rather than a
+        # file pointing to it
+        if len(paths) > 1:
+            preferred = [
+                p for p in paths if p == os.path.realpath(default_path)
+            ] or [p for p in paths if os.path.isdir(os.path.join(p, ".git"))]
+            if len(preferred) != 1:
+                raise_error(
+                    f"{owner or found[paths[0]]}/{name} is in more than one "
+                    "place; open one with 'code PATH': " + ", ".join(paths)
+                )
+            paths = preferred
     path = paths[0]
     extra_args = []
     if file_path is not None:

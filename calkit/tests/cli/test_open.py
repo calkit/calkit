@@ -104,6 +104,12 @@ def test_open_project(tmp_path, monkeypatch):
         result = run(*args)
         assert result.exit_code == 0, result.output
         assert opened == [["/fake/bin/code", os.path.realpath(main)]]
+    # Unless the checkout to open is given
+    result = run("me/proj", "--checkout", str(worktree))
+    assert result.exit_code == 0, result.output
+    assert opened == [["/fake/bin/code", os.path.realpath(worktree)]]
+    result = run("me/proj", "--checkout", str(home))
+    assert result.exit_code != 0 and "isn't a Calkit project" in result.output
     # Another owner's project of the same name needs the owner given
     make_project(str(home / "dev" / "proj"), "them", "proj")
     # A checkout that can't be read is skipped rather than stopping the

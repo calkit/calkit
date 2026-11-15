@@ -49,6 +49,16 @@ def from_json(
             ),
         ),
     ] = None,
+    formats: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--format",
+            help=(
+                "Value to add, as NAME=FORMAT, e.g., "
+                "'pct={a:.1%}'. Repeatable."
+            ),
+        ),
+    ] = None,
     fmt_json: Annotated[
         str | None,
         typer.Option(
@@ -82,6 +92,11 @@ def from_json(
             raise_error("Format JSON is not valid JSON")
     else:
         fmt_dict = {}
+    for fmt in formats or []:
+        name, sep, fmt_string = fmt.partition("=")
+        if not sep or not name:
+            raise_error(f"Format '{fmt}' is not NAME=FORMAT")
+        fmt_dict[name] = fmt_string
     data = {}
     for input_fpath in input_fpaths:
         if not os.path.isfile(input_fpath):

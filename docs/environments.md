@@ -1235,6 +1235,9 @@ installed on your computer, so a document builds the same everywhere.
 A LaTeX stage or `calkit latex build` set up for XeLaTeX, e.g., with
 `-xelatex` in `latexmk_args` or `$pdf_mode = 5` in its latexmkrc, adds
 `xetex` to the lock.
+One that makes its PDF through DVI with dvipdfmx or dvips gets that too,
+while Ghostscript's `dvipdf` and `ps2pdf`, latexmk's defaults for those
+modes, come from your computer.
 To run XeLaTeX with `calkit xenv`, add `xetex` to `packages`.
 On Linux and Windows it finds the environment's fonts by name, e.g.,
 `\setmainfont{TeX Gyre Termes}`.

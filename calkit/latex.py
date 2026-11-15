@@ -201,8 +201,9 @@ def get_texmf_cache_dir(wdir: str | None = None) -> str:
     return os.path.join(ensure_local_dir(wdir), "texmf")
 
 
-def get_latexmk_engine(latexmk_cmd: list[str], wdir: str = ".") -> str:
-    """The TeX program a latexmk command compiles with, e.g., 'xelatex'.
+def get_latexmk_programs(latexmk_cmd: list[str], wdir: str = ".") -> list[str]:
+    """The programs a latexmk command makes its PDF with: the TeX engine,
+    e.g., 'xelatex', then any converter, e.g., 'dvipdf' from DVI.
 
     Follows latexmk's own order: the rc file in the directory it runs in,
     then its options, including '-r' rc files and '-e' code where they
@@ -215,6 +216,9 @@ def get_latexmk_engine(latexmk_cmd: list[str], wdir: str = ".") -> str:
         "lualatex": "lualatex",
         "xelatex": "xelatex",
         "latex": "latex",
+        "dvipdf": "dvipdf",
+        "dvips": "dvips",
+        "ps2pdf": "ps2pdf",
     }
     flags = {
         "-pdf": {"pdf_mode": 1, "dvi_mode": 0, "xdv_mode": 0},
@@ -246,7 +250,8 @@ def get_latexmk_engine(latexmk_cmd: list[str], wdir: str = ".") -> str:
         code = re.sub(r"(?m)^\s*#.*$", "", code)
         for m in re.finditer(
             r"\$(pdf_mode|dvi_mode|xdv_mode)\s*=\s*(\d+)"
-            r"|\$(pdflatex|lualatex|xelatex|latex)\s*=\s*(['\"])(.*?)\4",
+            r"|\$(pdflatex|lualatex|xelatex|latex|dvipdf|dvips|ps2pdf)"
+            r"\s*=\s*(['\"])(.*?)\4",
             code,
         ):
             if m.group(1):
@@ -296,8 +301,16 @@ def get_latexmk_engine(latexmk_cmd: list[str], wdir: str = ".") -> str:
         command = programs["pdflatex"]
     else:
         command = programs["latex"]
-    program = command.split()[0] if command.split() else ""
-    return os.path.splitext(os.path.basename(program))[0]
+    commands_run = [command]
+    if modes["pdf_mode"] == 2:
+        commands_run += [programs["dvips"], programs["ps2pdf"]]
+    elif modes["pdf_mode"] == 3:
+        commands_run.append(programs["dvipdf"])
+    return [
+        os.path.splitext(os.path.basename(c.split()[0]))[0]
+        for c in commands_run
+        if c.split()
+    ]
 
 
 def find_missing_tex_files(log: str) -> list[str]:

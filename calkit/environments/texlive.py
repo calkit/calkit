@@ -16,6 +16,7 @@ files years later.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -38,9 +39,13 @@ VIEW_FORMAT_VERSION = 3
 # Live's database nor a document's lookups find them, e.g., biblatex's
 # default backend
 EXTRA_DEPENDS = {"biblatex": ["biber"]}
-# The engine latexmk compiles with, which no log names, since it fails to
-# start without it
-ENGINE_PACKAGES = {"xelatex": "xetex"}
+# Programs latexmk makes a PDF with, which no log names, since it fails to
+# start them; Ghostscript's dvipdf and ps2pdf come from the system
+PROGRAM_PACKAGES = {
+    "xelatex": "xetex",
+    "dvipdfmx": "dvipdfmx",
+    "dvips": "dvips",
+}
 # What converting LaTeX to other formats with make4ht needs, beyond what
 # the document does, which isn't locked, since a conversion isn't part of
 # the pipeline
@@ -124,6 +129,8 @@ LEAKY_ENV_VARS = [
     "TEXMFAUXTREES",
 ]
 COMPLETE_MARKER = ".calkit-complete"
+# The formats builds compile with, which an environment can't do without
+LATEX_FORMATS = {"pdflatex", "lualatex", "xelatex", "latex"}
 
 
 def get_store_dir() -> str:
@@ -147,12 +154,13 @@ def get_platform() -> str:
         return "windows"
     if sys.platform.startswith("linux"):
         if machine in ("x86_64", "amd64"):
-            libc = platform.libc_ver()[0]
-            return (
-                "x86_64-linux"
-                if libc in ("glibc", "")
-                else ("x86_64-linuxmusl")
-            )
+            # platform.libc_ver() can't tell musl from not knowing, but
+            # musl's loader is always here
+            import glob
+
+            if glob.glob("/lib/ld-musl-*.so.1"):
+                return "x86_64-linuxmusl"
+            return "x86_64-linux"
         if machine in ("aarch64", "arm64"):
             return "aarch64-linux"
     raise ValueError(
@@ -205,17 +213,24 @@ def get_repository_url(env: dict) -> str:
         return str(env["repository_url"]).rstrip("/")
     release = int(env.get("release") or DEFAULT_RELEASE)
     frozen = FROZEN_REPOSITORY_TEMPLATE.format(release=release)
-    resp = requests.head(frozen + "/tlpkg/texlive.tlpdb.xz", timeout=30)
-    if resp.status_code == 200:
-        return frozen
-    return CURRENT_REPOSITORY
+    resp = requests.head(
+        frozen + "/tlpkg/texlive.tlpdb.xz", allow_redirects=True, timeout=30
+    )
+    # Only a release the archive doesn't have is the current one; any other
+    # failure is reported, since falling back would lock a moving repository
+    if resp.status_code == 404:
+        return CURRENT_REPOSITORY
+    resp.raise_for_status()
+    return frozen
 
 
+@functools.cache
 def resolve_mirror(repository: str) -> str:
     """Pin a redirecting repository, e.g., mirror.ctan.org, to one mirror.
 
     Mirrors sync at different times, so a database read from one and
-    packages fetched from another can disagree.
+    packages fetched from another can disagree. Cached, so a process reads
+    the database and fetches packages from the same one.
     """
     import requests
 
@@ -291,7 +306,9 @@ def load_tlpdb(repository: str, max_age_s: float = 86400) -> dict[str, dict]:
         if cached.get("frozen") or age < max_age_s:
             packages: dict[str, dict] = cached["packages"]
             return packages
-    resp = requests.get(repository + "/tlpkg/texlive.tlpdb.xz", timeout=120)
+    resp = requests.get(
+        resolve_mirror(repository) + "/tlpkg/texlive.tlpdb.xz", timeout=120
+    )
     resp.raise_for_status()
     packages = parse_tlpdb(lzma.decompress(resp.content).decode("utf-8"))
     config = packages.get("00texlive.config", {}).get("depends", [])
@@ -884,8 +901,50 @@ def assemble_view(lock: dict, platform: str, verbose: bool = False) -> str:
     interrupted build is never mistaken for a finished one. Returns the
     environment's directory.
     """
+    import shlex
     import tempfile
     from concurrent.futures import ThreadPoolExecutor
+    from xml.sax.saxutils import escape
+
+    def build_format(fmt: dict[str, str], fmt_dir: str) -> None:
+        """Build a format into the store, as fmtutil would.
+
+        One other than LaTeX's that fails is skipped with a warning, as
+        fmtutil does, since a package can register a format the document
+        never uses.
+        """
+        name = fmt["name"]
+        print(f"Building TeX format {name}", file=sys.stderr)
+        tmp_root = os.path.join(get_store_dir(), "tmp")
+        os.makedirs(tmp_root, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=tmp_root) as tmp_dir:
+            cmd = [
+                os.path.join(bin_dir, fmt["engine"] + exe),
+                "-ini",
+                f"-jobname={name}",
+                f"-progname={name}",
+            ] + shlex.split(fmt.get("options", ""))
+            result = subprocess.run(
+                cmd,
+                cwd=tmp_dir,
+                env=env_vars,
+                stdin=subprocess.DEVNULL,
+                capture_output=not verbose,
+            )
+            built = os.path.join(tmp_dir, name + ".fmt")
+            if result.returncode or not os.path.isfile(built):
+                log = os.path.join(tmp_dir, name + ".log")
+                tail = ""
+                if os.path.isfile(log):
+                    with open(log, errors="replace") as f:
+                        tail = "".join(f.readlines()[-20:])
+                msg = f"TeX format {name} failed to build:\n{tail}"
+                if name in LATEX_FORMATS:
+                    raise RuntimeError(msg)
+                print(f"Warning: skipping it; {msg}", file=sys.stderr)
+                return
+            os.makedirs(fmt_dir, exist_ok=True)
+            os.replace(built, os.path.join(fmt_dir, name + ".fmt"))
 
     def find_source(rel: str) -> str | None:
         # Follows links within the environment's layout to a real file
@@ -917,180 +976,186 @@ def assemble_view(lock: dict, platform: str, verbose: bool = False) -> str:
     store_dir = get_store_dir()
     os.makedirs(os.path.join(store_dir, "envs"), exist_ok=True)
     tmp_dir = tempfile.mkdtemp(dir=os.path.join(store_dir, "envs"))
-    exe = ".exe" if platform == "windows" else ""
-    # Programs and anything else a platform package carries outside the TeX
-    # tree, e.g., Windows' Perl under tlpkg, go in by hard link, resolving
-    # the symbolic links that point from one package into another
-    owners: dict[str, str] = {}
-    for name in sorted(pkg_dirs):
-        if get_package_platform(name) is None:
-            continue
-        pkg_dir = pkg_dirs[name]
-        for dirpath, _, filenames in os.walk(pkg_dir):
-            for fname in filenames:
-                fpath = os.path.join(dirpath, fname)
-                rel = os.path.relpath(fpath, pkg_dir).replace(os.sep, "/")
-                if rel.startswith("tlpkg/tlpobj/") or fname == COMPLETE_MARKER:
-                    continue
-                owners.setdefault(rel, fpath)
-    for rel in sorted(owners):
-        src = find_source(rel)
-        if src is None:
-            continue
-        if platform == "universal-darwin" and rel.startswith("bin/"):
-            src = get_thin_program_fpath(src)
-        link_file(src, os.path.join(tmp_dir, rel))
-    # Windows' script launchers look for their Lua driver beside the
-    # programs, as in a full TeX Live
-    for rel in (
-        "texmf-dist/scripts/texlive/runscript.tlu",
-        "texmf-dist/web2c/texmf.cnf",
-    ):
-        src = find_source(rel)
-        if src is not None:
+    # Removed if anything fails, so a half-built one doesn't linger
+    try:
+        exe = ".exe" if platform == "windows" else ""
+        # Programs and anything else a platform package carries outside the TeX
+        # tree, e.g., Windows' Perl under tlpkg, go in by hard link, resolving
+        # the symbolic links that point from one package into another
+        owners: dict[str, str] = {}
+        for name in sorted(pkg_dirs):
+            if get_package_platform(name) is None:
+                continue
+            pkg_dir = pkg_dirs[name]
+            for dirpath, _, filenames in os.walk(pkg_dir):
+                for fname in filenames:
+                    fpath = os.path.join(dirpath, fname)
+                    rel = os.path.relpath(fpath, pkg_dir).replace(os.sep, "/")
+                    if (
+                        rel.startswith("tlpkg/tlpobj/")
+                        or fname == COMPLETE_MARKER
+                    ):
+                        continue
+                    owners.setdefault(rel, fpath)
+        for rel in sorted(owners):
+            src = find_source(rel)
+            if src is None:
+                continue
+            if platform == "universal-darwin" and rel.startswith("bin/"):
+                src = get_thin_program_fpath(src)
             link_file(src, os.path.join(tmp_dir, rel))
-    # Every package's tree stays where it is in the store, each with its
-    # own file database, and kpathsea searches them all. The environment's
-    # own tree holds what's generated for it.
-    trees = sorted(
-        os.path.join(d, "texmf-dist").replace(os.sep, "/")
-        for d in pkg_dirs.values()
-        if os.path.isdir(os.path.join(d, "texmf-dist"))
-    )
-    cnf = [
-        "% Generated by Calkit for a TeX Live environment",
-        "TEXMFROOT = $SELFAUTOPARENT",
-        "TEXMFDIST = {" + ",".join(trees) + "}",
-        "TEXMFVAR = $SELFAUTOPARENT/texmf-var",
-        "TEXMFCONFIG = $SELFAUTOPARENT/texmf-var",
-        "TEXMFSYSVAR = $SELFAUTOPARENT/texmf-var",
-        "TEXMFSYSCONFIG = $SELFAUTOPARENT/texmf-var",
-        "TEXMFLOCAL = $SELFAUTOPARENT/texmf-var",
-        # Nothing from the user's own trees, so a build only sees what the
-        # lock pins
-        "TEXMFHOME = $SELFAUTOPARENT/texmf-home",
-        "TEXMFAUXTREES = {}",
-        # Fonts are looked for in the environment, not the system
-        "OSFONTDIR = $SELFAUTOPARENT/texmf-home",
-    ]
-    with open(os.path.join(tmp_dir, "texmf.cnf"), "w", newline="\n") as f:
-        f.write("\n".join(cnf) + "\n")
-    var_dir = os.path.join(tmp_dir, "texmf-var")
-    os.makedirs(var_dir)
-    languages = create_language_files(pkg_dirs, var_dir)
-    create_font_maps(pkg_dirs, var_dir)
-    # LuaTeX looks for fonts in TeX's trees only, not the system's, which
-    # also saves it indexing every font on the machine
-    luaotfload_conf = os.path.join(
-        var_dir, "tex", "generic", "config", "luaotfload.conf"
-    )
-    with open(luaotfload_conf, "w", newline="\n") as f:
-        f.write("[db]\n    location-precedence = texmf,local\n")
-    # XeTeX does the same through fontconfig, which reads this, except on
-    # macOS, where it also sees the system's. It's written for where the
-    # environment ends up, since fontconfig writes its cache there.
-    from xml.sax.saxutils import escape
-
-    font_dirs = sorted(
-        os.path.join(tree, "fonts", kind)
-        for tree in trees
-        for kind in ("opentype", "truetype", "type1")
-        if os.path.isdir(os.path.join(tree, "fonts", kind))
-    )
-    fonts_conf = [
-        '<?xml version="1.0"?>',
-        '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">',
-        "<fontconfig>",
-        *(f"  <dir>{escape(d)}</dir>" for d in font_dirs),
-        "  <cachedir>"
-        + escape(
-            os.path.join(view_dir, "texmf-var", "fonts", "cache").replace(
-                os.sep, "/"
-            )
+        # Windows' script launchers look for their Lua driver beside the
+        # programs, as in a full TeX Live
+        for rel in (
+            "texmf-dist/scripts/texlive/runscript.tlu",
+            "texmf-dist/web2c/texmf.cnf",
+        ):
+            src = find_source(rel)
+            if src is not None:
+                link_file(src, os.path.join(tmp_dir, rel))
+        # Every package's tree stays where it is in the store, each with its
+        # own file database, and kpathsea searches them all. The environment's
+        # own tree holds what's generated for it.
+        trees = sorted(
+            os.path.join(d, "texmf-dist").replace(os.sep, "/")
+            for d in pkg_dirs.values()
+            if os.path.isdir(os.path.join(d, "texmf-dist"))
         )
-        + "</cachedir>",
-        "</fontconfig>",
-    ]
-    os.makedirs(os.path.join(var_dir, "fonts", "conf"))
-    with open(
-        os.path.join(var_dir, "fonts", "conf", "fonts.conf"),
-        "w",
-        newline="\n",
-    ) as f:
-        f.write("\n".join(fonts_conf) + "\n")
-    # Formats depend on their engine and the packages TeX Live says trigger
-    # a rebuild, so they're cached in the store by a hash of those, and an
-    # environment that differs only in, e.g., siunitx, reuses them
-    bin_dir = os.path.join(tmp_dir, "bin", platform)
-    env_vars = get_run_env_vars(tmp_dir, platform)
-    engine_pkgs = {
-        os.path.basename(rel): os.path.relpath(src, store_dir)
-        .replace(os.sep, "/")
-        .split("/")[1]
-        for rel, src in owners.items()
-        if rel.startswith(f"bin/{platform}/")
-    }
-    write_ls_r(var_dir)
-    formats: list[tuple[dict[str, str], str]] = []
-    for name in sorted(pkg_dirs):
-        for e in read_executes(pkg_dirs[name]):
-            if not e.startswith("AddFormat"):
-                continue
-            fmt = parse_execute_args(e[len("AddFormat") :])
-            engine = fmt.get("engine", "")
-            if fmt.get("mode") == "disabled" or not os.path.isfile(
-                os.path.join(bin_dir, engine + exe)
-            ):
-                continue
-            if engine in ("mpost", "mf", "mf-nowin"):
-                continue
-            key_parts = [
-                platform,
-                e,
-                f"kpathsea.{platform}:"
-                f"{packages.get(f'kpathsea.{platform}', {}).get('revision')}",
-            ]
-            engine_pkg = engine_pkgs.get(engine + exe, "")
-            key_parts.append(
-                f"{engine_pkg}:{packages.get(engine_pkg, {}).get('revision')}"
-            )
-            for trigger in fmt.get("fmttriggers", "").split(","):
-                key_parts.append(
-                    f"{trigger}:{packages.get(trigger, {}).get('revision')}"
+        cnf = [
+            "% Generated by Calkit for a TeX Live environment",
+            "TEXMFROOT = $SELFAUTOPARENT",
+            "TEXMFDIST = {" + ",".join(trees) + "}",
+            "TEXMFVAR = $SELFAUTOPARENT/texmf-var",
+            "TEXMFCONFIG = $SELFAUTOPARENT/texmf-var",
+            "TEXMFSYSVAR = $SELFAUTOPARENT/texmf-var",
+            "TEXMFSYSCONFIG = $SELFAUTOPARENT/texmf-var",
+            "TEXMFLOCAL = $SELFAUTOPARENT/texmf-var",
+            # Nothing from the user's own trees, so a build only sees what the
+            # lock pins
+            "TEXMFHOME = $SELFAUTOPARENT/texmf-home",
+            "TEXMFAUXTREES = {}",
+            # Fonts are looked for in the environment, not the system
+            "OSFONTDIR = $SELFAUTOPARENT/texmf-home",
+        ]
+        with open(os.path.join(tmp_dir, "texmf.cnf"), "w", newline="\n") as f:
+            f.write("\n".join(cnf) + "\n")
+        var_dir = os.path.join(tmp_dir, "texmf-var")
+        os.makedirs(var_dir)
+        languages = create_language_files(pkg_dirs, var_dir)
+        create_font_maps(pkg_dirs, var_dir)
+        # LuaTeX looks for fonts in TeX's trees only, not the system's, which
+        # also saves it indexing every font on the machine
+        luaotfload_conf = os.path.join(
+            var_dir, "tex", "generic", "config", "luaotfload.conf"
+        )
+        with open(luaotfload_conf, "w", newline="\n") as f:
+            f.write("[db]\n    location-precedence = texmf,local\n")
+        # XeTeX does the same through fontconfig, which reads this, except on
+        # macOS, where it also sees the system's. It's written for where the
+        # environment ends up, since fontconfig writes its cache there.
+        font_dirs = sorted(
+            os.path.join(tree, "fonts", kind)
+            for tree in trees
+            for kind in ("opentype", "truetype", "type1")
+            if os.path.isdir(os.path.join(tree, "fonts", kind))
+        )
+        fonts_conf = [
+            '<?xml version="1.0"?>',
+            '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">',
+            "<fontconfig>",
+            *(f"  <dir>{escape(d)}</dir>" for d in font_dirs),
+            "  <cachedir>"
+            + escape(
+                os.path.join(view_dir, "texmf-var", "fonts", "cache").replace(
+                    os.sep, "/"
                 )
-            for pattern in fmt.get("patterns", "").split(","):
-                key_parts.append(languages.get(pattern, ""))
-            key = hashlib.md5("\n".join(key_parts).encode()).hexdigest()
-            fmt_dir = os.path.join(
-                store_dir, "formats", f"{fmt['name']}-{key[:16]}"
             )
-            formats.append((fmt, fmt_dir))
-    # In parallel, since each is one process and LaTeX's take a while
-    with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
-        list(
-            pool.map(
-                lambda job: build_format(
-                    job[0], bin_dir, exe, env_vars, job[1], verbose
-                ),
-                [
-                    (fmt, fmt_dir)
-                    for fmt, fmt_dir in formats
-                    if not os.path.isfile(
-                        os.path.join(fmt_dir, fmt["name"] + ".fmt")
+            + "</cachedir>",
+            "</fontconfig>",
+        ]
+        os.makedirs(os.path.join(var_dir, "fonts", "conf"))
+        with open(
+            os.path.join(var_dir, "fonts", "conf", "fonts.conf"),
+            "w",
+            newline="\n",
+        ) as f:
+            f.write("\n".join(fonts_conf) + "\n")
+        # Formats depend on their engine and the packages TeX Live says trigger
+        # a rebuild, so they're cached in the store by a hash of those, and an
+        # environment that differs only in, e.g., siunitx, reuses them
+        bin_dir = os.path.join(tmp_dir, "bin", platform)
+        env_vars = get_run_env_vars(tmp_dir, platform)
+        engine_pkgs = {
+            os.path.basename(rel): os.path.relpath(src, store_dir)
+            .replace(os.sep, "/")
+            .split("/")[1]
+            for rel, src in owners.items()
+            if rel.startswith(f"bin/{platform}/")
+        }
+        write_ls_r(var_dir)
+        formats: list[tuple[dict[str, str], str]] = []
+        for name in sorted(pkg_dirs):
+            for e in read_executes(pkg_dirs[name]):
+                if not e.startswith("AddFormat"):
+                    continue
+                fmt = parse_execute_args(e[len("AddFormat") :])
+                engine = fmt.get("engine", "")
+                if fmt.get("mode") == "disabled" or not os.path.isfile(
+                    os.path.join(bin_dir, engine + exe)
+                ):
+                    continue
+                if engine in ("mpost", "mf", "mf-nowin"):
+                    continue
+                key_parts = [
+                    platform,
+                    e,
+                    f"kpathsea.{platform}:"
+                    f"{packages.get(f'kpathsea.{platform}', {}).get('revision')}",
+                ]
+                engine_pkg = engine_pkgs.get(engine + exe, "")
+                key_parts.append(
+                    f"{engine_pkg}:{packages.get(engine_pkg, {}).get('revision')}"
+                )
+                for trigger in fmt.get("fmttriggers", "").split(","):
+                    key_parts.append(
+                        f"{trigger}:{packages.get(trigger, {}).get('revision')}"
                     )
-                ],
+                for pattern in fmt.get("patterns", "").split(","):
+                    key_parts.append(languages.get(pattern, ""))
+                key = hashlib.md5("\n".join(key_parts).encode()).hexdigest()
+                fmt_dir = os.path.join(
+                    store_dir, "formats", f"{fmt['name']}-{key[:16]}"
+                )
+                formats.append((fmt, fmt_dir))
+        # In parallel, since each is one process and LaTeX's take a while
+        with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
+            list(
+                pool.map(
+                    lambda job: build_format(*job),
+                    [
+                        (fmt, fmt_dir)
+                        for fmt, fmt_dir in formats
+                        if not os.path.isfile(
+                            os.path.join(fmt_dir, fmt["name"] + ".fmt")
+                        )
+                    ],
+                )
             )
-        )
-    for fmt, fmt_dir in formats:
-        link_file(
-            os.path.join(fmt_dir, fmt["name"] + ".fmt"),
-            os.path.join(
-                var_dir, "web2c", fmt["engine"], fmt["name"] + ".fmt"
-            ),
-        )
-    write_ls_r(var_dir)
-    with open(os.path.join(tmp_dir, COMPLETE_MARKER), "w") as f:
-        f.write(json.dumps(sorted(packages)) + "\n")
+        for fmt, fmt_dir in formats:
+            if not os.path.isfile(os.path.join(fmt_dir, fmt["name"] + ".fmt")):
+                continue
+            link_file(
+                os.path.join(fmt_dir, fmt["name"] + ".fmt"),
+                os.path.join(
+                    var_dir, "web2c", fmt["engine"], fmt["name"] + ".fmt"
+                ),
+            )
+        write_ls_r(var_dir)
+        with open(os.path.join(tmp_dir, COMPLETE_MARKER), "w") as f:
+            f.write(json.dumps(sorted(packages)) + "\n")
+    except BaseException:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
     try:
         os.rename(tmp_dir, view_dir)
     except OSError:
@@ -1099,48 +1164,6 @@ def assemble_view(lock: dict, platform: str, verbose: bool = False) -> str:
         if not os.path.isfile(os.path.join(view_dir, COMPLETE_MARKER)):
             raise
     return view_dir
-
-
-def build_format(
-    fmt: dict[str, str],
-    bin_dir: str,
-    exe: str,
-    env_vars: dict[str, str],
-    fmt_dir: str,
-    verbose: bool = False,
-) -> None:
-    """Build a format into the store, as fmtutil would."""
-    import shlex
-    import tempfile
-
-    name = fmt["name"]
-    print(f"Building TeX format {name}", file=sys.stderr)
-    tmp_root = os.path.join(get_store_dir(), "tmp")
-    os.makedirs(tmp_root, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=tmp_root) as tmp_dir:
-        cmd = [
-            os.path.join(bin_dir, fmt["engine"] + exe),
-            "-ini",
-            f"-jobname={name}",
-            f"-progname={name}",
-        ] + shlex.split(fmt.get("options", ""))
-        result = subprocess.run(
-            cmd,
-            cwd=tmp_dir,
-            env=env_vars,
-            stdin=subprocess.DEVNULL,
-            capture_output=not verbose,
-        )
-        built = os.path.join(tmp_dir, name + ".fmt")
-        if result.returncode or not os.path.isfile(built):
-            log = os.path.join(tmp_dir, name + ".log")
-            tail = ""
-            if os.path.isfile(log):
-                with open(log, errors="replace") as f:
-                    tail = "".join(f.readlines()[-20:])
-            raise RuntimeError(f"Failed to build TeX format {name}:\n{tail}")
-        os.makedirs(fmt_dir, exist_ok=True)
-        os.replace(built, os.path.join(fmt_dir, name + ".fmt"))
 
 
 def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:

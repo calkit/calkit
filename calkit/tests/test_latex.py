@@ -905,38 +905,44 @@ def test_find_named_tex_files(tmp_dir):
     ]
 
 
-def test_get_latexmk_engine(tmp_dir):
-    from calkit.latex import get_latexmk_engine
+def test_get_latexmk_programs(tmp_dir):
+    from calkit.latex import get_latexmk_programs
 
     base = ["latexmk", "-pdf", "-cd"]
     # Options, the last of which wins, as in latexmk
     for args, expected in [
-        ([], "pdflatex"),
-        (["-xelatex"], "xelatex"),
-        (["-pdfxe"], "xelatex"),
-        (["-pdflua"], "lualatex"),
-        (["-xelatex", "-pdf"], "pdflatex"),
-        (["-latex"], "latex"),
-        (["-pdfdvi"], "latex"),
-        (["-xdv"], "xelatex"),
-        (["-pdflatex=xelatex -shell-escape %O %S"], "xelatex"),
-        (["-e", "$pdf_mode = 5;"], "xelatex"),
+        ([], ["pdflatex"]),
+        (["-xelatex"], ["xelatex"]),
+        (["-pdfxe"], ["xelatex"]),
+        (["-pdflua"], ["lualatex"]),
+        (["-xelatex", "-pdf"], ["pdflatex"]),
+        (["-latex"], ["latex"]),
+        (["-xdv"], ["xelatex"]),
+        (["-pdflatex=xelatex -shell-escape %O %S"], ["xelatex"]),
+        (["-e", "$pdf_mode = 5;"], ["xelatex"]),
+        # Through DVI or PostScript, with the converters that takes
+        (["-pdfdvi"], ["latex", "dvipdf"]),
+        (["-pdfps"], ["latex", "dvips", "ps2pdf"]),
+        (
+            ["-pdfdvi", "-e", "$dvipdf = 'dvipdfmx %O -o %D %S';"],
+            ["latex", "dvipdfmx"],
+        ),
     ]:
-        assert get_latexmk_engine(base + args + ["main.tex"]) == expected
+        assert get_latexmk_programs(base + args + ["main.tex"]) == expected
     # The rc file where latexmk runs comes before the options, so Calkit's
     # -pdf overrides its mode but not a command it sets
     with open(".latexmkrc", "w") as f:
         f.write("# $pdf_mode = 4;\n$pdf_mode = 5;\n")
-    assert get_latexmk_engine(base + ["main.tex"]) == "pdflatex"
+    assert get_latexmk_programs(base + ["main.tex"]) == ["pdflatex"]
     with open(".latexmkrc", "w") as f:
         f.write("$pdflatex = 'xelatex %O %S';\n")
-    assert get_latexmk_engine(base + ["main.tex"]) == "xelatex"
+    assert get_latexmk_programs(base + ["main.tex"]) == ["xelatex"]
     os.remove(".latexmkrc")
     # One given with -r is read where it appears
     os.makedirs("paper")
     with open("paper/latexmkrc", "w") as f:
         f.write("$pdf_mode = 5;\n")
     cmd = base + ["-r", "paper/latexmkrc", "main.tex"]
-    assert get_latexmk_engine(cmd) == "xelatex"
+    assert get_latexmk_programs(cmd) == ["xelatex"]
     cmd = ["latexmk", "-r", "paper/latexmkrc", "-pdf", "main.tex"]
-    assert get_latexmk_engine(cmd) == "pdflatex"
+    assert get_latexmk_programs(cmd) == ["pdflatex"]

@@ -197,6 +197,44 @@ def test_parse_and_resolve(tmp_path, monkeypatch):
     assert texlive.get_selected_env("py") is None
     assert texlive.get_selected_env("nope") is None
     assert texlive.get_selected_env(None) is None
+    # Only a release the archive doesn't have falls back to the moving
+    # repository; any other failure is reported, rather than unpinning
+    import requests
+
+    monkeypatch.undo()
+
+    def head(status):
+        def fake_head(url, **kwargs):
+            resp = requests.Response()
+            resp.status_code = status
+            resp.url = url
+            return resp
+
+        return fake_head
+
+    frozen = texlive.FROZEN_REPOSITORY_TEMPLATE.format(release=2025)
+    for status, expected in [
+        (200, frozen),
+        (404, texlive.CURRENT_REPOSITORY),
+        (503, None),
+    ]:
+        monkeypatch.setattr(requests, "head", head(status))
+        if expected is None:
+            with pytest.raises(requests.HTTPError):
+                texlive.get_repository_url({"release": 2025})
+        else:
+            assert texlive.get_repository_url({"release": 2025}) == expected
+    # Musl Linux is told from its loader, since its libc reports nothing
+    import glob
+    import platform
+
+    monkeypatch.setattr(texlive.sys, "platform", "linux")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(platform, "libc_ver", lambda: ("", ""))
+    monkeypatch.setattr(glob, "glob", lambda pattern: [])
+    assert texlive.get_platform() == "x86_64-linux"
+    monkeypatch.setattr(glob, "glob", lambda pattern: [pattern])
+    assert texlive.get_platform() == "x86_64-linuxmusl"
 
 
 def test_extract_container(tmp_path, monkeypatch):
@@ -372,7 +410,7 @@ def test_create_language_files_and_font_maps(tmp_path):
 
 
 @pytest.mark.xdist_group("texlive")
-def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch):
+def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch, capsys):
     monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
     env: dict = {"kind": "texlive"}
     calkit.save_calkit_info({"environments": {"tex": env}})
@@ -462,3 +500,29 @@ def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch):
     )
     # Rebuilding assembles the environment again from the store
     assert texlive.check("tex", env, rebuild=True) == new_view_dir
+    # A format other than LaTeX's that fails to build is skipped, as fmtutil
+    # does, while one of LaTeX's fails the assembly, leaving nothing behind
+    read_executes = texlive.read_executes
+
+    def add_format(name):
+        def read(pkg_dir):
+            executes = read_executes(pkg_dir)
+            if os.path.basename(os.path.dirname(pkg_dir)) == "latex-bin":
+                executes.append(
+                    f"AddFormat name={name} engine=pdftex "
+                    'options="-etex calkit-nonexistent.ini"'
+                )
+            return executes
+
+        return read
+
+    monkeypatch.setattr(texlive, "read_executes", add_format("ckbogus"))
+    assert texlive.check("tex", env, rebuild=True) == new_view_dir
+    assert "skipping it; TeX format ckbogus failed" in capsys.readouterr().err
+    monkeypatch.setattr(texlive, "read_executes", add_format("latex"))
+    with pytest.raises(RuntimeError, match="TeX format latex failed"):
+        texlive.check("tex", env, rebuild=True)
+    envs_dir = os.path.join(texlive.get_store_dir(), "envs")
+    assert not [d for d in os.listdir(envs_dir) if d.startswith("tmp")]
+    monkeypatch.setattr(texlive, "read_executes", read_executes)
+    assert texlive.check("tex", env) == new_view_dir

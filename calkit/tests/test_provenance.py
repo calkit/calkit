@@ -1026,6 +1026,22 @@ def test_find_provenance_gaps():
                 "deps": ["summarize.py", "params.yaml", "data/loose.json"],
                 "outs": ["results/summary.json"],
             },
+            # Plots made one by one into a folder, which another copies
+            "plot": {
+                "cmd": "python plot.py",
+                "deps": ["plot.py", "data/measured.csv"],
+                "outs": ["plots/a.png"],
+            },
+            "plot-raw": {
+                "cmd": "python plot-raw.py",
+                "deps": ["plot-raw.py", "data/raw.csv"],
+                "outs": ["plots/b.png"],
+            },
+            "copy-plots": {
+                "cmd": "calkit map-paths",
+                "deps": ["plots"],
+                "outs": ["paper/plots"],
+            },
         }
     }
     # A run records its inputs, which is what's followed where it exists
@@ -1087,6 +1103,12 @@ def test_find_provenance_gaps():
     assert gaps(["data/box.csv", "data/laptop.csv"]) == [
         "data/box.csv is imported from somewhere that can't be checked",
         "data/laptop.csv is imported from somewhere that can't be checked",
+    ]
+    # A folder is followed back through the stages making what's in it
+    assert gaps(["paper/plots/a.png"]) == [
+        "origin not defined for data/raw.csv (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/b.png <- stage plot-raw "
+        "<- data/raw.csv)"
     ]
     # A matrix stage that hasn't run produces nothing known yet
     assert gaps(["figures/sweep-1.png"]) == [

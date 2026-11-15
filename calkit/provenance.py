@@ -1431,6 +1431,18 @@ def find_provenance_gaps(
             return
         stage = producer(path)
         if stage is None:
+            # A folder whose contents stages produce, e.g., figures a stage
+            # copies, comes from those stages
+            inner = [
+                out
+                for _, outs in stages.values()
+                for out in outs
+                if out != path and under(out, path)
+            ]
+            for out in inner:
+                walk(out, trail + [ProvenanceStep(path)])
+            if inner:
+                return
             # An entry naming a stage not compiled yet is taken at its word
             if not any(e.get("stage") is not None for e in covering):
                 if is_data(path) and path not in gaps:

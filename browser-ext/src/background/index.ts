@@ -394,10 +394,16 @@ async function handle(
           },
         },
       );
-    case "project.pipeline":
+    case "project.pipeline": {
+      // As it is on this computer, when it's here, rather than as pushed
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        return askLocal<ProjectPipeline>({ type: "project.pipeline", project });
+      }
       return request<ProjectPipeline>(
         `${projectPath(message.owner, message.project)}/pipeline`,
       );
+    }
     case "project.pipelineRuns": {
       // Run on this computer when it's here, rather than on GitHub Actions
       const project = `${message.owner}/${message.project}`;

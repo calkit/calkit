@@ -271,6 +271,12 @@ def get_reply(msg: dict) -> dict:
                 path=msg.get("path"),
                 pull=msg.get("pull", True) is not False,
             )
+        elif kind == "project.pipeline":
+            owner, name = split_project(msg.get("project"))
+            paths = get_checkout_paths(owner, name)
+            if not paths:
+                raise ValueError(f"{owner}/{name} isn't on this computer")
+            result = get_pipeline(paths[0])
         elif kind == "publication.pdf":
             owner, name = split_project(msg.get("project"))
             paths = get_checkout_paths(owner, name)
@@ -1259,6 +1265,64 @@ def run_job(job_id: str) -> None:
                 "committed_project": after["project"] != before["project"],
             }
     save(job)
+
+
+def get_pipeline(wdir: str) -> dict:
+    """A checkout's pipeline as the hub summarizes one: the stages in
+    calkit.yaml's order, each one's status here, and the compiled DVC
+    stages, with what each runs, reads, and makes.
+
+    Environments aren't checked, since that can build them, which a look
+    at the pipeline shouldn't do.
+    """
+    import calkit.dvc
+    import calkit.pipeline
+
+    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    ck_stages = list((ck_info.get("pipeline") or {}).get("stages") or {})
+    prev_wdir = os.getcwd()
+    try:
+        os.chdir(wdir)
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info,
+            check_environments=False,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+            quiet_environment_checks=True,
+        )
+        dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
+        lock_stages = set(calkit.dvc.read_lock_stages())
+    finally:
+        os.chdir(prev_wdir)
+    stage_statuses = {}
+    for name in ck_stages:
+        stale = status.stale_stages.get(name)
+        if name not in lock_stages:
+            state = "not-run"
+        elif stale is None:
+            state = "up-to-date"
+        elif stale.always_run:
+            state = "always-run"
+        else:
+            state = "stale"
+        stage_statuses[name] = {
+            "status": state,
+            "modified_command": bool(stale and stale.modified_command),
+            "modified_inputs": stale.modified_inputs if stale else [],
+            "modified_outputs": stale.modified_outputs if stale else [],
+            "missing_outputs": stale.stale_outputs if stale else [],
+        }
+    return {
+        "ck_stages": ck_stages,
+        "stage_statuses": stage_statuses,
+        "status": "stale" if status.is_stale else "up-to-date",
+        "error": "; ".join(status.errors) or None,
+        "dvc_stages": {
+            name: stage
+            for name, stage in dvc_stages.items()
+            if isinstance(stage, dict)
+        },
+    }
 
 
 def get_checkout_status(wdir: str) -> dict:

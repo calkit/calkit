@@ -836,3 +836,50 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
             }
         )
         assert "whole number" in reply["error"]
+
+
+def test_get_pipeline(tmp_path):
+    from calkit.browser_link import get_pipeline
+
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    # Declared out of name order, which is the order they're listed in
+    stages = {
+        "make-b": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo b > b.txt",
+            "outputs": ["b.txt"],
+        },
+        "make-a": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo a > a.txt",
+            "outputs": ["a.txt"],
+        },
+    }
+    with open(project / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    cwd = os.getcwd()
+    res = get_pipeline(str(project))
+    assert os.getcwd() == cwd
+    assert res["ck_stages"] == ["make-b", "make-a"]
+    assert res["status"] == "stale"
+    assert res["stage_statuses"]["make-b"]["status"] == "not-run"
+    assert res["dvc_stages"]["make-a"]["cmd"].endswith("echo a > a.txt")
+    assert res["dvc_stages"]["make-a"]["outs"] == ["a.txt"]
+    subprocess.check_call(["calkit", "run"], cwd=project)
+    res = get_pipeline(str(project))
+    assert res["status"] == "up-to-date"
+    assert {s["status"] for s in res["stage_statuses"].values()} == {
+        "up-to-date"
+    }
+    # A changed command makes it stale, and says so
+    stages["make-a"]["command"] = "echo A > a.txt"
+    with open(project / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    status = get_pipeline(str(project))["stage_statuses"]
+    assert status["make-a"]["status"] == "stale"
+    assert status["make-a"]["modified_command"]
+    assert status["make-b"]["status"] == "up-to-date"

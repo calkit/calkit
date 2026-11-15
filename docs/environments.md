@@ -1195,6 +1195,7 @@ which adds this to `calkit.yaml`:
 environments:
   tex:
     kind: texlive
+    release: 2025
     packages:
       - siunitx
       - booktabs
@@ -1215,7 +1216,10 @@ packages never change, so the lock Calkit writes to
 `.calkit/env-locks/tex.json` means the same TeX on every computer, years
 later.
 The lock covers macOS, Linux, and Windows at once.
-Set `release` to use another, e.g., `release: 2024`.
+`calkit new texlive-env` writes the release out, so the environment only
+moves to a newer one when you change `release`.
+Without `release`, an environment uses Calkit's default, which a newer
+version of Calkit may change the next time it's locked.
 To drop packages a document no longer needs, delete the lock;
 the next build adds back the ones it still uses.
 

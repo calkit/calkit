@@ -518,11 +518,18 @@ def test_new_uv_env(tmp_dir):
 @pytest.mark.xdist_group("texlive")
 def test_new_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    from calkit.environments import texlive
+
     subprocess.check_call(["calkit", "init"])
     # Locked, installed, and committed with its lock
     subprocess.check_call(["calkit", "new", "texlive-env", "booktabs"])
     env = calkit.load_calkit_info()["environments"]["tex"]
-    assert env == {"kind": "texlive", "packages": ["booktabs"]}
+    # The release is written out, so a new default doesn't move it
+    assert env == {
+        "kind": "texlive",
+        "release": texlive.DEFAULT_RELEASE,
+        "packages": ["booktabs"],
+    }
     repo = git.Repo()
     assert repo.head.commit.message.strip() == "Add TeX Live environment tex"
     assert ".calkit/env-locks/tex.json" in repo.git.ls_files().split()

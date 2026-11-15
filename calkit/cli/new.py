@@ -2722,7 +2722,10 @@ def new_texlive_env(
         int | None,
         typer.Option(
             "--release",
-            help="TeX Live release; defaults to the latest frozen one.",
+            help=(
+                "TeX Live release; defaults to the latest frozen one, "
+                "written out so it only changes when you change it."
+            ),
         ),
     ] = None,
     description: Annotated[
@@ -2749,6 +2752,7 @@ def new_texlive_env(
     without Docker or a system TeX.
     """
     from calkit.cli.check import check_environment
+    from calkit.environments.texlive import DEFAULT_RELEASE
 
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
@@ -2757,9 +2761,8 @@ def new_texlive_env(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
-    env: dict = {"kind": "texlive"}
-    if release is not None:
-        env["release"] = release
+    # Pinned, so a new default in Calkit doesn't move it
+    env: dict = {"kind": "texlive", "release": release or DEFAULT_RELEASE}
     if packages:
         env["packages"] = packages
     if description is not None:

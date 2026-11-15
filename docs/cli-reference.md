@@ -1515,14 +1515,14 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                          |
-| ------------------- | ------- | -------- | ------- | ---------------------------------------------------- |
-| `--name`, `-n`      | str     | no       | tex     | Environment name.                                    |
-| `--release`         | int     | no       |         | TeX Live release; defaults to the latest frozen one. |
-| `--description`     | str     | no       |         | Description.                                         |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite an existing environment.                   |
-| `--no-check`        | boolean | no       | False   | Don't lock and install it now.                       |
-| `--no-commit`       | boolean | no       | False   | Do not commit changes.                               |
+| Option              | Type    | Required | Default | Description                                                                                             |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | str     | no       | tex     | Environment name.                                                                                       |
+| `--release`         | int     | no       |         | TeX Live release; defaults to the latest frozen one, written out so it only changes when you change it. |
+| `--description`     | str     | no       |         | Description.                                                                                            |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite an existing environment.                                                                      |
+| `--no-check`        | boolean | no       | False   | Don't lock and install it now.                                                                          |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                  |
 
 <a id="subcommand-new-create-nix-env"></a>
 

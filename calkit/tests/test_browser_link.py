@@ -883,3 +883,25 @@ def test_get_pipeline(tmp_path):
     assert status["make-a"]["status"] == "stale"
     assert status["make-a"]["modified_command"]
     assert status["make-b"]["status"] == "up-to-date"
+
+
+def test_get_figures(tmp_path):
+    from calkit.browser_link import get_figures
+
+    project = tmp_path / "project"
+    (project / "figures").mkdir(parents=True)
+    subprocess.check_call(["git", "init", "-q"], cwd=project)
+    (project / "figures" / "a.png").write_text("png")
+    (project / "calkit.yaml").write_text(
+        "figures:\n  - path: figures/b.svg\n    title: The setup\n"
+        "misc:\n  - path: paper/drawn.png\n    created_by:\n"
+        "      - name: Pat\n"
+    )
+    assert get_figures(str(project)) == {
+        "items": [
+            {"path": "figures/b.svg", "title": "The setup"},
+            {"path": "figures/a.png", "title": "a"},
+            {"path": "paper/drawn.png", "title": "drawn"},
+        ],
+        "total": 3,
+    }

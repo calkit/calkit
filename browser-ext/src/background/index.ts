@@ -331,6 +331,15 @@ async function handle(
         `${projectPath(message.owner, message.project)}/contents-paths`,
       );
     case "project.figures": {
+      // As they are on this computer, when it's here, including ones not
+      // pushed yet
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<FiguresPage>({
+          type: "project.figures",
+          project: local,
+        });
+      }
       // The hub pages at most 100 figures, so gather paths and titles only
       const items: FiguresPage["items"] = [];
       let total = 0;

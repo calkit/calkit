@@ -3487,39 +3487,9 @@ def _discover_figures(
 
     for path in _tree_figure_paths(repo, ref):
         _maybe_add_figure(path)
-    # An image a stage makes, or whose origin is recorded, is a figure
-    # wherever it is, e.g., one exported into the paper's folder, unless
-    # it's a document, e.g., the paper's own PDF
-    documents = {
-        str(entry.get("path"))
-        for section in ("publications", "presentations")
-        for entry in ck_info_full.get(section) or []
-        if isinstance(entry, dict)
-    }
-    images: list[str] = []
-    for stage in (
-        (ck_info_full.get("pipeline") or {}).get("stages") or {}
-    ).values():
-        if not isinstance(stage, dict) or stage.get("kind") == "latex":
-            continue
-        for out in stage.get("outputs") or []:
-            images.append(out.get("path") if isinstance(out, dict) else out)
-    images += [
-        entry.get("path")
-        for entry in ck_info_full.get("misc") or []
-        if isinstance(entry, dict)
-    ]
-    for path in images:
-        if (
-            isinstance(path, str)
-            # Not one of a stage's iterations, e.g., fig-{n}.png
-            and "{" not in path
-            and posixpath.splitext(path)[1].lower() in FIGURE_EXTS
-            and not any(p.startswith(".") for p in path.split("/"))
-            and path not in declared_paths
-            and path not in documents
-            and not _under_any(path, copies)
-        ):
+    # And images calkit.yaml says the origin of, wherever they are
+    for path in calkit.pipeline.get_figure_paths_with_origins(ck_info_full):
+        if path not in declared_paths:
             figures.append({"path": path, "title": title_from_path(path)})
             declared_paths.add(path)
     # Also auto-detect figures from DVC lock outs (files stored with DVC)

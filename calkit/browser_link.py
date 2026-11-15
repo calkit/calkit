@@ -271,6 +271,12 @@ def get_reply(msg: dict) -> dict:
                 path=msg.get("path"),
                 pull=msg.get("pull", True) is not False,
             )
+        elif kind == "project.figures":
+            owner, name = split_project(msg.get("project"))
+            paths = get_checkout_paths(owner, name)
+            if not paths:
+                raise ValueError(f"{owner}/{name} isn't on this computer")
+            result = get_figures(paths[0])
         elif kind == "project.pipeline":
             owner, name = split_project(msg.get("project"))
             paths = get_checkout_paths(owner, name)
@@ -1265,6 +1271,25 @@ def run_job(job_id: str) -> None:
                 "committed_project": after["project"] != before["project"],
             }
     save(job)
+
+
+def get_figures(wdir: str) -> dict:
+    """A checkout's figures as the hub lists them, paths and titles only:
+    those declared, detected, and made by a stage or with a recorded
+    origin, as ``calkit list figures`` finds them.
+    """
+    import calkit.pipeline
+
+    items = [
+        {
+            "path": figure["path"],
+            "title": figure.get("title")
+            or os.path.splitext(os.path.basename(figure["path"]))[0],
+        }
+        for figure in calkit.pipeline.list_artifacts("figures", wdir=wdir)
+        if isinstance(figure.get("path"), str)
+    ]
+    return {"items": items, "total": len(items)}
 
 
 def get_pipeline(wdir: str) -> dict:

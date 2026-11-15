@@ -11919,7 +11919,7 @@
           "description": "TeX Live release, e.g., 2025, to install packages from. A past release's repository is frozen, so its lock pins every package for good. Defaults to the latest frozen release.",
           "title": "Release"
         },
-        "repository": {
+        "repository_url": {
           "anyOf": [
             {
               "type": "string"
@@ -11930,7 +11930,7 @@
           ],
           "default": null,
           "description": "TeX Live repository URL to install from instead of the one for 'release', e.g., a local mirror.",
-          "title": "Repository"
+          "title": "Repository Url"
         }
       },
       "title": "TexLiveEnvironment",

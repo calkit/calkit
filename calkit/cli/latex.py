@@ -457,12 +457,43 @@ def _tex_cmd(
     return cmd
 
 
+def _get_texlive_env(environment: str | None) -> tuple[str, dict] | None:
+    """Return the TeX Live environment a build runs in directly, if it's
+    one, prepared as 'calkit xenv' would.
+
+    The project's variables are set first, since a switch can pick by
+    them, and a switch's machine lock is checked.
+    """
+    import dotenv
+
+    from calkit.environments import SWITCH_KIND, get_env
+    from calkit.environments import texlive as env_texlive
+
+    if environment is None:
+        return None
+    ck_info = calkit.load_calkit_info()
+    dotenv.load_dotenv(dotenv_path=".env")
+    calkit.set_env_vars(ck_info=ck_info)
+    texlive_env = env_texlive.get_selected_env(environment)
+    envs = ck_info.get("environments", {})
+    env = get_env(environment, envs)
+    if texlive_env is not None and (env or {}).get("kind") == SWITCH_KIND:
+        from calkit.cli.scheduler import _gate_switch_machine_lock
+
+        assert env is not None
+        _gate_switch_machine_lock(
+            environment, env, texlive_env[0], envs, ck_info
+        )
+    return texlive_env
+
+
 def _run_latexmk(
     latexmk_cmd: list[str],
     env_vars: dict[str, str],
     log_path: str,
     fdb_path: str,
     environment: str | None,
+    texlive_env: tuple[str, dict] | None,
     no_check: bool,
     verbose: bool,
     quiet: bool = False,
@@ -476,8 +507,9 @@ def _run_latexmk(
     the user's to manage, and anything installed in another container is
     gone when it exits. Returns latexmk's exit status.
 
-    ``quiet`` hides latexmk's output, for a caller that reports what went
-    wrong from the log itself.
+    ``texlive_env`` is what ``_get_texlive_env`` returns for
+    ``environment``. ``quiet`` hides latexmk's output, for a caller that
+    reports what went wrong from the log itself.
     """
     import shlex
 
@@ -508,7 +540,6 @@ def _run_latexmk(
 
     fetched: set[str] = set()
     fetchable = None
-    texlive_env = env_texlive.get_selected_env(environment)
     while True:
         if texlive_env is not None:
             # Directly rather than through 'calkit xenv', which would start
@@ -812,7 +843,7 @@ def build(
     log_dir = aux_dir or output_dir or tex_dir
     # A TeX Live environment gets the packages the document names before
     # compiling, since LaTeX stops at the first one missing
-    texlive_env = env_texlive.get_selected_env(environment)
+    texlive_env = _get_texlive_env(environment)
     if texlive_env is not None:
         tex_env_name, tex_env = texlive_env
         try:
@@ -834,6 +865,7 @@ def build(
         log_path=os.path.join(log_dir, stem + ".log"),
         fdb_path=os.path.join(log_dir, stem + ".fdb_latexmk"),
         environment=environment,
+        texlive_env=texlive_env,
         no_check=no_check,
         verbose=verbose,
     ):
@@ -1979,6 +2011,7 @@ def _build_diff(
                 log_path=os.path.join(aux_dir, f"{job}.log"),
                 fdb_path=os.path.join(aux_dir, f"{job}.fdb_latexmk"),
                 environment=environment,
+                texlive_env=_get_texlive_env(environment),
                 no_check=no_check,
                 verbose=verbose,
                 # The log's errors are shown if it fails, and a document

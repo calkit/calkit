@@ -576,6 +576,10 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
         lock = json.load(f)
     assert {"amsmath", "booktabs", "siunitx", "tools"} <= set(lock["added"])
     assert set(lock["added"]) <= set(lock["packages"])
+    # Relocking it explicitly keeps them
+    subprocess.check_call(["calkit", "update", "env", "-n", "tex", "--lock"])
+    with open(".calkit/env-locks/tex.json") as f:
+        assert json.load(f)["added"] == lock["added"]
     # A stage builds in it, with the lock as a dependency, and nothing is
     # out of date afterwards
     os.remove("paper/main.pdf")
@@ -585,6 +589,38 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
         assert ".calkit/env-locks/tex.json" in f.read()
     out = subprocess.check_output(["calkit", "status"], text=True)
     assert "Pipeline is up to date" in out
+
+
+def test_get_texlive_env(tmp_dir, monkeypatch):
+    from calkit.cli import latex as cli_latex
+
+    # Removed afterward, since the project's variables are set in-process
+    monkeypatch.setenv("CK_TEX_TEST", "")
+    monkeypatch.delenv("CK_TEX_TEST")
+    tex = {"kind": "texlive"}
+    calkit.save_calkit_info(
+        {
+            "env_vars": {"CK_TEX_TEST": "1"},
+            "environments": {
+                "tex": tex,
+                "old": {"kind": "texlive", "release": 2024},
+                "auto": {
+                    "kind": "switch",
+                    "switch": [
+                        {
+                            "when": [{"env_var_set": "CK_TEX_TEST"}],
+                            "use": "tex",
+                        },
+                        {"use": "old"},
+                    ],
+                },
+            },
+        }
+    )
+    # A switch picks by the project's variables, as in 'calkit xenv'
+    assert cli_latex._get_texlive_env("auto") == ("tex", tex)
+    assert os.environ["CK_TEX_TEST"] == "1"
+    assert cli_latex._get_texlive_env(None) is None
 
 
 def test_build_localizes_synctex(tmp_dir, monkeypatch):
@@ -1336,6 +1372,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
             log_path=log_path,
             fdb_path=fdb_path,
             environment=None,
+            texlive_env=None,
             no_check=False,
             verbose=False,
             quiet=quiet,

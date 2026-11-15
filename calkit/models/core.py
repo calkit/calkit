@@ -835,7 +835,7 @@ class TexLiveEnvironment(Environment):
             "and Linux on x86_64 and ARM."
         ),
     )
-    repository: str | None = Field(
+    repository_url: str | None = Field(
         default=None,
         description=(
             "TeX Live repository URL to install from instead of the one "

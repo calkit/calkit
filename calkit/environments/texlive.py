@@ -22,8 +22,12 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
 import calkit
+
+if TYPE_CHECKING:
+    from filelock import FileLock
 
 # Bumped when what a lock or environment holds changes meaning, so old ones
 # are relocked or rebuilt rather than misread
@@ -158,7 +162,7 @@ def calc_spec_hash(env: dict) -> str:
     """Hash what an environment's lock is resolved from."""
     spec = {
         "release": env.get("release"),
-        "repository": env.get("repository"),
+        "repository_url": env.get("repository_url"),
         "packages": sorted(get_spec_packages(env)),
         "platforms": get_lock_platforms(env),
         "lock_format": LOCK_FORMAT_VERSION,
@@ -176,8 +180,8 @@ def get_repository_url(env: dict) -> str:
     """
     import requests
 
-    if env.get("repository"):
-        return str(env["repository"]).rstrip("/")
+    if env.get("repository_url"):
+        return str(env["repository_url"]).rstrip("/")
     release = int(env.get("release") or DEFAULT_RELEASE)
     frozen = FROZEN_REPOSITORY_TEMPLATE.format(release=release)
     resp = requests.head(frozen + "/tlpkg/texlive.tlpdb.xz", timeout=30)
@@ -275,7 +279,7 @@ def load_tlpdb(repository: str, max_age_s: float = 86400) -> dict[str, dict]:
     with open(tmp_fpath, "w") as f:
         json.dump(
             {
-                "repository": repository,
+                "repository_url": repository,
                 "frozen": "frozen/1" in config,
                 "packages": packages,
             },
@@ -362,7 +366,7 @@ def create_lock(env: dict, added: list[str] | None = None) -> dict:
         "lock_format": LOCK_FORMAT_VERSION,
         "spec_hash": calc_spec_hash(env),
         "release": release,
-        "repository": repository,
+        "repository_url": repository,
         "platforms": platforms,
         "added": added,
         "packages": {n: get_lock_entry(tlpdb, n) for n in names},
@@ -382,12 +386,41 @@ def read_lock(lock_fpath: str) -> dict | None:
 
 
 def write_lock(lock: dict, lock_fpath: str) -> None:
+    """Write a lock whole, so it's never read half-written."""
     lock_dir = os.path.dirname(lock_fpath)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
-    with open(lock_fpath, "w") as f:
+    tmp_fpath = f"{lock_fpath}.{os.getpid()}.tmp"
+    with open(tmp_fpath, "w", newline="\n") as f:
         json.dump(lock, f, indent=2, sort_keys=True)
         f.write("\n")
+    os.replace(tmp_fpath, lock_fpath)
+
+
+def get_lock_mutex(lock_fpath: str) -> FileLock:
+    """Return a file lock for changing a lock, so concurrent builds don't
+    drop each other's packages.
+
+    Kept in the store, so the project gets no extra files.
+    """
+    from filelock import FileLock
+
+    key = hashlib.md5(os.path.abspath(lock_fpath).encode()).hexdigest()
+    mutex_dir = os.path.join(get_store_dir(), "mutexes")
+    os.makedirs(mutex_dir, exist_ok=True)
+    return FileLock(os.path.join(mutex_dir, key[:16] + ".lock"))
+
+
+def relock(env_name: str, env: dict, wdir: str | None = None) -> dict:
+    """Resolve an environment's lock again, keeping packages builds added,
+    and return it.
+    """
+    lock_fpath = get_lock_fpath(env_name, env, wdir=wdir)
+    with get_lock_mutex(lock_fpath):
+        old_lock = read_lock(lock_fpath)
+        lock = create_lock(env, added=(old_lock or {}).get("added"))
+        write_lock(lock, lock_fpath)
+    return lock
 
 
 def get_platform_packages(lock: dict, platform: str) -> dict[str, dict]:
@@ -440,6 +473,15 @@ def extract_container(archive_fpath: str, dest_dir: str) -> None:
                 # are resolved when an environment is assembled
                 if sys.platform == "win32":
                     continue
+                link_target = os.path.normpath(
+                    os.path.join(os.path.dirname(target), member.linkname)
+                )
+                if os.path.isabs(member.linkname) or not (
+                    link_target.startswith(dest_real + os.sep)
+                ):
+                    raise ValueError(
+                        f"Unsafe link in container: {member.name}"
+                    )
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 os.symlink(member.linkname, target)
             elif member.isfile():
@@ -1038,8 +1080,7 @@ def check(
     lock = read_lock(lock_fpath)
     if lock is None or lock.get("spec_hash") != calc_spec_hash(env):
         print(f"Locking TeX Live environment '{env_name}'", file=sys.stderr)
-        lock = create_lock(env, added=(lock or {}).get("added"))
-        write_lock(lock, lock_fpath)
+        lock = relock(env_name, env, wdir=wdir)
     platform = get_platform()
     if platform not in lock["platforms"]:
         raise ValueError(
@@ -1052,7 +1093,7 @@ def check(
     if not os.path.isfile(os.path.join(view_dir, COMPLETE_MARKER)):
         install_packages(
             get_platform_packages(lock, platform),
-            lock["repository"],
+            lock["repository_url"],
             verbose=verbose,
         )
         assemble_view(lock, platform, verbose=verbose)
@@ -1098,7 +1139,7 @@ def find_packages_for_files(
     LaTeX development format's, e.g., tools' array.sty over
     latex-tools-dev's.
     """
-    tlpdb = load_tlpdb(lock["repository"])
+    tlpdb = load_tlpdb(lock["repository_url"])
     wanted = {"/" + f: f for f in filenames}
     candidates: dict[str, list[tuple[int, str]]] = {}
     for name in sorted(tlpdb):
@@ -1201,17 +1242,20 @@ def add_packages(
     Returns those that weren't already locked.
     """
     lock_fpath = get_lock_fpath(env_name, env, wdir=wdir)
-    lock = read_lock(lock_fpath)
-    if lock is None:
-        raise ValueError(f"TeX Live environment '{env_name}' isn't locked")
-    added = [p for p in dict.fromkeys(packages) if p not in lock["packages"]]
-    if not added:
-        return []
-    tlpdb = load_tlpdb(lock["repository"])
-    for name in resolve_packages(tlpdb, added, lock["platforms"]):
-        lock["packages"].setdefault(name, get_lock_entry(tlpdb, name))
-    lock["added"] = sorted(set(lock.get("added", [])) | set(added))
-    write_lock(lock, lock_fpath)
+    with get_lock_mutex(lock_fpath):
+        lock = read_lock(lock_fpath)
+        if lock is None:
+            raise ValueError(f"TeX Live environment '{env_name}' isn't locked")
+        added = [
+            p for p in dict.fromkeys(packages) if p not in lock["packages"]
+        ]
+        if not added:
+            return []
+        tlpdb = load_tlpdb(lock["repository_url"])
+        for name in resolve_packages(tlpdb, added, lock["platforms"]):
+            lock["packages"].setdefault(name, get_lock_entry(tlpdb, name))
+        lock["added"] = sorted(set(lock.get("added", [])) | set(added))
+        write_lock(lock, lock_fpath)
     return added
 
 

@@ -132,7 +132,7 @@ def test_parse_and_resolve(tmp_path, monkeypatch):
         texlive, "load_tlpdb", lambda repository, max_age_s=0: tlpdb
     )
     assert texlive.find_packages_for_files(
-        {"repository": "x"}, ["array.sty", "article.cls", "nope.sty"]
+        {"repository_url": "x"}, ["array.sty", "article.cls", "nope.sty"]
     ) == {"array.sty": "tools", "article.cls": "latex"}
     # Packages a build adds go in the lock, not the spec, and relocking
     # keeps them, unless the spec has them or the release doesn't
@@ -231,6 +231,17 @@ def test_extract_container(tmp_path):
     with pytest.raises(ValueError, match="Unsafe path"):
         texlive.extract_container(str(tmp_path / "evil.tar.xz"), str(dest))
     assert not (tmp_path / "evil.sty").exists()
+    # Nor through a link pointing outside it
+    if sys.platform != "win32":
+        for i, link in enumerate(["../outside", "/tmp"]):
+            make_container(tmp_path / "link.tar.xz", {"texmf-dist": (link,)})
+            dest = tmp_path / f"link{i}"
+            dest.mkdir()
+            with pytest.raises(ValueError, match="Unsafe link"):
+                texlive.extract_container(
+                    str(tmp_path / "link.tar.xz"), str(dest)
+                )
+            assert not (dest / "texmf-dist").is_symlink()
 
 
 def test_create_language_files_and_font_maps(tmp_path):
@@ -388,6 +399,9 @@ def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch):
     lock = texlive.read_lock(lock_fpath)
     assert lock is not None
     assert lock["added"] == ["booktabs"]
+    # Relocking keeps what builds added
+    assert texlive.relock("tex", env)["added"] == ["booktabs"]
+    assert texlive.read_lock(lock_fpath) == lock
     new_view_dir = texlive.check("tex", env)
     assert new_view_dir != view_dir
     assert os.path.isdir(view_dir)

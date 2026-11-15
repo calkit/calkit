@@ -4075,6 +4075,15 @@ def relock(env_name: str, env: dict) -> None:
         else:
             old_locks[fpath] = None
     try:
+        if kind == "texlive":
+            from calkit.environments import texlive as env_texlive
+
+            # Rather than removing the lock, which would drop the packages
+            # builds added
+            typer.echo(f"Relocking environment '{env_name}'")
+            env_texlive.relock(env_name, env)
+            check_environment(env_name=env_name, verbose=True)
+            return
         if upgrade_cmd is not None:
             typer.echo(f"Running: {' '.join(upgrade_cmd)}")
             if subprocess.run(upgrade_cmd, cwd=env_dir).returncode != 0:

@@ -2669,19 +2669,19 @@ def to_docx(
         tex_env_vars = _tex_env_vars(
             calkit.latex.get_source_date_epoch(source)
         )
-        # A TeX Live environment gets TeX4ht in its lock, as a build gets the
-        # packages it's missing, and runs it as a system TeX would, since
-        # the shell the other environments run it with isn't on Windows
+        # A TeX Live environment gets TeX4ht beside its lock rather than in
+        # it, since a conversion isn't part of the pipeline, and runs it as
+        # a system TeX would, since the shell the other environments run it
+        # with isn't on Windows
         texlive_env = _get_texlive_env(environment)
         m4h_env = os.environ | tex_env_vars
         if texlive_env is not None:
             from calkit.environments import texlive as env_texlive
 
             try:
-                env_texlive.add_packages(
+                view_dir = env_texlive.check_with_extra_packages(
                     *texlive_env, env_texlive.TEX4HT_PACKAGES
                 )
-                view_dir = env_texlive.check(*texlive_env)
             except (ValueError, RuntimeError, OSError) as e:
                 raise_error(f"Environment '{texlive_env[0]}': {e}")
             m4h_env = env_texlive.get_run_env_vars(view_dir) | tex_env_vars

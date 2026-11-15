@@ -39,7 +39,8 @@ VIEW_FORMAT_VERSION = 3
 # default backend
 EXTRA_DEPENDS = {"biblatex": ["biber"]}
 # What converting LaTeX to other formats with make4ht needs, beyond what
-# the document does
+# the document does, which isn't locked, since a conversion isn't part of
+# the pipeline
 TEX4HT_PACKAGES = ["make4ht", "tex4ht", "luaxml"]
 # The latest TeX Live release whose repository is frozen, so locking against
 # it pins every package for good
@@ -1341,6 +1342,39 @@ def add_document_packages(
             if fpath.suffix in (".sty", ".cls")
         ]
     return added_for
+
+
+def check_with_extra_packages(
+    env_name: str,
+    env: dict,
+    packages: list[str],
+    verbose: bool = False,
+    wdir: str | None = None,
+) -> str:
+    """Assemble an environment with packages beyond its lock, without
+    adding them to it, and return its directory.
+
+    For a one-off task outside the pipeline, e.g., converting a document
+    to .docx. The packages come from the lock's repository, like the
+    locked ones, and the environment is kept in the store for next time.
+    """
+    check(env_name, env, verbose=verbose, wdir=wdir)
+    lock = read_lock(get_lock_fpath(env_name, env, wdir=wdir))
+    assert lock is not None
+    tlpdb = load_tlpdb(lock["repository_url"])
+    lock = lock | {"packages": dict(lock["packages"])}
+    for name in resolve_packages(tlpdb, packages, lock["platforms"]):
+        lock["packages"].setdefault(name, get_lock_entry(tlpdb, name))
+    platform = get_platform()
+    view_dir = get_view_dir(lock, platform)
+    if not os.path.isfile(os.path.join(view_dir, COMPLETE_MARKER)):
+        install_packages(
+            get_platform_packages(lock, platform),
+            lock["repository_url"],
+            verbose=verbose,
+        )
+        assemble_view(lock, platform, verbose=verbose)
+    return view_dir
 
 
 def add_packages(

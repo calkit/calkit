@@ -72,6 +72,12 @@ for (const [param, name] of [
   ["bar", "--bar-bg"],
   ["barText", "--bar-fg"],
   ["backdrop", "--backdrop"],
+  ["bg", "--bg"],
+  ["fg", "--fg"],
+  ["muted", "--muted"],
+  ["border", "--border"],
+  ["raised", "--raised"],
+  ["raisedHover", "--raised-hover"],
 ]) {
   const color = params.get(param);
   if (color && CSS.supports("color", color)) {

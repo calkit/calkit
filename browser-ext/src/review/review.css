@@ -9,6 +9,11 @@
   --bar-bg: #2f3a4c;
   --bar-fg: #f4f5f6;
   --backdrop: #2f3a4c;
+  /* The panel's, from Overleaf's theme too */
+  --bg: #fff;
+  --fg: #111827;
+  --raised: #f3f4f6;
+  --raised-hover: #e5e7eb;
 }
 html,
 body {
@@ -21,8 +26,8 @@ body {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  color: #111827;
-  background: #fff;
+  color: var(--fg);
+  background: var(--bg);
 }
 #toolbar {
   display: flex;
@@ -57,7 +62,7 @@ body {
   background: color-mix(in srgb, var(--bar-fg) 20%, transparent);
 }
 button {
-  background: #f3f4f6;
+  background: var(--raised);
   color: inherit;
   border: 1px solid var(--border);
   padding: 2px 8px;
@@ -66,7 +71,7 @@ button {
   font: inherit;
 }
 button:hover {
-  background: #e5e7eb;
+  background: var(--raised-hover);
 }
 button.primary {
   background: var(--accent);
@@ -233,11 +238,11 @@ body.no-comments .ck-layer {
   outline: 1px solid var(--accent);
 }
 .thread .quote {
-  border-left: 2px solid #9ca3af;
+  border-left: 2px solid var(--muted);
   padding-left: 6px;
   margin: 2px 0 6px;
   font-style: italic;
-  color: #374151;
+  color: color-mix(in srgb, var(--fg) 80%, var(--bg));
 }
 .msg {
   margin: 4px 0;
@@ -278,6 +283,8 @@ textarea {
   min-height: 48px;
   resize: vertical;
   font: inherit;
+  color: inherit;
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 4px;
@@ -315,7 +322,7 @@ a {
   align-items: center;
   gap: 2px;
   padding: 4px;
-  background: #fff;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-top: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -326,6 +333,8 @@ a {
 #find input {
   width: 200px;
   font: inherit;
+  color: inherit;
+  background: var(--raised);
   padding: 3px 6px;
   outline: none;
   border: 1px solid var(--border);
@@ -355,7 +364,7 @@ a {
   gap: 4px;
   padding: 3px;
   border-radius: 4px;
-  background: #fff;
+  background: var(--bg);
   border: 1px solid var(--border);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }

@@ -3261,9 +3261,9 @@ function showLocalPdf(link: OverleafLinkPublic, path: string): void {
     title: "PDF from this computer",
     style: { flex: "1", width: "100%", border: "none", background: "#fff" },
   });
-  frame.src = commentsOn
-    ? getReviewUrl(params)
-    : `${chrome.runtime.getURL("viewer.html")}?${params}`;
+  // Always with comments, whose own toggle hides them, since without them
+  // it would be the browser's plain viewer
+  frame.src = getReviewUrl(params);
   // The switch in Overleaf's toolbar says which PDF this is
   const host = el("div", {}, [frame]);
   Object.assign(host.style, {
@@ -3279,11 +3279,10 @@ function showLocalPdf(link: OverleafLinkPublic, path: string): void {
   }
   pane.append(host);
   localPdf = { host, link, path };
-  if (commentsOn) {
-    hideOverleafReview();
-    review = { frame, host, local: true, ready: false, buildId: null };
-  }
+  hideOverleafReview();
+  review = { frame, host, local: true, ready: false, buildId: null };
   mountPdfSwitch();
+  mountCommentsToggle();
 }
 
 function hideLocalPdf(): void {
@@ -3293,6 +3292,7 @@ function hideLocalPdf(): void {
     review = null;
   }
   mountPdfSwitch();
+  mountCommentsToggle();
   if (commentsOn) {
     showOverleafReview();
   }
@@ -3766,6 +3766,21 @@ function getReviewUrl(params: URLSearchParams): string {
   }
   if (pane) {
     all.set("backdrop", getComputedStyle(pane).backgroundColor);
+  }
+  // The panel's, from the variables Overleaf's own themed panels use
+  const theme = getComputedStyle(document.body);
+  for (const [param, name] of [
+    ["bg", "--bg-primary-themed"],
+    ["fg", "--content-primary-themed"],
+    ["muted", "--content-placeholder-themed"],
+    ["border", "--bg-tertiary-themed"],
+    ["raised", "--bg-secondary-themed"],
+    ["raisedHover", "--bg-tertiary-themed"],
+  ]) {
+    const color = theme.getPropertyValue(name).trim();
+    if (color) {
+      all.set(param, color);
+    }
   }
   all.set(
     "key",
@@ -4332,12 +4347,13 @@ function mountCommentsToggle(): void {
   const toolbar = document.querySelector<HTMLElement>(".toolbar-pdf-left");
   const existing = document.getElementById("calkit-comments-toggle");
   const projectId = currentProjectId;
-  if (!toolbar || !projectId || !isExtensionAlive()) {
+  // This computer's PDF always has them, so it's only for Overleaf's
+  if (!toolbar || !projectId || !isExtensionAlive() || localPdf) {
     existing?.remove();
     return;
   }
   // Redrawn by Overleaf, so shown again where it now is
-  if (commentsOn && !localPdf && !review?.host.isConnected) {
+  if (commentsOn && !review?.host.isConnected) {
     review = null;
     showOverleafReview();
   }
@@ -4357,9 +4373,7 @@ function mountCommentsToggle(): void {
       all[projectId] = on;
       void chrome.storage.local.set({ [COMMENTS_KEY]: all });
     });
-    if (localPdf) {
-      showLocalPdf(localPdf.link, localPdf.path);
-    } else if (on) {
+    if (on) {
       showOverleafReview();
     } else {
       hideOverleafReview();

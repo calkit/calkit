@@ -349,7 +349,9 @@ window.addEventListener("message", (event) => {
     };
     active.view.dispatch({
       selection: { anchor: at(message.from), head: at(message.to) },
-      scrollIntoView: true,
+      effects: active.view.constructor.scrollIntoView(at(message.from), {
+        y: "center",
+      }),
     });
     active.view.focus();
   } else if (message.type === "goto" && active) {
@@ -358,9 +360,12 @@ window.addEventListener("message", (event) => {
       return;
     }
     const line = doc.line(message.line);
+    const at = Math.min(line.from + message.column, line.to);
+    // Halfway down the editor, as an editor's go to definition puts it,
+    // with the class Overleaf's CodeMirror is
     active.view.dispatch({
-      selection: { anchor: Math.min(line.from + message.column, line.to) },
-      scrollIntoView: true,
+      selection: { anchor: at },
+      effects: active.view.constructor.scrollIntoView(at, { y: "center" }),
     });
     active.view.focus();
   }

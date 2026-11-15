@@ -1311,18 +1311,22 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     from calkit.cli import latex as cli_latex
     from calkit.latex import find_missing_tex_files
 
-    # What LaTeX says, for a style file and for a font it has no metrics for
+    # What LaTeX says, for a style file, a font it has no metrics or
+    # outlines for, and a Lua module
     log = (
         "! LaTeX Error: File `xurl.sty' not found.\n"
         "! Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable: Metric (TFM) "
         "file not found.\n"
         "! LaTeX Error: File `xurl.sty' not found.\n"
         "[\\directlua]:1: module 'pdftexcmds' not found:\n"
+        "!pdfTeX error: pdflatex (file ecrm1000): Font ecrm1000 at 600 not "
+        "found\n"
     )
     assert find_missing_tex_files(log) == [
         "xurl.sty",
         "pcrr7t.tfm",
         "pdftexcmds.lua",
+        "ecrm1000.pfb",
     ]
     assert find_missing_tex_files("Output written on main.pdf") == []
     os.makedirs("paper")

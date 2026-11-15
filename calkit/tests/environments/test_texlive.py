@@ -134,6 +134,20 @@ def test_parse_and_resolve(tmp_path, monkeypatch):
     assert texlive.find_packages_for_files(
         {"repository_url": "x"}, ["array.sty", "article.cls", "nope.sty"]
     ) == {"array.sty": "tools", "article.cls": "latex"}
+    # T1-encoded Computer Modern's outlines are cm-super's, under other
+    # names, where the release has it
+    lock = {"repository_url": "x"}
+    pfbs = ["ecrm1000.pfb", "tcbx1200.pfb", "pcrr8a.pfb"]
+    assert texlive.find_packages_for_files(lock, pfbs) == {}
+    monkeypatch.setattr(
+        texlive,
+        "load_tlpdb",
+        lambda repository, max_age_s=0: tlpdb | {"cm-super": {"runfiles": []}},
+    )
+    assert texlive.find_packages_for_files(lock, pfbs) == {
+        "ecrm1000.pfb": "cm-super",
+        "tcbx1200.pfb": "cm-super",
+    }
     # Packages a build adds go in the lock, not the spec, and relocking
     # keeps them, unless the spec has them or the release doesn't
     monkeypatch.chdir(tmp_path)

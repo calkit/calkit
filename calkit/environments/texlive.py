@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1206,10 +1207,16 @@ def find_packages_for_files(
             fname = wanted["/" + path.rsplit("/", 1)[-1]]
             rank = int("/latex-dev/" in path or name.endswith("-dev"))
             candidates.setdefault(fname, []).append((rank, name))
+    # cm-super's outlines for the EC and TC fonts, i.e., T1- and
+    # TS1-encoded Computer Modern, are named after the fonts it maps them
+    # from, e.g., sfrm1000.pfb for ecrm1000
+    for fname in filenames:
+        if re.fullmatch(r"(ec|tc)[a-z]{2}\d{4}\.pfb", fname):
+            candidates.setdefault(fname, []).append((0, "cm-super"))
     return {
         fname: min(found)[1]
         for fname, found in candidates.items()
-        if fname in filenames
+        if fname in filenames and min(found)[1] in tlpdb
     }
 
 

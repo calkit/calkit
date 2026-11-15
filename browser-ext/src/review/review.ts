@@ -19,6 +19,7 @@ import {
   type TextRange,
 } from "../../../vscode-ext/src/latex/core";
 import { getLocalPdf } from "../core/local";
+import { type PdfBox, placePdfBoxes } from "../core/pdf-boxes";
 import type {
   FromReview,
   PdfRect,
@@ -1077,7 +1078,48 @@ container.addEventListener("scroll", () => {
   state.scrollTop = container.scrollTop;
   save();
 });
-eventBus.on("textlayerrendered", () => void draw());
+// What's wrong with what the document shows, from the page it's on
+let boxes: PdfBox[] = [];
+function drawBoxes(): void {
+  placePdfBoxes(boxes, (box) =>
+    post({ type: "goto", line: box.line, column: box.column }),
+  );
+}
+eventBus.on("textlayerrendered", () => {
+  void draw();
+  drawBoxes();
+});
+eventBus.on("scalechanging", () => setTimeout(drawBoxes, 0));
+// Where the pointer rests, so the page can say what's there, as it does on
+// its own viewer; a few times a second at most
+let pointerTimer: ReturnType<typeof setTimeout> | undefined;
+let lastPointer: MouseEvent | null = null;
+container.addEventListener("mousemove", (e) => {
+  lastPointer = e;
+  pointerTimer ??= setTimeout(() => {
+    pointerTimer = undefined;
+    const event = lastPointer;
+    const point = event && pointAt(event.clientX, event.clientY);
+    post({
+      type: "pointer",
+      point: point && {
+        page: point.page,
+        x: point.at.x,
+        y: point.at.y,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      },
+    });
+  }, 100);
+});
+for (const type of ["mouseleave", "scroll"]) {
+  container.addEventListener(type, () => {
+    clearTimeout(pointerTimer);
+    pointerTimer = undefined;
+    lastPointer = null;
+    post({ type: "pointer", point: null });
+  });
+}
 new ResizeObserver(() => {
   if (pdfDoc && state.scale === "page-width") {
     viewer.currentScaleValue = "page-width";
@@ -1229,6 +1271,9 @@ window.addEventListener("message", (e) => {
     void draw();
   } else if (msg.type === "status") {
     setStatus(msg.text);
+  } else if (msg.type === "boxes") {
+    boxes = msg.boxes;
+    drawBoxes();
   } else if (msg.type === "reveal") {
     reveal(msg.rect);
   } else if (msg.type === "located") {

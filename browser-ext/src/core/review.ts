@@ -21,6 +21,8 @@ import {
   paragraphLines,
 } from "../../../vscode-ext/src/latex/core";
 
+import type { PdfBox } from "./pdf-boxes";
+
 export type { PdfRect };
 
 /** A thread as the viewer shows it, with where it is in the PDF. */
@@ -43,6 +45,7 @@ export type ToReview =
       stale: string[];
     }
   | { calkit: "review"; type: "status"; text: string }
+  | { calkit: "review"; type: "boxes"; boxes: PdfBox[] }
   | { calkit: "review"; type: "reveal"; rect: PdfRect }
   | {
       calkit: "review";
@@ -96,7 +99,22 @@ export type FromReview =
   | ({ calkit: "review"; type: "delete" } & ThreadRef)
   | ({ calkit: "review"; type: "postToOverleaf" } & ThreadRef)
   | { calkit: "review"; type: "openSource"; file: string; line: number }
-  | { calkit: "review"; type: "openIssue"; url: string };
+  | { calkit: "review"; type: "openIssue"; url: string }
+  // What's wrong at a box, to show in the editor
+  | { calkit: "review"; type: "goto"; line: number; column: number }
+  // Where the pointer rests on the PDF, in points from a page's top left,
+  // and on the viewer's own page, or null once it's off the PDF
+  | {
+      calkit: "review";
+      type: "pointer";
+      point: {
+        page: number;
+        x: number;
+        y: number;
+        clientX: number;
+        clientY: number;
+      } | null;
+    };
 
 /** Who's writing a comment, as the schema names them. */
 export interface CommentAuthor {

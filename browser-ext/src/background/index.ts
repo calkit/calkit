@@ -521,7 +521,7 @@ async function handle(
     case "overleaf.status": {
       const project = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(project)).path) {
-        return askLocal<OverleafSyncStatus[]>({
+        const local = await askLocal<OverleafSyncStatus[]>({
           type: "overleaf.status",
           project,
           overleaf_project_id: message.overleafProjectId,
@@ -529,7 +529,16 @@ async function handle(
           pull: message.pull ?? true,
           overleaf_files: message.overleafFiles,
           overleaf_texts: message.overleafTexts,
+        }).catch((e) => {
+          if (/isn't synced with Overleaf/.test(String(e?.message ?? e))) {
+            return null;
+          }
+          throw e;
         });
+        // Unless the checkout here hasn't pulled a link the hub knows of
+        if (local?.length) {
+          return local;
+        }
       }
       return request<OverleafSyncStatus[]>(
         `${projectPath(message.owner, message.project)}/overleaf-syncs/status`,
@@ -737,18 +746,24 @@ async function handle(
 // Installing, updating, or reloading the extension cuts off the scripts in
 // tabs already open, e.g., Overleaf, or never put them there, so new ones
 // are put in rather than leaving those tabs needing a refresh
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   void (async () => {
     for (const script of chrome.runtime.getManifest().content_scripts ?? []) {
       // Scripts in the page's own world don't depend on the extension, so
-      // they're still running
-      if ((script as { world?: string }).world === "MAIN" || !script.js) {
+      // after a reload or update they're still running, but after the
+      // first install they were never put in
+      const main = (script as { world?: string }).world === "MAIN";
+      if ((main && details.reason !== "install") || !script.js) {
         continue;
       }
       for (const tab of await chrome.tabs.query({ url: script.matches })) {
         if (tab.id !== undefined) {
           await chrome.scripting
-            .executeScript({ target: { tabId: tab.id }, files: script.js })
+            .executeScript({
+              target: { tabId: tab.id },
+              files: script.js,
+              world: main ? "MAIN" : "ISOLATED",
+            })
             .catch(() => undefined);
         }
       }

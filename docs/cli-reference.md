@@ -2943,6 +2943,7 @@ Options:
 | `--path`, `-p` | str     | no       |         | File in the project to open too, e.g., a notebook.                                                                                  |
 | `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                                                |
 | `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder.                              |
+| `--checkout`   | str     | no       |         | Checkout to open, e.g., one of its Git worktrees, rather than finding one.                                                          |
 | `--hub`        | str     | no       |         | Hub to clone it from if it isn't here, e.g., https://calkit.example.edu, or localhost for a development hub. Defaults to calkit.io. |
 
 <a id="command-group-browser-link"></a>

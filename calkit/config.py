@@ -875,13 +875,19 @@ class Settings(BaseSettings):
         os.chmod(fpath, 0o600)
 
 
-def read() -> Settings:
-    """Read the config."""
+def read(project_env: bool = True) -> Settings:
+    """Read the config, without the working directory's ``.env``, i.e., a
+    project's, unless ``project_env``, e.g., for a process that changes
+    directory into projects while it reads the machine's settings.
+    """
     # Update the env prefix in case the environment has changed since
     # import; the YAML source resolves its file path itself
     Settings.model_config["env_prefix"] = (
         "CALKIT" + get_env_suffix(sep="_") + "_"
     )
+    if not project_env:
+        # pydantic-settings' own argument, which mypy doesn't know of
+        return Settings(_env_file=None)  # type: ignore[call-arg]
     return Settings()
 
 

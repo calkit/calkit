@@ -190,6 +190,11 @@ def get_reply(msg: dict) -> dict:
             owner, name = split_project(msg.get("project"))
             cmd = [sys.executable, "-m", "calkit", "open", "project"]
             cmd += [f"{owner}/{name}", "--with", get_editor_info()["editor"]]
+            # The checkout everything else here uses, e.g., a worktree
+            # chosen for it, rather than one the command finds
+            paths = get_checkout_paths(owner, name)
+            if paths:
+                cmd += ["--checkout", paths[0]]
             path = msg.get("path")
             if path is not None:
                 if not isinstance(path, str):
@@ -343,7 +348,8 @@ def get_editor_info() -> dict[str, Any]:
         return found
 
     search_path: str | None = (get_login_shell_env() or os.environ).get("PATH")
-    settings = read_config()
+    # The machine's, not a project's another request is working in
+    settings = read_config(project_env=False)
     if "default_editor" in settings.model_fields_set:
         editor = settings.default_editor
         return {"editor": editor, "editor_installed": find(editor) is not None}
@@ -412,12 +418,21 @@ def get_checkouts_found() -> dict[str, list]:
     return found if isinstance(found, dict) else {}
 
 
-def save_checkouts_found(found: dict[str, list]) -> None:
+def set_checkouts_found(key: str, entry: list | None) -> None:
+    """Record what was found for one project's checkouts, or forget it
+    with ``None``, leaving what other processes found for others.
+    """
+    from filelock import FileLock
+
     os.makedirs(get_host_dir(), exist_ok=True)
-    tmp_path = get_checkouts_found_path() + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(found, f)
-    os.replace(tmp_path, get_checkouts_found_path())
+    path = get_checkouts_found_path()
+    with FileLock(path + ".lock", timeout=60):
+        found = get_checkouts_found()
+        if entry is None:
+            found.pop(key, None)
+        else:
+            found[key] = entry
+        calkit.write_json(path, found)
 
 
 def get_checkouts_key(owner: str, name: str) -> str:
@@ -448,7 +463,7 @@ def get_checkout_paths(
         )
     ):
         paths = sorted(calkit.get_project_checkouts(name, owner=owner))
-        save_checkouts_found(found | {key: [time.time(), paths]})
+        set_checkouts_found(key, [time.time(), paths])
     return sort_checkouts(owner, name, paths)
 
 
@@ -568,38 +583,42 @@ def get_overleaf_links(overleaf_project_id: str) -> list[dict]:
             firsts += [x for x in project_links if x["local_path"] == first]
         return firsts
 
+    from filelock import FileLock
+
     index_path = get_overleaf_index_path()
-    index: dict[str, Any] = {"scanned": 0.0, "checkouts": {}}
-    if os.path.isfile(index_path):
-        try:
-            with open(index_path) as f:
-                index = json.load(f)
-        except ValueError:
-            pass
-    changed = False
-    # Those changed since they were read, or gone
-    for path, entry in list(index["checkouts"].items()):
-        if not os.path.isdir(path):
-            del index["checkouts"][path]
-            changed = True
-        elif entry is None or entry["mtimes"] != get_mtimes(path):
-            index["checkouts"][path] = read_checkout(path)
-            changed = True
-    links = get_links(index)
-    if not links and time.time() - index["scanned"] > LOOKUP_RESCAN_SECONDS:
-        for path in calkit.find_project_dirs():
-            path = os.path.realpath(path)
-            if path not in index["checkouts"]:
+    os.makedirs(os.path.dirname(index_path), exist_ok=True)
+    # One lookup at a time updates it, so neither's changes are lost
+    with FileLock(index_path + ".lock", timeout=60):
+        index: dict[str, Any] = {"scanned": 0.0, "checkouts": {}}
+        if os.path.isfile(index_path):
+            try:
+                with open(index_path) as f:
+                    index = json.load(f)
+            except ValueError:
+                pass
+        changed = False
+        # Those changed since they were read, or gone
+        for path, entry in list(index["checkouts"].items()):
+            if not os.path.isdir(path):
+                del index["checkouts"][path]
+                changed = True
+            elif entry is None or entry["mtimes"] != get_mtimes(path):
                 index["checkouts"][path] = read_checkout(path)
-        index["scanned"] = time.time()
-        changed = True
+                changed = True
         links = get_links(index)
-    if changed:
-        os.makedirs(os.path.dirname(index_path), exist_ok=True)
-        # Whole, for a lookup answered alongside
-        with open(index_path + ".tmp", "w") as f:
-            json.dump(index, f)
-        os.replace(index_path + ".tmp", index_path)
+        if (
+            not links
+            and time.time() - index["scanned"] > LOOKUP_RESCAN_SECONDS
+        ):
+            for path in calkit.find_project_dirs():
+                path = os.path.realpath(path)
+                if path not in index["checkouts"]:
+                    index["checkouts"][path] = read_checkout(path)
+            index["scanned"] = time.time()
+            changed = True
+            links = get_links(index)
+        if changed:
+            calkit.write_json(index_path, index)
     return links
 
 
@@ -783,6 +802,7 @@ def get_pdf_path(wdir: str, folder: str) -> str | None:
     """The PDF built from a folder synced with Overleaf, relative to the
     checkout: a publication's in it, or else its LaTeX stage's output.
     """
+    import posixpath
     from pathlib import PurePosixPath
 
     def is_in_folder(path: str) -> bool:
@@ -797,9 +817,21 @@ def get_pdf_path(wdir: str, folder: str) -> str | None:
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     for stage in stages.values():
         target = stage.get("target_path") if isinstance(stage, dict) else None
-        if stage.get("kind") == "latex" and isinstance(target, str):
-            if is_in_folder(target):
-                return target.removesuffix(".tex") + ".pdf"
+        if stage.get("kind") != "latex" or not isinstance(target, str):
+            continue
+        # Paths are relative to the stage's working directory, and the PDF
+        # goes in its output folder if it has one, as LatexStage.pdf_path
+        # says
+        stage_wdir = stage.get("wdir") or "."
+        if not is_in_folder(posixpath.normpath(f"{stage_wdir}/{target}")):
+            continue
+        output_dir = stage.get("output_dir")
+        built = (
+            f"{output_dir}/{PurePosixPath(target).stem}.pdf"
+            if output_dir
+            else target.removesuffix(".tex") + ".pdf"
+        )
+        return posixpath.normpath(f"{stage_wdir}/{built}")
     return None
 
 
@@ -1145,14 +1177,25 @@ def start_job(msg: dict) -> dict:
         )
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen(
-        [sys.executable, "-m", "calkit.browser_link", "job", job_id],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=get_login_shell_env(),
-        **kwargs,
-    )
+    try:
+        subprocess.Popen(
+            [sys.executable, "-m", "calkit.browser_link", "job", job_id],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=get_login_shell_env(),
+            **kwargs,
+        )
+    except OSError as e:
+        # Otherwise it'd look queued forever, holding up the next run
+        job |= {
+            "status": "failed",
+            "finished": datetime.now(timezone.utc).isoformat(),
+            "error": f"Couldn't start it: {e}",
+        }
+        with open(get_job_path(job_id), "w") as f:
+            json.dump(job, f)
+        raise
     # Only the oldest finished ones are dropped
     finished = [
         j for j in list_jobs() if j["status"] not in ("queued", "running")
@@ -1287,9 +1330,9 @@ def run_job(job_id: str) -> None:
             calkit.record_project_path(job["location"])
             # So it's found, rather than none being, until that's looked
             # into again
-            found = get_checkouts_found()
-            found.pop(get_checkouts_key(*job["project"].split("/", 1)), None)
-            save_checkouts_found(found)
+            set_checkouts_found(
+                get_checkouts_key(*job["project"].split("/", 1)), None
+            )
         elif job["kind"] == "sync":
             after = {"project": get_head(job["wdir"]), **get_overleaf_heads()}
             overleaf_ids = [k for k in after if k != "project"]

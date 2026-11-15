@@ -144,7 +144,9 @@ def test_get_reply(tmp_path, monkeypatch):
         assert cmd == [
             sys.executable,
             *["-m", "calkit", "open", "project", "me/far"],
-            *["--with", get_editor_info()["editor"], "--path", "a.ipynb"],
+            *["--with", get_editor_info()["editor"]],
+            # The checkout everything else here uses
+            *["--checkout", os.path.realpath(far), "--path", "a.ipynb"],
         ]
         if os.name != "nt":
             assert env["PATH"].startswith("/login/bin" + os.pathsep)
@@ -181,7 +183,7 @@ def test_get_reply(tmp_path, monkeypatch):
         installed[:] = now_installed
         if set_editor:
             settings = calkit.config.Settings(default_editor=set_editor)
-            monkeypatch.setattr(calkit.config, "read", lambda: settings)
+            monkeypatch.setattr(calkit.config, "read", lambda **_: settings)
         assert get_editor_info() == expected
 
 
@@ -638,6 +640,21 @@ def test_start_job(tmp_path, monkeypatch):
     ]
     assert installing["wdir"] == calkit.get_user_home()
     os.remove(calkit.browser_link.get_job_path(installing["id"]))
+
+    # A worker that can't be started leaves its job failed, not queued,
+    # which would hold up the next run
+    def popen_fails(cmd, **kwargs):
+        if cmd[1:3] == ["-m", "calkit.browser_link"]:
+            raise OSError("No such file")
+        return real_popen(cmd, **kwargs)
+
+    monkeypatch.setattr("subprocess.Popen", popen_fails)
+    with pytest.raises(OSError):
+        start_job({"kind": "run", "project": "me/proj"})
+    [failed] = [j for j in list_jobs() if j["status"] == "failed"]
+    assert "Couldn't start it" in failed["error"] and failed["finished"]
+    os.remove(calkit.browser_link.get_job_path(failed["id"]))
+    monkeypatch.setattr("subprocess.Popen", popen)
     with open(job_path, "w") as f:
         json.dump(record, f)
     for msg, error in [
@@ -794,6 +811,12 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
             "publications:\n  - path: paper/main.pdf\n"
             "pipeline:\n  stages:\n    build-notes:\n      kind: latex\n"
             "      target_path: notes/notes.tex\n"
+            # Relative to its working directory, built where it says
+            "    build-talk:\n      kind: latex\n      wdir: talk\n"
+            "      target_path: main.tex\n"
+            "    build-poster:\n      kind: latex\n"
+            "      target_path: poster/main.tex\n"
+            "      output_dir: poster/build\n"
         )
     os.makedirs(project / "paper")
     (project / "paper" / "main.tex").write_text("Hi\n")
@@ -805,6 +828,8 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     assert get_pdf_path(str(project), "paper") == "paper/main.pdf"
     assert get_pdf_path(str(project), "notes") == "notes/notes.pdf"
     assert get_pdf_path(str(project), "pap") is None
+    assert get_pdf_path(str(project), "talk") == "talk/main.pdf"
+    assert get_pdf_path(str(project), "poster") == "poster/build/main.pdf"
     # Read a part at a time, with how fresh it is in the first
     monkeypatch.setattr(calkit.browser_link, "PDF_CHUNK_BYTES", 1000)
     first = get_pdf_chunk(str(project), "paper", 0)

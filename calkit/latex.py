@@ -176,8 +176,11 @@ CONTAINER_TEXMF_DIR = "/work/.calkit/local/texmf"
 # couldn't, e.g., "Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable"
 _MISSING_FILE_RE = re.compile(r"File `([^']+)' not found")
 _MISSING_TFM_RE = re.compile(
-    r"Font \S+=(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
+    r"Font \S+=(?![\"\[])(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
 )
+# XeTeX's and LuaTeX's for a font fontspec loads by file name, e.g.,
+# "Font TU/...=[texgyretermes-regular.otf]/OT at 10.0pt not loadable"
+_MISSING_FONT_FILE_RE = re.compile(r"Font \S+=\"?\[([^\]\n]+\.[ot]t[fc])\]")
 # LuaTeX's require() of a module no package installed, e.g., pdftexcmds
 # under LuaLaTeX, which only says so as a Lua error
 _MISSING_LUA_RE = re.compile(r"module '([^']+)' not found")
@@ -198,18 +201,119 @@ def get_texmf_cache_dir(wdir: str | None = None) -> str:
     return os.path.join(ensure_local_dir(wdir), "texmf")
 
 
+def get_latexmk_engine(latexmk_cmd: list[str], wdir: str = ".") -> str:
+    """The TeX program a latexmk command compiles with, e.g., 'xelatex'.
+
+    Follows latexmk's own order: the rc file in the directory it runs in,
+    then its options, including '-r' rc files and '-e' code where they
+    appear. The user's own rc file is left out, since it isn't the
+    project's.
+    """
+    modes = {"pdf_mode": 0, "dvi_mode": 0, "xdv_mode": 0}
+    programs = {
+        "pdflatex": "pdflatex",
+        "lualatex": "lualatex",
+        "xelatex": "xelatex",
+        "latex": "latex",
+    }
+    flags = {
+        "-pdf": {"pdf_mode": 1, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflatex": {"pdf_mode": 1, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflua": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-lualatex": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflualatex": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdfxe": {"pdf_mode": 5, "dvi_mode": 0},
+        "-xelatex": {"pdf_mode": 5, "dvi_mode": 0},
+        "-pdfxelatex": {"pdf_mode": 5, "dvi_mode": 0},
+        "-pdfdvi": {"pdf_mode": 3, "xdv_mode": 0},
+        "-pdfps": {"pdf_mode": 2, "xdv_mode": 0},
+        "-dvi": {"dvi_mode": 1},
+        "-latex": {"dvi_mode": 1, "xdv_mode": 0},
+        "-xdv": {"xdv_mode": 1, "dvi_mode": 0},
+    }
+    commands = {
+        "pdflatex": "pdflatex",
+        "pdflualatex": "lualatex",
+        "lualatex": "lualatex",
+        "pdfxelatex": "xelatex",
+        "xelatex": "xelatex",
+        "latex": "latex",
+    }
+
+    def read_perl(code: str) -> None:
+        # Assignments in the order they appear, which is enough for an rc
+        # file setting a mode or a command
+        code = re.sub(r"(?m)^\s*#.*$", "", code)
+        for m in re.finditer(
+            r"\$(pdf_mode|dvi_mode|xdv_mode)\s*=\s*(\d+)"
+            r"|\$(pdflatex|lualatex|xelatex|latex)\s*=\s*(['\"])(.*?)\4",
+            code,
+        ):
+            if m.group(1):
+                modes[m.group(1)] = int(m.group(2))
+            else:
+                programs[m.group(3)] = m.group(5)
+
+    def read_rc(fpath: str) -> None:
+        try:
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                read_perl(f.read())
+        except OSError:
+            pass
+
+    for name in [".latexmkrc", "latexmkrc"]:
+        if os.path.isfile(os.path.join(wdir, name)):
+            read_rc(os.path.join(wdir, name))
+            break
+    args = iter(latexmk_cmd[1:])
+    for arg in args:
+        if arg in ("-r", "-e"):
+            value = next(args, "")
+            if arg == "-r":
+                read_rc(os.path.join(wdir, value))
+            else:
+                read_perl(value)
+        elif arg in flags:
+            pdf_mode = modes["pdf_mode"]
+            modes.update(flags[arg])
+            # As latexmk does, -latex and -xdv keep a PDF mode that
+            # converts from their output
+            if arg == "-latex" and pdf_mode in (2, 3):
+                modes["pdf_mode"] = pdf_mode
+            elif arg == "-xdv" and pdf_mode != 5:
+                modes["pdf_mode"] = 0
+            elif arg == "-latex":
+                modes["pdf_mode"] = 0
+        elif arg.startswith("-") and "=" in arg:
+            option, value = arg[1:].split("=", 1)
+            if option in commands:
+                programs[commands[option]] = value
+    if modes["pdf_mode"] == 5 or modes["xdv_mode"]:
+        command = programs["xelatex"]
+    elif modes["pdf_mode"] == 4:
+        command = programs["lualatex"]
+    elif modes["pdf_mode"] == 1:
+        command = programs["pdflatex"]
+    else:
+        command = programs["latex"]
+    program = command.split()[0] if command.split() else ""
+    return os.path.splitext(os.path.basename(program))[0]
+
+
 def find_missing_tex_files(log: str) -> list[str]:
     """The files a LaTeX log says it couldn't find, in the order it says.
 
     Style and class files are named as they are; a font whose metrics are
     missing is named as its ``.tfm`` file, and one whose outlines are as
-    its ``.pfb`` file, which is what finds the package providing it.
+    its ``.pfb`` file, which is what finds the package providing it. One
+    fontspec loads by file name is named as that file.
     """
     found = (
         _MISSING_FILE_RE.findall(log)
         + [f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)]
         + [f"{name}.lua" for name in _MISSING_LUA_RE.findall(log)]
         + [f"{name}.pfb" for name in _MISSING_FONT_RE.findall(log)]
+        + _MISSING_FONT_FILE_RE.findall(log)
     )
     return list(dict.fromkeys(found))
 

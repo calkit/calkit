@@ -1343,12 +1343,16 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
         "[\\directlua]:1: module 'pdftexcmds' not found:\n"
         "!pdfTeX error: pdflatex (file ecrm1000): Font ecrm1000 at 600 not "
         "found\n"
+        "! Font TU/texgyretermes-regular.otf(0)/m/n/10=[texgyretermes-regular"
+        ".otf]/OT at\n 10.0pt not loadable: Metric (TFM) file or installed "
+        "font not found.\n"
     )
     assert find_missing_tex_files(log) == [
         "xurl.sty",
         "pcrr7t.tfm",
         "pdftexcmds.lua",
         "ecrm1000.pfb",
+        "texgyretermes-regular.otf",
     ]
     assert find_missing_tex_files("Output written on main.pdf") == []
     os.makedirs("paper")
@@ -1427,6 +1431,38 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     captured.clear()
     build(quiet=True)
     assert captured == [True]
+    # A TeX Live environment gets the engine latexmk will compile with,
+    # which a log can't name, since it fails to start
+    from calkit.environments import texlive as env_texlive
+
+    added: list[list[str]] = []
+    monkeypatch.setattr(
+        env_texlive,
+        "add_packages",
+        lambda name, env, packages: added.append(packages) or packages,
+    )
+    monkeypatch.setattr(env_texlive, "check", lambda *a, **kw: "view")
+    monkeypatch.setattr(
+        env_texlive, "get_run_env_vars", lambda view: {"PATH": view}
+    )
+    state["unfetchable"] = set()
+    state["installed"] = {"xurl.sty"}
+    for args, expected in [(["-xelatex"], [["xetex"]]), ([], [])]:
+        added.clear()
+        assert (
+            cli_latex._run_latexmk(
+                ["latexmk", "-pdf", *args, "paper/main.tex"],
+                env_vars={},
+                log_path=log_path,
+                fdb_path=fdb_path,
+                environment="tex",
+                texlive_env=("tex", {"kind": "texlive"}),
+                no_check=False,
+                verbose=False,
+            )
+            == 0
+        )
+        assert added == expected
 
 
 def test_from_questions(tmp_dir):

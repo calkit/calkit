@@ -1228,7 +1228,10 @@ calkit xenv -n tex -- latexmk -lualatex paper.tex
 The environment only sees fonts from TeX Live packages, not those
 installed on your computer, so a document builds the same everywhere.
 
-For XeLaTeX, add `xetex` to `packages`.
+A LaTeX stage or `calkit latex build` set up for XeLaTeX, e.g., with
+`-xelatex` in `latexmk_args` or `$pdf_mode = 5` in its latexmkrc, adds
+`xetex` to the lock.
+To run XeLaTeX with `calkit xenv`, add `xetex` to `packages`.
 On Linux and Windows it finds the environment's fonts by name, e.g.,
 `\setmainfont{TeX Gyre Termes}`.
 On macOS, as with MacTeX, it finds them by file name instead, e.g.,
@@ -1236,6 +1239,10 @@ On macOS, as with MacTeX, it finds them by file name instead, e.g.,
 installed on your computer.
 On Linux, XeLaTeX needs the system's fontconfig library, which desktop
 Linux distributions include.
+With XeLaTeX or LuaLaTeX, a font loaded by file name gets its TeX Live
+package added to the lock.
+One loaded by name doesn't, so add its package, e.g., `tex-gyre`, to
+`packages`.
 
 ### R
 

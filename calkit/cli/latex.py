@@ -538,6 +538,21 @@ def _run_latexmk(
         ).stdout.strip()
         return out.endswith("/.calkit/local/texmf")
 
+    # A TeX Live environment gets the engine latexmk compiles with, e.g.,
+    # XeTeX for a document set up for xelatex
+    if texlive_env is not None:
+        engine = calkit.latex.get_latexmk_engine(latexmk_cmd)
+        package = env_texlive.ENGINE_PACKAGES.get(engine)
+        if package is not None:
+            try:
+                added = env_texlive.add_packages(*texlive_env, [package])
+            except (ValueError, OSError) as e:
+                raise_error(f"Environment '{texlive_env[0]}': {e}")
+            if added:
+                typer.echo(
+                    "Added TeX Live packages to environment "
+                    f"'{texlive_env[0]}' for {engine}: {package}"
+                )
     fetched: set[str] = set()
     fetchable = None
     while True:

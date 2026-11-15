@@ -903,3 +903,40 @@ def test_find_named_tex_files(tmp_dir):
         "plainnat.bst",
         "siunitx.sty",
     ]
+
+
+def test_get_latexmk_engine(tmp_dir):
+    from calkit.latex import get_latexmk_engine
+
+    base = ["latexmk", "-pdf", "-cd"]
+    # Options, the last of which wins, as in latexmk
+    for args, expected in [
+        ([], "pdflatex"),
+        (["-xelatex"], "xelatex"),
+        (["-pdfxe"], "xelatex"),
+        (["-pdflua"], "lualatex"),
+        (["-xelatex", "-pdf"], "pdflatex"),
+        (["-latex"], "latex"),
+        (["-pdfdvi"], "latex"),
+        (["-xdv"], "xelatex"),
+        (["-pdflatex=xelatex -shell-escape %O %S"], "xelatex"),
+        (["-e", "$pdf_mode = 5;"], "xelatex"),
+    ]:
+        assert get_latexmk_engine(base + args + ["main.tex"]) == expected
+    # The rc file where latexmk runs comes before the options, so Calkit's
+    # -pdf overrides its mode but not a command it sets
+    with open(".latexmkrc", "w") as f:
+        f.write("# $pdf_mode = 4;\n$pdf_mode = 5;\n")
+    assert get_latexmk_engine(base + ["main.tex"]) == "pdflatex"
+    with open(".latexmkrc", "w") as f:
+        f.write("$pdflatex = 'xelatex %O %S';\n")
+    assert get_latexmk_engine(base + ["main.tex"]) == "xelatex"
+    os.remove(".latexmkrc")
+    # One given with -r is read where it appears
+    os.makedirs("paper")
+    with open("paper/latexmkrc", "w") as f:
+        f.write("$pdf_mode = 5;\n")
+    cmd = base + ["-r", "paper/latexmkrc", "main.tex"]
+    assert get_latexmk_engine(cmd) == "xelatex"
+    cmd = ["latexmk", "-r", "paper/latexmkrc", "-pdf", "main.tex"]
+    assert get_latexmk_engine(cmd) == "pdflatex"

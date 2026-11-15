@@ -38,6 +38,9 @@ VIEW_FORMAT_VERSION = 3
 # Live's database nor a document's lookups find them, e.g., biblatex's
 # default backend
 EXTRA_DEPENDS = {"biblatex": ["biber"]}
+# The engine latexmk compiles with, which no log names, since it fails to
+# start without it
+ENGINE_PACKAGES = {"xelatex": "xetex"}
 # What converting LaTeX to other formats with make4ht needs, beyond what
 # the document does, which isn't locked, since a conversion isn't part of
 # the pipeline

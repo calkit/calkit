@@ -162,6 +162,53 @@ questions:
           plugins_cpu_ms: ms.cpu.pydantic_plugins
           n: repeats
 
+  - question: >-
+      Can a TeX Live environment composed into a Python one give Matplotlib
+      its usetex and its fonts, so a figure can't silently change with the
+      machine?
+    answer:
+      if usetex_ok and from_store and not missing_tex_ok and shared_ok and not new_ok and fontconfig and arimo_new and cmu_new and not arimo_before and not cmu_before: >-
+        Yes, if each composed environment also gets its own Matplotlib
+        config directory. With TeX Live {release}'s base packages and
+        {packages}, {rest_kb:.0f} KB besides {largest}'s {largest_mb:.0f} MB,
+        which Matplotlib's preamble loads for type1ec.sty alone, usetex
+        rendered a figure in {render_s:.1f} s, embedding Computer Modern from
+        the store. A usetex font missing from the environment failed the
+        build, with {missing_file} not found, where a family missing from
+        the machine without usetex quietly became {fallback}. But
+        Matplotlib keys its TeX cache by source alone, so with the config
+        directory that rendered the figure, a TeX with none of those
+        packages rendered it again, and with a new one it failed. Fonts from
+        a TeX Live environment, Arimo, metric-compatible with Arial, and CMU
+        Serif, were found through fontconfig by a new font list but not by
+        one built before. Building one took {font_list_s:.0f} s here, once
+        per config directory.
+      else: >-
+        Not as the spike first found; see results/mpl-texlive.json.
+    evidence:
+      - kind: result
+        path: results/mpl-texlive.json
+        values:
+          usetex_ok: usetex.ok
+          from_store: usetex.pdf_fonts_from_store
+          packages: usetex.package_list
+          rest_kb: usetex.rest_kb
+          largest: usetex.largest.name
+          largest_mb: usetex.largest.mb
+          render_s: usetex.seconds.render
+          font_list_s: usetex.seconds.font_list
+          missing_tex_ok: missing_tex_font.ok
+          missing_file: missing_tex_font.missing_file
+          fallback: missing_font.used
+          shared_ok: tex_cache.other_tex_shared_config_ok
+          new_ok: tex_cache.other_tex_new_config_ok
+          fontconfig: env_fonts.fontconfig
+          arimo_new: env_fonts.new_config.Arimo
+          cmu_new: env_fonts.new_config.CMU Serif
+          arimo_before: env_fonts.built_before.Arimo
+          cmu_before: env_fonts.built_before.CMU Serif
+          release: release
+
 environments:
   pure:
     kind: uv-venv
@@ -179,6 +226,23 @@ environments:
     kind: uv
     path: ../pyproject.toml
     description: Calkit itself, from this checkout.
+  mpl-tex:
+    kind: texlive
+    release: 2025
+    packages:
+      - type1cm
+      - geometry
+      - underscore
+      - dvipng
+      - cm-super
+    description: TeX Live for Matplotlib's usetex, alongside the calkit env.
+  mpl-fonts:
+    kind: texlive
+    release: 2025
+    packages:
+      - arimo
+      - cm-unicode
+    description: Fonts from TeX Live for Matplotlib without usetex.
 
 pipeline:
   stages:
@@ -262,6 +326,20 @@ pipeline:
         - ../calkit/environments/texlive.py
       outputs:
         - path: results/texlive-env.json
+          storage: git
+    check-mpl-texlive:
+      kind: python-script
+      frozen: true
+      script_path: scripts/check-mpl-texlive.py
+      environment: calkit
+      args:
+        - --out=results/mpl-texlive.json
+      inputs:
+        - ../calkit/environments/texlive.py
+        - .calkit/env-locks/mpl-tex.json
+        - .calkit/env-locks/mpl-fonts.json
+      outputs:
+        - path: results/mpl-texlive.json
           storage: git
     time-latex-build:
       kind: python-script

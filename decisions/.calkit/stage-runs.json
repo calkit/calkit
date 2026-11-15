@@ -1,0 +1,21 @@
+{
+  "check-mpl-texlive": {
+    "start_time": "2026-11-15T23:45:35.093000",
+    "end_time": "2026-11-15T23:46:54.881000",
+    "environment": "calkit",
+    "git_rev": "c4093debdf06a6688d1277323072c65bbfc71b09",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:31684ccee53c75458510f941da3438001b2c67dea6e2ec860a7d43512829d6eb",
+    "calkit_version": "0.51.1.dev19+gc4093debd.d20261115",
+    "calkit_git_rev": "c4093debdf06a6688d1277323072c65bbfc71b09",
+    "system": {
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.2.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
+    }
+  }
+}

@@ -1,0 +1,475 @@
+{
+  "added": [],
+  "lock_format": 1,
+  "packages": {
+    "amsfonts": {
+      "revision": 77677,
+      "sha512": "6f60ae687e26b34e0335565453246a8850fd1a254213ca2adfdc281ef2496cf291f04ebfde2966b01e9e57d98e13dffac4122ad1b3c9a48d381f918eb52f9336",
+      "size": 3626288
+    },
+    "arimo": {
+      "revision": 77677,
+      "sha512": "e654dc251d8c3cfb376bc3c5664819801620a00bccd9808c65df89cd16dd8bb16218a2250fba7ab0377f1bdcb67c72f7f72476434760d14bbaf02a15d603354a",
+      "size": 2905312
+    },
+    "babel": {
+      "revision": 77821,
+      "sha512": "3b85869a0ab1c1ff541d795a5219c65413e0224ef7b858c383fda15d6d9618b6a8bad1095af6708c86e12bf65d92cec6dc698bc30be6c239bed53ec6f130045e",
+      "size": 243580
+    },
+    "bibtex": {
+      "revision": 77677,
+      "sha512": "cc81600961153f15b213a0de9482e744990598ea0861fc5a05127ac0bad68738ca57dedb2309b65739ec5ac709c6b22c97b2db53b25d91ab9306ae1753493c52",
+      "size": 14896
+    },
+    "bibtex.aarch64-linux": {
+      "revision": 73915,
+      "sha512": "dd34e54abd3da53aa9e6f13c06d01a154c6dc3918271f229f3a5afa754cf8810a4b12cb1479391f096ed5dea6d438980cd436b722b3c7cf6116954c37f8159ce",
+      "size": 76220
+    },
+    "bibtex.universal-darwin": {
+      "revision": 73806,
+      "sha512": "b711a2c2923b464d82e9e330977e6ea91821ebd097da587de07efe485375acf3adc26e9d1f09cd1aa1a2eb3039970da3a94617249b006b52e0128f4a415ca2fe",
+      "size": 179180
+    },
+    "bibtex.windows": {
+      "revision": 73796,
+      "sha512": "98fd273bc064b088899625548bd0202fb2608c2d8c82995d8268e2d6b68d2ea6c783b72ba655d363871aff1b4461c82fac16d853f0c2d5f324fe5f328d480333",
+      "size": 49684
+    },
+    "bibtex.x86_64-linux": {
+      "revision": 74121,
+      "sha512": "f681f413894d0b5bb8db1343cfcb129670553d8ba71a715a7b154bc408109de2c718a76f9a677d44c1b57239e3e5d730bdc2c0fda6cc224dde80e774b6884ae3",
+      "size": 78452
+    },
+    "cm": {
+      "revision": 57963,
+      "sha512": "e65b2096ca183ca21d8ff987489223bc98750fcbaf4f9f9a9996f5153a76c5587d1ad77693234d02f80753b8b8cb86fd957514f82065bd7aab9eb64bad9003a3",
+      "size": 238064
+    },
+    "cm-unicode": {
+      "revision": 58661,
+      "sha512": "5d6cce2e396ffa0dc887e839f4ef57865db9eda3dcdf6a62737008b53837c40ee1498d97ab06eab8f0802e745787fa5c107c0738a8dedd4e65f6996aee555c48",
+      "size": 14122248
+    },
+    "dehyph": {
+      "revision": 48599,
+      "sha512": "2dc4ee5b4389549c032f3a4d87740ab3c5e296a1ef109a6b673656a82ca4c317ca774f39f61417568b8ccbeac787c4058184fc893d53799bbf0b042ba5aca9a2",
+      "size": 46556
+    },
+    "epstopdf": {
+      "revision": 71782,
+      "sha512": "323b20d556be6e076303045a1484190c08deac0da6a9d31a0a4f24ec96da2f0fd159260b3a5e456500ee15727fff19d1dbc7e8c893adf88571f5ecf656d5afbd",
+      "size": 14936
+    },
+    "epstopdf-pkg": {
+      "revision": 77677,
+      "sha512": "e9f159b536cfe01b49e724bb4d0c05a631d0ec4da64139887ae3a9ebc589375caaa2a7a6bc03ad5c71f0ac7c3cefdd2928e58c7ead8eb74e80fdd9581a74c4be",
+      "size": 4200
+    },
+    "epstopdf.aarch64-linux": {
+      "revision": 46208,
+      "sha512": "5d8e4cc9eaf28dbac98d5c3805e44caff7acc1769b7f3747f105c7772e9d56bbe63c3f83b98ab2dd8688c5b58e5b286ad51168e764b33d964d0fd948b4701161",
+      "size": 364
+    },
+    "epstopdf.universal-darwin": {
+      "revision": 57908,
+      "sha512": "9c9a2e56d91c80e9f2938f16565017a7db0e828c987a9dd5b56aad28dc3c26d9057d7ea74011b215fcff5857981d75d7b7bdc0a3fecb83c7d3205261beda5c29",
+      "size": 364
+    },
+    "epstopdf.windows": {
+      "revision": 65891,
+      "sha512": "bb21ec7803b89f878e4d334b8dc66d437064d381025a095818a3727f16ef9269147777695eeec12f1f7edd9b57aeea7dc6217636f2d077a5b5d38d900b8cbfb6",
+      "size": 2356
+    },
+    "epstopdf.x86_64-linux": {
+      "revision": 18365,
+      "sha512": "a14c6953be481ae60c1b6ff8657a26cc13cb7c994ca2f003f3c3c4da98032cf77ba51298bb11391654b9d2547d6070d287384521956e5132a13142ff7bcbfeb9",
+      "size": 364
+    },
+    "etex": {
+      "revision": 73850,
+      "sha512": "78bec7371541769eeb3e9d8dda666be6557091f824cb93960e7ad083ce54a90012524b16c0294cfcdadf475b2707db0e32437f70b085270359232267f184b1d3",
+      "size": 11572
+    },
+    "firstaid": {
+      "revision": 76740,
+      "sha512": "a9c52037430294b047a5d069a8e15f7c1864dc1d9b0d420f0ac3716f0deefa76bb68141d601d9397a788eb16f0055a489da7f2fed5405c493e0210f997bfc2a9",
+      "size": 5184
+    },
+    "graphics": {
+      "revision": 75374,
+      "sha512": "be003ee31cd33508d5ba8549848776b292a9c54d143dbbbb61254aa3fec331223b372ea163d8ba08a09766e929d33bb6e53c857c19e9370c28915e3cc94448fc",
+      "size": 15980
+    },
+    "graphics-cfg": {
+      "revision": 41448,
+      "sha512": "e1015d360b56f63f1b9790daf16e2101e6af995bd1e45288ea604ae94e20196cab22e7e54d318aa79fa386123032a928be70a57154d409321e04f03ecf97ab75",
+      "size": 1160
+    },
+    "graphics-def": {
+      "revision": 76719,
+      "sha512": "5fedc5bd4ac2313c920b23addb5753f6f90ec5def0b9f7e8fa6b31248c01a5246331f0d266d367d806931f61e824925099d9bf61f805f81c21385007f7f832b3",
+      "size": 10992
+    },
+    "hyph-utf8": {
+      "revision": 74823,
+      "sha512": "132d7658db67b71e82123cbe8054f5766858a1c405966c82b6f76ab43b9b967429cb74ee081405dd3e690af0d0479482499b0cd882445489dd65bce69ad77bd1",
+      "size": 15988
+    },
+    "hyphen-base": {
+      "revision": 74125,
+      "sha512": "004e08de194563dd70c02a487465728bdf9bf235a01793495e048df7674581fe9641d0077bbe1d3fbdc982273da7d29a17abe462d2387dd5c6390bfcf3630770",
+      "size": 22636
+    },
+    "iftex": {
+      "revision": 77677,
+      "sha512": "b958d8285b1ce12010034fbea4c3155a7f44c8aecefd16559581e24cace453dc6b25ab5a40a2340940fa9e540da5a5a8e46ab5a726cd1b7aad8f0996afea1553",
+      "size": 3256
+    },
+    "infwarerr": {
+      "revision": 77677,
+      "sha512": "eb441377de3ad2055b61a5170391209ce669f3dc345bdf86efa9de8b2936db6e13e73a83b26e925e3a492219261dec2c0dc35397b4de2533846a39d5804e5876",
+      "size": 2656
+    },
+    "knuth-lib": {
+      "revision": 57963,
+      "sha512": "47d50b1966dc5a3adf4921c297d9ed5917035e917098154fc08d1c72ebd0ba70ebfa41735c7ae52c5087d62242bcfa9b0b49914c6da4f392e2d4c56a6d72807d",
+      "size": 30508
+    },
+    "kpathsea": {
+      "revision": 75425,
+      "sha512": "77af79f31614f265ac43611b18b4ed35da0ada30263f78e7b23c434538e1c67fd1fdd1693c89ea5d53fb2964b7e4eece713e28e6a2d50ff2a2a63e1e20165f34",
+      "size": 33128
+    },
+    "kpathsea.aarch64-linux": {
+      "revision": 73915,
+      "sha512": "fb49fe6be95bb8bd4de868e87187445a0494ef57d99c1f446be2347fe9d677ebd3756fd0d9c0cbca76199f45e78d85de7c54fede11915896100aa538dbcc08db",
+      "size": 38952
+    },
+    "kpathsea.universal-darwin": {
+      "revision": 73806,
+      "sha512": "c1d08a88667caa69a9b5dd7e6bb559fce2f3c5a4c4f9f7e059c5207847dff1254cbc43a6a80b51223b9d3f58e6d24a53bd0763a650f682f9551c76ed7850242b",
+      "size": 84944
+    },
+    "kpathsea.windows": {
+      "revision": 73796,
+      "sha512": "5c934787042761a333ee8d148d81b141afa74e288ad0daf0e21db97aff9de4a13641aa4d701c634abcc6d06ad2ffbc9a5ad50954ce109a701f6e0d1daf10b17e",
+      "size": 518932
+    },
+    "kpathsea.x86_64-linux": {
+      "revision": 74121,
+      "sha512": "183c33a0dfcda2793f568cda279323d74927d29fcd57a9b8f9fa795aa448b225f9e38bb5c766b607351de2b602f5ca3107735993fa959db5868d40193840afc5",
+      "size": 41116
+    },
+    "l3backend": {
+      "revision": 76924,
+      "sha512": "dbc3f7b699ca69504c61b207286daeffe0da699ad2a6439fa271691b5b825b156a4a3e1e67b423daaa86a011bd671d56259ca7e285e2bd9d15131b5a88ee6865",
+      "size": 16544
+    },
+    "l3kernel": {
+      "revision": 77438,
+      "sha512": "def3bb6f94a0b78d8e27d7d6ca1cddf2cb480164c32a84dae5c5d05f79d7ebecd9ca5a4f4554c55a32092a342c6341a9e618c246ff0a1bcffba33565c09d8669",
+      "size": 188720
+    },
+    "latex": {
+      "revision": 76924,
+      "sha512": "4ac48b1a1d59365d5efe06897bb7db085931ceffc77b6076d74d664ba7af1bf171b0af4e9408ebff236c29b80c9567dcb25ff81020a035ccd2f2e1b9ca31cd46",
+      "size": 260056
+    },
+    "latex-bin": {
+      "revision": 77033,
+      "sha512": "e992f71fd145ad3451c9ba6a0b8a07fb8ddd635aa32f6dd4386a901e2ddd3a7ee9d9ef108bd4618a52876c6809c0583ed71984bce393f6f3233a45b5a3edf2b4",
+      "size": 600
+    },
+    "latex-bin.aarch64-linux": {
+      "revision": 54018,
+      "sha512": "c8f47dcfa5c29be25ded52e0f44d11d7aa00f041e3118875f19f8e47921e814dd84a4854043ca75c70b0cf76bafa7b4e8cd8f15c715ed8cddc4883937d84722c",
+      "size": 384
+    },
+    "latex-bin.universal-darwin": {
+      "revision": 57908,
+      "sha512": "45abdf9fec79500491f0f3c5511aa2a8a25521ee9bf648e9f81ea667c194aac2bdf76267e0f4276cfbd70e4b8f3c1f109129c77030138ba43f51f4e6e0d291f8",
+      "size": 376
+    },
+    "latex-bin.windows": {
+      "revision": 75604,
+      "sha512": "95a6eb9e4753e39f6d0c08d7c24b3f4c4da56a0a4466b701010edf1841e2a3e5fb483c63402381d285b007b1ccb5682c81fc41c1b1e3dd4fbd7a2be2aa1eae65",
+      "size": 3192
+    },
+    "latex-bin.x86_64-linux": {
+      "revision": 54018,
+      "sha512": "4822d2b4bab3a785fd2d53d845b52178b4d7c8b82cef29757cddaa7d08bfb34a72583c4f51e5c8267240cdd5f5df8e41fe9ffc472d2b27ef4e80942c462c1ce2",
+      "size": 376
+    },
+    "latex-fonts": {
+      "revision": 28888,
+      "sha512": "98549dd0c7b29511abc3a1a6b6803a86af0b48121d47e292066f3b67e4b5847efbb7025352c1ec996778c7ea3a5cba552385e9b4dfd6ab005d716f503e37a26e",
+      "size": 17972
+    },
+    "latexconfig": {
+      "revision": 68923,
+      "sha512": "22e233cad5742691da573249b3f9cd4ea0c6ccf4e31a757837d710ca863e0cccd089106e523e40fb541255f3795d963273ccdf70211f19ff3caecb30d7fefcbe",
+      "size": 2240
+    },
+    "latexdiff": {
+      "revision": 77278,
+      "sha512": "a319e76b5fdc0069ef295534a023094db53535ba36a8943ba3d6af9035726dfa38809769e9082c72b56b7d97ccdda73774deb1c5eede5bb0a7fe74df35d7ae05",
+      "size": 82136
+    },
+    "latexdiff.aarch64-linux": {
+      "revision": 46208,
+      "sha512": "0a27f7270c784deaa292a419b1f4bda42b671713632b423cd3233f573604c99259dd24376ef67db085092ac125ed5fc939cfbc8dd6deec9104090354e7f30d91",
+      "size": 384
+    },
+    "latexdiff.universal-darwin": {
+      "revision": 57908,
+      "sha512": "8f4f98cf5233613e01a25200039e81ff9eb878fc108449ca5f197b71b5edace599eb1efd983fd20b780737f97fb65a49bf72c4fac9f2a6da5ebf629d0b7cb9fc",
+      "size": 388
+    },
+    "latexdiff.windows": {
+      "revision": 65891,
+      "sha512": "45505f2abbd36b912e81c4b8682faa0baa1d8b2e6c70dfd16954b79a4217879bb5f9a9ea3184dbf317988fc5974c9f7192ced68df12549939470238a829ae41d",
+      "size": 2384
+    },
+    "latexdiff.x86_64-linux": {
+      "revision": 16420,
+      "sha512": "37f34e90a572e49f4643e10f429e8256b4d0dd236123823ce35b8681b68322988632bb0294d806755b21ed8742757e77b4e157f202a1b781be2826a717e08618",
+      "size": 384
+    },
+    "latexmk": {
+      "revision": 75540,
+      "sha512": "aba6fcf53b429ca48d2dc56f647156a67c2353d811a35bb34febcbaee5725e4880fe9228bfb39a92a8994b4805731757e9d5a44639b95bf39f2a2a9c167e009c",
+      "size": 123912
+    },
+    "latexmk.aarch64-linux": {
+      "revision": 46208,
+      "sha512": "0b397c69945221fc6575c719ba1b9a28cdec5c3e24ac2e5be0eee434f64c9be0fd8be7078cb374b8fc81a8fa97d28ecd3febbe58f35cac749281f4399d9d0f4e",
+      "size": 340
+    },
+    "latexmk.universal-darwin": {
+      "revision": 57908,
+      "sha512": "ab302c69dbd2644803a243082de3dfea1d441950f40d04ac2dbc660eca3c7038a6faa6fbcc0e703411a922918c8f2d40837b307ad8a41b27e34a2297ce1c1268",
+      "size": 340
+    },
+    "latexmk.windows": {
+      "revision": 65891,
+      "sha512": "dbdcbba6c94b305ee1ffa04db6b3beaabce7c50c4dd50b57bba84e8124152ff6839730360e459433c38fe3476da793647ce5c403ff206037518d292c1b398849",
+      "size": 2300
+    },
+    "latexmk.x86_64-linux": {
+      "revision": 10937,
+      "sha512": "d0d78524ebd8aecbd3f2646030150d37283be92d852aadc75c1efa33b08e1b73c6365ce4e41e86eb5626d819e75140c7fe4caf772f472b51810b7b0868f0aa4d",
+      "size": 340
+    },
+    "lm": {
+      "revision": 77677,
+      "sha512": "bacdb541c99bcf1b25fdfd87094a98ce48642e534e0017676fccdc81843f9f1e64af271180589a96513915dfa15a782458e151c760ddb26929a29ba0b9e141ef",
+      "size": 11944800
+    },
+    "ltxcmds": {
+      "revision": 77677,
+      "sha512": "9206308fed3c14f21ced9c5ed7873943201e42217cedeb8fa5b14bddcc5e6720e36a1b63db340b1afccaf500c1406c7c5891c8e3d8e687f85ea4ea52dd80dc66",
+      "size": 4132
+    },
+    "lua-alt-getopt": {
+      "revision": 56414,
+      "sha512": "60ad4731ac61f9b5c4360bb3d0c6475e2abd358418e20bed29cc94761fdfb97fcf02829b9785e559ca6052a1e82ee7f0b104b166592b9fd87237679ac3caa2e6",
+      "size": 2008
+    },
+    "lua-uni-algos": {
+      "revision": 76195,
+      "sha512": "50022083eb3659c994e571d9bd9c9a916b9b47e34c2776e73515afdff0361b49fac8da59c1532a578a5518c70236983be4bbb2412845a30064d421ba3c85bf66",
+      "size": 12332
+    },
+    "luahbtex": {
+      "revision": 73848,
+      "sha512": "9c9ff51255befd74735dfdecfc4c7d1fdb184e8dbf10e34311601f1ec39dd414e179e3f290ea296d40d8f0a02ea3f9df24a733d4d6b9738a24a3d5ea9e669975",
+      "size": 460
+    },
+    "luahbtex.aarch64-linux": {
+      "revision": 74669,
+      "sha512": "3d1369f224abbe61aa083fecfdac9418b01980926e019fe597f663c400943de9e9054c3f12e17785cd4541d717671c3828e0fc8f7b8f8218a1af277e703b80f2",
+      "size": 2324592
+    },
+    "luahbtex.universal-darwin": {
+      "revision": 74677,
+      "sha512": "9427bde2bd97a1de73fd25218818e343495c724d8079d4d14900b85925b1bdd6104552c03df2abde05ac5571e4a6c7208fde59cbd9a5876dedf788c1cb156bf7",
+      "size": 4393824
+    },
+    "luahbtex.windows": {
+      "revision": 75604,
+      "sha512": "f28e5aa98bfd437d2ca1c2e7c388fbd346a67f408633eae8698d691192e81176edf5cc70a2bc3ceb83f94ae7b99a175b47a5915afdf30e4715a728ef9d75cb7e",
+      "size": 1948616
+    },
+    "luahbtex.x86_64-linux": {
+      "revision": 74669,
+      "sha512": "e281bf1f5852ca8b2a9824f767d6896836be5ccdeee8009dd0e05632b6178e832262ca58bd193444fb1d5af346a5ccb7972cdcacd92ca79a8cf3ffff76f07734",
+      "size": 2487428
+    },
+    "lualibs": {
+      "revision": 67994,
+      "sha512": "4387311fb78a29d63959114e401a2b97a8743a50c76a22163e0d14f15cd7b51a50f4be7a19232b32fa4152eac71c73fbeebcb8e38fee3bfc997aaea37bef78bf",
+      "size": 133320
+    },
+    "luaotfload": {
+      "revision": 74324,
+      "sha512": "4300e5f4b3fe37babb12cc36cc5a130c1a0f246db6e3b8955813c62f41b698e5a08443eb7b41c8afe4fab08184e508838e1a4210206240e53a50b7b66f736bf6",
+      "size": 623572
+    },
+    "luaotfload.aarch64-linux": {
+      "revision": 46208,
+      "sha512": "5a2141f4e940e971f11151776503faeb7834ea23fdd2600dcc0aca333854459a3a3dbcb38b4e6d0fe25a953470022958af319c170cb30ceedf1394656a447e2f",
+      "size": 348
+    },
+    "luaotfload.universal-darwin": {
+      "revision": 57908,
+      "sha512": "4dd3c702670e73d04eea57bf563a015a719461d388c496074cbef47b1bcd728b1e33306363057f100f3d50cc29ce9d3ffa471d2948a6352ee5f6140a8b001935",
+      "size": 348
+    },
+    "luaotfload.windows": {
+      "revision": 65891,
+      "sha512": "5d4f16b6cb9702155b3174ff8ec4b7f6188ae9868e5ec0411499ac61edbfbb193b2aba4e4614f050c9a49e6b7bc577b924cd51d88f732cf8ecdceae463296cbb",
+      "size": 2316
+    },
+    "luaotfload.x86_64-linux": {
+      "revision": 34647,
+      "sha512": "88d1a0e7f084beab1c8d28d25ed0ce3d355619b5d33fa5e7fb312e4b689532c47ac11fb5ddb5df0790c44200b8fc1fbde72d411717183d3796bbd20158265e8d",
+      "size": 348
+    },
+    "luatex": {
+      "revision": 76924,
+      "sha512": "5a502ea42eb0d23c9575e3e9f6e46e0ebb8bb8034ea912deaa16616f23ae81a34d9372537c3099058ce1a65af4df0d39e20fa81b59bba68ffc75ebfded7a6d25",
+      "size": 9840
+    },
+    "luatex.aarch64-linux": {
+      "revision": 74669,
+      "sha512": "ed0595f9eaf80141707ff18471f01355d11ffab8effa624398ca6e5c0f3360d885812b4f933eef664d05da979c5f5d34a2b81f16366389beb1f242d5ae5b79d8",
+      "size": 1723660
+    },
+    "luatex.universal-darwin": {
+      "revision": 74677,
+      "sha512": "3c66ced0c1ed0c00e5c4f7a35305d6228d5edd7cfe0917759a7ae273bc610f3d5e4d360d5db0236381143f5d7a27cc185c2d07a1c3d6ece74538a4480598608d",
+      "size": 3067912
+    },
+    "luatex.windows": {
+      "revision": 75604,
+      "sha512": "501f2a634ee47868ecba87a595b18d996b1502bb5694e34f46d682b7268a6a8ee6280edf2577060bf098a41ad5ae52f41114a6a90b85b91821e18cbb807ae477",
+      "size": 2111224
+    },
+    "luatex.x86_64-linux": {
+      "revision": 74669,
+      "sha512": "325a0ba0ae2fb016e642451d99e6ab1a4700e50fdd2403254ec74699734b07ac932d6d49d4bb43d15c274e0434149e8009dadf22a4defb378ac40e7036c498c2",
+      "size": 1867516
+    },
+    "makeindex": {
+      "revision": 75712,
+      "sha512": "6644e9c2818718ca9e1883e4782a25e0e2732292689418d511404b33dd61585ab19f2a60da1da152a251b21ad7bbdea5c62249a88466ee4deb95e15c496f3822",
+      "size": 4600
+    },
+    "makeindex.aarch64-linux": {
+      "revision": 73915,
+      "sha512": "0d578ab737e66f266ded0bfbf141ccbf77287c9512a2fe7410db884a80c7a57e8d4a0355958d7db8beb2b72925aa1cbee99794332a8e4fdc1e64d468079a09a8",
+      "size": 48188
+    },
+    "makeindex.universal-darwin": {
+      "revision": 73806,
+      "sha512": "cf1c5b52f637e3d0f3d16aebdbd7f3d60255a69b0381dc834ac41a92c752d38428cbe401a82669bd2e495872ebe55fa17de905dcb921966a766b0b72f2248fd0",
+      "size": 95124
+    },
+    "makeindex.windows": {
+      "revision": 73796,
+      "sha512": "870f9e4000c6f489923b9ff574de309961e6409568c623051ea3c4ae4b337d1749f823c559d3d04b3e6637ff9933204b2fb7c913306559c43bfa1421bec11960",
+      "size": 20732
+    },
+    "makeindex.x86_64-linux": {
+      "revision": 74121,
+      "sha512": "904b9a01298c048d4b4b4eb1206538806d30e7bc7813b6e51f3ecc2244d7ed376bedfe83ebba7c274b34c432a38c29113d0405d454b2cfbcf6191f94ebd15040",
+      "size": 51060
+    },
+    "pdftex": {
+      "revision": 74113,
+      "sha512": "12150665a45d81682a7d355d02f98f1e9035dd720b81622717eafad2973a504c5f648d50e73c521e2dca984ff69afe2fbe0ac8255912478a7ddf2b568740a225",
+      "size": 39588
+    },
+    "pdftex.aarch64-linux": {
+      "revision": 75253,
+      "sha512": "27558d69ab6019700216dd1fec484654cb787d68c6f04b44968fa782abef728355af2e180baf9b099d91ca0c0b7cd767a79e2bdaaf701304a61b2589f8775b7c",
+      "size": 788440
+    },
+    "pdftex.universal-darwin": {
+      "revision": 75293,
+      "sha512": "35337bf76e98be93b3c9067f6677d408a153759615711695f6cebdab0032b3656e53c7d336dfca69d3eff30ae3d03f84c1c0fb9f1c92315ac933ab5f86315623",
+      "size": 1695652
+    },
+    "pdftex.windows": {
+      "revision": 75247,
+      "sha512": "71188b71b214dce9ba749944c9cb432485929171f513ec8c178366fdf09a0fc3004ffe8143621810cae6f4c18af521ed13499af3f7a59f5ca89d358f9fa07c1e",
+      "size": 835068
+    },
+    "pdftex.x86_64-linux": {
+      "revision": 75248,
+      "sha512": "7e6ae14e95e1d5dee5112c336e70665b5f88a214c4527d2513e3ddc25f6943d1b5c08aa89c0fd3c90689f17dab9d7a2e9ec04ff4f66ab3d6f46aff46ec7f9987",
+      "size": 853960
+    },
+    "pdftexcmds": {
+      "revision": 77677,
+      "sha512": "36778bf7472189a6b78bf2627571210f319b6201ac80e2f5d2f3d29fc93e35dcab5402e50436218cbc48c8be7706da876ad64f7795a31ee8172de51b308be3d4",
+      "size": 6324
+    },
+    "plain": {
+      "revision": 75712,
+      "sha512": "797e0566127d23302d5713031b7edc0a8dd8041b0911219c1a5d80e91a49ec80b59fbe2f7ed16253b8976a52f045ae0878807a4eab1913314e91de12f9bd26d8",
+      "size": 29116
+    },
+    "tex-ini-files": {
+      "revision": 73863,
+      "sha512": "4f7e5478e1037d28237567cdd10ecbb59758e1b309662e29a30bc3ef7e8b1a38c7ce80c54e48ddfef497db4a5016b2ec96889be1587f67f6630b883759d9463e",
+      "size": 4400
+    },
+    "texlive.infra": {
+      "revision": 76780,
+      "sha512": "d7c0409b4af94f6c5874b72bbacdc431c46495d8406d73f4aff376692e6a4f541e54ccee1a7179dc423a095a9208149afb1f1e8a331911806f58ed26ef028d5c",
+      "size": 419208
+    },
+    "texlive.infra.aarch64-linux": {
+      "revision": 70811,
+      "sha512": "c47e8e27b73f44f746cc2dcc60faeefee9ae576c3994c8bf864f92b4735166b711a5da6d051c5771ff720efe79c5bb1a291b57e83e78d3365196e0e95fe8e686",
+      "size": 82688
+    },
+    "texlive.infra.universal-darwin": {
+      "revision": 70811,
+      "sha512": "3dde77d9741572de25bdb99ea4d3ed77bccdd09000bb30513c2e443eae58aadae6ce972e42fede96a1f8f418c9b26693e17f0f4bb7e0c4d790a107cc117542d1",
+      "size": 308364
+    },
+    "texlive.infra.windows": {
+      "revision": 75566,
+      "sha512": "8aff22a6b65bfd1a89bda49dbbf1b46e3078c6726ec8098c2f918059d22a0454fdef99ade8f940efef15a836b85f83a5231a83b6e23dbafa62666e85dd63c532",
+      "size": 3085484
+    },
+    "texlive.infra.x86_64-linux": {
+      "revision": 70811,
+      "sha512": "a877e7f66c6d2d6a6885305466a8f6d5190b544a45a5d7f74a58e0ec0a119bff99a7a41324ecbea82d95a2551278e8ae3306aee54c0d6d767543e7c1d142215f",
+      "size": 145484
+    },
+    "tlperl.windows": {
+      "revision": 74256,
+      "sha512": "a705a82293a5582421d8e0d2b173bee4a201c5a7b7734e824600ec659f2ff739b828f74c595e87daf28932c16b7b94ae9b5bfd5e2c704d0000498213a963830e",
+      "size": 12277884
+    },
+    "unicode-data": {
+      "revision": 76413,
+      "sha512": "217639c4d4dd58714db6b581cf94beb90015061ab6d20a7531845edd3765082f746c43f7e9c5607bea3ece07c46565775f1b8947ad8c19ae7fff9daeb7235a5d",
+      "size": 316692
+    }
+  },
+  "platforms": [
+    "aarch64-linux",
+    "universal-darwin",
+    "windows",
+    "x86_64-linux"
+  ],
+  "release": 2025,
+  "repository_url": "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final",
+  "spec_hash": "sha256:254dda6297543314c0fc5df996b84670867b4940037808f08489f369376cfba7"
+}

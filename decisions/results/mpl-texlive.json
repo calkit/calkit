@@ -1,0 +1,78 @@
+{
+  "store_dir": "/Users/pete/.calkit/texlive",
+  "usetex": {
+    "ok": true,
+    "error": null,
+    "packages": [
+      "type1cm",
+      "geometry",
+      "underscore",
+      "dvipng",
+      "cm-super"
+    ],
+    "package_list": "type1cm, geometry, underscore, dvipng, cm-super",
+    "download_kb": {
+      "type1cm": 2,
+      "geometry": 9,
+      "underscore": 5,
+      "dvipng": 1,
+      "cm-super": 64562
+    },
+    "largest": {
+      "name": "cm-super",
+      "mb": 64.562404
+    },
+    "rest_kb": 16.408,
+    "seconds": {
+      "font_list": 26.344151583965868,
+      "render": 1.3918040829594247,
+      "cached": 0.7046150829992257
+    },
+    "samples": [
+      1.4824120830162428,
+      1.3918040829594247,
+      1.3724215420079418
+    ],
+    "pdf_fonts": {
+      "cmmi10.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb",
+      "cmmi7.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb",
+      "cmr10.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb",
+      "cmr7.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb"
+    },
+    "pdf_fonts_from_store": true
+  },
+  "tex_cache": {
+    "other_tex_shared_config_ok": true,
+    "other_tex_new_config_ok": false
+  },
+  "missing_tex_font": {
+    "ok": false,
+    "missing_file": "helvet.sty"
+  },
+  "missing_font": {
+    "family": "Not A Real Font",
+    "ok": true,
+    "used": "DejaVuSans.ttf",
+    "warned": true
+  },
+  "env_fonts": {
+    "fontconfig": true,
+    "new_config": {
+      "Arimo": true,
+      "CMU Serif": true
+    },
+    "built_before": {
+      "Arimo": false,
+      "CMU Serif": false
+    }
+  },
+  "release": 2025,
+  "machine": {
+    "platform": "macOS-27.2.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "texlive_platform": "universal-darwin",
+    "python": "3.12.4",
+    "matplotlib": "3.10.8",
+    "calkit": "0.51.1.dev19+gc4093debd.d20261115"
+  }
+}

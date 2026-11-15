@@ -682,7 +682,7 @@ def get_project_checkouts(
             with open(os.path.join(path, "calkit.yaml"), "rb") as f:
                 text = f.read()
             match = re.search(
-                rb"^name:[ \t]*([\"']?)([\w.-]+)\1[ \t]*(?:#.*)?$",
+                rb"^name:[ \t]*([\"']?)([\w.-]+)\1[ \t]*(?:#[^\r\n]*)?\r?$",
                 text,
                 flags=re.MULTILINE,
             )

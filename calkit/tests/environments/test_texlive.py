@@ -100,6 +100,11 @@ def test_parse_and_resolve(tmp_path, monkeypatch):
     ]
     with pytest.raises(ValueError, match="Unknown TeX Live package"):
         texlive.resolve_packages(tlpdb, ["nope"], ["windows"])
+    # A program a package runs comes with it, e.g., biblatex's Biber
+    assert "tools" not in texlive.resolve_packages(tlpdb, ["latex"], [])
+    with monkeypatch.context() as m:
+        m.setattr(texlive, "EXTRA_DEPENDS", {"latex": ["tools"]})
+        assert "tools" in texlive.resolve_packages(tlpdb, ["latex"], [])
     # A package with a dot in its name isn't mistaken for a platform's
     assert texlive.get_package_platform("texlive.infra") is None
     assert texlive.get_package_platform("tlperl.windows") == "windows"

@@ -2704,6 +2704,79 @@ def new_renv(
             repo.git.commit(["-m", f"Add renv environment {name}"])
 
 
+@new_app.command("texlive-env")
+def new_texlive_env(
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ] = "tex",
+    packages: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "TeX Live packages beyond the base set (pdfLaTeX, LuaLaTeX, "
+                "latexmk); builds add what documents need anyway."
+            )
+        ),
+    ] = None,
+    release: Annotated[
+        int | None,
+        typer.Option(
+            "--release",
+            help="TeX Live release; defaults to the latest frozen one.",
+        ),
+    ] = None,
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite", "-f", help="Overwrite an existing environment."
+        ),
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Don't lock and install it now.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+) -> None:
+    """Create a new TeX Live environment, which builds LaTeX documents
+    without Docker or a system TeX.
+    """
+    from calkit.cli.check import check_environment
+
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    env: dict = {"kind": "texlive"}
+    if release is not None:
+        env["release"] = release
+    if packages:
+        env["packages"] = packages
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    calkit.save_calkit_info(ck_info)
+    repo = calkit.git.get_repo()
+    repo.git.add("calkit.yaml")
+    if not no_check:
+        env_lock_fpath = check_environment(env_name=name)
+        if env_lock_fpath is not None:
+            repo.git.add(env_lock_fpath)
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add TeX Live environment {name}"])
+
+
 @new_app.command("nix-env")
 def new_nix_env(
     packages: Annotated[

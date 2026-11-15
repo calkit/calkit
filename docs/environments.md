@@ -1183,18 +1183,25 @@ installation of your own.
 Calkit downloads the TeX Live packages the environment needs, once per
 computer, into `~/.calkit/texlive`, and every project that uses the same
 packages shares them.
+Create one with `calkit new texlive-env`, e.g.:
+
+```sh
+calkit new texlive-env siunitx booktabs
+```
+
+which adds this to `calkit.yaml`:
 
 ```yaml
 environments:
   tex:
     kind: texlive
     packages:
-      - amsmath
-      - booktabs
       - siunitx
+      - booktabs
 ```
 
-Every TeX Live environment has pdfLaTeX, LuaLaTeX, latexmk, and BibTeX.
+Every TeX Live environment has pdfLaTeX, LuaLaTeX, latexmk, and BibTeX,
+and one whose document uses biblatex gets Biber with it.
 List any other [TeX Live packages](https://ctan.org/) the document uses
 under `packages`, or leave them out:
 when `calkit latex build -e tex` or a LaTeX stage finds the document
@@ -1219,7 +1226,7 @@ calkit xenv -n tex -- latexmk -lualatex paper.tex
 
 The environment only sees fonts from TeX Live packages, not those
 installed on your computer, so a document builds the same everywhere.
-XeLaTeX, Biber, and TeX4ht aren't supported yet.
+XeLaTeX isn't supported yet.
 
 ### R
 

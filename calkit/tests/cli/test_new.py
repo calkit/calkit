@@ -515,6 +515,25 @@ def test_new_uv_env(tmp_dir):
     assert env["path"] == ".calkit/envs/main/pyproject.toml"
 
 
+@pytest.mark.xdist_group("texlive")
+def test_new_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    subprocess.check_call(["calkit", "init"])
+    # Locked, installed, and committed with its lock
+    subprocess.check_call(["calkit", "new", "texlive-env", "booktabs"])
+    env = calkit.load_calkit_info()["environments"]["tex"]
+    assert env == {"kind": "texlive", "packages": ["booktabs"]}
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Add TeX Live environment tex"
+    assert ".calkit/env-locks/tex.json" in repo.git.ls_files().split()
+    # A name already taken is refused unless overwriting it
+    cmd = ["calkit", "new", "texlive-env", "--no-check", "--release", "2024"]
+    assert subprocess.run(cmd, capture_output=True).returncode != 0
+    subprocess.check_call(cmd + ["-f"])
+    env = calkit.load_calkit_info()["environments"]["tex"]
+    assert env == {"kind": "texlive", "release": 2024}
+
+
 def test_new_uv_venv(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(

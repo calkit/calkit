@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 # are relocked or rebuilt rather than misread
 LOCK_FORMAT_VERSION = 1
 VIEW_FORMAT_VERSION = 2
+# Programs a package runs, which no file it loads names, so neither TeX
+# Live's database nor a document's lookups find them, e.g., biblatex's
+# default backend
+EXTRA_DEPENDS = {"biblatex": ["biber"]}
 # What converting LaTeX to other formats with make4ht needs, beyond what
 # the document does
 TEX4HT_PACKAGES = ["make4ht", "tex4ht", "luaxml"]
@@ -326,7 +330,7 @@ def resolve_packages(
         if name in resolved or name not in tlpdb:
             continue
         resolved.add(name)
-        for dep in tlpdb[name]["depends"]:
+        for dep in tlpdb[name]["depends"] + EXTRA_DEPENDS.get(name, []):
             if dep.endswith(".ARCH"):
                 queue += [dep[:-4] + p for p in platforms]
             elif ":" not in dep and "/" not in dep:

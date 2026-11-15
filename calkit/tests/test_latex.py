@@ -878,3 +878,78 @@ def test_flatten(tmp_dir):
         ("paper/main.tex", 4, "\\includegraphics{fig}"),
         ("paper/main.tex", 5, ""),
     ]
+
+
+def test_find_named_tex_files(tmp_dir):
+    os.makedirs("paper/sections")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass[11pt]{revtex4-2}\n"
+            "\\usepackage[utf8]{inputenc}\n"
+            "\\usepackage{amsmath, booktabs}\n"
+            "% \\usepackage{commented}\n"
+            "\\usepackage{\\mypkg}\n"
+            "\\input{sections/intro}\n"
+            "\\input{missing}\n"
+            "\\bibliographystyle{plainnat}\n"
+        )
+    with open("paper/sections/intro.tex", "w") as f:
+        f.write("\\RequirePackage{siunitx}\n\\usepackage{amsmath}\n")
+    assert calkit.latex.find_named_tex_files("paper/main.tex") == [
+        "revtex4-2.cls",
+        "inputenc.sty",
+        "amsmath.sty",
+        "booktabs.sty",
+        "plainnat.bst",
+        "siunitx.sty",
+    ]
+
+
+def test_get_latexmk_programs(tmp_dir):
+    from calkit.latex import get_latexmk_programs
+
+    base = ["latexmk", "-pdf", "-cd"]
+    # Options, the last of which wins, as in latexmk
+    for args, expected in [
+        ([], ["pdflatex"]),
+        (["-xelatex"], ["xelatex"]),
+        (["-pdfxe"], ["xelatex"]),
+        (["-pdflua"], ["lualatex"]),
+        (["-xelatex", "-pdf"], ["pdflatex"]),
+        (["-latex"], ["latex"]),
+        (["-xdv"], ["xelatex"]),
+        (["-pdflatex=xelatex -shell-escape %O %S"], ["xelatex"]),
+        (["-e", "$pdf_mode = 5;"], ["xelatex"]),
+        # Through DVI or PostScript, with the converters that takes
+        (["-pdfdvi"], ["latex", "dvipdf"]),
+        (["-pdfps"], ["latex", "dvips", "ps2pdf"]),
+        (
+            ["-pdfdvi", "-e", "$dvipdf = 'dvipdfmx %O -o %D %S';"],
+            ["latex", "dvipdfmx"],
+        ),
+    ]:
+        assert get_latexmk_programs(base + args + ["main.tex"]) == expected
+    # The rc file where latexmk runs comes before the options, so Calkit's
+    # -pdf overrides its mode but not a command it sets
+    with open(".latexmkrc", "w") as f:
+        f.write("# $pdf_mode = 4;\n$pdf_mode = 5;\n")
+    assert get_latexmk_programs(base + ["main.tex"]) == ["pdflatex"]
+    with open(".latexmkrc", "w") as f:
+        f.write("$pdflatex = 'xelatex %O %S';\n")
+    assert get_latexmk_programs(base + ["main.tex"]) == ["xelatex"]
+    # Comments after code are ignored, but not a # in a string
+    with open(".latexmkrc", "w") as f:
+        f.write("$max_repeat = 5; # $pdflatex = 'xelatex %O %S';\n")
+    assert get_latexmk_programs(base + ["main.tex"]) == ["pdflatex"]
+    with open(".latexmkrc", "w") as f:
+        f.write("$pdflatex = 'xe#latex %O'; # $pdflatex = 'lualatex';\n")
+    assert get_latexmk_programs(base + ["main.tex"]) == ["xe#latex"]
+    os.remove(".latexmkrc")
+    # One given with -r is read where it appears
+    os.makedirs("paper")
+    with open("paper/latexmkrc", "w") as f:
+        f.write("$pdf_mode = 5;\n")
+    cmd = base + ["-r", "paper/latexmkrc", "main.tex"]
+    assert get_latexmk_programs(cmd) == ["xelatex"]
+    cmd = ["latexmk", "-r", "paper/latexmkrc", "-pdf", "main.tex"]
+    assert get_latexmk_programs(cmd) == ["pdflatex"]

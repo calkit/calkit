@@ -91,6 +91,11 @@ When Overleaf rejects it, Calkit first checks your Calkit account for a
 newer one, e.g., after you've connected again from the extension,
 and otherwise asks for a new one,
 so copy the cookie again after signing back in.
+
+<!-- TODO: needs human review -->
+
+With both a Git token and a session, in your config or your Calkit account,
+Calkit uses the token.
 If a Git token stops working, e.g., because Premium has ended,
 Calkit uses the session instead, if one is set.
 

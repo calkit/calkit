@@ -126,18 +126,20 @@ def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
     """Get a Git token, or, if only a session is available, a web client
     for syncing without Overleaf Premium.
 
-    Credentials in config come first, then a token saved to the hub, then a
-    session saved to the hub, before prompting for a token.
+    A token comes first, in config or else saved to the hub, since Git
+    integration fetches only what's new and keeps each edit's author, then a
+    session, in config or else saved to the hub, before prompting for a
+    token.
     """
     calkit_config = calkit.config.read()
     if calkit_config.overleaf_token:
         return calkit_config.overleaf_token
-    if calkit_config.overleaf_session:
-        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
     token = _get_overleaf_token_from_hub()
     if token:
         typer.echo("Using the Overleaf token saved to the hub")
         return token
+    if calkit_config.overleaf_session:
+        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
     session = _get_overleaf_session_from_hub()
     if session:
         typer.echo("Using the Overleaf session saved to the hub")

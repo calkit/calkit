@@ -2199,6 +2199,11 @@ def test_overleaf_credentials(monkeypatch):
     config.overleaf_session = None
     hub["/user/overleaf-token"] = {"access_token": "olp_hub"}
     assert _get_overleaf_auth() == config.overleaf_token == "olp_hub"
+    # A token on the hub comes before a session here too
+    config.overleaf_token = None
+    config.overleaf_session = "here"
+    assert _get_overleaf_auth() == "olp_hub"
+    config.overleaf_session = None
     # A rejected session is replaced by a newer one on the hub without
     # prompting or warning, but the same one again isn't retried, however
     # it's written

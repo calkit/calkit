@@ -181,19 +181,19 @@ function esc(s: unknown): string {
   );
 }
 
-function visible(t: Thread): boolean {
+function isShown(t: Thread): boolean {
   return state.showResolved || !t.resolved;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function pageView(n: number): any {
+function getPageView(n: number): any {
   return viewer.getPageView(n - 1);
 }
 
 // SyncTeX measures from the top-left of the page in points; PDF.js from the
 // bottom-left
 function toViewport(n: number, x: number, y: number): number[] {
-  const vp = pageView(n).viewport;
+  const vp = getPageView(n).viewport;
   return vp.convertToViewportPoint(x, vp.viewBox[3] - y);
 }
 
@@ -202,19 +202,19 @@ function fromViewport(
   vx: number,
   vy: number,
 ): { x: number; y: number } {
-  const vp = pageView(n).viewport;
+  const vp = getPageView(n).viewport;
   const [x, y] = vp.convertToPdfPoint(vx, vy);
   return { x, y: vp.viewBox[3] - y };
 }
 
-function pageText(n: number): Promise<PageItem[]> {
+function getPageText(n: number): Promise<PageItem[]> {
   let cached = textCache.get(n);
   if (!cached && pdfDoc) {
     cached = pdfDoc
       .getPage(n)
       .then((p) => p.getTextContent())
       .then((tc) => {
-        const view = pageView(n).viewport.viewBox;
+        const view = getPageView(n).viewport.viewBox;
         let span = 0;
         // The text layer has a span for each item with text, in order
         return tc.items
@@ -244,7 +244,7 @@ function pageText(n: number): Promise<PageItem[]> {
 
 // Each occurrence of some text from the top of a line to either the bottom
 // of one, or a place in the text, in reading order
-async function occurrences(
+async function getOccurrences(
   text: string,
   from: Place,
   to: Place,
@@ -254,7 +254,7 @@ async function occurrences(
     return out;
   }
   for (let n = from.page; n <= Math.min(to.page, pdfDoc.numPages); n++) {
-    const items = await pageText(n);
+    const items = await getPageText(n);
     for (const r of findText(items, text)) {
       const y = items[r.start.item].top;
       if (n === from.page && y < from.y - 2) {
@@ -277,15 +277,15 @@ async function occurrences(
 }
 
 // Where a page's content starts on screen, inside its border
-function pageBox(div: HTMLElement): { left: number; top: number } {
+function getPageBox(div: HTMLElement): { left: number; top: number } {
   const r = div.getBoundingClientRect();
   return { left: r.left + div.clientLeft, top: r.top + div.clientTop };
 }
 
 // The text of the line nearest each of two heights on a page, and those
 // between, as context for finding its paragraph in the source
-async function lineText(n: number, y0: number, y1 = y0): Promise<string> {
-  const items = (await pageText(n)).filter((it) => it.str.trim());
+async function getLineText(n: number, y0: number, y1 = y0): Promise<string> {
+  const items = (await getPageText(n)).filter((it) => it.str.trim());
   const near = (y: number) =>
     items.reduce<PageItem | null>(
       (a, it) =>
@@ -334,7 +334,7 @@ async function placeParagraph(
   }
   const pages: PageItem[][] = [];
   for (let n = 1; n <= pdfDoc.numPages; n++) {
-    pages.push(await pageText(n));
+    pages.push(await getPageText(n));
   }
   type Hit = { page: number; items: PageItem[]; r: TextRange };
   const hitsOf = (needle: string) => {
@@ -398,9 +398,9 @@ async function placeParagraph(
   };
 }
 
-function spans(n: number): HTMLElement[] {
+function getSpans(n: number): HTMLElement[] {
   return [
-    ...(pageView(n)?.div?.querySelectorAll(
+    ...(getPageView(n)?.div?.querySelectorAll(
       ".textLayer span:not(.markedContent, .highlight)",
     ) ?? []),
   ];
@@ -408,11 +408,11 @@ function spans(n: number): HTMLElement[] {
 
 // Rectangles around a match, from the text layer where it's rendered, since
 // that has the real glyph widths, otherwise estimated from the text items
-function rangeRects(m: Occurrence): Box[] {
+function getRangeRects(m: Occurrence): Box[] {
   const rects: Box[] = [];
-  const pv = pageView(m.page);
-  const box = pageBox(pv.div);
-  const domSpans = spans(m.page);
+  const pv = getPageView(m.page);
+  const box = getPageBox(pv.div);
+  const domSpans = getSpans(m.page);
   for (let i = m.range.start.item; i <= m.range.end.item; i++) {
     const it = m.items[i];
     const len = Math.max(it.str.length, 1);
@@ -456,8 +456,8 @@ function rangeRects(m: Occurrence): Box[] {
   return rects;
 }
 
-function layer(n: number): HTMLElement | null {
-  const pv = pageView(n);
+function getLayer(n: number): HTMLElement | null {
+  const pv = getPageView(n);
   if (!pv?.div) {
     return null;
   }
@@ -503,11 +503,11 @@ async function draw(): Promise<void> {
   }
   const gen = ++drawGen;
   for (let n = 1; n <= pdfDoc.numPages; n++) {
-    pageView(n)?.div?.querySelector(".ck-layer")?.replaceChildren();
+    getPageView(n)?.div?.querySelector(".ck-layer")?.replaceChildren();
   }
   const pins = new Map<string, number>();
   for (const t of threads) {
-    if (!visible(t)) {
+    if (!isShown(t)) {
       continue;
     }
     if (!t.start && t.anchor) {
@@ -525,12 +525,12 @@ async function draw(): Promise<void> {
     if (!t.start) {
       continue;
     }
-    const startLayer = layer(t.start.page);
+    const startLayer = getLayer(t.start.page);
     if (!startLayer) {
       continue;
     }
     const end = t.end && t.end.page === t.start.page ? t.end : null;
-    const view = pageView(t.start.page).viewport.viewBox;
+    const view = getPageView(t.start.page).viewport.viewBox;
     const [x0, y0] = toViewport(
       t.start.page,
       t.start.x + t.start.width + 4,
@@ -561,7 +561,7 @@ async function draw(): Promise<void> {
     pin.title = `${t.messages[0]?.author}: ${t.messages[0]?.text}`;
     if (t.highlight) {
       const last = t.end ?? t.start;
-      const found = await occurrences(
+      const found = await getOccurrences(
         t.highlight.text,
         { page: t.start.page, y: t.start.y },
         { page: last.page, y: last.y + last.height },
@@ -570,9 +570,9 @@ async function draw(): Promise<void> {
         return;
       }
       const m = found[t.highlight.occ] ?? found[0];
-      const hlLayer = m && layer(m.page);
+      const hlLayer = m && getLayer(m.page);
       if (m && hlLayer) {
-        for (const r of rangeRects(m)) {
+        for (const r of getRangeRects(m)) {
           addEl(hlLayer, "ck-hl", r, t);
         }
       }
@@ -581,7 +581,7 @@ async function draw(): Promise<void> {
 }
 
 function renderPanel(): void {
-  const shown = threads.filter(visible);
+  const shown = threads.filter(isShown);
   const parts: string[] = [];
   if (composer) {
     parts.push(
@@ -694,7 +694,7 @@ function select(key: string, scroll: boolean): void {
 }
 
 function reveal(rect: PdfRect): void {
-  const pv = pageView(rect.page);
+  const pv = getPageView(rect.page);
   if (!pv) {
     return;
   }
@@ -841,7 +841,7 @@ function offsetIn(node: Node, inner: Node, offset: number): number {
 }
 
 // The selected text, where it starts on its page, and the lines it's on
-async function selection(): Promise<{
+async function getCommentSelection(): Promise<{
   text: string;
   page: number;
   at: { x: number; y: number };
@@ -870,11 +870,11 @@ async function selection(): Promise<{
   }
   const n = Number(pageDiv.dataset.pageNumber);
   // Where the selection starts in the page's text items
-  const domIndex = spans(n).indexOf(startEl);
-  const item = (await pageText(n)).findIndex(
+  const domIndex = getSpans(n).indexOf(startEl);
+  const item = (await getPageText(n)).findIndex(
     (it) => it.span === domIndex && domIndex >= 0,
   );
-  const box = pageBox(pageDiv);
+  const box = getPageBox(pageDiv);
   const first = rects[0];
   const last = rects[rects.length - 1];
   const at = fromViewport(
@@ -893,7 +893,7 @@ async function selection(): Promise<{
     at,
     item,
     offset: offsetIn(startEl, startNode, range.startOffset),
-    context: await lineText(n, at.y, atEnd.y),
+    context: await getLineText(n, at.y, atEnd.y),
   };
 }
 
@@ -909,7 +909,7 @@ function pointAt(
     return null;
   }
   const n = Number(pageDiv.dataset.pageNumber);
-  const box = pageBox(pageDiv);
+  const box = getPageBox(pageDiv);
   return { page: n, at: fromViewport(n, cx - box.left, cy - box.top) };
 }
 
@@ -917,7 +917,7 @@ function pointAt(
 async function sourceAt(
   point: { page: number; at: { x: number; y: number } } | null,
 ): Promise<void> {
-  const sel = point ? null : await selection();
+  const sel = point ? null : await getCommentSelection();
   if (sel) {
     post({
       type: "sourceAt",
@@ -933,7 +933,7 @@ async function sourceAt(
       page: point.page,
       x: point.at.x,
       y: point.at.y,
-      context: await lineText(point.page, point.at.y),
+      context: await getLineText(point.page, point.at.y),
     });
   }
 }
@@ -945,7 +945,7 @@ byId("select-source").addEventListener("click", () => {
 
 byId("select-comment").addEventListener("click", async () => {
   selectBtn.style.display = "none";
-  const sel = await selection();
+  const sel = await getCommentSelection();
   if (!sel) {
     return;
   }
@@ -983,7 +983,11 @@ byId("select-comment").addEventListener("click", async () => {
       selItem >= 0
         ? { page: n, y: at.y, item: selItem, offset: selOffset }
         : { page: n, y: at.y - 6 };
-    const found = await occurrences(text, { page: start.page, y: start.y }, to);
+    const found = await getOccurrences(
+      text,
+      { page: start.page, y: start.y },
+      to,
+    );
     composer.occ = found.length;
   }
 });

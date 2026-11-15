@@ -108,6 +108,8 @@ def _get_overleaf_token_from_hub(stale: str | None = None) -> str | None:
     """Get an Overleaf Git token saved to the hub, other than a ``stale``
     one, and store it in config.
     """
+    import hashlib
+
     try:
         token = calkit.hub.get(
             "/user/overleaf-token", allow_login=False, max_retries=2
@@ -117,6 +119,10 @@ def _get_overleaf_token_from_hub(stale: str | None = None) -> str | None:
     if not token or token == stale:
         return None
     calkit_config = calkit.config.read()
+    # Rejected by Overleaf already, e.g., since Premium ended
+    token_sha = hashlib.sha256(str(token).encode()).hexdigest()
+    if token_sha == calkit_config.overleaf_rejected_token_sha:
+        return None
     calkit_config.overleaf_token = token
     calkit_config.write()
     return str(token)
@@ -156,6 +162,7 @@ def _get_pulled_overleaf_repo(
     Returns the repo and the credentials that worked, so later projects use
     them too.
     """
+    import hashlib
 
     def get_new_session(stale: str, error: Exception) -> str:
         """Get a new Overleaf session from the hub, or prompt for one, and
@@ -218,10 +225,14 @@ def _get_pulled_overleaf_repo(
                     )
                     # Forget the token, so later syncs go straight to the
                     # session
+                    # and the hub's copy isn't tried first again
                     calkit_config = calkit.config.read()
                     if calkit_config.overleaf_token == auth:
                         calkit_config.overleaf_token = None
-                        calkit_config.write()
+                    calkit_config.overleaf_rejected_token_sha = hashlib.sha256(
+                        str(auth).encode()
+                    ).hexdigest()
+                    calkit_config.write()
                     auth = calkit.overleaf.WebClient(str(session))
                 else:
                     auth = _get_overleaf_token(rejected=True)

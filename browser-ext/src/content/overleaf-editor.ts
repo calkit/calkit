@@ -46,6 +46,8 @@ export type FromEditor =
       tree: {
         docs: { path: string; id: string }[];
         files: { path: string; hash: string }[];
+        /** The document open in the editor, if one is. */
+        openDocId: string | null;
       } | null;
     };
 
@@ -312,7 +314,15 @@ function getFileTree(): Extract<FromEditor, { type: "tree" }>["tree"] {
     }
     return (folder.folders ?? []).every((f) => walk(f, `${prefix}${f.name}/`));
   };
-  return walk(root, "") ? { docs, files } : null;
+  let openDocId: string | null = null;
+  try {
+    openDocId =
+      (window as any).overleaf?.unstable?.store?.get("editor.open_doc_id") ??
+      null;
+  } catch {
+    // Not known yet, e.g., while the editor loads
+  }
+  return walk(root, "") ? { docs, files, openDocId } : null;
 }
 
 window.addEventListener("message", (event) => {

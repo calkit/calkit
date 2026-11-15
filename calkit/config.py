@@ -699,6 +699,9 @@ class Settings(BaseSettings):
     overleaf_token: KeyringOptionalSecret | None = None
     # Browser session cookie, for syncing without Overleaf's Git integration
     overleaf_session: KeyringOptionalSecret | None = None
+    # A hash of the last Git token Overleaf rejected, so one still saved to
+    # the hub isn't tried again before the session
+    overleaf_rejected_token_sha: str | None = None
     # Default archival service for releases
     default_archival_service: Literal["zenodo", "caltechdata"] = "zenodo"
     # Which fields have been resolved from the keyring, so a secret that

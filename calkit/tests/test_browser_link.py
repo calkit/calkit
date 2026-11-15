@@ -836,6 +836,11 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     # saving, are both said
     os.utime(project / "paper" / "main.tex", (later, later))
     assert get_pdf_chunk(str(project), "paper", 0)["edited_since_built"]
+    # Including one whose name isn't ASCII
+    os.utime(project / "paper" / "main.tex", (0, 0))
+    (project / "paper" / "café.tex").write_text("Hi\n")
+    os.utime(project / "paper" / "café.tex", (later, later))
+    assert get_pdf_chunk(str(project), "paper", 0)["edited_since_built"]
     (project / "paper" / "main.pdf").write_bytes(pdf + b"more")
     assert get_pdf_chunk(str(project), "paper", 0)["changed_since_commit"]
     with pytest.raises(ValueError, match="hasn't been built"):
@@ -872,13 +877,21 @@ def test_get_pipeline(tmp_path):
             "command": "echo a > a.txt",
             "outputs": ["a.txt"],
         },
+        # Run once per value, each recorded as its own run
+        "make-each": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo {n} > {n}.txt",
+            "iterate_over": [{"arg_name": "n", "values": ["x", "y"]}],
+            "outputs": ["{n}.txt"],
+        },
     }
     with open(project / "calkit.yaml", "w") as f:
         calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
     cwd = os.getcwd()
     res = get_pipeline(str(project))
     assert os.getcwd() == cwd
-    assert res["ck_stages"] == ["make-b", "make-a"]
+    assert res["ck_stages"] == ["make-b", "make-a", "make-each"]
     assert res["status"] == "stale"
     assert res["stage_statuses"]["make-b"]["status"] == "not-run"
     assert res["dvc_stages"]["make-a"]["cmd"].endswith("echo a > a.txt")

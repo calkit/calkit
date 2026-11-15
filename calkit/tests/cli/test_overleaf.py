@@ -2238,3 +2238,8 @@ def test_overleaf_credentials(monkeypatch):
     assert sessions_tried == ["fresh"]
     assert config.overleaf_token is None
     assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    # Nor is the hub's copy of it tried first again
+    hub["/user/overleaf-token"] = {"access_token": "expired"}
+    assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    assert config.overleaf_token is None
+    del hub["/user/overleaf-token"]

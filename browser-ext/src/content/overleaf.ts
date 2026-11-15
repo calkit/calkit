@@ -3356,20 +3356,7 @@ async function getOverleafFiles(projectId: string): Promise<{
   shas: Record<string, string>;
   texts: Record<string, string>;
 } | null> {
-  const reqId = ++editorRequests;
-  const tree = await new Promise<(FromEditor & { type: "tree" })["tree"]>(
-    (resolve) => {
-      const timer = setTimeout(() => {
-        editorReplies.delete(reqId);
-        resolve(null);
-      }, 3000);
-      editorReplies.set(reqId, (message) => {
-        clearTimeout(timer);
-        resolve(message.type === "tree" ? message.tree : null);
-      });
-      toEditor({ type: "tree", reqId });
-    },
-  );
+  const tree = await getOverleafTree();
   if (!tree) {
     return null;
   }
@@ -3381,6 +3368,18 @@ async function getOverleafFiles(projectId: string): Promise<{
   try {
     await Promise.all(
       tree.docs.map(async (doc) => {
+        // Typing changes only the open one, so the rest are read again
+        // only once they may have been changed by someone else
+        const cached = overleafDocs.get(doc.id);
+        if (
+          cached &&
+          doc.id !== tree.openDocId &&
+          Date.now() - cached.at < DOC_CACHE_MS
+        ) {
+          shas[doc.path] = cached.sha;
+          texts[doc.path] = cached.text;
+          return;
+        }
         const response = await fetch(
           `/project/${projectId}/doc/${doc.id}/download`,
         );
@@ -3390,12 +3389,41 @@ async function getOverleafFiles(projectId: string): Promise<{
         const data = new Uint8Array(await response.arrayBuffer());
         shas[doc.path] = await getGitBlobSha(data);
         texts[doc.path] = new TextDecoder().decode(data);
+        overleafDocs.set(doc.id, {
+          at: Date.now(),
+          sha: shas[doc.path],
+          text: texts[doc.path],
+        });
       }),
     );
   } catch {
     return null;
   }
   return { shas, texts };
+}
+
+// What each Overleaf document held when last read, by ID, and for how long
+// that's trusted for those not open
+const overleafDocs = new Map<
+  string,
+  { at: number; sha: string; text: string }
+>();
+const DOC_CACHE_MS = 30 * 1000;
+
+/** Overleaf's file tree, from its editor, or null if it can't be read. */
+function getOverleafTree(): Promise<(FromEditor & { type: "tree" })["tree"]> {
+  const reqId = ++editorRequests;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      editorReplies.delete(reqId);
+      resolve(null);
+    }, 3000);
+    editorReplies.set(reqId, (message) => {
+      clearTimeout(timer);
+      resolve(message.type === "tree" ? message.tree : null);
+    });
+    toEditor({ type: "tree", reqId });
+  });
 }
 
 /** Make an edit to the open file in the editor, as typing would. */
@@ -3504,7 +3532,7 @@ async function getOverleafTexts(
     .filter((e) => e.type === "doc")
     .map((e) => e.path.replace(/^\//, ""))
     .filter(wanted);
-  const ids = getDocIds();
+  const ids = await getDocIds();
   if (paths.every((p) => ids.get(p))) {
     const texts = await Promise.all(
       paths.map(async (p) => {
@@ -3527,10 +3555,14 @@ async function getOverleafTexts(
 }
 
 /**
- * The IDs of the documents the file tree shows, by their paths. Those in
- * closed folders aren't shown.
+ * The IDs of the project's documents, by their paths, from Overleaf's file
+ * tree, or else those the tree shows, which leaves out closed folders.
  */
-function getDocIds(): Map<string, string> {
+async function getDocIds(): Promise<Map<string, string>> {
+  const tree = await getOverleafTree();
+  if (tree) {
+    return new Map(tree.docs.map((doc) => [doc.path, doc.id]));
+  }
   const ids = new Map<string, string>();
   for (const node of document.querySelectorAll<HTMLElement>(
     '[data-file-type="doc"][data-file-id]',
@@ -3576,7 +3608,9 @@ async function getOverleafComments(
     >("ranges"),
     read<Record<string, OverleafThread>>("threads"),
   ]);
-  const paths = new Map([...getDocIds()].map(([path, id]) => [id, path]));
+  const paths = new Map(
+    [...(await getDocIds())].map(([path, id]) => [id, path]),
+  );
   const byFile = new Map<string, OverleafComment[]>();
   for (const doc of ranges) {
     const comments = (doc.ranges?.comments ?? []).map(({ op }) => ({
@@ -3665,9 +3699,7 @@ async function syncOverleafComments(
     known,
     getCommentAuthor().name,
   );
-  // Overleaf first, so if it refuses, nothing's changed and it's tried
-  // again next time
-  const docId = getDocIds().get(file);
+  const docId = (await getDocIds()).get(file);
   const csrf =
     document.querySelector<HTMLMetaElement>('meta[name="ol-csrfToken"]')
       ?.content ?? "";
@@ -3687,24 +3719,8 @@ async function syncOverleafComments(
       );
     }
   };
-  for (const push of pushes) {
-    if (push.deleted) {
-      if (docId) {
-        await deleteOverleafThread(projectId, docId, push.thread);
-      }
-      continue;
-    }
-    for (const content of push.replies) {
-      await post(`thread/${push.thread}/messages`, { content });
-    }
-    if (push.resolved !== undefined && docId) {
-      await post(
-        `doc/${docId}/thread/${push.thread}/${
-          push.resolved ? "resolve" : "reopen"
-        }`,
-      );
-    }
-  }
+  // The source first, which fails if it was edited meanwhile, before
+  // Overleaf is told anything, so nothing's sent twice
   const changed = next.join("\n") !== lines.join("\n");
   if (changed) {
     // Only what changed, so the rest of the file is left as it is
@@ -3734,7 +3750,8 @@ async function syncOverleafComments(
     );
     sources.current.set(file, next.join("\n"));
   }
-  // This file's threads replace what was known of them
+  // This file's threads replace what was known of them, those Overleaf
+  // has yet to hear about from here aside, so they're sent again next time
   const here = new Set([
     ...comments.map((c) => c.thread),
     ...getReviewThreads(new Map([[file, lines.join("\n")]])).flatMap((t) =>
@@ -3744,9 +3761,44 @@ async function syncOverleafComments(
   const kept = Object.fromEntries(
     Object.entries(known).filter(([id]) => !here.has(id)),
   );
-  await chrome.storage.local.set({
-    [OVERLEAF_SYNCED_KEY]: { ...stored, [projectId]: { ...kept, ...synced } },
-  });
+  const save = (state: Record<string, OverleafSynced>) =>
+    chrome.storage.local.set({
+      [OVERLEAF_SYNCED_KEY]: { ...stored, [projectId]: { ...kept, ...state } },
+    });
+  const unsent = new Set(pushes.map((p) => p.thread));
+  const done = Object.fromEntries(
+    Object.entries(synced).filter(([id]) => !unsent.has(id)),
+  );
+  const pending = Object.fromEntries(
+    [...unsent].filter((id) => known[id]).map((id) => [id, known[id]]),
+  );
+  await save({ ...pending, ...done });
+  for (const push of pushes) {
+    // Without its document's ID, Overleaf can't be told, so it's left to
+    // be sent next time
+    if ((push.deleted || push.resolved !== undefined) && !docId) {
+      continue;
+    }
+    if (push.deleted) {
+      await deleteOverleafThread(projectId, docId as string, push.thread);
+    } else {
+      for (const content of push.replies) {
+        await post(`thread/${push.thread}/messages`, { content });
+      }
+      if (push.resolved !== undefined) {
+        await post(
+          `doc/${docId}/thread/${push.thread}/${
+            push.resolved ? "resolve" : "reopen"
+          }`,
+        );
+      }
+    }
+    delete pending[push.thread];
+    if (synced[push.thread]) {
+      done[push.thread] = synced[push.thread];
+    }
+    await save({ ...pending, ...done });
+  }
   return changed;
 }
 
@@ -4183,12 +4235,14 @@ async function onReviewMessage(message: FromReview): Promise<void> {
         }
         return;
       case "locate": {
+        // Always answered, without a source if it can't be found, since
+        // the viewer waits on it
         const found = await getSourceAt(
           message.page,
           message.x,
           message.y,
           message.context,
-        );
+        ).catch(() => null);
         postToReview({ type: "located", reqId: message.reqId, ...found });
         return;
       }
@@ -4267,7 +4321,7 @@ async function onReviewMessage(message: FromReview): Promise<void> {
               message.line >= t.line &&
               message.line < t.line + t.nlines,
         );
-        const docId = getDocIds().get(message.file);
+        const docId = (await getDocIds()).get(message.file);
         if (thread?.overleaf && currentProjectId) {
           if (!docId) {
             throw new Error(

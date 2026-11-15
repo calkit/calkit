@@ -838,9 +838,14 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         changed = bool(repo.git.status("--porcelain", "--", path).strip())
         # Only what Git would keep counts, so what the build leaves, e.g.,
         # SyncTeX data written just after the PDF, doesn't
-        sources = repo.git.ls_files(
-            "-co", "--exclude-standard", "--", folder
-        ).splitlines()
+        # Unquoted, e.g., for names that aren't ASCII
+        sources = [
+            p
+            for p in repo.git.ls_files(
+                "-z", "-co", "--exclude-standard", "--", folder
+            ).split("\0")
+            if p
+        ]
         edited_since = any(
             os.path.getmtime(os.path.join(wdir, source_path)) > stat.st_mtime
             for source_path in sources
@@ -1345,26 +1350,38 @@ def get_pipeline(wdir: str) -> dict:
             quiet_environment_checks=True,
         )
         dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
-        lock_stages = set(calkit.dvc.read_lock_stages())
+        # One run per iteration is recorded as 'name@item', so each is
+        # counted toward its stage
+        lock_stages = {n.split("@")[0] for n in calkit.dvc.read_lock_stages()}
     finally:
         os.chdir(prev_wdir)
     stage_statuses = {}
     for name in ck_stages:
-        stale = status.stale_stages.get(name)
+        stale = [
+            s
+            for key, s in status.stale_stages.items()
+            if key.split("@")[0] == name
+        ]
         if name not in lock_stages:
             state = "not-run"
-        elif stale is None:
+        elif not stale:
             state = "up-to-date"
-        elif stale.always_run:
+        elif all(s.always_run for s in stale):
             state = "always-run"
         else:
             state = "stale"
         stage_statuses[name] = {
             "status": state,
-            "modified_command": bool(stale and stale.modified_command),
-            "modified_inputs": stale.modified_inputs if stale else [],
-            "modified_outputs": stale.modified_outputs if stale else [],
-            "missing_outputs": stale.stale_outputs if stale else [],
+            "modified_command": any(s.modified_command for s in stale),
+            "modified_inputs": list(
+                dict.fromkeys(p for s in stale for p in s.modified_inputs)
+            ),
+            "modified_outputs": list(
+                dict.fromkeys(p for s in stale for p in s.modified_outputs)
+            ),
+            "missing_outputs": list(
+                dict.fromkeys(p for s in stale for p in s.stale_outputs)
+            ),
         }
     return {
         "ck_stages": ck_stages,

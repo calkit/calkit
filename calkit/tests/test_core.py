@@ -49,7 +49,9 @@ def test_find_project_dirs():
 
 def test_get_project_checkouts(tmp_path, monkeypatch):
     home = tmp_path / "home"
+    # Windows finds the home folder from USERPROFILE
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("CALKIT_USER_HOME", str(home))
     # Named in calkit.yaml in any of the ways YAML allows, or by the remote
     projects = {
@@ -57,6 +59,7 @@ def test_get_project_checkouts(tmp_path, monkeypatch):
         "quoted": ("owner: me\nname: 'proj'  # It's this\n", None),
         "folded": ("owner: me\nname: >-\n  proj\n", None),
         "other": ("owner: me\nname: other\n", None),
+        "windows": ("owner: me\r\nname: proj\r\n", None),
         "remote": ("owner: me\n", "https://github.com/me/proj.git"),
         "other-remote": ("owner: me\n", "https://github.com/me/else.git"),
         "not-mine": ("owner: you\nname: proj\n", None),
@@ -64,7 +67,7 @@ def test_get_project_checkouts(tmp_path, monkeypatch):
     for dirname, (text, remote_url) in projects.items():
         path = home / "calkit" / dirname
         os.makedirs(path)
-        (path / "calkit.yaml").write_text(text)
+        (path / "calkit.yaml").write_bytes(text.encode())
         repo = git.Repo.init(path)
         if remote_url:
             repo.create_remote("origin", remote_url)
@@ -74,6 +77,7 @@ def test_get_project_checkouts(tmp_path, monkeypatch):
         "plain",
         "quoted",
         "remote",
+        "windows",
     ]
     assert set(found.values()) == {"me"}
 

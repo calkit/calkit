@@ -36,7 +36,18 @@ export type FromEditor =
     }
   // The open document's text, or whether lines were replaced in it
   | { calkit: "editor"; type: "text"; reqId: number; text: string | null }
-  | { calkit: "editor"; type: "replaced"; reqId: number; error: string | null };
+  | { calkit: "editor"; type: "replaced"; reqId: number; error: string | null }
+  // Overleaf's file tree: its documents' IDs and its other files' Git
+  // hashes, by path, or null if it can't be found
+  | {
+      calkit: "editor";
+      type: "tree";
+      reqId: number;
+      tree: {
+        docs: { path: string; id: string }[];
+        files: { path: string; hash: string }[];
+      } | null;
+    };
 
 export type ToEditor =
   | {
@@ -57,6 +68,7 @@ export type ToEditor =
   // last scan
   | { calkit: "lint"; type: "rescan" }
   | { calkit: "lint"; type: "read"; reqId: number }
+  | { calkit: "lint"; type: "tree"; reqId: number }
   // Lines from `line` (from 1) replaced, if they're still `expected`
   | {
       calkit: "lint";
@@ -259,6 +271,50 @@ function replaceLines(message: ToEditor & { type: "replace" }): string | null {
   return null;
 }
 
+/**
+ * Overleaf's file tree, from the data its React components share, found by
+ * walking up from one of them, since Overleaf doesn't expose it otherwise.
+ */
+function getFileTree(): Extract<FromEditor, { type: "tree" }>["tree"] {
+  interface Folder {
+    name: string;
+    docs?: { _id: string; name: string }[];
+    fileRefs?: { name: string; hash?: string }[];
+    folders?: Folder[];
+  }
+  const start = document.querySelector(
+    "[data-file-id], .cm-content, #ide-root",
+  );
+  const key =
+    start && Object.keys(start).find((k) => k.startsWith("__reactFiber"));
+  let fiber = key ? (start as any)[key] : null;
+  let root: Folder | null = null;
+  for (let i = 0; fiber && i < 1000 && !root; i++, fiber = fiber.return) {
+    const data = fiber.memoizedProps?.value?.fileTreeData;
+    if (data && Array.isArray(data.docs)) {
+      root = data;
+    }
+  }
+  if (!root) {
+    return null;
+  }
+  const docs: { path: string; id: string }[] = [];
+  const files: { path: string; hash: string }[] = [];
+  const walk = (folder: Folder, prefix: string): boolean => {
+    for (const doc of folder.docs ?? []) {
+      docs.push({ path: prefix + doc.name, id: doc._id });
+    }
+    for (const file of folder.fileRefs ?? []) {
+      if (!file.hash) {
+        return false;
+      }
+      files.push({ path: prefix + file.name, hash: file.hash });
+    }
+    return (folder.folders ?? []).every((f) => walk(f, `${prefix}${f.name}/`));
+  };
+  return walk(root, "") ? { docs, files } : null;
+}
+
 window.addEventListener("message", (event) => {
   if (event.source !== window || event.data?.calkit !== "lint") {
     return;
@@ -277,6 +333,8 @@ window.addEventListener("message", (event) => {
       reqId: message.reqId,
       text: active ? active.view.state.doc.toString() : null,
     });
+  } else if (message.type === "tree") {
+    post({ type: "tree", reqId: message.reqId, tree: getFileTree() });
   } else if (message.type === "replace") {
     post({
       type: "replaced",

@@ -320,3 +320,15 @@ export async function getLocalPdf(
   } while (offset < first.size);
   return { parts, first };
 }
+
+/** The hash Git gives a file with these contents, as Overleaf's are given. */
+export async function getGitBlobSha(data: Uint8Array): Promise<string> {
+  const header = new TextEncoder().encode(`blob ${data.length}\0`);
+  const blob = new Uint8Array(header.length + data.length);
+  blob.set(header);
+  blob.set(data, header.length);
+  const digest = await crypto.subtle.digest("SHA-1", blob);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}

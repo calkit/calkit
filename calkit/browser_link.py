@@ -270,6 +270,8 @@ def get_reply(msg: dict) -> dict:
                 overleaf_project_id=msg.get("overleaf_project_id"),
                 path=msg.get("path"),
                 pull=msg.get("pull", True) is not False,
+                overleaf_files=msg.get("overleaf_files"),
+                overleaf_texts=msg.get("overleaf_texts"),
             )
         elif kind == "project.figures":
             owner, name = split_project(msg.get("project"))
@@ -613,6 +615,8 @@ def get_overleaf_sync_statuses(
     overleaf_project_id: str | None = None,
     path: str | None = None,
     pull: bool = True,
+    overleaf_files: dict[str, str] | None = None,
+    overleaf_texts: dict[str, str] | None = None,
 ) -> list[dict]:
     """What a sync of each folder of a checkout synced with Overleaf would
     do, after pulling from Overleaf, as the hub's status reports it,
@@ -622,6 +626,11 @@ def get_overleaf_sync_statuses(
     is used, if there is one, which takes a fraction of the time, so
     something can be shown while Overleaf is asked. It's used with ``pull``
     too if this pulled it only ``PULL_FRESH_SECONDS`` ago.
+
+    With ``overleaf_files``, the Git hashes of the Overleaf project's files
+    by path, from its editor, and ``overleaf_texts``, its documents, a copy
+    that has those files counts as pulled, and one that differs only in
+    documents is updated from them, without asking Overleaf.
 
     Overleaf credentials come from Calkit's config, or else the hub, as for
     ``calkit overleaf sync``.
@@ -697,6 +706,21 @@ def get_overleaf_sync_statuses(
                     os.path.join(clone_path, ".git")
                 )
                 with calkit.overleaf.lock(project_id, lambda _: None):
+                    if (
+                        pulled
+                        and overleaf_files is not None
+                        and os.path.isdir(os.path.join(clone_path, ".git"))
+                    ):
+                        overleaf_repo = calkit.git.get_repo(clone_path)
+                        if calkit.overleaf.pull_from_editor(
+                            overleaf_repo, overleaf_files, overleaf_texts or {}
+                        ):
+                            pulled = False
+                            fresh = True
+                            _overleaf_pulled_at[
+                                os.path.abspath(clone_path)
+                            ] = time.time()
+                        overleaf_repo.close()
                     if pulled:
                         if _overleaf_auth is None:
                             _overleaf_auth = _get_overleaf_auth()

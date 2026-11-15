@@ -67,6 +67,17 @@ if (!/^https:\/\/(www\.)?overleaf\.com$/.test(parentOrigin)) {
   throw new Error(`Not shown on a page it works with: ${parentOrigin}`);
 }
 const viewKey = `calkit.review.view:${params.get("key") ?? ""}`;
+// Matches the page's colors, so it looks like Overleaf's own PDF pane
+for (const [param, name] of [
+  ["bar", "--bar-bg"],
+  ["barText", "--bar-fg"],
+  ["backdrop", "--backdrop"],
+]) {
+  const color = params.get(param);
+  if (color && CSS.supports("color", color)) {
+    document.documentElement.style.setProperty(name, color);
+  }
+}
 const PREFS_KEY = "calkit.review.prefs";
 
 function readStored(key: string): Record<string, unknown> {

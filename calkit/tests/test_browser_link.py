@@ -555,6 +555,14 @@ def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
     [quick] = get_overleaf_sync_statuses(str(project), pull=False)
     assert not pulled and not quick["pulled"]
     assert quick | {"pulled": True} == status
+    # What Overleaf's editor has, if the copy here has it already, counts as
+    # a pull without asking Overleaf
+    git("update-ref", "refs/calkit/overleaf", "HEAD", cwd=clone)
+    sha = gitpython.Repo(clone).head.commit.tree["main.tex"].hexsha
+    assert get_overleaf_sync_statuses(
+        str(project), overleaf_files={"main.tex": sha}
+    ) == [status]
+    assert not pulled
     monkeypatch.setattr(
         calkit.cli.overleaf, "_get_overleaf_auth", lambda: "token"
     )

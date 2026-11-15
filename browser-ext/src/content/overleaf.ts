@@ -9,6 +9,7 @@ import {
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import {
   getEditorLabel,
+  getGitBlobSha,
   type CheckoutStatus,
   type LocalStatus,
 } from "../core/local";
@@ -2249,7 +2250,11 @@ function watchEditor(): void {
       lastEditorVersion = message.version;
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
-    } else if (message.type === "text" || message.type === "replaced") {
+    } else if (
+      message.type === "text" ||
+      message.type === "replaced" ||
+      message.type === "tree"
+    ) {
       editorReplies.get(message.reqId)?.(message);
       editorReplies.delete(message.reqId);
     }
@@ -3341,7 +3346,7 @@ let reviewSources: {
 // Answers from the editor's script, by request
 const editorReplies = new Map<
   number,
-  (message: FromEditor & { type: "text" | "replaced" }) => void
+  (message: FromEditor & { type: "text" | "replaced" | "tree" }) => void
 >();
 let editorRequests = 0;
 
@@ -3359,6 +3364,58 @@ function readEditor(): Promise<string | null> {
     });
     toEditor({ type: "read", reqId });
   });
+}
+
+/**
+ * What the Overleaf project has, from its editor: every file's Git hash
+ * and the documents' text, by path, so Calkit on this computer can tell if
+ * its copy is current, or bring it up to date, without downloading the
+ * project. Null if Overleaf's file tree can't be read.
+ */
+async function getOverleafFiles(projectId: string): Promise<{
+  shas: Record<string, string>;
+  texts: Record<string, string>;
+} | null> {
+  const reqId = ++editorRequests;
+  const tree = await new Promise<(FromEditor & { type: "tree" })["tree"]>(
+    (resolve) => {
+      const timer = setTimeout(() => {
+        editorReplies.delete(reqId);
+        resolve(null);
+      }, 3000);
+      editorReplies.set(reqId, (message) => {
+        clearTimeout(timer);
+        resolve(message.type === "tree" ? message.tree : null);
+      });
+      toEditor({ type: "tree", reqId });
+    },
+  );
+  if (!tree) {
+    return null;
+  }
+  const shas: Record<string, string> = {};
+  const texts: Record<string, string> = {};
+  for (const file of tree.files) {
+    shas[file.path] = file.hash;
+  }
+  try {
+    await Promise.all(
+      tree.docs.map(async (doc) => {
+        const response = await fetch(
+          `/project/${projectId}/doc/${doc.id}/download`,
+        );
+        if (!response.ok) {
+          throw new Error(`Couldn't read ${doc.path} (${response.status})`);
+        }
+        const data = new Uint8Array(await response.arrayBuffer());
+        shas[doc.path] = await getGitBlobSha(data);
+        texts[doc.path] = new TextDecoder().decode(data);
+      }),
+    );
+  } catch {
+    return null;
+  }
+  return { shas, texts };
 }
 
 /** Make an edit to the open file in the editor, as typing would. */
@@ -3720,6 +3777,16 @@ let overleafSyncedFile: string | null = null;
 function getReviewUrl(params: URLSearchParams): string {
   const all = new URLSearchParams(params);
   all.set("parent", window.location.origin);
+  // Overleaf's own PDF toolbar and backdrop, whichever theme is on
+  const toolbar = document.querySelector(".toolbar-pdf");
+  const pane = toolbar?.closest(".pdf");
+  if (toolbar) {
+    all.set("bar", getComputedStyle(toolbar).backgroundColor);
+    all.set("barText", getComputedStyle(toolbar).color);
+  }
+  if (pane) {
+    all.set("backdrop", getComputedStyle(pane).backgroundColor);
+  }
   all.set(
     "key",
     `${currentProjectId}:${all.has("localProject") ? "local" : "overleaf"}`,
@@ -5446,7 +5513,14 @@ async function load(overleafProjectId: string): Promise<void> {
         content.append(loading("Checking Overleaf for new edits"));
       }
     }
-    const statuses = await send(statusRequest);
+    const files = link.local_path
+      ? await getOverleafFiles(overleafProjectId)
+      : null;
+    const statuses = await send({
+      ...statusRequest,
+      overleafFiles: files?.shas,
+      overleafTexts: files?.texts,
+    });
     if (!current()) {
       return;
     }
@@ -5732,12 +5806,17 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     if (pipelineRuns?.key !== linkKey(link)) {
       void refreshRuns(link);
     }
+    const files = link.local_path
+      ? await getOverleafFiles(overleafProjectId)
+      : null;
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
       project: link.project_name,
       overleafProjectId,
       path: link.path,
+      overleafFiles: files?.shas,
+      overleafTexts: files?.texts,
     });
     if (!(await current())) {
       return;
@@ -5954,7 +6033,7 @@ function watchRail(): void {
     #${RAIL_TAB_ID}.active svg { color: #fff; }
     #${RAIL_TAB_ID} { position: relative; }
     #${RAIL_TAB_ID} .calkit-rail-dot {
-      position: absolute; top: 4px; right: 6px; width: 8px; height: 8px;
+      position: absolute; bottom: 4px; right: 6px; width: 8px; height: 8px;
       border-radius: 50%; background: #e5484d;
       box-shadow: 0 0 0 2px var(--bg-primary-themed, #fff);
     }
@@ -6132,6 +6211,15 @@ const RAIL_STYLES = `
   .dot.warning { background: var(--ck-warning); }
   .dot.error { background: var(--ck-danger); }
   .dot.unknown { background: var(--ck-dim); }
+  /* A row that expands, colored for its state, pointing down when open */
+  .twistie { width: 0; height: 0; flex: none; margin: 0 1px 0 2px;
+    border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--ck-success);
+    transition: transform 0.1s; }
+  .twistie.open { transform: rotate(90deg); }
+  .twistie.warning { border-left-color: var(--ck-warning); }
+  .twistie.error { border-left-color: var(--ck-danger); }
+  .twistie.unknown { border-left-color: var(--ck-dim); }
   .item .spinner { width: 8px; height: 8px; border-width: 1.5px;
     flex: none; }
   .card {
@@ -6368,6 +6456,7 @@ function drawRail(): void {
           title: problems?.length
             ? problems.map((p) => p.message).join("\n")
             : `Line ${item.line}`,
+          attrs: { "aria-expanded": String(railCard?.key === key) },
           onClick: () => {
             toEditor({ type: "goto", line: item.line, column: item.column });
             if (railCard?.key === key) {
@@ -6382,7 +6471,7 @@ function drawRail(): void {
         },
         [
           el("span", {
-            class: `dot ${
+            class: `twistie ${
               problems === undefined
                 ? "unknown"
                 : problems.some((p) => p.severity === "error")
@@ -6390,7 +6479,7 @@ function drawRail(): void {
                 : problems.length
                 ? "warning"
                 : ""
-            }`,
+            }${railCard?.key === key ? " open" : ""}`,
           }),
           el("span", { class: "grow small", text: label }),
           el("span", { class: "dim small", text: `${item.line}` }),
@@ -6423,6 +6512,7 @@ function drawRail(): void {
         {
           class: "item",
           title: status,
+          attrs: { "aria-expanded": String(railStage === name) },
           onClick: () => {
             railStage = railStage === name ? null : name;
             drawRail();
@@ -6432,9 +6522,9 @@ function drawRail(): void {
           toRun
             ? el("span", { class: "spinner" })
             : el("span", {
-                class: `dot ${
+                class: `twistie ${
                   status === "up-to-date" ? "" : due ? "warning" : "unknown"
-                }`,
+                }${railStage === name ? " open" : ""}`,
               }),
           el("span", { class: "grow small", text: name }),
           status !== "up-to-date"

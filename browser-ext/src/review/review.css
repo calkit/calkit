@@ -5,6 +5,10 @@
   --border: #d1d5db;
   --accent: #098842;
   --muted: #6b7280;
+  /* Overleaf's PDF toolbar and backdrop, which the page passes in */
+  --bar-bg: #2f3a4c;
+  --bar-fg: #f4f5f6;
+  --backdrop: #2f3a4c;
 }
 html,
 body {
@@ -24,19 +28,33 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  height: 28px;
-  box-sizing: content-box;
+  padding: 0 8px;
+  height: 32px;
+  box-sizing: border-box;
+  background: var(--bar-bg);
+  color: var(--bar-fg);
 }
 #toolbar .spacer {
   flex: 1;
 }
 #toolbar #status {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--bar-fg) 70%, transparent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+#toolbar button {
+  background: none;
+  border-color: transparent;
+  border-radius: 12px;
+  padding: 2px 10px;
+}
+#toolbar button:hover {
+  background: color-mix(in srgb, var(--bar-fg) 14%, transparent);
+}
+#toolbar button[aria-pressed="true"] {
+  outline: none;
+  background: color-mix(in srgb, var(--bar-fg) 20%, transparent);
 }
 button {
   background: #f3f4f6;
@@ -69,7 +87,7 @@ label {
 }
 #main {
   position: absolute;
-  top: 37px;
+  top: 32px;
   left: 0;
   right: 0;
   bottom: 0;
@@ -85,7 +103,7 @@ label {
   inset: 0;
   overflow: auto;
   outline: none;
-  background: #e5e7eb;
+  background: var(--backdrop);
 }
 #side {
   width: var(--panel-width);

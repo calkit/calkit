@@ -527,6 +527,8 @@ async function handle(
           overleaf_project_id: message.overleafProjectId,
           path: message.path,
           pull: message.pull ?? true,
+          overleaf_files: message.overleafFiles,
+          overleaf_texts: message.overleafTexts,
         });
       }
       return request<OverleafSyncStatus[]>(

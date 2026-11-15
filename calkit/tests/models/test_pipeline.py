@@ -1,6 +1,7 @@
 """Tests for ``calkit.models.pipeline``."""
 
 import json
+import shlex
 
 import pytest
 from pydantic import ValidationError
@@ -781,11 +782,25 @@ def test_jsontolatexstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        "calkit latex from-json 'data/results.json' 'more.json' "
-        "--output 'paper/results.tex' --output 'paper/results2.tex' "
+        "calkit latex from-json data/results.json more.json "
+        "--output paper/results.tex --output paper/results2.tex "
         "--command theresults --format-json "
-        '\'{"result1": "{value1:.2f}", "result2": "{value2}"}\''
+        '"{\\"result1\\": \\"{value1:.2f}\\", '
+        '\\"result2\\": \\"{value2}\\"}"'
     )
+    # Paths with spaces are double quoted, and the format survives a shell
+    s = JsonToLatexStage(
+        name="json2latex",
+        inputs=["my results/a.json"],
+        outputs=["paper/results.tex"],
+        keys=["cases.a.cp"],
+        format={"pct": "{a * 100:.1f} %"},
+    )
+    args = shlex.split(s.to_dvc()["cmd"])
+    assert args[3] == "my results/a.json"
+    assert args[args.index("--key") + 1] == "cases.a.cp"
+    fmt_json = args[args.index("--format-json") + 1]
+    assert json.loads(fmt_json) == {"pct": "{a * 100:.1f} %"}
     dvc_outs = s.dvc_outs
     assert {
         "paper/results.tex": {"cache": False, "persist": False}
@@ -1182,8 +1197,7 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
         }
     )
     cmd = stage.dvc_cmd
-    assert "'a.json'" in cmd
-    assert "'b.json'" in cmd
+    assert cmd.startswith("calkit latex from-json a.json b.json --output")
     assert "PathInput" not in cmd
     assert "from_stage_outputs" not in cmd
     # A schedule's period file is a dependency, but not data to read
@@ -1197,7 +1211,7 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
     period_file = ".calkit/local/current-periods/1-day-utc.txt"
     assert period_file in stage.to_dvc()["deps"]
     assert "current-periods" not in stage.dvc_cmd
-    assert "'a.json'" in stage.dvc_cmd
+    assert " a.json " in stage.dvc_cmd
 
 
 def test_system_env_can_wrap_a_runtime():

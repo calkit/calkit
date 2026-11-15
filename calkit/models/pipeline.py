@@ -1861,21 +1861,25 @@ class JsonToLatexStage(Stage):
         cmd = "calkit latex from-json"
         # Only the declared paths, since what's generated for the stage, e.g.,
         # its setup or schedule period file, isn't data
+        # Double quotes for any quoting, since Windows runs this with
+        # cmd.exe, which passes single quotes through
         for input_path in self.input_paths:
-            cmd += f" '{input_path}'"
+            cmd += f" {quote_arg(input_path)}"
         for out in self.outputs:
             if isinstance(out, str):
                 out_path = out
             elif isinstance(out, PathOutput):
                 out_path = out.path
-            cmd += f" --output '{out_path}'"
+            cmd += f" --output {quote_arg(out_path)}"
         if self.command_name is not None:
             cmd += f" --command {self.command_name}"
         for key in self.keys:
-            cmd += f" --key {shlex.quote(key)}"
+            cmd += f" --key {quote_arg(key)}"
         if self.format is not None:
-            fmt_json = json.dumps(self.format)
-            cmd += f" --format-json '{fmt_json}'"
+            # Escaped as \" inside double quotes, which sh and the Windows
+            # argument parser both read as a literal quote
+            fmt_json = json.dumps(self.format, ensure_ascii=False)
+            cmd += ' --format-json "' + fmt_json.replace('"', '\\"') + '"'
         return cmd
 
     @property

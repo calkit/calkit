@@ -486,9 +486,10 @@ def pull_from_editor(
 
     ``file_shas`` are the Git hashes of every file on Overleaf, by path, as
     its file tree lists them, and ``texts`` the contents of its documents.
-    A clone that has those files already needs nothing. A session-synced
-    mirror can be updated with the documents if nothing else changed, but a
-    Git integration clone has to fetch, so it can be pushed from.
+    A Git integration clone that fetched those files already is reset to
+    them, as ``pull`` would after fetching nothing new, but otherwise has to
+    fetch, so it can be pushed from. A session-synced mirror is updated as
+    ``pull_mirror`` would be if only documents changed.
     """
     import hashlib
 
@@ -499,19 +500,15 @@ def pull_from_editor(
         )
     except (git.BadName, ValueError, git.GitCommandError):
         return False
-    if (
-        not repo.head.is_valid()
-        or repo.head.commit != ref
-        or repo.git.status("--porcelain", "--ignored", "-uall")
-    ):
-        return False
     pulled = {
         b.path: b for b in ref.tree.traverse() if isinstance(b, git.Blob)
     }
-    if {path: b.hexsha for path, b in pulled.items()} == file_shas:
-        return True
     if not mirror:
-        return False
+        if {path: b.hexsha for path, b in pulled.items()} != file_shas:
+            return False
+        repo.git.reset("--hard", "@{upstream}")
+        repo.git.clean("-fdx")
+        return True
     files = {}
     for path, sha in file_shas.items():
         if path in pulled and pulled[path].hexsha == sha:

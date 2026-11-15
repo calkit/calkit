@@ -589,24 +589,27 @@ def test_pull_from_editor(tmp_dir: str) -> None:
         mirror, shas, {"main.tex": "Hi again\n"}
     )
     assert mirror.head.commit == second
-    # Or something was left in the mirror, e.g., by a failed sync
+    # A file deleted on Overleaf is deleted here, and anything left in the
+    # mirror, e.g., by a failed sync, is cleared
     del shas["a.png"]
     with open(os.path.join(mirror.working_dir, "left.txt"), "w") as f:
         f.write("Left\n")
-    assert not calkit.overleaf.pull_from_editor(
-        mirror, shas, {"main.tex": "Hi again\n"}
-    )
-    os.remove(os.path.join(mirror.working_dir, "left.txt"))
-    # A file deleted on Overleaf is deleted here
     assert calkit.overleaf.pull_from_editor(
         mirror, shas, {"main.tex": "Hi again\n"}
     )
     assert mirror.git.ls_files().split() == ["main.tex"]
-    # A Git integration clone counts as pulled when it has the files, but
-    # otherwise has to fetch
+    assert not os.path.exists(os.path.join(mirror.working_dir, "left.txt"))
+    # A Git integration clone that has the files is reset to what it
+    # fetched, e.g., from a commit a status check put on top, but otherwise
+    # has to fetch
     clone = git.Repo.clone_from(mirror.working_dir, "clone")
+    fetched = clone.head.commit
+    with open(os.path.join(clone.working_dir, "main.tex"), "w") as f:
+        f.write("On top\n")
+    clone.git.commit("-qam", "On top", "--author", "T <t@example.com>")
     shas = {"main.tex": get_sha("Hi again\n")}
     assert calkit.overleaf.pull_from_editor(clone, shas, {})
+    assert clone.head.commit == fetched
     assert not calkit.overleaf.pull_from_editor(
         clone, {"main.tex": get_sha("New\n")}, {"main.tex": "New\n"}
     )

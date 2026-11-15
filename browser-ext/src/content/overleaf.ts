@@ -915,13 +915,13 @@ let runsRequest: { key: string; promise: Promise<void> } | null = null;
 let runsFailures = 0;
 // A start from a run button, kept across their redraws
 let starting: { key: string; busy: boolean; error?: string } | null = null;
-// Whether a run on this computer saves and syncs with Overleaf after, as
-// last chosen, and whether the latest one did
-const SYNC_AFTER_RUN_KEY = "syncAfterRun";
-let syncAfterRun = true;
+// Whether syncing from this computer runs what's out of date first, as last
+// chosen, and whether the latest run synced after
+const RUN_BEFORE_SYNC_KEY = "runBeforeSync";
+let runBeforeSync = true;
 let lastRunSynced = true;
-void chrome.storage.local.get(SYNC_AFTER_RUN_KEY).then((stored) => {
-  syncAfterRun = stored[SYNC_AFTER_RUN_KEY] ?? true;
+void chrome.storage.local.get(RUN_BEFORE_SYNC_KEY).then((stored) => {
+  runBeforeSync = stored[RUN_BEFORE_SYNC_KEY] ?? true;
 });
 // Where the open panel shows them, redrawn as they change
 const runsBoxes = new Set<{
@@ -1055,6 +1055,10 @@ function afterSync(): void {
   if (localPdf) {
     showLocalPdf(localPdf.link, localPdf.path);
   }
+  // A run or sync changes which stages are out of date
+  if (currentLink?.local_path) {
+    void refreshRailPipeline(currentLink);
+  }
   if (!currentProjectId) {
     return;
   }
@@ -1109,7 +1113,8 @@ function syncNow(
 async function startRun(link: OverleafLinkPublic): Promise<void> {
   const key = linkKey(link);
   starting = { key, busy: true };
-  lastRunSynced = !link.local_path || syncAfterRun;
+  // A run started here syncs after; only one from before may not have
+  lastRunSynced = true;
   drawRuns();
   try {
     const run = await send({
@@ -1185,6 +1190,7 @@ function renderRuns(link: OverleafLinkPublic, offer: boolean): HTMLElement {
 
 function drawRuns(): void {
   drawStatusParts();
+  drawPanelActions();
   for (const entry of runsBoxes) {
     const { box, link, offer } = entry;
     if (!box.isConnected && box.dataset.drawn) {
@@ -1269,49 +1275,26 @@ function drawRuns(): void {
     const staleShown = editorProblems?.found.some((problems) =>
       problems.some((p) => p.kind === "stale"),
     );
-    // Running here is quick to start, so it's always on offer
+    // On this computer, running is part of syncing, below
     if (
-      !link.local_path &&
-      !offer &&
-      !staleShown &&
-      latest?.status !== "failed"
+      link.local_path ||
+      (!offer && !staleShown && latest?.status !== "failed")
     ) {
       continue;
     }
     const mine = starting?.key === linkKey(link) ? starting : null;
-    const syncAfter = el("input", { type: "checkbox" }) as HTMLInputElement;
-    syncAfter.checked = syncAfterRun;
-    syncAfter.addEventListener("change", () => {
-      syncAfterRun = syncAfter.checked;
-      void chrome.storage.local.set({ [SYNC_AFTER_RUN_KEY]: syncAfterRun });
-    });
     const start = el("button", {
       class: "action",
-      text: link.local_path ? "Run" : "Run and sync",
+      text: "Run and sync",
       disabled: !canWrite(link) || !runs.can_start || Boolean(mine?.busy),
       title: !canWrite(link)
         ? "You need write access to this project to run it"
         : runs.cannot_start_reason ??
-          (link.local_path
-            ? "Run the pipeline on this computer"
-            : "Run the pipeline on GitHub Actions, then sync what it " +
-              "makes here"),
+          "Run the pipeline on GitHub Actions, then sync what it makes here",
       onClick: () => void startRun(link),
     });
     box.append(
-      el("div", { class: "actions" }, [
-        start,
-        link.local_path
-          ? el(
-              "label",
-              {
-                class: "check",
-                title: "Save it and sync what it makes with Overleaf after",
-              },
-              [syncAfter, document.createTextNode("Sync with Overleaf after")],
-            )
-          : null,
-      ]),
+      el("div", { class: "actions" }, [start]),
       mine?.busy
         ? loading("Starting")
         : mine?.error
@@ -4640,6 +4623,11 @@ function renderStatus(
   });
   const message = el("div", { class: "small" });
   syncButton.addEventListener("click", async () => {
+    // Running saves and syncs when it's done, so that's the sync
+    if (runFirst.isConnected && runFirst.checked) {
+      void startRun(link);
+      return;
+    }
     loadGeneration++;
     syncButton.disabled = true;
     clear(message).append(loading("Syncing"));
@@ -4678,22 +4666,75 @@ function renderStatus(
       );
     }
   });
-  // Nothing to sync while it's in sync, e.g., when what's out of date
-  // needs a run first
-  body.append(
-    el("div", { class: "actions" }, [
-      status.in_sync ? null : syncButton,
-      // Its button in this row, and anything it says below it
-      local ? renderOpenLocally(project, undefined, true) : null,
-      el("button", {
-        class: "action secondary",
-        text: "Refresh",
-        onClick: reload,
-      }),
-    ]),
-    message,
-  );
-  statusParts.add({ link, hide: [badge, details, syncButton], busy });
+  // Syncing, and on this computer running what's out of date first, or,
+  // with nothing to sync, running and syncing after. Redrawn once it's
+  // known what's out of date, which takes a moment.
+  const actions = el("div", { class: "actions" });
+  const openLocally = local
+    ? renderOpenLocally(project, undefined, true)
+    : null;
+  const refresh = el("button", {
+    class: "action secondary",
+    text: "Refresh",
+    onClick: reload,
+  });
+  const runFirst = el("input", { type: "checkbox" }) as HTMLInputElement;
+  runFirst.addEventListener("change", () => {
+    runBeforeSync = runFirst.checked;
+    void chrome.storage.local.set({ [RUN_BEFORE_SYNC_KEY]: runBeforeSync });
+  });
+  const drawActions = () => {
+    const pipeline =
+      local && railPipeline?.key === linkKey(link)
+        ? railPipeline.pipeline
+        : undefined;
+    const staleStages = (pipeline?.ck_stages ?? []).filter((name) =>
+      ["stale", "not-run"].includes(
+        pipeline?.stage_statuses[name]?.status ?? "",
+      ),
+    );
+    const running = Boolean(activeRun()) || Boolean(starting?.busy);
+    runFirst.checked = runBeforeSync;
+    const stagesText = `Out of date: ${staleStages.join(", ")}`;
+    clear(actions).append(
+      ...[
+        status.in_sync ? null : syncButton,
+        !status.in_sync && staleStages.length
+          ? el("label", { class: "check", title: stagesText }, [
+              runFirst,
+              document.createTextNode("Run the pipeline first"),
+            ])
+          : null,
+        status.in_sync && staleStages.length
+          ? el("button", {
+              class: "action",
+              text: "Run and sync",
+              title: `Run the pipeline on this computer, then save and sync. ${stagesText}`,
+              disabled: !canWrite(link) || running,
+              onClick: () => void startRun(link),
+            })
+          : null,
+        // Its button in this row, and anything it says below it
+        openLocally,
+        refresh,
+      ].filter((node): node is HTMLElement => Boolean(node)),
+    );
+    syncButton.disabled = !canWrite(link) || status.in_sync || running;
+    syncButton.title = staleStages.length
+      ? `Push project files to Overleaf and pull Overleaf edits back. ${stagesText}`
+      : syncButton.title;
+  };
+  drawPanelActions = () => {
+    if (actions.isConnected) {
+      drawActions();
+    }
+  };
+  drawActions();
+  if (local) {
+    void refreshRailPipeline(link);
+  }
+  body.append(actions, message);
+  statusParts.add({ link, hide: [badge, details, actions], busy });
   drawStatusParts();
 }
 
@@ -5783,6 +5824,9 @@ let railPane: { host: HTMLElement; body: HTMLElement } | null = null;
 let railCard: { key: string; element: HTMLElement } | null = null;
 // The stage whose details are open in the sidebar
 let railStage: string | null = null;
+// Redraws the open panel's sync and run buttons, e.g., once it's known
+// what's out of date
+let drawPanelActions: () => void = () => undefined;
 
 /**
  * A stage's details in the sidebar: why it's out of date, what it runs,
@@ -6129,6 +6173,7 @@ async function refreshRailPipeline(link: OverleafLinkPublic): Promise<void> {
       project: link.project_name,
     });
     railPipeline = { key: linkKey(link), pipeline };
+    drawPanelActions();
   } catch (e) {
     railPipeline = {
       key: linkKey(link),
@@ -6406,6 +6451,25 @@ function drawRail(): void {
     }
   }
   body.append(renderRuns(link, true));
+  // On this computer, a run is offered only when something's out of date
+  const staleStages = (pipeline?.ck_stages ?? []).filter((name) =>
+    ["stale", "not-run"].includes(pipeline?.stage_statuses[name]?.status ?? ""),
+  );
+  if (link.local_path && staleStages.length && !running) {
+    body.append(
+      el("div", { class: "actions" }, [
+        el("button", {
+          class: "action",
+          text: "Run and sync",
+          title:
+            "Run the pipeline on this computer, then save and sync. " +
+            `Out of date: ${staleStages.join(", ")}`,
+          disabled: !canWrite(link) || Boolean(starting?.busy),
+          onClick: () => void startRun(link),
+        }),
+      ]),
+    );
+  }
   // The latest runs, each with its log
   const runs =
     pipelineRuns?.key === linkKey(link) ? pipelineRuns.runs.runs : [];

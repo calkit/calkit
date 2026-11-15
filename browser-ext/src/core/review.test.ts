@@ -290,5 +290,18 @@ describe("getOverleafSyncedLines", () => {
       { thread: "d4", replies: ["Because.", "Sam: Agreed."] },
     ]);
     expect(both.synced).toEqual({ d4: { resolved: false, messages: 4 } });
+    // Deleted from the source after being in step, so not brought back
+    const deleted = getOverleafSyncedLines(
+      ["Text."],
+      [{ thread: "e5", text: "Text", offset: 0 }],
+      { e5: { messages: [{ content: "Hm." }] } },
+      { e5: { resolved: false, messages: 1 } },
+      "Jo Doe",
+    );
+    expect(deleted.lines).toEqual(["Text."]);
+    expect(deleted.pushes).toEqual([
+      { thread: "e5", replies: [], deleted: true },
+    ]);
+    expect(deleted.synced).toEqual({});
   });
 });

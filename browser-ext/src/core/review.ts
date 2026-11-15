@@ -317,6 +317,8 @@ export interface OverleafPush {
   thread: string;
   replies: string[];
   resolved?: boolean;
+  /** Deleted from the source after being in step, so from Overleaf too. */
+  deleted?: boolean;
 }
 
 /** How a thread was on both sides when they were last in step. */
@@ -330,8 +332,8 @@ export interface OverleafSynced {
  * thread for each new one, above its paragraph, and new replies and
  * resolving or reopening on Overleaf since they were last in step. A thread
  * deleted on Overleaf after being in step is deleted from the source too.
- * Also what to do on Overleaf for replies and resolving or reopening done
- * in the source, with replies others wrote named, since they're posted by
+ * Also what to do on Overleaf for replies, resolving or reopening, and
+ * deleting done in the source, with replies others wrote named, since they're posted by
  * `me`, and how each thread will be on both sides, for next time.
  */
 export function getOverleafSyncedLines(
@@ -428,6 +430,10 @@ export function getOverleafSyncedLines(
       continue;
     }
     inSource.add(c.thread);
+    if (synced[c.thread]) {
+      pushes.push({ thread: c.thread, replies: [], deleted: true });
+      continue;
+    }
     const line = text.slice(0, c.offset).split("\n").length;
     const start = paragraphStart(lines, line);
     if (start === null) {

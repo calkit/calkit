@@ -3731,6 +3731,32 @@ async function getOverleafComments(
   return { byFile, threads };
 }
 
+/** Delete a comment thread on Overleaf, as its review panel does. */
+async function deleteOverleafThread(
+  projectId: string,
+  docId: string,
+  thread: string,
+): Promise<void> {
+  const response = await fetch(
+    `/project/${projectId}/doc/${docId}/thread/${thread}`,
+    {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+        "X-Csrf-Token":
+          document.querySelector<HTMLMetaElement>('meta[name="ol-csrfToken"]')
+            ?.content ?? "",
+      },
+    },
+  );
+  // Already gone is as good as deleted
+  if (!response.ok && response.status !== 404) {
+    throw new Error(
+      `Overleaf didn't delete the comment thread (${response.status})`,
+    );
+  }
+}
+
 /** How each Overleaf thread was when last in step, by Overleaf project. */
 const OVERLEAF_SYNCED_KEY = "overleafCommentsSynced";
 
@@ -3792,6 +3818,12 @@ async function syncOverleafComments(
     }
   };
   for (const push of pushes) {
+    if (push.deleted) {
+      if (docId) {
+        await deleteOverleafThread(projectId, docId, push.thread);
+      }
+      continue;
+    }
     for (const content of push.replies) {
       await post(`thread/${push.thread}/messages`, { content });
     }
@@ -4215,11 +4247,34 @@ async function onReviewMessage(message: FromReview): Promise<void> {
           })),
         );
         break;
-      case "delete":
+      case "delete": {
+        // One kept in step with Overleaf goes there too, first, or the
+        // next sync would bring it back
+        const thread = getReviewThreads(
+          new Map([
+            [message.file, reviewSources?.current.get(message.file) ?? ""],
+          ]),
+        ).find((t) =>
+          message.id
+            ? t.id === message.id
+            : message.line !== undefined &&
+              message.line >= t.line &&
+              message.line < t.line + t.nlines,
+        );
+        const docId = getDocIds().get(message.file);
+        if (thread?.overleaf && currentProjectId) {
+          if (!docId) {
+            throw new Error(
+              `Open ${message.file} in Overleaf to delete its comment there.`,
+            );
+          }
+          await deleteOverleafThread(currentProjectId, docId, thread.overleaf);
+        }
         await editSource(message.file, (lines) =>
           getThreadEdit(lines, ref(message), null),
         );
         break;
+      }
       case "openIssue":
         if (/^https?:\/\//.test(message.url)) {
           window.open(message.url, "_blank", "noopener");

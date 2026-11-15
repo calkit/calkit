@@ -46,6 +46,13 @@ export type ToEditor =
       items: { index: number; severity: "error" | "warning" }[];
     }
   | { calkit: "lint"; type: "goto"; line: number; column: number }
+  // Text selected, e.g., to comment on it, by line (from 1) and column
+  | {
+      calkit: "lint";
+      type: "select";
+      from: { line: number; column: number };
+      to: { line: number; column: number };
+    }
   // From a script put in after the extension reloaded, which missed the
   // last scan
   | { calkit: "lint"; type: "rescan" }
@@ -276,6 +283,17 @@ window.addEventListener("message", (event) => {
       reqId: message.reqId,
       error: replaceLines(message),
     });
+  } else if (message.type === "select" && active) {
+    const doc = active.view.state.doc;
+    const at = ({ line, column }: { line: number; column: number }) => {
+      const found = doc.line(Math.min(Math.max(line, 1), doc.lines));
+      return Math.min(found.from + column, found.to);
+    };
+    active.view.dispatch({
+      selection: { anchor: at(message.from), head: at(message.to) },
+      scrollIntoView: true,
+    });
+    active.view.focus();
   } else if (message.type === "goto" && active) {
     const doc = active.view.state.doc;
     if (message.line < 1 || message.line > doc.lines) {

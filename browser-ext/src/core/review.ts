@@ -94,6 +94,7 @@ export type FromReview =
   | ({ calkit: "review"; type: "reply"; text: string } & ThreadRef)
   | ({ calkit: "review"; type: "resolve"; resolved: boolean } & ThreadRef)
   | ({ calkit: "review"; type: "delete" } & ThreadRef)
+  | ({ calkit: "review"; type: "postToOverleaf" } & ThreadRef)
   | { calkit: "review"; type: "openSource"; file: string; line: number }
   | { calkit: "review"; type: "openIssue"; url: string };
 
@@ -365,15 +366,53 @@ export function getOverleafSyncedLines(
   const pushes: OverleafPush[] = [];
   const next: Record<string, OverleafSynced> = {};
   const inSource = new Set<string>();
-  for (const t of parseComments(lines)) {
-    const id = getOverleafThreadId(t);
+  const text = lines.join("\n");
+  // The character each line starts at
+  const starts = [0];
+  for (const line of lines) {
+    starts.push(starts[starts.length - 1] + line.length + 1);
+  }
+  const getLine = (offset: number) => text.slice(0, offset).split("\n").length;
+  // Threads posted to Overleaf from the source, found by their paragraph
+  // and first message, are linked to it rather than brought in again
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+  const parsed = parseComments(lines);
+  const linked = new Set(parsed.map(getOverleafThreadId));
+  const links = new Map<number, string>();
+  for (const c of comments) {
+    const first = threads[c.thread]?.messages?.[0]?.content;
+    if (!first || linked.has(c.thread) || synced[c.thread]) {
+      continue;
+    }
+    const start = paragraphStart(lines, getLine(c.offset));
+    const match = parsed.find(
+      (t) =>
+        !getOverleafThreadId(t) &&
+        !links.has(t.lineno) &&
+        paragraphStart(lines, t.lineno + t.nlines) === start &&
+        t.entries[0] &&
+        [
+          norm(t.entries[0].text),
+          norm(`${t.entries[0].author}: ${t.entries[0].text}`),
+        ].includes(norm(first)),
+    );
+    if (match) {
+      links.set(match.lineno, c.thread);
+    }
+  }
+  for (const t of parsed) {
+    const id = getOverleafThreadId(t) ?? links.get(t.lineno);
     if (!id) {
       continue;
     }
     inSource.add(id);
     const thread = threads[id];
+    // Just posted, so in step as far as its first message
+    const last = links.has(t.lineno)
+      ? { resolved: Boolean(thread?.resolved), messages: 1 }
+      : synced[id];
     if (!thread) {
-      if (synced[id]) {
+      if (last) {
         edits.push({ line: t.lineno, count: t.nlines, insert: [] });
       }
       continue;
@@ -382,15 +421,16 @@ export function getOverleafSyncedLines(
     const resolved = Boolean(thread.resolved);
     // Replies on each side since they were in step, which, never in step
     // here before, are those past what both have
-    const base =
-      synced[id]?.messages ?? Math.min(messages.length, t.entries.length);
+    const base = last?.messages ?? Math.min(messages.length, t.entries.length);
     const push: OverleafPush = {
       thread: id,
       replies: t.entries
         .slice(base)
         .map((e) => (e.author === me ? e.text : `${e.author}: ${e.text}`)),
     };
-    let changed = t;
+    let changed = links.has(t.lineno)
+      ? { ...t, attrs: [...t.attrs, ["overleaf", id] as [string, string]] }
+      : t;
     if (messages.length > base) {
       changed = {
         ...changed,
@@ -400,7 +440,7 @@ export function getOverleafSyncedLines(
     // Resolved or reopened on one side since they were in step, or, never
     // in step here, as it is on Overleaf
     if (resolved !== t.resolved) {
-      if (synced[id]?.resolved === resolved) {
+      if (last?.resolved === resolved) {
         push.resolved = t.resolved;
       } else {
         changed = { ...changed, resolved };
@@ -418,12 +458,6 @@ export function getOverleafSyncedLines(
     }
     next[id] = { resolved: changed.resolved, messages: changed.entries.length };
   }
-  const text = lines.join("\n");
-  // The character each line starts at
-  const starts = [0];
-  for (const line of lines) {
-    starts.push(starts[starts.length - 1] + line.length + 1);
-  }
   for (const c of comments) {
     const thread = threads[c.thread];
     if (inSource.has(c.thread) || !thread?.messages?.length) {
@@ -434,8 +468,7 @@ export function getOverleafSyncedLines(
       pushes.push({ thread: c.thread, replies: [], deleted: true });
       continue;
     }
-    const line = text.slice(0, c.offset).split("\n").length;
-    const start = paragraphStart(lines, line);
+    const start = paragraphStart(lines, getLine(c.offset));
     if (start === null) {
       continue;
     }

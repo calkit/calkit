@@ -604,6 +604,9 @@ function renderPanel(): void {
             t.resolved ? "Reopen" : "Resolve"
           }</button>` +
           '<button data-act="source">Source</button>' +
+          (t.overleaf
+            ? ""
+            : '<button data-act="overleaf" title="Add it to Overleaf\'s comments, kept in step from then on">Post to Overleaf</button>') +
           '<button data-act="delete">Delete</button>';
     parts.push(
       `<div class="thread${t.resolved ? " resolved" : ""}${
@@ -761,6 +764,9 @@ panel.addEventListener("click", (e) => {
   } else if (act === "confirm-delete") {
     deleting = null;
     post({ type: "delete", ...ref });
+  } else if (act === "overleaf") {
+    post({ type: "postToOverleaf", ...ref });
+    setStatus("Posting to Overleaf\u2026");
   } else if (act === "source") {
     post({ type: "openSource", file: t.path, line: t.line });
   } else if (act === "issue" && t.issue) {

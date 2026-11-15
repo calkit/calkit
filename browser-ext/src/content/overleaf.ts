@@ -72,7 +72,11 @@ import {
   getThreadEdit,
 } from "../core/review";
 import { getZipTexts } from "../core/zip";
-import { lineMap, paragraphLines } from "../../../vscode-ext/src/latex/core";
+import {
+  findInSource,
+  lineMap,
+  paragraphLines,
+} from "../../../vscode-ext/src/latex/core";
 import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
 
 const PANEL_ID = "calkit-overleaf-panel";
@@ -2061,6 +2065,10 @@ function problemLine(problem: CitationProblem): HTMLElement {
 
 type Without<T> = T extends unknown ? Omit<T, "calkit"> : never;
 
+// The editor's count of scans, which go up with each edit, so the first
+// one, when it opens, isn't taken for an edit
+let lastEditorVersion: number | null = null;
+
 // What the editor last said the open document shows, and what's wrong with
 // each, by its index there
 let editorCitations: { version: number; items: EditorCitation[] } | null = null;
@@ -2250,6 +2258,11 @@ function watchEditor(): void {
       void checkCitations();
       // The open file changed, and maybe its comments with it
       scheduleReviewThreads();
+      // Overleaf saves edits as they're made, so they're there to sync
+      if (lastEditorVersion !== null && message.version !== lastEditorVersion) {
+        recheckAfterEdit(5000);
+      }
+      lastEditorVersion = message.version;
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
     } else if (message.type === "text" || message.type === "replaced") {
@@ -4160,7 +4173,7 @@ async function getSourceAt(
 async function editSource(
   file: string,
   getEdit: (lines: string[]) => LineEdit,
-): Promise<void> {
+): Promise<LineEdit> {
   if (!(await openDocument(file))) {
     throw new Error(`Couldn't open ${file} in the editor.`);
   }
@@ -4172,6 +4185,98 @@ async function editSource(
   const edit = getEdit(lines);
   await editEditor(edit, lines);
   reviewSources?.current.set(file, getEditedLines(lines, edit).join("\n"));
+  return edit;
+}
+
+/**
+ * Add a thread from the source to Overleaf's comments through Overleaf's
+ * own comment form, since a comment's place in the text can only be set by
+ * its editor: its text is selected, the form opened, and its first message
+ * put in and sent. The next sync links the two.
+ */
+async function postToOverleaf(
+  file: string,
+  ref: { id?: string; line?: number },
+  me: string,
+): Promise<void> {
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+  if (!(await openDocument(file))) {
+    throw new Error(`Couldn't open ${file} in the editor.`);
+  }
+  const text = (await readEditor()) ?? "";
+  const lines = text.split("\n");
+  const thread = getReviewThreads(new Map([[file, text]])).find((t) =>
+    ref.id
+      ? t.id === ref.id
+      : ref.line !== undefined &&
+        ref.line >= t.line &&
+        ref.line < t.line + t.nlines,
+  );
+  if (!thread?.anchor || !thread.messages.length) {
+    throw new Error("That comment thread is no longer in the source.");
+  }
+  if (thread.overleaf) {
+    return;
+  }
+  // Its highlight where it is in the paragraph, else the paragraph's start
+  const { anchor, highlight } = thread;
+  let found: { line: number; start: number; end: number } | undefined;
+  for (let n = anchor.line; highlight && !found && n <= anchor.end_line; n++) {
+    found = findInSource(lines, n, highlight.text);
+  }
+  toEditor({
+    type: "select",
+    from: found
+      ? { line: found.line, column: found.start }
+      : { line: anchor.line, column: 0 },
+    to: found
+      ? { line: found.line, column: found.end }
+      : { line: anchor.line, column: lines[anchor.line - 1]?.length ?? 0 },
+  });
+  await sleep(300);
+  window.dispatchEvent(new Event("add-new-review-comment"));
+  // Overleaf's comment box is a small editor of its own, out of sight
+  let box: HTMLElement | null = null;
+  for (let i = 0; i < 30 && !box; i++) {
+    await sleep(100);
+    box =
+      document
+        .querySelector(".review-panel-add-comment-editor")
+        ?.shadowRoot?.querySelector<HTMLElement>(".cm-content") ?? null;
+  }
+  if (!box) {
+    throw new Error("Overleaf's comment form didn't open.");
+  }
+  const [first] = thread.messages;
+  // Pasted into that box, since typing commands go to whatever editor the
+  // page thinks has focus, which can be the document's
+  const data = new DataTransfer();
+  data.setData(
+    "text/plain",
+    first.author === me ? first.text : `${first.author}: ${first.text}`,
+  );
+  box.focus();
+  box.dispatchEvent(
+    new ClipboardEvent("paste", {
+      clipboardData: data,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  const root = box.getRootNode() as ShadowRoot;
+  const button = root.host
+    ?.closest("form")
+    ?.querySelector<HTMLButtonElement>('button[type="submit"]');
+  for (let i = 0; i < 20 && button?.disabled; i++) {
+    await sleep(100);
+  }
+  if (!button || button.disabled) {
+    throw new Error("Couldn't fill in Overleaf's comment form.");
+  }
+  button.click();
+  // Time for Overleaf to save it before it's linked
+  await sleep(1500);
 }
 
 /** Do what the viewer with comments asks. */
@@ -4222,8 +4327,8 @@ async function onReviewMessage(message: FromReview): Promise<void> {
         toEditor({ type: "goto", line: found.line, column: 0 });
         return;
       }
-      case "add":
-        await editSource(message.file, (lines) =>
+      case "add": {
+        const edit = await editSource(message.file, (lines) =>
           getAddEdit(
             lines,
             message.line,
@@ -4233,7 +4338,25 @@ async function onReviewMessage(message: FromReview): Promise<void> {
             message.occ,
           ),
         );
+        // On Overleaf too, so it's in its review panel, kept in step
+        const id = /\bid=([0-9a-f]{8})\b/.exec(edit.insert[0])?.[1];
+        if (id) {
+          try {
+            await postToOverleaf(message.file, { id }, author.name);
+          } catch (e) {
+            postToReview({
+              type: "status",
+              text: `Saved in the source, but not on Overleaf: ${
+                e instanceof Error ? e.message : e
+              }`,
+            });
+            overleafSyncedFile = null;
+            await refreshReviewThreads(false);
+            return;
+          }
+        }
         break;
+      }
       case "reply":
         await editSource(message.file, (lines) =>
           getThreadEdit(lines, ref(message), getReply(author, message.text)),
@@ -4275,6 +4398,9 @@ async function onReviewMessage(message: FromReview): Promise<void> {
         );
         break;
       }
+      case "postToOverleaf":
+        await postToOverleaf(message.file, ref(message), author.name);
+        break;
       case "openIssue":
         if (/^https?:\/\//.test(message.url)) {
           window.open(message.url, "_blank", "noopener");
@@ -5753,30 +5879,37 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
  * people still press rather than trying to observe every keystroke, and
  * waits a moment for Overleaf to have written it before asking.
  */
+let recheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Check again what there is to sync, a while after the last change, e.g.,
+ * a save, or an edit Overleaf saves by itself, like a comment added from
+ * the PDF, which the sync has to bring to this computer.
+ */
+function recheckAfterEdit(delay: number): void {
+  clearTimeout(recheckTimer);
+  recheckTimer = setTimeout(() => {
+    if (!currentProjectId) {
+      return;
+    }
+    // The button has to notice it too, not just an already-open panel
+    if (panel) {
+      void load(currentProjectId);
+    } else {
+      void checkSyncStatus(currentProjectId);
+    }
+  }, delay);
+}
+
 function watchForSaves(): void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
   document.addEventListener(
     "keydown",
     (event) => {
       const isSave =
         (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
-      if (!isSave || !currentProjectId) {
-        return;
+      if (isSave && currentProjectId) {
+        recheckAfterEdit(2000);
       }
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (!currentProjectId) {
-          return;
-        }
-        // A save is when a figure most often stops matching what's on
-        // Overleaf, so the button has to notice it too, not just an
-        // already-open panel
-        if (panel) {
-          void load(currentProjectId);
-        } else {
-          void checkSyncStatus(currentProjectId);
-        }
-      }, 2000);
     },
     true,
   );

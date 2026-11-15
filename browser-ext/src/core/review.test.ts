@@ -303,5 +303,28 @@ describe("getOverleafSyncedLines", () => {
       { thread: "e5", replies: [], deleted: true },
     ]);
     expect(deleted.synced).toEqual({});
+    // Posted to Overleaf from the source, so linked, with the rest sent
+    const posted = getOverleafSyncedLines(
+      [
+        "% COMMENT id=55555555 resolved=true",
+        "%   Sam:",
+        "%     Check this.",
+        "%   Jo Doe:",
+        "%     Checked.",
+        "Text here.",
+      ],
+      [{ thread: "f6", text: "Text", offset: 90 }],
+      { f6: { messages: [{ content: "Sam: Check this." }] } },
+      {},
+      "Jo Doe",
+    );
+    expect(posted.lines[0]).toBe(
+      "% COMMENT id=55555555 resolved=true overleaf=f6",
+    );
+    expect(posted.lines.length).toBe(6);
+    expect(posted.pushes).toEqual([
+      { thread: "f6", replies: ["Checked."], resolved: true },
+    ]);
+    expect(posted.synced).toEqual({ f6: { resolved: true, messages: 2 } });
   });
 });

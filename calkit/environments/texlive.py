@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 # Bumped when what a lock or environment holds changes meaning, so old ones
 # are relocked or rebuilt rather than misread
 LOCK_FORMAT_VERSION = 1
-VIEW_FORMAT_VERSION = 2
+VIEW_FORMAT_VERSION = 3
 # Programs a package runs, which no file it loads names, so neither TeX
 # Live's database nor a document's lookups find them, e.g., biblatex's
 # default backend
@@ -978,6 +978,38 @@ def assemble_view(lock: dict, platform: str, verbose: bool = False) -> str:
     )
     with open(luaotfload_conf, "w", newline="\n") as f:
         f.write("[db]\n    location-precedence = texmf,local\n")
+    # XeTeX does the same through fontconfig, which reads this, except on
+    # macOS, where it also sees the system's. It's written for where the
+    # environment ends up, since fontconfig writes its cache there.
+    from xml.sax.saxutils import escape
+
+    font_dirs = sorted(
+        os.path.join(tree, "fonts", kind)
+        for tree in trees
+        for kind in ("opentype", "truetype", "type1")
+        if os.path.isdir(os.path.join(tree, "fonts", kind))
+    )
+    fonts_conf = [
+        '<?xml version="1.0"?>',
+        '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">',
+        "<fontconfig>",
+        *(f"  <dir>{escape(d)}</dir>" for d in font_dirs),
+        "  <cachedir>"
+        + escape(
+            os.path.join(view_dir, "texmf-var", "fonts", "cache").replace(
+                os.sep, "/"
+            )
+        )
+        + "</cachedir>",
+        "</fontconfig>",
+    ]
+    os.makedirs(os.path.join(var_dir, "fonts", "conf"))
+    with open(
+        os.path.join(var_dir, "fonts", "conf", "fonts.conf"),
+        "w",
+        newline="\n",
+    ) as f:
+        f.write("\n".join(fonts_conf) + "\n")
     # Formats depend on their engine and the packages TeX Live says trigger
     # a rebuild, so they're cached in the store by a hash of those, and an
     # environment that differs only in, e.g., siunitx, reuses them
@@ -1107,8 +1139,10 @@ def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
     """Return the environmental variables a command in an environment gets.
 
     The environment's programs come first on PATH, and TeX variables that
-    would point kpathsea elsewhere are dropped. Nothing else is needed:
-    the programs find the environment's configuration from where they are.
+    would point kpathsea elsewhere are dropped. Nothing else is needed for
+    TeX: the programs find the environment's configuration from where they
+    are. XeTeX's fontconfig doesn't, except on Windows, so it's pointed at
+    the environment's.
     """
     platform = platform or get_platform()
     env_vars = {
@@ -1116,6 +1150,9 @@ def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
     }
     bin_dir = os.path.join(view_dir, "bin", platform)
     env_vars["PATH"] = bin_dir + os.pathsep + env_vars.get("PATH", "")
+    env_vars["FONTCONFIG_FILE"] = os.path.join(
+        view_dir, "texmf-var", "fonts", "conf", "fonts.conf"
+    )
     return env_vars
 
 

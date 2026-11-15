@@ -405,6 +405,12 @@ def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch):
         check=True,
     ).stdout.strip()
     assert out.replace("\\", "/").startswith(view_dir.replace("\\", "/"))
+    # XeTeX's fontconfig is pointed at the environment's fonts alone
+    fonts_conf = texlive.get_run_env_vars(view_dir)["FONTCONFIG_FILE"]
+    with open(fonts_conf) as f:
+        conf = f.read()
+    assert "/amsfonts/" in conf and "/usr/share/fonts" not in conf
+    assert f"<cachedir>{view_dir.replace(os.sep, '/')}/" in conf
     # Checking a ready environment reads its lock and nothing else
     started = time.perf_counter()
     for _ in range(10):

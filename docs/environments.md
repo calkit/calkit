@@ -1226,7 +1226,15 @@ calkit xenv -n tex -- latexmk -lualatex paper.tex
 
 The environment only sees fonts from TeX Live packages, not those
 installed on your computer, so a document builds the same everywhere.
-XeLaTeX isn't supported yet.
+
+For XeLaTeX, add `xetex` to `packages`.
+On Linux and Windows it finds the environment's fonts by name, e.g.,
+`\setmainfont{TeX Gyre Termes}`.
+On macOS, as with MacTeX, it finds them by file name instead, e.g.,
+`\setmainfont{texgyretermes-regular.otf}`, and it also sees the fonts
+installed on your computer.
+On Linux, XeLaTeX needs the system's fontconfig library, which desktop
+Linux distributions include.
 
 ### R
 

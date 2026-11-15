@@ -1752,22 +1752,29 @@ function renderOpenLocally(
   project: string,
   path?: string,
   inline = false,
+  // Shown as a link, e.g., the checkout's path, rather than a button
+  shown?: string,
 ): HTMLElement {
   localStatus ??= send({ type: "local.status" }).catch(() => ({
     permitted: false,
   }));
   const open = el("button", {
-    class: "action secondary",
-    text: "Open in editor",
+    class: shown ? "link" : "action secondary",
+    text: shown ?? "Open in editor",
     title: path ? `Open ${path} on this computer` : "Open it on this computer",
   });
   const message = el("div", { class: "small" });
   const label = (status: LocalStatus) => {
     const editor = getEditorLabel(status.editor);
-    open.textContent =
+    const text =
       status.editorInstalled === false
         ? `Install ${editor}`
         : `Open in ${editor}`;
+    if (shown) {
+      open.title = text;
+    } else {
+      open.textContent = text;
+    }
   };
   void localStatus.then(label);
   open.addEventListener("click", async () => {
@@ -4546,10 +4553,11 @@ function mountPdfSwitch(): void {
  */
 function renderWhere(link: OverleafLinkPublic): HTMLElement {
   if (link.local_path) {
-    return el("div", {
-      class: "dim small",
-      text: `On this computer: ${link.local_path}`,
-    });
+    // Opens it in the editor, which is what the path is there for
+    return el("div", { class: "dim small" }, [
+      document.createTextNode("On this computer: "),
+      renderOpenLocally(linkKey(link), undefined, true, link.local_path),
+    ]);
   }
   return el("div", { class: "dim small" }, [
     document.createTextNode(`Via ${new URL(hubWebUrl).host}`),

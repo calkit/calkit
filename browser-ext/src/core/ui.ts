@@ -234,6 +234,17 @@ button.secondary:hover:not(:disabled) {
   background: rgba(0, 150, 136, 0.12);
 }
 a { color: var(--ck-main); }
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ck-main);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+button.link:hover:not(:disabled) { text-decoration: underline; }
 input, select, textarea {
   width: 100%;
   padding: 5px 7px;

@@ -836,13 +836,18 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         repo = calkit.git.get_repo(wdir)
         commit_sha = repo.git.log("-1", "--format=%H", "--", path) or None
         changed = bool(repo.git.status("--porcelain", "--", path).strip())
-        folder_path = os.path.join(wdir, folder)
+        # Only what Git would keep counts, so what the build leaves, e.g.,
+        # SyncTeX data written just after the PDF, doesn't
+        sources = repo.git.ls_files(
+            "-co", "--exclude-standard", "--", folder
+        ).splitlines()
         edited_since = any(
-            os.path.getmtime(os.path.join(root, fname)) > stat.st_mtime
-            for root, dirs, files in os.walk(folder_path)
-            for fname in files
-            if not fname.endswith((".pdf", ".log", ".aux", ".fls"))
-            and not root.startswith(os.path.join(folder_path, "_calkit"))
+            os.path.getmtime(os.path.join(wdir, source_path)) > stat.st_mtime
+            for source_path in sources
+            if not source_path.endswith((".pdf", ".log", ".aux", ".fls"))
+            and os.path.relpath(source_path, folder).split(os.sep)[0]
+            != "_calkit"
+            and os.path.isfile(os.path.join(wdir, source_path))
         )
         chunk |= {
             "built": stat.st_mtime,

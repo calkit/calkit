@@ -825,9 +825,15 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
         assert "built" not in reply["result"]
         data += base64.b64decode(reply["result"]["data"])
     assert data == pdf
+    # What the build leaves after the PDF, which Git ignores, doesn't count
+    later = time.time() + 10
+    (project / "paper" / ".gitignore").write_text("*.synctex.gz\n")
+    os.utime(project / "paper" / ".gitignore", (0, 0))
+    (project / "paper" / "main.synctex.gz").write_bytes(b"")
+    os.utime(project / "paper" / "main.synctex.gz", (later, later))
+    assert not get_pdf_chunk(str(project), "paper", 0)["edited_since_built"]
     # Its source changing after it was built, and it being rebuilt without
     # saving, are both said
-    later = time.time() + 10
     os.utime(project / "paper" / "main.tex", (later, later))
     assert get_pdf_chunk(str(project), "paper", 0)["edited_since_built"]
     (project / "paper" / "main.pdf").write_bytes(pdf + b"more")

@@ -403,6 +403,46 @@ As of September 2026, cocalc.com redirects to CoCalc.ai,
 a rewrite built around AI.
 Pipelines, data versioning, and provenance aren't part of either version.
 
+<!-- TODO: needs human review -->
+
+## In-browser workspaces
+
+These run everything in the browser, so there's nothing to install.
+
+### Papers AI
+
+[Papers AI](https://papers.ai/), launched in August 2026,
+is a browser-based workspace for research writing with an AI assistant,
+free or £10 per month for more AI usage.
+It edits Word, Markdown, LaTeX, Typst, and MyST documents,
+Jupyter notebooks, and CSV files,
+and connects to Zotero, Mendeley, and ReadCube.
+[Notebooks](https://docs.papers.ai/notebooks-and-data/notebooks.md)
+run Python with Pyodide and R with WebR,
+and LaTeX and Typst compile in the browser,
+with a built-in set of LaTeX packages that can't be added to.
+A project is kept in the browser's storage, on Papers AI's servers,
+or in a folder on the user's computer,
+which only Chromium-based browsers can open.
+Each file keeps a history of snapshots,
+capped at five per file for projects that aren't in the cloud,
+and cloud projects can be shared with real-time editing.
+
+Running in the browser makes it quick to start,
+but limits what a project can do.
+Code runs in WebAssembly builds of Python and R,
+not in the project's own environments,
+so only packages built for them can be used,
+and a 32-bit WebAssembly program can use at most 4 GB of memory,
+which limits how much data an analysis can hold.
+There's no pipeline, environment locking, or data versioning,
+and history is per file rather than a repository of the whole project.
+
+Calkit runs where the project's code and data already are,
+e.g., a laptop, a workstation, or a cluster,
+in environments declared and locked in the project,
+so the analysis that makes a figure is the one anyone can rerun.
+
 ## Agentic research tools
 
 These run AI agents that do research.

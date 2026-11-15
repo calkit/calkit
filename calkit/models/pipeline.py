@@ -87,6 +87,33 @@ def quote_arg(arg: str) -> str:
     return '"' + body + "\\" * 2 * (len(arg) - len(body)) + '"'
 
 
+def quote_literal_arg(arg: str) -> str:
+    """An arg as one word that sh and cmd.exe, which DVC runs stage commands
+    with on Windows, both pass through unchanged, so the command is the same
+    on every platform.
+
+    Double quotes protect everything else in both, so an arg with a
+    character one of them still acts on there is refused rather than
+    passed changed.
+    """
+    if arg and re.fullmatch(r"[\w@%+=:,./-]+", arg):
+        return arg
+    for char in ['"', "$", "`", "\n"]:
+        if char in arg:
+            raise ValueError(
+                f"{arg!r} can't be passed to a shell unchanged on every "
+                f"platform, since it contains {char!r}"
+            )
+    # Trailing backslashes are doubled, which both read back as one each
+    body = arg.rstrip("\\")
+    if "\\\\" in body:
+        raise ValueError(
+            f"{arg!r} can't be passed to a shell unchanged on every "
+            "platform, since it contains consecutive backslashes"
+        )
+    return '"' + body + "\\" * 2 * (len(arg) - len(body)) + '"'
+
+
 def check_path_relative_and_child_of_cwd(s: str) -> str:
     # An empty or blank path is Path('.'), which passes every check below and
     # silently means the project root. Callers act on what they're given, so
@@ -1862,21 +1889,28 @@ class JsonToLatexStage(Stage):
         # Only the declared paths, since what's generated for the stage, e.g.,
         # its setup or schedule period file, isn't data
         for input_path in self.input_paths:
-            cmd += f" '{input_path}'"
+            cmd += f" {quote_literal_arg(input_path)}"
         for out in self.outputs:
             if isinstance(out, str):
                 out_path = out
             elif isinstance(out, PathOutput):
                 out_path = out.path
-            cmd += f" --output '{out_path}'"
+            cmd += f" --output {quote_literal_arg(out_path)}"
         if self.command_name is not None:
-            cmd += f" --command {self.command_name}"
+            cmd += f" --command {quote_literal_arg(self.command_name)}"
         for key in self.keys:
-            cmd += f" --key {shlex.quote(key)}"
-        if self.format is not None:
-            fmt_json = json.dumps(self.format)
-            cmd += f" --format-json '{fmt_json}'"
+            cmd += f" --key {quote_literal_arg(key)}"
+        # One arg per format rather than JSON, whose quotes neither shell's
+        # quoting can carry unchanged on both
+        for name, fmt in (self.format or {}).items():
+            cmd += f" --format {quote_literal_arg(f'{name}={fmt}')}"
         return cmd
+
+    @model_validator(mode="after")
+    def check_args_quotable(self) -> "JsonToLatexStage":
+        # So calkit.yaml says why, rather than the pipeline failing to compile
+        self.dvc_cmd
+        return self
 
     @property
     def dvc_outs(self) -> list[str | dict]:

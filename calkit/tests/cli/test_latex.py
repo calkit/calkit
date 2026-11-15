@@ -125,6 +125,31 @@ def test_from_json(tmp_dir):
     assert r"\newcommand\results" in tex
     assert get_value(tex, "result4") == "hello"
     assert get_value(tex, "sup") == "5.555"
+    # Formats can come one per arg too, as stages pass them
+    subprocess.run(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "test2.json",
+            "-o",
+            "paper/results.tex",
+            "--format",
+            "greeting=say {result4}",
+        ],
+        check=True,
+    )
+    with open("paper/results.tex") as f:
+        assert get_value(f.read(), "greeting") == "say hello"
+    out = subprocess.run(
+        ["calkit", "latex", "from-json", "test2.json", "-o", "r.tex"]
+        + ["--format", "no-equals"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert out.returncode != 0
+    assert "NAME=FORMAT" in out.stderr
 
 
 def test_from_json_keys(tmp_dir):

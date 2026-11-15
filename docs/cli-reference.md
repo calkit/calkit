@@ -4216,6 +4216,7 @@ Options:
 | `--output`, `-o` | list[str] | yes      |         | Output LaTeX file path(s).                                                                                                      |
 | `--command`      | str       | no       |         | Command name to use in LaTeX output.                                                                                            |
 | `--key`          | list[str] | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
+| `--format`       | list[str] | no       |         | Value to add, as NAME=FORMAT, e.g., 'pct={a:.1%}'. Repeatable.                                                                  |
 | `--format-json`  | str       | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
 
 <a id="subcommand-latex-tex-from-questions"></a>

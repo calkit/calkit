@@ -3264,35 +3264,8 @@ function showLocalPdf(link: OverleafLinkPublic, path: string): void {
   frame.src = commentsOn
     ? getReviewUrl(params)
     : `${chrome.runtime.getURL("viewer.html")}?${params}`;
-  const edits =
-    lastCheck && linkKey(lastCheck.link) === linkKey(link)
-      ? lastCheck.status.commits_from_overleaf
-      : 0;
-  const bar = el(
-    "div",
-    {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        padding: "4px 8px",
-        background: "#f3f4f6",
-        font: "12px -apple-system, BlinkMacSystemFont, sans-serif",
-        color: "#111827",
-      },
-    },
-    [
-      el("span", {
-        style: { flex: "1" },
-        text: edits
-          ? `PDF from this computer, without ${edits} edit${
-              edits === 1 ? "" : "s"
-            } made on Overleaf since the last sync`
-          : "PDF from this computer",
-      }),
-    ],
-  );
-  const host = el("div", {}, [bar, frame]);
+  // The switch in Overleaf's toolbar says which PDF this is
+  const host = el("div", {}, [frame]);
   Object.assign(host.style, {
     display: "flex",
     flexDirection: "column",
@@ -4474,9 +4447,11 @@ function mountPdfSwitch(): void {
     return;
   }
   const local = Boolean(localPdf);
+  const edits = check.status.commits_from_overleaf;
   if (
     existing?.parentElement === toolbar &&
-    existing.dataset.local === `${local}`
+    existing.dataset.local === `${local}` &&
+    existing.dataset.edits === `${edits}`
   ) {
     return;
   }
@@ -4498,7 +4473,12 @@ function mountPdfSwitch(): void {
       text,
       title: useLocal
         ? "The PDF the pipeline built on this computer, without waiting " +
-          "on Overleaf to compile"
+          "on Overleaf to compile" +
+          (edits
+            ? `, without ${edits} edit${
+                edits === 1 ? "" : "s"
+              } made on Overleaf since the last sync`
+            : "")
         : "Overleaf's own PDF",
       style: {
         border: "none",
@@ -4534,7 +4514,14 @@ function mountPdfSwitch(): void {
     [option("Overleaf", false), option("This computer", true)],
   );
   toggle.dataset.local = `${local}`;
-  toolbar.append(toggle);
+  toggle.dataset.edits = `${edits}`;
+  // Before Comments, whichever was put back last
+  const comments = document.getElementById("calkit-comments-toggle");
+  if (comments?.parentElement === toolbar) {
+    toolbar.insertBefore(toggle, comments);
+  } else {
+    toolbar.append(toggle);
+  }
   // The first time it's shown for this project, the last choice applies
   if (!existing) {
     void chrome.storage.local.get(PDF_SOURCE_KEY).then((stored) => {

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 # Bumped when what a lock or environment holds changes meaning, so old ones
 # are relocked or rebuilt rather than misread
 LOCK_FORMAT_VERSION = 1
-VIEW_FORMAT_VERSION = 1
+VIEW_FORMAT_VERSION = 2
 # The latest TeX Live release whose repository is frozen, so locking against
 # it pins every package for good
 DEFAULT_RELEASE = 2025
@@ -649,6 +649,60 @@ def link_file(src: str, dst: str) -> None:
         shutil.copy2(src, dst)
 
 
+def get_thin_program_fpath(fpath: str) -> str:
+    """Return a macOS program built for this machine alone, if it's a
+    universal one that would unpack itself to run.
+
+    Biber's does, with Xcode's ``lipo``, which isn't on every Mac and
+    doesn't take the option it uses on every version, so its slice is
+    unpacked here instead, once, into the store. Anything else is returned
+    as is.
+    """
+    import platform
+    import struct
+
+    cpu_types = {"arm64": 0x0100000C, "x86_64": 0x01000007}
+    cpu_type = cpu_types.get(platform.machine())
+    with open(fpath, "rb") as f:
+        header = f.read(8)
+        if len(header) < 8 or cpu_type is None:
+            return fpath
+        magic, n_archs = struct.unpack(">II", header)
+        if magic not in (0xCAFEBABE, 0xCAFEBABF):
+            return fpath
+        fmt = ">iiQQII" if magic == 0xCAFEBABF else ">iiIII"
+        archs = [
+            struct.unpack(fmt, f.read(struct.calcsize(fmt)))
+            for _ in range(n_archs)
+        ]
+        arch = next((a for a in archs if a[0] == cpu_type), None)
+        if arch is None:
+            return fpath
+        offset, size = arch[2], arch[3]
+        # The unpacking launcher's code is at its start
+        f.seek(offset)
+        if b"-extract_family" not in f.read(min(size, 1 << 21)):
+            return fpath
+        key = hashlib.md5(f"{fpath}:{cpu_type}".encode()).hexdigest()[:16]
+        thin_fpath = os.path.join(
+            get_store_dir(), "thin", key, os.path.basename(fpath)
+        )
+        if os.path.isfile(thin_fpath):
+            return thin_fpath
+        os.makedirs(os.path.dirname(thin_fpath), exist_ok=True)
+        tmp_fpath = f"{thin_fpath}.{os.getpid()}.tmp"
+        f.seek(offset)
+        with open(tmp_fpath, "wb") as out:
+            remaining = size
+            while remaining:
+                chunk = f.read(min(remaining, 1 << 20))
+                out.write(chunk)
+                remaining -= len(chunk)
+    os.chmod(tmp_fpath, 0o755)
+    os.replace(tmp_fpath, thin_fpath)
+    return thin_fpath
+
+
 def create_language_files(
     pkg_dirs: dict[str, str], out_dir: str
 ) -> dict[str, str]:
@@ -860,8 +914,11 @@ def assemble_view(lock: dict, platform: str, verbose: bool = False) -> str:
                 owners.setdefault(rel, fpath)
     for rel in sorted(owners):
         src = find_source(rel)
-        if src is not None:
-            link_file(src, os.path.join(tmp_dir, rel))
+        if src is None:
+            continue
+        if platform == "universal-darwin" and rel.startswith("bin/"):
+            src = get_thin_program_fpath(src)
+        link_file(src, os.path.join(tmp_dir, rel))
     # Windows' script launchers look for their Lua driver beside the
     # programs, as in a full TeX Live
     for rel in (

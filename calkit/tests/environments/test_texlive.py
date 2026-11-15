@@ -180,7 +180,7 @@ def test_parse_and_resolve(tmp_path, monkeypatch):
     assert texlive.get_selected_env(None) is None
 
 
-def test_extract_container(tmp_path):
+def test_extract_container(tmp_path, monkeypatch):
     def make_container(path, members):
         with tarfile.open(path, "w:xz") as tf:
             for name, content in members.items():
@@ -242,6 +242,32 @@ def test_extract_container(tmp_path):
                     str(tmp_path / "link.tar.xz"), str(dest)
                 )
             assert not (dest / "texmf-dist").is_symlink()
+    # A universal macOS program that unpacks itself with lipo, as Biber's
+    # does, is replaced by its slice for this machine, kept in the store
+    import platform
+    import struct
+
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    slices = [b"x86 -extract_family", b"arm -extract_family"]
+    header = struct.pack(">II", 0xCAFEBABE, 2)
+    offset = 4096
+    for cpu_type, data in zip([0x01000007, 0x0100000C], slices):
+        header += struct.pack(">iiIII", cpu_type, 0, offset, len(data), 12)
+        offset += 4096
+    fat = header.ljust(4096, b"\0")
+    fat += slices[0].ljust(4096, b"\0") + slices[1]
+    (tmp_path / "biber").write_bytes(fat)
+    thin = texlive.get_thin_program_fpath(str(tmp_path / "biber"))
+    assert thin.startswith(str(tmp_path / "home"))
+    with open(thin, "rb") as f:
+        assert f.read() == slices[1]
+    assert texlive.get_thin_program_fpath(str(tmp_path / "biber")) == thin
+    # Other universal programs run as they are, as does anything else
+    (tmp_path / "luatex").write_bytes(fat.replace(b"-extract_family", b"x"))
+    for name in ["luatex", "amsmath/texmf-dist/ls-R"]:
+        fpath = str(tmp_path / name)
+        assert texlive.get_thin_program_fpath(fpath) == fpath
 
 
 def test_create_language_files_and_font_maps(tmp_path):

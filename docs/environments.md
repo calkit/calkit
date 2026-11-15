@@ -1200,7 +1200,8 @@ environments:
       - booktabs
 ```
 
-Every TeX Live environment has pdfLaTeX, LuaLaTeX, latexmk, and BibTeX,
+Every TeX Live environment has pdfLaTeX, LuaLaTeX, latexmk, BibTeX,
+makeindex, and latexdiff, for `calkit latex diff`,
 and one whose document uses biblatex gets Biber with it.
 List any other [TeX Live packages](https://ctan.org/) the document uses
 under `packages`, or leave them out:

@@ -86,6 +86,8 @@ TL_PLATFORMS = [
 # graphicx can't load without epstopdf-pkg, nor under LuaLaTeX without
 # pdftexcmds, which needs the next three; and none of those failures
 # names a file to fetch.
+# makeindex and latexdiff are programs, which no document names a file
+# of, for indexes and for 'calkit latex diff'; about 200 kB together.
 # texlive.infra brings the launcher Windows' script wrappers need, and
 # tlperl the Perl latexmk runs on there; tlperl.windows is only installed
 # on Windows.
@@ -99,6 +101,8 @@ BASE_PACKAGES = [
     "iftex",
     "infwarerr",
     "ltxcmds",
+    "makeindex",
+    "latexdiff",
     "texlive.infra",
     "tlperl.windows",
 ]

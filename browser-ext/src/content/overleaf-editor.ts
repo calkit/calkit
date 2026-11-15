@@ -33,7 +33,10 @@ export type FromEditor =
       id: string;
       version: number;
       index: number;
-    };
+    }
+  // The open document's text, or whether lines were replaced in it
+  | { calkit: "editor"; type: "text"; reqId: number; text: string | null }
+  | { calkit: "editor"; type: "replaced"; reqId: number; error: string | null };
 
 export type ToEditor =
   | {
@@ -45,7 +48,17 @@ export type ToEditor =
   | { calkit: "lint"; type: "goto"; line: number; column: number }
   // From a script put in after the extension reloaded, which missed the
   // last scan
-  | { calkit: "lint"; type: "rescan" };
+  | { calkit: "lint"; type: "rescan" }
+  | { calkit: "lint"; type: "read"; reqId: number }
+  // Lines from `line` (from 1) replaced, if they're still `expected`
+  | {
+      calkit: "lint";
+      type: "replace";
+      reqId: number;
+      line: number;
+      expected: string[];
+      insert: string[];
+    };
 
 // CodeMirror comes from Overleaf's bundle at runtime, so it's untyped here
 type View = any;
@@ -198,6 +211,47 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
   extensions.push(problems, scanner, tooltip, theme);
 });
 
+/**
+ * Replace lines in the open document, as one change it can undo, unless
+ * they've changed, e.g., by someone else editing them meanwhile. Says
+ * what went wrong, if anything.
+ */
+function replaceLines(message: ToEditor & { type: "replace" }): string | null {
+  if (!active) {
+    return "The editor isn't open.";
+  }
+  const doc = active.view.state.doc;
+  const { line, expected, insert } = message;
+  const last = line + expected.length - 1;
+  if (line < 1 || last > doc.lines || line > doc.lines + 1) {
+    return "The source changed. Try again.";
+  }
+  for (let n = line; n <= last; n++) {
+    if (doc.line(n).text !== expected[n - line]) {
+      return "The source changed. Try again.";
+    }
+  }
+  const text = insert.map((l) => `${l}\n`).join("");
+  let from: number;
+  let to: number;
+  if (line > doc.lines) {
+    // After the last line, which has no line break of its own
+    from = to = doc.length;
+    active.view.dispatch({
+      changes: { from, to, insert: `\n${text.slice(0, -1)}` },
+    });
+    return null;
+  }
+  from = doc.line(line).from;
+  to = expected.length ? Math.min(doc.line(last).to + 1, doc.length) : from;
+  const atEnd = expected.length && doc.line(last).to === doc.length;
+  active.view.dispatch({
+    changes: { from, to, insert: atEnd ? text.slice(0, -1) : text },
+    scrollIntoView: false,
+  });
+  return null;
+}
+
 window.addEventListener("message", (event) => {
   if (event.source !== window || event.data?.calkit !== "lint") {
     return;
@@ -210,6 +264,18 @@ window.addEventListener("message", (event) => {
     if (active) {
       scan(active.view);
     }
+  } else if (message.type === "read") {
+    post({
+      type: "text",
+      reqId: message.reqId,
+      text: active ? active.view.state.doc.toString() : null,
+    });
+  } else if (message.type === "replace") {
+    post({
+      type: "replaced",
+      reqId: message.reqId,
+      error: replaceLines(message),
+    });
   } else if (message.type === "goto" && active) {
     const doc = active.view.state.doc;
     if (message.line < 1 || message.line > doc.lines) {

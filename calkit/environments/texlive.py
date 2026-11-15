@@ -154,7 +154,7 @@ def get_lock_platforms(env: dict) -> list[str]:
     return sorted(set(platforms))
 
 
-def calc_spec_md5(env: dict) -> str:
+def calc_spec_hash(env: dict) -> str:
     """Hash what an environment's lock is resolved from."""
     spec = {
         "release": env.get("release"),
@@ -163,7 +163,8 @@ def calc_spec_md5(env: dict) -> str:
         "platforms": get_lock_platforms(env),
         "lock_format": LOCK_FORMAT_VERSION,
     }
-    return hashlib.md5(json.dumps(spec, sort_keys=True).encode()).hexdigest()
+    content = json.dumps(spec, sort_keys=True)
+    return "sha256:" + hashlib.sha256(content.encode()).hexdigest()
 
 
 def get_repository_url(env: dict) -> str:
@@ -359,7 +360,7 @@ def create_lock(env: dict, added: list[str] | None = None) -> dict:
     names = resolve_packages(tlpdb, spec_packages + added, platforms)
     return {
         "lock_format": LOCK_FORMAT_VERSION,
-        "spec_md5": calc_spec_md5(env),
+        "spec_hash": calc_spec_hash(env),
         "release": release,
         "repository": repository,
         "platforms": platforms,
@@ -1035,7 +1036,7 @@ def check(
     """
     lock_fpath = get_lock_fpath(env_name, env, wdir=wdir)
     lock = read_lock(lock_fpath)
-    if lock is None or lock.get("spec_md5") != calc_spec_md5(env):
+    if lock is None or lock.get("spec_hash") != calc_spec_hash(env):
         print(f"Locking TeX Live environment '{env_name}'", file=sys.stderr)
         lock = create_lock(env, added=(lock or {}).get("added"))
         write_lock(lock, lock_fpath)

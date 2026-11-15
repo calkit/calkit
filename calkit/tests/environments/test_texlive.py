@@ -105,9 +105,9 @@ def test_parse_and_resolve(tmp_path, monkeypatch):
     assert texlive.get_package_platform("tlperl.windows") == "windows"
     # The spec hash changes with what the lock is resolved from, not with
     # how the spec is written
-    a = texlive.calc_spec_md5({"kind": "texlive", "packages": ["b", "a"]})
-    b = texlive.calc_spec_md5({"kind": "texlive", "packages": ["a", "b"]})
-    c = texlive.calc_spec_md5({"kind": "texlive", "packages": ["a"]})
+    a = texlive.calc_spec_hash({"kind": "texlive", "packages": ["b", "a"]})
+    b = texlive.calc_spec_hash({"kind": "texlive", "packages": ["a", "b"]})
+    c = texlive.calc_spec_hash({"kind": "texlive", "packages": ["a"]})
     assert a == b != c
     # Locks are only for the platform packages that belong to a platform
     lock = {

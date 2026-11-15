@@ -589,6 +589,23 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
         assert ".calkit/env-locks/tex.json" in f.read()
     out = subprocess.check_output(["calkit", "status"], text=True)
     assert "Pipeline is up to date" in out
+    # Converting it from the source brings TeX4ht into the lock
+    if calkit.docx.find_soffice():
+        subprocess.check_call(
+            [
+                "calkit",
+                "latex",
+                "to-docx",
+                "--engine",
+                "libreoffice",
+                "--output",
+                "main.docx",
+                "paper/main.pdf",
+            ]
+        )
+        assert os.path.isfile("main.docx")
+        with open(".calkit/env-locks/tex.json") as f:
+            assert "make4ht" in json.load(f)["added"]
 
 
 def test_get_texlive_env(tmp_dir, monkeypatch):

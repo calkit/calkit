@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 # are relocked or rebuilt rather than misread
 LOCK_FORMAT_VERSION = 1
 VIEW_FORMAT_VERSION = 2
+# What converting LaTeX to other formats with make4ht needs, beyond what
+# the document does
+TEX4HT_PACKAGES = ["make4ht", "tex4ht", "luaxml"]
 # The latest TeX Live release whose repository is frozen, so locking against
 # it pins every package for good
 DEFAULT_RELEASE = 2025
@@ -112,8 +115,13 @@ COMPLETE_MARKER = ".calkit-complete"
 
 
 def get_store_dir() -> str:
-    """Return the directory holding every project's TeX Live packages."""
-    return os.path.join(calkit.get_user_home(), ".calkit", "texlive")
+    """Return the directory holding every project's TeX Live packages.
+
+    Absolute and normalized, since it ends up in paths TeX's tools read,
+    and some, e.g., TeX4ht's xtpipes, mangle a relative or ``..`` one.
+    """
+    home = os.path.abspath(calkit.get_user_home())
+    return os.path.join(home, ".calkit", "texlive")
 
 
 def get_platform() -> str:

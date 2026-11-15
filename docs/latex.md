@@ -514,6 +514,9 @@ The metadata a thread can have:
   that the thread is about, and `occ`, which occurrence of that text it is.
   Without a highlight, a thread is about the whole paragraph.
 - `issue`: the URL of an issue that mirrors the thread, e.g., on GitHub.
+<!-- TODO: needs human review -->
+- `overleaf`: the ID of the Overleaf comment thread it's kept in step with,
+  set by the [browser extension](browser-ext/index.md#comments-on-the-pdf).
 
 Tools keep any other metadata they don't recognize when they rewrite a
 thread, so newer attributes survive older tools.

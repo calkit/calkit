@@ -46,9 +46,15 @@ if it doesn't have it.
 
 When it's connected, the Overleaf panel works with the project on your
 computer rather than through calkit.io, and says **On this computer**.
-It finds the project from its `calkit.yaml`, and **Sync** runs
-`calkit overleaf sync` there, and **Run and sync** runs
-`calkit run --save --overleaf` there, instead of on GitHub Actions.
+It finds the project from its `calkit.yaml`, and **Sync now** runs
+`calkit overleaf sync` there, instead of on GitHub Actions.
+If any stages are out of date, **Run the pipeline first** next to it runs
+`calkit run --save --overleaf` instead,
+and with nothing to sync, **Run and sync** does the same.
+The pipeline stages in the Calkit sidebar are the ones on your computer,
+in the order `calkit.yaml` defines them,
+and each expands to show what it reads and makes, what's out of date,
+and buttons to open it in your editor or on calkit.io.
 **Show this computer's PDF** shows the PDF built there in place of
 Overleaf's, so you don't wait for Overleaf to compile it.
 If the project isn't on your computer, the panel offers to clone it,
@@ -126,6 +132,23 @@ Once everything is connected, syncing between them is a single action.
 The Overleaf document becomes a Calkit pipeline stage with explicit
 inputs for the figures, so they can be checked for staleness,
 synced, and built offline and pushed back up to the web.
+
+### Comments on the PDF
+
+<!-- TODO: needs human review -->
+
+**Comments** in the PDF pane's toolbar shows the PDF with the comment
+threads in the document's source,
+written in [Calkit's comment format](../latex.md#comments),
+highlighted where they apply.
+Select text in the PDF to comment on it, reply to or resolve a thread in
+the panel beside it, or double-click the PDF to go to that line of the
+source.
+Threads are kept in step with Overleaf's own comments:
+a comment added, replied to, resolved, or deleted on either side shows up on
+the other, and a thread started on the PDF is posted to Overleaf too.
+Boxes and hovering show where figures and values come from,
+the same as on Overleaf's PDF.
 
 ## GitHub
 

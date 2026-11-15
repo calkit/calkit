@@ -556,6 +556,120 @@ def test_build_output_and_aux_dirs(tmp_dir):
             assert f.read().count(b"/ID [<") == 1, pdf
 
 
+@pytest.mark.xdist_group("texlive")
+def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    subprocess.check_call(["git", "init", "-q"])
+    calkit.save_calkit_info(
+        {
+            "name": "tex",
+            "environments": {"tex": {"kind": "texlive"}},
+            "pipeline": {
+                "stages": {
+                    "build-paper": {
+                        "kind": "latex",
+                        "target_path": "paper/main.tex",
+                        "environment": "tex",
+                    }
+                }
+            },
+        }
+    )
+    os.makedirs("paper")
+    # siunitx needs array.sty, from tools, which the document doesn't name,
+    # so that's read from siunitx itself. A package named by a macro can't
+    # be read from the source, so that's added after a failed compile.
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{amsmath}\n"
+            "\\usepackage{siunitx} % \\usepackage{nonexistent}\n"
+            "\\newcommand{\\tablepkg}{booktabs}\n"
+            "\\usepackage{\\tablepkg}\n"
+            "\\begin{document}\n\\SI{3}{\\meter}, $\\text{a}$\n"
+            "\\end{document}\n"
+        )
+    subprocess.check_call(
+        ["calkit", "latex", "build", "-e", "tex", "paper/main.tex"]
+    )
+    assert os.path.isfile("paper/main.pdf")
+    # What it was missing is recorded in the lock, and the spec stays as
+    # written
+    env = calkit.load_calkit_info()["environments"]["tex"]
+    assert env == {"kind": "texlive"}
+    with open(".calkit/env-locks/tex.json") as f:
+        lock = json.load(f)
+    assert {"amsmath", "booktabs", "siunitx", "tools"} <= set(lock["added"])
+    assert set(lock["added"]) <= set(lock["packages"])
+    # Relocking it explicitly keeps them
+    subprocess.check_call(["calkit", "update", "env", "-n", "tex", "--lock"])
+    with open(".calkit/env-locks/tex.json") as f:
+        assert json.load(f)["added"] == lock["added"]
+    # A stage builds in it, with the lock as a dependency, and nothing is
+    # out of date afterwards
+    os.remove("paper/main.pdf")
+    subprocess.check_call(["calkit", "run"])
+    assert os.path.isfile("paper/main.pdf")
+    with open("dvc.yaml") as f:
+        assert ".calkit/env-locks/tex.json" in f.read()
+    out = subprocess.check_output(["calkit", "status"], text=True)
+    assert "Pipeline is up to date" in out
+    # Converting it from the source gets TeX4ht without locking it, since
+    # it isn't part of the pipeline
+    if calkit.docx.find_soffice():
+        with open(".calkit/env-locks/tex.json") as f:
+            lock = json.load(f)
+        subprocess.check_call(
+            [
+                "calkit",
+                "latex",
+                "to-docx",
+                "--engine",
+                "libreoffice",
+                "--output",
+                "main.docx",
+                "paper/main.pdf",
+            ]
+        )
+        assert os.path.isfile("main.docx")
+        with open(".calkit/env-locks/tex.json") as f:
+            assert json.load(f) == lock
+        out = subprocess.check_output(["calkit", "status"], text=True)
+        assert "Pipeline is up to date" in out
+
+
+def test_get_texlive_env(tmp_dir, monkeypatch):
+    from calkit.cli import latex as cli_latex
+
+    # Removed afterward, since the project's variables are set in-process
+    monkeypatch.setenv("CK_TEX_TEST", "")
+    monkeypatch.delenv("CK_TEX_TEST")
+    tex = {"kind": "texlive"}
+    calkit.save_calkit_info(
+        {
+            "env_vars": {"CK_TEX_TEST": "1"},
+            "environments": {
+                "tex": tex,
+                "old": {"kind": "texlive", "release": 2024},
+                "auto": {
+                    "kind": "switch",
+                    "switch": [
+                        {
+                            "when": [{"env_var_set": "CK_TEX_TEST"}],
+                            "use": "tex",
+                        },
+                        {"use": "old"},
+                    ],
+                },
+            },
+        }
+    )
+    # A switch picks by the project's variables, as in 'calkit xenv'
+    assert cli_latex._get_texlive_env("auto") == ("tex", tex)
+    assert os.environ["CK_TEX_TEST"] == "1"
+    assert cli_latex._get_texlive_env(None) is None
+
+
 def test_build_localizes_synctex(tmp_dir, monkeypatch):
     import gzip
 
@@ -1244,14 +1358,27 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     from calkit.cli import latex as cli_latex
     from calkit.latex import find_missing_tex_files
 
-    # What LaTeX says, for a style file and for a font it has no metrics for
+    # What LaTeX says, for a style file, a font it has no metrics or
+    # outlines for, and a Lua module
     log = (
         "! LaTeX Error: File `xurl.sty' not found.\n"
         "! Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable: Metric (TFM) "
         "file not found.\n"
         "! LaTeX Error: File `xurl.sty' not found.\n"
+        "[\\directlua]:1: module 'pdftexcmds' not found:\n"
+        "!pdfTeX error: pdflatex (file ecrm1000): Font ecrm1000 at 600 not "
+        "found\n"
+        "! Font TU/texgyretermes-regular.otf(0)/m/n/10=[texgyretermes-regular"
+        ".otf]/OT at\n 10.0pt not loadable: Metric (TFM) file or installed "
+        "font not found.\n"
     )
-    assert find_missing_tex_files(log) == ["xurl.sty", "pcrr7t.tfm"]
+    assert find_missing_tex_files(log) == [
+        "xurl.sty",
+        "pcrr7t.tfm",
+        "pdftexcmds.lua",
+        "ecrm1000.pfb",
+        "texgyretermes-regular.otf",
+    ]
     assert find_missing_tex_files("Output written on main.pdf") == []
     os.makedirs("paper")
     log_path = os.path.join("paper", "main.log")
@@ -1274,7 +1401,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
 
     def run(cmd, **kwargs):
         calls.append(cmd)
-        if cmd[0] == "latexmk":
+        if "latexmk" in cmd:
             captured.append(kwargs.get("capture_output"))
             return latexmk(cmd)
         if "search" in cmd:
@@ -1296,10 +1423,12 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     def build(quiet: bool = False):
         return cli_latex._run_latexmk(
             ["latexmk", "paper/main.tex"],
-            env=None,
+            env_vars={},
             log_path=log_path,
             fdb_path=fdb_path,
             environment=None,
+            texlive_env=None,
+            no_check=False,
             verbose=False,
             quiet=quiet,
         )
@@ -1316,7 +1445,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     state["unfetchable"] = {"nope.sty"}
     calls.clear()
     assert build() == 12
-    assert len([c for c in calls if c[0] == "latexmk"]) == 2
+    assert len([c for c in calls if "latexmk" in c]) == 2
     # A system TeX is the user's, so nothing is fetched into it
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: True)
     calls.clear()
@@ -1327,6 +1456,38 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     captured.clear()
     build(quiet=True)
     assert captured == [True]
+    # A TeX Live environment gets the engine latexmk will compile with,
+    # which a log can't name, since it fails to start
+    from calkit.environments import texlive as env_texlive
+
+    added: list[list[str]] = []
+    monkeypatch.setattr(
+        env_texlive,
+        "add_packages",
+        lambda name, env, packages: added.append(packages) or packages,
+    )
+    monkeypatch.setattr(env_texlive, "check", lambda *a, **kw: "view")
+    monkeypatch.setattr(
+        env_texlive, "get_run_env_vars", lambda view: {"PATH": view}
+    )
+    state["unfetchable"] = set()
+    state["installed"] = {"xurl.sty"}
+    for args, expected in [(["-xelatex"], [["xetex"]]), ([], [])]:
+        added.clear()
+        assert (
+            cli_latex._run_latexmk(
+                ["latexmk", "-pdf", *args, "paper/main.tex"],
+                env_vars={},
+                log_path=log_path,
+                fdb_path=fdb_path,
+                environment="tex",
+                texlive_env=("tex", {"kind": "texlive"}),
+                no_check=False,
+                verbose=False,
+            )
+            == 0
+        )
+        assert added == expected
 
 
 def test_from_questions(tmp_dir):

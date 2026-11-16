@@ -53,6 +53,20 @@ TEX4HT_PACKAGES = ["make4ht", "tex4ht", "luaxml"]
 # The latest TeX Live release whose repository is frozen, so locking against
 # it pins every package for good
 DEFAULT_RELEASE = 2025
+# The environment created for a LaTeX document that doesn't have one,
+# wherever that happens: a new publication, an Overleaf import, or a stage
+# whose environment is worked out from what it runs. Its release is written
+# out, as 'calkit new texlive-env' does. Copied where it's used, since
+# what's written into a project is the caller's to amend.
+DEFAULT_ENVIRONMENT = {
+    "kind": "texlive",
+    "release": DEFAULT_RELEASE,
+    "description": "TeX Live, installed by Calkit.",
+}
+# What builds run in when neither the project nor the machine has a TeX,
+# locked in the store rather than a project, so packages its builds add are
+# shared by every document built that way here
+DEFAULT_ENV_NAME = "_texlive"
 FROZEN_REPOSITORY_TEMPLATE = (
     "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/"
     "{release}/tlnet-final"
@@ -1167,10 +1181,13 @@ def assemble_view(lock: dict, platform: str, verbose: bool = False) -> str:
     return view_dir
 
 
-def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
+def get_run_env_vars(
+    view_dir: str, platform: str | None = None, env_vars: dict | None = None
+) -> dict:
     """Return the environmental variables a command in an environment gets.
 
-    The environment's programs come first on PATH, and every variable
+    These are ``env_vars``, by default this process's, with the
+    environment's programs first on PATH, and every variable
     kpathsea would take from the environment over ``texmf.cnf``, e.g.,
     ``TEXINPUTS`` or ``TEXINPUTS.xelatex``, is dropped. Nothing else is
     needed for TeX: the programs find the environment's configuration from
@@ -1189,7 +1206,9 @@ def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
         re.IGNORECASE,
     )
     env_vars = {
-        k: v for k, v in os.environ.items() if not pattern.fullmatch(k)
+        k: v
+        for k, v in (os.environ if env_vars is None else env_vars).items()
+        if not pattern.fullmatch(k)
     }
     bin_dir = os.path.join(view_dir, "bin", platform)
     env_vars["PATH"] = bin_dir + os.pathsep + env_vars.get("PATH", "")
@@ -1200,9 +1219,13 @@ def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
 
 
 def get_lock_fpath(env_name: str, env: dict, wdir: str | None = None) -> str:
-    """Return where an environment's lock lives in the project."""
+    """Return where an environment's lock lives in the project, or in the
+    store for the default environment.
+    """
     from calkit.environments import get_env_lock_fpath
 
+    if env_name == DEFAULT_ENV_NAME:
+        return os.path.join(get_store_dir(), "default-lock.json")
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=False
     )

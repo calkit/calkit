@@ -85,6 +85,14 @@ between browsers and machines.
 This works behind NAT and firewalls without opening ports.
 There is no direct or localhost path for now, even when the browser is on
 the same machine.
+
+<!-- TODO: needs human review -->
+
+Since then, the browser extension reaches Calkit on the machine it runs
+on directly, through the browser's native messaging, which starts
+`python -m calkit.browser_link` and talks to it over its standard input and
+output, so nothing listens on a port (`calkit/browser_link.py`).
+The relay stays the way to reach other machines, and the hub's pages.
 SSH environments remain the way to run on other machines without the hub.
 
 Relayed traffic is kept to what is interactive and small:

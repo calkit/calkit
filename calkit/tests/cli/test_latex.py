@@ -12,12 +12,10 @@ import calkit
 import calkit.git
 import calkit.pipeline
 
-skipif_windows_docker = pytest.mark.skipif(
+# Built with the machine's TeX, or else Calkit's default TeX Live
+skipif_windows_default_tex = pytest.mark.skipif(
     sys.platform == "win32",
-    reason=(
-        "TODO: Docker Linux images are unavailable on windows-latest GHA "
-        "runners"
-    ),
+    reason="TODO: not yet run in the default TeX Live on Windows",
 )
 
 
@@ -210,8 +208,7 @@ def test_from_json_keys(tmp_dir):
     assert "not in nested.json" in out.stderr
 
 
-@skipif_windows_docker
-@pytest.mark.needs("docker")
+@skipif_windows_default_tex
 def test_build(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper", exist_ok=True)
@@ -249,8 +246,7 @@ def test_build(tmp_dir):
         assert built[0].count(b"/ID [<") == 1
 
 
-@skipif_windows_docker
-@pytest.mark.needs("docker")
+@skipif_windows_default_tex
 def test_build_ck_components(tmp_dir):
     import struct
     import zlib
@@ -420,16 +416,21 @@ def test_build_ck_components(tmp_dir):
                 "\\end{document}", "\\ckfigure{figures/gone}\n\\end{document}"
             )
         )
-    # Compiled without mapping again, wherever TeX is, e.g., in a container
+    # Compiled without mapping again, with the machine's TeX or Calkit's
+    from calkit.environments import texlive as env_texlive
+
+    latexmk_cmd = ["latexmk", "-pdf", "-cd", "-interaction=nonstopmode"]
+    latexmk_cmd += ["paper/main.tex"]
+    latexmk_env = None
+    default_tex = cli_latex._get_texlive_env(None)
+    if default_tex is not None:
+        latexmk_env = env_texlive.get_run_env_vars(
+            env_texlive.check(*default_tex)
+        )
+        latexmk_cmd = env_texlive.get_run_cmd(latexmk_cmd, latexmk_env)
     out = subprocess.run(
-        cli_latex._tex_cmd(
-            ["latexmk", "-pdf", "-cd", "-interaction=nonstopmode"]
-            + ["paper/main.tex"],
-            environment=None,
-            no_check=True,
-            verbose=False,
-            dep="latexmk",
-        ),
+        latexmk_cmd,
+        env=latexmk_env,
         capture_output=True,
         text=True,
         errors="replace",
@@ -510,8 +511,7 @@ def test_build_ck_components(tmp_dir):
     assert urls["captions"] == urls["asked"]
 
 
-@skipif_windows_docker
-@pytest.mark.needs("docker")
+@skipif_windows_default_tex
 def test_build_output_and_aux_dirs(tmp_dir):
     # --output-dir / --aux-dir are given relative to the current directory but
     # latexmk runs with -cd, so the build command must translate them to the
@@ -667,7 +667,25 @@ def test_get_texlive_env(tmp_dir, monkeypatch):
     # A switch picks by the project's variables, as in 'calkit xenv'
     assert cli_latex._get_texlive_env("auto") == ("tex", tex)
     assert os.environ["CK_TEX_TEST"] == "1"
-    assert cli_latex._get_texlive_env(None) is None
+    # Without an environment, the machine's TeX if it has one, else Calkit's
+    # default TeX Live, locked in the store rather than the project
+    from calkit.environments import texlive as env_texlive
+
+    for installed, expected in [
+        (True, None),
+        (
+            False,
+            (env_texlive.DEFAULT_ENV_NAME, env_texlive.DEFAULT_ENVIRONMENT),
+        ),
+    ]:
+        monkeypatch.setattr(calkit, "check_dep_exists", lambda d: installed)
+        assert cli_latex._get_texlive_env(None) == expected
+    assert env_texlive.get_lock_fpath(
+        env_texlive.DEFAULT_ENV_NAME, env_texlive.DEFAULT_ENVIRONMENT
+    ) == os.path.join(env_texlive.get_store_dir(), "default-lock.json")
+    assert env_texlive.get_lock_fpath("tex", tex) == os.path.join(
+        ".calkit", "env-locks", "tex.json"
+    )
 
 
 def test_build_localizes_synctex(tmp_dir, monkeypatch):
@@ -689,6 +707,7 @@ def test_build_localizes_synctex(tmp_dir, monkeypatch):
         return 0
 
     monkeypatch.setattr(cli_latex, "_tex_cmd", lambda cmd, **kwargs: cmd)
+    monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
     monkeypatch.setattr(cli_latex, "_run_latexmk", run_latexmk)
     cli_latex.build("paper/main.tex", latexmk_rc_path="paper/latexmkrc")
     with gzip.open("paper/build/main.synctex.gz", "rt") as f:
@@ -709,6 +728,7 @@ def test_build_dirs_relative_to_tex_dir(
         f.write("\\documentclass{article}\n")
     cmds: list[list[str]] = []
     monkeypatch.setattr(cli_latex, "_tex_cmd", lambda cmd, **kwargs: cmd)
+    monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
     monkeypatch.setattr(
         cli_latex, "_run_latexmk", lambda cmd, **kwargs: cmds.append(cmd)
     )
@@ -1274,8 +1294,7 @@ def test_marked_up_digest_ignores_the_header():
     assert _marked_up_digest(changed) != _marked_up_digest(first)
 
 
-@skipif_windows_docker
-@pytest.mark.needs("docker")
+@skipif_windows_default_tex
 def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     # Two revisions that resolve to the same commit is what a pull request
     # diff looks like from the default branch. The pipeline resolves both
@@ -1401,6 +1420,9 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
 
     def run(cmd, **kwargs):
         calls.append(cmd)
+        if "printenv" in cmd:
+            out = "/work/.calkit/local/texmf\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=out)
         if "latexmk" in cmd:
             captured.append(kwargs.get("capture_output"))
             return latexmk(cmd)
@@ -1416,17 +1438,26 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     captured: list[bool] = []
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: False)
-    monkeypatch.setattr(
-        calkit.docker, "ensure_image_available", lambda image: None
-    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "tex": {
+                        "kind": "docker",
+                        "image": calkit.latex.DEFAULT_LATEX_IMAGE,
+                    }
+                }
+            },
+            f,
+        )
 
-    def build(quiet: bool = False):
+    def build(quiet: bool = False, environment: str | None = "tex"):
         return cli_latex._run_latexmk(
             ["latexmk", "paper/main.tex"],
             env_vars={},
             log_path=log_path,
             fdb_path=fdb_path,
-            environment=None,
+            environment=environment,
             texlive_env=None,
             no_check=False,
             verbose=False,
@@ -1438,7 +1469,6 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     assert build() == 0
     installs = [c for c in calls if "install" in c]
     assert len(installs) == 1 and installs[0][-1] == "xurl"
-    assert "TEXMFHOME=/work/.calkit/local/texmf" in installs[0]
     assert os.path.isdir(os.path.join(".calkit", "local", "texmf"))
     # Something fetching doesn't fix fails rather than looping
     state["installed"].clear()
@@ -1449,12 +1479,12 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     # A system TeX is the user's, so nothing is fetched into it
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: True)
     calls.clear()
-    assert build() == 12
+    assert build(environment=None) == 12
     assert not [c for c in calls if "tlmgr" in c]
     # Quiet keeps latexmk's output out of the way, for a caller that reports
     # what went wrong from the log
     captured.clear()
-    build(quiet=True)
+    build(quiet=True, environment=None)
     assert captured == [True]
     # A TeX Live environment gets the engine latexmk will compile with,
     # which a log can't name, since it fails to start

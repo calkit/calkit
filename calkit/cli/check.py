@@ -558,6 +558,9 @@ def check_environment(
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--manifest-path", env["path"]]
+        # Without a name, pixi installs only the manifest's default env
+        if pixi_env_name := env.get("name"):
+            cmd += ["--environment", pixi_env_name]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

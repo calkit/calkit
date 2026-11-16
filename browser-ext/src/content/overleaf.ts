@@ -4228,48 +4228,68 @@ async function postToOverleaf(
       : { line: anchor.line, column: lines[anchor.line - 1]?.length ?? 0 },
   });
   await sleep(300);
-  window.dispatchEvent(new Event("add-new-review-comment"));
-  // Overleaf's comment box is a small editor of its own, out of sight
-  let box: HTMLElement | null = null;
-  for (let i = 0; i < 30 && !box; i++) {
-    await sleep(100);
-    box =
-      document
-        .querySelector(".review-panel-add-comment-editor")
-        ?.shadowRoot?.querySelector<HTMLElement>(".cm-content") ?? null;
+  // Overleaf opens its review panel for the form, which the viewer with
+  // comments already shows, so it's put back as it was after
+  const getRailTab = () =>
+    document.querySelector<HTMLElement>(".ide-rail-tab-link.active");
+  const railBefore = getRailTab();
+  const railWasClosed =
+    (document.querySelector(".ide-rail-tab-content")?.getBoundingClientRect()
+      .width ?? 0) < 20;
+  try {
+    window.dispatchEvent(new Event("add-new-review-comment"));
+    // Overleaf's comment box is a small editor of its own, out of sight
+    let box: HTMLElement | null = null;
+    for (let i = 0; i < 30 && !box; i++) {
+      await sleep(100);
+      box =
+        document
+          .querySelector(".review-panel-add-comment-editor")
+          ?.shadowRoot?.querySelector<HTMLElement>(".cm-content") ?? null;
+    }
+    if (!box) {
+      throw new Error("Overleaf's comment form didn't open.");
+    }
+    const [first] = thread.messages;
+    // Pasted into that box, since typing commands go to whatever editor the
+    // page thinks has focus, which can be the document's
+    const data = new DataTransfer();
+    data.setData(
+      "text/plain",
+      first.author === me ? first.text : `${first.author}: ${first.text}`,
+    );
+    box.focus();
+    box.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    const root = box.getRootNode() as ShadowRoot;
+    const button = root.host
+      ?.closest("form")
+      ?.querySelector<HTMLButtonElement>('button[type="submit"]');
+    for (let i = 0; i < 20 && button?.disabled; i++) {
+      await sleep(100);
+    }
+    if (!button || button.disabled) {
+      throw new Error("Couldn't fill in Overleaf's comment form.");
+    }
+    button.click();
+    // Time for Overleaf to save it before it's linked
+    await sleep(1500);
+  } finally {
+    const railAfter = getRailTab();
+    if (railAfter && railAfter.id !== RAIL_TAB_ID) {
+      if (railWasClosed || !railBefore) {
+        // Clicking the open tab closes the panel
+        railAfter.click();
+      } else if (railBefore !== railAfter) {
+        railBefore.click();
+      }
+    }
   }
-  if (!box) {
-    throw new Error("Overleaf's comment form didn't open.");
-  }
-  const [first] = thread.messages;
-  // Pasted into that box, since typing commands go to whatever editor the
-  // page thinks has focus, which can be the document's
-  const data = new DataTransfer();
-  data.setData(
-    "text/plain",
-    first.author === me ? first.text : `${first.author}: ${first.text}`,
-  );
-  box.focus();
-  box.dispatchEvent(
-    new ClipboardEvent("paste", {
-      clipboardData: data,
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
-  const root = box.getRootNode() as ShadowRoot;
-  const button = root.host
-    ?.closest("form")
-    ?.querySelector<HTMLButtonElement>('button[type="submit"]');
-  for (let i = 0; i < 20 && button?.disabled; i++) {
-    await sleep(100);
-  }
-  if (!button || button.disabled) {
-    throw new Error("Couldn't fill in Overleaf's comment form.");
-  }
-  button.click();
-  // Time for Overleaf to save it before it's linked
-  await sleep(1500);
 }
 
 /** Do what the viewer with comments asks. */

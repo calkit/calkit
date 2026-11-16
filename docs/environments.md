@@ -1309,6 +1309,19 @@ the one it names.
 Matplotlib finds them through fontconfig, which most Linux systems have,
 and macOS has with Homebrew's `fontconfig`, but Windows doesn't.
 
+<!-- TODO: needs human review -->
+
+When Matplotlib can't find a font, it draws with another and only prints a
+warning, which is easy to miss.
+`calkit run` repeats it at the end for each stage that printed one,
+whether the font was named in a `matplotlibrc` or in a script.
+It can't catch what Matplotlib doesn't print:
+a script that turns off or redirects Matplotlib's logging,
+or a list like `font.sans-serif: Arial, DejaVu Sans`,
+which goes to DejaVu Sans without a warning when Arial is missing.
+Nor does it look at scripts run outside `calkit run`, e.g., with
+`calkit xenv`.
+
 Only `uv`, `uv-venv`, `venv`, `conda`, `pixi`, `julia`, and `renv`
 environments can have another composed into them with `with`,
 and only one TeX Live environment each.

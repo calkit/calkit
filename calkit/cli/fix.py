@@ -185,6 +185,18 @@ def fix_merge_conflicts(
     typer.echo(f"Run {then} to finish")
 
 
+@fix_app.command(name="stage-runs")
+def fix_stage_runs() -> None:
+    """Drop dvc.lock entries and run records of stages no longer in the
+    pipeline.
+
+    Same as 'calkit check stage-runs --fix'.
+    """
+    from calkit.cli.check import check_stage_runs
+
+    check_stage_runs(fix=True)
+
+
 @fix_app.command(name="storage")
 def fix_storage() -> None:
     """Move paths to where they're declared to be stored (Git or DVC).

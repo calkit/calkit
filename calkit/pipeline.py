@@ -764,6 +764,122 @@ def _rename_lock_entries(
     return True
 
 
+def prune_removed_stages(write: bool = True) -> dict[str, list[str]]:
+    """Drop ``dvc.lock`` entries and run records of stages no longer in the
+    pipeline.
+
+    DVC writes ``dvc.lock`` a stage at a time, so a stage removed from
+    ``dvc.yaml`` keeps its entry there, along with its record in
+    ``.calkit/stage-runs.json``. A stage counts as removed when the
+    ``dvc.yaml`` beside its ``dvc.lock`` doesn't define it, as DVC resolves
+    it, so each item of a ``foreach`` or ``matrix`` stage is its own, and a
+    subproject's are compared with its own ``dvc.yaml``. Where that can't be
+    read, or a name can't be resolved, nothing is dropped. Compiling first
+    makes ``dvc.yaml`` say what ``calkit.yaml`` does, e.g., with the stages
+    Markdown or a LaTeX stage's diffs generate.
+
+    Refuses to write while a merge, rebase, or cherry-pick is in progress,
+    since 'calkit fix merge-conflicts' merges these files from each side.
+    Returns the stages dropped, or to drop if not ``write``, named as in
+    'calkit check stage-runs', by the file they're in.
+    """
+    import json
+
+    from dvc.exceptions import NotDvcRepoError
+    from dvc.parsing import DataResolver
+    from dvc.utils.serialize import modify_yaml
+
+    import calkit.dvc
+    import calkit.git
+    import calkit.merge
+
+    def get_removed_names(
+        lock_dir: str | None, keys: Iterable[str]
+    ) -> dict[str, str]:
+        # By key, where a record may name another pipeline's stage from here
+        removed = {}
+        for key in keys:
+            key_dir, name = calkit.dvc.split_lock_stage_name(key)
+            if key_dir is None:
+                key_dir = lock_dir
+            else:
+                key_dir = posixpath.normpath(
+                    posixpath.join(lock_dir or "", key_dir)
+                )
+                key_dir = None if key_dir == "." else key_dir
+            resolver = resolvers.get(key_dir)
+            try:
+                if resolver is None or resolver.has_key(name):
+                    continue
+            except Exception:
+                continue
+            removed[key] = (
+                name if key_dir is None else f"{key_dir}/dvc.yaml:{name}"
+            )
+        return removed
+
+    if write:
+        try:
+            operation = calkit.merge.get_operation(calkit.git.get_repo())
+        except Exception:
+            operation = None
+        if operation is not None:
+            raise ValueError(
+                f"A {operation[0]} is in progress, whose conflict resolution "
+                "reads dvc.lock and stage run records; finish it first"
+            )
+    try:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+    except NotDvcRepoError:
+        return {}
+    pruned: dict[str, list[str]] = {}
+    try:
+        # What DVC makes of each dvc.yaml
+        lock_dirs = calkit.dvc.get_lock_dirs()
+        resolvers: dict[str | None, Any] = {}
+        for lock_dir in lock_dirs:
+            fpath = os.path.join(lock_dir or ".", "dvc.yaml")
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    dvc_yaml = calkit.core._load_yaml_readonly(f)
+                resolvers[lock_dir] = DataResolver(
+                    dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
+                )
+            except Exception:
+                continue
+        for lock_dir in lock_dirs:
+            # Rewritten as DVC writes it, so only the dropped entries change
+            lock_fpath = os.path.join(lock_dir or "", "dvc.lock")
+            try:
+                removed = get_removed_names(
+                    lock_dir, calkit.dvc.read_lock_stages(lock_dir)
+                )
+            except Exception:
+                removed = {}
+            if removed:
+                pruned[lock_fpath] = list(removed.values())
+            if removed and write:
+                with modify_yaml(lock_fpath) as lock:
+                    for key in removed:
+                        lock["stages"].pop(key, None)
+            runs_fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
+            try:
+                runs = calkit.read_stage_runs(lock_dir)
+            except json.JSONDecodeError:
+                continue
+            removed = get_removed_names(lock_dir, runs)
+            if removed:
+                pruned[runs_fpath] = list(removed.values())
+            if removed and write:
+                runs = {k: v for k, v in runs.items() if k not in removed}
+                with open(runs_fpath, "w") as f:
+                    json.dump(dict(sorted(runs.items())), f, indent=2)
+                    f.write("\n")
+    finally:
+        dvc_repo.close()
+    return pruned
+
+
 def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
     """Restructure a dictionary with list values into a list of dictionaries,
     where each dictionary represents a permutation of the input dictionary's

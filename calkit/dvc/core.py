@@ -1067,6 +1067,42 @@ def split_lock_stage_name(stage_name: str) -> tuple[str | None, str]:
     return None, stage_name
 
 
+def get_lock_dirs() -> list[str | None]:
+    """The directories of the ``dvc.lock`` files run with this project's.
+
+    That's this one, as None, and that of any other ``dvc.yaml`` in this
+    DVC repo, e.g., a subproject's. One inside a DVC repo of its own is run
+    by a wrapper stage, so it's left out.
+    """
+    import subprocess
+
+    try:
+        listed = subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*/dvc.yaml",
+            ],
+            text=True,
+        ).splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        listed = []
+    lock_dirs: list[str | None] = [None]
+    for path in sorted(listed):
+        parts = path.split("/")[:-1]
+        if not os.path.isfile(path) or any(
+            os.path.isdir(os.path.join(*parts[:i], ".dvc"))
+            for i in range(1, len(parts) + 1)
+        ):
+            continue
+        lock_dirs.append("/".join(parts))
+    return lock_dirs
+
+
 def stage_lock_hash(entry: dict) -> str:
     """A checksum of what a stage's ``dvc.lock`` entry says it ran and made.
 

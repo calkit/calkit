@@ -1850,6 +1850,42 @@ def test_check_stage_runs(tmp_dir):
     # Rerunning them records them again
     subprocess.check_call(["calkit", "run", "--force"])
     subprocess.check_call(check)
+    # A stage removed from the pipeline is called out as such, and fixing
+    # drops its dvc.lock entry and record, after compiling to see it's gone
+    b_stage = ck_info["pipeline"]["stages"].pop("b")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(check)
+    subprocess.check_call(["calkit", "check", "pipeline", "-c"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Stage 'b' is no longer in the pipeline" in res.stdout
+    assert "'calkit check stage-runs --fix' drops them" in res.stderr
+    assert "calkit run --force" not in res.stderr
+    ck_info["pipeline"]["stages"]["b"] = b_stage
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(check + ["--fix"])
+    assert "b" in calkit.dvc.read_lock_stages()
+    del ck_info["pipeline"]["stages"]["b"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "fix", "stage-runs"], capture_output=True, text=True
+    )
+    assert res.returncode == 0
+    assert "Dropped stage 'b' from dvc.lock" in res.stdout
+    assert list(calkit.dvc.read_lock_stages()) == ["a"]
+    assert list(calkit.read_stage_runs()) == ["a"]
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).splitlines()
+    assert "dvc.lock" in staged
+    subprocess.check_call(check)
+    ck_info["pipeline"]["stages"]["b"] = b_stage
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
     # A subproject's runs are kept beside its dvc.lock under their names
     # there, so it is the same record whichever directory ran them
     os.makedirs("sub")

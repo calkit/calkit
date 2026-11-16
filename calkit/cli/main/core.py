@@ -43,6 +43,7 @@ from calkit.cli import (
     warn,
     warn_app_control,
 )
+from calkit.cli.browser_link import browser_link_app
 from calkit.cli.check import (
     check_app,
     check_conda_env,
@@ -97,6 +98,11 @@ app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(open_app, name="open", help="Open things.")
+app.add_typer(
+    browser_link_app,
+    name="browser-link",
+    help="Link the browser extension to Calkit on this machine.",
+)
 app.add_typer(
     export_app,
     name="export",
@@ -359,6 +365,7 @@ def init(
         repo.git.add(os.path.abspath("calkit.yaml"))
         if not no_commit and calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
+    calkit.record_project_path()
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
     # TODO: Add a sane LICENSE file?
@@ -486,6 +493,7 @@ def clone(
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")
     os.chdir(location)
+    calkit.record_project_path()
     # So Git merges dvc.lock and stage run records stage by stage
     calkit.merge.configure_driver()
     # Setup auth for any Calkit remotes
@@ -3502,6 +3510,9 @@ def run(
             with paused():
                 calkit.docker.ensure_ready(interactive=True)
             results = check(interactive=False)
+        except ValueError as e:
+            # E.g., an environment with a 'with' that can't be composed
+            raise_error(str(e))
         for env_name, result in results.items():
             qualified = calkit.qualify_with_project(sp, env_name)
             if verbose:
@@ -4925,6 +4936,10 @@ def run_in_env(
             calkit.ryaml.dump(ck_info, f)
     env_name = res.name
     env = res.env
+    try:
+        calkit.environments.get_guest_envs(env_name, env, envs)
+    except ValueError as e:
+        raise_error(str(e))
     if env.get("kind") == calkit.environments.SWITCH_KIND:
         from calkit.cli.scheduler import _gate_switch_machine_lock
 
@@ -4972,6 +4987,24 @@ def run_in_env(
             raise_error(f"Invalid --env-var '{item}'; write it as KEY=VALUE")
         extra_env_vars[key] = value
         os.environ[key] = value
+    # Environments composed into this one with 'with' put their programs on
+    # PATH for its command, which gets them rather than this process, since
+    # it may be a long-lived one, e.g., Jupyter's. What the project and
+    # --env-var set wins.
+    try:
+        run_env_vars = calkit.environments.get_composed_env_vars(
+            env_name,
+            env,
+            envs,
+            keep=[
+                *(ck_info.get("env_vars") or {}),
+                *dotenv.dotenv_values(".env"),
+                *extra_env_vars,
+            ],
+            verbose=verbose,
+        )
+    except (ValueError, RuntimeError, OSError) as e:
+        raise_error(str(e))
 
     def _with_system_env_setup(shell_cmd: str) -> list[str] | None:
         """Chain the setup commands before a stage's command.
@@ -5081,7 +5114,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, cwd=wdir)
+            subprocess.check_call(cmd, cwd=wdir, env=run_env_vars)
         except subprocess.CalledProcessError as e:
             warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in Conda environment")
@@ -5096,7 +5129,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, cwd=wdir)
+            subprocess.check_call(cmd, cwd=wdir, env=run_env_vars)
         except subprocess.CalledProcessError as e:
             warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in Pixi environment")
@@ -5106,7 +5139,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, cwd=wdir)
+            subprocess.check_call(cmd, cwd=wdir, env=run_env_vars)
         except subprocess.CalledProcessError as e:
             warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in uv environment")
@@ -5145,7 +5178,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, shell=True, cwd=wdir)
+            subprocess.check_call(cmd, shell=True, cwd=wdir, env=run_env_vars)
         except subprocess.CalledProcessError as e:
             warn_app_control(returncode=e.returncode)
             raise_error(f"Failed to run in {kind}")
@@ -5193,7 +5226,7 @@ def run_in_env(
             subprocess.check_call(
                 julia_cmd,
                 cwd=wdir,
-                env=os.environ.copy()
+                env=(run_env_vars or os.environ.copy())
                 | {"JULIA_LOAD_PATH": calkit.julia.load_path()},
             )
         except subprocess.CalledProcessError:
@@ -5290,7 +5323,7 @@ def run_in_env(
         if not env_dir:
             env_dir = "."
         abs_wdir = os.path.abspath(wdir) if wdir else os.getcwd()
-        env_vars = os.environ.copy()
+        env_vars = run_env_vars or os.environ.copy()
         env_vars["RENV_PROJECT"] = env_dir
         # Check if the first argument is an R script
         if cmd and cmd[0] == "Rscript" and len(cmd) > 1:

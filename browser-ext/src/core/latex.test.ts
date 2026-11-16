@@ -10,6 +10,7 @@ import {
   isDiffableDocument,
   latexDiffPath,
   refDirName,
+  getShownValue,
 } from "./latex";
 
 describe("latexDiffPath", () => {
@@ -304,5 +305,23 @@ describe("canBeCreatedByPerson", () => {
     expect(canBeCreatedByPerson("data/raw.csv")).toBe(true);
     expect(canBeCreatedByPerson("figures/plot.png")).toBe(false);
     expect(canBeCreatedByPerson("figures/PLOT.PDF")).toBe(false);
+  });
+});
+
+describe("getShownValue", () => {
+  test("follows simple Python format specs", () => {
+    expect(getShownValue(0.4075738095238095, ".2f")).toBe("0.41");
+    expect(getShownValue(1234.5, ",.1f")).toBe("1,234.5");
+    expect(getShownValue(0.123, ".1%")).toBe("12.3%");
+    expect(getShownValue(12345.678, ".3g")).toBe("12300");
+    expect(getShownValue(12345.678, ".2e")).toBe("1.23e+04");
+    expect(getShownValue(41.6, "d")).toBe("42");
+    expect(getShownValue(1234567, ",")).toBe("1,234,567");
+  });
+  test("falls back to six significant figures", () => {
+    expect(getShownValue(0.4075738095238095, "")).toBe("0.407574");
+    expect(getShownValue(0.4075738095238095, "{:>10}")).toBe("0.407574");
+    expect(getShownValue("text", ".2f")).toBe("text");
+    expect(getShownValue([1, 2], "")).toBe("[1,2]");
   });
 });

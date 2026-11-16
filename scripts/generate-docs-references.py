@@ -669,6 +669,12 @@ def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, ...]]:
 
 
 def generate_environment_kinds_markdown() -> str:
+    def get_subclasses(cls: type) -> list[type]:
+        # Including those of a base like ComposableEnvironment
+        return [
+            s for c in cls.__subclasses__() for s in [c, *get_subclasses(c)]
+        ]
+
     # Derived from the models rather than listed by hand, the same way the
     # stage kinds are. A hand-kept list is a list that silently omits a
     # kind -- 'pbs' was missing from the reference entirely for exactly
@@ -676,7 +682,7 @@ def generate_environment_kinds_markdown() -> str:
     env_classes = [Environment] + sorted(
         (
             cls
-            for cls in Environment.__subclasses__()
+            for cls in get_subclasses(Environment)
             if _kind_for_model_class(cls)
         ),
         key=_kind_for_model_class,

@@ -224,6 +224,8 @@ powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1
 ```
 
 Pass `--no-shell-completion` to skip installing shell completion.
+The scripts also let the [browser extension](https://docs.calkit.org/browser-ext) work
+with projects on this machine; pass `--no-browser` to skip that.
 
 If you already have uv installed, install Calkit with:
 

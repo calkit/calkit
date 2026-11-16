@@ -468,6 +468,15 @@
           "default": null,
           "description": "Path at which to create the environment.",
           "title": "Prefix"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -2956,6 +2965,15 @@
           "description": "Path to the Julia project's Project.toml.",
           "title": "Path",
           "type": "string"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -6688,6 +6706,15 @@
           "description": "Path to the Pixi manifest file.",
           "title": "Path",
           "type": "string"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -8403,6 +8430,15 @@
           "default": null,
           "description": "Path at which to create the environment.",
           "title": "Prefix"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -11984,6 +12020,15 @@
           "description": "Path to the uv project's pyproject.toml.",
           "title": "Path",
           "type": "string"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -12066,6 +12111,15 @@
           "default": null,
           "description": "Python version to use when creating the environment.",
           "title": "Python"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -12212,6 +12266,15 @@
           "default": null,
           "description": "Python version to use when creating the environment.",
           "title": "Python"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [

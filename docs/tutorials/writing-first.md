@@ -58,10 +58,11 @@ Then, for each one it can close, it:
 
 1. adds a pipeline stage that computes the value and writes it to a results
    file;
-2. adds a `json-to-latex` stage that turns that file into LaTeX commands;
-3. replaces the hole with `\result[Speedup]`, so the number is read from
-   the results file every build;
-4. adds the question the sentence answers to `calkit.yaml`, with the
+2. replaces the hole with
+   `\ckvalue[.2f]{results/speedup.json}{mean_speedup}`, from the
+   [`calkit` LaTeX package](../latex.md#including-project-components),
+   so the number is read from the results file every build;
+3. adds the question the sentence answers to `calkit.yaml`, with the
    answer's numbers as `{placeholders}` over `value` evidence.
 
 The rule the skill works under is that it never types a computed number

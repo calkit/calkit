@@ -5536,3 +5536,151 @@ def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
         ]
         == "up to date"
     )
+
+
+def test_composed_env_locks_are_stage_deps(tmp_dir):
+    import calkit
+
+    with open("pyproject.toml", "w") as f:
+        f.write(
+            '[project]\nname = "p"\nversion = "0"\n'
+            'requires-python = ">=3.10"\ndependencies = []\n'
+        )
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {
+                "tex": {"kind": "texlive"},
+                "py": {
+                    "kind": "uv",
+                    "path": "pyproject.toml",
+                    "with": ["tex"],
+                },
+            },
+            "pipeline": {
+                "stages": {
+                    "fig": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "py",
+                        "outputs": ["a.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert "uv.lock" in stages["fig"]["deps"]
+    assert ".calkit/env-locks/tex.json" in stages["fig"]["deps"]
+    # As are those of the environments a switch picks from
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {
+                "tex": {"kind": "texlive"},
+                "py": {
+                    "kind": "uv",
+                    "path": "pyproject.toml",
+                    "with": ["tex"],
+                },
+                "sw": {"kind": "switch", "switch": [{"use": "py"}]},
+            },
+            "pipeline": {
+                "stages": {
+                    "fig": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "sw",
+                        "outputs": ["a.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert ".calkit/env-locks/tex.json" in stages["fig"]["deps"]
+    # One that can't be composed is reported
+    with pytest.raises(ValueError, match="isn't defined"):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {
+                    "py": {
+                        "kind": "uv",
+                        "path": "pyproject.toml",
+                        "with": ["x"],
+                    }
+                },
+                "pipeline": {
+                    "stages": {
+                        "fig": {
+                            "kind": "shell-command",
+                            "command": "echo a",
+                            "environment": "py",
+                        },
+                    }
+                },
+            },
+            write=False,
+        )
+
+
+def test_get_figure_paths_with_origins(tmp_dir):
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "_system",
+                    "outputs": [
+                        "plot.png",
+                        {"path": "results/r.json"},
+                        "frames/frame-{n}.png",
+                    ],
+                },
+                "export": {
+                    "kind": "manual-step",
+                    "message": "Export it",
+                    "outputs": [{"path": "paper/exported.png"}],
+                },
+                "paper": {
+                    "kind": "latex",
+                    "target_path": "paper/main.tex",
+                    "outputs": ["paper/main.pdf"],
+                },
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "plot.png",
+                            "dest": "paper/plot.png",
+                        }
+                    ],
+                },
+            }
+        },
+        "publications": [{"path": "paper/main.pdf"}],
+        "misc": [
+            {"path": "paper/drawn.png", "created_by": [{"name": "Pat"}]},
+            {"path": "paper/plot.png", "created_by": [{"name": "Pat"}]},
+            {"path": "notes.png"},
+            {"path": "data/runs", "created_by": [{"name": "Pat"}]},
+        ],
+    }
+    assert calkit.pipeline.get_figure_paths_with_origins(ck_info) == [
+        "plot.png",
+        "paper/exported.png",
+        "paper/drawn.png",
+    ]
+    # Listed among the project's figures, after those detected by folder
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("figures")
+    for path in ["figures/a.png", "plot.png", "notes.png"]:
+        with open(path, "w") as f:
+            f.write("png")
+    listed = calkit.pipeline.list_artifacts("figures", ck_info=ck_info)
+    assert [f["path"] for f in listed] == [
+        "figures/a.png",
+        "plot.png",
+        "paper/exported.png",
+        "paper/drawn.png",
+    ]

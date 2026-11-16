@@ -185,22 +185,23 @@ def check_env_kernel(
     from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
     from calkit.cli.update import update_environment
-    from calkit.environments import language_from_env
+    from calkit.environments import get_composed_env_vars, language_from_env
 
-    def get_env():
-        ck_info = calkit.load_calkit_info()
-        envs = ck_info.get("environments", {})
-        if env_name not in envs:
-            raise_error(
-                f"No environment '{env_name}' defined for this project"
-            )
-        return envs[env_name]
-
-    env = None
+    envs = calkit.load_calkit_info().get("environments", {})
+    if env_name not in envs:
+        raise_error(f"No environment '{env_name}' defined for this project")
+    env = envs[env_name]
     # Detect language from environment
     if language is None:
-        env = get_env()
         language = language_from_env(env) or "python"
+    # A kernel an editor starts doesn't go through Calkit, so its spec gives
+    # it the environments composed into this one, ahead of the editor's PATH
+    try:
+        kernel_env_vars = get_composed_env_vars(
+            env_name, env, envs, verbose=verbose, env_vars={"PATH": "${PATH}"}
+        )
+    except (ValueError, RuntimeError, OSError) as e:
+        raise_error(f"Environment '{env_name}': {e}")
     project_name = calkit.detect_project_name(prepend_owner=False)
     if not project_name:
         raise_error("Project name cannot be empty")
@@ -261,8 +262,6 @@ def check_env_kernel(
     elif language == "julia":
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
-        if env is None:
-            env = get_env()
         env_path = env.get("path")
         julia_version = env.get("julia")
         env_fname = os.path.basename(env_path)
@@ -315,6 +314,9 @@ def check_env_kernel(
         # Windows project path, whose backslashes are otherwise read as invalid
         # unicode escapes.
         esc = calkit.julia.escape_string
+        kernel_env = {"JULIA_LOAD_PATH": calkit.julia.load_path()} | (
+            kernel_env_vars or {}
+        )
         julia_cmd = (
             "import IJulia;"
             "kp=IJulia.installkernel("
@@ -322,7 +324,11 @@ def check_env_kernel(
             f'"--project={esc(env_dir_abs)}",'
             '"--startup-file=no",'
             f'displayname="{esc(display_name)}",'
-            f'env=Dict("JULIA_LOAD_PATH" => "{esc(calkit.julia.load_path())}")'
+            "env=Dict("
+            + ",".join(
+                f'"{esc(k)}" => "{esc(v)}"' for k, v in kernel_env.items()
+            )
+            + ")"
             ");"
             "println(kp);"
         )
@@ -354,6 +360,24 @@ def check_env_kernel(
     else:
         raise_error(f"{language} not supported")
         return "", ""  # For typing analysis since raise_error exits
+    # IJulia took them, but others go into the spec installed for this user,
+    # since a shell between here and the installer could expand ${PATH}
+    if kernel_env_vars and language != "julia":
+        from jupyter_core.paths import jupyter_data_dir
+
+        spec_fpath = os.path.join(
+            jupyter_data_dir(), "kernels", kernel_name.lower(), "kernel.json"
+        )
+        if not os.path.isfile(spec_fpath):
+            raise_error(
+                f"Kernel '{kernel_name}' isn't in {jupyter_data_dir()}, so "
+                "it can't get the environments in 'with'"
+            )
+        with open(spec_fpath, encoding="utf-8") as f:
+            spec = json.load(f)
+        spec["env"] = spec.get("env", {}) | kernel_env_vars
+        with open(spec_fpath, "w", encoding="utf-8") as f:
+            json.dump(spec, f, indent=1)
     # Output result
     if json_output:
         result = {

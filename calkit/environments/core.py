@@ -899,13 +899,18 @@ def get_guest_envs(
 
 
 def get_composed_env_vars(
-    env_name: str, env: dict, envs: dict, verbose: bool = False
+    env_name: str,
+    env: dict,
+    envs: dict,
+    verbose: bool = False,
+    env_vars: dict | None = None,
 ) -> dict | None:
     """Return the environmental variables an environment's commands get
     with the environments in its ``with`` composed in, or None if it has
     none.
 
-    Each is checked first, which is fast once it's ready. Matplotlib keys
+    These are ``env_vars``, by default this process's, with each composed
+    in. Each is checked first, which is fast once it's ready. Matplotlib keys
     its TeX output and font list caches by neither the TeX nor the fonts it
     found, so they would carry over from other projects and other TeX
     installations, and get a config directory of their own.
@@ -915,7 +920,7 @@ def get_composed_env_vars(
     guests = get_guest_envs(env_name, env, envs)
     if not guests:
         return None
-    env_vars = dict(os.environ)
+    env_vars = dict(os.environ if env_vars is None else env_vars)
     view_dirs = []
     for name, guest in guests:
         view_dir = texlive.check(name, guest, verbose=verbose)

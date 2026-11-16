@@ -4,6 +4,7 @@ import base64
 import copy
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -266,6 +267,82 @@ def test_check_env_kernel_julia(tmp_dir):
         capture_output=True,
     )
     assert res.returncode == 0
+
+
+@pytest.mark.xdist_group("texlive")
+def test_check_env_kernel_composed(
+    tmp_dir: pathlib.Path,
+    texlive_user_home: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from jupyter_client.blocking.client import BlockingKernelClient
+    from jupyter_client.manager import start_new_kernel
+
+    from calkit.environments import texlive
+
+    def check_kernel() -> tuple[str, dict]:
+        out = subprocess.check_output(
+            ["calkit", "nb", "check-kernel", "-e", "main", "--json"]
+        )
+        kernel_name = json.loads(out.splitlines()[-1])["kernel_name"]
+        spec_fpath = os.path.join(
+            "jupyter-data", "kernels", kernel_name.lower(), "kernel.json"
+        )
+        with open(spec_fpath) as f:
+            return kernel_name, json.load(f).get("env", {})
+
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    monkeypatch.setenv("JUPYTER_DATA_DIR", os.path.abspath("jupyter-data"))
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "uv-venv", "-n", "main", "ipykernel"]
+    )
+    # Without 'with', the kernel's spec doesn't touch PATH
+    _, env_vars = check_kernel()
+    assert "PATH" not in env_vars
+    assert "FONTCONFIG_FILE" not in env_vars
+    # With it, the spec puts TeX Live's programs ahead of the PATH of
+    # whatever starts the kernel
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"]["tex"] = {"kind": "texlive"}
+    ck_info["environments"]["main"]["with"] = ["tex"]
+    calkit.save_calkit_info(ck_info)
+    kernel_name, env_vars = check_kernel()
+    envs = ck_info["environments"]
+    view_dir = texlive.check("tex", envs["tex"])
+    bin_dir = os.path.join(view_dir, "bin", texlive.get_platform())
+    assert env_vars["PATH"] == bin_dir + os.pathsep + "${PATH}"
+    composed = calkit.environments.get_composed_env_vars(
+        "main", envs["main"], envs
+    )
+    assert composed is not None
+    for name in ["FONTCONFIG_FILE", "MPLCONFIGDIR"]:
+        assert env_vars[name] == composed[name]
+    # Jupyter fills in the PATH it was started with
+    path = os.environ["PATH"]
+    monkeypatch.setenv("PATH", os.defpath)
+    km, kc = start_new_kernel(kernel_name=kernel_name)
+    assert isinstance(kc, BlockingKernelClient)
+    try:
+        kc.execute_interactive(
+            "import json, os, shutil\n"
+            "with open('kernel-env.json', 'w') as f:\n"
+            "    json.dump([os.environ['PATH'], shutil.which('kpsewhich')], f)",
+            timeout=60,
+        )
+    finally:
+        kc.stop_channels()
+        km.shutdown_kernel(now=True)
+    monkeypatch.setenv("PATH", path)
+    with open("kernel-env.json") as f:
+        kernel_path, kpsewhich_fpath = json.load(f)
+    assert kernel_path == bin_dir + os.pathsep + os.defpath
+    assert os.path.dirname(kpsewhich_fpath) == bin_dir
+    # Taking it out of 'with' takes it out of the spec
+    ck_info["environments"]["main"].pop("with")
+    calkit.save_calkit_info(ck_info)
+    _, env_vars = check_kernel()
+    assert "FONTCONFIG_FILE" not in env_vars
 
 
 def test_execute_notebook_auto_env(tmp_dir):

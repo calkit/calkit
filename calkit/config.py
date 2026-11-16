@@ -699,6 +699,9 @@ class Settings(BaseSettings):
     overleaf_token: KeyringOptionalSecret | None = None
     # Browser session cookie, for syncing without Overleaf's Git integration
     overleaf_session: KeyringOptionalSecret | None = None
+    # A hash of the last Git token Overleaf rejected, so one still saved to
+    # the hub isn't tried again before the session
+    overleaf_rejected_token_sha: str | None = None
     # Default archival service for releases
     default_archival_service: Literal["zenodo", "caltechdata"] = "zenodo"
     # Which fields have been resolved from the keyring, so a secret that
@@ -872,13 +875,19 @@ class Settings(BaseSettings):
         os.chmod(fpath, 0o600)
 
 
-def read() -> Settings:
-    """Read the config."""
+def read(project_env: bool = True) -> Settings:
+    """Read the config, without the working directory's ``.env``, i.e., a
+    project's, unless ``project_env``, e.g., for a process that changes
+    directory into projects while it reads the machine's settings.
+    """
     # Update the env prefix in case the environment has changed since
     # import; the YAML source resolves its file path itself
     Settings.model_config["env_prefix"] = (
         "CALKIT" + get_env_suffix(sep="_") + "_"
     )
+    if not project_env:
+        # pydantic-settings' own argument, which mypy doesn't know of
+        return Settings(_env_file=None)  # type: ignore[call-arg]
     return Settings()
 
 

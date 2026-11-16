@@ -53,6 +53,20 @@ TEX4HT_PACKAGES = ["make4ht", "tex4ht", "luaxml"]
 # The latest TeX Live release whose repository is frozen, so locking against
 # it pins every package for good
 DEFAULT_RELEASE = 2025
+# The environment created for a LaTeX document that doesn't have one,
+# wherever that happens: a new publication, an Overleaf import, or a stage
+# whose environment is worked out from what it runs. Its release is written
+# out, as 'calkit new texlive-env' does. Copied where it's used, since
+# what's written into a project is the caller's to amend.
+DEFAULT_ENVIRONMENT = {
+    "kind": "texlive",
+    "release": DEFAULT_RELEASE,
+    "description": "TeX Live, installed by Calkit.",
+}
+# What builds run in when neither the project nor the machine has a TeX,
+# locked in the store rather than a project, so packages its builds add are
+# shared by every document built that way here
+DEFAULT_ENV_NAME = "_texlive"
 FROZEN_REPOSITORY_TEMPLATE = (
     "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/"
     "{release}/tlnet-final"
@@ -1205,9 +1219,13 @@ def get_run_env_vars(
 
 
 def get_lock_fpath(env_name: str, env: dict, wdir: str | None = None) -> str:
-    """Return where an environment's lock lives in the project."""
+    """Return where an environment's lock lives in the project, or in the
+    store for the default environment.
+    """
     from calkit.environments import get_env_lock_fpath
 
+    if env_name == DEFAULT_ENV_NAME:
+        return os.path.join(get_store_dir(), "default-lock.json")
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=False
     )

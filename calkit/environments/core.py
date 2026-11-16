@@ -11,6 +11,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -231,6 +232,16 @@ COMPOSABLE_HOST_KINDS = [
 ]
 # Kinds that add programs without an interpreter to compete with a host's
 COMPOSABLE_GUEST_KINDS = ["texlive"]
+# What Matplotlib's usetex needs from TeX beyond the basics, whatever font
+# it's set to: the packages its preamble loads and the program it makes
+# PNGs with
+MATPLOTLIB_TEX_PACKAGES = [
+    "cm-super",
+    "dvipng",
+    "geometry",
+    "type1cm",
+    "underscore",
+]
 
 
 def host_is_local(host: str | None) -> bool:
@@ -910,6 +921,47 @@ def get_guest_envs(
     return guests
 
 
+def add_host_tex_packages(
+    env_name: str, env: dict, guest_name: str, guest: dict
+) -> list[str]:
+    """Add what the programs in an environment need from a TeX Live one
+    composed into it to the TeX Live environment's lock, and return the
+    packages added.
+
+    Those programs only write their TeX when they run, so it can't be read
+    beforehand like a document's. Matplotlib's needs are mostly the same
+    whatever a script does, so they're added if the host's spec or lock
+    names it. The guest must be locked already.
+    """
+    from calkit.environments import texlive
+
+    fpaths = [env.get("path"), get_env_lock_fpath(env, env_name)]
+    uses_matplotlib = False
+    for fpath in fpaths:
+        if not fpath or not os.path.isfile(fpath):
+            continue
+        with open(fpath, encoding="utf-8", errors="replace") as f:
+            # Not matplotlib-inline, which Jupyter kernels bring along
+            if re.search(
+                r"(?<![\w.-])matplotlib(-base)?(?![\w.]|-[a-z])", f.read()
+            ):
+                uses_matplotlib = True
+                break
+    if not uses_matplotlib:
+        return []
+    lock = texlive.read_lock(texlive.get_lock_fpath(guest_name, guest)) or {}
+    if all(p in lock.get("packages", {}) for p in MATPLOTLIB_TEX_PACKAGES):
+        return []
+    added = texlive.add_packages(guest_name, guest, MATPLOTLIB_TEX_PACKAGES)
+    if added:
+        print(
+            f"Added Matplotlib's usetex packages to TeX Live environment "
+            f"'{guest_name}': {', '.join(added)}",
+            file=sys.stderr,
+        )
+    return added
+
+
 def get_composed_env_vars(
     env_name: str,
     env: dict,
@@ -947,6 +999,8 @@ def get_composed_env_vars(
     for name, guest in guests:
         try:
             view_dir = texlive.check(name, guest, verbose=verbose)
+            if add_host_tex_packages(env_name, env, name, guest):
+                view_dir = texlive.check(name, guest, verbose=verbose)
         except (ValueError, RuntimeError, OSError) as e:
             raise RuntimeError(f"Environment '{name}': {e}") from e
         env_vars = texlive.get_run_env_vars(view_dir, env_vars=env_vars)
@@ -2811,18 +2865,20 @@ def env_from_name_or_path(
     if name_or_path is None and language is not None:
         # Look for a docker environment matching the language
         for env_name, env in envs.items():
+            if language.lower() == "latex" and env.get("kind") == "texlive":
+                return EnvDetectResult(name=env_name, env=env, exists=True)
             if env.get("kind") == "docker":
                 image = env.get("image", "").lower()
                 # Check if this looks like a language environment
                 if language.lower() in image or f"{language}mk" in image:
                     return EnvDetectResult(name=env_name, env=env, exists=True)
-        # Only create default docker environment for latex
+        # Only LaTeX gets a default environment created
         if language.lower() == "latex":
-            from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+            from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
             return EnvDetectResult(
                 name="latex",
-                env=dict(DEFAULT_LATEX_ENVIRONMENT),
+                env=dict(DEFAULT_ENVIRONMENT),
                 exists=False,
             )
         # For shell language, use _system environment

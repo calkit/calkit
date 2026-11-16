@@ -91,6 +91,11 @@ When Overleaf rejects it, Calkit first checks your Calkit account for a
 newer one, e.g., after you've connected again from the extension,
 and otherwise asks for a new one,
 so copy the cookie again after signing back in.
+
+<!-- TODO: needs human review -->
+
+With both a Git token and a session, in your config or your Calkit account,
+Calkit uses the token.
 If a Git token stops working, e.g., because Premium has ended,
 Calkit uses the session instead, if one is set.
 
@@ -122,7 +127,7 @@ Push paths are relative to the publication folder,
 and multiple can be specified.
 
 If necessary, this command will also
-create a TeXlive Docker [environment](environments.md)
+create a TeX Live [environment](environments.md#tex-live)
 and a build stage in the [pipeline](pipeline/index.md),
 which will build and cache the PDF upon calling `calkit run`.
 

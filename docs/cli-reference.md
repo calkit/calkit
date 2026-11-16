@@ -4152,16 +4152,17 @@ calkit fix storage
 
 Work with LaTeX.
 
-| Command                                                  | Description                                                       |
-| -------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                     |
-| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.     |
-| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.           |
-| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands. |
-| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                     |
-| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.             |
-| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.        |
+| Command                                                  | Description                                                            |
+| -------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                          |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.          |
+| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.                |
+| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands.      |
+| [`warm`](#subcommand-latex-tex-warm)                     | Download TeX Live's base packages and build its formats ahead of time. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                          |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.                  |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                     |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.             |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -4263,6 +4264,27 @@ Arguments:
 | Argument   | Type | Required | Default | Description                            |
 | ---------- | ---- | -------- | ------- | -------------------------------------- |
 | `tex_file` | str  | yes      |         | The .tex file whose components to map. |
+
+<a id="subcommand-latex-tex-warm"></a>
+
+#### `calkit latex|tex warm`
+
+Download TeX Live's base packages and build its formats ahead of time.
+
+For a machine or image without a project yet, e.g., a dev container, so a TeX Live environment's first build doesn't have to.
+
+Usage:
+
+```text
+calkit latex|tex warm [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                         |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------- |
+| `--release`       | int     | no       |         | TeX Live release, e.g., 2025; defaults to Calkit's. |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                               |
 
 <a id="subcommand-latex-tex-build"></a>
 

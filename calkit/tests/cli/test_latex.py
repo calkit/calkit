@@ -1,5 +1,6 @@
 """Tests for ``calkit.cli.latex.``"""
 
+import gzip
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import pytest
 import calkit
 import calkit.git
 import calkit.pipeline
+import calkit.resources
 
 skipif_windows_docker = pytest.mark.skipif(
     sys.platform == "win32",
@@ -614,6 +616,36 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
         assert ".calkit/env-locks/tex.json" in f.read()
     out = subprocess.check_output(["calkit", "status"], text=True)
     assert "Pipeline is up to date" in out
+    # The editor builds it the way the stage does, with SyncTeX pointing at
+    # the source here, and building an edit there leaves the stage out of
+    # date until it runs
+    settings = calkit.resources.get_latex_workshop_settings(
+        {}, calkit.load_calkit_info()
+    )
+    tool = settings["latex-workshop.latex.tools"][0]
+    doc_fpath = os.path.abspath("paper/main.tex")
+    with open(doc_fpath, "a") as f:
+        f.write("% An edit\n")
+    subprocess.check_call(
+        [tool["command"]]
+        + [a.replace("%DOC_EXT%", doc_fpath) for a in tool["args"]],
+        cwd=tool["cwd"].replace("%WORKSPACE_FOLDER%", os.getcwd()),
+    )
+    with gzip.open("paper/main.synctex.gz", "rt") as f:
+        inputs = [
+            line.split(":", 2)[2].strip()
+            for line in f
+            if line.startswith("Input:")
+        ]
+    assert os.path.samefile(inputs[0], doc_fpath)
+    out = subprocess.check_output(["calkit", "status"], text=True)
+    assert "Pipeline is up to date" not in out
+    subprocess.check_call(["calkit", "run"])
+    out = subprocess.check_output(["calkit", "status"], text=True)
+    assert "Pipeline is up to date" in out
+    # The store can be filled without a project, e.g., for an image
+    out = subprocess.check_output(["calkit", "latex", "warm"], text=True)
+    assert "TeX Live is ready" in out
     # Converting it from the source gets TeX4ht without locking it, since
     # it isn't part of the pipeline
     if calkit.docx.find_soffice():

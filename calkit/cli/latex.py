@@ -696,6 +696,36 @@ def map_components(
         warn(f"{problem}; it will print as ??")
 
 
+@latex_app.command(name="warm")
+def warm(
+    release: Annotated[
+        int | None,
+        typer.Option(
+            "--release",
+            help="TeX Live release, e.g., 2025; defaults to Calkit's.",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+) -> None:
+    """Download TeX Live's base packages and build its formats ahead of time.
+
+    For a machine or image without a project yet, e.g., a dev container, so
+    a TeX Live environment's first build doesn't have to.
+    """
+    from calkit.environments import texlive as env_texlive
+
+    env: dict = {"kind": "texlive"}
+    if release is not None:
+        env["release"] = release
+    try:
+        view_dir = env_texlive.warm(env, verbose=verbose)
+    except (ValueError, RuntimeError, OSError) as e:
+        raise_error(str(e))
+    typer.echo(f"TeX Live is ready in {view_dir}")
+
+
 @latex_app.command(name="build")
 def build(
     tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],

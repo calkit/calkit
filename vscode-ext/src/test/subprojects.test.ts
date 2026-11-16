@@ -345,9 +345,17 @@ test("a malformed subproject calkit.yaml doesn't break the merge", async () => {
 });
 
 test("a document in a project the root doesn't declare maps to its PDF", () => {
-  const projects = new Set(["examples/basic", "subs/declared"]);
+  const projects = new Set([
+    "examples/basic",
+    "subs/declared",
+    "subs/declared/inner",
+    "outer",
+    "outer/declared",
+    // Read as relative, it would be one
+    "D:/basic",
+  ]);
   const isProject = (dir: string) => projects.has(dir);
-  const declared = ["subs/declared"];
+  const declared = ["subs/declared", "outer/declared"];
   // The nearest project above the file counts, unless the merged config
   // already has it
   assert.equal(
@@ -362,6 +370,19 @@ test("a document in a project the root doesn't declare maps to its PDF", () => {
     findUndeclaredProjectDir("subs/declared/paper.tex", isProject, declared),
     undefined,
   );
+  // Nested either way round with a declared one, the nearest still decides
+  assert.equal(
+    findUndeclaredProjectDir(
+      "subs/declared/inner/doc.tex",
+      isProject,
+      declared,
+    ),
+    "subs/declared/inner",
+  );
+  assert.equal(
+    findUndeclaredProjectDir("outer/declared/doc.tex", isProject, declared),
+    undefined,
+  );
   assert.equal(
     findUndeclaredProjectDir("paper/main.tex", isProject, declared),
     undefined,
@@ -370,14 +391,12 @@ test("a document in a project the root doesn't declare maps to its PDF", () => {
     findUndeclaredProjectDir("main.tex", isProject, declared),
     undefined,
   );
-  assert.equal(
-    findUndeclaredProjectDir(
-      "../elsewhere/basic/main.tex",
-      isProject,
-      declared,
-    ),
-    undefined,
-  );
+  for (const outside of ["../elsewhere/basic/main.tex", "D:/basic/main.tex"]) {
+    assert.equal(
+      findUndeclaredProjectDir(outside, isProject, declared),
+      undefined,
+    );
+  }
   // Its stages, rebased, map its document and PDF in the root's frame
   const stages = rebaseStages("examples/basic", {
     "build-paper": { kind: "latex", target_path: "paper/main.tex" },

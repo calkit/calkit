@@ -614,8 +614,14 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     // Not in an open PDF yet, so open the one its stage builds, or for a
-    // file it inputs, the only one there is
+    // file it inputs, the only one there is, in its own project if the root
+    // doesn't declare it
     const stages = getDocumentStages(workspaceRoot, texFile);
+    const projectDir = findUndeclaredProjectDir(
+      texFile,
+      (d) => fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml")),
+      currentSubprojectDirs,
+    );
     const latexPdfs = Object.values(stages)
       .map((stage) => {
         const st = stage as {
@@ -630,7 +636,11 @@ export function activate(context: vscode.ExtensionContext): void {
             )
           : undefined;
       })
-      .filter((p): p is string => p !== undefined);
+      .filter(
+        (p): p is string =>
+          p !== undefined &&
+          (projectDir === undefined || p.startsWith(`${projectDir}/`)),
+      );
     const pdfFile =
       documentStagePdf(stages, texFile) ??
       (latexPdfs.length === 1 ? latexPdfs[0] : undefined);
@@ -2582,6 +2592,7 @@ async function refreshPipelineOutputContext(
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
   currentSubprojectDirs = subprojectDirs;
+  undeclaredProjectStages.clear();
   currentQuestionOrigins = questionOrigins;
   currentArtifactOrigins = artifactOrigins;
   currentEnvDescriptions = envDescriptions;
@@ -4940,10 +4951,10 @@ function getWorkspaceRoot(): string | undefined {
 }
 
 // Stages of projects inside the workspace the root doesn't declare, by
-// calkit.yaml, read again when it changes
+// directory, cleared when the pipeline is reread, e.g., any calkit.yaml changes
 const undeclaredProjectStages = new Map<
   string,
-  { mtimeMs: number; stages: Record<string, PipelineStage> }
+  Record<string, PipelineStage>
 >();
 
 // The stages that may build a root-relative document into a PDF, which for
@@ -4962,25 +4973,21 @@ function getDocumentStages(
   if (dir === undefined) {
     return stages;
   }
-  const configPath = path.join(workspaceRoot, dir, "calkit.yaml");
-  let mtimeMs: number;
-  try {
-    mtimeMs = fs.statSync(configPath).mtimeMs;
-  } catch {
-    return stages;
-  }
-  let cached = undeclaredProjectStages.get(configPath);
-  if (cached?.mtimeMs !== mtimeMs) {
+  let cached = undeclaredProjectStages.get(dir);
+  if (cached === undefined) {
     let config: CalkitInfo | undefined;
     try {
-      config = YAML.parse(fs.readFileSync(configPath, "utf8")) ?? undefined;
+      config =
+        YAML.parse(
+          fs.readFileSync(path.join(workspaceRoot, dir, "calkit.yaml"), "utf8"),
+        ) ?? undefined;
     } catch {
       config = undefined;
     }
-    cached = { mtimeMs, stages: rebaseStages(dir, config?.pipeline?.stages) };
-    undeclaredProjectStages.set(configPath, cached);
+    cached = rebaseStages(dir, config?.pipeline?.stages);
+    undeclaredProjectStages.set(dir, cached);
   }
-  return { ...stages, ...cached.stages };
+  return { ...stages, ...cached };
 }
 
 // The root's calkit.yaml and dvc.yaml with every subproject's folded in.

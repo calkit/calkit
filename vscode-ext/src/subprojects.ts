@@ -443,7 +443,12 @@ export function findUndeclaredProjectDir(
   isProject: (dir: string) => boolean,
   subprojectDirs: string[],
 ): string | undefined {
-  if (path.posix.isAbsolute(relPath) || relPath.startsWith("../")) {
+  // Outside the workspace, including on another Windows drive
+  if (
+    path.posix.isAbsolute(relPath) ||
+    relPath.startsWith("../") ||
+    /^[A-Za-z]:/.test(relPath)
+  ) {
     return undefined;
   }
   for (

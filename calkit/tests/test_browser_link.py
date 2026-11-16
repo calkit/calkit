@@ -1030,6 +1030,49 @@ def test_get_pipeline(tmp_path):
     assert status["make-b"]["status"] == "up-to-date"
 
 
+def test_get_provenance(tmp_path, monkeypatch):
+    from calkit.browser_link import get_provenance
+
+    home = make_home(tmp_path, monkeypatch)
+    project = home / "calkit" / "proj"
+    project.mkdir(parents=True)
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    (project / "data.csv").write_text("x\n1\n")
+    stages = {
+        "summarize": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo '{\"n\": 1}' > results.json",
+            "inputs": ["data.csv"],
+            "outputs": ["results.json"],
+        },
+    }
+    with open(project / "calkit.yaml", "a") as f:
+        f.write("owner: me\nname: proj\n")
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    subprocess.check_call(["calkit", "run"], cwd=project)
+    # The stage that makes it here, its value, how fresh it is, and the
+    # data nothing records the origin of, as the hub says them
+    res = get_provenance(str(project), "results.json", key="n")
+    assert res["stage"] == "summarize" and res["value"] == 1
+    assert res["stage_status"]["status"] == "up-to-date"
+    assert res["inputs"] == ["data.csv"]
+    assert [g["path"] for g in res["gaps"]] == ["data.csv"]
+    assert get_reply(
+        {
+            "type": "project.provenance",
+            "project": "me/proj",
+            "path": "data.csv",
+        }
+    )["result"]["input_to_stages"] == ["summarize"]
+    # Only paths in the project
+    for path in ["../x", "/etc/passwd", 5]:
+        reply = get_reply(
+            {"type": "project.provenance", "project": "me/proj", "path": path}
+        )
+        assert not reply["ok"]
+
+
 def test_get_figures(tmp_path):
     from calkit.browser_link import get_figures
 

@@ -367,11 +367,23 @@ async function handle(
       return request<Result[]>(
         `${projectPath(message.owner, message.project)}/results`,
       );
-    case "project.provenance":
+    case "project.provenance": {
+      // As it is on this computer, when it's here, including what isn't
+      // pushed yet
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<Provenance>({
+          type: "project.provenance",
+          project: local,
+          path: message.path,
+          key: message.key,
+        });
+      }
       return request<Provenance>(
         `${projectPath(message.owner, message.project)}/provenance`,
         { query: { path: message.path, key: message.key } },
       );
+    }
     case "project.stageFromScriptOrNotebook":
       return request<StageFromScriptOrNotebookResponse>(
         `${projectPath(message.owner, message.project)}` +

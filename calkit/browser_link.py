@@ -89,6 +89,8 @@ MAX_JOBS_KEPT = 20
 # How much of a PDF goes in each message, which base64 makes a third
 # bigger, keeping it well under the browser's limit
 PDF_CHUNK_BYTES = 600_000
+# A results file bigger than this isn't read for a value, as on the hub
+MAX_VALUE_FILE_BYTES = 10 * 1024 * 1024
 OVERLEAF_AUTH_MISSING = (
     "Calkit on this computer has no Overleaf credentials that work; connect "
     "Overleaf to Calkit, which saves them for every computer you use"
@@ -175,6 +177,9 @@ def get_reply(msg: dict) -> dict:
       Overleaf project, shaped as the hub's lookup is.
     - ``overleaf.status``: what a sync of a project's checkout would do,
       after pulling from Overleaf, shaped as the hub's status is.
+    - ``project.figures``, ``project.pipeline``, and ``project.provenance``:
+      a checkout's figures, pipeline, and where a path in it, or a value in
+      a results file, came from, shaped as the hub's are.
     - ``publication.pdf``: part of the PDF a folder synced with Overleaf
       builds to, from ``offset``, with how fresh it is, so it can be shown
       in place of Overleaf's.
@@ -327,6 +332,15 @@ def get_result(msg: dict) -> Any:
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this computer")
         result = get_pipeline(paths[0])
+    elif kind == "project.provenance":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this computer")
+        key = msg.get("key")
+        if key is not None and not isinstance(key, str):
+            raise ValueError("A key must be a string")
+        result = get_provenance(paths[0], msg.get("path"), key)
     elif kind == "publication.pdf":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
@@ -1548,6 +1562,69 @@ def get_pipeline(wdir: str) -> dict:
             if isinstance(stage, dict)
         },
     }
+
+
+def get_provenance(wdir: str, path: Any, key: str | None = None) -> dict:
+    """Where a path in a checkout, or one value in a results file, came
+    from, as the hub's provenance says it, from the checkout as it is,
+    including what isn't saved yet.
+    """
+    import posixpath
+
+    import calkit.dvc
+    import calkit.provenance
+
+    def get_full_path(p: str) -> str:
+        return os.path.join(wdir, *p.split("/"))
+
+    def read_bytes(p: str) -> bytes:
+        full_path = get_full_path(p)
+        if os.path.getsize(full_path) > MAX_VALUE_FILE_BYTES:
+            raise ValueError(f"{p} is too big to read")
+        with open(full_path, "rb") as f:
+            return f.read()
+
+    def listdir(p: str) -> list[str]:
+        return os.listdir(get_full_path(p))
+
+    if not isinstance(path, str):
+        raise ValueError("A path must be a string")
+    path = posixpath.normpath(path.strip().replace("\\", "/"))
+    if (
+        path in (".", "..")
+        or path.startswith(("/", "../"))
+        or re.match(r"^[A-Za-z]:", path)
+    ):
+        raise ValueError(f"{path} isn't a path in the project")
+    pipeline = get_pipeline(wdir)
+    dvc_lock = {"stages": calkit.dvc.read_lock_stages(wdir=wdir)}
+    lock_outs = [
+        out["path"]
+        for stage in dvc_lock["stages"].values()
+        for out in (stage or {}).get("outs") or []
+        if isinstance(out, dict) and isinstance(out.get("path"), str)
+    ]
+    # Each iteration of a stage has its status, as the hub keys them
+    statuses = dict(pipeline["stage_statuses"])
+    for name in dvc_lock["stages"]:
+        if name.split("@")[0] in pipeline["stage_statuses"]:
+            statuses[name] = pipeline["stage_statuses"][name.split("@")[0]]
+    return calkit.provenance.get_path_provenance(
+        path,
+        key=key,
+        ck_info=calkit.load_calkit_info(wdir=wdir, read_only=True),
+        dvc_yaml={"stages": pipeline["dvc_stages"]},
+        dvc_lock=dvc_lock,
+        stage_statuses=statuses,
+        is_file=lambda p: os.path.isfile(get_full_path(p)),
+        is_dir=lambda p: os.path.isdir(get_full_path(p)),
+        listdir=listdir,
+        read_bytes=read_bytes,
+        # E.g., a file in a folder a stage makes that isn't pulled here
+        is_dvc_output=lambda p: any(
+            p.startswith(out.rstrip("/") + "/") for out in lock_outs
+        ),
+    )
 
 
 def get_checkout_status(wdir: str) -> dict:

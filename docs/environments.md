@@ -1242,6 +1242,9 @@ computer or a container image, run:
 calkit latex warm
 ```
 
+Calkit's dev container image comes with them, so a new container's first
+build is quicker.
+
 The environment only sees fonts from TeX Live packages, not those
 installed on your computer, so a document builds the same everywhere.
 

@@ -512,8 +512,8 @@ def _mask_exclusion_zones(tex_source: str) -> str:
         )
         masked = re.sub(pattern, _mask_match, masked, flags=re.DOTALL)
     # Macros whose arguments are references, layout, or links rather than
-    # anything the project computed. \ckfigure and \ckinput are Calkit's
-    # own, and their options carry widths and scales.
+    # anything the project computed. Those starting with \ck are Calkit's
+    # own, whose options carry widths, scales, and formats.
     macros_to_mask = [
         r"\\cite[a-zA-Z]*\*?\{[^}]*\}",
         r"\\bibitem\{[^}]*\}",
@@ -528,8 +528,10 @@ def _mask_exclusion_zones(tex_source: str) -> str:
         r"\\include\{[^}]*\}",
         r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\includesvg(?:\[[^\]]*\])?\{[^}]*\}",
-        r"\\ckfigure(?:\[[^\]]*\])?\{[^}]*\}",
-        r"\\ckinput\{[^}]*\}",
+        r"\\ckfigure\s*(?:\[[^\]]*\])?\s*\{[^}]*\}",
+        r"\\ckvalue\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
+        r"\\cktable\s*\{[^}]*\}",
+        r"\\ckinclude\s*\{[^}]*\}",
         r"\\usepackage(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\documentclass(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\setlength\{[^}]*\}\{[^}]*\}",
@@ -570,6 +572,7 @@ def find_retyped_values(
     tex_source: str,
     filepath: str,
     project_values: dict[str, str] | None = None,
+    json_to_latex_sources: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Values the project computes that a document typed out instead.
 
@@ -589,6 +592,10 @@ def find_retyped_values(
     project_values : dict[str, str] | None
         Value as it is written in a results file, mapped to where it came
         from, e.g., ``{"0.42": "results/drag.json:DragCoefficient"}``.
+    json_to_latex_sources : set[str] | None
+        Those sources a document already reads through the commands a
+        ``json-to-latex`` stage generates, which the fix references
+        instead of ``\\ckvalue``.
 
     Returns
     -------
@@ -609,8 +616,22 @@ def find_retyped_values(
     lines = tex_source.splitlines()
     findings: list[dict[str, Any]] = []
     for text, source in project_values.items():
-        if not _is_distinctive(text):
+        # Checked for first, since a project can have many values
+        if not _is_distinctive(text) or text not in masked_source:
             continue
+        if source in (json_to_latex_sources or set()):
+            suggestion = (
+                "Reference the generated command from the 'json-to-latex' "
+                "stage over that file instead of typing the number, so the "
+                "paper follows the analysis when it changes."
+            )
+        else:
+            path, _, key = source.partition(":")
+            suggestion = (
+                f"Read it with \\ckvalue{{{path}}}{{{key}}}, from "
+                "\\usepackage{calkit}, instead of typing the number, so the "
+                "paper follows the analysis when it changes."
+            )
         # Bounded so 0.42 doesn't match inside 10.425 or 0.4251, while a
         # value ending a sentence still does
         pattern = r"(?<![\d.])" + re.escape(text) + r"(?!\d)(?!\.\d)"
@@ -632,12 +653,7 @@ def find_retyped_values(
                         else ""
                     ),
                     "reason": (f"the project computes this value in {source}"),
-                    "suggestion": (
-                        "Reference the generated command from the "
-                        "'json-to-latex' stage over that file instead of "
-                        "typing the number, so the paper follows the "
-                        "analysis when it changes."
-                    ),
+                    "suggestion": suggestion,
                 }
             )
     findings.sort(key=lambda f: (f["line"], f["column"]))
@@ -714,28 +730,75 @@ def find_unattributed_numbers(
     return findings
 
 
-def _project_values(wdir: str, stages: dict) -> dict[str, str]:
-    """Every value a ``json-to-latex`` stage puts within a document's reach.
+def _project_values(
+    wdir: str, stages: dict, tex_paths: set[str]
+) -> tuple[dict[str, str], set[str]]:
+    """Every value the pipeline puts within a document's reach, and which
+    of them a document reads through a ``json-to-latex`` stage's commands.
 
-    Read from the results files those stages consume rather than from the
-    LaTeX they generate: the results file is what the value actually is,
-    and the generated commands are one rendering of it. Mapped back to
-    where it came from, so a finding can name the key to reference.
+    A document reaches a results file two ways: with calkit.sty's
+    ``\\ckvalue``, which can read any key in a file it reads from, found
+    the way its LaTeX stage finds them, or through the commands a
+    ``json-to-latex`` stage generates. Values are read from the results
+    files rather than from any LaTeX written from them, since the results
+    file is what the value actually is. Mapped back to where it came from,
+    so a finding can name the key to reference.
     """
     import json
 
-    from calkit.questions import resolve_key
+    from calkit.latex import component_path, read_ck_usage
+    from calkit.questions import read_evidence_file, resolve_key
+
+    def add_numbers(node: Any, path: str, key: str = "") -> None:
+        """Every number in a results file a key names, by that key, but
+        not those in lists, e.g., a residual history or a table of runs,
+        whose entries turn up in prose by chance.
+        """
+        if isinstance(node, bool):
+            return
+        if isinstance(node, (int, float)) and key:
+            values.setdefault(str(node), f"{path}:{key}")
+        elif isinstance(node, dict):
+            for name, child in node.items():
+                if isinstance(name, str):
+                    add_numbers(child, path, f"{key}.{name}" if key else name)
 
     values: dict[str, str] = {}
+    via_json_to_latex: set[str] = set()
+    # What documents read with \ckvalue, which comes first, since that's
+    # the way to read a value both reach
+    read: set[str] = set()
+    for tex_path in sorted(tex_paths):
+        _, components = read_ck_usage(tex_path)
+        for c in components:
+            if c.kind != "value":
+                continue
+            rel, _ = component_path(
+                c, lambda p: os.path.isfile(os.path.join(wdir, p))
+            )
+            if rel is None or rel in read:
+                continue
+            read.add(rel)
+            try:
+                data = read_evidence_file(os.path.join(wdir, rel))
+            except Exception:
+                continue
+            add_numbers(data, rel)
     for stage in stages.values():
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
         if "calkit latex from-json" not in cmd:
             continue
-        for dep in stage.get("deps", []) or []:
-            if not str(dep).endswith(".json"):
+        # Whether a document inputs what the stage writes, so it already
+        # uses the commands
+        used = any(
+            os.path.abspath(os.path.join(wdir, out)) in tex_paths
+            for out in _get_stage_paths(stage, "outs")
+        )
+        for dep in _get_stage_paths(stage, "deps"):
+            if not dep.endswith(".json"):
                 continue
             try:
-                with open(os.path.join(wdir, str(dep))) as f:
+                with open(os.path.join(wdir, dep)) as f:
                     data = json.load(f)
             except (OSError, ValueError):
                 continue
@@ -748,23 +811,37 @@ def _project_values(wdir: str, stages: dict) -> dict[str, str]:
             # to name it, not to reference a command that was never
             # generated. Without any names every top-level key is exposed.
             named = _named_keys(cmd)
+            exposed: dict[str, Any] = {}
             if named:
                 for key in named:
                     try:
-                        value = resolve_key(data, key)
+                        exposed[key] = resolve_key(data, key)
                     except (KeyError, ValueError, IndexError, TypeError):
                         continue
-                    if isinstance(value, (int, float)) and not isinstance(
-                        value, bool
-                    ):
-                        values.setdefault(str(value), f"{dep}:{key}")
-                continue
-            for key, value in data.items():
-                if isinstance(value, (int, float)) and not isinstance(
+            else:
+                exposed = data
+            for key, value in exposed.items():
+                if not isinstance(value, (int, float)) or isinstance(
                     value, bool
                 ):
-                    values.setdefault(str(value), f"{dep}:{key}")
-    return values
+                    continue
+                if str(value) not in values and used:
+                    via_json_to_latex.add(f"{dep}:{key}")
+                values.setdefault(str(value), f"{dep}:{key}")
+    return values, via_json_to_latex
+
+
+def _get_stage_paths(stage: dict, field: str) -> list[str]:
+    """A compiled stage's deps or outs, relative to the project."""
+    base = stage.get("wdir") or ""
+    return [
+        posixpath.normpath(
+            posixpath.join(
+                base, str(item if isinstance(item, str) else next(iter(item)))
+            )
+        )
+        for item in stage.get(field, []) or []
+    ]
 
 
 def _named_keys(cmd: str) -> list[str]:
@@ -782,17 +859,22 @@ def _named_keys(cmd: str) -> list[str]:
     ]
 
 
-def _generated_tex_paths(wdir: str, stages: dict) -> set[str]:
-    """LaTeX files the pipeline writes, which are not manuscripts."""
+def _generated_paths(wdir: str, stages: dict) -> set[str]:
+    """What the pipeline writes, which holds no manuscripts, e.g., a table
+    or a folder of them, and the LaTeX Calkit writes for calkit.sty, which a
+    LaTeX stage depends on.
+    """
+    from calkit.latex import COMPONENTS_DIR
+
     paths: set[str] = set()
     for stage in stages.values():
-        cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
-        if "calkit latex from-" not in cmd:
-            continue
-        for out in stage.get("outs", []) or []:
-            out_path = out if isinstance(out, str) else next(iter(out))
-            if str(out_path).endswith(".tex"):
-                paths.add(os.path.abspath(os.path.join(wdir, str(out_path))))
+        ours = [
+            dep
+            for dep in _get_stage_paths(stage, "deps")
+            if COMPONENTS_DIR in dep.split("/") and dep.endswith(".tex")
+        ]
+        for path in _get_stage_paths(stage, "outs") + ours:
+            paths.add(os.path.abspath(os.path.join(wdir, path)))
     return paths
 
 
@@ -807,9 +889,9 @@ def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
         if "calkit latex build" not in cmd:
             continue
-        for dep in stage.get("deps", []) or []:
-            if str(dep).endswith(".tex"):
-                targets.add(str(dep))
+        for dep in _get_stage_paths(stage, "deps"):
+            if dep.endswith(".tex"):
+                targets.add(dep)
     found: set[str] = set()
 
     def walk(rel: str) -> None:
@@ -847,17 +929,25 @@ def find_literals_in_project(
     result-like numbers with nothing recorded behind them, which is a
     weaker signal offered as something to look over.
     """
-    values = _project_values(wdir, stages)
-    generated = _generated_tex_paths(wdir, stages)
+    sources = _tex_sources(wdir, ck_info, stages)
+    generated = _generated_paths(wdir, stages)
+    values, via_json_to_latex = _project_values(wdir, stages, sources)
     out: dict[str, list[dict]] = {"retyped": [], "unattributed": []}
-    for path in sorted(_tex_sources(wdir, ck_info, stages) - generated):
+    for path in sorted(sources):
+        if any(
+            path == g or path.startswith(g.rstrip(os.sep) + os.sep)
+            for g in generated
+        ):
+            continue
         try:
             with open(path, encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except OSError:
             continue
-        rel = os.path.relpath(path, wdir)
-        out["retyped"] += find_retyped_values(content, rel, values)
+        rel = os.path.relpath(path, wdir).replace(os.sep, "/")
+        out["retyped"] += find_retyped_values(
+            content, rel, values, via_json_to_latex
+        )
         out["unattributed"] += find_unattributed_numbers(content, rel, values)
     return out
 

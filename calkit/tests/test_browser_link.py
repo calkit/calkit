@@ -1046,7 +1046,11 @@ def test_get_provenance(tmp_path, monkeypatch):
         "summarize": {
             "kind": "command",
             "environment": "_system",
-            "command": "echo '{\"n\": 1}' > results.json",
+            # The same in Windows' shell as in others
+            "command": (
+                f'"{sys.executable}" -c "import json; '
+                "json.dump({'n': 1}, open('results.json', 'w'))\""
+            ),
             "inputs": ["data.csv"],
             "outputs": ["results.json"],
         },

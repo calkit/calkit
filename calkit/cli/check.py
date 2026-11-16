@@ -412,16 +412,16 @@ def _echo_retyped(findings: list[dict]) -> None:
     calkit.echo(
         "\nEach of these is a number the project already computes, typed "
         "into the document. It is right today and wrong the next time that "
-        "stage runs. Reference the command the 'json-to-latex' stage "
-        "generates for that key instead."
+        "stage runs. Read it with \\ckvalue{<file>}{<key>} from the "
+        "calkit LaTeX package instead, or, where the document already uses "
+        "a 'json-to-latex' stage, with the command it generates."
         "\n\nWhat this does not catch: a value under two significant "
         "digits (0.5) or an integer under 100 (8), which would match too "
         "much ordinary prose to be worth reporting; a value the document "
         "rounds or reformats before typing, since it is compared as "
-        "written; and anything in a results file no 'json-to-latex' stage "
-        "reads, or in one whose stage names its 'keys' without naming "
-        "that value---the document has no command for it, so typing it "
-        "is what there is until the key is named."
+        "written; and anything in a results file the document doesn't "
+        "read with \\ckvalue and no 'json-to-latex' stage reads, or a "
+        "value a 'json-to-latex' stage leaves out of the 'keys' it names."
     )
 
 

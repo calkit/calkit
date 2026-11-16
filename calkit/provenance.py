@@ -1377,6 +1377,7 @@ def find_provenance_gaps(
     dvc_yaml: dict,
     dvc_lock: dict,
     is_data: Callable[[str], bool],
+    listdir: Callable[[str], list[str]],
 ) -> list[ProvenanceGap]:
     """Follow each path back through the stages that produce it, to where
     each chain starts, and return the starts nothing accounts for.
@@ -1384,6 +1385,7 @@ def find_provenance_gaps(
     A chain starts somewhere accounted for at an entry recording an import
     or who created it, or at code and config the authors wrote. Anything
     else nothing produces, i.e., what ``is_data`` says is data, is a gap.
+    ``listdir`` names what's in a folder, and nothing for any other path.
     Stages are read from ``dvc.lock`` where they've run, and from
     ``dvc.yaml`` where they haven't, except for matrix stages, whose
     expansions aren't known until they run.
@@ -1431,17 +1433,21 @@ def find_provenance_gaps(
             return
         stage = producer(path)
         if stage is None:
-            # A folder whose contents stages produce, e.g., figures a stage
-            # copies, comes from those stages
+            # A folder stages write into, e.g., figures a stage copies, is
+            # followed through all it holds and what stages will make there
             inner = [
                 out
                 for _, outs in stages.values()
                 for out in outs
                 if out != path and under(out, path)
             ]
-            for out in inner:
-                walk(out, trail + [ProvenanceStep(path)])
             if inner:
+                children = sorted(
+                    posixpath.join(path, name.removesuffix(".dvc"))
+                    for name in listdir(path)
+                )
+                for child in dict.fromkeys(inner + children):
+                    walk(child, trail + [ProvenanceStep(path)])
                 return
             # An entry naming a stage not compiled yet is taken at its word
             if not any(e.get("stage") is not None for e in covering):
@@ -1561,5 +1567,10 @@ def find_project_provenance_gaps(
             is_file=lambda p: os.path.isfile(os.path.join(wdir, p)),
             is_dir=lambda p: os.path.isdir(os.path.join(wdir, p)),
             listdir=lambda p: os.listdir(os.path.join(wdir, p)),
+        ),
+        listdir=lambda path: (
+            os.listdir(os.path.join(wdir, path))
+            if os.path.isdir(os.path.join(wdir, path))
+            else []
         ),
     )

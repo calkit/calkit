@@ -1642,33 +1642,42 @@ class LatexStage(Stage):
         return Path(os.path.normpath(out_base)).with_suffix(".pdf").as_posix()
 
     @property
-    def dvc_cmd(self) -> str:
-        # Quote user-controlled paths/args so spaces or shell metacharacters in
-        # them don't corrupt the compiled DVC command.
-        cmd = (
-            f"calkit latex build -e {shlex.quote(self.environment)} --no-check"
-        )
+    def build_args(self) -> list[str]:
+        """Options for ``calkit latex build`` beyond the environment and
+        target, so a build outside the pipeline, e.g., an editor's, can
+        match the stage's.
+        """
+        args = []
         if self.latexmkrc_path is not None:
-            cmd += f" -r {shlex.quote(self.latexmkrc_path)}"
+            args += ["-r", self.latexmkrc_path]
         else:
             # Only drive latexmk's output/aux directories when the user has not
             # supplied a latexmkrc; a CLI -outdir would override the rc's
             # $out_dir. With a latexmkrc, it stays authoritative (and the
             # output_dir drift lint in calkit.pipeline covers mismatches).
             if self.output_dir is not None:
-                cmd += f" --output-dir {shlex.quote(self.output_dir)}"
+                args += ["--output-dir", self.output_dir]
             if self.aux_dir is not None:
-                cmd += f" --aux-dir {shlex.quote(self.aux_dir)}"
+                args += ["--aux-dir", self.aux_dir]
         if self.verbose:
-            cmd += " --verbose"
+            args.append("--verbose")
         if self.force:
-            cmd += " -f"
+            args.append("-f")
         if not self.synctex:
-            cmd += " --no-synctex"
+            args.append("--no-synctex")
         for arg in self.latexmk_args:
-            cmd += f" --latexmk-arg {shlex.quote(arg)}"
-        cmd += f" {shlex.quote(self.target_path)}"
-        return cmd
+            args += ["--latexmk-arg", arg]
+        return args
+
+    @property
+    def dvc_cmd(self) -> str:
+        # Quote user-controlled paths/args so spaces or shell metacharacters in
+        # them don't corrupt the compiled DVC command.
+        return "calkit latex build " + shlex.join(
+            ["-e", self.environment, "--no-check"]
+            + self.build_args
+            + [self.target_path]
+        )
 
     # Project paths the document's components depend on, the files among
     # them it reads copies of, and whether it loads calkit.sty, set by

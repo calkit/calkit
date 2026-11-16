@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import posixpath
 import re
 import stat
 from typing import Any
@@ -88,6 +89,101 @@ def render_devcontainer_spec() -> dict:
     return spec
 
 
+def get_latex_workshop_settings(settings: dict, ck_info: dict) -> dict:
+    """Return VS Code settings with LaTeX Workshop building a project's
+    documents the way its pipeline does.
+
+    The bundled settings build in Calkit's LaTeX Docker image, which a
+    project keeps unless its LaTeX stages use a TeX Live environment. Then
+    each of those stages gets a recipe that runs ``calkit latex build`` in
+    its environment with its options, with stages that build alike sharing
+    one. A project without LaTeX stages gets one for its only TeX Live
+    environment, if it has one. Builds are verbose, with errors named by
+    file and line, since that's how LaTeX Workshop finds them in TeX's
+    output.
+    """
+    from calkit.models.pipeline import LatexStage
+
+    envs = ck_info.get("environments") or {}
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    texlive_names = [
+        name
+        for name, env in envs.items()
+        if isinstance(env, dict) and env.get("kind") == "texlive"
+    ]
+    latex_stages = []
+    for name, stage in stages.items():
+        if not isinstance(stage, dict) or stage.get("kind") != "latex":
+            continue
+        try:
+            latex_stages.append(
+                LatexStage.model_validate(stage | {"name": name})
+            )
+        except ValueError:
+            continue
+    # Each build's working directory and arguments, with the stages it's for
+    builds: dict[tuple[str, ...], list[str]] = {}
+    # Where each puts its PDF, if not beside the document
+    out_dirs: set[str | None] = set()
+    for s in latex_stages:
+        if s.environment not in texlive_names:
+            continue
+        key = (s.wdir or "", "-e", s.environment, *s.build_args)
+        builds.setdefault(key, []).append(str(s.name))
+        if s.latexmkrc_path is None and s.output_dir is not None:
+            pdf_path = posixpath.join(s.wdir or "", s.pdf_path)
+            out_dirs.add(posixpath.dirname(posixpath.normpath(pdf_path)))
+        else:
+            out_dirs.add(None)
+    if not latex_stages and len(texlive_names) == 1:
+        builds[("", "-e", texlive_names[0])] = [texlive_names[0]]
+    if not builds:
+        return settings
+    settings = dict(settings)
+    settings.pop("latex-workshop.docker.image.latex", None)
+    settings["latex-workshop.docker.enabled"] = False
+    tools = []
+    for (wdir, *args), names in builds.items():
+        if "--verbose" not in args:
+            args.append("--verbose")
+        args += ["--latexmk-arg", "-file-line-error"]
+        tools.append(
+            {
+                "name": "Calkit: " + ", ".join(names),
+                "command": "calkit",
+                "args": ["latex", "build", *args, "%DOC_EXT%"],
+                "cwd": posixpath.join("%WORKSPACE_FOLDER%", wdir).rstrip("/"),
+            }
+        )
+    settings["latex-workshop.latex.tools"] = tools
+    settings["latex-workshop.latex.recipes"] = [
+        {"name": tool["name"], "tools": [tool["name"]]} for tool in tools
+    ]
+    # LaTeX Workshop finds the PDF, and its SyncTeX, where the stage's
+    # output_dir puts it, if they all put it in one place
+    out_dir = out_dirs.pop() if len(out_dirs) == 1 else None
+    if out_dir is not None:
+        settings["latex-workshop.latex.outDir"] = "%WORKSPACE_FOLDER%" + (
+            f"/{out_dir}" if out_dir else ""
+        )
+    return settings
+
+
+def make_vscode_settings(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> str:
+    """Return the VS Code settings for a project, as JSON text."""
+    if ck_info is None:
+        from calkit.core import load_calkit_info
+
+        ck_info = load_calkit_info(wdir=wdir, read_only=True)
+    settings = load_json("vscode", "settings.json")
+    return (
+        json.dumps(get_latex_workshop_settings(settings, ck_info), indent=2)
+        + "\n"
+    )
+
+
 def make_devcontainer_spec(
     ck_info: dict | None = None, wdir: str | None = None
 ) -> str:
@@ -95,7 +191,7 @@ def make_devcontainer_spec(
 
     Julia is only installed for a project with a Julia environment, in it
     or a subproject, since installing it slows down creating every
-    Codespace.
+    Codespace. LaTeX Workshop builds as ``make_vscode_settings`` sets it to.
     """
     from calkit.core import iter_projects
 
@@ -111,7 +207,11 @@ def make_devcontainer_spec(
         return env.get("kind") == "julia" or any(map(uses_julia, options))
 
     spec = load_json("devcontainer", DEVCONTAINER_FNAME)
-    projects = iter_projects(wdir=wdir, ck_info=ck_info)
+    projects = list(iter_projects(wdir=wdir, ck_info=ck_info))
+    vscode = spec["customizations"]["vscode"]
+    vscode["settings"] = get_latex_workshop_settings(
+        vscode["settings"], projects[0][1]
+    )
     if not any(
         uses_julia(env)
         for _, info in projects
@@ -123,7 +223,6 @@ def make_devcontainer_spec(
                 "ghcr.io/julialang/devcontainer-features/julia:"
             ):
                 del features[key]
-        vscode = spec["customizations"]["vscode"]
         vscode["extensions"] = [
             e
             for e in vscode["extensions"]

@@ -59,6 +59,36 @@ def test_update_project_config(tmp_dir, monkeypatch):
         assert json.load(f) == calkit.resources.load_json(
             "devcontainer", calkit.resources.DEVCONTAINER_FNAME
         )
+    # A project that builds LaTeX with TeX Live builds that way in the
+    # editor too, in the container or not
+    ck_info["environments"] = {"tex": {"kind": "texlive"}}
+    ck_info["pipeline"] = {
+        "stages": {
+            "build-paper": {
+                "kind": "latex",
+                "target_path": "paper/main.tex",
+                "environment": "tex",
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    with open(os.path.join(".vscode", "settings.json")) as f:
+        settings = json.load(f)
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        in_container = json.load(f)["customizations"]["vscode"]["settings"]
+    for s in [settings, in_container]:
+        assert s["latex-workshop.docker.enabled"] is False
+        assert s["latex-workshop.latex.tools"][0]["args"][:4] == [
+            "latex",
+            "build",
+            "-e",
+            "tex",
+        ]
+    assert repo.git.log("-1", "--format=%s") == "Update devcontainer"
+    assert not repo.git.status("--porcelain", "--", ".vscode", ".devcontainer")
 
 
 def test_update_dataset(tmp_dir):

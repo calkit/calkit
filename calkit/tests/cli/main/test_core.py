@@ -3139,7 +3139,8 @@ def test_run_captures_stage_logs(tmp_dir):
         assert res.returncode == exit_code
         warning = res.stdout.split("Matplotlib in stage 'test_stage'")[-1]
         assert warning.startswith(" drew with a fallback font")
-        assert warning.count("Font family 'Arial' not found.") == 1
+        assert warning.count("Font family 'Arial' not found") == 1
+        assert "not found; see https://docs.calkit.org/" in warning
 
 
 def test_run_captures_stage_logs_failure(tmp_dir):
@@ -3339,11 +3340,11 @@ def test_get_missing_fonts_by_stage() -> None:
     )
     assert _get_missing_fonts_by_stage(log) == {
         "plot": [
-            "Font family 'Arial' not found.",
+            "Font family 'Arial' not found",
             "Generic family 'sans-serif' not found because none of the "
             "following families were found: Arial, Helvetica",
-            "Font family ['Arial'] not found. Falling back to DejaVu Sans.",
-            "Font family 'CMU Serif' not found.",
+            "Font family ['Arial'] not found. Falling back to DejaVu Sans",
+            "Font family 'CMU Serif' not found",
         ]
     }
     assert _get_missing_fonts_by_stage("") == {}

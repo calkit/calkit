@@ -2776,7 +2776,8 @@ def _get_missing_fonts_by_stage(log_content: str) -> dict[str, list[str]]:
     res: dict[str, list[str]] = {}
     stdout_by_stage = _stage_stdout_from_log_content(log_content)
     for stage_name, output in stdout_by_stage.items():
-        messages = [m.strip() for m in pattern.findall(output)]
+        # Without the final period, since they're joined into a sentence
+        messages = [m.strip().rstrip(".") for m in pattern.findall(output)]
         if messages:
             res[stage_name] = list(dict.fromkeys(messages))
     return res

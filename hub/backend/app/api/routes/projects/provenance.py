@@ -288,6 +288,7 @@ def get_project_provenance(
                 dvc_yaml=pipeline.dvc_yaml,
                 dvc_lock=pipeline.dvc_lock,
                 is_data=is_data,
+                listdir=lambda p: tree.listdir(p) if tree.is_dir(p) else [],
             )
             if stage_for(gap.path) is None
         ]

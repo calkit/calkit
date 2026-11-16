@@ -1026,6 +1026,34 @@ def test_find_provenance_gaps():
                 "deps": ["summarize.py", "params.yaml", "data/loose.json"],
                 "outs": ["results/summary.json"],
             },
+            # Plots made one by one into a folder, which another copies
+            "plot": {
+                "cmd": "python plot.py",
+                "deps": ["plot.py", "data/measured.csv"],
+                "outs": ["plots/a.png"],
+            },
+            "plot-raw": {
+                "cmd": "python plot-raw.py",
+                "deps": ["plot-raw.py", "data/raw.csv"],
+                "outs": ["plots/b.png"],
+            },
+            "copy-plots": {
+                "cmd": "calkit map-paths",
+                "deps": ["plots"],
+                "outs": ["paper/plots"],
+            },
+            # Named like the folder above, but nothing writes into it
+            "copy-plot": {
+                "cmd": "calkit map-paths",
+                "deps": ["plot"],
+                "outs": ["paper/plot"],
+            },
+            # Writes into the folder it reads
+            "tidy": {
+                "cmd": "python tidy.py",
+                "deps": ["tidy.py", "inbox"],
+                "outs": ["inbox/tidy.csv"],
+            },
         }
     }
     # A run records its inputs, which is what's followed where it exists
@@ -1042,6 +1070,12 @@ def test_find_provenance_gaps():
         }
     }
     data = {".csv", ".json", ".png"}
+    # What's on disk in the folders stages write into, besides their outputs
+    listing = {
+        "plots": ["a.png", "b.png", "photo.png", "scan.png.dvc", ".gitignore"],
+        "plot": ["old.png"],
+        "inbox": ["tidy.csv", "dropped.csv"],
+    }
 
     def gaps(paths: list[str]) -> list[str]:
         return [
@@ -1052,8 +1086,11 @@ def test_find_provenance_gaps():
                 dvc_yaml=dvc_yaml,
                 dvc_lock=dvc_lock,
                 is_data=lambda p: (
-                    p.startswith("data/") or posixpath.splitext(p)[1] in data
+                    p.startswith("data/")
+                    or posixpath.splitext(p)[1] in data
+                    or p in listing
                 ),
+                listdir=lambda p: listing.get(p, []),
             )
         ]
 
@@ -1087,6 +1124,26 @@ def test_find_provenance_gaps():
     assert gaps(["data/box.csv", "data/laptop.csv"]) == [
         "data/box.csv is imported from somewhere that can't be checked",
         "data/laptop.csv is imported from somewhere that can't be checked",
+    ]
+    # A folder is followed back through the stages making what's in it,
+    # and what else is in it is a gap of its own, pulled or not
+    assert gaps(["paper/plots/a.png"]) == [
+        "origin not defined for data/raw.csv (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/b.png <- stage plot-raw "
+        "<- data/raw.csv)",
+        "origin not defined for plots/photo.png (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/photo.png)",
+        "origin not defined for plots/scan.png (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/scan.png)",
+    ]
+    # A folder nothing writes into is a gap as a whole
+    assert gaps(["paper/plot"]) == [
+        "origin not defined for plot (paper/plot <- stage copy-plot <- plot)"
+    ]
+    # A stage's own output doesn't account for the folder it reads
+    assert gaps(["inbox/tidy.csv"]) == [
+        "origin not defined for inbox/dropped.csv (inbox/tidy.csv "
+        "<- stage tidy <- inbox <- inbox/dropped.csv)"
     ]
     # A matrix stage that hasn't run produces nothing known yet
     assert gaps(["figures/sweep-1.png"]) == [

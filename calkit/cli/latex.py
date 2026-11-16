@@ -414,10 +414,12 @@ def _tex_cmd(
     """Wrap a TeX command so it runs wherever the project's TeX lives.
 
     In the project's Calkit environment if one was named, else directly if
-    the tool is installed, else in a TeX Live container. The container
-    mounts the working directory, so anything the command reads has to be
-    inside the project -- which is why the diff builds its copy of the
-    base revision there rather than in a temp directory.
+    the tool is installed. Without either, callers use Calkit's default TeX
+    Live environment, from ``_get_texlive_env``, instead. An environment
+    may run in a container that mounts the working directory, so anything
+    the command reads has to be inside the project -- which is why the
+    diff builds its copy of the base revision there rather than in a temp
+    directory.
     """
     env_vars = env_vars or {}
     if environment is not None:
@@ -433,51 +435,27 @@ def _tex_cmd(
     elif calkit.check_dep_exists(dep):
         cmd = tex_cmd
     else:
-        # Pulled deliberately, since docker run's implicit pull of an
-        # image that isn't there can stall rather than report it
-        try:
-            calkit.docker.ensure_image_available(
-                calkit.latex.DEFAULT_LATEX_IMAGE
-            )
-        except ValueError as e:
-            raise_error(str(e))
-        # Packages fetched at run time go to the project's cache, which
-        # the working directory mount already covers, rather than over
-        # the image's own tree, which would hide the distribution entirely
-        os.makedirs(calkit.latex.get_texmf_cache_dir(), exist_ok=True)
-        cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "-v",
-            f"{os.getcwd()}:/work",
-            "-e",
-            f"TEXMFHOME={calkit.latex.CONTAINER_TEXMF_DIR}",
-            "-w",
-            "/work",
-        ]
-        # As the user, so a PDF doesn't come back owned by root
-        try:
-            cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
-        except AttributeError:
-            # Windows has no UID to map
-            pass
-        # The container gets its own environment, so anything the command
-        # needs has to be handed to it rather than inherited
-        for key, value in env_vars.items():
-            cmd += ["-e", f"{key}={value}"]
-        cmd += [calkit.latex.DEFAULT_LATEX_IMAGE] + tex_cmd
+        # Callers run Calkit's default TeX Live themselves, with its
+        # variables, before getting here
+        raise_error(
+            f"{dep} isn't installed; name an environment that has it, "
+            "or install it"
+        )
     if verbose:
         typer.echo(f"Running command: {cmd}")
     return cmd
 
 
-def _get_texlive_env(environment: str | None) -> tuple[str, dict] | None:
+def _get_texlive_env(
+    environment: str | None, dep: str = "latexmk"
+) -> tuple[str, dict] | None:
     """Return the TeX Live environment a build runs in directly, if it's
     one, prepared as 'calkit xenv' would.
 
-    The project's variables are set first, since a switch can pick by
-    them, and a switch's machine lock is checked.
+    Without an environment, that's Calkit's default one, unless ``dep`` is
+    installed, in which case the machine's TeX is used. The project's
+    variables are set first, since a switch can pick by them, and a
+    switch's machine lock is checked.
     """
     import dotenv
 
@@ -485,7 +463,12 @@ def _get_texlive_env(environment: str | None) -> tuple[str, dict] | None:
     from calkit.environments import texlive as env_texlive
 
     if environment is None:
-        return None
+        if calkit.check_dep_exists(dep):
+            return None
+        return (
+            env_texlive.DEFAULT_ENV_NAME,
+            dict(env_texlive.DEFAULT_ENVIRONMENT),
+        )
     ck_info = calkit.load_calkit_info()
     dotenv.load_dotenv(dotenv_path=".env")
     calkit.set_env_vars(ck_info=ck_info)
@@ -516,9 +499,10 @@ def _run_latexmk(
     """Run latexmk where the project's TeX lives, fetching the TeX packages
     it's missing and retrying.
 
-    Only where what's fetched is kept with the project, i.e., Calkit's
-    LaTeX image, run directly or as a Docker environment built on it, or a
-    TeX Live environment, whose lock gains the packages. A system TeX is
+    Only where what's fetched is kept, i.e., a Docker environment built on
+    Calkit's LaTeX image, or a TeX Live environment, whose lock gains the
+    packages, including the default one used without an environment. A
+    system TeX is
     the user's to manage, and anything installed in another container is
     gone when it exits. Returns latexmk's exit status.
 
@@ -541,8 +525,9 @@ def _run_latexmk(
         )
 
     def can_fetch() -> bool:
+        # A system TeX is the user's to manage
         if environment is None:
-            return not calkit.check_dep_exists("latexmk")
+            return False
         envs = calkit.load_calkit_info().get("environments", {})
         if envs.get(environment, {}).get("kind") != "docker":
             return False
@@ -1970,14 +1955,31 @@ def _build_diff(
         latexdiff_cmd.append("--append-safecmd=cknum")
         # User pass-through args come last so they can override Calkit's
         # defaults
-        latexdiff_cmd += latexdiff_args
-        cmd = _tex_cmd(
-            latexdiff_cmd + [base_tex_fpath, head_tex_fpath],
-            environment=environment,
-            no_check=no_check,
-            verbose=verbose,
-            dep="latexdiff",
+        latexdiff_cmd += latexdiff_args + [base_tex_fpath, head_tex_fpath]
+        # Without an environment or a system latexdiff, Calkit's TeX Live
+        default_tex = (
+            _get_texlive_env(None, dep="latexdiff")
+            if environment is None
+            else None
         )
+        latexdiff_env = None
+        if default_tex is not None:
+            from calkit.environments import texlive as env_texlive
+
+            try:
+                view_dir = env_texlive.check(*default_tex, verbose=verbose)
+            except (ValueError, RuntimeError, OSError) as e:
+                raise_error(f"TeX Live: {e}")
+            latexdiff_env = env_texlive.get_run_env_vars(view_dir)
+            cmd = env_texlive.get_run_cmd(latexdiff_cmd, latexdiff_env)
+        else:
+            cmd = _tex_cmd(
+                latexdiff_cmd,
+                environment=environment,
+                no_check=no_check,
+                verbose=verbose,
+                dep="latexdiff",
+            )
         typer.echo("Marking up the document with latexdiff")
         try:
             # No stdin, so an environment's container isn't given a TTY,
@@ -1986,6 +1988,7 @@ def _build_diff(
             # they're only shown when asked for or when it fails
             marked_up = subprocess.check_output(
                 cmd,
+                env=latexdiff_env,
                 stdin=subprocess.DEVNULL,
                 stderr=None if verbose else subprocess.PIPE,
             )
@@ -2738,7 +2741,7 @@ def to_docx(
         # it, since a conversion isn't part of the pipeline, and runs it as
         # a system TeX would, since the shell the other environments run it
         # with isn't on Windows
-        texlive_env = _get_texlive_env(environment)
+        texlive_env = _get_texlive_env(environment, dep="make4ht")
         m4h_env = os.environ | tex_env_vars
         if texlive_env is not None:
             from calkit.environments import texlive as env_texlive

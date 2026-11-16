@@ -40,6 +40,7 @@ export interface FigureEntry {
   path: string;
   stage?: string;
   imported_from?: unknown;
+  created_by?: unknown;
   [key: string]: unknown;
 }
 
@@ -146,6 +147,8 @@ export interface CalkitInfo {
   questions?: (string | QuestionEntry)[];
   figures?: FigureEntry[];
   datasets?: DatasetEntry[];
+  // Anything else, which can record who created it or where it came from
+  misc?: ArtifactEntry[];
   results?: ArtifactEntry[];
   publications?: ArtifactEntry[];
   presentations?: ArtifactEntry[];

@@ -248,3 +248,39 @@ export function citationProblems(
   }
   return problems;
 }
+
+/**
+ * A value as the document shows it, by its Python format spec, e.g.,
+ * `.2f`, as far as that's simple to follow, else to 6 significant figures.
+ */
+export function getShownValue(value: unknown, format: string): string {
+  if (typeof value !== "number") {
+    return typeof value === "string" ? value : JSON.stringify(value);
+  }
+  const spec = /^(,)?(?:\.(\d+))?([fFeEgG%d])?$/.exec(format.trim());
+  const digits = spec?.[2] === undefined ? undefined : Number(spec[2]);
+  const kind = spec?.[3];
+  if (spec && (kind || spec[1])) {
+    if (kind === "%") {
+      return `${(value * 100).toFixed(digits ?? 6)}%`;
+    }
+    if (kind === "e" || kind === "E") {
+      // Python writes at least two digits of exponent
+      return value.toExponential(digits ?? 6).replace(/e([+-])(\d)$/, "e$10$2");
+    }
+    if (kind === "g" || kind === "G") {
+      return String(Number(value.toPrecision(digits || 6)));
+    }
+    if (kind === "d") {
+      return Math.round(value).toLocaleString("en-US", {
+        useGrouping: Boolean(spec[1]),
+      });
+    }
+    return value.toLocaleString("en-US", {
+      useGrouping: Boolean(spec[1]),
+      minimumFractionDigits: digits ?? (kind ? 6 : 0),
+      maximumFractionDigits: digits ?? (kind ? 6 : 20),
+    });
+  }
+  return String(Number(value.toPrecision(6)));
+}

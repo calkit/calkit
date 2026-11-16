@@ -2081,6 +2081,62 @@ def get_map_paths_outputs(stage: dict) -> list[str]:
     ]
 
 
+def get_figure_paths_with_origins(ck_info: dict) -> list[str]:
+    """Images calkit.yaml says the origin of, wherever they are: those a
+    stage makes, and those recorded under ``misc`` as imported or created
+    by someone, e.g., a figure exported into a paper's folder. Documents,
+    e.g., a paper's own PDF, aren't figures, nor are copies a ``map-paths``
+    stage makes, or the files a stage's iterations write, which only its
+    runs name.
+    """
+    import calkit.detect
+
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    documents = {
+        str(entry.get("path"))
+        for section in ("publications", "presentations")
+        for entry in ck_info.get(section) or []
+        if isinstance(entry, dict)
+    }
+    copies = [
+        out
+        for stage in stages.values()
+        if isinstance(stage, dict)
+        for out in get_map_paths_outputs(stage)
+    ]
+    candidates: list[object] = []
+    for stage in stages.values():
+        if not isinstance(stage, dict) or stage.get("kind") == "latex":
+            continue
+        for out in stage.get("outputs") or []:
+            candidates.append(
+                out.get("path") if isinstance(out, dict) else out
+            )
+    candidates += [
+        entry.get("path")
+        for entry in ck_info.get("misc") or []
+        if isinstance(entry, dict)
+        and (entry.get("created_by") or entry.get("imported_from"))
+    ]
+    paths: list[str] = []
+    for path in candidates:
+        if not isinstance(path, str) or "{" in path:
+            continue
+        path = posixpath.normpath(path)
+        if (
+            posixpath.splitext(path)[1].lower()
+            in calkit.detect.FIGURE_EXTENSIONS
+            and not any(part.startswith(".") for part in path.split("/"))
+            and path not in documents
+            and not any(
+                path == copy or path.startswith(copy + "/") for copy in copies
+            )
+            and path not in paths
+        ):
+            paths.append(path)
+    return paths
+
+
 def get_map_paths_source(stage: dict, path: str) -> str | None:
     """Where a ``map-paths`` stage copied ``path`` from, both relative to the
     project, so a copy can be followed back to whatever made the original.
@@ -2669,11 +2725,32 @@ def to_dvc(
         get_env_input_env_vars,
         get_env_input_paths,
         get_env_lock_fpath,
+        get_guest_envs,
         get_switch_options,
         resolve_env_var,
         write_switch_env_lock,
     )
     from calkit.models.io import EnvVarInput, ScheduleInput
+
+    def get_guest_names(env_name: str) -> list[str]:
+        # Those of the environments a switch picks from too, since a stage
+        # depends on every option's
+        env = environments.get(env_name)
+        if not isinstance(env, dict):
+            return []
+        names = [
+            name for name, _ in get_guest_envs(env_name, env, environments)
+        ]
+        if env.get("kind") == SWITCH_KIND:
+            for option in get_switch_options(env_name, environments):
+                option_env = get_env(option, environments) or {}
+                names += [
+                    name
+                    for name, _ in get_guest_envs(
+                        option, option_env, environments
+                    )
+                ]
+        return list(dict.fromkeys(names))
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -2883,6 +2960,11 @@ def to_dvc(
         used_envs.update(stage.environment_names)
     env_lock_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
+    # Environments composed into one are part of it, so their locks are
+    # inputs to its stages too
+    guest_names = {name: get_guest_names(name) for name in sorted(used_envs)}
+    for names in guest_names.values():
+        used_envs.update(names)
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
@@ -2938,6 +3020,11 @@ def to_dvc(
             ):
                 if source_path not in env_lock_fpaths[env_name]:
                     env_lock_fpaths[env_name].append(source_path)
+    for host_name, names in guest_names.items():
+        for name in names:
+            for lock_path in env_lock_fpaths.get(name, []):
+                if lock_path not in env_lock_fpaths.setdefault(host_name, []):
+                    env_lock_fpaths[host_name].append(lock_path)
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Convert legacy sbatch stages to shell-script + scheduler and rename
     # old `slurm:` stage fields to `scheduler:`, updating calkit.yaml
@@ -2985,6 +3072,8 @@ def to_dvc(
                     names += get_env_input_env_vars(
                         get_env(option, environments) or {}
                     )
+            for guest_name in get_guest_names(env_name):
+                names += get_env_input_env_vars(environments[guest_name])
         stage._env_var_names = sorted(set(names))
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
@@ -3777,7 +3866,10 @@ def list_artifacts(
         found = calkit.detect.detect_project_artifacts(
             wdir=wdir, ck_info=ck_info
         )
-        for path in found.get(kind, []):
+        found_paths = found.get(kind, [])
+        if kind == "figures":
+            found_paths = found_paths + get_figure_paths_with_origins(ck_info)
+        for path in found_paths:
             if path not in listed:
                 entries.append({"path": path, "detected": True})
                 listed.add(path)

@@ -1265,12 +1265,6 @@ environments:
   tex:
     kind: texlive
     release: 2025
-    packages:
-      - type1cm
-      - geometry
-      - underscore
-      - dvipng
-      - cm-super
   py:
     kind: uv
     path: pyproject.toml
@@ -1278,7 +1272,11 @@ environments:
       - tex
 ```
 
-Those are the packages Matplotlib's usetex needs.
+If `py` has Matplotlib, Calkit adds the packages its usetex needs,
+e.g., `cm-super` and `dvipng`, to `tex`'s lock,
+as it does for a document's packages.
+Others, e.g., for a font set in `text.latex.preamble`,
+go in `tex`'s `packages`.
 Commands in `py`, including its pipeline stages and the notebooks Calkit
 executes, then find TeX Live's programs after the environment's own and
 before anything installed on the computer,

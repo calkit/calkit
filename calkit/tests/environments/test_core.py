@@ -2822,3 +2822,21 @@ def test_composed_envs(tmp_dir, texlive_user_home, monkeypatch):
     env_vars = get_composed_env_vars("sw", envs["sw"], envs)
     assert env_vars is not None
     assert env_vars["PATH"].split(os.pathsep)[0] == bin_dir
+    # Matplotlib's usetex packages are added to the TeX Live environment's
+    # lock when the host has Matplotlib, but not just matplotlib-inline
+    add_host_tex_packages = calkit.environments.add_host_tex_packages
+    with open("pyproject.toml", "w") as f:
+        f.write('[project]\nname = "x"\ndependencies = ["ipykernel"]\n')
+    with open("uv.lock", "w") as f:
+        f.write('[[package]]\nname = "matplotlib-inline"\n')
+    assert add_host_tex_packages("py", envs["py"], "tex", envs["tex"]) == []
+    with open("uv.lock", "a") as f:
+        f.write('[[package]]\nname = "matplotlib"\n')
+    added = add_host_tex_packages("py", envs["py"], "tex", envs["tex"])
+    assert added == calkit.environments.MATPLOTLIB_TEX_PACKAGES
+    lock = calkit.environments.texlive.read_lock(
+        calkit.environments.texlive.get_lock_fpath("tex", envs["tex"])
+    )
+    assert lock is not None
+    assert lock["added"] == calkit.environments.MATPLOTLIB_TEX_PACKAGES
+    assert add_host_tex_packages("py", envs["py"], "tex", envs["tex"]) == []

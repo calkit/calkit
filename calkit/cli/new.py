@@ -1284,7 +1284,7 @@ def new_docker_env(
         env["inputs"] = inputs  # type: ignore
     if ports:
         env["ports"] = ports  # type: ignore
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -1643,7 +1643,7 @@ def new_publication(
     if env_name is not None and template_type == "latex":
         from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
 
-        envs[env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
+        calkit.set_yaml_item(envs, env_name, dict(DEFAULT_LATEX_ENVIRONMENT))
         ck_info["environments"] = envs
     # Copy in template files if applicable. This happens before the stage is
     # built so its inputs can be detected from the document itself: a template
@@ -1793,7 +1793,7 @@ def new_conda_env(
         env["prefix"] = prefix
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -1823,7 +1823,15 @@ def new_uv_env(
     ] = None,
     packages: Annotated[
         list[str] | None,
-        typer.Argument(help="Packages to include in the environment."),
+        typer.Argument(
+            help=(
+                "Packages to include in the environment, e.g., "
+                "'pandas==2.2.3' to keep a version."
+            )
+        ),
+    ] = None,
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     no_check: Annotated[
         bool,
@@ -1864,19 +1872,33 @@ def new_uv_env(
         )
         if res.returncode != 0:
             raise_error("Failed to create uv environment")
+    # uv picks the interpreter from .python-version, since requires-python
+    # is only a floor
+    python_version_path = os.path.join(envdir, ".python-version")
+    if python_version and not os.path.isfile(python_version_path):
+        res = subprocess.run(
+            ["uv", "python", "pin", python_version], cwd=envdir
+        )
+        if res.returncode != 0:
+            raise_error(f"Failed to pin Python {python_version}")
     if packages:
         res = subprocess.run(["uv", "add"] + packages, cwd=envdir)
         if res.returncode != 0:
             raise_error("Failed to add packages to uv environment")
     if not no_check:
         subprocess.run(["uv", "sync"], cwd=envdir)
-    envs[name] = dict(kind="uv", path=path)
+    env = dict(kind="uv", path=path)
+    if description is not None:
+        env["description"] = description
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
         repo = calkit.git.get_repo()
         repo.git.add(path)
+        if os.path.isfile(python_version_path):
+            repo.git.add(python_version_path)
         repo.git.add("calkit.yaml")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Add uv environment {name}"])
@@ -1972,7 +1994,7 @@ def new_slurm_env(
             env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2081,7 +2103,7 @@ def new_pbs_env(
             env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2188,7 +2210,7 @@ def new_uv_venv(
         env["python"] = python_version
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2287,7 +2309,7 @@ def new_venv(
         env["prefix"] = prefix
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2390,7 +2412,7 @@ def new_pixi_env(
     env = dict(kind="pixi", path="pixi.toml", name=name)
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2533,7 +2555,7 @@ def new_julia_env(
     env = dict(kind="julia", path=path, julia=julia_version)
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2686,7 +2708,7 @@ def new_renv(
     env_info = dict(kind="renv", path=path)
     if description:
         env_info["description"] = description
-    envs[name] = env_info
+    calkit.set_yaml_item(envs, name, env_info)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2767,7 +2789,7 @@ def new_texlive_env(
         env["packages"] = packages
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     calkit.save_calkit_info(ck_info)
     repo = calkit.git.get_repo()
@@ -2910,7 +2932,7 @@ def new_nix_env(
     env_info: dict = dict(kind="nix", path=path)
     if description:
         env_info["description"] = description
-    envs[name] = env_info
+    calkit.set_yaml_item(envs, name, env_info)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)

@@ -489,13 +489,31 @@ def test_new_uv_env(tmp_dir):
             "my-uv-env",
             "--python",
             "3.13",
-            "requests",
+            "--description",
+            "For analysis.",
+            "requests==2.32.3",
         ]
     )
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["my-uv-env"]
-    assert env["path"] == "pyproject.toml"
-    # Test one in a subdirectory when another env already exists
+    assert env == {
+        "kind": "uv",
+        "path": "pyproject.toml",
+        "description": "For analysis.",
+    }
+    # The interpreter is pinned, not just floored, and an exact version
+    # given for a package is kept rather than resolved to the latest
+    with open(".python-version") as f:
+        assert f.read().strip() == "3.13"
+    with open("pyproject.toml") as f:
+        pyproject = f.read()
+    assert 'requires-python = ">=3.13"' in pyproject
+    assert '"requests==2.32.3"' in pyproject
+    assert ".python-version" in git.Repo().git.ls_files().split()
+    # Test one in a subdirectory when another env already exists, and one
+    # that comes before another top-level key, which keeps its blank line
+    with open("calkit.yaml", "a") as f:
+        f.write("\npipeline:\n  stages: {}\n")
     subprocess.check_call(
         [
             "calkit",
@@ -513,6 +531,37 @@ def test_new_uv_env(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["main"]
     assert env["path"] == ".calkit/envs/main/pyproject.toml"
+    with open(".calkit/envs/main/.python-version") as f:
+        assert f.read().strip() == "3.13"
+    with open("calkit.yaml") as f:
+        ck_txt = f.read()
+    assert (
+        "    description: For analysis.\n"
+        "  main:\n"
+        "    kind: uv\n"
+        "    path: .calkit/envs/main/pyproject.toml\n"
+        "\npipeline:\n"
+    ) in ck_txt
+    # An existing interpreter pin is kept
+    os.makedirs(".calkit/envs/other")
+    with open(".calkit/envs/other/.python-version", "w") as f:
+        f.write("3.12.0\n")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-env",
+            "--name",
+            "other",
+            "--path",
+            ".calkit/envs/other/pyproject.toml",
+            "--python",
+            "3.12",
+            "--no-check",
+        ]
+    )
+    with open(".calkit/envs/other/.python-version") as f:
+        assert f.read() == "3.12.0\n"
 
 
 @pytest.mark.xdist_group("texlive")

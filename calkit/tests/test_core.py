@@ -202,6 +202,51 @@ def test_save_calkit_info_preserves_unicode(tmp_dir):
     assert "Î½".encode("utf-8") not in raw
 
 
+def test_set_yaml_item() -> None:
+    import io
+
+    def set_item(txt: str, key: str, value: object) -> str:
+        info = calkit.ryaml.load(txt)
+        calkit.set_yaml_item(info["envs"], key, value)
+        buf = io.StringIO()
+        calkit.ryaml.dump(info, buf)
+        return buf.getvalue()
+
+    # A new item goes above the blank line and comment ending the mapping,
+    # whether they trail a mapping or a sequence
+    txt = "envs:\n  a:\n    kind: uv\n\n# Stages\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda", "deps": ["x"]}) == (
+        "envs:\n  a:\n    kind: uv\n  b:\n    kind: conda\n    deps:\n"
+        "      - x\n\n# Stages\npipeline: {}\n"
+    )
+    txt = "envs:\n  a:\n    deps:\n      - x\n\npipeline: {}\n"
+    assert set_item(txt, "b", {}) == (
+        "envs:\n  a:\n    deps:\n      - x\n  b: {}\n\npipeline: {}\n"
+    )
+    # A comment at the end of the last item's line stays on it
+    txt = "envs:\n  a:\n    kind: uv  # Fast\n\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda"}) == (
+        "envs:\n  a:\n    kind: uv  # Fast\n  b:\n    kind: conda\n"
+        "\npipeline: {}\n"
+    )
+    txt = "envs:\n  a:\n    kind: uv  # Fast\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda"}) == (
+        "envs:\n  a:\n    kind: uv  # Fast\n  b:\n    kind: conda\n"
+        "pipeline: {}\n"
+    )
+    # Replacing the last item keeps the blank line, and replacing another
+    # leaves it where it was
+    txt = "envs:\n  a:\n    kind: uv\n  b:\n    kind: uv\n\npipeline: {}\n"
+    for key in ["a", "b"]:
+        assert set_item(txt, key, {"kind": "conda"}) == txt.replace(
+            f"{key}:\n    kind: uv", f"{key}:\n    kind: conda"
+        )
+    # Plain dicts, e.g., environments converted from a list, still get set
+    envs: dict = {"a": {"kind": "uv"}}
+    calkit.set_yaml_item(envs, "b", {"kind": "conda"})
+    assert envs == {"a": {"kind": "uv"}, "b": {"kind": "conda"}}
+
+
 def test_load_calkit_info(tmp_dir, monkeypatch):
     subpath = "some/project"
     os.makedirs(subpath)

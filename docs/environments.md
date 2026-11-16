@@ -562,6 +562,17 @@ this will create a `pyproject.toml` file in the project directory,
 and otherwise in `.calkit/envs/my-env/pyproject.toml`.
 The path can be controlled with the `--path` option.
 
+<!-- TODO: needs human review -->
+
+Packages given without a version get the latest one, with that as a floor,
+e.g., `matplotlib>=3.10`.
+To keep the versions an environment already uses,
+e.g., when converting one from a `uv-venv`,
+give them exactly, e.g., `pandas==2.2.3`.
+Passing `--python 3.13` writes a `.python-version` file next to the
+`pyproject.toml`, which is what decides the Python version uv uses,
+unless that file already exists.
+
 To create a new uv venv,
 simply replace `uv-env` with `uv-venv` in the above command and a
 `requirements.txt`

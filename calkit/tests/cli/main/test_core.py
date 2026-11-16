@@ -3834,6 +3834,69 @@ def test_xenv_env_var(tmp_dir):
     assert "KEY=VALUE" in proc.stderr
 
 
+@pytest.mark.xdist_group("texlive")
+def test_xenv_composed_env(tmp_dir, texlive_user_home, monkeypatch):
+    from calkit.cli.main import run_in_env
+    from calkit.environments import texlive
+
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    monkeypatch.delenv("FONTCONFIG_FILE", raising=False)
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "tex": {"kind": "texlive"},
+        "py": {"kind": "uv-venv", "path": "requirements.txt", "with": ["tex"]},
+    }
+    calkit.save_calkit_info(ck_info)
+    view_dir = texlive.check("tex", ck_info["environments"]["tex"])
+    bin_dir = os.path.join(view_dir, "bin", texlive.get_platform())
+    show = (
+        "import os, shutil; print(shutil.which('kpsewhich')); "
+        "print(os.environ['MPLCONFIGDIR']); "
+        "print(os.environ['PATH'].split(os.pathsep).index(os.path.dirname("
+        "shutil.which('python'))))"
+    )
+
+    def run(*args: str) -> list[str]:
+        return subprocess.check_output(
+            ["calkit", "xenv", "-n", "py", *args, "--", "python", "-c", show],
+            text=True,
+        ).splitlines()[-3:]
+
+    # The command gets the guest's programs after the host's own, and
+    # Matplotlib a config directory of its own
+    kpsewhich, mplconfigdir, python_index = run()
+    assert os.path.dirname(kpsewhich) == bin_dir
+    assert mplconfigdir.startswith(
+        os.path.join(texlive_user_home, ".calkit", "composed")
+    )
+    assert python_index == "0"
+    # This process isn't changed, which matters in a long-lived one, e.g.,
+    # Jupyter's server
+    path = os.environ["PATH"]
+    run_in_env(cmd=["python", "-c", "pass"], env_name="py")
+    assert os.environ["PATH"] == path
+    assert "FONTCONFIG_FILE" not in os.environ
+    # What the project and --env-var set wins
+    ck_info["env_vars"] = {"MPLCONFIGDIR": "from-project"}
+    calkit.save_calkit_info(ck_info)
+    assert run()[1] == "from-project"
+    assert run("--env-var", "MPLCONFIGDIR=from-cli")[1] == "from-cli"
+    # One that can't be composed is said so
+    ck_info["environments"]["py"]["with"] = ["nope"]
+    calkit.save_calkit_info(ck_info)
+    proc = subprocess.run(
+        ["calkit", "xenv", "-n", "py", "--", "python", "-c", "pass"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "Environment 'py' has 'nope' in 'with'" in proc.stderr
+    assert "Environment 'py': Environment" not in proc.stderr
+
+
 def test_add_says_why_git_refused(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     with open(".gitignore", "w") as f:

@@ -167,7 +167,7 @@ questions:
       its usetex and its fonts, so a figure can't silently change with the
       machine?
     answer:
-      if usetex_ok and from_store and not missing_tex_ok and shared_ok and not new_ok and fontconfig and arimo_new and cmu_new and not arimo_before and not cmu_before: >-
+      if usetex_ok and from_store and not missing_tex_ok and shared_ok and not new_ok and fontconfig and arimo_new and cmu_new and not arimo_before and not cmu_before and composed_ok and composed_latex and composed_dir and system_fonts > 0: >-
         Yes, if each composed environment also gets its own Matplotlib
         config directory. With TeX Live {release}'s base packages and
         {packages}, {rest_kb:.0f} KB besides {largest}'s {largest_mb:.0f} MB,
@@ -182,7 +182,11 @@ questions:
         a TeX Live environment, Arimo, metric-compatible with Arial, and CMU
         Serif, were found through fontconfig by a new font list but not by
         one built before. Building one took {font_list_s:.0f} s here, once
-        per config directory.
+        per config directory. Through 'calkit xenv', in an environment with
+        the TeX Live one composed into it, the figure rendered with the
+        store's latex and a config directory of its own, and fontconfig
+        found {system_fonts} of the system's fonts besides {store_fonts}
+        from the store.
       else: >-
         Not as the spike first found; see results/mpl-texlive.json.
     evidence:
@@ -207,6 +211,11 @@ questions:
           cmu_new: env_fonts.new_config.CMU Serif
           arimo_before: env_fonts.built_before.Arimo
           cmu_before: env_fonts.built_before.CMU Serif
+          composed_ok: composed.ok
+          composed_latex: composed.latex_from_store
+          composed_dir: composed.own_config_dir
+          system_fonts: composed.system_fonts
+          store_fonts: composed.store_fonts
           release: release
 
 environments:
@@ -226,6 +235,12 @@ environments:
     kind: uv
     path: ../pyproject.toml
     description: Calkit itself, from this checkout.
+  calkit-tex:
+    kind: uv
+    path: ../pyproject.toml
+    with:
+      - mpl-tex
+    description: Calkit itself, with mpl-tex composed into it.
   mpl-tex:
     kind: texlive
     release: 2025
@@ -338,6 +353,7 @@ pipeline:
         - ../calkit/environments/texlive.py
         - .calkit/env-locks/mpl-tex.json
         - .calkit/env-locks/mpl-fonts.json
+        - ../calkit/environments/core.py
       outputs:
         - path: results/mpl-texlive.json
           storage: git

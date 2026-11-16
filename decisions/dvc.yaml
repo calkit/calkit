@@ -110,6 +110,7 @@ stages:
       - ../calkit/environments/texlive.py
       - .calkit/env-locks/mpl-tex.json
       - .calkit/env-locks/mpl-fonts.json
+      - ../calkit/environments/core.py
       - ../uv.lock
       - ../.python-version
     outs:

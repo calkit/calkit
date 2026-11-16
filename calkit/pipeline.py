@@ -2676,6 +2676,26 @@ def to_dvc(
     )
     from calkit.models.io import EnvVarInput, ScheduleInput
 
+    def get_guest_names(env_name: str) -> list[str]:
+        # Those of the environments a switch picks from too, since a stage
+        # depends on every option's
+        env = environments.get(env_name)
+        if not isinstance(env, dict):
+            return []
+        names = [
+            name for name, _ in get_guest_envs(env_name, env, environments)
+        ]
+        if env.get("kind") == SWITCH_KIND:
+            for option in get_switch_options(env_name, environments):
+                option_env = get_env(option, environments) or {}
+                names += [
+                    name
+                    for name, _ in get_guest_envs(
+                        option, option_env, environments
+                    )
+                ]
+        return list(dict.fromkeys(names))
+
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info and "subprojects" not in ck_info:
@@ -2886,13 +2906,9 @@ def to_dvc(
     environments = ck_info.get("environments", {})
     # Environments composed into one are part of it, so their locks are
     # inputs to its stages too
-    guest_names: dict[str, list[str]] = {}
-    for host_name in sorted(used_envs):
-        host = environments.get(host_name)
-        if isinstance(host, dict):
-            guests = get_guest_envs(host_name, host, environments)
-            guest_names[host_name] = [name for name, _ in guests]
-            used_envs.update(guest_names[host_name])
+    guest_names = {name: get_guest_names(name) for name in sorted(used_envs)}
+    for names in guest_names.values():
+        used_envs.update(names)
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
@@ -3000,6 +3016,8 @@ def to_dvc(
                     names += get_env_input_env_vars(
                         get_env(option, environments) or {}
                     )
+            for guest_name in get_guest_names(env_name):
+                names += get_env_input_env_vars(environments[guest_name])
         stage._env_var_names = sorted(set(names))
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows

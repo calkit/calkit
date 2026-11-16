@@ -863,9 +863,16 @@ def get_guest_envs(
     Raises ``ValueError`` if the environment's kind can't have others
     composed into it, or one it names doesn't exist or can't be composed.
     """
-    names = env.get("with") or []
+    names = env.get("with")
     if not names:
         return []
+    if not isinstance(names, list) or not all(
+        isinstance(n, str) for n in names
+    ):
+        raise ValueError(
+            f"Environment '{env_name}' has 'with: {names}'; write it as a "
+            "list of environment names"
+        )
     kind = env.get("kind")
     if kind not in COMPOSABLE_HOST_KINDS:
         raise ValueError(
@@ -874,7 +881,7 @@ def get_guest_envs(
             f"{', '.join(COMPOSABLE_HOST_KINDS)} environments can"
         )
     guests = []
-    for name in names:
+    for name in dict.fromkeys(names):
         guest = envs.get(name)
         if guest is None:
             raise ValueError(
@@ -888,6 +895,11 @@ def get_guest_envs(
                 f"{', '.join(COMPOSABLE_GUEST_KINDS)} environments can be "
                 "composed into another"
             )
+        if guest.get("with"):
+            raise ValueError(
+                f"Environment '{name}' is composed into '{env_name}', so it "
+                "can't have a 'with' of its own"
+            )
         guests.append((name, guest))
     # Each sets the fonts fontconfig finds, which only one can do
     if sum(g["kind"] == "texlive" for _, g in guests) > 1:
@@ -899,32 +911,104 @@ def get_guest_envs(
 
 
 def get_composed_env_vars(
-    env_name: str, env: dict, envs: dict, verbose: bool = False
+    env_name: str,
+    env: dict,
+    envs: dict,
+    keep: list[str] | None = None,
+    verbose: bool = False,
 ) -> dict | None:
     """Return the environmental variables an environment's commands get
     with the environments in its ``with`` composed in, or None if it has
-    none.
+    none. Those named in ``keep``, e.g., the project's own, keep their
+    values.
 
-    Each is checked first, which is fast once it's ready. Matplotlib keys
-    its TeX output and font list caches by neither the TeX nor the fonts it
-    found, so they would carry over from other projects and other TeX
-    installations, and get a config directory of their own.
+    Each is checked first, which is fast once it's ready. Fontconfig is
+    pointed at the system's fonts as well as the TeX Live environment's,
+    and Matplotlib, which keys its TeX output and font list caches by
+    neither the TeX nor the fonts it found, gets a config directory of its
+    own, both kept in a folder for the host and its guests.
     """
+    from xml.sax.saxutils import escape
+
     from calkit.environments import texlive
 
+    if env.get("kind") == SWITCH_KIND:
+        picked = resolve_switch(env_name, envs)
+        if picked is None:
+            return None
+        env_name, env = picked, get_env(picked, envs) or {}
     guests = get_guest_envs(env_name, env, envs)
     if not guests:
         return None
     env_vars = dict(os.environ)
     view_dirs = []
     for name, guest in guests:
-        view_dir = texlive.check(name, guest, verbose=verbose)
+        try:
+            view_dir = texlive.check(name, guest, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise RuntimeError(f"Environment '{name}': {e}") from e
         env_vars = texlive.get_run_env_vars(view_dir, env_vars=env_vars)
         view_dirs.append(view_dir)
-    key = hashlib.sha256("\n".join(view_dirs).encode()).hexdigest()[:16]
-    env_vars["MPLCONFIGDIR"] = os.path.join(
-        calkit.get_user_home(), ".calkit", "matplotlib", key
-    )
+    # The system's fontconfig configuration, which the host's programs would
+    # read without one of the guest's, wherever this machine keeps it
+    calkit_dir = os.path.join(calkit.get_user_home(), ".calkit")
+    prior = os.environ.get("FONTCONFIG_FILE", "")
+    if prior and not os.path.abspath(prior).startswith(calkit_dir):
+        system_confs = [prior]
+    else:
+        prefixes = ["/", "/opt/homebrew", "/usr/local"]
+        if os.environ.get("CONDA_PREFIX"):
+            prefixes.append(os.environ["CONDA_PREFIX"])
+        if env.get("kind") == "conda" and env.get("prefix"):
+            prefixes.append(os.path.abspath(env["prefix"]))
+        if env.get("kind") == "pixi" and env.get("path"):
+            prefixes.append(
+                os.path.join(
+                    os.path.dirname(os.path.abspath(env["path"])),
+                    ".pixi",
+                    "envs",
+                    env.get("name") or "default",
+                )
+            )
+        system_confs = [
+            os.path.join(p, "etc", "fonts", "fonts.conf") for p in prefixes
+        ]
+    key = hashlib.sha256(
+        "\n".join(
+            [os.path.abspath(env.get("path", env_name))]
+            + system_confs
+            + view_dirs
+        ).encode()
+    ).hexdigest()[:16]
+    composed_dir = os.path.join(calkit_dir, "composed", key)
+    fonts_conf_fpath = os.path.join(composed_dir, "fonts.conf")
+    if not os.path.isfile(fonts_conf_fpath):
+        includes = system_confs + [env_vars["FONTCONFIG_FILE"]]
+        os.makedirs(composed_dir, exist_ok=True)
+        tmp_fpath = f"{fonts_conf_fpath}.{os.getpid()}.tmp"
+        with open(tmp_fpath, "w", newline="\n") as f:
+            f.write(
+                "\n".join(
+                    [
+                        '<?xml version="1.0"?>',
+                        '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">',
+                        "<fontconfig>",
+                        *(
+                            '  <include ignore_missing="yes">'
+                            f"{escape(c.replace(os.sep, '/'))}</include>"
+                            for c in includes
+                        ),
+                        "</fontconfig>",
+                    ]
+                )
+                + "\n"
+            )
+        os.replace(tmp_fpath, fonts_conf_fpath)
+    env_vars["FONTCONFIG_FILE"] = fonts_conf_fpath
+    env_vars["MPLCONFIGDIR"] = os.path.join(composed_dir, "matplotlib")
+    for name in keep or []:
+        if name in os.environ:
+            env_vars[name] = os.environ[name]
     return env_vars
 
 

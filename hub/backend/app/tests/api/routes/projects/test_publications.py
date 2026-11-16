@@ -12,7 +12,7 @@ from unittest.mock import patch
 import git
 from fastapi.testclient import TestClient
 
-import calkit.latex
+import calkit.environments.texlive
 from app.core import ryaml
 
 URL = "/projects/o/p/publications"
@@ -482,10 +482,10 @@ def test_post_project_overleaf_publication_creates_tex_env(
             assert resp.status_code == 200, resp.text
     with open(os.path.join(wdir, "calkit.yaml")) as f:
         ck = ryaml.load(f)
-    # Built with Calkit's LaTeX image, and found again by the second import
-    # rather than duplicated
+    # Built with TeX Live, and found again by the second import rather than
+    # duplicated
     assert ck["environments"] == {
-        "tex": dict(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
+        "tex": dict(calkit.environments.texlive.DEFAULT_ENVIRONMENT)
     }
     stages = ck["pipeline"]["stages"]
     assert {s["environment"] for s in stages.values()} == {"tex"}

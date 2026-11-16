@@ -596,9 +596,7 @@ const ImportOverleaf = ({
                 </FormControl>
                 {/* Environment name */}
                 <FormControl mt={4} isInvalid={!!errors.environment}>
-                  <FormLabel htmlFor="environment">
-                    Docker environment name
-                  </FormLabel>
+                  <FormLabel htmlFor="environment">Environment name</FormLabel>
                   <Input
                     autoComplete="off"
                     id="environment"

@@ -202,6 +202,13 @@ export type Request =
        * pulling, when answered on this computer, to show while it pulls.
        */
       pull?: boolean;
+      /**
+       * What Overleaf's editor has: every file's Git hash and the
+       * documents' text, by path, so this computer's copy can be checked or
+       * updated without downloading the project.
+       */
+      overleafFiles?: Record<string, string>;
+      overleafTexts?: Record<string, string>;
     }
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }

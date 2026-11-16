@@ -9,6 +9,7 @@ import {
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import {
   getEditorLabel,
+  getGitBlobSha,
   type CheckoutStatus,
   type LocalStatus,
 } from "../core/local";
@@ -54,6 +55,30 @@ import {
   STYLES,
   textInput,
 } from "../core/ui";
+import {
+  type CommentAuthor,
+  type FromReview,
+  type LineEdit,
+  type OverleafComment,
+  type OverleafSynced,
+  type OverleafThread,
+  type PdfRect,
+  type ToReview,
+  findParagraphByText,
+  getAddEdit,
+  getEditedLines,
+  getOverleafSyncedLines,
+  getReply,
+  getReviewThreads,
+  getThreadEdit,
+} from "../core/review";
+import { getZipTexts } from "../core/zip";
+import { type PdfBox, placePdfBoxes } from "../core/pdf-boxes";
+import {
+  findInSource,
+  lineMap,
+  paragraphLines,
+} from "../../../vscode-ext/src/latex/core";
 import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
 
 const PANEL_ID = "calkit-overleaf-panel";
@@ -891,13 +916,13 @@ let runsRequest: { key: string; promise: Promise<void> } | null = null;
 let runsFailures = 0;
 // A start from a run button, kept across their redraws
 let starting: { key: string; busy: boolean; error?: string } | null = null;
-// Whether a run on this computer saves and syncs with Overleaf after, as
-// last chosen, and whether the latest one did
-const SYNC_AFTER_RUN_KEY = "syncAfterRun";
-let syncAfterRun = true;
+// Whether syncing from this computer runs what's out of date first, as last
+// chosen, and whether the latest run synced after
+const RUN_BEFORE_SYNC_KEY = "runBeforeSync";
+let runBeforeSync = true;
 let lastRunSynced = true;
-void chrome.storage.local.get(SYNC_AFTER_RUN_KEY).then((stored) => {
-  syncAfterRun = stored[SYNC_AFTER_RUN_KEY] ?? true;
+void chrome.storage.local.get(RUN_BEFORE_SYNC_KEY).then((stored) => {
+  runBeforeSync = stored[RUN_BEFORE_SYNC_KEY] ?? true;
 });
 // Where the open panel shows them, redrawn as they change
 const runsBoxes = new Set<{
@@ -1031,6 +1056,10 @@ function afterSync(): void {
   if (localPdf) {
     showLocalPdf(localPdf.link, localPdf.path);
   }
+  // A run or sync changes which stages are out of date
+  if (currentLink?.local_path) {
+    void refreshRailPipeline(currentLink);
+  }
   if (!currentProjectId) {
     return;
   }
@@ -1085,7 +1114,8 @@ function syncNow(
 async function startRun(link: OverleafLinkPublic): Promise<void> {
   const key = linkKey(link);
   starting = { key, busy: true };
-  lastRunSynced = !link.local_path || syncAfterRun;
+  // A run started here syncs after; only one from before may not have
+  lastRunSynced = true;
   drawRuns();
   try {
     const run = await send({
@@ -1161,6 +1191,7 @@ function renderRuns(link: OverleafLinkPublic, offer: boolean): HTMLElement {
 
 function drawRuns(): void {
   drawStatusParts();
+  drawPanelActions();
   for (const entry of runsBoxes) {
     const { box, link, offer } = entry;
     if (!box.isConnected && box.dataset.drawn) {
@@ -1245,49 +1276,26 @@ function drawRuns(): void {
     const staleShown = editorProblems?.found.some((problems) =>
       problems.some((p) => p.kind === "stale"),
     );
-    // Running here is quick to start, so it's always on offer
+    // On this computer, running is part of syncing, below
     if (
-      !link.local_path &&
-      !offer &&
-      !staleShown &&
-      latest?.status !== "failed"
+      link.local_path ||
+      (!offer && !staleShown && latest?.status !== "failed")
     ) {
       continue;
     }
     const mine = starting?.key === linkKey(link) ? starting : null;
-    const syncAfter = el("input", { type: "checkbox" }) as HTMLInputElement;
-    syncAfter.checked = syncAfterRun;
-    syncAfter.addEventListener("change", () => {
-      syncAfterRun = syncAfter.checked;
-      void chrome.storage.local.set({ [SYNC_AFTER_RUN_KEY]: syncAfterRun });
-    });
     const start = el("button", {
       class: "action",
-      text: link.local_path ? "Run" : "Run and sync",
+      text: "Run and sync",
       disabled: !canWrite(link) || !runs.can_start || Boolean(mine?.busy),
       title: !canWrite(link)
         ? "You need write access to this project to run it"
         : runs.cannot_start_reason ??
-          (link.local_path
-            ? "Run the pipeline on this computer"
-            : "Run the pipeline on GitHub Actions, then sync what it " +
-              "makes here"),
+          "Run the pipeline on GitHub Actions, then sync what it makes here",
       onClick: () => void startRun(link),
     });
     box.append(
-      el("div", { class: "actions" }, [
-        start,
-        link.local_path
-          ? el(
-              "label",
-              {
-                class: "check",
-                title: "Save it and sync what it makes with Overleaf after",
-              },
-              [syncAfter, document.createTextNode("Sync with Overleaf after")],
-            )
-          : null,
-      ]),
+      el("div", { class: "actions" }, [start]),
       mine?.busy
         ? loading("Starting")
         : mine?.error
@@ -1744,22 +1752,29 @@ function renderOpenLocally(
   project: string,
   path?: string,
   inline = false,
+  // Shown as a link, e.g., the checkout's path, rather than a button
+  shown?: string,
 ): HTMLElement {
   localStatus ??= send({ type: "local.status" }).catch(() => ({
     permitted: false,
   }));
   const open = el("button", {
-    class: "action secondary",
-    text: "Open in editor",
+    class: shown ? "link" : "action secondary",
+    text: shown ?? "Open in editor",
     title: path ? `Open ${path} on this computer` : "Open it on this computer",
   });
   const message = el("div", { class: "small" });
   const label = (status: LocalStatus) => {
     const editor = getEditorLabel(status.editor);
-    open.textContent =
+    const text =
       status.editorInstalled === false
         ? `Install ${editor}`
         : `Open in ${editor}`;
+    if (shown) {
+      open.title = text;
+    } else {
+      open.textContent = text;
+    }
   };
   void localStatus.then(label);
   open.addEventListener("click", async () => {
@@ -2042,6 +2057,10 @@ function problemLine(problem: CitationProblem): HTMLElement {
 
 type Without<T> = T extends unknown ? Omit<T, "calkit"> : never;
 
+// The editor's count of scans, which go up with each edit, so the first
+// one, when it opens, isn't taken for an edit
+let lastEditorVersion: number | null = null;
+
 // What the editor last said the open document shows, and what's wrong with
 // each, by its index there
 let editorCitations: { version: number; items: EditorCitation[] } | null = null;
@@ -2229,32 +2248,28 @@ function watchEditor(): void {
       editorCitations = { version: message.version, items: message.items };
       drawRail();
       void checkCitations();
+      // The open file changed, and maybe its comments with it
+      scheduleReviewThreads();
+      // Overleaf saves edits as they're made, so they're there to sync
+      if (lastEditorVersion !== null && message.version !== lastEditorVersion) {
+        recheckAfterEdit(5000);
+      }
+      lastEditorVersion = message.version;
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
+    } else if (
+      message.type === "text" ||
+      message.type === "replaced" ||
+      message.type === "tree"
+    ) {
+      editorReplies.get(message.reqId)?.(message);
+      editorReplies.delete(message.reqId);
     }
   };
   window.addEventListener("message", listener);
   // What the open document shows, in case this script came in after the
   // editor last said
   toEditor({ type: "rescan" });
-}
-
-/** Where a problem lands in the PDF, in points from the page's top left. */
-interface PdfBox {
-  page: number;
-  h: number;
-  v: number;
-  width: number;
-  height: number;
-  message: string;
-  line: number;
-  column: number;
-  /** A figure's graphics options, since SyncTeX gives its unscaled size. */
-  options?: string;
-  /** Where the text block starts, for a figure sized by its width. */
-  textLeft?: number;
-  /** A value as shown, to box it rather than its whole line. */
-  text?: string;
 }
 
 type SynctexBox = Omit<PdfBox, "message" | "options" | "textLeft" | "text">;
@@ -2410,202 +2425,33 @@ async function drawPdfBoxes(): Promise<void> {
     return;
   }
   pdfBoxes = boxes;
-  placePdfBoxes();
+  showPdfBoxes();
 }
 
 /**
- * A figure's width on the page, in points, from its graphics options,
- * since SyncTeX gives the image's own size. A width relative to the text
- * assumes margins as wide on both sides.
+ * Draw what's wrong on Overleaf's PDF, and on the viewer with comments
+ * when it's showing Overleaf's.
  */
-function getFigureWidth(box: PdfBox, pageWidth: number): number {
-  const options = box.options ?? "";
-  const pt: Record<string, number> = {
-    pt: 72 / 72.27,
-    bp: 1,
-    in: 72,
-    cm: 72 / 2.54,
-    mm: 72 / 25.4,
-  };
-  const textWidth =
-    box.textLeft !== undefined && box.textLeft <= box.h
-      ? pageWidth - 2 * box.textLeft
-      : box.width;
-  const relative =
-    /width\s*=\s*([\d.]*)\s*\\(?:textwidth|linewidth|columnwidth|hsize)/.exec(
-      options,
-    );
-  const absolute =
-    /(?:^|[,\s])(width|height)\s*=\s*([\d.]+)\s*(pt|bp|in|cm|mm)/.exec(options);
-  const scale = /scale\s*=\s*([\d.]+)/.exec(options);
-  let width = box.width;
-  if (relative) {
-    width = (relative[1] ? Number(relative[1]) : 1) * textWidth;
-  } else if (absolute) {
-    const length = Number(absolute[2]) * pt[absolute[3]];
-    width =
-      absolute[1] === "width" ? length : (box.width * length) / box.height;
-  } else if (scale) {
-    width = Number(scale[1]) * box.width;
+function showPdfBoxes(): void {
+  const goTo = (box: PdfBox) =>
+    toEditor({ type: "goto", line: box.line, column: box.column });
+  placePdfBoxes(pdfBoxes, goTo);
+  if (review?.ready && !review.local) {
+    postToReview({ type: "boxes", boxes: pdfBoxes });
   }
-  // Never off the page, whatever the options say
-  return Math.max(Math.min(width, pageWidth - box.h), 1);
 }
 
-/**
- * Where a value's text is in its line on a page, in points, from the text
- * layer, which can split it, e.g., at a decimal point.
- */
-function findValueRect(
-  page: HTMLElement,
-  box: PdfBox,
-  scale: number,
-): { h: number; v: number; width: number; height: number } | null {
-  const text = box.text;
-  if (!text) {
-    return null;
-  }
-  const origin = page.getBoundingClientRect();
-  const left = origin.left + page.clientLeft;
-  const top = origin.top + page.clientTop;
-  // The page's text in order, and where each character came from
-  let joined = "";
-  const at: { node: Text; offset: number }[] = [];
-  for (const span of page.querySelectorAll<HTMLElement>(".textLayer span")) {
-    const node = span.firstChild;
-    if (!(node instanceof Text)) {
-      continue;
-    }
-    for (let offset = 0; offset < node.data.length; offset++) {
-      joined += node.data[offset];
-      at.push({ node, offset });
-    }
-  }
-  for (let i = joined.indexOf(text); i >= 0; i = joined.indexOf(text, i + 1)) {
-    const first = at[i];
-    const last = at[i + text.length - 1];
-    const range = document.createRange();
-    range.setStart(first.node, first.offset);
-    range.setEnd(last.node, last.offset + 1);
-    const rect = range.getBoundingClientRect();
-    const v = (rect.bottom - top) / scale;
-    const height = rect.height / scale;
-    // On the line the value's command is on
-    if (v - height > box.v + 2 || v < box.v - box.height - 2) {
-      continue;
-    }
-    return {
-      h: (rect.left - left) / scale,
-      v,
-      width: rect.width / scale,
-      height,
-    };
-  }
-  return null;
-}
-
-/**
- * Put a red box around each error on the PDF's pages, with a dot beside
- * it in the margin that says what's wrong on hover and goes to it in the
- * editor on a click.
- *
- * pdf.js clears a page it redraws, e.g., on zooming, so this runs whenever
- * the viewer changes, and leaves a page alone that already has its boxes.
- * A box's ``v`` is its bottom, e.g., a figure's baseline, and its height
- * goes up from there; for a scaled figure, it's the unscaled height.
- */
-function placePdfBoxes(): void {
-  if (!document.getElementById("calkit-pdf-box-style")) {
-    const style = document.createElement("style");
-    style.id = "calkit-pdf-box-style";
-    style.textContent = `
-      .calkit-pdf-box { position: absolute; border: 2px solid #e5484d;
-        border-radius: 2px; box-sizing: border-box; pointer-events: none;
-        z-index: 5; }
-      .calkit-pdf-tag { position: absolute; display: flex; align-items: center; gap: 4px;
-        height: 16px; min-width: 16px; padding: 0 5px; box-sizing: border-box;
-        border: none; border-radius: 8px; background: #e5484d; color: #fff;
-        font: 700 11px/16px -apple-system, BlinkMacSystemFont, sans-serif;
-        cursor: pointer; pointer-events: auto; white-space: nowrap;
-        z-index: 6; }
-      .calkit-pdf-tag .calkit-pdf-message { display: none; font-weight: 600; }
-      .calkit-pdf-tag:hover .calkit-pdf-message { display: inline; }
-    `;
-    document.head.append(style);
-  }
-  for (const page of document.querySelectorAll<HTMLElement>(
-    ".pdfViewer .page[data-page-number]",
-  )) {
-    const number = Number(page.dataset.pageNumber);
-    const scale = parseFloat(
-      getComputedStyle(page).getPropertyValue("--scale-factor"),
-    );
-    const wanted = Number.isFinite(scale)
-      ? pdfBoxes.filter((box) => box.page === number)
-      : [];
-    // Values are found in the text layer, which comes after the page
-    const texts = page.querySelector(".textLayer span") ? "t" : "";
-    const signature = `${scale}|${texts}|${wanted
-      .map((box) => [box.h, box.v, box.width, box.height].join(","))
-      .join(";")}`;
-    const existing = page.querySelectorAll(":scope > .calkit-pdf-box");
-    if (
-      existing.length === wanted.length &&
-      page.dataset.calkitBoxes === signature
-    ) {
-      continue;
-    }
-    existing.forEach((node) => node.remove());
-    page
-      .querySelectorAll(":scope > .calkit-pdf-tag")
-      .forEach((node) => node.remove());
-    page.dataset.calkitBoxes = signature;
-    const pageWidth = page.clientWidth / scale;
-    // Dots already in the margin, by height, so ones on a line go in a row
-    const dots = new Map<number, number>();
-    for (const box of wanted) {
-      let placed = { h: box.h, v: box.v, width: box.width, height: box.height };
-      if (box.options !== undefined) {
-        const width = getFigureWidth(box, pageWidth);
-        placed = { ...placed, width, height: (box.height * width) / box.width };
-      } else if (box.text) {
-        placed = findValueRect(page, box, scale) ?? placed;
-      }
-      const pad = box.text ? 2 : 0;
-      const tag = el(
-        "button",
-        {
-          class: "calkit-pdf-tag",
-          title: `${box.message}. Click to show it in the editor.`,
-          onClick: () =>
-            toEditor({ type: "goto", line: box.line, column: box.column }),
-        },
-        [
-          el("span", { text: "!" }),
-          el("span", { class: "calkit-pdf-message", text: box.message }),
-        ],
-      );
-      const outline = el("div", { class: "calkit-pdf-box" });
-      const top = (placed.v - placed.height - pad) * scale;
-      Object.assign(outline.style, {
-        left: `${(placed.h - pad) * scale}px`,
-        top: `${top}px`,
-        width: `${(placed.width + 2 * pad) * scale}px`,
-        height: `${(placed.height + 2 * pad) * scale}px`,
-      });
-      // In the margin beside the line, off the text, expanding leftward
-      const row = Math.round(top / 8);
-      const n = dots.get(row) ?? 0;
-      dots.set(row, n + 1);
-      const margin = Math.min(box.textLeft ?? placed.h, placed.h) * scale;
-      Object.assign(tag.style, {
-        right: `calc(100% - ${margin - 6 - n * 20}px)`,
-        top: `${top + Math.min(placed.height * scale, 16) / 2 - 8}px`,
-      });
-      page.append(outline, tag);
-    }
-  }
-}
+// What's under the pointer on the viewer with comments, shown as on
+// Overleaf's, or null once it's off the PDF
+let pdfPointer: (
+  point: {
+    page: number;
+    h: number;
+    v: number;
+    clientX: number;
+    clientY: number;
+  } | null,
+) => void = () => undefined;
 
 /** Follow Overleaf's builds and its PDF viewer, to keep the boxes on it. */
 function watchPdf(): void {
@@ -2637,6 +2483,7 @@ function watchPdf(): void {
     pdfBuild = next;
     synctexCache.clear();
     void drawPdfBoxes();
+    void sendOverleafPdf();
   };
   // Overleaf's own requests say which compile server has the build, but
   // a content script may not see them, so the PDF's download link, which
@@ -2665,7 +2512,7 @@ function watchPdf(): void {
     clearTimeout(timer);
     timer = setTimeout(() => {
       noteDownloadLink();
-      placePdfBoxes();
+      showPdfBoxes();
     }, 200);
   }).observe(document.body, {
     childList: true,
@@ -2774,6 +2621,44 @@ function watchPdf(): void {
     shown = { ...found, host };
     void fillTooltip(host.id, found.version, found.index);
   };
+  // Over the PDF, what's under the pointer once it rests decides, whether
+  // it's Overleaf's viewer or the one with comments
+  const pointAt = (point: {
+    page: number;
+    h: number;
+    v: number;
+    clientX: number;
+    clientY: number;
+  }) => {
+    clearTimeout(showing);
+    clearTimeout(hiding);
+    hiding = undefined;
+    showing = setTimeout(async () => {
+      const lookup = ++lookups;
+      const found = await citationAt(point.page, point.h, point.v);
+      if (lookup !== lookups) {
+        return;
+      }
+      if (!found) {
+        hide();
+      } else if (
+        shown?.index !== found.index ||
+        shown.version !== found.version
+      ) {
+        show(found, point.clientX, point.clientY);
+      }
+    }, 300);
+  };
+  pdfPointer = (point) => {
+    if (point) {
+      pointAt(point);
+      return;
+    }
+    clearTimeout(showing);
+    if (shown && hiding === undefined) {
+      hiding = setTimeout(hide, 300);
+    }
+  };
   document.addEventListener(
     "mousemove",
     (event) => {
@@ -2795,29 +2680,14 @@ function watchPdf(): void {
         }
         return;
       }
-      // Over the PDF, what's under the pointer once it rests decides
-      clearTimeout(hiding);
-      hiding = undefined;
       const bounds = page.getBoundingClientRect();
-      const h = (event.clientX - bounds.left - page.clientLeft) / scale;
-      const v = (event.clientY - bounds.top - page.clientTop) / scale;
-      const number = Number(page.dataset.pageNumber);
-      const { clientX, clientY } = event;
-      showing = setTimeout(async () => {
-        const lookup = ++lookups;
-        const found = await citationAt(number, h, v);
-        if (lookup !== lookups) {
-          return;
-        }
-        if (!found) {
-          hide();
-        } else if (
-          shown?.index !== found.index ||
-          shown.version !== found.version
-        ) {
-          show(found, clientX, clientY);
-        }
-      }, 300);
+      pointAt({
+        page: Number(page.dataset.pageNumber),
+        h: (event.clientX - bounds.left - page.clientLeft) / scale,
+        v: (event.clientY - bounds.top - page.clientTop) / scale,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
     },
     { passive: true },
   );
@@ -3391,36 +3261,11 @@ function showLocalPdf(link: OverleafLinkPublic, path: string): void {
     title: "PDF from this computer",
     style: { flex: "1", width: "100%", border: "none", background: "#fff" },
   });
-  frame.src = `${chrome.runtime.getURL("viewer.html")}?${params}`;
-  const edits =
-    lastCheck && linkKey(lastCheck.link) === linkKey(link)
-      ? lastCheck.status.commits_from_overleaf
-      : 0;
-  const bar = el(
-    "div",
-    {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        padding: "4px 8px",
-        background: "#f3f4f6",
-        font: "12px -apple-system, BlinkMacSystemFont, sans-serif",
-        color: "#111827",
-      },
-    },
-    [
-      el("span", {
-        style: { flex: "1" },
-        text: edits
-          ? `PDF from this computer, without ${edits} edit${
-              edits === 1 ? "" : "s"
-            } made on Overleaf since the last sync`
-          : "PDF from this computer",
-      }),
-    ],
-  );
-  const host = el("div", {}, [bar, frame]);
+  // Always with comments, whose own toggle hides them, since without them
+  // it would be the browser's plain viewer
+  frame.src = getReviewUrl(params);
+  // The switch in Overleaf's toolbar says which PDF this is
+  const host = el("div", {}, [frame]);
   Object.assign(host.style, {
     display: "flex",
     flexDirection: "column",
@@ -3434,13 +3279,1195 @@ function showLocalPdf(link: OverleafLinkPublic, path: string): void {
   }
   pane.append(host);
   localPdf = { host, link, path };
+  hideOverleafReview();
+  review = { frame, host, local: true, ready: false, buildId: null };
   mountPdfSwitch();
+  mountCommentsToggle();
 }
 
 function hideLocalPdf(): void {
   localPdf?.host.remove();
   localPdf = null;
+  if (review?.local) {
+    review = null;
+  }
   mountPdfSwitch();
+  mountCommentsToggle();
+  if (commentsOn) {
+    showOverleafReview();
+  }
+}
+
+// Whether the PDF is shown with its comments, in the viewer that has
+// them, for this Overleaf project
+let commentsOn = false;
+/** Whether someone last showed comments on an Overleaf project, by ID. */
+const COMMENTS_KEY = "pdfComments";
+
+// The viewer with comments over Overleaf's PDF pane, if it's shown
+let review: {
+  frame: HTMLIFrameElement;
+  host: HTMLElement;
+  /** Showing the PDF built on this computer, rather than Overleaf's. */
+  local: boolean;
+  ready: boolean;
+  /** The build of Overleaf's PDF it has. */
+  buildId: string | null;
+} | null = null;
+
+// The project's LaTeX source as the PDF was built from it, and as it is
+// now, which the threads and where they are in the PDF come from
+let reviewSources: {
+  buildId: string | null;
+  built: Map<string, string>;
+  current: Map<string, string>;
+} | null = null;
+
+// Answers from the editor's script, by request
+const editorReplies = new Map<
+  number,
+  (message: FromEditor & { type: "text" | "replaced" | "tree" }) => void
+>();
+let editorRequests = 0;
+
+/** The open file's text in the editor, or null if there isn't one. */
+function readEditor(): Promise<string | null> {
+  const reqId = ++editorRequests;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      editorReplies.delete(reqId);
+      resolve(null);
+    }, 3000);
+    editorReplies.set(reqId, (message) => {
+      clearTimeout(timer);
+      resolve(message.type === "text" ? message.text : null);
+    });
+    toEditor({ type: "read", reqId });
+  });
+}
+
+/**
+ * What the Overleaf project has, from its editor: every file's Git hash
+ * and the documents' text, by path, so Calkit on this computer can tell if
+ * its copy is current, or bring it up to date, without downloading the
+ * project. Null if Overleaf's file tree can't be read.
+ */
+async function getOverleafFiles(projectId: string): Promise<{
+  shas: Record<string, string>;
+  texts: Record<string, string>;
+} | null> {
+  const tree = await getOverleafTree();
+  if (!tree) {
+    return null;
+  }
+  const shas: Record<string, string> = {};
+  const texts: Record<string, string> = {};
+  for (const file of tree.files) {
+    shas[file.path] = file.hash;
+  }
+  try {
+    await Promise.all(
+      tree.docs.map(async (doc) => {
+        // Typing changes only the open one, so the rest are read again
+        // only once they may have been changed by someone else
+        const cached = overleafDocs.get(doc.id);
+        if (
+          cached &&
+          doc.id !== tree.openDocId &&
+          Date.now() - cached.at < DOC_CACHE_MS
+        ) {
+          shas[doc.path] = cached.sha;
+          texts[doc.path] = cached.text;
+          return;
+        }
+        const response = await fetch(
+          `/project/${projectId}/doc/${doc.id}/download`,
+        );
+        if (!response.ok) {
+          throw new Error(`Couldn't read ${doc.path} (${response.status})`);
+        }
+        const data = new Uint8Array(await response.arrayBuffer());
+        shas[doc.path] = await getGitBlobSha(data);
+        texts[doc.path] = new TextDecoder().decode(data);
+        overleafDocs.set(doc.id, {
+          at: Date.now(),
+          sha: shas[doc.path],
+          text: texts[doc.path],
+        });
+      }),
+    );
+  } catch {
+    return null;
+  }
+  return { shas, texts };
+}
+
+// What each Overleaf document held when last read, by ID, and for how long
+// that's trusted for those not open
+const overleafDocs = new Map<
+  string,
+  { at: number; sha: string; text: string }
+>();
+const DOC_CACHE_MS = 30 * 1000;
+
+/** Overleaf's file tree, from its editor, or null if it can't be read. */
+function getOverleafTree(): Promise<(FromEditor & { type: "tree" })["tree"]> {
+  const reqId = ++editorRequests;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      editorReplies.delete(reqId);
+      resolve(null);
+    }, 3000);
+    editorReplies.set(reqId, (message) => {
+      clearTimeout(timer);
+      resolve(message.type === "tree" ? message.tree : null);
+    });
+    toEditor({ type: "tree", reqId });
+  });
+}
+
+/** Make an edit to the open file in the editor, as typing would. */
+function editEditor(edit: LineEdit, lines: string[]): Promise<void> {
+  const reqId = ++editorRequests;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      editorReplies.delete(reqId);
+      reject(new Error("The editor didn't answer."));
+    }, 3000);
+    editorReplies.set(reqId, (message) => {
+      clearTimeout(timer);
+      if (message.type === "replaced" && message.error) {
+        reject(new Error(message.error));
+      } else {
+        resolve();
+      }
+    });
+    toEditor({
+      type: "replace",
+      reqId,
+      line: edit.line,
+      expected: lines.slice(edit.line - 1, edit.line - 1 + edit.count),
+      insert: edit.insert,
+    });
+  });
+}
+
+/**
+ * Open a file in Overleaf's editor, as clicking it in the file tree would,
+ * opening the folders it's in first, and wait for it to load. Says whether
+ * it could.
+ */
+async function openDocument(path: string): Promise<boolean> {
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+  if (openDocPath() === path) {
+    return true;
+  }
+  const parts = path.split("/");
+  let scope: ParentNode = document;
+  for (const [i, name] of parts.entries()) {
+    const item = [
+      ...scope.querySelectorAll<HTMLElement>('[role="treeitem"]'),
+    ].find((node) => node.getAttribute("aria-label") === name);
+    if (!item) {
+      return false;
+    }
+    if (i < parts.length - 1) {
+      if (item.getAttribute("aria-expanded") === "false") {
+        item
+          .querySelector<HTMLElement>(".folder-expand-collapse-button")
+          ?.click();
+        await sleep(300);
+      }
+      scope = item;
+      continue;
+    }
+    (
+      item.querySelector<HTMLElement>(".file-tree-entity-button") ?? item
+    ).click();
+  }
+  for (let i = 0; i < 50 && openDocPath() !== path; i++) {
+    await sleep(100);
+  }
+  // The editor shows it a moment after the tree says it's open
+  await sleep(300);
+  return openDocPath() === path;
+}
+
+/** Who's commenting, as Overleaf knows them. */
+function getCommentAuthor(): CommentAuthor {
+  try {
+    const user = JSON.parse(
+      document.querySelector<HTMLMetaElement>('meta[name="ol-user"]')
+        ?.content ?? "{}",
+    );
+    const name = [user.first_name, user.last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    return { name: name || user.email || "Someone", email: user.email ?? null };
+  } catch {
+    return { name: "Someone", email: null };
+  }
+}
+
+/**
+ * The text of the project's LaTeX files, except the ones Calkit writes:
+ * each on its own where the file tree shows its ID, else all from the
+ * project's download, e.g., for one in a folder that's closed.
+ */
+async function getOverleafTexts(
+  projectId: string,
+): Promise<Map<string, string>> {
+  const response = await fetch(`/project/${projectId}/entities`);
+  if (!response.ok) {
+    throw new Error(`Couldn't list the project's files (${response.status})`);
+  }
+  const { entities } = (await response.json()) as {
+    entities: { path: string; type: string }[];
+  };
+  const wanted = (path: string) =>
+    /\.tex$/i.test(path) && !path.startsWith("_calkit/");
+  const paths = entities
+    .filter((e) => e.type === "doc")
+    .map((e) => e.path.replace(/^\//, ""))
+    .filter(wanted);
+  const ids = await getDocIds();
+  if (paths.every((p) => ids.get(p))) {
+    const texts = await Promise.all(
+      paths.map(async (p) => {
+        const doc = await fetch(
+          `/project/${projectId}/doc/${ids.get(p)}/download`,
+        );
+        if (!doc.ok) {
+          throw new Error(`Couldn't read ${p} (${doc.status})`);
+        }
+        return [p, await doc.text()] as const;
+      }),
+    );
+    return new Map(texts);
+  }
+  const zip = await fetch(`/project/${projectId}/download/zip`);
+  if (!zip.ok) {
+    throw new Error(`Couldn't download the project (${zip.status})`);
+  }
+  return getZipTexts(await zip.arrayBuffer(), wanted);
+}
+
+/**
+ * The IDs of the project's documents, by their paths, from Overleaf's file
+ * tree, or else those the tree shows, which leaves out closed folders.
+ */
+async function getDocIds(): Promise<Map<string, string>> {
+  const tree = await getOverleafTree();
+  if (tree) {
+    return new Map(tree.docs.map((doc) => [doc.path, doc.id]));
+  }
+  const ids = new Map<string, string>();
+  for (const node of document.querySelectorAll<HTMLElement>(
+    '[data-file-type="doc"][data-file-id]',
+  )) {
+    const parts: string[] = [];
+    let item = node.closest('[role="treeitem"]');
+    while (item) {
+      parts.unshift(item.getAttribute("aria-label") ?? "");
+      item = item.parentElement?.closest('[role="treeitem"]') ?? null;
+    }
+    ids.set(parts.join("/"), node.dataset.fileId ?? "");
+  }
+  return ids;
+}
+
+/**
+ * The comments made on Overleaf, by the file each is in, and their
+ * threads. A file the tree doesn't show is found by the comments' text
+ * being where they say.
+ */
+async function getOverleafComments(
+  projectId: string,
+  texts: Map<string, string>,
+): Promise<{
+  byFile: Map<string, OverleafComment[]>;
+  threads: Record<string, OverleafThread>;
+}> {
+  const read = async <T>(path: string): Promise<T> => {
+    const response = await fetch(`/project/${projectId}/${path}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`Couldn't read Overleaf's comments (${response.status})`);
+    }
+    return response.json();
+  };
+  const [ranges, threads] = await Promise.all([
+    read<
+      {
+        id: string;
+        ranges?: { comments?: { op: { c: string; p: number; t: string } }[] };
+      }[]
+    >("ranges"),
+    read<Record<string, OverleafThread>>("threads"),
+  ]);
+  const paths = new Map(
+    [...(await getDocIds())].map(([path, id]) => [id, path]),
+  );
+  const byFile = new Map<string, OverleafComment[]>();
+  for (const doc of ranges) {
+    const comments = (doc.ranges?.comments ?? []).map(({ op }) => ({
+      thread: op.t,
+      text: op.c,
+      offset: op.p,
+    }));
+    if (!comments.length) {
+      continue;
+    }
+    const path =
+      paths.get(doc.id) ??
+      [...texts].find(([, text]) =>
+        comments.every(
+          (c) => text.slice(c.offset, c.offset + c.text.length) === c.text,
+        ),
+      )?.[0];
+    if (path) {
+      byFile.set(path, comments);
+    }
+  }
+  return { byFile, threads };
+}
+
+/** Delete a comment thread on Overleaf, as its review panel does. */
+async function deleteOverleafThread(
+  projectId: string,
+  docId: string,
+  thread: string,
+): Promise<void> {
+  const response = await fetch(
+    `/project/${projectId}/doc/${docId}/thread/${thread}`,
+    {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+        "X-Csrf-Token":
+          document.querySelector<HTMLMetaElement>('meta[name="ol-csrfToken"]')
+            ?.content ?? "",
+      },
+    },
+  );
+  // Already gone is as good as deleted
+  if (!response.ok && response.status !== 404) {
+    throw new Error(
+      `Overleaf didn't delete the comment thread (${response.status})`,
+    );
+  }
+}
+
+/** How each Overleaf thread was when last in step, by Overleaf project. */
+const OVERLEAF_SYNCED_KEY = "overleafCommentsSynced";
+
+/**
+ * Bring the open file's Overleaf comments into its source, through the
+ * editor, and remember how each thread now is. Only the open one, so
+ * someone's file isn't switched under them; each catches up when opened.
+ * Says whether the source changed.
+ */
+async function syncOverleafComments(
+  projectId: string,
+  file: string,
+  sources: { current: Map<string, string> },
+): Promise<boolean> {
+  const { byFile, threads } = await getOverleafComments(
+    projectId,
+    sources.current,
+  );
+  const lines = (sources.current.get(file) ?? "").split("\n");
+  const comments = byFile.get(file) ?? [];
+  if (!comments.length && !lines.some((l) => /overleaf=/.test(l))) {
+    return false;
+  }
+  const stored = (await chrome.storage.local.get(OVERLEAF_SYNCED_KEY))[
+    OVERLEAF_SYNCED_KEY
+  ] as Record<string, Record<string, OverleafSynced>> | undefined;
+  const known = stored?.[projectId] ?? {};
+  const {
+    lines: next,
+    pushes,
+    synced,
+  } = getOverleafSyncedLines(
+    lines,
+    comments,
+    threads,
+    known,
+    getCommentAuthor().name,
+  );
+  const docId = (await getDocIds()).get(file);
+  const csrf =
+    document.querySelector<HTMLMetaElement>('meta[name="ol-csrfToken"]')
+      ?.content ?? "";
+  const post = async (path: string, body?: object) => {
+    const response = await fetch(`/project/${projectId}/${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Csrf-Token": csrf,
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Overleaf didn't take a change to a comment (${response.status})`,
+      );
+    }
+  };
+  // The source first, which fails if it was edited meanwhile, before
+  // Overleaf is told anything, so nothing's sent twice
+  const changed = next.join("\n") !== lines.join("\n");
+  if (changed) {
+    // Only what changed, so the rest of the file is left as it is
+    let prefix = 0;
+    while (
+      prefix < lines.length &&
+      prefix < next.length &&
+      lines[prefix] === next[prefix]
+    ) {
+      prefix++;
+    }
+    let suffix = 0;
+    while (
+      suffix < lines.length - prefix &&
+      suffix < next.length - prefix &&
+      lines[lines.length - 1 - suffix] === next[next.length - 1 - suffix]
+    ) {
+      suffix++;
+    }
+    await editEditor(
+      {
+        line: prefix + 1,
+        count: lines.length - prefix - suffix,
+        insert: next.slice(prefix, next.length - suffix),
+      },
+      lines,
+    );
+    sources.current.set(file, next.join("\n"));
+  }
+  // This file's threads replace what was known of them, those Overleaf
+  // has yet to hear about from here aside, so they're sent again next time
+  const here = new Set([
+    ...comments.map((c) => c.thread),
+    ...getReviewThreads(new Map([[file, lines.join("\n")]])).flatMap((t) =>
+      t.overleaf ? [t.overleaf] : [],
+    ),
+  ]);
+  const kept = Object.fromEntries(
+    Object.entries(known).filter(([id]) => !here.has(id)),
+  );
+  const save = (state: Record<string, OverleafSynced>) =>
+    chrome.storage.local.set({
+      [OVERLEAF_SYNCED_KEY]: { ...stored, [projectId]: { ...kept, ...state } },
+    });
+  const unsent = new Set(pushes.map((p) => p.thread));
+  const done = Object.fromEntries(
+    Object.entries(synced).filter(([id]) => !unsent.has(id)),
+  );
+  const pending = Object.fromEntries(
+    [...unsent].filter((id) => known[id]).map((id) => [id, known[id]]),
+  );
+  await save({ ...pending, ...done });
+  for (const push of pushes) {
+    // Without its document's ID, Overleaf can't be told, so it's left to
+    // be sent next time
+    if ((push.deleted || push.resolved !== undefined) && !docId) {
+      continue;
+    }
+    if (push.deleted) {
+      await deleteOverleafThread(projectId, docId as string, push.thread);
+    } else {
+      for (const content of push.replies) {
+        await post(`thread/${push.thread}/messages`, { content });
+      }
+      if (push.resolved !== undefined) {
+        await post(
+          `doc/${docId}/thread/${push.thread}/${
+            push.resolved ? "resolve" : "reopen"
+          }`,
+        );
+      }
+    }
+    delete pending[push.thread];
+    if (synced[push.thread]) {
+      done[push.thread] = synced[push.thread];
+    }
+    await save({ ...pending, ...done });
+  }
+  return changed;
+}
+
+// The file whose Overleaf comments were last brought into its source
+let overleafSyncedFile: string | null = null;
+
+/** The address of the viewer with comments, for this page. */
+function getReviewUrl(params: URLSearchParams): string {
+  const all = new URLSearchParams(params);
+  all.set("parent", window.location.origin);
+  // Overleaf's own PDF toolbar and backdrop, whichever theme is on
+  const toolbar = document.querySelector(".toolbar-pdf");
+  const pane = toolbar?.closest(".pdf");
+  if (toolbar) {
+    all.set("bar", getComputedStyle(toolbar).backgroundColor);
+    all.set("barText", getComputedStyle(toolbar).color);
+  }
+  if (pane) {
+    all.set("backdrop", getComputedStyle(pane).backgroundColor);
+  }
+  // The panel's, from the variables Overleaf's own themed panels use
+  const theme = getComputedStyle(document.body);
+  for (const [param, name] of [
+    ["bg", "--bg-primary-themed"],
+    ["fg", "--content-primary-themed"],
+    ["muted", "--content-placeholder-themed"],
+    ["border", "--bg-tertiary-themed"],
+    ["raised", "--bg-secondary-themed"],
+    ["raisedHover", "--bg-tertiary-themed"],
+  ]) {
+    const color = theme.getPropertyValue(name).trim();
+    if (color) {
+      all.set(param, color);
+    }
+  }
+  all.set(
+    "key",
+    `${currentProjectId}:${all.has("localProject") ? "local" : "overleaf"}`,
+  );
+  return `${chrome.runtime.getURL("review.html")}?${all}`;
+}
+
+function postToReview(
+  message: Without<ToReview>,
+  transfer: Transferable[] = [],
+): void {
+  review?.frame.contentWindow?.postMessage(
+    { calkit: "review", ...message },
+    new URL(chrome.runtime.getURL("")).origin,
+    transfer,
+  );
+}
+
+/** Show Overleaf's PDF in the viewer with comments, over its own. */
+function showOverleafReview(): void {
+  if (review && !review.local && review.host.isConnected) {
+    return;
+  }
+  hideOverleafReview();
+  const pane = getPdfPane();
+  if (!pane || localPdf) {
+    return;
+  }
+  const frame = el("iframe", {
+    title: "PDF with comments",
+    style: { flex: "1", width: "100%", border: "none", background: "#fff" },
+  });
+  frame.src = getReviewUrl(new URLSearchParams());
+  const host = el("div", {}, [frame]);
+  Object.assign(host.style, {
+    display: "flex",
+    flexDirection: "column",
+    background: "#fff",
+    position: "absolute",
+    inset: "0",
+    zIndex: "20",
+  });
+  if (getComputedStyle(pane).position === "static") {
+    pane.style.position = "relative";
+  }
+  pane.append(host);
+  review = { frame, host, local: false, ready: false, buildId: null };
+}
+
+function hideOverleafReview(): void {
+  if (review && !review.local) {
+    review.host.remove();
+    review = null;
+  }
+}
+
+/** Send the viewer Overleaf's latest PDF, if it hasn't got it. */
+async function sendOverleafPdf(): Promise<void> {
+  const r = review;
+  const build = pdfBuild;
+  if (!r?.ready || r.local || !build || r.buildId === build.buildId) {
+    return;
+  }
+  const link = document.querySelector<HTMLAnchorElement>(
+    'a[href*="/build/"][href*="output.pdf"]',
+  );
+  if (!link) {
+    return;
+  }
+  r.buildId = build.buildId;
+  try {
+    const response = await fetch(link.href);
+    if (!response.ok) {
+      throw new Error(`Couldn't get the PDF (${response.status})`);
+    }
+    const data = await response.arrayBuffer();
+    if (review !== r) {
+      return;
+    }
+    postToReview({ type: "load", data }, [data]);
+    postToReview({ type: "boxes", boxes: pdfBoxes });
+    await refreshReviewThreads(true);
+  } catch (e) {
+    r.buildId = null;
+    postToReview({
+      type: "status",
+      text: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/** Where a box Overleaf's SyncTeX gives is, as the viewer measures. */
+function toPdfRect(box: SynctexBox): PdfRect {
+  return {
+    page: box.page,
+    x: box.h,
+    y: box.v - box.height,
+    width: box.width,
+    height: box.height,
+  };
+}
+
+/**
+ * Send the viewer the threads in the source, with where each is in
+ * Overleaf's PDF. The project's files are read again for a new build, and
+ * otherwise only the open one, from the editor.
+ */
+async function refreshReviewThreads(full: boolean): Promise<void> {
+  const r = review;
+  const projectId = currentProjectId;
+  if (!r?.ready || !projectId) {
+    return;
+  }
+  try {
+    let sources = reviewSources;
+    const buildId = r.local ? null : pdfBuild?.buildId ?? null;
+    if (full || !sources) {
+      const texts = await getOverleafTexts(projectId);
+      sources = {
+        buildId,
+        // What a build was made from is read once, when it's new
+        built:
+          sources && sources.buildId === buildId
+            ? sources.built
+            : new Map(texts),
+        current: texts,
+      };
+      reviewSources = sources;
+    }
+    const file = openDocPath();
+    const live = file && sources.current.has(file) ? await readEditor() : null;
+    if (file && live !== null) {
+      sources.current.set(file, live);
+      // Overleaf's comments are asked for with a new build, or a file just
+      // opened, not on every edit
+      if (full || overleafSyncedFile !== file) {
+        overleafSyncedFile = file;
+        try {
+          await syncOverleafComments(projectId, file, sources);
+        } catch (e) {
+          postToReview({
+            type: "status",
+            text: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+    }
+    const threads = getReviewThreads(sources.current);
+    const build = pdfBuild;
+    const synctexUsed = !r.local && Boolean(build);
+    if (build && !r.local) {
+      const { built, current } = sources;
+      await Promise.all(
+        threads.map(async (t) => {
+          if (!t.anchor) {
+            return;
+          }
+          const map = lineMap(
+            (built.get(t.path) ?? "").split("\n"),
+            (current.get(t.path) ?? "").split("\n"),
+          );
+          const [start] = await synctex(
+            projectId,
+            build,
+            t.path,
+            map.toBefore(t.anchor.line),
+            0,
+          );
+          const ends = await synctex(
+            projectId,
+            build,
+            t.path,
+            map.toBefore(t.anchor.end_line),
+            0,
+          );
+          if (start) {
+            t.start = toPdfRect(start);
+          }
+          if (ends.length) {
+            t.end = toPdfRect(ends[ends.length - 1]);
+          }
+        }),
+      );
+    }
+    if (review === r) {
+      postToReview({
+        type: "threads",
+        threads,
+        synctex: synctexUsed,
+        stale: [],
+      });
+    }
+  } catch (e) {
+    postToReview({
+      type: "status",
+      text: `Couldn't read the comments: ${e instanceof Error ? e.message : e}`,
+    });
+  }
+}
+
+let reviewTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleReviewThreads(): void {
+  if (!review?.ready) {
+    return;
+  }
+  clearTimeout(reviewTimer);
+  reviewTimer = setTimeout(() => void refreshReviewThreads(false), 800);
+}
+
+/**
+ * The source file and line at a place in the PDF: by SyncTeX for
+ * Overleaf's, else the paragraph sharing the most words with the text
+ * there, as a line in the source now.
+ */
+async function getSourceAt(
+  page: number,
+  x: number,
+  y: number,
+  context: string,
+): Promise<{
+  file: string;
+  line: number;
+  start?: PdfRect;
+  text?: string;
+} | null> {
+  const projectId = currentProjectId;
+  const sources = reviewSources;
+  const build = pdfBuild;
+  if (!projectId || !sources) {
+    return null;
+  }
+  if (review && !review.local && build) {
+    const params = new URLSearchParams({
+      page: String(page),
+      h: String(x),
+      v: String(y),
+    });
+    setBuildParams(params, build);
+    const response = await fetch(`/project/${projectId}/sync/pdf?${params}`, {
+      headers: { Accept: "application/json" },
+    });
+    const data = response.ok
+      ? ((await response.json()) as { code?: { file: string; line: number }[] })
+      : {};
+    const found = data.code?.find((c) => sources.current.has(c.file));
+    if (found) {
+      const map = lineMap(
+        (sources.built.get(found.file) ?? "").split("\n"),
+        (sources.current.get(found.file) ?? "").split("\n"),
+      );
+      const line = map.toAfter(found.line);
+      const lines = (sources.current.get(found.file) ?? "").split("\n");
+      const para = paragraphLines(lines, line);
+      const [box] = await synctex(
+        projectId,
+        build,
+        found.file,
+        map.toBefore(para.start),
+        0,
+      );
+      return { file: found.file, line, start: box && toPdfRect(box) };
+    }
+  }
+  const para = findParagraphByText(sources.current, context);
+  return para && { file: para.file, line: para.line, text: para.text };
+}
+
+/**
+ * Edit a file through Overleaf's editor, opening it first, so the change
+ * is saved and shared like any other.
+ */
+async function editSource(
+  file: string,
+  getEdit: (lines: string[]) => LineEdit,
+): Promise<LineEdit> {
+  if (!(await openDocument(file))) {
+    throw new Error(`Couldn't open ${file} in the editor.`);
+  }
+  const text = await readEditor();
+  if (text === null) {
+    throw new Error(`Couldn't read ${file} from the editor.`);
+  }
+  const lines = text.split("\n");
+  const edit = getEdit(lines);
+  await editEditor(edit, lines);
+  reviewSources?.current.set(file, getEditedLines(lines, edit).join("\n"));
+  return edit;
+}
+
+/**
+ * Add a thread from the source to Overleaf's comments through Overleaf's
+ * own comment form, since a comment's place in the text can only be set by
+ * its editor: its text is selected, the form opened, and its first message
+ * put in and sent. The next sync links the two.
+ */
+async function postToOverleaf(
+  file: string,
+  ref: { id?: string; line?: number },
+  me: string,
+): Promise<void> {
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+  if (!(await openDocument(file))) {
+    throw new Error(`Couldn't open ${file} in the editor.`);
+  }
+  const text = (await readEditor()) ?? "";
+  const lines = text.split("\n");
+  const thread = getReviewThreads(new Map([[file, text]])).find((t) =>
+    ref.id
+      ? t.id === ref.id
+      : ref.line !== undefined &&
+        ref.line >= t.line &&
+        ref.line < t.line + t.nlines,
+  );
+  if (!thread?.anchor || !thread.messages.length) {
+    throw new Error("That comment thread is no longer in the source.");
+  }
+  if (thread.overleaf) {
+    return;
+  }
+  // Its highlight where it is in the paragraph, else the paragraph's start
+  const { anchor, highlight } = thread;
+  let found: { line: number; start: number; end: number } | undefined;
+  for (let n = anchor.line; highlight && !found && n <= anchor.end_line; n++) {
+    found = findInSource(lines, n, highlight.text);
+  }
+  toEditor({
+    type: "select",
+    from: found
+      ? { line: found.line, column: found.start }
+      : { line: anchor.line, column: 0 },
+    to: found
+      ? { line: found.line, column: found.end }
+      : { line: anchor.line, column: lines[anchor.line - 1]?.length ?? 0 },
+  });
+  await sleep(300);
+  window.dispatchEvent(new Event("add-new-review-comment"));
+  // Overleaf's comment box is a small editor of its own, out of sight
+  let box: HTMLElement | null = null;
+  for (let i = 0; i < 30 && !box; i++) {
+    await sleep(100);
+    box =
+      document
+        .querySelector(".review-panel-add-comment-editor")
+        ?.shadowRoot?.querySelector<HTMLElement>(".cm-content") ?? null;
+  }
+  if (!box) {
+    throw new Error("Overleaf's comment form didn't open.");
+  }
+  const [first] = thread.messages;
+  // Pasted into that box, since typing commands go to whatever editor the
+  // page thinks has focus, which can be the document's
+  const data = new DataTransfer();
+  data.setData(
+    "text/plain",
+    first.author === me ? first.text : `${first.author}: ${first.text}`,
+  );
+  box.focus();
+  box.dispatchEvent(
+    new ClipboardEvent("paste", {
+      clipboardData: data,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  const root = box.getRootNode() as ShadowRoot;
+  const button = root.host
+    ?.closest("form")
+    ?.querySelector<HTMLButtonElement>('button[type="submit"]');
+  for (let i = 0; i < 20 && button?.disabled; i++) {
+    await sleep(100);
+  }
+  if (!button || button.disabled) {
+    throw new Error("Couldn't fill in Overleaf's comment form.");
+  }
+  button.click();
+  // Time for Overleaf to save it before it's linked
+  await sleep(1500);
+}
+
+/** Do what the viewer with comments asks. */
+async function onReviewMessage(message: FromReview): Promise<void> {
+  const r = review;
+  if (!r) {
+    return;
+  }
+  const author = getCommentAuthor();
+  const ref = (m: { id?: string; line?: number }) =>
+    m.id ? { id: m.id } : { line: m.line };
+  try {
+    switch (message.type) {
+      case "ready":
+        r.ready = true;
+        r.buildId = null;
+        if (r.local) {
+          await refreshReviewThreads(true);
+        } else {
+          await sendOverleafPdf();
+        }
+        return;
+      case "locate": {
+        // Always answered, without a source if it can't be found, since
+        // the viewer waits on it
+        const found = await getSourceAt(
+          message.page,
+          message.x,
+          message.y,
+          message.context,
+        ).catch(() => null);
+        postToReview({ type: "located", reqId: message.reqId, ...found });
+        return;
+      }
+      case "sourceAt":
+      case "openSource": {
+        const found =
+          message.type === "openSource"
+            ? { file: message.file, line: message.line }
+            : await getSourceAt(
+                message.page,
+                message.x,
+                message.y,
+                message.context,
+              );
+        if (!found || !(await openDocument(found.file))) {
+          postToReview({ type: "status", text: "No source found there." });
+          return;
+        }
+        toEditor({ type: "goto", line: found.line, column: 0 });
+        return;
+      }
+      case "add": {
+        const edit = await editSource(message.file, (lines) =>
+          getAddEdit(
+            lines,
+            message.line,
+            author,
+            message.text,
+            message.highlight,
+            message.occ,
+          ),
+        );
+        // On Overleaf too, so it's in its review panel, kept in step
+        const id = /\bid=([0-9a-f]{8})\b/.exec(edit.insert[0])?.[1];
+        if (id) {
+          try {
+            await postToOverleaf(message.file, { id }, author.name);
+          } catch (e) {
+            postToReview({
+              type: "status",
+              text: `Saved in the source, but not on Overleaf: ${
+                e instanceof Error ? e.message : e
+              }`,
+            });
+            overleafSyncedFile = null;
+            await refreshReviewThreads(false);
+            return;
+          }
+        }
+        break;
+      }
+      case "reply":
+        await editSource(message.file, (lines) =>
+          getThreadEdit(lines, ref(message), getReply(author, message.text)),
+        );
+        break;
+      case "resolve":
+        await editSource(message.file, (lines) =>
+          getThreadEdit(lines, ref(message), (t) => ({
+            ...t,
+            resolved: message.resolved,
+          })),
+        );
+        break;
+      case "delete": {
+        // One kept in step with Overleaf goes there too, first, or the
+        // next sync would bring it back
+        const thread = getReviewThreads(
+          new Map([
+            [message.file, reviewSources?.current.get(message.file) ?? ""],
+          ]),
+        ).find((t) =>
+          message.id
+            ? t.id === message.id
+            : message.line !== undefined &&
+              message.line >= t.line &&
+              message.line < t.line + t.nlines,
+        );
+        const docId = (await getDocIds()).get(message.file);
+        if (thread?.overleaf && currentProjectId) {
+          if (!docId) {
+            throw new Error(
+              `Open ${message.file} in Overleaf to delete its comment there.`,
+            );
+          }
+          await deleteOverleafThread(currentProjectId, docId, thread.overleaf);
+        }
+        await editSource(message.file, (lines) =>
+          getThreadEdit(lines, ref(message), null),
+        );
+        break;
+      }
+      case "goto":
+        toEditor({ type: "goto", line: message.line, column: message.column });
+        return;
+      case "pointer": {
+        // Its place on this page, over the viewer
+        const frame = r.frame.getBoundingClientRect();
+        const point = message.point;
+        pdfPointer(
+          point && !r.local
+            ? {
+                page: point.page,
+                h: point.x,
+                v: point.y,
+                clientX: frame.left + point.clientX,
+                clientY: frame.top + point.clientY,
+              }
+            : null,
+        );
+        return;
+      }
+      case "postToOverleaf":
+        await postToOverleaf(message.file, ref(message), author.name);
+        break;
+      case "openIssue":
+        if (/^https?:\/\//.test(message.url)) {
+          window.open(message.url, "_blank", "noopener");
+        }
+        return;
+    }
+    postToReview({ type: "status", text: "" });
+    // So a change to a thread kept in step with Overleaf goes there now
+    overleafSyncedFile = null;
+    await refreshReviewThreads(false);
+  } catch (e) {
+    postToReview({
+      type: "status",
+      text: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/** Hear from the viewer with comments, and only from it. */
+function watchReview(): void {
+  const origin = new URL(chrome.runtime.getURL("")).origin;
+  window.addEventListener("message", (event) => {
+    if (
+      !review ||
+      event.source !== review.frame.contentWindow ||
+      event.origin !== origin ||
+      event.data?.calkit !== "review"
+    ) {
+      return;
+    }
+    void onReviewMessage(event.data as FromReview);
+  });
+}
+
+/**
+ * A button in Overleaf's PDF toolbar that shows the PDF with the comments
+ * in its source, remembered per Overleaf project. Mounted again whenever
+ * Overleaf redraws the toolbar.
+ */
+function mountCommentsToggle(): void {
+  const toolbar = document.querySelector<HTMLElement>(".toolbar-pdf-left");
+  const existing = document.getElementById("calkit-comments-toggle");
+  const projectId = currentProjectId;
+  // This computer's PDF always has them, so it's only for Overleaf's
+  if (!toolbar || !projectId || !isExtensionAlive() || localPdf) {
+    existing?.remove();
+    return;
+  }
+  // Redrawn by Overleaf, so shown again where it now is
+  if (commentsOn && !review?.host.isConnected) {
+    review = null;
+    showOverleafReview();
+  }
+  if (
+    existing?.parentElement === toolbar &&
+    existing.dataset.on === `${commentsOn}` &&
+    existing.dataset.project === projectId
+  ) {
+    return;
+  }
+  const first = !existing || existing.dataset.project !== projectId;
+  existing?.remove();
+  const set = (on: boolean) => {
+    commentsOn = on;
+    void chrome.storage.local.get(COMMENTS_KEY).then((stored) => {
+      const all: Record<string, boolean> = stored[COMMENTS_KEY] ?? {};
+      all[projectId] = on;
+      void chrome.storage.local.set({ [COMMENTS_KEY]: all });
+    });
+    if (on) {
+      showOverleafReview();
+    } else {
+      hideOverleafReview();
+    }
+    mountCommentsToggle();
+  };
+  const button = el("button", {
+    text: "Comments",
+    title: commentsOn
+      ? "Hide the comments in the source"
+      : "Show the PDF with the comments in its source, and add some",
+    attrs: {
+      id: "calkit-comments-toggle",
+      "aria-pressed": String(commentsOn),
+    },
+    style: {
+      marginLeft: "8px",
+      border: "none",
+      padding: "2px 10px",
+      borderRadius: "999px",
+      cursor: "pointer",
+      font: "inherit",
+      fontSize: "12px",
+      whiteSpace: "nowrap",
+      background: commentsOn ? "#009688" : "rgba(127, 127, 127, 0.18)",
+      color: commentsOn ? "#fff" : "inherit",
+    },
+    onClick: () => set(!commentsOn),
+  });
+  button.dataset.on = `${commentsOn}`;
+  button.dataset.project = projectId;
+  toolbar.append(button);
+  // The last choice for this project applies when it's opened
+  if (first) {
+    void chrome.storage.local.get(COMMENTS_KEY).then((stored) => {
+      if ((stored[COMMENTS_KEY] ?? {})[projectId] && !commentsOn) {
+        set(true);
+      }
+    });
+  }
 }
 
 /** The pane Overleaf shows its PDF in, around pdf.js's pages. */
@@ -3458,7 +4485,10 @@ function watchPdfSwitch(): void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   new MutationObserver(() => {
     clearTimeout(timer);
-    timer = setTimeout(mountPdfSwitch, 200);
+    timer = setTimeout(() => {
+      mountPdfSwitch();
+      mountCommentsToggle();
+    }, 200);
   }).observe(document.body, { childList: true, subtree: true });
 }
 
@@ -3485,9 +4515,11 @@ function mountPdfSwitch(): void {
     return;
   }
   const local = Boolean(localPdf);
+  const edits = check.status.commits_from_overleaf;
   if (
     existing?.parentElement === toolbar &&
-    existing.dataset.local === `${local}`
+    existing.dataset.local === `${local}` &&
+    existing.dataset.edits === `${edits}`
   ) {
     return;
   }
@@ -3509,7 +4541,12 @@ function mountPdfSwitch(): void {
       text,
       title: useLocal
         ? "The PDF the pipeline built on this computer, without waiting " +
-          "on Overleaf to compile"
+          "on Overleaf to compile" +
+          (edits
+            ? `, without ${edits} edit${
+                edits === 1 ? "" : "s"
+              } made on Overleaf since the last sync`
+            : "")
         : "Overleaf's own PDF",
       style: {
         border: "none",
@@ -3545,7 +4582,14 @@ function mountPdfSwitch(): void {
     [option("Overleaf", false), option("This computer", true)],
   );
   toggle.dataset.local = `${local}`;
-  toolbar.append(toggle);
+  toggle.dataset.edits = `${edits}`;
+  // Before Comments, whichever was put back last
+  const comments = document.getElementById("calkit-comments-toggle");
+  if (comments?.parentElement === toolbar) {
+    toolbar.insertBefore(toggle, comments);
+  } else {
+    toolbar.append(toggle);
+  }
   // The first time it's shown for this project, the last choice applies
   if (!existing) {
     void chrome.storage.local.get(PDF_SOURCE_KEY).then((stored) => {
@@ -3564,10 +4608,11 @@ function mountPdfSwitch(): void {
  */
 function renderWhere(link: OverleafLinkPublic): HTMLElement {
   if (link.local_path) {
-    return el("div", {
-      class: "dim small",
-      text: `On this computer: ${link.local_path}`,
-    });
+    // Opens it in the editor, which is what the path is there for
+    return el("div", { class: "dim small" }, [
+      document.createTextNode("On this computer: "),
+      renderOpenLocally(linkKey(link), undefined, true, link.local_path),
+    ]);
   }
   return el("div", { class: "dim small" }, [
     document.createTextNode(`Via ${new URL(hubWebUrl).host}`),
@@ -3708,6 +4753,11 @@ function renderStatus(
   });
   const message = el("div", { class: "small" });
   syncButton.addEventListener("click", async () => {
+    // Running saves and syncs when it's done, so that's the sync
+    if (runFirst.isConnected && runFirst.checked) {
+      void startRun(link);
+      return;
+    }
     loadGeneration++;
     syncButton.disabled = true;
     clear(message).append(loading("Syncing"));
@@ -3746,22 +4796,75 @@ function renderStatus(
       );
     }
   });
-  // Nothing to sync while it's in sync, e.g., when what's out of date
-  // needs a run first
-  body.append(
-    el("div", { class: "actions" }, [
-      status.in_sync ? null : syncButton,
-      // Its button in this row, and anything it says below it
-      local ? renderOpenLocally(project, undefined, true) : null,
-      el("button", {
-        class: "action secondary",
-        text: "Refresh",
-        onClick: reload,
-      }),
-    ]),
-    message,
-  );
-  statusParts.add({ link, hide: [badge, details, syncButton], busy });
+  // Syncing, and on this computer running what's out of date first, or,
+  // with nothing to sync, running and syncing after. Redrawn once it's
+  // known what's out of date, which takes a moment.
+  const actions = el("div", { class: "actions" });
+  const openLocally = local
+    ? renderOpenLocally(project, undefined, true)
+    : null;
+  const refresh = el("button", {
+    class: "action secondary",
+    text: "Refresh",
+    onClick: reload,
+  });
+  const runFirst = el("input", { type: "checkbox" }) as HTMLInputElement;
+  runFirst.addEventListener("change", () => {
+    runBeforeSync = runFirst.checked;
+    void chrome.storage.local.set({ [RUN_BEFORE_SYNC_KEY]: runBeforeSync });
+  });
+  const drawActions = () => {
+    const pipeline =
+      local && railPipeline?.key === linkKey(link)
+        ? railPipeline.pipeline
+        : undefined;
+    const staleStages = (pipeline?.ck_stages ?? []).filter((name) =>
+      ["stale", "not-run"].includes(
+        pipeline?.stage_statuses[name]?.status ?? "",
+      ),
+    );
+    const running = Boolean(activeRun()) || Boolean(starting?.busy);
+    runFirst.checked = runBeforeSync;
+    const stagesText = `Out of date: ${staleStages.join(", ")}`;
+    clear(actions).append(
+      ...[
+        status.in_sync ? null : syncButton,
+        !status.in_sync && staleStages.length
+          ? el("label", { class: "check", title: stagesText }, [
+              runFirst,
+              document.createTextNode("Run the pipeline first"),
+            ])
+          : null,
+        status.in_sync && staleStages.length
+          ? el("button", {
+              class: "action",
+              text: "Run and sync",
+              title: `Run the pipeline on this computer, then save and sync. ${stagesText}`,
+              disabled: !canWrite(link) || running,
+              onClick: () => void startRun(link),
+            })
+          : null,
+        // Its button in this row, and anything it says below it
+        openLocally,
+        refresh,
+      ].filter((node): node is HTMLElement => Boolean(node)),
+    );
+    syncButton.disabled = !canWrite(link) || status.in_sync || running;
+    syncButton.title = staleStages.length
+      ? `Push project files to Overleaf and pull Overleaf edits back. ${stagesText}`
+      : syncButton.title;
+  };
+  drawPanelActions = () => {
+    if (actions.isConnected) {
+      drawActions();
+    }
+  };
+  drawActions();
+  if (local) {
+    void refreshRailPipeline(link);
+  }
+  body.append(actions, message);
+  statusParts.add({ link, hide: [badge, details, actions], busy });
   drawStatusParts();
 }
 
@@ -4473,7 +5576,14 @@ async function load(overleafProjectId: string): Promise<void> {
         content.append(loading("Checking Overleaf for new edits"));
       }
     }
-    const statuses = await send(statusRequest);
+    const files = link.local_path
+      ? await getOverleafFiles(overleafProjectId)
+      : null;
+    const statuses = await send({
+      ...statusRequest,
+      overleafFiles: files?.shas,
+      overleafTexts: files?.texts,
+    });
     if (!current()) {
       return;
     }
@@ -4759,12 +5869,17 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     if (pipelineRuns?.key !== linkKey(link)) {
       void refreshRuns(link);
     }
+    const files = link.local_path
+      ? await getOverleafFiles(overleafProjectId)
+      : null;
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
       project: link.project_name,
       overleafProjectId,
       path: link.path,
+      overleafFiles: files?.shas,
+      overleafTexts: files?.texts,
     });
     if (!(await current())) {
       return;
@@ -4805,30 +5920,37 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
  * people still press rather than trying to observe every keystroke, and
  * waits a moment for Overleaf to have written it before asking.
  */
+let recheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Check again what there is to sync, a while after the last change, e.g.,
+ * a save, or an edit Overleaf saves by itself, like a comment added from
+ * the PDF, which the sync has to bring to this computer.
+ */
+function recheckAfterEdit(delay: number): void {
+  clearTimeout(recheckTimer);
+  recheckTimer = setTimeout(() => {
+    if (!currentProjectId) {
+      return;
+    }
+    // The button has to notice it too, not just an already-open panel
+    if (panel) {
+      void load(currentProjectId);
+    } else {
+      void checkSyncStatus(currentProjectId);
+    }
+  }, delay);
+}
+
 function watchForSaves(): void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
   document.addEventListener(
     "keydown",
     (event) => {
       const isSave =
         (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
-      if (!isSave || !currentProjectId) {
-        return;
+      if (isSave && currentProjectId) {
+        recheckAfterEdit(2000);
       }
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (!currentProjectId) {
-          return;
-        }
-        // A save is when a figure most often stops matching what's on
-        // Overleaf, so the button has to notice it too, not just an
-        // already-open panel
-        if (panel) {
-          void load(currentProjectId);
-        } else {
-          void checkSyncStatus(currentProjectId);
-        }
-      }, 2000);
     },
     true,
   );
@@ -4844,6 +5966,9 @@ let railPane: { host: HTMLElement; body: HTMLElement } | null = null;
 let railCard: { key: string; element: HTMLElement } | null = null;
 // The stage whose details are open in the sidebar
 let railStage: string | null = null;
+// Redraws the open panel's sync and run buttons, e.g., once it's known
+// what's out of date
+let drawPanelActions: () => void = () => undefined;
 
 /**
  * A stage's details in the sidebar: why it's out of date, what it runs,
@@ -4971,7 +6096,7 @@ function watchRail(): void {
     #${RAIL_TAB_ID}.active svg { color: #fff; }
     #${RAIL_TAB_ID} { position: relative; }
     #${RAIL_TAB_ID} .calkit-rail-dot {
-      position: absolute; top: 4px; right: 6px; width: 8px; height: 8px;
+      position: absolute; bottom: 4px; right: 6px; width: 8px; height: 8px;
       border-radius: 50%; background: #e5484d;
       box-shadow: 0 0 0 2px var(--bg-primary-themed, #fff);
     }
@@ -5149,6 +6274,15 @@ const RAIL_STYLES = `
   .dot.warning { background: var(--ck-warning); }
   .dot.error { background: var(--ck-danger); }
   .dot.unknown { background: var(--ck-dim); }
+  /* A row that expands, colored for its state, pointing down when open */
+  .twistie { width: 0; height: 0; flex: none; margin: 0 1px 0 2px;
+    border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--ck-success);
+    transition: transform 0.1s; }
+  .twistie.open { transform: rotate(90deg); }
+  .twistie.warning { border-left-color: var(--ck-warning); }
+  .twistie.error { border-left-color: var(--ck-danger); }
+  .twistie.unknown { border-left-color: var(--ck-dim); }
   .item .spinner { width: 8px; height: 8px; border-width: 1.5px;
     flex: none; }
   .card {
@@ -5190,6 +6324,7 @@ async function refreshRailPipeline(link: OverleafLinkPublic): Promise<void> {
       project: link.project_name,
     });
     railPipeline = { key: linkKey(link), pipeline };
+    drawPanelActions();
   } catch (e) {
     railPipeline = {
       key: linkKey(link),
@@ -5384,6 +6519,7 @@ function drawRail(): void {
           title: problems?.length
             ? problems.map((p) => p.message).join("\n")
             : `Line ${item.line}`,
+          attrs: { "aria-expanded": String(railCard?.key === key) },
           onClick: () => {
             toEditor({ type: "goto", line: item.line, column: item.column });
             if (railCard?.key === key) {
@@ -5398,7 +6534,7 @@ function drawRail(): void {
         },
         [
           el("span", {
-            class: `dot ${
+            class: `twistie ${
               problems === undefined
                 ? "unknown"
                 : problems.some((p) => p.severity === "error")
@@ -5406,7 +6542,7 @@ function drawRail(): void {
                 : problems.length
                 ? "warning"
                 : ""
-            }`,
+            }${railCard?.key === key ? " open" : ""}`,
           }),
           el("span", { class: "grow small", text: label }),
           el("span", { class: "dim small", text: `${item.line}` }),
@@ -5439,6 +6575,7 @@ function drawRail(): void {
         {
           class: "item",
           title: status,
+          attrs: { "aria-expanded": String(railStage === name) },
           onClick: () => {
             railStage = railStage === name ? null : name;
             drawRail();
@@ -5448,9 +6585,9 @@ function drawRail(): void {
           toRun
             ? el("span", { class: "spinner" })
             : el("span", {
-                class: `dot ${
+                class: `twistie ${
                   status === "up-to-date" ? "" : due ? "warning" : "unknown"
-                }`,
+                }${railStage === name ? " open" : ""}`,
               }),
           el("span", { class: "grow small", text: name }),
           status !== "up-to-date"
@@ -5467,6 +6604,25 @@ function drawRail(): void {
     }
   }
   body.append(renderRuns(link, true));
+  // On this computer, a run is offered only when something's out of date
+  const staleStages = (pipeline?.ck_stages ?? []).filter((name) =>
+    ["stale", "not-run"].includes(pipeline?.stage_statuses[name]?.status ?? ""),
+  );
+  if (link.local_path && staleStages.length && !running) {
+    body.append(
+      el("div", { class: "actions" }, [
+        el("button", {
+          class: "action",
+          text: "Run and sync",
+          title:
+            "Run the pipeline on this computer, then save and sync. " +
+            `Out of date: ${staleStages.join(", ")}`,
+          disabled: !canWrite(link) || Boolean(starting?.busy),
+          onClick: () => void startRun(link),
+        }),
+      ]),
+    );
+  }
   // The latest runs, each with its log
   const runs =
     pipelineRuns?.key === linkKey(link) ? pipelineRuns.runs.runs : [];
@@ -5620,6 +6776,7 @@ watchIntegrations();
 watchRail();
 watchContextMenu();
 watchPdfSwitch();
+watchReview();
 runContentScript({
   id: "overleaf",
   sync,

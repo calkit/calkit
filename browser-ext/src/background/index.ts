@@ -331,6 +331,15 @@ async function handle(
         `${projectPath(message.owner, message.project)}/contents-paths`,
       );
     case "project.figures": {
+      // As they are on this computer, when it's here, including ones not
+      // pushed yet
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<FiguresPage>({
+          type: "project.figures",
+          project: local,
+        });
+      }
       // The hub pages at most 100 figures, so gather paths and titles only
       const items: FiguresPage["items"] = [];
       let total = 0;
@@ -394,10 +403,16 @@ async function handle(
           },
         },
       );
-    case "project.pipeline":
+    case "project.pipeline": {
+      // As it is on this computer, when it's here, rather than as pushed
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        return askLocal<ProjectPipeline>({ type: "project.pipeline", project });
+      }
       return request<ProjectPipeline>(
         `${projectPath(message.owner, message.project)}/pipeline`,
       );
+    }
     case "project.pipelineRuns": {
       // Run on this computer when it's here, rather than on GitHub Actions
       const project = `${message.owner}/${message.project}`;
@@ -512,6 +527,8 @@ async function handle(
           overleaf_project_id: message.overleafProjectId,
           path: message.path,
           pull: message.pull ?? true,
+          overleaf_files: message.overleafFiles,
+          overleaf_texts: message.overleafTexts,
         }).catch((e) => {
           if (/isn't synced with Overleaf/.test(String(e?.message ?? e))) {
             return null;

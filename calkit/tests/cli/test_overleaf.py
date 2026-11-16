@@ -15,7 +15,7 @@ import typer
 from typer.testing import CliRunner
 
 import calkit
-import calkit.latex
+import calkit.environments.texlive
 from calkit.cli.overleaf import (
     _extract_title_from_tex,
     _get_overleaf_auth,
@@ -92,8 +92,7 @@ def test_overleaf(tmp_dir):
     # Check the TeX environment and pipeline was created properly
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["tex"]
-    assert env["kind"] == "docker"
-    assert env["image"] == calkit.latex.DEFAULT_LATEX_IMAGE
+    assert env == calkit.environments.texlive.DEFAULT_ENVIRONMENT
     stage = ck_info["pipeline"]["stages"]["build-ol-project"]
     assert stage["kind"] == "latex"
     assert stage["environment"] == "tex"
@@ -2199,6 +2198,11 @@ def test_overleaf_credentials(monkeypatch):
     config.overleaf_session = None
     hub["/user/overleaf-token"] = {"access_token": "olp_hub"}
     assert _get_overleaf_auth() == config.overleaf_token == "olp_hub"
+    # A token on the hub comes before a session here too
+    config.overleaf_token = None
+    config.overleaf_session = "here"
+    assert _get_overleaf_auth() == "olp_hub"
+    config.overleaf_session = None
     # A rejected session is replaced by a newer one on the hub without
     # prompting or warning, but the same one again isn't retried, however
     # it's written
@@ -2233,3 +2237,8 @@ def test_overleaf_credentials(monkeypatch):
     assert sessions_tried == ["fresh"]
     assert config.overleaf_token is None
     assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    # Nor is the hub's copy of it tried first again
+    hub["/user/overleaf-token"] = {"access_token": "expired"}
+    assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    assert config.overleaf_token is None
+    del hub["/user/overleaf-token"]

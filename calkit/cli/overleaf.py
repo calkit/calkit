@@ -108,6 +108,8 @@ def _get_overleaf_token_from_hub(stale: str | None = None) -> str | None:
     """Get an Overleaf Git token saved to the hub, other than a ``stale``
     one, and store it in config.
     """
+    import hashlib
+
     try:
         token = calkit.hub.get(
             "/user/overleaf-token", allow_login=False, max_retries=2
@@ -117,6 +119,10 @@ def _get_overleaf_token_from_hub(stale: str | None = None) -> str | None:
     if not token or token == stale:
         return None
     calkit_config = calkit.config.read()
+    # Rejected by Overleaf already, e.g., since Premium ended
+    token_sha = hashlib.sha256(str(token).encode()).hexdigest()
+    if token_sha == calkit_config.overleaf_rejected_token_sha:
+        return None
     calkit_config.overleaf_token = token
     calkit_config.write()
     return str(token)
@@ -126,18 +132,20 @@ def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
     """Get a Git token, or, if only a session is available, a web client
     for syncing without Overleaf Premium.
 
-    Credentials in config come first, then a token saved to the hub, then a
-    session saved to the hub, before prompting for a token.
+    A token comes first, in config or else saved to the hub, since Git
+    integration fetches only what's new and keeps each edit's author, then a
+    session, in config or else saved to the hub, before prompting for a
+    token.
     """
     calkit_config = calkit.config.read()
     if calkit_config.overleaf_token:
         return calkit_config.overleaf_token
-    if calkit_config.overleaf_session:
-        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
     token = _get_overleaf_token_from_hub()
     if token:
         typer.echo("Using the Overleaf token saved to the hub")
         return token
+    if calkit_config.overleaf_session:
+        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
     session = _get_overleaf_session_from_hub()
     if session:
         typer.echo("Using the Overleaf session saved to the hub")
@@ -154,6 +162,7 @@ def _get_pulled_overleaf_repo(
     Returns the repo and the credentials that worked, so later projects use
     them too.
     """
+    import hashlib
 
     def get_new_session(stale: str, error: Exception) -> str:
         """Get a new Overleaf session from the hub, or prompt for one, and
@@ -216,10 +225,14 @@ def _get_pulled_overleaf_repo(
                     )
                     # Forget the token, so later syncs go straight to the
                     # session
+                    # and the hub's copy isn't tried first again
                     calkit_config = calkit.config.read()
                     if calkit_config.overleaf_token == auth:
                         calkit_config.overleaf_token = None
-                        calkit_config.write()
+                    calkit_config.overleaf_rejected_token_sha = hashlib.sha256(
+                        str(auth).encode()
+                    ).hexdigest()
+                    calkit_config.write()
                     auth = calkit.overleaf.WebClient(str(session))
                 else:
                     auth = _get_overleaf_token(rejected=True)
@@ -453,24 +466,19 @@ def import_publication(
     # Check that we have a LaTeX environment
     typer.echo("Checking that this project has a LaTeX environment")
     envs = ck_info.get("environments", {})
-    tex_env_name = None
-    for name, env in envs.items():
-        image = env.get("image", "")
-        if env.get("kind") == "docker" and (
-            "texlive" in image or "calkit/latex" in image
-        ):
-            tex_env_name = name
-            break
+    tex_env_name = next(
+        (n for n, e in envs.items() if calkit.latex.is_latex_env(e)), None
+    )
     if tex_env_name is None:
-        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+        from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
-        typer.echo("Creating TeX Live Docker environment")
+        typer.echo("Creating TeX Live environment")
         tex_env_name = "tex"
         n = 1
         while tex_env_name in envs:
             tex_env_name = f"tex-{n}"
             n += 1
-        envs[tex_env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
+        envs[tex_env_name] = dict(DEFAULT_ENVIRONMENT)
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)

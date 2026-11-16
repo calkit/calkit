@@ -557,6 +557,14 @@ def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
     [quick] = get_overleaf_sync_statuses(str(project), pull=False)
     assert not pulled and not quick["pulled"]
     assert quick | {"pulled": True} == status
+    # What Overleaf's editor has, if the copy here has it already, counts as
+    # a pull without asking Overleaf
+    git("update-ref", "refs/calkit/overleaf", "HEAD", cwd=clone)
+    sha = gitpython.Repo(clone).head.commit.tree["main.tex"].hexsha
+    assert get_overleaf_sync_statuses(
+        str(project), overleaf_files={"main.tex": sha}
+    ) == [status]
+    assert not pulled
     monkeypatch.setattr(
         calkit.cli.overleaf, "_get_overleaf_auth", lambda: "token"
     )
@@ -735,6 +743,32 @@ def test_start_job(tmp_path, monkeypatch):
         {"type": "jobs.list", "project": "me/proj", "kind": "run"}
     )
     assert [j["id"] for j in reply["result"]] == [job["id"]]
+    # A clone sets up its TeX Live environments after, not the first run
+    clone_dir = home / "calkit" / "o"
+    clone_dir.mkdir()
+    (clone_dir / "calkit.yaml").write_text(
+        "environments:\n"
+        "  tex:\n    kind: texlive\n"
+        "  py:\n    kind: uv\n    path: pyproject.toml\n"
+    )
+    clone_path = calkit.browser_link.get_job_path(clone["id"])
+    with open(clone_path) as f:
+        record = json.load(f)
+    with open(clone_path, "w") as f:
+        json.dump(record | {"cmd": [sys.executable, "-c", "pass"]}, f)
+    checked = []
+    real_run = subprocess.run
+
+    def run_checks(cmd, **kwargs):
+        if cmd[1:4] == ["-m", "calkit", "check"]:
+            checked.append((cmd[4:], kwargs["cwd"]))
+            return None
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr("subprocess.run", run_checks)
+    run_job(clone["id"])
+    assert get_job(clone["id"])["status"] == "succeeded"
+    assert checked == [(["env", "--name", "tex"], str(clone_dir))]
 
 
 def test_get_job_progress(tmp_path):
@@ -842,10 +876,21 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
         assert "built" not in reply["result"]
         data += base64.b64decode(reply["result"]["data"])
     assert data == pdf
+    # What the build leaves after the PDF, which Git ignores, doesn't count
+    later = time.time() + 10
+    (project / "paper" / ".gitignore").write_text("*.synctex.gz\n")
+    os.utime(project / "paper" / ".gitignore", (0, 0))
+    (project / "paper" / "main.synctex.gz").write_bytes(b"")
+    os.utime(project / "paper" / "main.synctex.gz", (later, later))
+    assert not get_pdf_chunk(str(project), "paper", 0)["edited_since_built"]
     # Its source changing after it was built, and it being rebuilt without
     # saving, are both said
-    later = time.time() + 10
     os.utime(project / "paper" / "main.tex", (later, later))
+    assert get_pdf_chunk(str(project), "paper", 0)["edited_since_built"]
+    # Including one whose name isn't ASCII
+    os.utime(project / "paper" / "main.tex", (0, 0))
+    (project / "paper" / "café.tex").write_text("Hi\n")
+    os.utime(project / "paper" / "café.tex", (later, later))
     assert get_pdf_chunk(str(project), "paper", 0)["edited_since_built"]
     (project / "paper" / "main.pdf").write_bytes(pdf + b"more")
     assert get_pdf_chunk(str(project), "paper", 0)["changed_since_commit"]
@@ -861,3 +906,80 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
             }
         )
         assert "whole number" in reply["error"]
+
+
+def test_get_pipeline(tmp_path):
+    from calkit.browser_link import get_pipeline
+
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    # Declared out of name order, which is the order they're listed in
+    stages = {
+        "make-b": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo b > b.txt",
+            "outputs": ["b.txt"],
+        },
+        "make-a": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo a > a.txt",
+            "outputs": ["a.txt"],
+        },
+        # Run once per value, each recorded as its own run
+        "make-each": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo {n} > {n}.txt",
+            "iterate_over": [{"arg_name": "n", "values": ["x", "y"]}],
+            "outputs": ["{n}.txt"],
+        },
+    }
+    with open(project / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    cwd = os.getcwd()
+    res = get_pipeline(str(project))
+    assert os.getcwd() == cwd
+    assert res["ck_stages"] == ["make-b", "make-a", "make-each"]
+    assert res["status"] == "stale"
+    assert res["stage_statuses"]["make-b"]["status"] == "not-run"
+    assert res["dvc_stages"]["make-a"]["cmd"].endswith("echo a > a.txt")
+    assert res["dvc_stages"]["make-a"]["outs"] == ["a.txt"]
+    subprocess.check_call(["calkit", "run"], cwd=project)
+    res = get_pipeline(str(project))
+    assert res["status"] == "up-to-date"
+    assert {s["status"] for s in res["stage_statuses"].values()} == {
+        "up-to-date"
+    }
+    # A changed command makes it stale, and says so
+    stages["make-a"]["command"] = "echo A > a.txt"
+    with open(project / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    status = get_pipeline(str(project))["stage_statuses"]
+    assert status["make-a"]["status"] == "stale"
+    assert status["make-a"]["modified_command"]
+    assert status["make-b"]["status"] == "up-to-date"
+
+
+def test_get_figures(tmp_path):
+    from calkit.browser_link import get_figures
+
+    project = tmp_path / "project"
+    (project / "figures").mkdir(parents=True)
+    subprocess.check_call(["git", "init", "-q"], cwd=project)
+    (project / "figures" / "a.png").write_text("png")
+    (project / "calkit.yaml").write_text(
+        "figures:\n  - path: figures/b.svg\n    title: The setup\n"
+        "misc:\n  - path: paper/drawn.png\n    created_by:\n"
+        "      - name: Pat\n"
+    )
+    assert get_figures(str(project)) == {
+        "items": [
+            {"path": "figures/b.svg", "title": "The setup"},
+            {"path": "figures/a.png", "title": "a"},
+            {"path": "paper/drawn.png", "title": "drawn"},
+        ],
+        "total": 3,
+    }

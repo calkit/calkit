@@ -1644,9 +1644,9 @@ def new_publication(
     repo = calkit.git.get_repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
-        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+        from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
-        envs[env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
+        envs[env_name] = dict(DEFAULT_ENVIRONMENT)
         ck_info["environments"] = envs
     # Copy in template files if applicable. This happens before the stage is
     # built so its inputs can be detected from the document itself: a template

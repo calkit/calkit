@@ -1,4 +1,4 @@
-import { askLocal } from "../core/local";
+import { type LocalPdfChunk, getLocalPdf } from "../core/local";
 import { send } from "../core/messages";
 import { clear, el, errorMessage, loading } from "../core/ui";
 
@@ -34,19 +34,6 @@ function kindFor(path: string): Kind {
   return "other";
 }
 
-interface PdfChunk {
-  path: string;
-  size: number;
-  offset: number;
-  /** Base64. */
-  data: string;
-  /** With the first part only. */
-  built?: number;
-  commit_sha?: string | null;
-  changed_since_commit?: boolean | null;
-  edited_since_built?: boolean;
-}
-
 /**
  * The PDF a folder synced with Overleaf builds to on this computer, read
  * from Calkit here a part at a time, since a message to or from it can't
@@ -59,25 +46,10 @@ async function renderLocalPdf(
 ): Promise<void> {
   const status = el("div", { class: "small" }, [loading("Reading the PDF")]);
   main.append(status);
-  const parts: Uint8Array[] = [];
-  let first: PdfChunk | null = null;
+  let parts: Uint8Array[];
+  let first: LocalPdfChunk;
   try {
-    let offset = 0;
-    do {
-      const chunk: PdfChunk = await askLocal({
-        type: "publication.pdf",
-        project,
-        folder,
-        offset,
-      });
-      first ??= chunk;
-      const bytes = Uint8Array.from(atob(chunk.data), (c) => c.charCodeAt(0));
-      parts.push(bytes);
-      offset += bytes.length;
-      if (!bytes.length) {
-        break;
-      }
-    } while (offset < first.size);
+    ({ parts, first } = await getLocalPdf(project, folder));
   } catch (e) {
     clear(status).append(
       errorMessage(e instanceof Error ? e.message : String(e)),

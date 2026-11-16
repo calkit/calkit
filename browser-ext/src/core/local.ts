@@ -276,3 +276,59 @@ export function getEditorLabel(editor: string | undefined): string {
   const command = editor?.split(" ")[0] ?? "";
   return names[editor ?? ""] ?? names[command] ?? "your editor";
 }
+
+/** A part of a PDF read from this computer, with how fresh it is. */
+export interface LocalPdfChunk {
+  path: string;
+  size: number;
+  offset: number;
+  /** Base64. */
+  data: string;
+  /** With the first part only. */
+  built?: number;
+  commit_sha?: string | null;
+  changed_since_commit?: boolean | null;
+  edited_since_built?: boolean;
+}
+
+/**
+ * The PDF a folder synced with Overleaf builds to on this computer, read a
+ * part at a time, since a message to or from Calkit here can't be over
+ * 1 MB, with the first part, which says how fresh it is.
+ */
+export async function getLocalPdf(
+  project: string,
+  folder: string,
+): Promise<{ parts: Uint8Array[]; first: LocalPdfChunk }> {
+  const parts: Uint8Array[] = [];
+  let first: LocalPdfChunk | null = null;
+  let offset = 0;
+  do {
+    const chunk: LocalPdfChunk = await askLocal({
+      type: "publication.pdf",
+      project,
+      folder,
+      offset,
+    });
+    first ??= chunk;
+    const bytes = Uint8Array.from(atob(chunk.data), (c) => c.charCodeAt(0));
+    parts.push(bytes);
+    offset += bytes.length;
+    if (!bytes.length) {
+      break;
+    }
+  } while (offset < first.size);
+  return { parts, first };
+}
+
+/** The hash Git gives a file with these contents, as Overleaf's are given. */
+export async function getGitBlobSha(data: Uint8Array): Promise<string> {
+  const header = new TextEncoder().encode(`blob ${data.length}\0`);
+  const blob = new Uint8Array(header.length + data.length);
+  blob.set(header);
+  blob.set(data, header.length);
+  const digest = await crypto.subtle.digest("SHA-1", blob);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}

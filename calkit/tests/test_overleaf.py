@@ -553,6 +553,69 @@ def test_pull_mirror(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
     assert mirror.git.show(f"{second}:main.tex") == "Hi there"
 
 
+def test_pull_from_editor(tmp_dir: str) -> None:
+    import hashlib
+
+    def get_sha(text: str) -> str:
+        data = text.encode()
+        return hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+
+    mirror = calkit.overleaf.get_mirror("p1", dest="mirror")
+    calkit.overleaf.pull_mirror(
+        mirror, None, "p1", files={"main.tex": b"Hi\n", "a.png": b"png"}
+    )
+    first = mirror.head.commit
+    shas = {"main.tex": get_sha("Hi\n"), "a.png": get_sha("png")}
+    # Overleaf has what's here, so nothing changes
+    assert calkit.overleaf.pull_from_editor(mirror, shas, {})
+    assert mirror.head.commit == first
+    # A document edited there is committed from its text
+    shas["main.tex"] = get_sha("Hi there\n")
+    assert calkit.overleaf.pull_from_editor(
+        mirror, shas, {"main.tex": "Hi there\n"}
+    )
+    second = mirror.head.commit
+    assert second != first
+    assert mirror.git.show(f"{second}:main.tex") == "Hi there"
+    assert mirror.git.rev_parse(calkit.overleaf.MIRROR_REF) == second.hexsha
+    # Unless its text isn't what Overleaf's hash says, or something else,
+    # e.g., an image, changed too, which only a download can bring
+    shas["main.tex"] = get_sha("Hi again\n")
+    assert not calkit.overleaf.pull_from_editor(
+        mirror, shas, {"main.tex": "Hello\n"}
+    )
+    shas["a.png"] = get_sha("new png")
+    assert not calkit.overleaf.pull_from_editor(
+        mirror, shas, {"main.tex": "Hi again\n"}
+    )
+    assert mirror.head.commit == second
+    # A file deleted on Overleaf is deleted here, and anything left in the
+    # mirror, e.g., by a failed sync, is cleared
+    del shas["a.png"]
+    with open(os.path.join(mirror.working_dir, "left.txt"), "w") as f:
+        f.write("Left\n")
+    assert calkit.overleaf.pull_from_editor(
+        mirror, shas, {"main.tex": "Hi again\n"}
+    )
+    assert mirror.git.ls_files().split() == ["main.tex"]
+    assert not os.path.exists(os.path.join(mirror.working_dir, "left.txt"))
+    # A Git integration clone that has the files is reset to what it
+    # fetched, e.g., from a commit a status check put on top, but otherwise
+    # has to fetch
+    clone = git.Repo.clone_from(mirror.working_dir, "clone")
+    fetched = clone.head.commit
+    with open(os.path.join(clone.working_dir, "main.tex"), "w") as f:
+        f.write("On top\n")
+    clone.git.commit("-qam", "On top", "--author", "T <t@example.com>")
+    shas = {"main.tex": get_sha("Hi again\n")}
+    assert calkit.overleaf.pull_from_editor(clone, shas, {})
+    assert clone.head.commit == fetched
+    assert not calkit.overleaf.pull_from_editor(
+        clone, {"main.tex": get_sha("New\n")}, {"main.tex": "New\n"}
+    )
+    assert clone.git.show("HEAD:main.tex") == "Hi again"
+
+
 def test_ensure_sync_base(tmp_dir: str) -> None:
     import io
     import tempfile

@@ -101,6 +101,10 @@
   ],
   "web_accessible_resources": [
     {
+      "resources": ["review.html"],
+      "matches": ["https://www.overleaf.com/*", "https://overleaf.com/*"]
+    },
+    {
       "resources": ["viewer.html"],
       "matches": [
         "https://github.com/*",

@@ -64,8 +64,11 @@ calkit new publication paper \
 Available templates are `latex/article` (generic), `latex/ieee-conference`
 (IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
 (chapters, for a thesis or technical report).
-The environment created uses Calkit's LaTeX Docker image,
-which can build all of them.
+
+<!-- TODO: needs human review -->
+
+The environment created is a [TeX Live environment](environments.md#tex-live),
+which downloads the packages a document uses the first time it's built.
 
 ## Packages
 
@@ -78,9 +81,16 @@ Installed packages are kept in the project in `.calkit/local/texmf`,
 which is ignored by Git,
 so they don't need to be installed again on the next build.
 
-Packages are only installed automatically when building with Calkit's
-image, either directly, i.e., with no environment specified,
-or in a Docker environment built from it.
+<!-- TODO: needs human review -->
+
+Packages are only installed automatically in a
+[TeX Live environment](environments.md#tex-live),
+whose lock gains them,
+or a Docker environment built from Calkit's image.
+With no environment specified,
+`calkit latex build` uses the LaTeX installed on your machine if there is
+one, and otherwise a TeX Live environment Calkit keeps for the machine
+in `~/.calkit/texlive`.
 For other images or a LaTeX distribution installed on your machine,
 you'll need to install packages the usual way.
 
@@ -514,6 +524,9 @@ The metadata a thread can have:
   that the thread is about, and `occ`, which occurrence of that text it is.
   Without a highlight, a thread is about the whole paragraph.
 - `issue`: the URL of an issue that mirrors the thread, e.g., on GitHub.
+<!-- TODO: needs human review -->
+- `overleaf`: the ID of the Overleaf comment thread it's kept in step with,
+  set by the [browser extension](browser-ext/index.md#comments-on-the-pdf).
 
 Tools keep any other metadata they don't recognize when they rewrite a
 thread, so newer attributes survive older tools.

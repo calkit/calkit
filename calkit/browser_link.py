@@ -275,7 +275,21 @@ def get_reply(msg: dict) -> dict:
                 overleaf_project_id=msg.get("overleaf_project_id"),
                 path=msg.get("path"),
                 pull=msg.get("pull", True) is not False,
+                overleaf_files=msg.get("overleaf_files"),
+                overleaf_texts=msg.get("overleaf_texts"),
             )
+        elif kind == "project.figures":
+            owner, name = split_project(msg.get("project"))
+            paths = get_checkout_paths(owner, name)
+            if not paths:
+                raise ValueError(f"{owner}/{name} isn't on this computer")
+            result = get_figures(paths[0])
+        elif kind == "project.pipeline":
+            owner, name = split_project(msg.get("project"))
+            paths = get_checkout_paths(owner, name)
+            if not paths:
+                raise ValueError(f"{owner}/{name} isn't on this computer")
+            result = get_pipeline(paths[0])
         elif kind == "publication.pdf":
             owner, name = split_project(msg.get("project"))
             paths = get_checkout_paths(owner, name)
@@ -620,6 +634,8 @@ def get_overleaf_sync_statuses(
     overleaf_project_id: str | None = None,
     path: str | None = None,
     pull: bool = True,
+    overleaf_files: dict[str, str] | None = None,
+    overleaf_texts: dict[str, str] | None = None,
 ) -> list[dict]:
     """What a sync of each folder of a checkout synced with Overleaf would
     do, after pulling from Overleaf, as the hub's status reports it,
@@ -629,6 +645,11 @@ def get_overleaf_sync_statuses(
     is used, if there is one, which takes a fraction of the time, so
     something can be shown while Overleaf is asked. It's used with ``pull``
     too if this pulled it only ``PULL_FRESH_SECONDS`` ago.
+
+    With ``overleaf_files``, the Git hashes of the Overleaf project's files
+    by path, from its editor, and ``overleaf_texts``, its documents, a copy
+    that has those files counts as pulled, and one that differs only in
+    documents is updated from them, without asking Overleaf.
 
     Overleaf credentials come from Calkit's config, or else the hub, as for
     ``calkit overleaf sync``.
@@ -704,6 +725,21 @@ def get_overleaf_sync_statuses(
                     os.path.join(clone_path, ".git")
                 )
                 with calkit.overleaf.lock(project_id, lambda _: None):
+                    if (
+                        pulled
+                        and overleaf_files is not None
+                        and os.path.isdir(os.path.join(clone_path, ".git"))
+                    ):
+                        overleaf_repo = calkit.git.get_repo(clone_path)
+                        if calkit.overleaf.pull_from_editor(
+                            overleaf_repo, overleaf_files, overleaf_texts or {}
+                        ):
+                            pulled = False
+                            fresh = True
+                            _overleaf_pulled_at[
+                                os.path.abspath(clone_path)
+                            ] = time.time()
+                        overleaf_repo.close()
                     if pulled:
                         if _overleaf_auth is None:
                             _overleaf_auth = _get_overleaf_auth()
@@ -832,13 +868,23 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         repo = calkit.git.get_repo(wdir)
         commit_sha = repo.git.log("-1", "--format=%H", "--", path) or None
         changed = bool(repo.git.status("--porcelain", "--", path).strip())
-        folder_path = os.path.join(wdir, folder)
+        # Only what Git would keep counts, so what the build leaves, e.g.,
+        # SyncTeX data written just after the PDF, doesn't
+        # Unquoted, e.g., for names that aren't ASCII
+        sources = [
+            p
+            for p in repo.git.ls_files(
+                "-z", "-co", "--exclude-standard", "--", folder
+            ).split("\0")
+            if p
+        ]
         edited_since = any(
-            os.path.getmtime(os.path.join(root, fname)) > stat.st_mtime
-            for root, dirs, files in os.walk(folder_path)
-            for fname in files
-            if not fname.endswith((".pdf", ".log", ".aux", ".fls"))
-            and not root.startswith(os.path.join(folder_path, "_calkit"))
+            os.path.getmtime(os.path.join(wdir, source_path)) > stat.st_mtime
+            for source_path in sources
+            if not source_path.endswith((".pdf", ".log", ".aux", ".fls"))
+            and os.path.relpath(source_path, folder).split(os.sep)[0]
+            != "_calkit"
+            and os.path.isfile(os.path.join(wdir, source_path))
         )
         chunk |= {
             "built": stat.st_mtime,
@@ -1302,6 +1348,114 @@ def run_job(job_id: str) -> None:
                 "committed_project": after["project"] != before["project"],
             }
     save(job)
+    # TeX Live takes up to a minute to set up from nothing, so it's done now
+    # rather than in the first run, which waits on it otherwise
+    if job["kind"] == "clone" and job["status"] == "succeeded":
+        try:
+            envs = calkit.load_calkit_info(wdir=job["location"]).get(
+                "environments", {}
+            )
+        except Exception:
+            envs = {}
+        for name, env in (envs or {}).items():
+            if env.get("kind") == "texlive":
+                subprocess.run(
+                    [sys.executable, "-m", "calkit", "check", "env"]
+                    + ["--name", name],
+                    cwd=job["location"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+
+def get_figures(wdir: str) -> dict:
+    """A checkout's figures as the hub lists them, paths and titles only:
+    those declared, detected, and made by a stage or with a recorded
+    origin, as ``calkit list figures`` finds them.
+    """
+    import calkit.pipeline
+
+    items = [
+        {
+            "path": figure["path"],
+            "title": figure.get("title")
+            or os.path.splitext(os.path.basename(figure["path"]))[0],
+        }
+        for figure in calkit.pipeline.list_artifacts("figures", wdir=wdir)
+        if isinstance(figure.get("path"), str)
+    ]
+    return {"items": items, "total": len(items)}
+
+
+def get_pipeline(wdir: str) -> dict:
+    """A checkout's pipeline as the hub summarizes one: the stages in
+    calkit.yaml's order, each one's status here, and the compiled DVC
+    stages, with what each runs, reads, and makes.
+
+    Environments aren't checked, since that can build them, which a look
+    at the pipeline shouldn't do.
+    """
+    import calkit.dvc
+    import calkit.pipeline
+
+    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    ck_stages = list((ck_info.get("pipeline") or {}).get("stages") or {})
+    prev_wdir = os.getcwd()
+    try:
+        os.chdir(wdir)
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info,
+            check_environments=False,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+            quiet_environment_checks=True,
+        )
+        dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
+        # One run per iteration is recorded as 'name@item', so each is
+        # counted toward its stage
+        lock_stages = {n.split("@")[0] for n in calkit.dvc.read_lock_stages()}
+    finally:
+        os.chdir(prev_wdir)
+    stage_statuses = {}
+    for name in ck_stages:
+        stale = [
+            s
+            for key, s in status.stale_stages.items()
+            if key.split("@")[0] == name
+        ]
+        if name not in lock_stages:
+            state = "not-run"
+        elif not stale:
+            state = "up-to-date"
+        elif all(s.always_run for s in stale):
+            state = "always-run"
+        else:
+            state = "stale"
+        stage_statuses[name] = {
+            "status": state,
+            "modified_command": any(s.modified_command for s in stale),
+            "modified_inputs": list(
+                dict.fromkeys(p for s in stale for p in s.modified_inputs)
+            ),
+            "modified_outputs": list(
+                dict.fromkeys(p for s in stale for p in s.modified_outputs)
+            ),
+            "missing_outputs": list(
+                dict.fromkeys(p for s in stale for p in s.stale_outputs)
+            ),
+        }
+    return {
+        "ck_stages": ck_stages,
+        "stage_statuses": stage_statuses,
+        "status": "stale" if status.is_stale else "up-to-date",
+        "error": "; ".join(status.errors) or None,
+        "dvc_stages": {
+            name: stage
+            for name, stage in dvc_stages.items()
+            if isinstance(stage, dict)
+        },
+    }
 
 
 def get_checkout_status(wdir: str) -> dict:

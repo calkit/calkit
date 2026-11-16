@@ -1265,12 +1265,6 @@ environments:
   tex:
     kind: texlive
     release: 2025
-    packages:
-      - type1cm
-      - geometry
-      - underscore
-      - dvipng
-      - cm-super
   py:
     kind: uv
     path: pyproject.toml
@@ -1278,14 +1272,18 @@ environments:
       - tex
 ```
 
-Those are the packages Matplotlib's usetex needs.
+If `py` has Matplotlib, Calkit adds the packages its usetex needs,
+e.g., `cm-super` and `dvipng`, to `tex`'s lock,
+as it does for a document's packages.
+Others, e.g., for a font set in `text.latex.preamble`,
+go in `tex`'s `packages`.
 Commands in `py`, including its pipeline stages and the notebooks Calkit
 executes, then find TeX Live's programs after the environment's own and
 before anything installed on the computer,
 and a change to `tex`'s lock reruns the stages that use `py`.
 
 Matplotlib keeps what it gets from TeX and the list of fonts it found in
-a folder for each TeX Live environment, under `~/.calkit/matplotlib`,
+a folder for each pair of environments, under `~/.calkit/composed`,
 rather than in `~/.matplotlib`,
 so a figure can't come from another project's TeX.
 Settings in `~/.matplotlib/matplotlibrc` don't apply either,
@@ -1293,6 +1291,8 @@ so put them in a `matplotlibrc` in the folder a stage runs in,
 e.g., the project's.
 The first figure in a new environment waits while Matplotlib lists the
 computer's fonts, which can take a while.
+A variable you set for the project, in `env_vars` in `calkit.yaml` or in
+`.env`, e.g., `MPLCONFIGDIR` or `TEXINPUTS`, keeps your value.
 
 TeX Live packages also have fonts Matplotlib can use without usetex,
 e.g., `arimo`, which has the same letter widths as Arial,
@@ -1308,6 +1308,9 @@ so a figure doesn't quietly change to another font on a computer without
 the one it names.
 Matplotlib finds them through fontconfig, which most Linux systems have,
 and macOS has with Homebrew's `fontconfig`, but Windows doesn't.
+Fontconfig still finds the fonts installed on your computer too,
+so programs that look fonts up through it, e.g., R's and Julia's plotting
+on Linux, keep finding the ones they used before.
 
 <!-- TODO: needs human review -->
 

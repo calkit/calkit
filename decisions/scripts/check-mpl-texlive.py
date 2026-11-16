@@ -24,6 +24,11 @@ it says otherwise:
 - ``env_fonts``: whether Matplotlib finds the ``mpl-fonts`` environment's
   fonts, through fontconfig, with a new config directory and with one whose
   font list was built without the environment.
+- ``composed``: the usetex figure through ``calkit xenv`` in the
+  ``calkit-tex`` environment, which has ``mpl-tex`` composed into it with
+  ``with``: where ``latex`` came from, whether Matplotlib got a config
+  directory of its own, and how many fonts fontconfig found from the
+  system and from the store.
 
 Writes the results and the machine to the given path.
 """
@@ -73,6 +78,28 @@ for name in sys.argv[1:]:
         print("")
 """
 TEX_LABEL = r"$\alpha < \beta$, 50\% of $x_1$, $\frac{\partial u}{\partial t}$"
+COMPOSED = r"""
+import json, os, shutil, subprocess, sys, tempfile
+os.chdir(tempfile.mkdtemp())
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+plt.rcParams.update(json.loads(sys.argv[1]))
+fig, ax = plt.subplots()
+ax.set_xlabel(sys.argv[2])
+fig.savefig("fig.png")
+fonts = []
+if shutil.which("fc-list"):
+    fonts = subprocess.run(
+        ["fc-list"], capture_output=True, text=True
+    ).stdout.splitlines()
+print(json.dumps({
+    "latex": shutil.which("latex"),
+    "mplconfigdir": os.environ.get("MPLCONFIGDIR", ""),
+    "n_fonts": len(fonts),
+    "n_store_fonts": sum(sys.argv[3] in f for f in fonts),
+}))
+"""
 USETEX = {"text.usetex": True, "font.family": "serif"}
 TEX_PROGRAMS = ["latex", "dvipng", "kpsewhich"]
 
@@ -247,6 +274,41 @@ for label, config_dir in [
         name: os.path.abspath(p).startswith(store_dir) if p else False
         for name, p in zip(names, found.splitlines())
     }
+# The usetex figure through Calkit itself, in an environment with mpl-tex
+# composed into it
+out = subprocess.run(
+    [
+        "calkit",
+        "xenv",
+        "-n",
+        "calkit-tex",
+        "--",
+        "python",
+        "-c",
+        COMPOSED,
+        json.dumps(USETEX),
+        TEX_LABEL,
+        store_dir,
+    ],
+    capture_output=True,
+    text=True,
+)
+composed = (
+    json.loads(out.stdout.strip().splitlines()[-1]) if out.stdout else {}
+)
+results["composed"] = {
+    "ok": out.returncode == 0,
+    "error": out.stderr[-2000:] if out.returncode else None,
+    "latex_from_store": os.path.abspath(
+        composed.get("latex") or ""
+    ).startswith(store_dir),
+    "own_config_dir": os.path.abspath(
+        composed.get("mplconfigdir") or os.sep
+    ).startswith(os.path.join(calkit.get_user_home(), ".calkit", "composed")),
+    "system_fonts": composed.get("n_fonts", 0)
+    - composed.get("n_store_fonts", 0),
+    "store_fonts": composed.get("n_store_fonts", 0),
+}
 results["release"] = tex_lock["release"]
 results["machine"] = {
     "platform": platform.platform(),

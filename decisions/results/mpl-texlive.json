@@ -24,14 +24,14 @@
     },
     "rest_kb": 16.408,
     "seconds": {
-      "font_list": 26.344151583965868,
-      "render": 1.3918040829594247,
-      "cached": 0.7046150829992257
+      "font_list": 14.364706000022124,
+      "render": 1.0635495830210857,
+      "cached": 0.42872062500100583
     },
     "samples": [
-      1.4824120830162428,
-      1.3918040829594247,
-      1.3724215420079418
+      1.093868666968774,
+      1.057228000019677,
+      1.0635495830210857
     ],
     "pdf_fonts": {
       "cmmi10.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb",
@@ -66,6 +66,14 @@
       "CMU Serif": false
     }
   },
+  "composed": {
+    "ok": true,
+    "error": null,
+    "latex_from_store": true,
+    "own_config_dir": true,
+    "system_fonts": 2682,
+    "store_fonts": 718
+  },
   "release": 2025,
   "machine": {
     "platform": "macOS-27.2.1-arm64-arm-64bit",
@@ -73,6 +81,6 @@
     "texlive_platform": "universal-darwin",
     "python": "3.12.4",
     "matplotlib": "3.10.8",
-    "calkit": "0.51.1.dev19+gc4093debd.d20261115"
+    "calkit": "0.51.1.dev28+g94d8fee1f.d20261116"
   }
 }

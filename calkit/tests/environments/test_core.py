@@ -18,7 +18,6 @@ import calkit.cli.check
 import calkit.environments
 import calkit.environments.core
 import calkit.environments.texlive
-import calkit.latex
 from calkit.environments.core import relock
 
 
@@ -1080,8 +1079,13 @@ def test_detect_env_for_stage(tmp_dir):
     res = calkit.environments.detect_env_for_stage(
         stage_latex, environment=None, ck_info={"environments": {}}
     )
-    assert res.env["kind"] == "docker"
-    assert res.env["image"] == calkit.latex.DEFAULT_LATEX_IMAGE
+    assert res.env == calkit.environments.texlive.DEFAULT_ENVIRONMENT
+    # A TeX Live environment the project has is used
+    tl_env = {"kind": "texlive", "release": 2025}
+    res = calkit.environments.detect_env_for_stage(
+        stage_latex, environment=None, ck_info={"environments": {"tl": tl_env}}
+    )
+    assert (res.name, res.env, res.exists) == ("tl", tl_env, True)
 
 
 def test_env_from_notebook_path(tmp_dir):
@@ -2732,21 +2736,32 @@ def test_composed_envs(tmp_dir, texlive_user_home, monkeypatch):
         "tex2": {"kind": "texlive"},
         "py": {"kind": "uv", "path": "pyproject.toml", "with": ["tex"]},
         "plain": {"kind": "uv", "path": "pyproject.toml"},
+        "twice": {"kind": "uv", "path": "x.toml", "with": ["tex", "tex"]},
         "img": {"kind": "docker", "image": "x", "with": ["tex"]},
         "nested": {"kind": "uv", "path": "pyproject.toml", "with": ["py"]},
         "missing": {"kind": "uv", "path": "pyproject.toml", "with": ["no"]},
         "two": {"kind": "uv", "path": "x.toml", "with": ["tex", "tex2"]},
+        "word": {"kind": "uv", "path": "x.toml", "with": "tex"},
+        "texwith": {"kind": "texlive", "with": ["tex"]},
+        "deep": {"kind": "uv", "path": "x.toml", "with": ["texwith"]},
+        "sw": {"kind": "switch", "switch": [{"use": "py"}]},
     }
     get_guest_envs = calkit.environments.get_guest_envs
     assert get_guest_envs("py", envs["py"], envs) == [("tex", envs["tex"])]
     assert get_guest_envs("plain", envs["plain"], envs) == []
+    assert get_guest_envs("twice", envs["twice"], envs) == [
+        ("tex", envs["tex"])
+    ]
     # Only a runtime on this machine can host, only TeX Live can be a guest,
-    # and only one of those
+    # only one of those, and a guest can't have its own
     for name, message in [
         ("img", "can't have others composed into it"),
         ("nested", "only texlive environments can be composed"),
         ("missing", "isn't defined"),
         ("two", "more than one TeX Live environment"),
+        ("word", "write it as a list"),
+        ("texwith", "can't have others composed into it"),
+        ("deep", "can't have a 'with' of its own"),
     ]:
         with pytest.raises(ValueError, match=message):
             get_guest_envs(name, envs[name], envs)
@@ -2766,10 +2781,12 @@ def test_composed_envs(tmp_dir, texlive_user_home, monkeypatch):
     names, _, _ = calkit.environments.get_pipeline_env_names(ck_info)
     assert names == ["py", "tex"]
     # Its programs come first on PATH, nothing on the machine points TeX
-    # elsewhere, and Matplotlib's caches are its own
+    # elsewhere, fontconfig finds the system's fonts and its own, and
+    # Matplotlib's caches are its own, unless the project says otherwise
     calkit.save_calkit_info(ck_info)
     monkeypatch.setenv("TEXINPUTS", "/elsewhere:")
     monkeypatch.setenv("MPLCONFIGDIR", "/elsewhere")
+    monkeypatch.delenv("FONTCONFIG_FILE", raising=False)
     get_composed_env_vars = calkit.environments.get_composed_env_vars
     assert get_composed_env_vars("plain", envs["plain"], envs) is None
     env_vars = get_composed_env_vars("py", envs["py"], envs)
@@ -2780,7 +2797,50 @@ def test_composed_envs(tmp_dir, texlive_user_home, monkeypatch):
     )
     assert env_vars["PATH"].split(os.pathsep)[0] == bin_dir
     assert "TEXINPUTS" not in env_vars
-    assert env_vars["MPLCONFIGDIR"].startswith(
-        os.path.join(texlive_user_home, ".calkit", "matplotlib")
+    composed_dir = os.path.dirname(env_vars["FONTCONFIG_FILE"])
+    assert composed_dir.startswith(
+        os.path.join(texlive_user_home, ".calkit", "composed")
     )
+    assert env_vars["MPLCONFIGDIR"] == os.path.join(composed_dir, "matplotlib")
+    with open(env_vars["FONTCONFIG_FILE"]) as f:
+        fonts_conf = f.read()
+    assert "/etc/fonts/fonts.conf</include>" in fonts_conf
+    assert "texmf-var/fonts/conf/fonts.conf</include>" in fonts_conf
     assert os.environ["MPLCONFIGDIR"] == "/elsewhere"
+    assert "FONTCONFIG_FILE" not in os.environ
+    env_vars = get_composed_env_vars(
+        "py", envs["py"], envs, keep=["MPLCONFIGDIR", "TEXINPUTS"]
+    )
+    assert env_vars is not None
+    assert env_vars["MPLCONFIGDIR"] == "/elsewhere"
+    assert env_vars["TEXINPUTS"] == "/elsewhere:"
+    # A fontconfig configuration the machine already uses is the one kept
+    monkeypatch.setenv("FONTCONFIG_FILE", "/my/fonts.conf")
+    env_vars = get_composed_env_vars("py", envs["py"], envs)
+    assert env_vars is not None
+    with open(env_vars["FONTCONFIG_FILE"]) as f:
+        fonts_conf = f.read()
+    assert "/my/fonts.conf</include>" in fonts_conf
+    assert "/etc/fonts/fonts.conf" not in fonts_conf
+    # A switch composes what it picks here
+    env_vars = get_composed_env_vars("sw", envs["sw"], envs)
+    assert env_vars is not None
+    assert env_vars["PATH"].split(os.pathsep)[0] == bin_dir
+    # Matplotlib's usetex packages are added to the TeX Live environment's
+    # lock when the host has Matplotlib, but not just matplotlib-inline
+    add_host_tex_packages = calkit.environments.add_host_tex_packages
+    with open("pyproject.toml", "w") as f:
+        f.write('[project]\nname = "x"\ndependencies = ["ipykernel"]\n')
+    with open("uv.lock", "w") as f:
+        f.write('[[package]]\nname = "matplotlib-inline"\n')
+    assert add_host_tex_packages("py", envs["py"], "tex", envs["tex"]) == []
+    with open("uv.lock", "a") as f:
+        f.write('[[package]]\nname = "matplotlib"\n')
+    added = add_host_tex_packages("py", envs["py"], "tex", envs["tex"])
+    assert added == calkit.environments.MATPLOTLIB_TEX_PACKAGES
+    lock = calkit.environments.texlive.read_lock(
+        calkit.environments.texlive.get_lock_fpath("tex", envs["tex"])
+    )
+    assert lock is not None
+    assert lock["added"] == calkit.environments.MATPLOTLIB_TEX_PACKAGES
+    assert add_host_tex_packages("py", envs["py"], "tex", envs["tex"]) == []

@@ -1799,6 +1799,34 @@ def test_check_switch_env(tmp_dir):
         assert set(json.load(f)["machine_locks"]) == {"a"}
 
 
+def test_check_pixi_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("env")
+    with open("env/pixi.toml", "w") as f:
+        f.write(
+            "[workspace]\n"
+            'name = "test"\n'
+            'channels = ["conda-forge"]\n'
+            'platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]\n'
+            "[feature.extra.dependencies]\n"
+            "[environments]\n"
+            'named = ["extra"]\n'
+        )
+    env = {"kind": "pixi", "path": "env/pixi.toml"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"px": env}}, f)
+    # Without a name, pixi installs the manifest's default env
+    subprocess.check_call(["calkit", "check", "env", "-n", "px"])
+    assert os.listdir("env/.pixi/envs") == ["default"]
+    # With one, it installs that env, as stages run it
+    shutil.rmtree("env/.pixi")
+    env["name"] = "named"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"px": env}}, f)
+    subprocess.check_call(["calkit", "check", "env", "-n", "px"])
+    assert os.listdir("env/.pixi/envs") == ["named"]
+
+
 def test_check_stage_runs(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {

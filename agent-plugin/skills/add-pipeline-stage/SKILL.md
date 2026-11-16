@@ -40,6 +40,12 @@ calkit xr scripts/new-stage.py \
 After running, inspect the new stage in `calkit.yaml` to confirm I/O is
 correct.
 
+<!-- TODO: needs human review -->
+
+For a `.tex` file in a project with no `texlive` environment, create one
+with `calkit new texlive-env` first, so `xr` uses it. Older versions of
+Calkit otherwise create a Docker one with Calkit's LaTeX image.
+
 ## Option B: Write the stage manually
 
 Write YAML directly when the stage is a shell command, or when you need

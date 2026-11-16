@@ -833,6 +833,13 @@ def check_environment(
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
+    elif env["kind"] == "texlive":
+        from calkit.environments import texlive as env_texlive
+
+        try:
+            env_texlive.check(env_name, env, rebuild=rebuild, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{env_name}': {e}")
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     calkit.environments.record_build_inputs(env_name, env)

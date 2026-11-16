@@ -64,6 +64,12 @@ LOOKUP_RESCAN_SECONDS = 600
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
 JOB_KINDS = ("run", "sync", "clone", "install-editor")
+# Those that change a checkout, so only one at a time works on each
+CHECKOUT_JOB_KINDS = ("run", "sync")
+# A job that hasn't started by then never will, e.g., its process died first
+JOB_START_SECONDS = 60
+# A GitHub owner or repo name, so neither is read as an option or a URL
+PROJECT_PART_RE = re.compile(r"^(?!\.+$)[A-Za-z0-9_.][A-Za-z0-9_.-]*$")
 # The requests answered alongside others, since they don't change the
 # working directory or start anything that has to be one at a time, e.g.,
 # opening a project, which can wait a while to hear it failed
@@ -138,6 +144,16 @@ def write_message(stream: BinaryIO, msg: dict) -> None:
     stream.flush()
 
 
+def split_project(project: Any) -> tuple[str, str]:
+    """A project's owner and name, from ``owner/name``."""
+    owner, _, name = (
+        project.partition("/") if isinstance(project, str) else ("", "", "")
+    )
+    if not PROJECT_PART_RE.match(owner) or not PROJECT_PART_RE.match(name):
+        raise ValueError("A project is given as 'owner/name'")
+    return owner, name
+
+
 def get_reply(msg: dict) -> dict:
     """Answer a request from the extension.
 
@@ -166,161 +182,231 @@ def get_reply(msg: dict) -> dict:
       takes a while, i.e., a pipeline run, an Overleaf sync, or a clone, in
       a process of its own, which outlives the host, and check on it.
     """
+    import contextlib
 
-    def split_project(project: Any) -> tuple[str, str]:
-        owner, _, name = (
-            project.partition("/")
-            if isinstance(project, str)
-            else ("", "", "")
-        )
-        if not owner or not name or "/" in name:
-            raise ValueError("A project is given as 'owner/name'")
-        return owner, name
+    import typer
 
     req_id = msg.get("id")
-    kind = msg.get("type")
+    # What Calkit's helpers print to stderr, so an error they raise after
+    # saying why can be told; only for requests that take turns, since it's
+    # for the whole process
+    printed = io.StringIO()
     try:
-        if kind == "ping":
-            result: Any = {"version": calkit.__version__} | get_editor_info()
-        elif kind == "projects.find":
-            owner, name = split_project(msg.get("project"))
-            found = calkit.get_project_checkouts(name, owner=owner)
-            result = {"paths": sorted(found)}
-        elif kind == "project.open":
-            owner, name = split_project(msg.get("project"))
-            cmd = [sys.executable, "-m", "calkit", "open", "project"]
-            cmd += [f"{owner}/{name}", "--with", get_editor_info()["editor"]]
-            # The checkout everything else here uses, e.g., a worktree
-            # chosen for it, rather than one the command finds
-            paths = get_checkout_paths(owner, name)
-            if paths:
-                cmd += ["--checkout", paths[0]]
-            path = msg.get("path")
-            if path is not None:
-                if not isinstance(path, str):
-                    raise ValueError("A path must be a string")
-                cmd += ["--path", path]
-            # Never cloning, which needs someone to say where. An editor
-            # that keeps running, e.g., JupyterLab's server, has opened it
-            # once it's still going a while later, and is left running in
-            # its own session, past the host
-            with tempfile.TemporaryFile("w+") as out:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=out,
-                    stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL,
-                    env=get_login_shell_env(),
-                    text=True,
-                    start_new_session=True,
-                )
-                try:
-                    returncode = proc.wait(timeout=OPEN_TIMEOUT_SECONDS)
-                except subprocess.TimeoutExpired:
-                    returncode = 0
-                out.seek(0)
-                lines = out.read().strip().splitlines()
-            if returncode != 0:
-                error = (
-                    (lines[-1] if lines else "Failed to open it")
-                    .removeprefix("Error: ")
-                    .strip()
-                )
-                if "isn't on this machine" in error:
-                    error = (
-                        f"{owner}/{name} isn't on this computer; clone it "
-                        f"with 'calkit clone {owner}/{name}'"
-                    )
-                raise ValueError(error)
-            result = {}
-        elif kind == "project.status":
-            owner, name = split_project(msg.get("project"))
-            result = {
-                "checkouts": [
-                    get_checkout_status(p)
-                    for p in sorted(get_checkout_paths(owner, name))
-                ]
-            }
-        elif kind == "checkouts.get":
-            owner, name = split_project(msg.get("project"))
-            paths = get_checkout_paths(owner, name)
-            result = {"paths": paths, "path": paths[0] if paths else None}
-        elif kind == "checkouts.choose":
-            owner, name = split_project(msg.get("project"))
-            path = msg.get("path")
-            # E.g., a worktree made since they were last looked for
-            if path not in get_checkout_paths(owner, name) and (
-                path not in get_checkout_paths(owner, name, refresh=True)
-            ):
-                raise ValueError(f"{path} isn't a checkout of {owner}/{name}")
-            remember_checkout(owner, name, path)
-            result = {"paths": get_checkout_paths(owner, name), "path": path}
-        elif kind == "overleaf.lookup":
-            overleaf_project_id = msg.get("overleaf_project_id")
-            if not isinstance(overleaf_project_id, str):
-                raise ValueError("An Overleaf project ID is needed")
-            links = get_overleaf_links(overleaf_project_id)
-            result = {
-                "links": links,
-                "projects_scanned": len(links),
-                "projects_remaining": 0,
-            }
-        elif kind == "overleaf.status":
-            owner, name = split_project(msg.get("project"))
-            paths = get_checkout_paths(owner, name)
-            if not paths:
-                raise ValueError(f"{owner}/{name} isn't on this computer")
-            result = get_overleaf_sync_statuses(
-                paths[0],
-                overleaf_project_id=msg.get("overleaf_project_id"),
-                path=msg.get("path"),
-                pull=msg.get("pull", True) is not False,
-                overleaf_files=msg.get("overleaf_files"),
-                overleaf_texts=msg.get("overleaf_texts"),
-            )
-        elif kind == "project.figures":
-            owner, name = split_project(msg.get("project"))
-            paths = get_checkout_paths(owner, name)
-            if not paths:
-                raise ValueError(f"{owner}/{name} isn't on this computer")
-            result = get_figures(paths[0])
-        elif kind == "project.pipeline":
-            owner, name = split_project(msg.get("project"))
-            paths = get_checkout_paths(owner, name)
-            if not paths:
-                raise ValueError(f"{owner}/{name} isn't on this computer")
-            result = get_pipeline(paths[0])
-        elif kind == "publication.pdf":
-            owner, name = split_project(msg.get("project"))
-            paths = get_checkout_paths(owner, name)
-            if not paths:
-                raise ValueError(f"{owner}/{name} isn't on this computer")
-            offset = msg.get("offset", 0)
-            if not isinstance(offset, int) or offset < 0:
-                raise ValueError("An offset must be a whole number")
-            result = get_pdf_chunk(paths[0], str(msg.get("folder")), offset)
-        elif kind == "job.start":
-            result = start_job(msg)
-        elif kind == "job.get":
-            result = get_job(str(msg.get("job_id")))
-        elif kind == "job.log":
-            result = {"log": get_job_log(str(msg.get("job_id")))}
-        elif kind == "jobs.list":
-            owner, name = split_project(msg.get("project"))
-            result = [
-                j
-                for j in list_jobs()
-                if j["project"] == f"{owner}/{name}"
-                and j["kind"] == msg.get("kind", j["kind"])
-            ]
-        else:
-            raise ValueError(f"Unknown request type {kind!r}")
+        with (
+            contextlib.nullcontext()
+            if msg.get("type") in CONCURRENT_REQUEST_TYPES
+            else contextlib.redirect_stderr(printed)
+        ):
+            result = get_result(msg)
     except OverleafAuthMissing as e:
         # As the hub says it, so the extension asks for credentials there
         return {"id": req_id, "ok": False, "error": str(e), "status": 401}
+    except (typer.Exit, SystemExit):
+        lines = [x for x in printed.getvalue().splitlines() if x.strip()]
+        error = ANSI_ESCAPE_RE.sub("", lines[-1]) if lines else "It failed"
+        return {
+            "id": req_id,
+            "ok": False,
+            "error": error.removeprefix("Error: "),
+        }
     except Exception as e:
         return {"id": req_id, "ok": False, "error": str(e)}
     return {"id": req_id, "ok": True, "result": result}
+
+
+def get_result(msg: dict) -> Any:
+    """What a request from the extension asks for, as ``get_reply`` lists."""
+    kind = msg.get("type")
+    if kind == "ping":
+        result: Any = {"version": calkit.__version__} | get_editor_info()
+    elif kind == "projects.find":
+        owner, name = split_project(msg.get("project"))
+        found = calkit.get_project_checkouts(name, owner=owner)
+        result = {"paths": sorted(found)}
+    elif kind == "project.open":
+        owner, name = split_project(msg.get("project"))
+        cmd = get_calkit_cmd() + ["open", "project"]
+        cmd += [f"{owner}/{name}", "--with", get_editor_info()["editor"]]
+        # The checkout everything else here uses, e.g., a worktree
+        # chosen for it, rather than one the command finds
+        paths = get_checkout_paths(owner, name)
+        if paths:
+            cmd += ["--checkout", paths[0]]
+        path = msg.get("path")
+        if path is not None:
+            if not isinstance(path, str):
+                raise ValueError("A path must be a string")
+            cmd += ["--path", path]
+        # Never cloning, which needs someone to say where. An editor
+        # that keeps running, e.g., JupyterLab's server, has opened it
+        # once it's still going a while later, and is left running in
+        # its own session, past the host
+        with tempfile.TemporaryFile("w+") as out:
+            proc = start_detached(
+                cmd,
+                cwd=calkit.get_user_home(),
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                env=get_login_shell_env(),
+                text=True,
+            )
+            try:
+                returncode = proc.wait(timeout=OPEN_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                returncode = 0
+            out.seek(0)
+            lines = out.read().strip().splitlines()
+        if returncode != 0:
+            error = (
+                (lines[-1] if lines else "Failed to open it")
+                .removeprefix("Error: ")
+                .strip()
+            )
+            if "isn't on this machine" in error:
+                error = (
+                    f"{owner}/{name} isn't on this computer; clone it "
+                    f"with 'calkit clone {owner}/{name}'"
+                )
+            raise ValueError(error)
+        result = {}
+    elif kind == "project.status":
+        owner, name = split_project(msg.get("project"))
+        result = {
+            "checkouts": [
+                get_checkout_status(p)
+                for p in sorted(get_checkout_paths(owner, name))
+            ]
+        }
+    elif kind == "checkouts.get":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        result = {"paths": paths, "path": paths[0] if paths else None}
+    elif kind == "checkouts.choose":
+        owner, name = split_project(msg.get("project"))
+        path = msg.get("path")
+        # E.g., a worktree made since they were last looked for
+        if path not in get_checkout_paths(owner, name) and (
+            path not in get_checkout_paths(owner, name, refresh=True)
+        ):
+            raise ValueError(f"{path} isn't a checkout of {owner}/{name}")
+        remember_checkout(owner, name, path)
+        result = {"paths": get_checkout_paths(owner, name), "path": path}
+    elif kind == "overleaf.lookup":
+        overleaf_project_id = msg.get("overleaf_project_id")
+        if not isinstance(overleaf_project_id, str):
+            raise ValueError("An Overleaf project ID is needed")
+        links = get_overleaf_links(overleaf_project_id)
+        result = {
+            "links": links,
+            "projects_scanned": len(links),
+            "projects_remaining": 0,
+        }
+    elif kind == "overleaf.status":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this computer")
+        result = get_overleaf_sync_statuses(
+            paths[0],
+            overleaf_project_id=msg.get("overleaf_project_id"),
+            path=msg.get("path"),
+            pull=msg.get("pull", True) is not False,
+            overleaf_files=msg.get("overleaf_files"),
+            overleaf_texts=msg.get("overleaf_texts"),
+        )
+    elif kind == "project.figures":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this computer")
+        result = get_figures(paths[0])
+    elif kind == "project.pipeline":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this computer")
+        result = get_pipeline(paths[0])
+    elif kind == "publication.pdf":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this computer")
+        offset = msg.get("offset", 0)
+        if not isinstance(offset, int) or offset < 0:
+            raise ValueError("An offset must be a whole number")
+        result = get_pdf_chunk(paths[0], str(msg.get("folder")), offset)
+    elif kind == "job.start":
+        result = start_job(msg)
+    elif kind == "job.get":
+        result = get_job(str(msg.get("job_id")))
+    elif kind == "job.log":
+        result = {"log": get_job_log(str(msg.get("job_id")))}
+    elif kind == "jobs.list":
+        owner, name = split_project(msg.get("project"))
+        result = [
+            j
+            for j in list_jobs()
+            if j["project"] == f"{owner}/{name}"
+            and j["kind"] == msg.get("kind", j["kind"])
+        ]
+    else:
+        raise ValueError(f"Unknown request type {kind!r}")
+    return result
+
+
+def get_calkit_cmd(module: str = "calkit") -> list[str]:
+    """The command that runs one of Calkit's modules with this Python,
+    without importing anything from the folder it runs in first, e.g., a
+    project's own ``queue.py``.
+    """
+    if sys.version_info >= (3, 11):
+        return [sys.executable, "-P", "-m", module]
+    return [
+        sys.executable,
+        "-c",
+        "import runpy, sys; sys.path.pop(0); "
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)",
+    ]
+
+
+def start_detached(cmd: list[str], **kwargs: Any) -> subprocess.Popen:
+    """Start a process that outlives the host, which the browser stops once
+    the extension's done with it, and, on Windows, the job object the
+    browser starts the host in, where that job allows it.
+    """
+    if sys.platform != "win32":
+        return subprocess.Popen(cmd, start_new_session=True, **kwargs)
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP
+    try:
+        return subprocess.Popen(
+            cmd,
+            creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB,
+            **kwargs,
+        )
+    except OSError:
+        return subprocess.Popen(cmd, creationflags=flags, **kwargs)
+
+
+def check_clone_location(location: str) -> None:
+    """Refuse a place to clone to that isn't a folder of the user's own,
+    i.e., outside the home folder, or in a hidden or app's folder there,
+    e.g., ``~/.config/git``, where what's cloned could be run as config.
+    """
+    home = os.path.realpath(calkit.get_user_home())
+    path = os.path.realpath(location)
+    rel = os.path.relpath(path, home)
+    parts = rel.split(os.sep)
+    if (
+        rel == "."
+        or parts[0] == ".."
+        or any(part.startswith(".") for part in parts)
+        or parts[0] in ("Library", "AppData")
+    ):
+        raise ValueError(
+            f"Can't clone to {location}; choose a folder in your home folder"
+            ", e.g., ~/calkit"
+        )
 
 
 class OverleafAuthMissing(Exception):
@@ -849,6 +935,10 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
     if path is None:
         raise ValueError(f"No PDF is built from {folder}")
     full_path = os.path.join(wdir, path)
+    if not os.path.realpath(full_path).startswith(
+        os.path.join(os.path.realpath(wdir), "")
+    ):
+        raise ValueError(f"{path} isn't in the project")
     if not os.path.isfile(full_path):
         raise ValueError(
             f"{path} hasn't been built on this computer; run the pipeline"
@@ -1029,15 +1119,27 @@ def get_job(job_id: str) -> dict:
     """A job's record, with how it ended, and the end of what it printed
     once it has.
     """
+    from datetime import datetime, timezone
+
     job_path = get_job_path(job_id)
     if not os.path.isfile(job_path):
         raise ValueError(f"No job {job_id!r}")
     with open(job_path) as f:
         job: dict = json.load(f)
-    # One whose process died without saying so, e.g., at a restart
+    # One whose process died without saying so, e.g., at a restart, or
+    # before it could start
     if job["status"] == "running" and not is_running(job.get("pid")):
         job["status"] = "failed"
         job["error"] = "It stopped without finishing"
+    elif (
+        job["status"] == "queued"
+        and (
+            datetime.now(timezone.utc) - datetime.fromisoformat(job["created"])
+        ).total_seconds()
+        > JOB_START_SECONDS
+    ):
+        job["status"] = "failed"
+        job["error"] = "It never started"
     # The last of what it's printed, while it runs
     if job["status"] == "running" and job.get("output"):
         lines = job["output"].splitlines()
@@ -1092,11 +1194,8 @@ def start_job(msg: dict) -> dict:
     kind = msg.get("kind")
     if kind not in JOB_KINDS:
         raise ValueError(f"Unknown kind of job {kind!r}")
-    project = msg.get("project")
-    owner, _, name = str(project).partition("/")
-    if not owner or not name or "/" in name:
-        raise ValueError("A project is given as 'owner/name'")
-    calkit_cmd = [sys.executable, "-m", "calkit"]
+    owner, name = split_project(msg.get("project"))
+    calkit_cmd = get_calkit_cmd()
     if kind == "install-editor":
         # VS Code, the only editor Calkit installs, for opening the project
         wdir = calkit.get_user_home()
@@ -1108,6 +1207,7 @@ def start_job(msg: dict) -> dict:
         if not isinstance(location, str):
             raise ValueError("A location must be a string")
         location = os.path.abspath(os.path.expanduser(location))
+        check_clone_location(location)
         if os.path.exists(location) and os.listdir(location):
             raise ValueError(f"{location} is already there and isn't empty")
         wdir = os.path.dirname(location)
@@ -1119,14 +1219,6 @@ def start_job(msg: dict) -> dict:
             raise ValueError(f"{owner}/{name} isn't on this computer")
         wdir = paths[0]
         if kind == "run":
-            # One at a time, as on the hub
-            for job in list_jobs():
-                if (
-                    job["kind"] == "run"
-                    and job["wdir"] == wdir
-                    and job["status"] in ("queued", "running")
-                ):
-                    raise ValueError("The pipeline is already running here")
             # Saved and synced with Overleaf after unless asked not to
             cmd = calkit_cmd + ["run"]
             if msg.get("sync", True):
@@ -1136,6 +1228,18 @@ def start_job(msg: dict) -> dict:
             if not isinstance(folder, str):
                 raise ValueError("A folder synced with Overleaf is needed")
             cmd = calkit_cmd + ["overleaf", "sync", folder]
+        # One at a time, as on the hub, since each commits
+        for job in list_jobs():
+            if (
+                job["kind"] in CHECKOUT_JOB_KINDS
+                and job["wdir"] == wdir
+                and job["status"] in ("queued", "running")
+            ):
+                raise ValueError(
+                    "The pipeline is already running here"
+                    if job["kind"] == "run"
+                    else "It's already syncing with Overleaf here"
+                )
     job_id = uuid.uuid4().hex
     repo_info: dict[str, Any] = {"git_rev": None, "branch": None}
     if kind not in ("clone", "install-editor"):
@@ -1166,25 +1270,14 @@ def start_job(msg: dict) -> dict:
     os.makedirs(get_jobs_dir(), exist_ok=True)
     with open(get_job_path(job_id), "w") as f:
         json.dump(job, f)
-    # Outliving the host, which the browser stops once the extension's
-    # done with it, and, on Windows, the job object the browser starts the
-    # host in
-    kwargs: dict[str, Any] = {}
-    if sys.platform == "win32":
-        kwargs["creationflags"] = (
-            subprocess.CREATE_BREAKAWAY_FROM_JOB
-            | subprocess.CREATE_NEW_PROCESS_GROUP
-        )
-    else:
-        kwargs["start_new_session"] = True
     try:
-        subprocess.Popen(
-            [sys.executable, "-m", "calkit.browser_link", "job", job_id],
+        start_detached(
+            get_calkit_cmd("calkit.browser_link") + ["job", job_id],
+            cwd=calkit.get_user_home(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=get_login_shell_env(),
-            **kwargs,
         )
     except OSError as e:
         # Otherwise it'd look queued forever, holding up the next run
@@ -1360,8 +1453,7 @@ def run_job(job_id: str) -> None:
         for name, env in (envs or {}).items():
             if env.get("kind") == "texlive":
                 subprocess.run(
-                    [sys.executable, "-m", "calkit", "check", "env"]
-                    + ["--name", name],
+                    get_calkit_cmd() + ["check", "env", "--name", name],
                     cwd=job["location"],
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
@@ -1777,16 +1869,29 @@ def uninstall_host() -> None:
     shutil.rmtree(get_host_dir(), ignore_errors=True)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run a job the host started, or else answer the browser, which names
+    the extension connecting.
+    """
+    if sys.argv[1:2] == ["job"]:
+        run_job(sys.argv[2])
+        return
+    # The browser's messages get stdout to themselves, since anything else
+    # printed there, e.g., by a helper or a process started here, would
+    # break them
+    protocol_fd = os.dup(sys.stdout.fileno())
+    sys.stdout.flush()
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    sys.stdout = sys.stderr
     # Windows would otherwise turn a newline in a message into two bytes
     if sys.platform == "win32":
         import msvcrt
 
         msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
-        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
-    # A job the host started, rather than the browser, which names the
-    # extension connecting
-    if sys.argv[1:2] == ["job"]:
-        run_job(sys.argv[2])
-    else:
-        serve(sys.stdin.buffer, sys.stdout.buffer)
+        msvcrt.setmode(protocol_fd, os.O_BINARY)
+    with os.fdopen(protocol_fd, "wb") as protocol_out:
+        serve(sys.stdin.buffer, protocol_out)
+
+
+if __name__ == "__main__":
+    main()

@@ -74,9 +74,29 @@ def test_messages():
         {"id": 2, "ok": False, "error": "Unknown request type 'nope'"},
         {"id": None, "ok": False, "error": "A message must be a JSON object"},
     ]
+    # Nothing else printed, by Calkit or a process it starts, reaches the
+    # browser's messages
+    noisy = (
+        "import os, calkit.browser_link as b; get_reply = b.get_reply; "
+        "b.get_reply = lambda m: (print('noise'), os.system('echo more'), "
+        "get_reply(m))[2]; b.main()"
+    )
+    ping = json.dumps({"type": "ping", "id": 1}).encode()
+    res = subprocess.run(
+        [sys.executable, "-c", noisy],
+        input=struct.pack("=I", len(ping)) + ping,
+        capture_output=True,
+        timeout=60,
+    )
+    out = io.BytesIO(res.stdout)
+    assert read_message(out)["ok"] and read_message(out) is None
+    assert b"noise" in res.stderr and b"more" in res.stderr
 
 
 def test_get_reply(tmp_path, monkeypatch):
+    from calkit.browser_link import get_calkit_cmd
+    from calkit.cli import raise_error
+
     home = tmp_path / "home"
     os.makedirs(home)
     monkeypatch.setenv("HOME", str(home))
@@ -95,7 +115,16 @@ def test_get_reply(tmp_path, monkeypatch):
     ]:
         reply = get_reply({"type": "projects.find", "project": project})
         assert reply == {"id": None, "ok": True, "result": {"paths": paths}}
-    for project in ["near", "a/b/c", "/near", 5, None]:
+    for project in [
+        "near",
+        "a/b/c",
+        "/near",
+        5,
+        None,
+        "-o/near",
+        "git@evil.example:a/b",
+        "../near",
+    ]:
         reply = get_reply({"type": "projects.find", "project": project})
         assert not reply["ok"] and "owner/name" in reply["error"]
     # Opening one runs 'calkit open project', which says what went wrong,
@@ -142,14 +171,20 @@ def test_get_reply(tmp_path, monkeypatch):
             assert reply["error"] == "a.ipynb isn't in /far"
         [(cmd, env)] = started
         assert cmd == [
-            sys.executable,
-            *["-m", "calkit", "open", "project", "me/far"],
+            *get_calkit_cmd(),
+            *["open", "project", "me/far"],
             *["--with", get_editor_info()["editor"]],
             # The checkout everything else here uses
             *["--checkout", os.path.realpath(far), "--path", "a.ipynb"],
         ]
         if os.name != "nt":
             assert env["PATH"].startswith("/login/bin" + os.pathsep)
+    # An error a helper raises after printing why says why
+    monkeypatch.setattr(
+        calkit.browser_link, "get_figures", lambda wdir: raise_error("Nope")
+    )
+    reply = get_reply({"type": "project.figures", "project": "me/far"})
+    assert reply == {"id": None, "ok": False, "error": "Nope"}
     # The editor is the one set, or else the first installed of those built
     # on VS Code, VS Code first, or else VS Code, to be installed
     installed: list[str] = []
@@ -588,7 +623,13 @@ def test_get_overleaf_sync_statuses(tmp_path, monkeypatch):
 
 def test_start_job(tmp_path, monkeypatch):
     import calkit.browser_link
-    from calkit.browser_link import get_job, list_jobs, run_job, start_job
+    from calkit.browser_link import (
+        get_calkit_cmd,
+        get_job,
+        list_jobs,
+        run_job,
+        start_job,
+    )
 
     home = make_home(tmp_path, monkeypatch)
     project = home / "calkit" / "proj"
@@ -596,9 +637,11 @@ def test_start_job(tmp_path, monkeypatch):
     git("commit", "-q", "--allow-empty", "-m", "Init", cwd=project)
     started = []
     real_popen = subprocess.Popen
+    calkit_cmd = get_calkit_cmd()
+    link_cmd = get_calkit_cmd("calkit.browser_link")
 
     def popen(cmd, **kwargs):
-        if cmd[1:3] == ["-m", "calkit.browser_link"]:
+        if cmd[: len(link_cmd)] == link_cmd:
             started.append(cmd)
             return None
         return real_popen(cmd, **kwargs)
@@ -609,15 +652,23 @@ def test_start_job(tmp_path, monkeypatch):
     assert job["status"] == "queued" and job["wdir"] == os.path.realpath(
         project
     )
-    assert job["cmd"][1:] == ["-m", "calkit", "run", "--save", "--overleaf"]
+    assert job["cmd"] == calkit_cmd + ["run", "--save", "--overleaf"]
     assert job["branch"] and len(job["git_rev"]) == 40
-    assert started == [
-        [sys.executable, "-m", "calkit.browser_link", "job", job["id"]]
-    ]
+    assert started == [link_cmd + ["job", job["id"]]]
     assert get_reply({"type": "job.get", "job_id": job["id"]})["result"] == job
     # One at a time
     reply = get_reply(
         {"type": "job.start", "kind": "run", "project": "me/proj"}
+    )
+    assert not reply["ok"] and "already running" in reply["error"]
+    # Nor a sync while it runs, since both commit
+    reply = get_reply(
+        {
+            "type": "job.start",
+            "kind": "sync",
+            "project": "me/proj",
+            "path": "paper",
+        }
     )
     assert not reply["ok"] and "already running" in reply["error"]
     # Without syncing after, it only runs
@@ -627,24 +678,18 @@ def test_start_job(tmp_path, monkeypatch):
     with open(job_path, "w") as f:
         json.dump(record | {"status": "succeeded"}, f)
     run_only = start_job({"kind": "run", "project": "me/proj", "sync": False})
-    assert run_only["cmd"][1:] == ["-m", "calkit", "run"]
+    assert run_only["cmd"] == calkit_cmd + ["run"]
     os.remove(calkit.browser_link.get_job_path(run_only["id"]))
     # VS Code, the editor Calkit installs, from the user's home folder
     installing = start_job({"kind": "install-editor", "project": "me/proj"})
-    assert installing["cmd"][1:] == [
-        "-m",
-        "calkit",
-        "install",
-        "code",
-        "--yes",
-    ]
+    assert installing["cmd"] == calkit_cmd + ["install", "code", "--yes"]
     assert installing["wdir"] == calkit.get_user_home()
     os.remove(calkit.browser_link.get_job_path(installing["id"]))
 
     # A worker that can't be started leaves its job failed, not queued,
     # which would hold up the next run
     def popen_fails(cmd, **kwargs):
-        if cmd[1:3] == ["-m", "calkit.browser_link"]:
+        if cmd[: len(link_cmd)] == link_cmd:
             raise OSError("No such file")
         return real_popen(cmd, **kwargs)
 
@@ -665,6 +710,16 @@ def test_start_job(tmp_path, monkeypatch):
             {"kind": "clone", "project": "me/proj", "location": str(project)},
             "isn't empty",
         ),
+        # Only to a folder of the user's own, not one config is read from
+        (
+            {"kind": "clone", "project": "me/x", "location": "~/.config/git"},
+            "Can't clone",
+        ),
+        (
+            {"kind": "clone", "project": "me/x", "location": str(tmp_path)},
+            "Can't clone",
+        ),
+        ({"kind": "clone", "project": "-u/x"}, "owner/name"),
     ]:
         with pytest.raises(ValueError, match=error):
             start_job(msg)
@@ -733,6 +788,11 @@ def test_start_job(tmp_path, monkeypatch):
     with open(job_path, "w") as f:
         json.dump(record, f)
     assert get_job(job["id"])["status"] == "failed"
+    # As has one that never started
+    record |= {"status": "queued", "pid": None, "created": "2000-01-01T00:00Z"}
+    with open(job_path, "w") as f:
+        json.dump(record, f)
+    assert get_job(job["id"])["error"] == "It never started"
     # Listed by project, newest first
     clone = start_job(
         {"kind": "clone", "project": "me/other", "location": "~/calkit/o"}
@@ -760,8 +820,8 @@ def test_start_job(tmp_path, monkeypatch):
     real_run = subprocess.run
 
     def run_checks(cmd, **kwargs):
-        if cmd[1:4] == ["-m", "calkit", "check"]:
-            checked.append((cmd[4:], kwargs["cwd"]))
+        if cmd[: len(calkit_cmd) + 1] == calkit_cmd + ["check"]:
+            checked.append((cmd[len(calkit_cmd) + 1 :], kwargs["cwd"]))
             return None
         return real_run(cmd, **kwargs)
 
@@ -896,6 +956,13 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     assert get_pdf_chunk(str(project), "paper", 0)["changed_since_commit"]
     with pytest.raises(ValueError, match="hasn't been built"):
         get_pdf_chunk(str(project), "notes", 0)
+    # Never one outside the project, e.g., through a link
+    if os.name != "nt":
+        (tmp_path / "outside.pdf").write_bytes(pdf)
+        os.makedirs(project / "notes")
+        os.symlink(tmp_path / "outside.pdf", project / "notes" / "notes.pdf")
+        with pytest.raises(ValueError, match="isn't in the project"):
+            get_pdf_chunk(str(project), "notes", 0)
     for offset in [-1, "0"]:
         reply = get_reply(
             {

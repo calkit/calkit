@@ -731,7 +731,21 @@ class Environment(Model):
         return data
 
 
-class CondaEnvironment(Environment):
+class ComposableEnvironment(Environment):
+    """Base class for the kinds other environments can be composed into."""
+
+    with_: list[str] = Field(
+        default=[],
+        alias="with",
+        description=(
+            "Names of TeX Live environments whose programs this one's "
+            "commands also get, e.g., for Matplotlib's usetex. They come "
+            "after this environment's own on PATH and before the system's."
+        ),
+    )
+
+
+class CondaEnvironment(ComposableEnvironment):
     kind: Literal["conda"] = "conda"
     path: str = Field(description="Path to the Conda environment YAML file.")
     prefix: str | None = Field(
@@ -739,7 +753,7 @@ class CondaEnvironment(Environment):
     )
 
 
-class VenvEnvironment(Environment):
+class VenvEnvironment(ComposableEnvironment):
     kind: Literal["venv"] = "venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -758,12 +772,12 @@ class VenvEnvironment(Environment):
     )
 
 
-class UvEnvironment(Environment):
+class UvEnvironment(ComposableEnvironment):
     kind: Literal["uv"] = "uv"
     path: str = Field(description="Path to the uv project's pyproject.toml.")
 
 
-class UvVenvEnvironment(Environment):
+class UvVenvEnvironment(ComposableEnvironment):
     kind: Literal["uv-venv"] = "uv-venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -782,7 +796,7 @@ class UvVenvEnvironment(Environment):
     )
 
 
-class PixiEnvironment(Environment):
+class PixiEnvironment(ComposableEnvironment):
     kind: Literal["pixi"] = "pixi"
     path: str = Field(description="Path to the Pixi manifest file.")
     name: str | None = Field(
@@ -969,7 +983,7 @@ class DockerEnvironment(Environment):
         return self
 
 
-class REnvironment(Environment):
+class REnvironment(ComposableEnvironment):
     kind: Literal["renv"] = "renv"
     path: str = Field(
         description="Path to the project's DESCRIPTION file. The renv lock "
@@ -980,7 +994,7 @@ class REnvironment(Environment):
     )
 
 
-class JuliaEnvironment(Environment):
+class JuliaEnvironment(ComposableEnvironment):
     kind: Literal["julia"] = "julia"
     path: str = Field(description="Path to the Julia project's Project.toml.")
     julia: str = Field(description="Julia version to use.")

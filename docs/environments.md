@@ -1251,6 +1251,73 @@ package added to the lock.
 One loaded by name doesn't, so add its package, e.g., `tex-gyre`, to
 `packages`.
 
+<!-- TODO: needs human review -->
+
+#### Using TeX from Python, e.g., for Matplotlib
+
+Matplotlib's `text.usetex`, and other tools that run LaTeX, need TeX's
+programs.
+Rather than installing TeX on every computer,
+add a TeX Live environment to the one your scripts run in with `with`:
+
+```yaml
+environments:
+  tex:
+    kind: texlive
+    release: 2025
+  py:
+    kind: uv
+    path: pyproject.toml
+    with:
+      - tex
+```
+
+If `py` has Matplotlib, Calkit adds the packages its usetex needs,
+e.g., `cm-super` and `dvipng`, to `tex`'s lock,
+as it does for a document's packages.
+Others, e.g., for a font set in `text.latex.preamble`,
+go in `tex`'s `packages`.
+Commands in `py`, including its pipeline stages and the notebooks Calkit
+executes, then find TeX Live's programs after the environment's own and
+before anything installed on the computer,
+and a change to `tex`'s lock reruns the stages that use `py`.
+
+Matplotlib keeps what it gets from TeX and the list of fonts it found in
+a folder for each pair of environments, under `~/.calkit/composed`,
+rather than in `~/.matplotlib`,
+so a figure can't come from another project's TeX.
+Settings in `~/.matplotlib/matplotlibrc` don't apply either,
+so put them in a `matplotlibrc` in the folder a stage runs in,
+e.g., the project's.
+The first figure in a new environment waits while Matplotlib lists the
+computer's fonts, which can take a while.
+A variable you set for the project, in `env_vars` in `calkit.yaml` or in
+`.env`, e.g., `MPLCONFIGDIR` or `TEXINPUTS`, keeps your value.
+
+TeX Live packages also have fonts Matplotlib can use without usetex,
+e.g., `arimo`, which has the same letter widths as Arial,
+and `cm-unicode`, for Computer Modern:
+
+```yaml
+# matplotlibrc
+font.family: CMU Serif
+mathtext.fontset: cm
+```
+
+so a figure doesn't quietly change to another font on a computer without
+the one it names.
+Matplotlib finds them through fontconfig, which most Linux systems have,
+and macOS has with Homebrew's `fontconfig`, but Windows doesn't.
+Fontconfig still finds the fonts installed on your computer too,
+so programs that look fonts up through it, e.g., R's and Julia's plotting
+on Linux, keep finding the ones they used before.
+
+Only `uv`, `uv-venv`, `venv`, `conda`, `pixi`, `julia`, and `renv`
+environments can have another composed into them with `with`,
+and only one TeX Live environment each.
+A notebook kernel your editor starts, rather than Calkit, doesn't get it
+yet.
+
 ### R
 
 R environments can be managed with Conda, Pixi, or `renv` (recommended).
@@ -1356,6 +1423,7 @@ Model class: `CondaEnvironment`
 | ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['conda']         | yes      | What kind of environment this is.                                                                                                                                                       |
 | inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
 | path        | str                      | yes      | Path to the Conda environment YAML file.                                                                                                                                                |
 | prefix      | str                      | no       | Path at which to create the environment.                                                                                                                                                |
 | description | str                      | no       | A description of the environment.                                                                                                                                                       |
@@ -1393,6 +1461,7 @@ Model class: `JuliaEnvironment`
 | ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['julia']         | yes      | What kind of environment this is.                                                                                                                                                       |
 | inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
 | path        | str                      | yes      | Path to the Julia project's Project.toml.                                                                                                                                               |
 | julia       | str                      | yes      | Julia version to use.                                                                                                                                                                   |
 | description | str                      | no       | A description of the environment.                                                                                                                                                       |
@@ -1444,6 +1513,7 @@ Model class: `PixiEnvironment`
 | ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['pixi']          | yes      | What kind of environment this is.                                                                                                                                                       |
 | inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
 | path        | str                      | yes      | Path to the Pixi manifest file.                                                                                                                                                         |
 | name        | str                      | no       | Name of the environment within the Pixi manifest.                                                                                                                                       |
 | description | str                      | no       | A description of the environment.                                                                                                                                                       |
@@ -1456,6 +1526,7 @@ Model class: `REnvironment`
 | ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['renv']          | yes      | What kind of environment this is.                                                                                                                                                       |
 | inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
 | path        | str                      | yes      | Path to the project's DESCRIPTION file. The renv lock file is created next to it.                                                                                                       |
 | prefix      | str                      | no       | Path at which to create the environment.                                                                                                                                                |
 | description | str                      | no       | A description of the environment.                                                                                                                                                       |
@@ -1676,6 +1747,7 @@ Model class: `UvEnvironment`
 | ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['uv']            | yes      | What kind of environment this is.                                                                                                                                                       |
 | inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
 | path        | str                      | yes      | Path to the uv project's pyproject.toml.                                                                                                                                                |
 | description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
@@ -1687,6 +1759,7 @@ Model class: `UvVenvEnvironment`
 | ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['uv-venv']       | yes      | What kind of environment this is.                                                                                                                                                       |
 | inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
 | path        | str                      | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                                  |
 | prefix      | str                      | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict.         |
 | python      | str                      | no       | Python version to use when creating the environment.                                                                                                                                    |
@@ -1700,6 +1773,7 @@ Model class: `VenvEnvironment`
 | ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['venv']          | yes      | What kind of environment this is.                                                                                                                                                       |
 | inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
 | path        | str                      | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                                  |
 | prefix      | str                      | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict.         |
 | python      | str                      | no       | Python version to use when creating the environment.                                                                                                                                    |

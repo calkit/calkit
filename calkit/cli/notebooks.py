@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import dotenv
 import typer
 from typing_extensions import Annotated
 
@@ -638,14 +639,38 @@ def execute_notebook(
             verbose=verbose,
         )
     elif language.lower() in ["python", "julia", "r"]:
-        papermill.execute_notebook(
-            input_path=path,
-            output_path=fpath_out_exec,
-            kernel_name=kernel_name,
-            log_output=True,
-            parameters=parsed_params,
-            cwd=notebook_dir,
-        )
+        # The kernel inherits this process's environmental variables, so
+        # it gets the programs of environments composed into its own while
+        # it runs, and what the project sets wins
+        try:
+            composed = calkit.environments.get_composed_env_vars(
+                env_name,
+                env,
+                envs,
+                keep=[
+                    *(ck_info.get("env_vars") or {}),
+                    *dotenv.dotenv_values(".env"),
+                ],
+                verbose=verbose,
+            )
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(str(e))
+        saved_env_vars = dict(os.environ)
+        if composed is not None:
+            os.environ.clear()
+            os.environ.update(composed)
+        try:
+            papermill.execute_notebook(
+                input_path=path,
+                output_path=fpath_out_exec,
+                kernel_name=kernel_name,
+                log_output=True,
+                parameters=parsed_params,
+                cwd=notebook_dir,
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(saved_env_vars)
     elif language.lower() == "matlab":
         # Use nbconvert to execute the notebook with the MATLAB kernel
         cmd = [

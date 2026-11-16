@@ -1,0 +1,86 @@
+{
+  "store_dir": "/Users/pete/.calkit/texlive",
+  "usetex": {
+    "ok": true,
+    "error": null,
+    "packages": [
+      "type1cm",
+      "geometry",
+      "underscore",
+      "dvipng",
+      "cm-super"
+    ],
+    "package_list": "type1cm, geometry, underscore, dvipng, cm-super",
+    "download_kb": {
+      "type1cm": 2,
+      "geometry": 9,
+      "underscore": 5,
+      "dvipng": 1,
+      "cm-super": 64562
+    },
+    "largest": {
+      "name": "cm-super",
+      "mb": 64.562404
+    },
+    "rest_kb": 16.408,
+    "seconds": {
+      "font_list": 14.364706000022124,
+      "render": 1.0635495830210857,
+      "cached": 0.42872062500100583
+    },
+    "samples": [
+      1.093868666968774,
+      1.057228000019677,
+      1.0635495830210857
+    ],
+    "pdf_fonts": {
+      "cmmi10.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb",
+      "cmmi7.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb",
+      "cmr10.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb",
+      "cmr7.pfb": "/Users/pete/.calkit/texlive/pkgs/amsfonts/77677/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb"
+    },
+    "pdf_fonts_from_store": true
+  },
+  "tex_cache": {
+    "other_tex_shared_config_ok": true,
+    "other_tex_new_config_ok": false
+  },
+  "missing_tex_font": {
+    "ok": false,
+    "missing_file": "helvet.sty"
+  },
+  "missing_font": {
+    "family": "Not A Real Font",
+    "ok": true,
+    "used": "DejaVuSans.ttf",
+    "warned": true
+  },
+  "env_fonts": {
+    "fontconfig": true,
+    "new_config": {
+      "Arimo": true,
+      "CMU Serif": true
+    },
+    "built_before": {
+      "Arimo": false,
+      "CMU Serif": false
+    }
+  },
+  "composed": {
+    "ok": true,
+    "error": null,
+    "latex_from_store": true,
+    "own_config_dir": true,
+    "system_fonts": 2682,
+    "store_fonts": 718
+  },
+  "release": 2025,
+  "machine": {
+    "platform": "macOS-27.2.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "texlive_platform": "universal-darwin",
+    "python": "3.12.4",
+    "matplotlib": "3.10.8",
+    "calkit": "0.51.1.dev28+g94d8fee1f.d20261116"
+  }
+}

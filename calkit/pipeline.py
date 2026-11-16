@@ -2669,6 +2669,7 @@ def to_dvc(
         get_env_input_env_vars,
         get_env_input_paths,
         get_env_lock_fpath,
+        get_guest_envs,
         get_switch_options,
         resolve_env_var,
         write_switch_env_lock,
@@ -2883,6 +2884,15 @@ def to_dvc(
         used_envs.update(stage.environment_names)
     env_lock_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
+    # Environments composed into one are part of it, so their locks are
+    # inputs to its stages too
+    guest_names: dict[str, list[str]] = {}
+    for host_name in sorted(used_envs):
+        host = environments.get(host_name)
+        if isinstance(host, dict):
+            guests = get_guest_envs(host_name, host, environments)
+            guest_names[host_name] = [name for name, _ in guests]
+            used_envs.update(guest_names[host_name])
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
@@ -2938,6 +2948,11 @@ def to_dvc(
             ):
                 if source_path not in env_lock_fpaths[env_name]:
                     env_lock_fpaths[env_name].append(source_path)
+    for host_name, names in guest_names.items():
+        for name in names:
+            for lock_path in env_lock_fpaths.get(name, []):
+                if lock_path not in env_lock_fpaths.setdefault(host_name, []):
+                    env_lock_fpaths[host_name].append(lock_path)
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Convert legacy sbatch stages to shell-script + scheduler and rename
     # old `slurm:` stage fields to `scheduler:`, updating calkit.yaml

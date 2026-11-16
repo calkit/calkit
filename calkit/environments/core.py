@@ -217,6 +217,20 @@ COMPOSITE_ENV_SEP = ":"
 VALID_OUTER_ENV_KINDS = ["slurm", "pbs", "system"]
 # A switch can be an outer env too, when every option it picks from is one
 SWITCH_KIND = "switch"
+# Kinds that run a command on this machine with the environmental variables
+# they're given, so another environment's programs can be put on PATH for
+# it with ``with``
+COMPOSABLE_HOST_KINDS = [
+    "conda",
+    "julia",
+    "pixi",
+    "renv",
+    "uv",
+    "uv-venv",
+    "venv",
+]
+# Kinds that add programs without an interpreter to compete with a host's
+COMPOSABLE_GUEST_KINDS = ["texlive"]
 
 
 def host_is_local(host: str | None) -> bool:
@@ -839,6 +853,79 @@ def env_can_be_outer(env_name: str, envs: dict) -> bool:
     if kind == SWITCH_KIND:
         return switch_is_outer(env_name, envs)
     return kind in VALID_OUTER_ENV_KINDS
+
+
+def get_guest_envs(
+    env_name: str, env: dict, envs: dict
+) -> list[tuple[str, dict]]:
+    """Return the environments composed into one with ``with``, in order.
+
+    Raises ``ValueError`` if the environment's kind can't have others
+    composed into it, or one it names doesn't exist or can't be composed.
+    """
+    names = env.get("with") or []
+    if not names:
+        return []
+    kind = env.get("kind")
+    if kind not in COMPOSABLE_HOST_KINDS:
+        raise ValueError(
+            f"Environment '{env_name}' is of kind '{kind}', which can't have "
+            "others composed into it with 'with'; only "
+            f"{', '.join(COMPOSABLE_HOST_KINDS)} environments can"
+        )
+    guests = []
+    for name in names:
+        guest = envs.get(name)
+        if guest is None:
+            raise ValueError(
+                f"Environment '{env_name}' has '{name}' in 'with', which "
+                "isn't defined"
+            )
+        if guest.get("kind") not in COMPOSABLE_GUEST_KINDS:
+            raise ValueError(
+                f"Environment '{env_name}' has '{name}' in 'with', which is "
+                f"of kind '{guest.get('kind')}'; only "
+                f"{', '.join(COMPOSABLE_GUEST_KINDS)} environments can be "
+                "composed into another"
+            )
+        guests.append((name, guest))
+    # Each sets the fonts fontconfig finds, which only one can do
+    if sum(g["kind"] == "texlive" for _, g in guests) > 1:
+        raise ValueError(
+            f"Environment '{env_name}' has more than one TeX Live "
+            "environment in 'with'; put their packages in one"
+        )
+    return guests
+
+
+def get_composed_env_vars(
+    env_name: str, env: dict, envs: dict, verbose: bool = False
+) -> dict | None:
+    """Return the environmental variables an environment's commands get
+    with the environments in its ``with`` composed in, or None if it has
+    none.
+
+    Each is checked first, which is fast once it's ready. Matplotlib keys
+    its TeX output and font list caches by neither the TeX nor the fonts it
+    found, so they would carry over from other projects and other TeX
+    installations, and get a config directory of their own.
+    """
+    from calkit.environments import texlive
+
+    guests = get_guest_envs(env_name, env, envs)
+    if not guests:
+        return None
+    env_vars = dict(os.environ)
+    view_dirs = []
+    for name, guest in guests:
+        view_dir = texlive.check(name, guest, verbose=verbose)
+        env_vars = texlive.get_run_env_vars(view_dir, env_vars=env_vars)
+        view_dirs.append(view_dir)
+    key = hashlib.sha256("\n".join(view_dirs).encode()).hexdigest()[:16]
+    env_vars["MPLCONFIGDIR"] = os.path.join(
+        calkit.get_user_home(), ".calkit", "matplotlib", key
+    )
+    return env_vars
 
 
 def get_env(name: str, envs: dict) -> dict | None:
@@ -2272,6 +2359,12 @@ def get_pipeline_env_names(
                 split_envs.append(sub_env_name)
         else:
             split_envs.append(env_name)
+    # Environments composed into one are checked with it
+    for env_name in list(split_envs):
+        env = envs.get(env_name)
+        if isinstance(env, dict):
+            for name, _ in get_guest_envs(env_name, env, envs):
+                split_envs.append(name)
     return list(dict.fromkeys(split_envs)), ck_info, stages
 
 

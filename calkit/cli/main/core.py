@@ -4963,6 +4963,17 @@ def run_in_env(
             "--setup only applies to a 'system' environment, and "
             f"'{env_name}' is of kind '{env.get('kind')}'"
         )
+    # Environments composed into this one with 'with' put their programs on
+    # PATH for it, and before --env-var, which wins
+    try:
+        composed = calkit.environments.get_composed_env_vars(
+            env_name, env, envs, verbose=verbose
+        )
+    except (ValueError, RuntimeError, OSError) as e:
+        raise_error(f"Environment '{env_name}': {e}")
+    if composed is not None:
+        os.environ.clear()
+        os.environ.update(composed)
     # Set here rather than per kind: a container is handed them below,
     # and everything else runs as a child of this process
     extra_env_vars = {}

@@ -638,6 +638,17 @@ def execute_notebook(
             verbose=verbose,
         )
     elif language.lower() in ["python", "julia", "r"]:
+        # The kernel inherits this process's environmental variables, so
+        # it gets the programs of environments composed into its own
+        try:
+            composed = calkit.environments.get_composed_env_vars(
+                env_name, env, envs, verbose=verbose
+            )
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{env_name}': {e}")
+        if composed is not None:
+            os.environ.clear()
+            os.environ.update(composed)
         papermill.execute_notebook(
             input_path=path,
             output_path=fpath_out_exec,

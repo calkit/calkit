@@ -17,6 +17,7 @@ import calkit
 import calkit.cli.check
 import calkit.environments
 import calkit.environments.core
+import calkit.environments.texlive
 import calkit.latex
 from calkit.environments.core import relock
 
@@ -2721,3 +2722,65 @@ def test_relock(tmp_dir, monkeypatch):
         relock("uv", {"kind": "uv", "path": "uvenv/pyproject.toml"})
     with open(os.path.join("uvenv", "uv.lock")) as f:
         assert f.read() == "old\n"
+
+
+@pytest.mark.xdist_group("texlive")
+def test_composed_envs(tmp_dir, texlive_user_home, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    envs: dict = {
+        "tex": {"kind": "texlive"},
+        "tex2": {"kind": "texlive"},
+        "py": {"kind": "uv", "path": "pyproject.toml", "with": ["tex"]},
+        "plain": {"kind": "uv", "path": "pyproject.toml"},
+        "img": {"kind": "docker", "image": "x", "with": ["tex"]},
+        "nested": {"kind": "uv", "path": "pyproject.toml", "with": ["py"]},
+        "missing": {"kind": "uv", "path": "pyproject.toml", "with": ["no"]},
+        "two": {"kind": "uv", "path": "x.toml", "with": ["tex", "tex2"]},
+    }
+    get_guest_envs = calkit.environments.get_guest_envs
+    assert get_guest_envs("py", envs["py"], envs) == [("tex", envs["tex"])]
+    assert get_guest_envs("plain", envs["plain"], envs) == []
+    # Only a runtime on this machine can host, only TeX Live can be a guest,
+    # and only one of those
+    for name, message in [
+        ("img", "can't have others composed into it"),
+        ("nested", "only texlive environments can be composed"),
+        ("missing", "isn't defined"),
+        ("two", "more than one TeX Live environment"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            get_guest_envs(name, envs[name], envs)
+    # A guest is checked along with the environment it's composed into
+    ck_info = {
+        "environments": {k: envs[k] for k in ["tex", "py"]},
+        "pipeline": {
+            "stages": {
+                "fig": {
+                    "kind": "python-script",
+                    "script_path": "fig.py",
+                    "environment": "py",
+                }
+            }
+        },
+    }
+    names, _, _ = calkit.environments.get_pipeline_env_names(ck_info)
+    assert names == ["py", "tex"]
+    # Its programs come first on PATH, nothing on the machine points TeX
+    # elsewhere, and Matplotlib's caches are its own
+    calkit.save_calkit_info(ck_info)
+    monkeypatch.setenv("TEXINPUTS", "/elsewhere:")
+    monkeypatch.setenv("MPLCONFIGDIR", "/elsewhere")
+    get_composed_env_vars = calkit.environments.get_composed_env_vars
+    assert get_composed_env_vars("plain", envs["plain"], envs) is None
+    env_vars = get_composed_env_vars("py", envs["py"], envs)
+    assert env_vars is not None
+    view_dir = calkit.environments.texlive.check("tex", envs["tex"])
+    bin_dir = os.path.join(
+        view_dir, "bin", calkit.environments.texlive.get_platform()
+    )
+    assert env_vars["PATH"].split(os.pathsep)[0] == bin_dir
+    assert "TEXINPUTS" not in env_vars
+    assert env_vars["MPLCONFIGDIR"].startswith(
+        os.path.join(texlive_user_home, ".calkit", "matplotlib")
+    )
+    assert os.environ["MPLCONFIGDIR"] == "/elsewhere"

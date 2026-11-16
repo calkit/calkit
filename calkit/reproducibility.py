@@ -944,7 +944,7 @@ def find_literals_in_project(
                 content = f.read()
         except OSError:
             continue
-        rel = os.path.relpath(path, wdir)
+        rel = os.path.relpath(path, wdir).replace(os.sep, "/")
         out["retyped"] += find_retyped_values(
             content, rel, values, via_json_to_latex
         )

@@ -147,6 +147,51 @@ export function latexStageSource(
   )?.source;
 }
 
+// The latex stage that builds `texFile`, if one does.
+export function latexStageName(
+  stages: Record<string, unknown>,
+  texFile: string,
+): string | undefined {
+  for (const [name, raw] of Object.entries(stages)) {
+    const stage = raw as DocumentStageFields;
+    if (
+      stage?.kind === "latex" &&
+      typeof stage.target_path === "string" &&
+      path.posix.join(stage.wdir ?? "", stage.target_path) === texFile
+    ) {
+      return name;
+    }
+  }
+  return undefined;
+}
+
+// How to preview a latex stage's document without running the pipeline:
+// the build the pipeline compiled for it (its dvc.yaml `cmd`), run from
+// `dir`, its working directory, and checking the environment first, since
+// no `calkit run` did. Undefined if the stage isn't compiled to one.
+export function latexPreviewCommand(
+  cmd: unknown,
+  dir: string,
+): string | undefined {
+  const prefix = "calkit latex build ";
+  if (typeof cmd !== "string" || !cmd.startsWith(prefix)) {
+    return undefined;
+  }
+  const quoted = `'${dir.replace(/'/g, `'\\''`)}'`;
+  const args = cmd.slice(prefix.length).replace(/(^| )--no-check(?= )/, "");
+  return `calkit -C ${quoted} latex build ${args.trim()}`;
+}
+
+// Whether LaTeX Workshop builds with Calkit, as `calkit update vscode-config`
+// sets it up to for a project with a TeX Live environment, given its
+// `latex.tools` setting.
+export function latexWorkshopBuildsWithCalkit(tools: unknown): boolean {
+  return (
+    Array.isArray(tools) &&
+    tools.some((tool) => (tool as { command?: unknown })?.command === "calkit")
+  );
+}
+
 // The PDF any stage builds from a document, LaTeX or Markdown.
 export function documentStagePdf(
   stages: Record<string, unknown>,

@@ -45,6 +45,31 @@ pipeline:
       target_path: paper/main.tex
 ```
 
+<!-- TODO: needs human review -->
+
+## Previewing in VS Code
+
+`calkit run` brings everything the document depends on up to date first,
+which can take a while.
+To see how a change to the document looks,
+use the "Preview PDF" button in the editor toolbar for a document a `latex`
+stage builds.
+It builds the document the way its stage does, in the stage's environment,
+with the figures and other inputs as they are, without running the stages
+that make them.
+The PDF goes where the stage puts it,
+and the stage still shows as out of date until `calkit run` builds it,
+if the document or its inputs changed.
+It won't start while the pipeline is running.
+
+For a project whose documents build with a
+[TeX Live environment](environments.md#tex-live),
+`calkit update vscode-config` sets up LaTeX Workshop to build them that way,
+so it also previews each time you save,
+and "Preview PDF" uses the same build.
+Otherwise, LaTeX Workshop builds on save with its own settings,
+and "Preview PDF" builds in a terminal.
+
 ## Using a template
 
 To start a new document from scratch, `calkit new publication` writes the

@@ -5,9 +5,12 @@ import {
   documentStageSource,
   findInSource,
   findText,
+  latexPreviewCommand,
+  latexStageName,
   latexStagePdf,
   latexStageSource,
   latexWorkingDiffPath,
+  latexWorkshopBuildsWithCalkit,
   lineMap,
   normalizeSelection,
   paragraphLines,
@@ -310,4 +313,44 @@ test("findInSource finds selected PDF text near a source line", () => {
   assert.equal(findInSource(lines, 1, "The model in Eq. (1)")!.start, 0);
   assert.equal(findInSource(lines, 1, "absent words"), undefined);
   assert.equal(findInSource(lines, 1, "in"), undefined);
+});
+
+test("a latex stage's document previews with the build it compiled to", () => {
+  const stages = {
+    data: { kind: "python-script", script_path: "paper/main.tex" },
+    paper: { kind: "latex", target_path: "paper/main.tex" },
+    thesis: { kind: "latex", wdir: "thesis", target_path: "main.tex" },
+  };
+  assert.equal(latexStageName(stages, "paper/main.tex"), "paper");
+  assert.equal(latexStageName(stages, "thesis/main.tex"), "thesis");
+  assert.equal(latexStageName(stages, "main.tex"), undefined);
+  // The environment is checked, since no pipeline run did, and the build runs
+  // where the stage's does
+  assert.equal(
+    latexPreviewCommand(
+      "calkit latex build -e tex --no-check -r 'my rc' paper/main.tex",
+      "/work/it's here",
+    ),
+    "calkit -C '/work/it'\\''s here' latex build -e tex -r 'my rc' paper/main.tex",
+  );
+  assert.equal(
+    latexPreviewCommand("calkit latex build -e tex paper/main.tex", "/w"),
+    "calkit -C '/w' latex build -e tex paper/main.tex",
+  );
+  // Anything else isn't a LaTeX build to preview
+  assert.equal(latexPreviewCommand("calkit run paper", "/w"), undefined);
+  assert.equal(latexPreviewCommand(undefined, "/w"), undefined);
+  // LaTeX Workshop builds it if its tools run Calkit, and not if they're
+  // its defaults or a user's own
+  assert.equal(
+    latexWorkshopBuildsWithCalkit([
+      { name: "Calkit: paper", command: "calkit", args: [] },
+    ]),
+    true,
+  );
+  assert.equal(
+    latexWorkshopBuildsWithCalkit([{ name: "latexmk", command: "latexmk" }]),
+    false,
+  );
+  assert.equal(latexWorkshopBuildsWithCalkit(undefined), false);
 });

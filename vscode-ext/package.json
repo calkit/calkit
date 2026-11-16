@@ -183,6 +183,12 @@
         "icon": "$(diff)"
       },
       {
+        "command": "calkit-vscode.previewLatex",
+        "title": "Preview PDF",
+        "category": "Calkit",
+        "icon": "$(open-preview)"
+      },
+      {
         "command": "calkit-vscode.showLatexPdf",
         "title": "Show PDF",
         "category": "Calkit",
@@ -598,6 +604,11 @@
       ],
       "editor/title": [
         {
+          "command": "calkit-vscode.previewLatex",
+          "when": "resourceExtname == .tex && calkit.activeFileHasStage",
+          "group": "navigation"
+        },
+        {
           "command": "calkit-vscode.showLatexPdf",
           "when": "resourceExtname == .tex && calkit.activeFileHasStage || calkit.activeFileBuildsPdf",
           "group": "navigation"
@@ -825,6 +836,10 @@
         {
           "command": "calkit-vscode.diffLatex",
           "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)"
+        },
+        {
+          "command": "calkit-vscode.previewLatex",
+          "when": "resourceExtname == .tex && calkit.activeFileHasStage"
         },
         {
           "command": "calkit-vscode.showInPdf",

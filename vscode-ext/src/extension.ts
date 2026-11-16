@@ -73,7 +73,10 @@ import {
   documentStageSource,
   latexStagePdf,
   latexStageSource,
+  latexPreviewCommand,
+  latexStageName,
   latexWorkingDiffPath,
+  latexWorkshopBuildsWithCalkit,
   pipelineLatexDiffs,
   type PipelineLatexDiff,
 } from "./latex/core";
@@ -125,6 +128,7 @@ const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
 const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
 const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
+const COMMAND_PREVIEW_LATEX = "calkit-vscode.previewLatex";
 const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
 const COMMAND_SHOW_IN_PDF_TO_SIDE = "calkit-vscode.showInPdfToSide";
 const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
@@ -717,6 +721,82 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  // Build a latex stage's document by itself, i.e., without DVC or its
+  // upstream stages, with whatever their outputs are now. LaTeX Workshop
+  // builds it when Calkit set it up to, so it stays the one builder on save
+  // and of its viewer; otherwise this runs the stage's build in a terminal.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_PREVIEW_LATEX,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const texFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const stageName = latexStageName(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          texFile,
+        );
+        if (!stageName) {
+          void vscode.window.showInformationMessage(
+            "No latex stage in the pipeline builds this document.",
+          );
+          return;
+        }
+        // Both would write the same PDF
+        if (runningStageNames.size > 0) {
+          void vscode.window.showInformationMessage(
+            "The pipeline is running; preview after it finishes.",
+          );
+          return;
+        }
+        const tools = vscode.workspace
+          .getConfiguration("latex-workshop", fileUri)
+          .get("latex.tools");
+        // Saving with LaTeX Workshop's command doesn't start its own build
+        // on save too
+        if (isLatexWorkshopInstalled()) {
+          await vscode.window.showTextDocument(fileUri);
+          await vscode.commands.executeCommand(
+            "latex-workshop.saveWithoutBuilding",
+          );
+          if (latexWorkshopBuildsWithCalkit(tools)) {
+            await vscode.commands.executeCommand("latex-workshop.build");
+            return;
+          }
+        } else {
+          await vscode.workspace.save(fileUri);
+        }
+        const stage = currentDvcYaml?.stages?.[stageName];
+        const wdir = typeof stage?.wdir === "string" ? stage.wdir : "";
+        const cmd = latexPreviewCommand(
+          stage?.cmd,
+          path.join(workspaceRoot, wdir),
+        );
+        if (!cmd) {
+          void vscode.window.showInformationMessage(
+            `Stage '${stageName}' isn't compiled yet; run it once first.`,
+          );
+          return;
+        }
+        const pdfFile = latexStagePdf(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          texFile,
+        );
+        if (pdfFile && isLatexWorkshopInstalled()) {
+          ensurePdfRefreshWatcher(context, path.join(workspaceRoot, pdfFile));
+        }
+        const terminal = getOrCreateTerminal("calkit: preview", workspaceRoot);
+        terminal.show(true);
+        terminal.sendText(cmd);
       },
     ),
   );

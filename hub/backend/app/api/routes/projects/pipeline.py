@@ -337,8 +337,6 @@ def _commit_pipeline(
         record_project_update(project, repo, session)
 
 
-# What calkit xr makes a script stage from, by extension
-SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
 MAX_SCRIPT_BYTES = 1_000_000
 # All the data uploaded with a script, which arrives in one request
 MAX_SCRIPT_DATA_BYTES = 50_000_000
@@ -441,12 +439,8 @@ def post_project_stage_from_script_or_notebook(
     )
     wdir = str(repo.working_dir)
     script_path = _clean_rel_path(req.script_path, "script")
-    if not script_path.lower().endswith(SCRIPT_EXTS):
-        raise HTTPException(
-            422,
-            "Scripts can be Python, R, Julia, MATLAB, shell, or Jupyter "
-            "notebooks",
-        )
+    if not script_path.lower().endswith(calkit.pipeline.SCRIPT_EXTS):
+        raise HTTPException(422, calkit.pipeline.SCRIPT_EXTS_MESSAGE)
     content = None
     if req.content is not None:
         try:

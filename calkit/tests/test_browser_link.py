@@ -8,12 +8,14 @@ import shutil
 import struct
 import subprocess
 import sys
+from unittest.mock import Mock
 
 import pytest
 
 import calkit
 import calkit.config
 import calkit.git
+import calkit.pipeline
 from calkit.browser_link import (
     get_editor_info,
     get_host_status,
@@ -1099,12 +1101,18 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     assert res["produces"] == "figures/fit.png"
     assert res["included_in"] == ["paper/paper.tex"]
     assert repo.git.status("--porcelain", "-uall") == "?? scripts/plot.py"
+    # A path given in full is the same script
+    full_msg = msg | {"scriptPath": str(project / "scripts" / "plot.py")}
+    assert (
+        add_stage_from_script(str(project), full_msg)["stage_name"] == "plot"
+    )
     # Uploads, data, and paths outside the project are for the hub
     for bad, error in [
         ({"content": "cHJpbnQoMSk="}, "folder on this computer"),
         ({"data": [{"external": "/x", "path": "data/x"}]}, "Move the data"),
         ({"scriptPath": "../plot.py"}, "isn't in the project"),
         ({"scriptPath": "scripts/none.py"}, "isn't in the project"),
+        ({"scriptPath": "notes.txt"}, "Scripts can be"),
     ]:
         with pytest.raises(ValueError, match=error):
             add_stage_from_script(str(project), msg | bad)
@@ -1115,6 +1123,17 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     (project / "paper" / "paper.tex").write_text(paper)
     # Saved: only what it wrote is committed, and nothing else changed here
     (project / "notes.txt").write_text("second")
+    # A save that fails is undone, so a try again isn't refused
+    with monkeypatch.context() as m:
+        m.setattr(
+            calkit.pipeline, "to_dvc", Mock(side_effect=RuntimeError("no"))
+        )
+        with pytest.raises(RuntimeError):
+            add_stage_from_script(str(project), msg | {"save": True})
+    assert repo.git.status("--porcelain", "-uall").splitlines() == [
+        " M notes.txt",
+        "?? scripts/plot.py",
+    ]
     res = add_stage_from_script(str(project), msg | {"save": True})
     assert res["saved"]
     ck_info = calkit.load_calkit_info(wdir=str(project))
@@ -1135,6 +1154,12 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     } <= set(committed)
     assert "notes.txt" not in committed
     assert repo.git.status("--porcelain") == " M notes.txt"
+    # Asked again, it's the stage as saved, with nothing new to commit
+    head = repo.head.commit.hexsha
+    res = add_stage_from_script(str(project), msg | {"save": True})
+    assert res["produces"] == "figures/fit.png"
+    assert res["outputs"] == ["figures/fit.png"]
+    assert repo.head.commit.hexsha == head
 
 
 def test_get_content_paths(tmp_path):

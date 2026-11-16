@@ -2200,6 +2200,13 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     return containing[1] if containing else None
 
 
+# What calkit xr makes a script stage from, by extension
+SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
+SCRIPT_EXTS_MESSAGE = (
+    "Scripts can be Python, R, Julia, MATLAB, shell, or Jupyter notebooks"
+)
+
+
 def get_script_detection(
     script_path: str, wdir: str = ".", timeout: float = 120
 ) -> dict:
@@ -2268,6 +2275,10 @@ def get_stage_from_script_plan(
     stage = copy.deepcopy(detected["stage"]["stage"])
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     existing_stage = stages.get(stage_name)
+    existing_outputs = {
+        o.get("path") if isinstance(o, dict) else o
+        for o in (existing_stage or {}).get("outputs") or []
+    }
     if isinstance(existing_stage, dict):
         merged = copy.deepcopy(existing_stage)
         for field in ("outputs", "inputs"):
@@ -2306,7 +2317,7 @@ def get_stage_from_script_plan(
     def get_included_texts(shown: str, path: str) -> dict[str, str]:
         # The new text of each document file that would show it from path
         documents = [
-            s["target_path"]
+            posixpath.normpath(s["target_path"].replace("\\", "/"))
             for s in stages.values()
             if isinstance(s, dict)
             and s.get("kind") == "latex"
@@ -2339,8 +2350,12 @@ def get_stage_from_script_plan(
             if posixpath.basename(o) == posixpath.basename(shows)
         ]
         # Only worth guessing if a document includes it, so it can show it
-        # from there instead
-        if len(same_name) == 1 and get_included_texts(shows, same_name[0]):
+        # from there instead, or the stage already makes it, e.g., when
+        # asked again after a document was changed to show it
+        if len(same_name) == 1 and (
+            same_name[0] in existing_outputs
+            or get_included_texts(shows, same_name[0])
+        ):
             produces = same_name[0]
     # What the document shows is what the stage makes, so if the script
     # isn't found writing it anywhere, it writes it there
@@ -2356,7 +2371,7 @@ def get_stage_from_script_plan(
     included: dict[str, str] = {}
     if shows is not None and produces is not None and produces != shows:
         included = get_included_texts(shows, produces)
-        if not included:
+        if not included and produces not in existing_outputs:
             raise ValueError(
                 f"No document includes '{shows}' to show it from "
                 f"'{produces}' instead"
@@ -2414,7 +2429,12 @@ def write_stage_from_script(
     for path, text in texts.items():
         full = os.path.join(wdir, path)
         os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
-        with open(full, "w") as f:
+        # Keeping the file's line endings, whatever this system's are
+        newline = "\n"
+        if os.path.isfile(full):
+            with open(full, "rb") as f:
+                newline = "\r\n" if b"\r\n" in f.read() else "\n"
+        with open(full, "w", encoding="utf-8", newline=newline) as f:
             f.write(text)
     if plan["environment_is_new"]:
         ck_info.setdefault("environments", {})[plan["environment"]] = plan[

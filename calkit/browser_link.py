@@ -1526,9 +1526,16 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     def get_clean_path(value: Any, what: str) -> str:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"A {what} path is required")
-        path = posixpath.normpath(value.strip().replace("\\", "/"))
+        # One given in full, e.g., from a file picker, is made relative
+        path = posixpath.normpath(
+            os.path.relpath(
+                os.path.join(wdir, value.strip()), os.path.abspath(wdir)
+            ).replace("\\", "/")
+        )
         real = os.path.realpath(os.path.join(wdir, path))
-        if not real.startswith(os.path.join(os.path.realpath(wdir), "")):
+        if path.startswith("../") or not real.startswith(
+            os.path.join(os.path.realpath(wdir), "")
+        ):
             raise ValueError(f"'{value}' isn't in the project")
         return path
 
@@ -1542,10 +1549,21 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
 
     def get_changed_paths() -> set[str]:
         # Unquoted, e.g., for names that aren't ASCII
-        listed = repo.git.status("--porcelain", "-z", "-uall").split("\0")
-        return {entry[3:] for entry in listed if len(entry) > 3}
+        entries = iter(
+            repo.git.status("--porcelain", "-z", "-uall").split("\0")
+        )
+        paths = set()
+        for entry in entries:
+            if len(entry) > 3:
+                paths.add(entry[3:])
+            # A rename or copy is followed by where it came from
+            if entry[:1] in ("R", "C"):
+                paths.add(next(entries, ""))
+        return paths - {""}
 
     script_path = get_clean_path(msg.get("scriptPath"), "script")
+    if not script_path.lower().endswith(calkit.pipeline.SCRIPT_EXTS):
+        raise ValueError(calkit.pipeline.SCRIPT_EXTS_MESSAGE)
     # Uploads go through the hub, which reads them in a checkout of their
     # own; here the script and its data are already on this computer
     if msg.get("content") is not None:
@@ -1563,6 +1581,12 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     shows = msg.get("shows")
     produces = msg.get("produces")
     repo = calkit.git.get_repo(wdir)
+    # Elsewhere, e.g., in CI, a stage couldn't run a script Git leaves out
+    if repo.ignored(script_path):
+        raise ValueError(
+            f"'{script_path}' is ignored by Git, so the stage couldn't run "
+            "anywhere else; stop ignoring it first"
+        )
     ck_info = calkit.load_calkit_info(wdir=wdir)
     plan = calkit.pipeline.get_stage_from_script_plan(
         script_path,
@@ -1593,23 +1617,47 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
                 f"{path} has changes that aren't saved; save or discard "
                 "them first"
             )
-    written = calkit.pipeline.write_stage_from_script(plan, ck_info, wdir=wdir)
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
-    commit_paths = sorted(
-        (get_changed_paths() - changed_before)
-        | set(written)
-        | {"calkit.yaml"}
-        | ({script_path} if script_path in changed_before else set())
-    )
-    repo.git.add("--", *commit_paths)
-    repo.git.commit(
-        "-m",
-        f"Add stage {plan['stage_name']} for {script_path}",
-        "--",
-        *commit_paths,
-    )
+    try:
+        written = calkit.pipeline.write_stage_from_script(
+            plan, ck_info, wdir=wdir
+        )
+        with open(
+            os.path.join(wdir, "calkit.yaml"), "w", encoding="utf-8"
+        ) as f:
+            calkit.ryaml.dump(ck_info, f)
+        calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
+        commit_paths = sorted(
+            (get_changed_paths() - changed_before)
+            | set(written)
+            | {"calkit.yaml"}
+            | ({script_path} if script_path in changed_before else set())
+        )
+        repo.git.add("--", *commit_paths)
+        # Already as asked, e.g., when saved before
+        if repo.git.diff("--cached", "--name-only", "--", *commit_paths):
+            repo.git.commit(
+                "-m",
+                f"Add stage {plan['stage_name']} for {script_path}",
+                "--",
+                *commit_paths,
+            )
+    except Exception:
+        # Put back what was written, so it isn't left half done, and a try
+        # again isn't refused for unsaved changes to it
+        undo = sorted(get_changed_paths() - changed_before)
+        if undo:
+            repo.git.reset("-q", "--", *undo)
+            tracked = [
+                p
+                for p in repo.git.ls_files("-z", "--", *undo).split("\0")
+                if p
+            ]
+            if tracked:
+                repo.git.checkout("--", *tracked)
+            for path in set(undo) - set(tracked):
+                if os.path.isfile(os.path.join(wdir, path)):
+                    os.remove(os.path.join(wdir, path))
+        raise
     result["saved"] = True
     return result
 

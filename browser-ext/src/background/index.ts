@@ -387,16 +387,21 @@ async function handle(
       // the project's here
       const local = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(local)).path) {
-        return askLocal<StageFromScriptOrNotebookResponse>({
-          type: "project.stageFromScriptOrNotebook",
-          project: local,
-          scriptPath: message.scriptPath,
-          content: message.content,
-          shows: message.shows,
-          produces: message.produces,
-          data: message.data ?? [],
-          save: message.save ?? false,
-        });
+        // Reading the script can take as long as calkit xr allows it, and
+        // a save reads it again before committing
+        return askLocal<StageFromScriptOrNotebookResponse>(
+          {
+            type: "project.stageFromScriptOrNotebook",
+            project: local,
+            scriptPath: message.scriptPath,
+            content: message.content,
+            shows: message.shows,
+            produces: message.produces,
+            data: message.data ?? [],
+            save: message.save ?? false,
+          },
+          5 * 60 * 1000,
+        );
       }
       return request<StageFromScriptOrNotebookResponse>(
         `${projectPath(message.owner, message.project)}` +

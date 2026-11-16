@@ -156,6 +156,10 @@ let composer: {
   occ: number;
   file?: string;
   line?: number;
+  // What's typed, kept across redraws
+  draft?: string;
+  // The request saving it, which holds it on screen until it's in the list
+  saving?: number;
 } | null = null;
 // A thread waiting on a click to confirm its deletion
 let deleting: string | null = null;
@@ -592,9 +596,13 @@ function renderPanel(): void {
       `<div class="thread composer" data-key="__new"><div class="quote">${esc(
         composer.text,
       )}</div>` +
-        '<textarea id="new-text" placeholder="Add a comment"></textarea>' +
-        '<div class="actions"><button class="primary" data-act="save-new">Comment</button>' +
-        '<button data-act="cancel-new">Cancel</button></div></div>',
+        `<textarea id="new-text" placeholder="Add a comment"${
+          composer.saving ? " disabled" : ""
+        }>${esc(composer.draft)}</textarea>` +
+        (composer.saving
+          ? '<div class="actions"><button class="primary" disabled>Saving…</button></div></div>'
+          : '<div class="actions"><button class="primary" data-act="save-new">Comment</button>' +
+            '<button data-act="cancel-new">Cancel</button></div></div>'),
     );
   }
   if (!shown.length && !composer) {
@@ -736,22 +744,24 @@ panel.addEventListener("click", (e) => {
       composer = null;
       renderPanel();
     }
-    if (act === "save-new" && composer) {
+    if (act === "save-new" && composer && !composer.saving) {
       const text =
         panel.querySelector<HTMLTextAreaElement>("#new-text")?.value.trim() ??
         "";
       if (!text || !composer.file || composer.line === undefined) {
         return;
       }
+      composer.saving = ++reqCounter;
+      composer.draft = text;
       post({
         type: "add",
+        reqId: composer.saving,
         file: composer.file,
         line: composer.line,
         text,
         highlight: composer.text,
         occ: composer.occ,
       });
-      composer = null;
       setStatus("Saving comment…");
       renderPanel();
     }
@@ -1238,6 +1248,12 @@ eventBus.on(
     showCount(e.matchesCount),
 );
 findInput.addEventListener("input", () => find(""));
+panel.addEventListener("input", (e) => {
+  const target = e.target as HTMLElement;
+  if (composer && target.id === "new-text") {
+    composer.draft = (target as HTMLTextAreaElement).value;
+  }
+});
 findInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
@@ -1307,6 +1323,10 @@ window.addEventListener("message", (e) => {
   } else if (msg.type === "status") {
     setStatus(msg.text);
   } else if (msg.type === "sent") {
+    // A new comment goes once it's in the list, or stays to try again
+    if (composer?.saving === msg.reqId) {
+      composer = msg.ok ? null : { ...composer, saving: undefined };
+    }
     const sent = sending.get(msg.reqId);
     sending.delete(msg.reqId);
     // A reply that went through isn't kept, to be sent again

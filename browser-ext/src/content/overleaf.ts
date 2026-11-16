@@ -4333,6 +4333,9 @@ async function onReviewMessage(message: FromReview): Promise<void> {
             message.occ,
           ),
         );
+        // In the list now, rather than once it's on Overleaf too
+        await refreshReviewThreads(false);
+        postToReview({ type: "sent", reqId: message.reqId, ok: true });
         // On Overleaf too, so it's in its review panel, kept in step
         const id = /\bid=([0-9a-f]{8})\b/.exec(edit.insert[0])?.[1];
         if (id) {
@@ -4435,7 +4438,11 @@ async function onReviewMessage(message: FromReview): Promise<void> {
       type: "status",
       text: e instanceof Error ? e.message : String(e),
     });
-    if (message.type === "reply" || message.type === "postToOverleaf") {
+    if (
+      message.type === "add" ||
+      message.type === "reply" ||
+      message.type === "postToOverleaf"
+    ) {
       postToReview({ type: "sent", reqId: message.reqId, ok: false });
     }
   }
@@ -4833,7 +4840,8 @@ function renderStatus(
     }
     loadGeneration++;
     syncButton.disabled = true;
-    clear(message).append(loading("Syncing"));
+    // The status above says it's syncing
+    clear(message);
     try {
       const result = await syncOverleaf(
         link.project_owner_name,

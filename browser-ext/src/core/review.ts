@@ -90,6 +90,7 @@ export type FromReview =
   | {
       calkit: "review";
       type: "add";
+      reqId: number;
       file: string;
       line: number;
       text: string;

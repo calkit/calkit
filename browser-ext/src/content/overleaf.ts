@@ -117,14 +117,21 @@ function observePage(
   delay: number | null,
   options: MutationObserverInit = { childList: true, subtree: true },
 ): void {
+  // A copy left behind by a reload can't reach the extension, and throws
+  // if it tries, until it notices and shuts down
+  const run = (): void => {
+    if (isExtensionAlive()) {
+      callback();
+    }
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const observer = new MutationObserver(() => {
     if (delay === null) {
-      callback();
+      run();
       return;
     }
     clearTimeout(timer);
-    timer = setTimeout(callback, delay);
+    timer = setTimeout(run, delay);
   });
   observer.observe(document.body, options);
   watching.signal.addEventListener("abort", () => {
@@ -1080,6 +1087,7 @@ function afterSync(): void {
   provenanceCache.clear();
   checkingAfterSync = true;
   drawStatusParts();
+  drawRail();
   // What was just built and synced, rather than what was
   if (localPdf) {
     showLocalPdf(localPdf.link, localPdf.path);
@@ -3882,7 +3890,10 @@ function postToReview(
   message: Without<ToReview>,
   transfer: Transferable[] = [],
 ): void {
-  review?.frame.contentWindow?.postMessage(
+  if (!review || !isExtensionAlive()) {
+    return;
+  }
+  review.frame.contentWindow?.postMessage(
     { calkit: "review", ...message },
     new URL(chrome.runtime.getURL("")).origin,
     transfer,
@@ -5667,6 +5678,7 @@ async function load(overleafProjectId: string): Promise<void> {
     lastCheck = { overleafProjectId, hubWebUrl, link, status: statuses[0] };
     // Checked since the last run or sync, so it's current again
     checkingAfterSync = false;
+    drawRail();
     renderStatus(content, link, statuses[0], reload);
     showNotice();
     content.append(renderInsert(link, statuses[0].path, reload));
@@ -5684,6 +5696,7 @@ async function load(overleafProjectId: string): Promise<void> {
       return;
     }
     checkingAfterSync = false;
+    drawRail();
     clear(body);
     if (e instanceof RequestFailed && e.notSignedIn) {
       // With a hub picker alongside, since credentials are per hub and a
@@ -5992,6 +6005,9 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     if (!(await current())) {
       return;
     }
+    checkingAfterSync = false;
+    drawStatusParts();
+    drawRail();
     // A token problem is worth a nudge, since nothing works until it's
     // fixed; anything else the panel explains when opened
     lastTokenProblem = isOverleafTokenProblem(e);
@@ -6510,6 +6526,8 @@ function drawRail(): void {
       : null;
   if (syncing) {
     body.append(loading("Syncing with the project"));
+  } else if (checkingAfterSync && !running) {
+    body.append(loading("Checking what's synced now"));
   } else if (running) {
     body.append(
       loading(

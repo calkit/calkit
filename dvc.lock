@@ -258,7 +258,7 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 3ad8dbfdaed0d9513568f49664a0c400
+      md5: 96825dd40e1410f50c3f3add81f4e4ad
       size: 4743
     - path: docs/one-pager/one-pager.lua
       hash: md5
@@ -274,13 +274,65 @@ stages:
       size: 2007
     - path: results/traction.json
       hash: md5
-      md5: 4ca870b950cf8da1eb3ef4a33e173669
+      md5: b4bac0a52acae1a1cec0cb18985fe40b
       size: 539
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 6503504afa4a3e93c2b08768836a198c
-      size: 179601
+      md5: bfc36cb1bf924190e2b2b9bcad5da7a0
+      size: 179495
+  find-calkit-projects:
+    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
+    deps:
+    - path: .calkit/local/current-periods/1-day-utc.txt
+      hash: md5
+      md5: d3c51c577475cd75e96dede24daad012
+      size: 11
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/find-calkit-projects.py
+      hash: md5
+      md5: f2ad6eafecd8555fc49762b503b81e82
+      size: 9233
+    - path: uv.lock
+      hash: md5
+      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
+      size: 1728848
+    outs:
+    - path: data/calkit-projects/projects.csv
+      hash: md5
+      md5: f77953c1d52213f2134c913b55a1c23b
+      size: 11920
+  find-calkit-papers:
+    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
+    deps:
+    - path: .calkit/local/current-periods/1-day-utc.txt
+      hash: md5
+      md5: d3c51c577475cd75e96dede24daad012
+      size: 11
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: data/calkit-projects/projects.csv
+      hash: md5
+      md5: f77953c1d52213f2134c913b55a1c23b
+      size: 11920
+    - path: scripts/find-calkit-papers.py
+      hash: md5
+      md5: 47c5738cb38a674825999afa124c74c8
+      size: 6400
+    - path: uv.lock
+      hash: md5
+      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
+      size: 1728848
+    outs:
+    - path: data/calkit-projects/papers.csv
+      hash: md5
+      md5: 8922d813a4e72bf1600400fd0d6f38d8
+      size: 5368
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -398,57 +450,5 @@ stages:
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 4ca870b950cf8da1eb3ef4a33e173669
+      md5: b4bac0a52acae1a1cec0cb18985fe40b
       size: 539
-  find-calkit-projects:
-    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
-    deps:
-    - path: .calkit/local/current-periods/1-day-utc.txt
-      hash: md5
-      md5: d3c51c577475cd75e96dede24daad012
-      size: 11
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: scripts/find-calkit-projects.py
-      hash: md5
-      md5: f2ad6eafecd8555fc49762b503b81e82
-      size: 9233
-    - path: uv.lock
-      hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
-    outs:
-    - path: data/calkit-projects/projects.csv
-      hash: md5
-      md5: f77953c1d52213f2134c913b55a1c23b
-      size: 11920
-  find-calkit-papers:
-    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
-    deps:
-    - path: .calkit/local/current-periods/1-day-utc.txt
-      hash: md5
-      md5: d3c51c577475cd75e96dede24daad012
-      size: 11
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: data/calkit-projects/projects.csv
-      hash: md5
-      md5: f77953c1d52213f2134c913b55a1c23b
-      size: 11920
-    - path: scripts/find-calkit-papers.py
-      hash: md5
-      md5: 47c5738cb38a674825999afa124c74c8
-      size: 6400
-    - path: uv.lock
-      hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
-    outs:
-    - path: data/calkit-projects/papers.csv
-      hash: md5
-      md5: 8922d813a4e72bf1600400fd0d6f38d8
-      size: 5368

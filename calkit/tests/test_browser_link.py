@@ -1054,7 +1054,30 @@ def test_get_provenance(tmp_path, monkeypatch):
             "inputs": ["data.csv"],
             "outputs": ["results.json"],
         },
+        "copy": {
+            "kind": "command",
+            "environment": "_system",
+            "command": (
+                f'"{sys.executable}" -c "'
+                "open('out-{n}.txt', 'w').write(open('in-{n}.txt').read())\""
+            ),
+            "inputs": ["in-{n}.txt"],
+            "outputs": ["out-{n}.txt"],
+            "iterate_over": [{"arg_name": "n", "values": ["x", "y"]}],
+        },
+        "draw": {
+            "kind": "command",
+            "environment": "_system",
+            "command": (
+                f'"{sys.executable}" -c "import os; '
+                "os.makedirs('figs', exist_ok=True); "
+                "open('figs/a.txt', 'w').write('a')\""
+            ),
+            "outputs": ["figs"],
+        },
     }
+    for n in ["x", "y"]:
+        (project / f"in-{n}.txt").write_text(n)
     with open(project / "calkit.yaml", "a") as f:
         f.write("owner: me\nname: proj\n")
         calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
@@ -1073,6 +1096,33 @@ def test_get_provenance(tmp_path, monkeypatch):
             "path": "data.csv",
         }
     )["result"]["input_to_stages"] == ["summarize"]
+    # Each iteration has its own status, and an entry dvc.lock kept from
+    # before the stage was a matrix isn't taken for the current stage
+    (project / "in-y.txt").write_text("changed")
+    lock = calkit.ryaml.load((project / "dvc.lock").read_text())
+    lock["stages"] = {"copy": lock["stages"]["copy@x"], **lock["stages"]}
+    with open(project / "dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    res = get_provenance(str(project), "out-x.txt")
+    assert res["stage"] == "copy@x"
+    assert res["stage_status"]["status"] == "up-to-date"
+    res = get_provenance(str(project), "out-y.txt")
+    assert res["stage"] == "copy@y" and res["stale_reason"] == "pipeline"
+    # A file in a folder a stage makes is there when DVC has it, even if
+    # it isn't pulled, but not a name that folder doesn't have
+    (project / "figs" / "a.txt").unlink()
+    assert get_provenance(str(project), "figs/a.txt")["exists"]
+    assert not get_provenance(str(project), "figs/typo.txt")["exists"]
+    # Nothing a symlink takes outside the project is read
+    if sys.platform != "win32":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.json").write_text('{"n": 2}')
+        os.symlink(outside / "secret.json", project / "link.json")
+        os.symlink(outside, project / "ext")
+        for path in ["link.json", "ext/secret.json"]:
+            res = get_provenance(str(project), path, key="n")
+            assert res["value"] is None and not res["exists"]
     # Only paths in the project
     for path in ["../x", "/etc/passwd", 5]:
         reply = get_reply(

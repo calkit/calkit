@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import itertools
 import json
 import logging
 import re
@@ -333,7 +332,7 @@ def _build_outs_index(lock_stages: dict) -> dict[str, str | None]:
     """Map out path -> md5 across the given lock stages.
 
     Pass only the stages that belong to the current pipeline (see
-    ``_get_live_lock_stages``). A dead entry left in the lock often claims the
+    ``calkit.pipeline.get_live_lock_stages``). A dead entry left in the lock often claims the
     same out path as the stage that replaced it, with the md5 from whenever it
     last ran, and later entries win here -- so including them resolves a dep to
     a hash nothing has produced in a while and flags its consumers stale.
@@ -345,41 +344,6 @@ def _build_outs_index(lock_stages: dict) -> dict[str, str | None]:
             if p:
                 out_map[p] = out.get("md5")
     return out_map
-
-
-def _get_live_lock_stages(
-    lock_stages: dict, yaml_stages: dict, current_expansions: dict
-) -> dict:
-    """The lock entries that are stages of the current pipeline.
-
-    dvc.lock accumulates entries that no longer correspond to anything
-    runnable: stages renamed or removed from dvc.yaml, a bare ``name`` left
-    from before that stage became a matrix, and expansions of matrix
-    combinations that have since changed. dvc/calkit status ignore all of
-    them, so the hub does too -- both when reporting status and when reading
-    the lock for what a dep's current hash should be.
-    """
-    live: dict = {}
-    for stage_name, lock_stage in lock_stages.items():
-        base = _get_base_stage_name(stage_name)
-        if base.startswith("_"):
-            continue
-        yaml_stage = yaml_stages.get(base)
-        if yaml_stage is None:
-            continue
-        if (
-            isinstance(yaml_stage, dict)
-            and ("matrix" in yaml_stage or "foreach" in yaml_stage)
-            and "@" not in stage_name
-        ):
-            continue
-        if (
-            base in current_expansions
-            and stage_name not in current_expansions[base]
-        ):
-            continue
-        live[stage_name] = lock_stage
-    return live
 
 
 def _resolve_current_dep_md5(
@@ -450,73 +414,6 @@ def _normalize_cmd(cmd) -> str | None:
     if isinstance(cmd, list):
         return " && ".join(str(c) for c in cmd).strip()
     return str(cmd).strip()
-
-
-def _compute_expansion_names(base: str, yaml_stage: dict) -> set[str] | None:
-    """The ``base@...`` stage names DVC generates for a matrix/foreach stage.
-
-    Mirrors DVC's naming: each matrix combination is named by joining its
-    values with ``-``; a scalar value contributes ``str(value)`` while a
-    list/dict value contributes ``{key}{index}`` (so a ``{_arg0: [..dicts..]}``
-    matrix yields ``base@_arg00``, ``base@_arg01``, ...). Returns None when the
-    expansion can't be determined statically (e.g. ``foreach: ${var}``).
-    """
-    matrix = yaml_stage.get("matrix")
-    if isinstance(matrix, dict):
-        keys = list(matrix.keys())
-        value_lists = []
-        for k in keys:
-            v = matrix[k]
-            if not isinstance(v, list):
-                return None
-            value_lists.append(v)
-        names: set[str] = set()
-        for combo in itertools.product(
-            *(range(len(vl)) for vl in value_lists)
-        ):
-            comps = []
-            for j, k in enumerate(keys):
-                val = value_lists[j][combo[j]]
-                if isinstance(val, (dict, list)):
-                    comps.append(f"{k}{combo[j]}")
-                else:
-                    comps.append(str(val))
-            names.add(f"{base}@{'-'.join(comps)}")
-        return names
-    foreach = yaml_stage.get("foreach")
-    if isinstance(foreach, list):
-        return {
-            f"{base}@{v if not isinstance(v, (dict, list)) else i}"
-            for i, v in enumerate(foreach)
-        }
-    if isinstance(foreach, dict):
-        return {f"{base}@{k}" for k in foreach}
-    return None
-
-
-def _compute_current_expansions(
-    yaml_stages: dict, lock_stages: dict
-) -> dict[str, set[str]]:
-    """Map each matrix/foreach base to the set of ``@`` stage names the current
-    pipeline produces.
-
-    Lets the staleness check drop leftover ``base@...`` lock entries -- old
-    matrix combinations (or an older naming scheme) whose objects were later
-    gc'd, which would otherwise be wrongly flagged stale. Only bases whose
-    computed names actually appear in the lock are returned, so a naming
-    mismatch (e.g. a DVC version change) never causes us to hide a real stage.
-    """
-    lock_names = set(lock_stages)
-    result: dict[str, set[str]] = {}
-    for base, st in yaml_stages.items():
-        if not isinstance(st, dict) or base.startswith("_"):
-            continue
-        if "matrix" not in st and "foreach" not in st:
-            continue
-        names = _compute_expansion_names(base, st)
-        if names and (names & lock_names):
-            result[base] = names
-    return result
 
 
 def compute_stage_statuses(
@@ -596,9 +493,8 @@ def compute_stage_statuses(
         cache_outcome = "hit-missing-pushed"
     lock_stages = dvc_lock.get("stages") or {}
     yaml_stages = dvc_yaml.get("stages") or {}
-    current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
-    live_lock_stages = _get_live_lock_stages(
-        lock_stages, yaml_stages, current_expansions
+    live_lock_stages = calkit.pipeline.get_live_lock_stages(
+        lock_stages, yaml_stages
     )
     outs_index = _build_outs_index(live_lock_stages)
     storage_start = time.perf_counter()
@@ -802,8 +698,7 @@ def find_frozen_tainted_stages(
     """
     lock_stages = dvc_lock.get("stages") or {}
     yaml_stages = dvc_yaml.get("stages") or {}
-    current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
-    live = _get_live_lock_stages(lock_stages, yaml_stages, current_expansions)
+    live = calkit.pipeline.get_live_lock_stages(lock_stages, yaml_stages)
 
     def _paths(stage: dict, key: str) -> list[str]:
         out = []

@@ -1190,3 +1190,163 @@ def test_is_data_path(tmp_path):
     assert is_data("pointers")
     assert is_data("store.zarr")
     assert is_data("nested")
+
+
+def test_get_import_info():
+    from calkit.provenance import get_import_info
+
+    # A bare string is read the way the calkit.yaml schema reads it
+    assert get_import_info(None) is None
+    assert get_import_info({"doi": "10.1/x"}) == {"doi": "10.1/x"}
+    assert get_import_info("https://doi.org/10.5281/zenodo.3960218") == {
+        "doi": "10.5281/zenodo.3960218"
+    }
+    assert get_import_info("https://example.com/data.csv") == {
+        "url": "https://example.com/data.csv"
+    }
+    assert get_import_info("a colleague's USB stick") == {
+        "description": "a colleague's USB stick"
+    }
+    # Links that aren't http(s) are dropped, since they're shown as links,
+    # but SSH clone URLs are kept
+    assert get_import_info(
+        {"url": "javascript:alert(1)", "date": "2026-01-02"}
+    ) == {"date": "2026-01-02"}
+    assert get_import_info(
+        {"git_repo_url": " JavaScript://github.com/%0Aalert(1)", "path": "a"}
+    ) == {"path": "a"}
+    assert get_import_info({"git_repo_url": "git@github.com:a/b"}) == {
+        "git_repo_url": "git@github.com:a/b"
+    }
+
+
+def test_get_path_provenance():
+    import json
+
+    from calkit.provenance import get_path_provenance
+
+    files = {
+        "results/metrics.json": json.dumps({"rmse": 0.12, "fit": {"b": 1.2}}),
+        "scripts/analyze.py": "",
+        "data/raw.csv": "",
+        "data/downloaded/a.csv": "",
+        "paper/drawn.svg": "",
+        "paper/figures/plot.png": "",
+        "figures/plot.png": "",
+    }
+    ck_info = {
+        "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
+        "datasets": [
+            {"path": "data/downloaded", "imported_from": "https://x.org/d"},
+        ],
+        "figures": [
+            {
+                "path": "paper/drawn.svg",
+                "created_by": {"name": "Ada", "with_ai": "Claude"},
+            },
+        ],
+        "pipeline": {
+            "stages": {
+                "analyze": {
+                    "kind": "python-script",
+                    "script_path": "scripts/analyze.py",
+                    "environment": "py",
+                    "outputs": ["results/metrics.json", "figures/plot.png"],
+                },
+                "copy-figs": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/plot.png",
+                            "dest": "paper/figures/plot.png",
+                        }
+                    ],
+                },
+            }
+        },
+    }
+    dvc_yaml = {
+        "stages": {
+            "analyze": {
+                "cmd": "python scripts/analyze.py",
+                "deps": [
+                    "scripts/analyze.py",
+                    "pyproject.toml",
+                    "data/raw.csv",
+                    "data/downloaded",
+                ],
+                "outs": ["results/metrics.json", "figures/plot.png"],
+            },
+            "copy-figs": {
+                "cmd": "calkit map-paths",
+                "deps": ["figures/plot.png"],
+                "outs": ["paper/figures/plot.png"],
+            },
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            name: {
+                "deps": [{"path": d} for d in stage["deps"]],
+                "outs": [{"path": o} for o in stage["outs"]],
+            }
+            for name, stage in dvc_yaml["stages"].items()
+        }
+    }
+
+    def get(path, key=None, statuses=None):
+        return get_path_provenance(
+            path,
+            key=key,
+            ck_info=ck_info,
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            stage_statuses=statuses
+            or {
+                "analyze": {"status": "up-to-date"},
+                "copy-figs": {"status": "up-to-date"},
+            },
+            is_file=lambda p: p in files,
+            is_dir=lambda p: p == "data/downloaded",
+            listdir=lambda p: ["a.csv"] if p == "data/downloaded" else [],
+            read_bytes=lambda p: files[p].encode(),
+        )
+
+    # A value in a results file, the stage making it, what to open to change
+    # it, and what it reads, but not its environment's spec, nor raw data
+    # with no origin that the gaps say
+    metrics = get("results/metrics.json", key="fit.b")
+    assert metrics["exists"] and metrics["value"] == 1.2
+    assert metrics["stage"] == "analyze"
+    assert metrics["stage_kind"] == "python-script"
+    assert metrics["source"] == "scripts/analyze.py"
+    assert metrics["inputs"] == ["data/raw.csv", "data/downloaded"]
+    assert metrics["stage_status"] == {"status": "up-to-date"}
+    assert [g["path"] for g in metrics["gaps"]] == ["data/raw.csv"]
+    assert get("results/metrics.json", key="nope")["value_error"] == (
+        "nope isn't in results/metrics.json"
+    )
+    # A copy is described by what made the original, and is stale if the
+    # copy is
+    copy = get(
+        "paper/figures/plot.png",
+        statuses={
+            "analyze": {"status": "up-to-date"},
+            "copy-figs": {"status": "stale"},
+        },
+    )
+    assert copy["copied_from"] == "figures/plot.png"
+    assert copy["copy_stage"] == "copy-figs" and copy["stage"] == "analyze"
+    assert copy["stale_reason"] == "pipeline"
+    # What calkit.yaml says it came from, including for a folder it's in
+    drawn = get("paper/drawn.svg")
+    assert drawn["origin"] == "Created by Ada with Claude"
+    assert drawn["stage"] is None and drawn["gaps"] == []
+    imported = get("data/downloaded/a.csv")
+    assert imported["origin_url"] == "https://x.org/d"
+    assert imported["origin_path"] == "data/downloaded"
+    assert imported["input_to_stages"] == ["analyze"]
+    # Something nothing makes or records is a gap itself
+    assert [g["path"] for g in get("data/raw.csv")["gaps"]] == ["data/raw.csv"]
+    assert not get("missing.png")["exists"]

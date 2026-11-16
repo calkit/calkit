@@ -95,7 +95,6 @@ from app.core import (
     ryaml,
     title_from_path,
     utcnow,
-    web_url_or_none,
 )
 from app.dvc import (
     expand_dvc_lock_outs,
@@ -5147,41 +5146,14 @@ def get_project_datasets(
             DatasetPublic.model_validate(
                 row,
                 update=dict(
-                    imported_from_info=_imported_from_info(imported),
+                    imported_from_info=calkit.provenance.get_import_info(
+                        imported
+                    ),
                     created_by=created if created else None,
                 ),
             )
         )
     return out
-
-
-def _imported_from_info(value: Any) -> dict[str, Any] | None:
-    """The structured origin, reading a bare string the way the calkit.yaml
-    schema does, so ``imported_from: https://doi.org/...`` is a DOI here too.
-    """
-    if isinstance(value, dict):
-        info = dict(value)
-    elif isinstance(value, str) and value.strip():
-        try:
-            info = calkit.provenance.source_from_location(value)
-        except ValueError:
-            return {"description": value}
-    else:
-        return None
-    # These are rendered as links, so drop any that aren't http(s), keeping
-    # SSH clone URLs, e.g., git@github.com:owner/repo, which calkit accepts
-    if "url" in info and web_url_or_none(info["url"]) is None:
-        del info["url"]
-    repo_url = info.get("git_repo_url")
-    if repo_url is not None and not (
-        web_url_or_none(repo_url)
-        or (
-            isinstance(repo_url, str)
-            and re.fullmatch(r"(ssh://|[\w.-]+@[\w.-]+:)\S+", repo_url)
-        )
-    ):
-        del info["git_repo_url"]
-    return info
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")

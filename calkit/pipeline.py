@@ -2162,6 +2162,38 @@ def get_map_paths_source(stage: dict, path: str) -> str | None:
     return None
 
 
+def get_lock_stage_for_output(
+    path: str, dvc_lock: dict, valid_stages: set[str] | None = None
+) -> str | None:
+    """The stage in ``dvc.lock`` that produces ``path``: one that outputs it,
+    or else a folder it's in.
+
+    ``valid_stages`` limits matching to stages in the current pipeline, since
+    dvc.lock keeps entries that no longer are, e.g., a bare name left from
+    before a stage became a matrix, or expansions from an older matrix,
+    which have no status. Those are still used as a last resort, since
+    naming the stage that most likely produced a file beats naming none.
+    """
+    # Whether each is an exact match and a current stage
+    matches: list[tuple[bool, bool, str]] = []
+    for stage_name, stage in (dvc_lock.get("stages") or {}).items():
+        is_valid = valid_stages is None or stage_name in valid_stages
+        for out in (stage or {}).get("outs") or []:
+            out_path = out.get("path") if isinstance(out, dict) else None
+            if not out_path:
+                continue
+            if out_path == path:
+                if is_valid:
+                    return str(stage_name)
+                matches.append((True, False, stage_name))
+            elif path.startswith(out_path.rstrip("/") + "/"):
+                matches.append((False, is_valid, stage_name))
+    if not matches:
+        return None
+    matches.sort(key=lambda m: (not m[0], not m[1]))
+    return matches[0][2]
+
+
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any.
 

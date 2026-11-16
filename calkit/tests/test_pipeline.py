@@ -5600,3 +5600,43 @@ def test_get_figure_paths_with_origins(tmp_dir):
         "paper/exported.png",
         "paper/drawn.png",
     ]
+
+
+def test_get_lock_stage_for_output():
+    from calkit.pipeline import get_lock_stage_for_output
+
+    dvc_lock = {
+        "stages": {
+            "train": {"outs": [{"path": "model.pkl", "md5": "def"}]},
+            "plot": {"outs": [{"path": "figures", "md5": "abc123.dir"}]},
+            "file": {"outs": [{"path": "figures/test.png", "md5": "f"}]},
+        }
+    }
+    # An output itself, or a folder it's in, with an exact match winning
+    assert get_lock_stage_for_output("model.pkl", dvc_lock) == "train"
+    assert get_lock_stage_for_output("figures/sub/a.png", dvc_lock) == "plot"
+    assert get_lock_stage_for_output("figures/test.png", dvc_lock) == "file"
+    assert get_lock_stage_for_output("other/x.png", dvc_lock) is None
+    # dvc.lock keeps entries that are no longer stages, e.g., a bare name
+    # from before a stage became a matrix, which only count with nothing
+    # current producing the path
+    dvc_lock = {
+        "stages": {
+            "plot": {"outs": [{"path": "figures/a.png"}]},
+            "plot@_arg00-9": {"outs": [{"path": "figures/a.png"}]},
+            "plot@_arg00": {"outs": [{"path": "figures/a.png"}]},
+            "render": {"outs": [{"path": "figures/sub"}]},
+            "render@_arg00": {"outs": [{"path": "figures/sub"}]},
+            "orphan": {"outs": [{"path": "figures/gone.png"}]},
+        }
+    }
+    current = {"plot@_arg00", "render@_arg00"}
+    for path, stage in [
+        ("figures/a.png", "plot@_arg00"),
+        ("figures/sub/deep.png", "render@_arg00"),
+        ("figures/gone.png", "orphan"),
+    ]:
+        assert (
+            get_lock_stage_for_output(path, dvc_lock, valid_stages=current)
+            == stage
+        )

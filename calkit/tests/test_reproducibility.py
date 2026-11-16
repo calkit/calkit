@@ -9,6 +9,7 @@ from calkit.dvc import run_dvc_command
 from calkit.reproducibility import (
     ReproCheck,
     check_reproducibility,
+    find_literals_in_project,
     find_retyped_values,
 )
 
@@ -354,7 +355,7 @@ def test_check_call():
     assert "yo" in out
 
 
-def test_find_retyped_values():
+def test_find_retyped_values(tmp_dir):
     def values(tex, project_values=None):
         return [
             (f["value"], f["line"], f["column"])
@@ -414,4 +415,103 @@ def test_find_retyped_values():
     assert findings[0]["line"] == 2
     assert findings[0]["context"] == "and then 0.42 here"
     assert "results.json:Cd" in findings[0]["reason"]
+    # The fix is to read it with calkit.sty, unless the document already
+    # reads it through a json-to-latex stage's commands
+    assert "\\ckvalue{results.json}{Cd}" in findings[0]["suggestion"]
+    assert "json-to-latex" not in findings[0]["suggestion"]
+    findings = find_retyped_values(
+        "and then 0.42 here", "main.tex", project, {"results.json:Cd"}
+    )
     assert "json-to-latex" in findings[0]["suggestion"]
+    # Calkit's own commands are masked, whatever their paths and options
+    assert (
+        values(
+            r"\ckvalue[round-precision=0.42]{runs/0.42.json}{Cd}"
+            r" \cktable{tables/0.42} \ckinclude{text/0.42}",
+            project,
+        )
+        == []
+    )
+    # In a project, the results files a document reads with \ckvalue are
+    # within its reach, every number in them at any depth, as are those a
+    # json-to-latex stage reads, while what Calkit writes for calkit.sty and
+    # a table a stage writes aren't manuscripts
+    for path, data in {
+        "results/drag.json": {
+            "Cd": 0.42,
+            "cases": {"a": {"cp": 0.7321}},
+            "runs": [{"Re": 12500}],
+        },
+        "results/lift.json": {"Cl": 1.234},
+        "results/wake.json": {"St": 0.215},
+    }.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(data, f)
+    files = {
+        "paper/main.tex": (
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "Read: \\ckvalue[.2f]{results/drag.json}{Cd}.\n"
+            "Typed: 0.42, 0.7321, and 12500.\n"
+            "\\cktable{tables/summary}\n"
+            "\\end{document}\n"
+        ),
+        "paper/_calkit/values.tex": (
+            "\\cksetvalue{results/drag.json}{Cd}{n}{0.42}\n"
+        ),
+        "tables/summary.tex": "0.42 & 0.7321 \\\\\n",
+        "other/main.tex": (
+            "\\documentclass{article}\n\\begin{document}\n"
+            "\\input{lift}\nTyped: 1.234 and 0.215.\n\\end{document}\n"
+        ),
+        "other/lift.tex": "\\newcommand\\lift[1][all]{1.234}\n",
+    }
+    for path, text in files.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+    stages = {
+        "table": {"cmd": "python table.py", "outs": ["tables/summary.tex"]},
+        "paper": {
+            "cmd": "calkit latex build -e tex --no-check paper/main.tex",
+            "deps": [
+                "paper/main.tex",
+                "results/drag.json",
+                "paper/calkit.sty",
+                "paper/_calkit/values.tex",
+                "tables/summary.tex",
+            ],
+            "outs": ["paper/main.pdf"],
+        },
+        "lift": {
+            "cmd": "calkit latex from-json results/lift.json "
+            "--output other/lift.tex",
+            "deps": ["results/lift.json"],
+            "outs": ["other/lift.tex"],
+        },
+        # Its output isn't input by any document, so it isn't the fix
+        "wake": {
+            "cmd": "calkit latex from-json results/wake.json "
+            "--output other/wake.tex",
+            "deps": ["results/wake.json"],
+            "outs": ["other/wake.tex"],
+        },
+        "other": {
+            "cmd": "calkit latex build other/main.tex",
+            "deps": ["other/main.tex"],
+            "outs": ["other/main.pdf"],
+        },
+    }
+    retyped = find_literals_in_project(".", {}, stages)["retyped"]
+    assert [(f["file"], f["value"], f["source"]) for f in retyped] == [
+        ("other/main.tex", "1.234", "results/lift.json:Cl"),
+        ("other/main.tex", "0.215", "results/wake.json:St"),
+        ("paper/main.tex", "0.42", "results/drag.json:Cd"),
+        ("paper/main.tex", "0.7321", "results/drag.json:cases.a.cp"),
+        ("paper/main.tex", "12500", "results/drag.json:runs.0.Re"),
+    ]
+    suggestions = [f["suggestion"] for f in retyped]
+    assert "json-to-latex" in suggestions[0]
+    assert "\\ckvalue{results/wake.json}{St}" in suggestions[1]
+    assert "\\ckvalue{results/drag.json}{runs.0.Re}" in suggestions[4]

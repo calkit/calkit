@@ -1174,6 +1174,83 @@ Calkit itself is also available as a flake — see
 CLI to your own Nix environments via `inputs.calkit.url =
 "github:calkit/calkit"`.
 
+<!-- TODO: needs human review -->
+
+### TeX Live
+
+A `texlive` environment builds LaTeX documents without Docker or a TeX
+installation of your own.
+Calkit downloads the TeX Live packages the environment needs, once per
+computer, into `~/.calkit/texlive`, and every project that uses the same
+packages shares them.
+Create one with `calkit new texlive-env`, e.g.:
+
+```sh
+calkit new texlive-env siunitx booktabs
+```
+
+which adds this to `calkit.yaml`:
+
+```yaml
+environments:
+  tex:
+    kind: texlive
+    release: 2025
+    packages:
+      - siunitx
+      - booktabs
+```
+
+Every TeX Live environment has pdfLaTeX, LuaLaTeX, latexmk, BibTeX,
+makeindex, and latexdiff, for `calkit latex diff`,
+and one whose document uses biblatex gets Biber with it.
+List any other [TeX Live packages](https://ctan.org/) the document uses
+under `packages`, or leave them out:
+when `calkit latex build -e tex` or a LaTeX stage finds the document
+needs a package the environment doesn't have,
+Calkit adds it to the environment's lock for you,
+so `packages` stays as you wrote it.
+
+Packages come from a past TeX Live release, 2025 by default, whose
+packages never change, so the lock Calkit writes to
+`.calkit/env-locks/tex.json` means the same TeX on every computer, years
+later.
+The lock covers macOS, Linux, and Windows at once.
+`calkit new texlive-env` writes the release out, so the environment only
+moves to a newer one when you change `release`.
+Without `release`, an environment uses Calkit's default, which a newer
+version of Calkit may change the next time it's locked.
+To drop packages a document no longer needs, delete the lock;
+the next build adds back the ones it still uses.
+
+Run any TeX program in it with `calkit xenv`, e.g.:
+
+```sh
+calkit xenv -n tex -- latexmk -lualatex paper.tex
+```
+
+The environment only sees fonts from TeX Live packages, not those
+installed on your computer, so a document builds the same everywhere.
+
+A LaTeX stage or `calkit latex build` set up for XeLaTeX, e.g., with
+`-xelatex` in `latexmk_args` or `$pdf_mode = 5` in its latexmkrc, adds
+`xetex` to the lock.
+One that makes its PDF through DVI with dvipdfmx or dvips gets that too,
+while Ghostscript's `dvipdf` and `ps2pdf`, latexmk's defaults for those
+modes, come from your computer.
+To run XeLaTeX with `calkit xenv`, add `xetex` to `packages`.
+On Linux and Windows it finds the environment's fonts by name, e.g.,
+`\setmainfont{TeX Gyre Termes}`.
+On macOS, as with MacTeX, it finds them by file name instead, e.g.,
+`\setmainfont{texgyretermes-regular.otf}`, and it also sees the fonts
+installed on your computer.
+On Linux, XeLaTeX needs the system's fontconfig library, which desktop
+Linux distributions include.
+With XeLaTeX or LuaLaTeX, a font loaded by file name gets its TeX Live
+package added to the lock.
+One loaded by name doesn't, so add its package, e.g., `tex-gyre`, to
+`packages`.
+
 ### R
 
 R environments can be managed with Conda, Pixi, or `renv` (recommended).
@@ -1576,6 +1653,20 @@ stale inputs; the paths are taken from the stage instead.
 | relock        | Literal['manual'\|'auto']                                                                                                                                                                                                                                                                                                                                                    | no       | What happens on a machine whose locked properties differ from the lock. 'manual' keeps the lock, and a stage that needs to run there is skipped by 'calkit run', and refused by 'calkit xenv', until 'calkit update env --lock' is run. 'auto' rewrites the lock, rerunning the stages that depend on it, for results that should follow the machine, e.g., ones that depend on the version of a tool Calkit doesn't manage.                                                                                                                      |
 | requirements  | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| AwsCredentialsRequirement \| Requirement \| dict[str, RequirementAttrs]]                                                                                                                                                                                                                | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                                                                                                                                                                                                                                                                                                    |
 | description   | str                                                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+#### `texlive`
+
+Model class: `TexLiveEnvironment`
+
+| Parameter      | Type                     | Required | Description                                                                                                                                                                                                                  |
+| -------------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind           | Literal['texlive']       | yes      | What kind of environment this is.                                                                                                                                                                                            |
+| inputs         | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.                                      |
+| release        | int                      | no       | TeX Live release, e.g., 2025, to install packages from. A past release's repository is frozen, so its lock pins every package for good. Defaults to the latest frozen release.                                               |
+| packages       | list[str]                | no       | TeX Live packages to install, beyond the base set every TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). What they depend on comes with them, and packages a build finds missing are added to the lock, not here. |
+| platforms      | list[str]                | no       | TeX Live platforms to lock for. Defaults to macOS, Windows, and Linux on x86_64 and ARM.                                                                                                                                     |
+| repository_url | str                      | no       | TeX Live repository URL to install from instead of the one for 'release', e.g., a local mirror.                                                                                                                              |
+| description    | str                      | no       | A description of the environment.                                                                                                                                                                                            |
 
 #### `uv`
 

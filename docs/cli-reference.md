@@ -879,6 +879,7 @@ Create a new Calkit object.
 | [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                                            |
 | [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml.                             |
 | [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                                             |
+| [`texlive-env`](#subcommand-new-create-texlive-env)                       | Create a new TeX Live environment, which builds LaTeX documents without Docker or a system TeX.   |
 | [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                                                         |
 | [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                                              |
 | [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                                            |
@@ -1493,6 +1494,35 @@ Options:
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
 | `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
+
+<a id="subcommand-new-create-texlive-env"></a>
+
+#### `calkit new|create texlive-env`
+
+Create a new TeX Live environment, which builds LaTeX documents without Docker or a system TeX.
+
+Usage:
+
+```text
+calkit new|create texlive-env [OPTIONS] [PACKAGES...]
+```
+
+Arguments:
+
+| Argument   | Type      | Required | Default | Description                                                                                                 |
+| ---------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `packages` | list[str] | no       |         | TeX Live packages beyond the base set (pdfLaTeX, LuaLaTeX, latexmk); builds add what documents need anyway. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                             |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | str     | no       | tex     | Environment name.                                                                                       |
+| `--release`         | int     | no       |         | TeX Live release; defaults to the latest frozen one, written out so it only changes when you change it. |
+| `--description`     | str     | no       |         | Description.                                                                                            |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite an existing environment.                                                                      |
+| `--no-check`        | boolean | no       | False   | Don't lock and install it now.                                                                          |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                  |
 
 <a id="subcommand-new-create-nix-env"></a>
 
@@ -4160,6 +4190,7 @@ Options:
 | `--output`, `-o` | list[str] | yes      |         | Output LaTeX file path(s).                                                                                                      |
 | `--command`      | str       | no       |         | Command name to use in LaTeX output.                                                                                            |
 | `--key`          | list[str] | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
+| `--format`       | list[str] | no       |         | Value to add, as NAME=FORMAT, e.g., 'pct={a:.1%}'. Repeatable.                                                                  |
 | `--format-json`  | str       | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
 
 <a id="subcommand-latex-tex-from-questions"></a>

@@ -49,6 +49,16 @@ def from_json(
             ),
         ),
     ] = None,
+    formats: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--format",
+            help=(
+                "Value to add, as NAME=FORMAT, e.g., "
+                "'pct={a:.1%}'. Repeatable."
+            ),
+        ),
+    ] = None,
     fmt_json: Annotated[
         str | None,
         typer.Option(
@@ -82,6 +92,11 @@ def from_json(
             raise_error("Format JSON is not valid JSON")
     else:
         fmt_dict = {}
+    for fmt in formats or []:
+        name, sep, fmt_string = fmt.partition("=")
+        if not sep or not name:
+            raise_error(f"Format '{fmt}' is not NAME=FORMAT")
+        fmt_dict[name] = fmt_string
     data = {}
     for input_fpath in input_fpaths:
         if not os.path.isfile(input_fpath):
@@ -457,26 +472,63 @@ def _tex_cmd(
     return cmd
 
 
+def _get_texlive_env(environment: str | None) -> tuple[str, dict] | None:
+    """Return the TeX Live environment a build runs in directly, if it's
+    one, prepared as 'calkit xenv' would.
+
+    The project's variables are set first, since a switch can pick by
+    them, and a switch's machine lock is checked.
+    """
+    import dotenv
+
+    from calkit.environments import SWITCH_KIND, get_env
+    from calkit.environments import texlive as env_texlive
+
+    if environment is None:
+        return None
+    ck_info = calkit.load_calkit_info()
+    dotenv.load_dotenv(dotenv_path=".env")
+    calkit.set_env_vars(ck_info=ck_info)
+    texlive_env = env_texlive.get_selected_env(environment)
+    envs = ck_info.get("environments", {})
+    env = get_env(environment, envs)
+    if texlive_env is not None and (env or {}).get("kind") == SWITCH_KIND:
+        from calkit.cli.scheduler import _gate_switch_machine_lock
+
+        assert env is not None
+        _gate_switch_machine_lock(
+            environment, env, texlive_env[0], envs, ck_info
+        )
+    return texlive_env
+
+
 def _run_latexmk(
-    cmd: list[str],
-    env: dict[str, str] | None,
+    latexmk_cmd: list[str],
+    env_vars: dict[str, str],
     log_path: str,
     fdb_path: str,
     environment: str | None,
+    texlive_env: tuple[str, dict] | None,
+    no_check: bool,
     verbose: bool,
     quiet: bool = False,
 ) -> int:
-    """Run latexmk, fetching the TeX packages it's missing and retrying.
+    """Run latexmk where the project's TeX lives, fetching the TeX packages
+    it's missing and retrying.
 
     Only where what's fetched is kept with the project, i.e., Calkit's
-    LaTeX image, run directly or as a Docker environment built on it. A
-    system TeX is the user's to manage, and anything installed in another
-    container is gone when it exits. Returns latexmk's exit status.
+    LaTeX image, run directly or as a Docker environment built on it, or a
+    TeX Live environment, whose lock gains the packages. A system TeX is
+    the user's to manage, and anything installed in another container is
+    gone when it exits. Returns latexmk's exit status.
 
-    ``quiet`` hides latexmk's output, for a caller that reports what went
-    wrong from the log itself.
+    ``texlive_env`` is what ``_get_texlive_env`` returns for
+    ``environment``. ``quiet`` hides latexmk's output, for a caller that
+    reports what went wrong from the log itself.
     """
     import shlex
+
+    from calkit.environments import texlive as env_texlive
 
     def in_tex(tex_cmd: list[str]) -> list[str]:
         # Where the build runs, so what's installed is what it sees
@@ -501,9 +553,51 @@ def _run_latexmk(
         ).stdout.strip()
         return out.endswith("/.calkit/local/texmf")
 
+    # A TeX Live environment gets the programs latexmk makes the PDF with,
+    # e.g., XeTeX for a document set up for xelatex
+    if texlive_env is not None:
+        programs = [
+            p
+            for p in calkit.latex.get_latexmk_programs(latexmk_cmd)
+            if p in env_texlive.PROGRAM_PACKAGES
+        ]
+        packages = [env_texlive.PROGRAM_PACKAGES[p] for p in programs]
+        if packages:
+            try:
+                added = env_texlive.add_packages(*texlive_env, packages)
+            except (ValueError, OSError) as e:
+                raise_error(f"Environment '{texlive_env[0]}': {e}")
+            if added:
+                typer.echo(
+                    "Added TeX Live packages to environment "
+                    f"'{texlive_env[0]}' for {', '.join(programs)}: "
+                    + ", ".join(added)
+                )
     fetched: set[str] = set()
     fetchable = None
     while True:
+        if texlive_env is not None:
+            # Directly rather than through 'calkit xenv', which would start
+            # Calkit again, and checked each time, since adding packages
+            # assembles a new environment
+            try:
+                view_dir = env_texlive.check(*texlive_env, verbose=verbose)
+            except (ValueError, RuntimeError, OSError) as e:
+                raise_error(f"Environment '{texlive_env[0]}': {e}")
+            env = env_texlive.get_run_env_vars(view_dir) | env_vars
+            cmd = env_texlive.get_run_cmd(latexmk_cmd, env)
+            if verbose:
+                typer.echo(f"Running command: {cmd}")
+        else:
+            cmd = _tex_cmd(
+                latexmk_cmd,
+                environment=environment,
+                no_check=no_check,
+                verbose=verbose,
+                dep="latexmk",
+                env_vars=env_vars,
+            )
+            env = os.environ | env_vars
         try:
             subprocess.run(cmd, env=env, check=True, capture_output=quiet)
             return 0
@@ -522,6 +616,33 @@ def _run_latexmk(
         ]
         if not missing:
             return status
+        # A TeX Live environment records what it was missing in its lock,
+        # so the next build anywhere has it too
+        if texlive_env is not None:
+            tex_env_name, tex_env = texlive_env
+            lock = env_texlive.read_lock(
+                env_texlive.get_lock_fpath(tex_env_name, tex_env)
+            )
+            if lock is None:
+                return status
+            try:
+                owners = env_texlive.find_packages_for_files(lock, missing)
+                packages = list(dict.fromkeys(owners.values()))
+                if not packages:
+                    return status
+                typer.echo(
+                    "Adding TeX Live packages to environment "
+                    f"'{tex_env_name}' for {', '.join(owners)}: "
+                    + ", ".join(packages)
+                )
+                env_texlive.add_packages(tex_env_name, tex_env, packages)
+            except (ValueError, OSError) as e:
+                warn(f"Could not add TeX Live packages: {e}")
+                return status
+            fetched.update(missing)
+            if os.path.isfile(fdb_path):
+                os.remove(fdb_path)
+            continue
         if fetchable is None:
             fetchable = can_fetch()
         if not fetchable:
@@ -663,6 +784,8 @@ def build(
     """
     import time
 
+    from calkit.environments import texlive as env_texlive
+
     def rel_to_tex_dir(path: str) -> str:
         """Express a current-directory-relative path from the .tex file's
         directory.
@@ -752,25 +875,33 @@ def build(
     latexmk_cmd += latexmk_args
     latexmk_cmd.append(tex_file)
     tex_env_vars = _tex_env_vars(calkit.latex.get_source_date_epoch(tex_file))
-    cmd = _tex_cmd(
-        latexmk_cmd,
-        environment=environment,
-        no_check=no_check,
-        verbose=verbose,
-        dep="latexmk",
-        env_vars=tex_env_vars,
-    )
-    if verbose:
-        typer.echo(f"Latexmk command: {cmd}")
     log_dir = aux_dir or output_dir or tex_dir
+    # A TeX Live environment gets the packages the document names before
+    # compiling, since LaTeX stops at the first one missing
+    texlive_env = _get_texlive_env(environment)
+    if texlive_env is not None:
+        tex_env_name, tex_env = texlive_env
+        try:
+            owners = env_texlive.add_document_packages(
+                tex_env_name, tex_env, tex_file
+            )
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{tex_env_name}': {e}")
+        if owners:
+            typer.echo(
+                f"Added TeX Live packages to environment '{tex_env_name}': "
+                + ", ".join(dict.fromkeys(owners.values()))
+            )
     # A little early, for file systems that keep times coarsely
     started = time.time() - 2
     if _run_latexmk(
-        cmd,
-        env=(os.environ | tex_env_vars) if tex_env_vars else None,
+        latexmk_cmd,
+        env_vars=tex_env_vars,
         log_path=os.path.join(log_dir, stem + ".log"),
         fdb_path=os.path.join(log_dir, stem + ".fdb_latexmk"),
         environment=environment,
+        texlive_env=texlive_env,
+        no_check=no_check,
         verbose=verbose,
     ):
         raise_error("latexmk failed")
@@ -1906,30 +2037,24 @@ def _build_diff(
         tex_env_vars = _tex_env_vars(
             calkit.latex.get_source_date_epoch(tex_file_fpath)
         )
-        cmd = _tex_cmd(
-            latexmk_cmd,
-            environment=environment,
-            no_check=no_check,
-            verbose=verbose,
-            dep="latexmk",
-            env_vars=tex_env_vars,
-        )
         typer.echo("Building the marked-up document")
         built = os.path.join(aux_dir, f"{job}.pdf")
         try:
             status = _run_latexmk(
-                cmd,
-                env=(os.environ | tex_env_vars) if tex_env_vars else None,
+                latexmk_cmd,
+                env_vars=tex_env_vars,
                 log_path=os.path.join(aux_dir, f"{job}.log"),
                 fdb_path=os.path.join(aux_dir, f"{job}.fdb_latexmk"),
                 environment=environment,
+                texlive_env=_get_texlive_env(environment),
+                no_check=no_check,
                 verbose=verbose,
                 # The log's errors are shown if it fails, and a document
                 # with glossaries and a bibliography says a lot otherwise
                 quiet=not verbose,
             )
             if status:
-                raise subprocess.CalledProcessError(status, cmd)
+                raise subprocess.CalledProcessError(status, latexmk_cmd)
         except subprocess.CalledProcessError as e:
             # -silent hides why, so show the errors LaTeX logged
             log_path = Path(aux_dir, f"{job}.log")
@@ -2579,6 +2704,23 @@ def to_docx(
         tex_env_vars = _tex_env_vars(
             calkit.latex.get_source_date_epoch(source)
         )
+        # A TeX Live environment gets TeX4ht beside its lock rather than in
+        # it, since a conversion isn't part of the pipeline, and runs it as
+        # a system TeX would, since the shell the other environments run it
+        # with isn't on Windows
+        texlive_env = _get_texlive_env(environment)
+        m4h_env = os.environ | tex_env_vars
+        if texlive_env is not None:
+            from calkit.environments import texlive as env_texlive
+
+            try:
+                view_dir = env_texlive.check_with_extra_packages(
+                    *texlive_env, env_texlive.TEX4HT_PACKAGES
+                )
+            except (ValueError, RuntimeError, OSError) as e:
+                raise_error(f"Environment '{texlive_env[0]}': {e}")
+            m4h_env = env_texlive.get_run_env_vars(view_dir) | tex_env_vars
+            m4h = env_texlive.get_run_cmd(m4h, m4h_env)
         # TeX can loop forever, e.g., older TeX4ht on a cases environment,
         # so a run gets a time limit, and loses its LaTeX child with it
         import time
@@ -2586,13 +2728,15 @@ def to_docx(
         limit = 600
         timed_out = False
         try:
-            if environment is None and calkit.check_dep_exists("make4ht"):
+            if texlive_env is not None or (
+                environment is None and calkit.check_dep_exists("make4ht")
+            ):
                 import signal
 
                 proc = subprocess.Popen(
                     m4h,
                     cwd=src_dir,
-                    env=os.environ | tex_env_vars,
+                    env=m4h_env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     start_new_session=sys.platform != "win32",

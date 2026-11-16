@@ -264,7 +264,7 @@ stages:
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: e13a02e0166cce219bb513179a052fc0
+      md5: d3c51c577475cd75e96dede24daad012
       size: 11
     - path: .python-version
       hash: md5
@@ -292,7 +292,7 @@ stages:
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: e13a02e0166cce219bb513179a052fc0
+      md5: d3c51c577475cd75e96dede24daad012
       size: 11
     - path: .python-version
       hash: md5
@@ -309,14 +309,14 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 45975102ca775367f8e2835dbeeb82c1
+      md5: 691f3005ac02b72701b540746c2502c0
       size: 11920
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: e13a02e0166cce219bb513179a052fc0
+      md5: d3c51c577475cd75e96dede24daad012
       size: 11
     - path: .python-version
       hash: md5
@@ -324,7 +324,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 45975102ca775367f8e2835dbeeb82c1
+      md5: 691f3005ac02b72701b540746c2502c0
       size: 11920
     - path: scripts/find-calkit-papers.py
       hash: md5

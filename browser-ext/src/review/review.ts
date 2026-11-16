@@ -159,6 +159,9 @@ let composer: {
 } | null = null;
 // A thread waiting on a click to confirm its deletion
 let deleting: string | null = null;
+// Replies and posts to Overleaf on their way, by request, which hold their
+// thread's buttons until they're done
+const sending = new Map<number, { key: string; act: "reply" | "overleaf" }>();
 const textCache = new Map<number, Promise<PageItem[]>>();
 const pending = new Map<
   number,
@@ -583,6 +586,7 @@ async function draw(): Promise<void> {
 function renderPanel(): void {
   const shown = threads.filter(isShown);
   const parts: string[] = [];
+  const busy = new Set([...sending.values()].map((s) => s.key));
   if (composer) {
     parts.push(
       `<div class="thread composer" data-key="__new"><div class="quote">${esc(
@@ -603,6 +607,7 @@ function renderPanel(): void {
     );
   }
   for (const t of shown) {
+    const held = busy.has(t.key) ? " disabled" : "";
     const msgs = t.messages
       .map(
         (m) =>
@@ -617,14 +622,14 @@ function renderPanel(): void {
           '<button class="primary" data-act="confirm-delete">Delete</button>' +
           '<button data-act="cancel-delete">Cancel</button>'
         : '<textarea placeholder="Reply"></textarea>' +
-          '<button class="primary" data-act="reply">Reply</button>' +
+          `<button class="primary" data-act="reply"${held}>Reply</button>` +
           `<button data-act="resolve">${
             t.resolved ? "Reopen" : "Resolve"
           }</button>` +
           '<button data-act="source">Source</button>' +
           (t.overleaf
             ? ""
-            : '<button data-act="overleaf" title="Add it to Overleaf\'s comments, kept in step from then on">Post to Overleaf</button>') +
+            : `<button data-act="overleaf" title="Add it to Overleaf's comments, kept in step from then on"${held}>Post to Overleaf</button>`) +
           '<button data-act="delete">Delete</button>';
     parts.push(
       `<div class="thread${t.resolved ? " resolved" : ""}${
@@ -765,11 +770,15 @@ panel.addEventListener("click", (e) => {
     }
     return;
   }
+  const held = [...sending.values()].some((s) => s.key === t.key);
   if (act === "reply") {
     const text = card.querySelector("textarea")?.value.trim();
-    if (text) {
-      post({ type: "reply", ...ref, text });
+    if (text && !held) {
+      const reqId = ++reqCounter;
+      sending.set(reqId, { key: t.key, act });
+      post({ type: "reply", ...ref, reqId, text });
       setStatus("Saving reply…");
+      renderPanel();
     }
   } else if (act === "resolve") {
     post({ type: "resolve", ...ref, resolved: !t.resolved });
@@ -783,8 +792,13 @@ panel.addEventListener("click", (e) => {
     deleting = null;
     post({ type: "delete", ...ref });
   } else if (act === "overleaf") {
-    post({ type: "postToOverleaf", ...ref });
-    setStatus("Posting to Overleaf\u2026");
+    if (!held) {
+      const reqId = ++reqCounter;
+      sending.set(reqId, { key: t.key, act });
+      post({ type: "postToOverleaf", ...ref, reqId });
+      setStatus("Posting to Overleaf\u2026");
+      renderPanel();
+    }
   } else if (act === "source") {
     post({ type: "openSource", file: t.path, line: t.line });
   } else if (act === "issue" && t.issue) {
@@ -1292,6 +1306,19 @@ window.addEventListener("message", (e) => {
     void draw();
   } else if (msg.type === "status") {
     setStatus(msg.text);
+  } else if (msg.type === "sent") {
+    const sent = sending.get(msg.reqId);
+    sending.delete(msg.reqId);
+    // A reply that went through isn't kept, to be sent again
+    if (sent?.act === "reply" && msg.ok) {
+      const node = panel.querySelector<HTMLTextAreaElement>(
+        `[data-key="${CSS.escape(sent.key)}"] textarea`,
+      );
+      if (node) {
+        node.value = "";
+      }
+    }
+    renderPanel();
   } else if (msg.type === "boxes") {
     boxes = msg.boxes;
     drawBoxes();

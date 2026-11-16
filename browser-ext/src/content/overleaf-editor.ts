@@ -9,6 +9,7 @@
  * where, and the other says what's wrong and fills the hover tooltips.
  */
 import { type Citation, citationsIn } from "../core/latex";
+import { type EditContext, isEditCurrent } from "../core/review";
 
 /** A command showing project content, and where it is in the document. */
 export interface EditorCitation {
@@ -71,15 +72,15 @@ export type ToEditor =
   | { calkit: "lint"; type: "rescan" }
   | { calkit: "lint"; type: "read"; reqId: number }
   | { calkit: "lint"; type: "tree"; reqId: number }
-  // Lines from `line` (from 1) replaced, if they're still `expected`
-  | {
+  // Lines from `line` (from 1) replaced, if they and those either side are
+  // still as expected
+  | ({
       calkit: "lint";
       type: "replace";
       reqId: number;
       line: number;
-      expected: string[];
       insert: string[];
-    };
+    } & EditContext);
 
 // CodeMirror comes from Overleaf's bundle at runtime, so it's untyped here
 type View = any;
@@ -244,13 +245,8 @@ function replaceLines(message: ToEditor & { type: "replace" }): string | null {
   const doc = active.view.state.doc;
   const { line, expected, insert } = message;
   const last = line + expected.length - 1;
-  if (line < 1 || last > doc.lines || line > doc.lines + 1) {
+  if (!isEditCurrent((n) => doc.line(n).text, doc.lines, message)) {
     return "The source changed. Try again.";
-  }
-  for (let n = line; n <= last; n++) {
-    if (doc.line(n).text !== expected[n - line]) {
-      return "The source changed. Try again.";
-    }
   }
   const text = insert.map((l) => `${l}\n`).join("");
   let from: number;

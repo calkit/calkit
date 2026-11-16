@@ -747,6 +747,10 @@ async function handle(
 // tabs already open, e.g., Overleaf, or never put them there, so new ones
 // are put in rather than leaving those tabs needing a refresh
 chrome.runtime.onInstalled.addListener((details) => {
+  // A Chrome update leaves the extension, and so its scripts, running
+  if (details.reason !== "install" && details.reason !== "update") {
+    return;
+  }
   void (async () => {
     for (const script of chrome.runtime.getManifest().content_scripts ?? []) {
       // Scripts in the page's own world don't depend on the extension, so

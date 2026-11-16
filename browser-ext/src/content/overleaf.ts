@@ -66,6 +66,7 @@ import {
   type ToReview,
   findParagraphByText,
   getAddEdit,
+  getEditContext,
   getEditedLines,
   getOverleafSyncedLines,
   getReply,
@@ -103,6 +104,34 @@ let lastCheck: {
 // that finishes after any of them doesn't draw over it
 let loadGeneration = 0;
 let tokenWatcher: MutationObserver | null = null;
+// Aborted once this script shuts down, which stops what watches the page
+const watching = new AbortController();
+
+/**
+ * Call back a moment after the page changes, until this script shuts down,
+ * e.g., to put back what Overleaf redrew without it, or straight away with
+ * no delay.
+ */
+function observePage(
+  callback: () => void,
+  delay: number | null,
+  options: MutationObserverInit = { childList: true, subtree: true },
+): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const observer = new MutationObserver(() => {
+    if (delay === null) {
+      callback();
+      return;
+    }
+    clearTimeout(timer);
+    timer = setTimeout(callback, delay);
+  });
+  observer.observe(document.body, options);
+  watching.signal.addEventListener("abort", () => {
+    observer.disconnect();
+    clearTimeout(timer);
+  });
+}
 // The Calkit project this Overleaf project syncs with, once found
 let currentLink: OverleafLinkPublic | null = null;
 // Kept for a minute, since the project changes under it, e.g., with a sync
@@ -917,10 +946,9 @@ let runsFailures = 0;
 // A start from a run button, kept across their redraws
 let starting: { key: string; busy: boolean; error?: string } | null = null;
 // Whether syncing from this computer runs what's out of date first, as last
-// chosen, and whether the latest run synced after
+// chosen
 const RUN_BEFORE_SYNC_KEY = "runBeforeSync";
 let runBeforeSync = true;
-let lastRunSynced = true;
 void chrome.storage.local.get(RUN_BEFORE_SYNC_KEY).then((stored) => {
   runBeforeSync = stored[RUN_BEFORE_SYNC_KEY] ?? true;
 });
@@ -1114,15 +1142,13 @@ function syncNow(
 async function startRun(link: OverleafLinkPublic): Promise<void> {
   const key = linkKey(link);
   starting = { key, busy: true };
-  // A run started here syncs after; only one from before may not have
-  lastRunSynced = true;
   drawRuns();
   try {
     const run = await send({
       type: "project.startPipelineRun",
       owner: link.project_owner_name,
       project: link.project_name,
-      sync: lastRunSynced,
+      sync: true,
     });
     starting = null;
     // Listed as soon as it's recorded, before GitHub lists it
@@ -1154,10 +1180,9 @@ async function bringInRun(link: OverleafLinkPublic): Promise<void> {
   }
   // 'calkit run --save --overleaf' synced already, unless it was only run
   if (pipelineRuns.runs.runs[0]?.location === "local") {
-    pipelineRuns.notice = lastRunSynced
-      ? "The pipeline ran on this computer, and its results were saved " +
-        "and synced here."
-      : "The pipeline ran on this computer. Sync to bring its results here.";
+    pipelineRuns.notice =
+      "The pipeline ran on this computer, and its results were saved " +
+      "and synced here.";
   } else if (canWrite(link)) {
     try {
       await syncOverleaf(link.project_owner_name, link.project_name, link.path);
@@ -2266,7 +2291,7 @@ function watchEditor(): void {
       editorReplies.delete(message.reqId);
     }
   };
-  window.addEventListener("message", listener);
+  window.addEventListener("message", listener, { signal: watching.signal });
   // What the open document shows, in case this script came in after the
   // editor last said
   toEditor({ type: "rescan" });
@@ -2488,7 +2513,7 @@ function watchPdf(): void {
   // Overleaf's own requests say which compile server has the build, but
   // a content script may not see them, so the PDF's download link, which
   // it always can, says which build it is
-  new PerformanceObserver((list) => {
+  const resources = new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       noteBuild(
         entry.name,
@@ -2497,7 +2522,9 @@ function watchPdf(): void {
           : null,
       );
     }
-  }).observe({ type: "resource", buffered: true });
+  });
+  resources.observe({ type: "resource", buffered: true });
+  watching.signal.addEventListener("abort", () => resources.disconnect());
   const noteDownloadLink = () => {
     const link = document.querySelector<HTMLAnchorElement>(
       'a[href*="/build/"][href*="output.pdf"]',
@@ -2507,19 +2534,19 @@ function watchPdf(): void {
     }
   };
   noteDownloadLink();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  new MutationObserver(() => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
+  observePage(
+    () => {
       noteDownloadLink();
       showPdfBoxes();
-    }, 200);
-  }).observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["href"],
-  });
+    },
+    200,
+    {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["href"],
+    },
+  );
   // A component's provenance on hover, as in the editor. Where each one
   // lands is asked of Overleaf once per build and edit, the first time the
   // pointer rests on the PDF, so moving it around costs nothing, and the
@@ -2689,7 +2716,7 @@ function watchPdf(): void {
         clientY: event.clientY,
       });
     },
-    { passive: true },
+    { passive: true, signal: watching.signal },
   );
   // A fixed tooltip would stay put while the PDF scrolls away under it
   document.addEventListener(
@@ -2700,7 +2727,7 @@ function watchPdf(): void {
         hide();
       }
     },
-    { capture: true, passive: true },
+    { capture: true, passive: true, signal: watching.signal },
   );
 }
 
@@ -3446,8 +3473,8 @@ function editEditor(edit: LineEdit, lines: string[]): Promise<void> {
       type: "replace",
       reqId,
       line: edit.line,
-      expected: lines.slice(edit.line - 1, edit.line - 1 + edit.count),
       insert: edit.insert,
+      ...getEditContext(lines, edit),
     });
   });
 }
@@ -3684,10 +3711,11 @@ async function syncOverleafComments(
   if (!comments.length && !lines.some((l) => /overleaf=/.test(l))) {
     return false;
   }
-  const stored = (await chrome.storage.local.get(OVERLEAF_SYNCED_KEY))[
-    OVERLEAF_SYNCED_KEY
-  ] as Record<string, Record<string, OverleafSynced>> | undefined;
-  const known = stored?.[projectId] ?? {};
+  const getStored = async () =>
+    ((await chrome.storage.local.get(OVERLEAF_SYNCED_KEY))[
+      OVERLEAF_SYNCED_KEY
+    ] ?? {}) as Record<string, Record<string, OverleafSynced>>;
+  const known = (await getStored())[projectId] ?? {};
   const {
     lines: next,
     pushes,
@@ -3723,6 +3751,10 @@ async function syncOverleafComments(
   // Overleaf is told anything, so nothing's sent twice
   const changed = next.join("\n") !== lines.join("\n");
   if (changed) {
+    // Read again after the waits above, in case a thread went in meanwhile
+    if (openDocPath() !== file || (await readEditor()) !== lines.join("\n")) {
+      throw new Error("The source changed. Try again.");
+    }
     // Only what changed, so the rest of the file is left as it is
     let prefix = 0;
     while (
@@ -3758,13 +3790,16 @@ async function syncOverleafComments(
       t.overleaf ? [t.overleaf] : [],
     ),
   ]);
-  const kept = Object.fromEntries(
-    Object.entries(known).filter(([id]) => !here.has(id)),
-  );
-  const save = (state: Record<string, OverleafSynced>) =>
-    chrome.storage.local.set({
+  // Read again each time, so what another tab saved meanwhile is kept
+  const save = async (state: Record<string, OverleafSynced>) => {
+    const stored = await getStored();
+    const kept = Object.fromEntries(
+      Object.entries(stored[projectId] ?? {}).filter(([id]) => !here.has(id)),
+    );
+    await chrome.storage.local.set({
       [OVERLEAF_SYNCED_KEY]: { ...stored, [projectId]: { ...kept, ...state } },
     });
+  };
   const unsent = new Set(pushes.map((p) => p.thread));
   const done = Object.fromEntries(
     Object.entries(synced).filter(([id]) => !unsent.has(id)),
@@ -3804,6 +3839,8 @@ async function syncOverleafComments(
 
 // The file whose Overleaf comments were last brought into its source
 let overleafSyncedFile: string | null = null;
+// The refresh of the viewer's threads under way, which the next waits for
+let reviewRefresh: Promise<void> = Promise.resolve();
 
 /** The address of the viewer with comments, for this page. */
 function getReviewUrl(params: URLSearchParams): string {
@@ -3942,9 +3979,15 @@ function toPdfRect(box: SynctexBox): PdfRect {
  * otherwise only the open one, from the editor.
  */
 async function refreshReviewThreads(full: boolean): Promise<void> {
+  // One at a time, so two can't bring the same comment into the source
+  const previous = reviewRefresh;
+  let finish: () => void = () => undefined;
+  reviewRefresh = new Promise<void>((resolve) => (finish = resolve));
+  await previous;
   const r = review;
   const projectId = currentProjectId;
   if (!r?.ready || !projectId) {
+    finish();
     return;
   }
   try {
@@ -3974,6 +4017,8 @@ async function refreshReviewThreads(full: boolean): Promise<void> {
         try {
           await syncOverleafComments(projectId, file, sources);
         } catch (e) {
+          // Tried again with the next refresh
+          overleafSyncedFile = null;
           postToReview({
             type: "status",
             text: e instanceof Error ? e.message : String(e),
@@ -4031,6 +4076,8 @@ async function refreshReviewThreads(full: boolean): Promise<void> {
       type: "status",
       text: `Couldn't read the comments: ${e instanceof Error ? e.message : e}`,
     });
+  } finally {
+    finish();
   }
 }
 
@@ -4368,28 +4415,39 @@ async function onReviewMessage(message: FromReview): Promise<void> {
     // So a change to a thread kept in step with Overleaf goes there now
     overleafSyncedFile = null;
     await refreshReviewThreads(false);
+    // Only now, once a posted thread's link to Overleaf is in the source
+    if (message.type === "reply" || message.type === "postToOverleaf") {
+      postToReview({ type: "sent", reqId: message.reqId, ok: true });
+    }
   } catch (e) {
     postToReview({
       type: "status",
       text: e instanceof Error ? e.message : String(e),
     });
+    if (message.type === "reply" || message.type === "postToOverleaf") {
+      postToReview({ type: "sent", reqId: message.reqId, ok: false });
+    }
   }
 }
 
 /** Hear from the viewer with comments, and only from it. */
 function watchReview(): void {
   const origin = new URL(chrome.runtime.getURL("")).origin;
-  window.addEventListener("message", (event) => {
-    if (
-      !review ||
-      event.source !== review.frame.contentWindow ||
-      event.origin !== origin ||
-      event.data?.calkit !== "review"
-    ) {
-      return;
-    }
-    void onReviewMessage(event.data as FromReview);
-  });
+  window.addEventListener(
+    "message",
+    (event) => {
+      if (
+        !review ||
+        event.source !== review.frame.contentWindow ||
+        event.origin !== origin ||
+        event.data?.calkit !== "review"
+      ) {
+        return;
+      }
+      void onReviewMessage(event.data as FromReview);
+    },
+    { signal: watching.signal },
+  );
 }
 
 /**
@@ -4398,11 +4456,15 @@ function watchReview(): void {
  * Overleaf redraws the toolbar.
  */
 function mountCommentsToggle(): void {
+  // Cut off, the button with its ID may be the next copy's
+  if (watching.signal.aborted || !isExtensionAlive()) {
+    return;
+  }
   const toolbar = document.querySelector<HTMLElement>(".toolbar-pdf-left");
   const existing = document.getElementById("calkit-comments-toggle");
   const projectId = currentProjectId;
   // This computer's PDF always has them, so it's only for Overleaf's
-  if (!toolbar || !projectId || !isExtensionAlive() || localPdf) {
+  if (!toolbar || !projectId || localPdf) {
     existing?.remove();
     return;
   }
@@ -4482,14 +4544,10 @@ function getPdfPane(): HTMLElement | null {
 
 /** Keep the PDF switch in the toolbar as Overleaf redraws it. */
 function watchPdfSwitch(): void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  new MutationObserver(() => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      mountPdfSwitch();
-      mountCommentsToggle();
-    }, 200);
-  }).observe(document.body, { childList: true, subtree: true });
+  observePage(() => {
+    mountPdfSwitch();
+    mountCommentsToggle();
+  }, 200);
 }
 
 /** Which PDF someone last chose for an Overleaf project, by its ID. */
@@ -4505,7 +4563,11 @@ function mountPdfSwitch(): void {
   // Beside Recompile, the logs, and download
   const toolbar = document.querySelector<HTMLElement>(".toolbar-pdf-left");
   const existing = document.getElementById("calkit-pdf-switch");
-  if (!check?.link.local_path || !toolbar || !isExtensionAlive()) {
+  // Cut off, the switch with its ID may be the next copy's
+  if (watching.signal.aborted || !isExtensionAlive()) {
+    return;
+  }
+  if (!check?.link.local_path || !toolbar) {
     existing?.remove();
     return;
   }
@@ -5801,6 +5863,32 @@ function teardown(): void {
   currentLink = null;
 }
 
+/**
+ * Stop watching the page and remove all this script put in it, when the
+ * extension's reloaded or a newer copy of this script takes over.
+ */
+function shutdown(): void {
+  watching.abort();
+  clearTimeout(reviewTimer);
+  setRail(false);
+  localPdf?.host.remove();
+  localPdf = null;
+  review?.host.remove();
+  review = null;
+  for (const id of [
+    "calkit-pdf-switch",
+    "calkit-comments-toggle",
+    "calkit-integration",
+    "calkit-insert-divider",
+    RAIL_TAB_ID,
+  ]) {
+    document.getElementById(id)?.remove();
+  }
+  document.getElementById("calkit-insert")?.parentElement?.remove();
+  railStyle?.remove();
+  teardown();
+}
+
 function sync(): void {
   if (new URL(window.location.href).pathname.startsWith("/user/settings")) {
     void watchForNewToken();
@@ -5952,11 +6040,13 @@ function watchForSaves(): void {
         recheckAfterEdit(2000);
       }
     },
-    true,
+    { capture: true, signal: watching.signal },
   );
 }
 
 const RAIL_TAB_ID = "calkit-rail-tab";
+// What styles the tab and its pane, removed on shutting down
+let railStyle: HTMLStyleElement | null = null;
 const RAIL_PANE_ID = "calkit-rail-pane";
 // Whether Calkit's tab is the one showing in Overleaf's sidebar
 let railOpen = false;
@@ -6073,6 +6163,7 @@ let railPipeline: {
  */
 function watchRail(): void {
   const style = document.createElement("style");
+  railStyle = style;
   style.textContent = `
     .ide-rail-tab-content.calkit-open > :not(#${RAIL_PANE_ID}) {
       display: none !important;
@@ -6119,9 +6210,8 @@ function watchRail(): void {
       }
       setRail(false);
     },
-    true,
+    { capture: true, signal: watching.signal },
   );
-  let timer: ReturnType<typeof setTimeout> | undefined;
   const ensure = () => {
     const first = document.getElementById("ide-rail-tabs-tab-file-tree");
     const tabs = first?.parentElement;
@@ -6159,10 +6249,7 @@ function watchRail(): void {
       placeRailPane();
     }
   };
-  new MutationObserver(() => {
-    clearTimeout(timer);
-    timer = setTimeout(ensure, 100);
-  }).observe(document.body, { childList: true, subtree: true });
+  observePage(ensure, 100);
 }
 
 /**
@@ -6643,7 +6730,6 @@ function watchIntegrations(): void {
   const icon = `data:image/svg+xml,${encodeURIComponent(
     calkitLogo.replace(/currentColor/g, "#009688"),
   )}`;
-  let timer: ReturnType<typeof setTimeout> | undefined;
   const addCard = () => {
     const list = document.querySelector(".integrations-panel");
     if (!list || !currentProjectId) {
@@ -6704,10 +6790,7 @@ function watchIntegrations(): void {
       list.prepend(card);
     }
   };
-  new MutationObserver(() => {
-    clearTimeout(timer);
-    timer = setTimeout(addCard, 100);
-  }).observe(document.body, { childList: true, subtree: true });
+  observePage(addCard, 100);
 }
 
 /**
@@ -6763,24 +6846,23 @@ function watchContextMenu(): void {
       el("li", { attrs: { role: "none" } }, [item]),
     );
   };
-  new MutationObserver(addItem).observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
+  observePage(addItem, null);
 }
 
-watchForSaves();
-watchEditor();
-watchPdf();
-watchIntegrations();
-watchRail();
-watchContextMenu();
-watchPdfSwitch();
-watchReview();
 runContentScript({
   id: "overleaf",
+  watch: () => {
+    watchForSaves();
+    watchEditor();
+    watchPdf();
+    watchIntegrations();
+    watchRail();
+    watchContextMenu();
+    watchPdfSwitch();
+    watchReview();
+  },
   sync,
-  teardown,
+  teardown: shutdown,
   authChanged: () => {
     if (!currentProjectId) {
       return;

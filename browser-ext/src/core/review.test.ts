@@ -3,12 +3,14 @@ import { describe, expect, test } from "vitest";
 import {
   findParagraphByText,
   getAddEdit,
+  getEditContext,
   getEditedLines,
   getPlainText,
   getReply,
   getReviewThreads,
   getOverleafSyncedLines,
   getThreadEdit,
+  isEditCurrent,
 } from "./review";
 
 const MAIN = [
@@ -138,6 +140,59 @@ describe("comment edits", () => {
     expect(() => getThreadEdit(MAIN, { id: "00000000" }, null)).toThrow(
       "no longer in the source",
     );
+  });
+});
+
+describe("isEditCurrent", () => {
+  test("checks the lines an edit replaces and those either side", () => {
+    const check = (
+      lines: string[],
+      line: number,
+      count: number,
+      now: string[],
+    ) =>
+      isEditCurrent((n) => now[n - 1], now.length, {
+        line,
+        ...getEditContext(lines, { line, count, insert: [] }),
+      });
+    // A thread inserted above a paragraph, with nothing to replace
+    expect(getEditContext(MAIN, { line: 6, count: 0, insert: [] })).toEqual({
+      before: "%     Which speeds?",
+      expected: [],
+      after: "We towed a cylinder at four speeds",
+    });
+    expect(check(MAIN, 6, 0, MAIN)).toBe(true);
+    // A line typed just above or below the insertion point
+    expect(
+      check(MAIN, 6, 0, [...MAIN.slice(0, 5), "New", ...MAIN.slice(5)]),
+    ).toBe(false);
+    expect(
+      check(MAIN, 6, 0, [...MAIN.slice(0, 5), "Edit", ...MAIN.slice(6)]),
+    ).toBe(false);
+    // The same thread put in by another refresh or tab first
+    const inserted = getEditedLines(MAIN, {
+      line: 6,
+      count: 0,
+      insert: ["% COMMENT overleaf=abc", "%   Pat:", "%     Hi."],
+    });
+    expect(check(MAIN, 6, 0, inserted)).toBe(false);
+    // Lines replaced, changed, and edits elsewhere left alone
+    expect(check(MAIN, 3, 3, MAIN)).toBe(true);
+    expect(
+      check(
+        MAIN,
+        3,
+        3,
+        MAIN.map((l, i) => (i === 3 ? "%   Sam:" : l)),
+      ),
+    ).toBe(false);
+    expect(check(MAIN, 3, 3, [...MAIN.slice(0, 8), "More"])).toBe(true);
+    // At either end, where there's no line beyond to check
+    expect(check(MAIN, 1, 0, MAIN)).toBe(true);
+    expect(check(MAIN, 1, 0, ["", ...MAIN])).toBe(false);
+    expect(check(MAIN, MAIN.length + 1, 0, MAIN)).toBe(true);
+    expect(check(MAIN, MAIN.length + 1, 0, [...MAIN, "End"])).toBe(false);
+    expect(check(MAIN, MAIN.length - 1, 2, MAIN.slice(0, -1))).toBe(false);
   });
 });
 

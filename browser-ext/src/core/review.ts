@@ -47,6 +47,8 @@ export type ToReview =
   | { calkit: "review"; type: "status"; text: string }
   | { calkit: "review"; type: "boxes"; boxes: PdfBox[] }
   | { calkit: "review"; type: "reveal"; rect: PdfRect }
+  // Whether a reply or post to Overleaf the viewer asked for went through
+  | { calkit: "review"; type: "sent"; reqId: number; ok: boolean }
   | {
       calkit: "review";
       type: "located";
@@ -94,10 +96,15 @@ export type FromReview =
       highlight: string;
       occ: number;
     }
-  | ({ calkit: "review"; type: "reply"; text: string } & ThreadRef)
+  | ({
+      calkit: "review";
+      type: "reply";
+      reqId: number;
+      text: string;
+    } & ThreadRef)
   | ({ calkit: "review"; type: "resolve"; resolved: boolean } & ThreadRef)
   | ({ calkit: "review"; type: "delete" } & ThreadRef)
-  | ({ calkit: "review"; type: "postToOverleaf" } & ThreadRef)
+  | ({ calkit: "review"; type: "postToOverleaf"; reqId: number } & ThreadRef)
   | { calkit: "review"; type: "openSource"; file: string; line: number }
   | { calkit: "review"; type: "openIssue"; url: string }
   // What's wrong at a box, to show in the editor
@@ -305,6 +312,46 @@ export function getEditedLines(lines: string[], edit: LineEdit): string[] {
     ...edit.insert,
     ...lines.slice(edit.line - 1 + edit.count),
   ];
+}
+
+/**
+ * The lines an edit replaces and those either side, null past either end,
+ * so it can be checked before it's made, even when it only inserts.
+ */
+export interface EditContext {
+  before: string | null;
+  expected: string[];
+  after: string | null;
+}
+
+export function getEditContext(lines: string[], edit: LineEdit): EditContext {
+  return {
+    before: edit.line > 1 ? lines[edit.line - 2] ?? null : null,
+    expected: lines.slice(edit.line - 1, edit.line - 1 + edit.count),
+    after: lines[edit.line - 1 + edit.count] ?? null,
+  };
+}
+
+/** Whether a file's lines, by number from 1, are as an edit expects. */
+export function isEditCurrent(
+  getLine: (n: number) => string,
+  nLines: number,
+  edit: { line: number } & EditContext,
+): boolean {
+  const { line, before, expected, after } = edit;
+  const next = line + expected.length;
+  if (line < 1 || next - 1 > nLines) {
+    return false;
+  }
+  if (before === null ? line !== 1 : line < 2 || getLine(line - 1) !== before) {
+    return false;
+  }
+  if (
+    after === null ? next <= nLines : next > nLines || getLine(next) !== after
+  ) {
+    return false;
+  }
+  return expected.every((text, i) => getLine(line + i) === text);
 }
 
 /** The Overleaf thread a source thread is kept in step with, if any. */

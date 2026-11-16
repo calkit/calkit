@@ -81,9 +81,16 @@ Installed packages are kept in the project in `.calkit/local/texmf`,
 which is ignored by Git,
 so they don't need to be installed again on the next build.
 
-Packages are only installed automatically when building with Calkit's
-image, either directly, i.e., with no environment specified,
-or in a Docker environment built from it.
+<!-- TODO: needs human review -->
+
+Packages are only installed automatically in a
+[TeX Live environment](environments.md#tex-live),
+whose lock gains them,
+or a Docker environment built from Calkit's image.
+With no environment specified,
+`calkit latex build` uses the LaTeX installed on your machine if there is
+one, and otherwise a TeX Live environment Calkit keeps for the machine
+in `~/.calkit/texlive`.
 For other images or a LaTeX distribution installed on your machine,
 you'll need to install packages the usual way.
 

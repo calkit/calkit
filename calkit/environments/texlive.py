@@ -63,6 +63,10 @@ DEFAULT_ENVIRONMENT = {
     "release": DEFAULT_RELEASE,
     "description": "TeX Live, installed by Calkit.",
 }
+# What builds run in when neither the project nor the machine has a TeX,
+# locked in the store rather than a project, so packages its builds add are
+# shared by every document built that way here
+DEFAULT_ENV_NAME = "_texlive"
 FROZEN_REPOSITORY_TEMPLATE = (
     "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/"
     "{release}/tlnet-final"
@@ -1210,9 +1214,13 @@ def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
 
 
 def get_lock_fpath(env_name: str, env: dict, wdir: str | None = None) -> str:
-    """Return where an environment's lock lives in the project."""
+    """Return where an environment's lock lives in the project, or in the
+    store for the default environment.
+    """
     from calkit.environments import get_env_lock_fpath
 
+    if env_name == DEFAULT_ENV_NAME:
+        return os.path.join(get_store_dir(), "default-lock.json")
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=False
     )

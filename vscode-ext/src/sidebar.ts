@@ -94,6 +94,35 @@ const ARTIFACT_ICONS: Record<ArtifactKind, string> = {
   presentation: "device-desktop",
 };
 
+// The names of who created an artifact, as calkit.yaml lists them
+function getCreators(entry: ArtifactEntry): string {
+  const people = [entry.created_by]
+    .flat()
+    .filter((p): p is { name?: string; email?: string } =>
+      Boolean(p && typeof p === "object"),
+    );
+  return people
+    .map((p) => p.name ?? p.email ?? "")
+    .filter(Boolean)
+    .join(", ");
+}
+
+// Where an artifact comes from, as a tooltip says it, or undefined when
+// nothing says: a stage makes it, it was imported, or someone created it
+function getOrigin(entry: ArtifactEntry): string | undefined {
+  if (typeof entry.stage === "string") {
+    return `stage: ${entry.stage}`;
+  }
+  if (entry.imported_from) {
+    return "imported";
+  }
+  if (entry.created_by) {
+    const creators = getCreators(entry);
+    return creators ? `created by ${creators}` : "created here";
+  }
+  return undefined;
+}
+
 export class SidebarItem extends vscode.TreeItem {
   constructor(
     label: string,
@@ -327,7 +356,7 @@ export class CalkitSidebarProvider
           nodeKind,
           outputToStage,
         );
-        if (!entry.stage && !entry.imported_from) {
+        if (!getOrigin(entry)) {
           n++;
         }
       }
@@ -1063,8 +1092,13 @@ export class CalkitSidebarProvider
     outputToStage: Map<string, string>,
   ): ArtifactEntry {
     const list = (this.calkitConfig?.[`${kind}s`] ?? []) as ArtifactEntry[];
-    const fromList = list.find((e) => e.path === artifactPath);
-    if (fromList?.stage || fromList?.imported_from) {
+    // Or under misc, where an origin may have been recorded, e.g., by an
+    // older hub, before it filed data under datasets
+    const misc = (this.calkitConfig?.misc ?? []) as ArtifactEntry[];
+    const fromList =
+      list.find((e) => e.path === artifactPath) ??
+      misc.find((e) => e.path === artifactPath && getOrigin(e));
+    if (fromList && getOrigin(fromList)) {
       return fromList;
     }
     const stageName = outputToStage.get(artifactPath);
@@ -1112,7 +1146,8 @@ export class CalkitSidebarProvider
     nodeKind: ArtifactKind,
   ): SidebarItem {
     const label = path.basename(entry.path);
-    const hasProvenance = !!entry.stage || !!entry.imported_from;
+    const origin = getOrigin(entry);
+    const hasProvenance = Boolean(origin);
     const isStale =
       typeof entry.stage === "string" && this.staleStageNames.has(entry.stage);
     const collapsible = hasProvenance
@@ -1140,9 +1175,7 @@ export class CalkitSidebarProvider
         isImported ? "cloud-download" : ARTIFACT_ICONS[nodeKind],
         new vscode.ThemeColor("testing.iconPassed"),
       );
-      item.tooltip = entry.stage
-        ? `${entry.path} — stage: ${entry.stage}`
-        : `${entry.path} — imported`;
+      item.tooltip = `${entry.path} — ${origin}`;
       item.contextValue = nodeKind;
     }
     // Clicking opens the file in the regular viewer (the inline carousel icon
@@ -1212,6 +1245,15 @@ export class CalkitSidebarProvider
       importItem.description = src;
       importItem.iconPath = new vscode.ThemeIcon("cloud-download");
       items.push(importItem);
+    } else if (entry.created_by) {
+      const createdItem = new SidebarItem(
+        "Created by",
+        vscode.TreeItemCollapsibleState.None,
+        "artifact-created-prop",
+      );
+      createdItem.description = getCreators(entry);
+      createdItem.iconPath = new vscode.ThemeIcon("person");
+      items.push(createdItem);
     }
     if (this.workspaceRoot) {
       const openItem = new SidebarItem(

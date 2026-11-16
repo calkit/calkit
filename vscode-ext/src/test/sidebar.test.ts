@@ -319,3 +319,50 @@ test("questions show their H A V V row once checked, and their sign-offs", () =>
   assert.equal(selection.endLine, 11);
   assert.equal(evidence[2].command?.arguments?.length, 1);
 });
+
+test("an artifact someone created has an origin, wherever it's recorded", () => {
+  const provider = new CalkitSidebarProvider();
+  provider.refresh(
+    "/workspace",
+    {
+      datasets: [{ path: "data/other.csv" }],
+      figures: [{ path: "figures/drawn.svg", created_by: { name: "Sam" } }],
+      // Recorded under misc, as the hub once did for data
+      misc: [
+        {
+          path: "data/runs",
+          created_by: [{ name: "Pat Lee", email: "pat@example.com" }],
+        },
+      ],
+    },
+    undefined,
+    new Set(),
+    undefined,
+    [],
+    ["figures/plot.png"],
+    ["data/runs"],
+  );
+  // Only what says nothing of where it came from needs attention
+  assert.equal(provider.getAttentionCount(), 2);
+  const p = provider as any;
+  const runs = p
+    .getArtifactItems("datasets")
+    .find(
+      (i: { description?: string; label?: string; tooltip?: string }) =>
+        i.description === "data/runs",
+    );
+  assert.equal(runs.tooltip, "data/runs — created by Pat Lee");
+  const props = p.getArtifactProps("data/runs", "dataset");
+  const created = props.find(
+    (i: { description?: string; label?: string; tooltip?: string }) =>
+      i.label === "Created by",
+  );
+  assert.equal(created.description, "Pat Lee");
+  const other = p
+    .getArtifactItems("datasets")
+    .find(
+      (i: { description?: string; label?: string; tooltip?: string }) =>
+        i.description === "data/other.csv",
+    );
+  assert.equal(other.tooltip, "data/other.csv — no source defined");
+});

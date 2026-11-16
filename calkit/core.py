@@ -586,8 +586,76 @@ def echo(message: str) -> None:
     typer.echo(encode_safe(message))
 
 
+def get_project_paths_path() -> str:
+    """Where the folders projects were created or cloned into on this
+    machine are recorded.
+    """
+    return os.path.join(
+        get_user_home(), ".calkit", f"project-paths{get_env_suffix()}.json"
+    )
+
+
+def get_recorded_project_paths() -> list[str]:
+    """The folders projects were created or cloned into on this machine."""
+    try:
+        with open(get_project_paths_path()) as f:
+            paths = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(paths, list):
+        return []
+    return [p for p in paths if isinstance(p, str)]
+
+
+def write_json(path: str, data: Any, **kwargs: Any) -> None:
+    """Write JSON to a file all at once, so it's never read half written,
+    through a temporary file of its own, so writers don't share one.
+    """
+    import tempfile
+
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=folder, prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, **kwargs)
+        os.replace(tmp_path, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+        raise
+
+
+def record_project_path(wdir: str = ".") -> None:
+    """Remember where a project is on this machine, so it's found wherever
+    it is, e.g., by 'calkit open project' or the browser extension.
+    """
+    from filelock import FileLock
+
+    path = os.path.realpath(wdir)
+    if path in get_recorded_project_paths():
+        return
+    fpath = get_project_paths_path()
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    # Read again once it's ours, so another process's addition isn't lost
+    with FileLock(fpath + ".lock", timeout=60):
+        paths = get_recorded_project_paths()
+        if path in paths:
+            return
+        # Ones since moved or deleted are dropped while it's being written
+        paths = [
+            p for p in paths if os.path.isfile(os.path.join(p, "calkit.yaml"))
+        ]
+        write_json(fpath, paths + [path], indent=2)
+
+
 def find_project_dirs(relative=False, max_depth=3) -> list[str]:
-    """Find all Calkit project directories."""
+    """Find all Calkit project directories, i.e., those up to
+    ``max_depth`` folders into the home folder, and, unless ``relative``,
+    those recorded when created or cloned.
+    """
     if relative:
         start = ""
     else:
@@ -601,9 +669,16 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
             start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
         )
         res += glob.glob(pattern)
+    if not relative:
+        res += [
+            os.path.join(p, "calkit.yaml")
+            for p in get_recorded_project_paths()
+        ]
     final_res = []
     for ck_fpath in res:
         path = os.path.dirname(ck_fpath)
+        if path in final_res or not os.path.isfile(ck_fpath):
+            continue
         # Make sure this path is a Git repo
         try:
             calkit.git.get_repo(path)
@@ -611,6 +686,69 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
             continue
         final_res.append(path)
     return final_res
+
+
+def get_project_checkouts(
+    name: str, owner: str = "", warn: Any = None
+) -> dict[str, str]:
+    """Find the checkouts of a project on this machine, by the owner and
+    name each says it has, returning each one's owner by its real path.
+
+    ``warn`` is called with why a project that can't be read was skipped.
+    """
+    found: dict[str, str] = {}
+    for path in find_project_dirs():
+        path = os.path.realpath(path)
+        if path in found:
+            continue
+        try:
+            # Most projects say their name, which rules them out without
+            # asking Git for a remote, or, for one written plainly on its
+            # own line, even parsing the file
+            with open(os.path.join(path, "calkit.yaml"), "rb") as f:
+                text = f.read()
+            match = re.search(
+                rb"^name:[ \t]*([\"']?)([\w.-]+)\1[ \t]*(?:#[^\r\n]*)?\r?$",
+                text,
+                flags=re.MULTILINE,
+            )
+            if match and match.group(2).decode() not in (
+                name,
+                "null",
+                "Null",
+                "NULL",
+                "~",
+            ):
+                continue
+            # One that says none takes it from its Git remote, so it's in
+            # the repo's config, unless that's elsewhere, as a worktree's is
+            git_config_path = os.path.join(path, ".git", "config")
+            if not re.search(
+                rb"^name[ \t]*:", text, flags=re.MULTILINE
+            ) and os.path.isfile(git_config_path):
+                with open(git_config_path, "rb") as f:
+                    if name.encode() not in f.read():
+                        continue
+            info = load_calkit_info(wdir=path, read_only=True)
+            declared = info.get("name") if isinstance(info, dict) else None
+            if declared is not None and declared != name:
+                continue
+            # A subproject without its own repo would look like its parent
+            repo = calkit.git.get_repo(path)
+            if os.path.realpath(str(repo.working_tree_dir)) != path:
+                continue
+            p_owner, p_name = detect_project_name(wdir=path).split("/", 1)
+        except ValueError:
+            # It names no owner, so it can't be the one asked for
+            continue
+        except Exception as e:
+            # E.g., a calkit.yaml left with merge conflict markers
+            if warn is not None:
+                warn(f"Skipping {path}, which can't be read: {e}")
+            continue
+        if p_name == name and owner in ("", p_owner):
+            found[path] = p_owner
+    return found
 
 
 def load_calkit_info(

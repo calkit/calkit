@@ -18,7 +18,6 @@ import calkit.cli.check
 import calkit.environments
 import calkit.environments.core
 import calkit.environments.texlive
-import calkit.latex
 from calkit.environments.core import relock
 
 
@@ -1080,8 +1079,13 @@ def test_detect_env_for_stage(tmp_dir):
     res = calkit.environments.detect_env_for_stage(
         stage_latex, environment=None, ck_info={"environments": {}}
     )
-    assert res.env["kind"] == "docker"
-    assert res.env["image"] == calkit.latex.DEFAULT_LATEX_IMAGE
+    assert res.env == calkit.environments.texlive.DEFAULT_ENVIRONMENT
+    # A TeX Live environment the project has is used
+    tl_env = {"kind": "texlive", "release": 2025}
+    res = calkit.environments.detect_env_for_stage(
+        stage_latex, environment=None, ck_info={"environments": {"tl": tl_env}}
+    )
+    assert (res.name, res.env, res.exists) == ("tl", tl_env, True)
 
 
 def test_env_from_notebook_path(tmp_dir):

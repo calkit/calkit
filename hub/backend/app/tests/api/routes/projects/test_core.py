@@ -4954,6 +4954,72 @@ def test_figures_listing_skips_map_paths_copies(tmp_path) -> None:
     ]
 
 
+def test_figures_listing_includes_images_with_origins(tmp_path) -> None:
+    from app.api.routes.projects.core import _discover_figures
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "plot.png": "png",
+            "paper/drawn.png": "png",
+            "paper/main.pdf": "pdf",
+            "notes.png": "png",
+        },
+    )
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "outputs": [
+                        "plot.png",
+                        {"path": "results/r.json"},
+                        "frames/frame-{n}.png",
+                    ],
+                },
+                "export": {
+                    "kind": "manual-step",
+                    "outputs": [{"path": "paper/exported.png"}],
+                },
+                "paper": {"kind": "latex", "outputs": ["paper/main.pdf"]},
+            }
+        },
+        "publications": [{"path": "paper/main.pdf"}],
+        "misc": [
+            {"path": "paper/drawn.png", "created_by": [{"name": "Pat"}]},
+            {"path": "data/runs", "created_by": [{"name": "Pat"}]},
+        ],
+    }
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(ck_info, {}, {}, {}),
+        ),
+    ):
+        ctx = _discover_figures(
+            project=SimpleNamespace(
+                owner_account_name="o",
+                name="p",
+                owner_github_name="o",
+                git_repo_url="https://github.com/o/p",
+            ),
+            repo=repo,
+            ref=None,
+        )
+    # Not the paper, an image nothing says anything about, or iterations
+    assert sorted(f["path"] for f in ctx.figures) == [
+        "paper/drawn.png",
+        "paper/exported.png",
+        "plot.png",
+    ]
+
+
 def test_imported_from_info_reads_bare_strings() -> None:
     from app.api.routes.projects.core import _imported_from_info
 

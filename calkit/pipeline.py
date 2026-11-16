@@ -2081,6 +2081,62 @@ def get_map_paths_outputs(stage: dict) -> list[str]:
     ]
 
 
+def get_figure_paths_with_origins(ck_info: dict) -> list[str]:
+    """Images calkit.yaml says the origin of, wherever they are: those a
+    stage makes, and those recorded under ``misc`` as imported or created
+    by someone, e.g., a figure exported into a paper's folder. Documents,
+    e.g., a paper's own PDF, aren't figures, nor are copies a ``map-paths``
+    stage makes, or the files a stage's iterations write, which only its
+    runs name.
+    """
+    import calkit.detect
+
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    documents = {
+        str(entry.get("path"))
+        for section in ("publications", "presentations")
+        for entry in ck_info.get(section) or []
+        if isinstance(entry, dict)
+    }
+    copies = [
+        out
+        for stage in stages.values()
+        if isinstance(stage, dict)
+        for out in get_map_paths_outputs(stage)
+    ]
+    candidates: list[object] = []
+    for stage in stages.values():
+        if not isinstance(stage, dict) or stage.get("kind") == "latex":
+            continue
+        for out in stage.get("outputs") or []:
+            candidates.append(
+                out.get("path") if isinstance(out, dict) else out
+            )
+    candidates += [
+        entry.get("path")
+        for entry in ck_info.get("misc") or []
+        if isinstance(entry, dict)
+        and (entry.get("created_by") or entry.get("imported_from"))
+    ]
+    paths: list[str] = []
+    for path in candidates:
+        if not isinstance(path, str) or "{" in path:
+            continue
+        path = posixpath.normpath(path)
+        if (
+            posixpath.splitext(path)[1].lower()
+            in calkit.detect.FIGURE_EXTENSIONS
+            and not any(part.startswith(".") for part in path.split("/"))
+            and path not in documents
+            and not any(
+                path == copy or path.startswith(copy + "/") for copy in copies
+            )
+            and path not in paths
+        ):
+            paths.append(path)
+    return paths
+
+
 def get_map_paths_source(stage: dict, path: str) -> str | None:
     """Where a ``map-paths`` stage copied ``path`` from, both relative to the
     project, so a copy can be followed back to whatever made the original.
@@ -3810,7 +3866,10 @@ def list_artifacts(
         found = calkit.detect.detect_project_artifacts(
             wdir=wdir, ck_info=ck_info
         )
-        for path in found.get(kind, []):
+        found_paths = found.get(kind, [])
+        if kind == "figures":
+            found_paths = found_paths + get_figure_paths_with_origins(ck_info)
+        for path in found_paths:
             if path not in listed:
                 entries.append({"path": path, "detected": True})
                 listed.add(path)

@@ -2863,18 +2863,20 @@ def env_from_name_or_path(
     if name_or_path is None and language is not None:
         # Look for a docker environment matching the language
         for env_name, env in envs.items():
+            if language.lower() == "latex" and env.get("kind") == "texlive":
+                return EnvDetectResult(name=env_name, env=env, exists=True)
             if env.get("kind") == "docker":
                 image = env.get("image", "").lower()
                 # Check if this looks like a language environment
                 if language.lower() in image or f"{language}mk" in image:
                     return EnvDetectResult(name=env_name, env=env, exists=True)
-        # Only create default docker environment for latex
+        # Only LaTeX gets a default environment created
         if language.lower() == "latex":
-            from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+            from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
             return EnvDetectResult(
                 name="latex",
-                env=dict(DEFAULT_LATEX_ENVIRONMENT),
+                env=dict(DEFAULT_ENVIRONMENT),
                 exists=False,
             )
         # For shell language, use _system environment

@@ -480,7 +480,7 @@ At a high level, `xr` chooses environments in this order:
      or a generated Python environment spec.
    - R: typically `DESCRIPTION` or a generated `renv` spec.
    - Julia: typically `Project.toml` or a generated Julia project spec.
-   - LaTeX: typically a Docker LaTeX environment.
+   - LaTeX: typically a TeX Live environment.
 4. For shell commands:
    - `docker run ...` can infer a Docker environment from the image.
    - non-Docker shell commands default to `_system` unless explicitly set.

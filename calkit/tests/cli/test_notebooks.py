@@ -284,7 +284,7 @@ def test_check_env_kernel_composed(
         out = subprocess.check_output(
             ["calkit", "nb", "check-kernel", "-e", "main", "--json"]
         )
-        kernel_name = json.loads(out.splitlines()[-1])["kernel_name"]
+        kernel_name = json.loads(out)["kernel_name"]
         spec_fpath = os.path.join(
             "jupyter-data", "kernels", kernel_name.lower(), "kernel.json"
         )

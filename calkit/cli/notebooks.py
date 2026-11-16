@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import pathlib
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -187,6 +189,23 @@ def check_env_kernel(
     from calkit.cli.update import update_environment
     from calkit.environments import get_composed_env_vars, language_from_env
 
+    @contextlib.contextmanager
+    def send_stdout_to_stderr() -> Iterator[None]:
+        # What's run prints to stdout, where only the JSON belongs, and child
+        # processes inherit the file descriptor rather than sys.stdout
+        if not json_output:
+            yield
+            return
+        sys.stdout.flush()
+        stdout_fd = os.dup(1)
+        os.dup2(2, 1)
+        try:
+            yield
+        finally:
+            sys.stdout.flush()
+            os.dup2(stdout_fd, 1)
+            os.close(stdout_fd)
+
     envs = calkit.load_calkit_info().get("environments", {})
     if env_name not in envs:
         raise_error(f"No environment '{env_name}' defined for this project")
@@ -197,9 +216,14 @@ def check_env_kernel(
     # A kernel an editor starts doesn't go through Calkit, so its spec gives
     # it the environments composed into this one, ahead of the editor's PATH
     try:
-        kernel_env_vars = get_composed_env_vars(
-            env_name, env, envs, verbose=verbose, env_vars={"PATH": "${PATH}"}
-        )
+        with send_stdout_to_stderr():
+            kernel_env_vars = get_composed_env_vars(
+                env_name,
+                env,
+                envs,
+                verbose=verbose,
+                env_vars={"PATH": "${PATH}"},
+            )
     except (ValueError, RuntimeError, OSError) as e:
         raise_error(f"Environment '{env_name}': {e}")
     project_name = calkit.detect_project_name(prepend_owner=False)
@@ -225,22 +249,12 @@ def check_env_kernel(
             "--display-name",
             display_name,
         ]
-        if json_output:
-            # For JSON output, run silently and don't show intermediate
-            # messages
-            res = run_in_env(
+        with send_stdout_to_stderr():
+            run_in_env(
                 cmd=cmd,
                 env_name=env_name,
                 no_check=no_check,
-                verbose=False,
-                relaxed_check=True,
-            )
-        else:
-            res = run_in_env(
-                cmd=cmd,
-                env_name=env_name,
-                no_check=no_check,
-                verbose=verbose,
+                verbose=verbose and not json_output,
                 relaxed_check=True,
             )
     elif language == "r":
@@ -252,16 +266,18 @@ def check_env_kernel(
                 f'"{kernel_name}", displayname = "{display_name}", user = TRUE)'
             ),
         ]
-        run_in_env(
-            cmd=cmd,
-            env_name=env_name,
-            no_check=no_check,
-            verbose=verbose,
-            relaxed_check=True,
-        )
+        with send_stdout_to_stderr():
+            run_in_env(
+                cmd=cmd,
+                env_name=env_name,
+                no_check=no_check,
+                verbose=verbose,
+                relaxed_check=True,
+            )
     elif language == "julia":
         if not no_check:
-            check_environment(env_name=env_name, verbose=verbose)
+            with send_stdout_to_stderr():
+                check_environment(env_name=env_name, verbose=verbose)
         env_path = env.get("path")
         julia_version = env.get("julia")
         env_fname = os.path.basename(env_path)
@@ -297,7 +313,10 @@ def check_env_kernel(
                     "install automatically."
                 )
             try:
-                update_environment(env_name=env_name, add_packages=["IJulia"])
+                with send_stdout_to_stderr():
+                    update_environment(
+                        env_name=env_name, add_packages=["IJulia"]
+                    )
             except Exception as e:
                 raise_error(f"Failed to install IJulia: {e}")
             ijulia_ok = _check_ijulia_available(

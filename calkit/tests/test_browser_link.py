@@ -1034,6 +1034,10 @@ def test_get_provenance(tmp_path, monkeypatch):
     from calkit.browser_link import get_provenance
 
     home = make_home(tmp_path, monkeypatch)
+    # Committing with no Git config in the home folder
+    for var in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{var}_NAME", "T")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "t@example.com")
     project = home / "calkit" / "proj"
     project.mkdir(parents=True)
     subprocess.check_call(["calkit", "init"], cwd=project)

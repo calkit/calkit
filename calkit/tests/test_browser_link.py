@@ -13,6 +13,7 @@ import pytest
 
 import calkit
 import calkit.config
+import calkit.git
 from calkit.browser_link import (
     get_editor_info,
     get_host_status,
@@ -1050,3 +1051,117 @@ def test_get_figures(tmp_path):
         ],
         "total": 3,
     }
+
+
+def test_add_stage_from_script(tmp_path, monkeypatch):
+    from calkit.browser_link import add_stage_from_script
+
+    for var in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{var}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "test@example.com")
+    project = tmp_path / "project"
+    (project / "scripts").mkdir(parents=True)
+    (project / "paper" / "figures").mkdir(parents=True)
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    (project / "calkit.yaml").write_text(
+        "overleaf_sync:\n  paper:\n    url: https://www.overleaf.com/project/abc\n"
+    )
+    paper = (
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "\\includegraphics[width=\\linewidth]{figures/fit}\n"
+        "\\end{document}\n"
+    )
+    (project / "paper" / "paper.tex").write_text(paper)
+    (project / "paper" / "figures" / "fit.png").write_text("png")
+    (project / "notes.txt").write_text("first")
+    repo = calkit.git.get_repo(str(project))
+    repo.git.add("-A")
+    repo.git.commit("-m", "Start")
+    script = (
+        "import matplotlib.pyplot as plt\n"
+        "import pandas as pd\n"
+        "df = pd.read_csv('data/raw.csv')\n"
+        "fig, ax = plt.subplots()\n"
+        "fig.savefig('figures/fit.png')\n"
+    )
+    (project / "scripts" / "plot.py").write_text(script)
+    msg = {"scriptPath": "scripts/plot.py", "shows": "paper/figures/fit.png"}
+    # Read, not saved, leaving the checkout as it was
+    res = add_stage_from_script(str(project), msg)
+    assert not res["saved"]
+    assert res["stage_name"] == "plot"
+    assert res["environment_is_new"]
+    assert set(res["dependencies"]) == {"matplotlib", "pandas"}
+    assert res["inputs"] == ["data/raw.csv"]
+    assert res["missing_inputs"] == ["data/raw.csv"]
+    assert res["outputs"] == ["figures/fit.png"]
+    assert res["produces"] == "figures/fit.png"
+    assert res["included_in"] == ["paper/paper.tex"]
+    assert repo.git.status("--porcelain", "-uall") == "?? scripts/plot.py"
+    # Uploads, data, and paths outside the project are for the hub
+    for bad, error in [
+        ({"content": "cHJpbnQoMSk="}, "folder on this computer"),
+        ({"data": [{"external": "/x", "path": "data/x"}]}, "Move the data"),
+        ({"scriptPath": "../plot.py"}, "isn't in the project"),
+        ({"scriptPath": "scripts/none.py"}, "isn't in the project"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            add_stage_from_script(str(project), msg | bad)
+    # Unsaved edits to what it changes aren't swept up or overwritten
+    (project / "paper" / "paper.tex").write_text(paper + "% draft\n")
+    with pytest.raises(ValueError, match="paper/paper.tex has changes"):
+        add_stage_from_script(str(project), msg | {"save": True})
+    (project / "paper" / "paper.tex").write_text(paper)
+    # Saved: only what it wrote is committed, and nothing else changed here
+    (project / "notes.txt").write_text("second")
+    res = add_stage_from_script(str(project), msg | {"save": True})
+    assert res["saved"]
+    ck_info = calkit.load_calkit_info(wdir=str(project))
+    stage = ck_info["pipeline"]["stages"]["plot"]
+    assert stage["script_path"] == "scripts/plot.py"
+    assert stage["environment"] in ck_info["environments"]
+    assert (
+        "\\ckfigure[width=\\linewidth]{figures/fit.png}"
+        in (project / "paper" / "paper.tex").read_text()
+    )
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split()
+    assert {
+        "calkit.yaml",
+        "dvc.yaml",
+        "paper/paper.tex",
+        "scripts/plot.py",
+        res["environment_spec_path"],
+    } <= set(committed)
+    assert "notes.txt" not in committed
+    assert repo.git.status("--porcelain") == " M notes.txt"
+
+
+def test_get_content_paths(tmp_path):
+    from calkit.browser_link import get_content_paths
+
+    project = tmp_path / "project"
+    (project / ".dvc").mkdir(parents=True)
+    (project / "data").mkdir()
+    subprocess.check_call(["git", "init", "-q"], cwd=project)
+    (project / ".gitignore").write_text("*.log\n/data/raw.csv\n")
+    (project / ".dvc" / "config").write_text("")
+    (project / "data" / "raw.csv.dvc").write_text("outs:\n- path: raw.csv\n")
+    (project / "run.log").write_text("")
+    (project / "script.py").write_text("")
+    (project / "dvc.lock").write_text(
+        "schema: '2.0'\nstages:\n  fit:\n    outs:\n"
+        "    - path: results/fit.json\n      md5: abc\n"
+        "    - path: results/plots\n      md5: def.dir\n"
+    )
+    repo = calkit.git.get_repo(str(project))
+    repo.git.add(".gitignore", "data/raw.csv.dvc", ".dvc/config", "dvc.lock")
+    # Tracked, made by the pipeline, and not saved yet, but not ignored, DVC
+    # internals, or folders the pipeline makes
+    assert get_content_paths(str(project)) == [
+        ".gitignore",
+        "data/raw.csv",
+        "dvc.lock",
+        "results/fit.json",
+        "script.py",
+    ]

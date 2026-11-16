@@ -26,6 +26,7 @@ import tempfile
 from typing import Any, BinaryIO
 
 import calkit
+from calkit.core import get_calkit_cmd
 
 HOST_NAME = "io.calkit.native"
 CHROME_EXTENSION_IDS = ["idhdomgapfolnpffanajdckdaojencal"]
@@ -321,6 +322,18 @@ def get_result(msg: dict) -> Any:
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this computer")
         result = get_figures(paths[0])
+    elif kind == "project.contentPaths":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this computer")
+        result = get_content_paths(paths[0])
+    elif kind == "project.stageFromScriptOrNotebook":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this computer")
+        result = add_stage_from_script(paths[0], msg)
     elif kind == "project.pipeline":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
@@ -353,21 +366,6 @@ def get_result(msg: dict) -> Any:
     else:
         raise ValueError(f"Unknown request type {kind!r}")
     return result
-
-
-def get_calkit_cmd(module: str = "calkit") -> list[str]:
-    """The command that runs one of Calkit's modules with this Python,
-    without importing anything from the folder it runs in first, e.g., a
-    project's own ``queue.py``.
-    """
-    if sys.version_info >= (3, 11):
-        return [sys.executable, "-P", "-m", module]
-    return [
-        sys.executable,
-        "-c",
-        "import runpy, sys; sys.path.pop(0); "
-        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)",
-    ]
 
 
 def start_detached(cmd: list[str], **kwargs: Any) -> subprocess.Popen:
@@ -1478,6 +1476,142 @@ def get_figures(wdir: str) -> dict:
         if isinstance(figure.get("path"), str)
     ]
     return {"items": items, "total": len(items)}
+
+
+def get_content_paths(wdir: str) -> list[str]:
+    """Every file in a checkout someone might pick, as the hub lists a
+    project's: what Git tracks, and what the pipeline makes with DVC, by its
+    own path rather than its ``.dvc`` file, with files not yet saved, e.g.,
+    a script just written, since here they're there to pick.
+    """
+    import calkit.dvc
+    import calkit.git
+
+    lock_outs = {
+        out["path"]
+        for stage in calkit.dvc.read_lock_stages(wdir=wdir).values()
+        if isinstance(stage, dict)
+        for out in stage.get("outs") or []
+        if isinstance(out, dict)
+        and isinstance(out.get("path"), str)
+        and not str(out.get("md5", "")).endswith(".dir")
+    }
+    repo = calkit.git.get_repo(wdir)
+    # Unquoted, e.g., for names that aren't ASCII
+    listed = repo.git.ls_files("-z", "-co", "--exclude-standard").split("\0")
+    paths = set(lock_outs)
+    for path in listed:
+        if not path or path.startswith(".dvc/"):
+            continue
+        paths.add(path.removesuffix(".dvc"))
+    return sorted(paths)
+
+
+def add_stage_from_script(wdir: str, msg: dict) -> dict:
+    """Make a stage from a script already in a checkout, as the hub does
+    for one in its clone, read rather than run, as ``calkit xr --dry-run``
+    reads it.
+
+    Without ``save``, nothing is written, so what it would be can be shown
+    first. With it, the stage, its environment, and each document changed
+    to show what it makes from where it's made are committed, and only
+    those, since anything else changed here is someone's work in progress.
+    Nothing's pushed; a run and sync does that.
+    """
+    import posixpath
+
+    import calkit.git
+    import calkit.pipeline
+
+    def get_clean_path(value: Any, what: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"A {what} path is required")
+        path = posixpath.normpath(value.strip().replace("\\", "/"))
+        real = os.path.realpath(os.path.join(wdir, path))
+        if not real.startswith(os.path.join(os.path.realpath(wdir), "")):
+            raise ValueError(f"'{value}' isn't in the project")
+        return path
+
+    def is_dvc_tracked(path: str) -> bool:
+        # Its own .dvc file or a folder's, whether or not it's pulled
+        parts = path.split("/")
+        return any(
+            os.path.isfile(os.path.join(wdir, *parts[:n]) + ".dvc")
+            for n in range(1, len(parts) + 1)
+        )
+
+    def get_changed_paths() -> set[str]:
+        # Unquoted, e.g., for names that aren't ASCII
+        listed = repo.git.status("--porcelain", "-z", "-uall").split("\0")
+        return {entry[3:] for entry in listed if len(entry) > 3}
+
+    script_path = get_clean_path(msg.get("scriptPath"), "script")
+    # Uploads go through the hub, which reads them in a checkout of their
+    # own; here the script and its data are already on this computer
+    if msg.get("content") is not None:
+        raise ValueError(
+            "Put the script in the project's folder on this computer, then "
+            "find it in the project"
+        )
+    if msg.get("data"):
+        raise ValueError(
+            "Move the data the script reads into the project's folder, and "
+            "change the script to read it from there"
+        )
+    if not os.path.isfile(os.path.join(wdir, script_path)):
+        raise ValueError(f"'{script_path}' isn't in the project")
+    shows = msg.get("shows")
+    produces = msg.get("produces")
+    repo = calkit.git.get_repo(wdir)
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    plan = calkit.pipeline.get_stage_from_script_plan(
+        script_path,
+        calkit.pipeline.get_script_detection(script_path, wdir=wdir),
+        ck_info,
+        wdir=wdir,
+        shows=get_clean_path(shows, "shown") if shows else None,
+        produces=(get_clean_path(produces, "output") if produces else None),
+        is_dvc_output=is_dvc_tracked,
+    )
+    result = {
+        key: value
+        for key, value in plan.items()
+        if key not in ("stage", "env", "included")
+    } | {
+        "rewritten": [],
+        "included_in": sorted(plan["included"]),
+        "git_repo_url": ck_info.get("git_repo_url") or "",
+        "saved": False,
+    }
+    if not msg.get("save"):
+        return result
+    # Edits not yet saved aren't swept into the commit, or overwritten
+    changed_before = get_changed_paths()
+    for path in ["calkit.yaml", "dvc.yaml", *plan["included"]]:
+        if path in changed_before:
+            raise ValueError(
+                f"{path} has changes that aren't saved; save or discard "
+                "them first"
+            )
+    written = calkit.pipeline.write_stage_from_script(plan, ck_info, wdir=wdir)
+    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
+    commit_paths = sorted(
+        (get_changed_paths() - changed_before)
+        | set(written)
+        | {"calkit.yaml"}
+        | ({script_path} if script_path in changed_before else set())
+    )
+    repo.git.add("--", *commit_paths)
+    repo.git.commit(
+        "-m",
+        f"Add stage {plan['stage_name']} for {script_path}",
+        "--",
+        *commit_paths,
+    )
+    result["saved"] = True
+    return result
 
 
 def get_pipeline(wdir: str) -> dict:

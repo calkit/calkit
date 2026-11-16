@@ -5600,3 +5600,108 @@ def test_get_figure_paths_with_origins(tmp_dir):
         "paper/exported.png",
         "paper/drawn.png",
     ]
+
+
+def test_get_stage_from_script_plan(tmp_path):
+    from calkit.pipeline import (
+        get_stage_from_script_plan,
+        write_stage_from_script,
+    )
+
+    subprocess.check_call(["git", "init", "-q"], cwd=tmp_path)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "raw.csv").write_text("x\n1\n")
+    (tmp_path / "paper" / "figures").mkdir(parents=True)
+    (tmp_path / "paper" / "paper.tex").write_text(
+        "\\documentclass{article}\n\\begin{document}\n"
+        "\\includegraphics{figures/fit.png}\n\\end{document}\n"
+    )
+    detected = {
+        "environment": {
+            "name": "py",
+            "exists": False,
+            "created_from_dependencies": True,
+            "env": {"kind": "uv", "path": "pyproject.toml"},
+            "spec_path": "pyproject.toml",
+            "spec_content": "[project]\nname = 'p'\n",
+            "dependencies": ["pandas"],
+        },
+        "stage": {
+            "name": "plot",
+            "stage": {
+                "kind": "python-script",
+                "script_path": "scripts/plot.py",
+                "environment": "py",
+                "inputs": ["data/raw.csv", "data/new.csv", "data/up.csv"],
+                "outputs": ["figures/fit.png"],
+            },
+        },
+        "external_inputs": ["/Users/me/runs"],
+    }
+    ck_info = {"overleaf_sync": {"paper": {}}}
+    # What a document shows is matched to the output with its file name,
+    # with the document changed to show it from there
+    plan = get_stage_from_script_plan(
+        "scripts/plot.py",
+        detected,
+        ck_info,
+        wdir=str(tmp_path),
+        shows="paper/figures/fit.png",
+        data_paths=["data/up.csv"],
+    )
+    assert plan["produces"] == "figures/fit.png"
+    assert list(plan["included"]) == ["paper/paper.tex"]
+    assert "\\ckfigure{figures/fit.png}" in plan["included"]["paper/paper.tex"]
+    # Only what isn't here, made, or uploaded with it is missing
+    assert plan["missing_inputs"] == ["data/new.csv"]
+    assert plan["external_inputs"] == ["/Users/me/runs"]
+    assert plan["environment_spec_path"] == "pyproject.toml"
+    # An output it doesn't write can't be picked
+    with pytest.raises(ValueError, match="doesn't write 'other.png'"):
+        get_stage_from_script_plan(
+            "scripts/plot.py",
+            detected,
+            ck_info,
+            wdir=str(tmp_path),
+            shows="paper/figures/fit.png",
+            produces="other.png",
+        )
+    # Not shown anywhere it can be shown from, so it's made where it's shown
+    plan_here = get_stage_from_script_plan(
+        "scripts/plot.py",
+        detected,
+        ck_info,
+        wdir=str(tmp_path),
+        shows="paper/figures/drawn.png",
+    )
+    assert plan_here["produces"] == "paper/figures/drawn.png"
+    assert "paper/figures/drawn.png" in plan_here["outputs"]
+    assert not plan_here["included"]
+    # A stage already running it keeps what it declares
+    existing = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    **detected["stage"]["stage"],
+                    "inputs": [{"kind": "env-var", "name": "SEED"}],
+                    "outputs": ["figures/extra.png"],
+                }
+            }
+        }
+    }
+    merged = get_stage_from_script_plan(
+        "scripts/plot.py", detected, existing, wdir=str(tmp_path)
+    )
+    assert merged["outputs"] == ["figures/extra.png", "figures/fit.png"]
+    assert merged["stage"]["inputs"][0] == {"kind": "env-var", "name": "SEED"}
+    # Written: the stage, the environment, its spec, and the document
+    written = write_stage_from_script(plan, ck_info, wdir=str(tmp_path))
+    assert sorted(written) == ["paper/paper.tex", "pyproject.toml"]
+    assert ck_info["pipeline"]["stages"]["plot"] == plan["stage"]
+    assert ck_info["environments"]["py"] == detected["environment"]["env"]
+    assert (tmp_path / "pyproject.toml").read_text().startswith("[project]")
+    assert "\\ckfigure" in (tmp_path / "paper" / "paper.tex").read_text()
+    # An invalid stage isn't written
+    bad = plan | {"stage": {"kind": "nope"}, "included": {}}
+    with pytest.raises(ValueError, match="Invalid stage"):
+        write_stage_from_script(bad, {}, wdir=str(tmp_path))

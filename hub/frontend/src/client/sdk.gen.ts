@@ -262,6 +262,8 @@ import type {
   GetUserGithubReposErrors,
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
+  GetUserGooglePresentationComponentsErrors,
+  GetUserGooglePresentationComponentsResponses,
   GetUserGooglePresentationErrors,
   GetUserGooglePresentationExportErrors,
   GetUserGooglePresentationExportResponses,
@@ -287,6 +289,7 @@ import type {
   GitHubTokenReq,
   GlobalSearchErrors,
   GlobalSearchResponses,
+  GoogleComponentsPut,
   GooglePresentationPost,
   GoogleSlidesPresentationPost,
   GoogleSlideTagsPost,
@@ -522,6 +525,8 @@ import type {
   PutProjectReferenceItemResponses,
   PutProjectReferenceNotesErrors,
   PutProjectReferenceNotesResponses,
+  PutUserGooglePresentationComponentsErrors,
+  PutUserGooglePresentationComponentsResponses,
   PutUserOnboardingFlagErrors,
   PutUserOnboardingFlagResponses,
   PutUserOverleafSessionErrors,
@@ -2386,6 +2391,89 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/google/presentations/{presentation_id}/slide-tags",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Google Presentation Components
+   *
+   * Get the project figures, values, and tables a Google Slides
+   * presentation shows.
+   */
+  public static getUserGooglePresentationComponents<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      presentation_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserGooglePresentationComponentsResponses,
+    GetUserGooglePresentationComponentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "presentation_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetUserGooglePresentationComponentsResponses,
+      GetUserGooglePresentationComponentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/google/presentations/{presentation_id}/components",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Put User Google Presentation Components
+   *
+   * Put the latest values and tables in the text boxes and tables of a
+   * Google Slides presentation tagged with them.
+   */
+  public static putUserGooglePresentationComponents<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      presentation_id: string
+      googleComponentsPut: GoogleComponentsPut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserGooglePresentationComponentsResponses,
+    PutUserGooglePresentationComponentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "presentation_id" },
+            { key: "googleComponentsPut", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutUserGooglePresentationComponentsResponses,
+      PutUserGooglePresentationComponentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/google/presentations/{presentation_id}/components",
       ...options,
       ...params,
       headers: {

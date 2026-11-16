@@ -113,6 +113,46 @@ so a figure can be shown in more than one place by copying it.
 If no image has that title, e.g., because it was deleted,
 the next run adds the figure to the first slide again.
 
+## Showing results and tables
+
+A text box or a table in a presentation can show a value or a table from
+the project, filled in each time the pipeline runs,
+like `\ckvalue` and `\cktable` in LaTeX.
+
+- For a value, add a text box, then set its alt text title
+  (right-click, **Alt text**, **Advanced options**, **Title**)
+  to `calkit:`, the results file, `#`, and the key,
+  optionally followed by `:` and a format, e.g.,
+  `calkit:results/wake.json#mean_deficit:.2f`.
+  Results files can be JSON, YAML, or TOML,
+  and keys reach into nested values with dots, e.g., `case.score`.
+  Formats are Python format specs, e.g., `.2f` for two decimal places.
+- For a table, add a table, then set its alt text title to `calkit:` and a
+  CSV or TSV file, e.g., `calkit:results/cases.csv`.
+  Its cells are filled with the file's, header first,
+  and rows and columns are added or removed to fit.
+
+Each run replaces the text and keeps its style,
+e.g., a value's font and size, or a table's colors,
+and leaves alone what's already up to date.
+Add the files to the stage's `inputs`,
+so the presentation goes out of date when they change:
+
+```yaml
+pipeline:
+  stages:
+    export-poster:
+      kind: google-slides-export
+      presentation_url: https://docs.google.com/presentation/d/.../edit
+      inputs:
+        - results/wake.json
+        - results/cases.csv
+      outputs:
+        - poster/poster.pdf
+```
+
+On the hub, a presentation lists the figures, values, and tables it shows.
+
 ## Making figures in Google Slides
 
 A slide can also be a figure,

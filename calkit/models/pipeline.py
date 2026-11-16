@@ -2478,6 +2478,13 @@ class GoogleSlidesExportStage(Stage):
     size, or, if there are none, is added to the first slide with that
     title.
 
+    Text boxes and tables can show values and tables from its inputs too,
+    tagged with what they show: a text box whose alt text title is, e.g.,
+    'calkit:results/wake.json#mean_deficit:.2f' shows that value, with
+    the same path, key, and format as '\\ckvalue' in LaTeX, and a table
+    whose alt text title is, e.g., 'calkit:results/cases.csv' shows that
+    CSV's cells.
+
     It goes out of date when an input changes, or when the presentation is
     edited, which 'calkit status', 'calkit run', and 'calkit pull' check
     for.
@@ -2573,7 +2580,18 @@ class GoogleSlidesExportStage(Stage):
         for path in self.slides:
             if not any(isinstance(o, dict) and path in o for o in outs):
                 outs.append({path: dict(persist=True)})
+        # What it shows, kept in Git for the hub to list
+        outs.append({self.components_path: dict(cache=False, persist=True)})
         return outs
+
+    @property
+    def components_path(self) -> str:
+        """Where the figures, values, and tables the presentation shows are
+        recorded, relative to the stage's wdir.
+        """
+        from calkit.google import get_components_path
+
+        return self.path_from_wdir(get_components_path(self.presentation_id))
 
     @property
     def dvc_cmd(self) -> str:
@@ -2587,6 +2605,10 @@ class GoogleSlidesExportStage(Stage):
             cmd += f" -o {shlex.quote(path)}"
         for figure in self.figure_paths:
             cmd += f" --figure {shlex.quote(figure)}"
+        # Others, e.g., results files, whose values it may show
+        for path in self.input_paths:
+            if path not in self.figure_paths:
+                cmd += f" --input {shlex.quote(path)}"
         for path, slide_id in self.slides.items():
             cmd += f" --slide {shlex.quote(path + '=' + slide_id)}"
         # It runs in the wdir, but records the edit under the project
@@ -2595,6 +2617,7 @@ class GoogleSlidesExportStage(Stage):
                 get_edit_time_path(self.presentation_id)
             )
             cmd += f" --edit-time-path {shlex.quote(edit_time_path)}"
+            cmd += f" --components-path {shlex.quote(self.components_path)}"
         return cmd
 
 

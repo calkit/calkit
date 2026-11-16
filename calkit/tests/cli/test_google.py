@@ -35,7 +35,13 @@ def test_google_slides(tmp_dir, monkeypatch):
     }
     posted = []
 
+    # What the presentation shows, which is nothing at first
+    components = []
+    put = []
+
     def hub_get(path, **kwargs):
+        if path.endswith("/components"):
+            return [dict(c) for c in components]
         if path.endswith("/export"):
             fmt = kwargs["params"]["format"]
 
@@ -53,8 +59,17 @@ def test_google_slides(tmp_dir, monkeypatch):
         decks[pid]["modified_time"] = "t2"
         return {"replaced": 0, "added": True, "modified_time": "t2"}
 
+    def hub_put(path, **kwargs):
+        put.append((path, kwargs["json"]))
+        return {
+            "values": len(kwargs["json"]["values"]),
+            "tables": len(kwargs["json"]["tables"]),
+            "modified_time": decks[pid]["modified_time"],
+        }
+
     monkeypatch.setattr(calkit.hub, "get", hub_get)
     monkeypatch.setattr(calkit.hub, "post", hub_post)
+    monkeypatch.setattr(calkit.hub, "put", hub_put)
     os.makedirs("figures")
     with open("figures/rates.png", "wb") as f:
         f.write(b"png")
@@ -243,6 +258,84 @@ def test_google_slides(tmp_dir, monkeypatch):
     assert res.exit_code != 0
     assert "PNG, JPEG, or GIF" in res.output
     assert len(posted) == n_posted
+    # Text boxes and tables tagged with values and tables from the inputs
+    # are filled in, and what it shows is recorded for the hub
+    os.makedirs("results", exist_ok=True)
+    with open("results/wake.json", "w") as f:
+        json.dump({"mean_deficit": 0.12345}, f)
+    with open("results/cases.csv", "w") as f:
+        f.write("case,u\nA,1.5\n")
+    value_tag = "calkit:results/wake.json#mean_deficit:.2f"
+    components += [
+        {
+            "kind": "figure",
+            "path": "figures/rates.png",
+            "key": None,
+            "format": None,
+            "slide_id": "s1",
+            "element_id": "img",
+            "tag": "calkit:figures/rates.png",
+        },
+        {
+            "kind": "value",
+            "path": "results/wake.json",
+            "key": "mean_deficit",
+            "format": ".2f",
+            "slide_id": "s1",
+            "element_id": "box",
+            "tag": value_tag,
+            "text": "0.11",
+        },
+        {
+            "kind": "table",
+            "path": "results/cases.csv",
+            "key": None,
+            "format": None,
+            "slide_id": "s2",
+            "element_id": "tbl",
+            "tag": "calkit:results/cases.csv",
+            "rows": [["old"]],
+        },
+    ]
+    res = runner.invoke(
+        export_app,
+        [
+            "google-slides",
+            url,
+            "-o",
+            "poster/poster.pdf",
+            "--input",
+            "results/wake.json",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert put[-1][1] == {
+        "values": {value_tag: "0.12"},
+        "tables": {"calkit:results/cases.csv": [["case", "u"], ["A", "1.5"]]},
+    }
+    assert "Updated 1 value(s) and 1 table(s)" in res.output
+    # One that isn't an input is still filled in, but changing it wouldn't
+    # put the presentation out of date
+    assert "results/cases.csv isn't an input of the stage" in res.output
+    with open(f".calkit/google/{pid}-components.json") as f:
+        assert json.load(f) == [
+            {
+                k: c[k]
+                for k in ["kind", "path", "key", "format", "slide_id"]
+                + ["element_id"]
+            }
+            for c in components
+        ]
+    # A key that isn't there says where it's shown
+    components[1] = dict(components[1], tag="calkit:results/wake.json#nope")
+    components[1]["key"] = "nope"
+    res = runner.invoke(
+        export_app, ["google-slides", url, "-o", "poster/poster.pdf"]
+    )
+    assert res.exit_code != 0
+    assert "results/wake.json has no nope" in res.output
+    assert "text box tagged 'calkit:results/wake.json#nope'" in res.output
+    components.clear()
     # Without Google connected, someone at a terminal is sent to connect it,
     # and the request is made again once they have
     import time
@@ -322,6 +415,8 @@ def test_google_slide_figures(tmp_dir, monkeypatch):
     tagged = []
 
     def hub_get(path, **kwargs):
+        if path.endswith("/components"):
+            return []
         if path.endswith("/slides"):
             return {"page_size": [720.0, 405.0], "slides": slides}
         if path.endswith("/export"):

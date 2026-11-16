@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import typer
 from typing_extensions import Annotated
 
-from calkit.cli import raise_error
+from calkit.cli import raise_error, warn
 
 if TYPE_CHECKING:
     from calkit.export import Exporter
@@ -171,6 +171,16 @@ def google_slides(
             ),
         ),
     ] = [],
+    inputs: Annotated[
+        list[str],
+        typer.Option(
+            "--input",
+            help=(
+                "Other input of the stage, e.g., a results file, whose "
+                "values and tables the presentation may show."
+            ),
+        ),
+    ] = [],
     edit_time_path: Annotated[
         str | None,
         typer.Option(
@@ -178,9 +188,16 @@ def google_slides(
             help="Where to record when the presentation was last edited.",
         ),
     ] = None,
+    components_path: Annotated[
+        str | None,
+        typer.Option(
+            "--components-path",
+            help="Where to record the figures, values, and tables it shows.",
+        ),
+    ] = None,
 ) -> None:
-    """Put figures into a Google Slides presentation, then export it, and
-    figures from its slides.
+    """Put figures, values, and tables into a Google Slides presentation,
+    then export it, and figures from its slides.
     """
     import posixpath
 
@@ -260,8 +277,50 @@ def google_slides(
             )
         else:
             typer.echo(f"Updated {figure} in {resp['replaced']} place(s)")
-    # Taken before exporting, since putting the figures in edited it, and
-    # so an edit made while exporting is seen as one next time
+    # Values and tables shown in text boxes and tables tagged with them,
+    # e.g., 'calkit:results/wake.json#mean_deficit:.2f'
+    components = ask_hub(
+        "get", f"{api_path}/components", "find what the presentation shows"
+    )
+    values: dict[str, str] = {}
+    tables: dict[str, list[list[str]]] = {}
+    for c in components:
+        if c["kind"] == "figure" or c["tag"] in values or c["tag"] in tables:
+            continue
+        where = f"a {'text box' if c['kind'] == 'value' else 'table'} tagged '{c['tag']}'"
+        if c["path"] not in inputs + figures:
+            # It's still filled in, but changing it won't put the
+            # presentation out of date
+            warn(
+                f"{c['path']} isn't an input of the stage exporting the "
+                f"presentation, which shows it in {where}; add it to the "
+                "stage's inputs"
+            )
+        try:
+            if c["kind"] == "value":
+                values[c["tag"]] = calkit.google.get_value_text(
+                    c["path"], c["key"], c["format"]
+                )
+            else:
+                tables[c["tag"]] = calkit.google.get_table_rows(c["path"])
+        except KeyError:
+            raise_error(f"{c['path']} has no {c['key']}, shown in {where}")
+        except (OSError, ValueError) as e:
+            raise_error(f"Failed to read what's shown in {where}: {e}")
+    if values or tables:
+        resp = ask_hub(
+            "put",
+            f"{api_path}/components",
+            "put values and tables in the presentation",
+            json={"values": values, "tables": tables},
+        )
+        if resp["values"] or resp["tables"]:
+            typer.echo(
+                f"Updated {resp['values']} value(s) and {resp['tables']} "
+                "table(s)"
+            )
+    # Taken before exporting, since putting things in edited it, and so an
+    # edit made while exporting is seen as one next time
     info = ask_hub("get", api_path, "check when it was last edited")
     for path in outputs:
         typer.echo(f"Exporting {path}")
@@ -330,4 +389,9 @@ def google_slides(
     calkit.google.write_edit_time(
         edit_time_path or calkit.google.get_edit_time_path(presentation_id),
         info["modified_time"],
+    )
+    # What it shows, for the hub to list, in the order it shows them
+    calkit.google.write_components(
+        components_path or calkit.google.get_components_path(presentation_id),
+        components,
     )

@@ -387,6 +387,13 @@ and its path, e.g., 'calkit:figures/rates.png', keeping their place and
 size, or, if there are none, is added to the first slide with that
 title.
 
+Text boxes and tables can show values and tables from its inputs too,
+tagged with what they show: a text box whose alt text title is, e.g.,
+'calkit:results/wake.json#mean_deficit:.2f' shows that value, with
+the same path, key, and format as '\ckvalue' in LaTeX, and a table
+whose alt text title is, e.g., 'calkit:results/cases.csv' shows that
+CSV's cells.
+
 It goes out of date when an input changes, or when the presentation is
 edited, which 'calkit status', 'calkit run', and 'calkit pull' check
 for.

@@ -1282,6 +1282,70 @@ def post_user_google_presentation_slide_tags(
     return GoogleSlideTagsResponse(tagged=tagged)
 
 
+class GoogleComponent(BaseModel):
+    """A project figure, value, or table a presentation shows, found by
+    its alt text title.
+    """
+
+    kind: Literal["figure", "value", "table"]
+    path: str
+    key: str | None = None
+    format: str | None = None
+    slide_id: str
+    element_id: str
+    tag: str
+    # What a value's text box, or each of a table's cells, says now
+    text: str | None = None
+    rows: list[list[str]] | None = None
+
+
+class GoogleComponentsPut(BaseModel):
+    # Text by tag, for values, and rows by tag, for tables
+    values: dict[str, str] = {}
+    tables: dict[str, list[list[str]]] = {}
+
+
+class GoogleComponentsPutResponse(BaseModel):
+    values: int
+    tables: int
+    modified_time: str
+
+
+@router.get("/user/google/presentations/{presentation_id}/components")
+def get_user_google_presentation_components(
+    presentation_id: str, session: SessionDep, current_user: CurrentUser
+) -> list[GoogleComponent]:
+    """Get the project figures, values, and tables a Google Slides
+    presentation shows.
+    """
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        components = client.get_components(presentation_id)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    return [GoogleComponent.model_validate(c) for c in components]
+
+
+@router.put("/user/google/presentations/{presentation_id}/components")
+def put_user_google_presentation_components(
+    presentation_id: str,
+    req: GoogleComponentsPut,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> GoogleComponentsPutResponse:
+    """Put the latest values and tables in the text boxes and tables of a
+    Google Slides presentation tagged with them.
+    """
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        resp = client.put_components(
+            presentation_id, values=req.values, tables=req.tables
+        )
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    return GoogleComponentsPutResponse.model_validate(resp)
+
+
 @router.get("/user/google/presentations/{presentation_id}/export")
 def get_user_google_presentation_export(
     presentation_id: str,

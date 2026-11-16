@@ -427,20 +427,23 @@ def test_find_retyped_values(tmp_dir):
     assert (
         values(
             r"\ckvalue[round-precision=0.42]{runs/0.42.json}{Cd}"
-            r" \cktable{tables/0.42} \ckinclude{text/0.42}",
+            r" \cktable{tables/0.42} \ckinclude{text/0.42}"
+            "\n\\ckvalue [.2f] {runs/0.42.json}\n  {Cd} \\cktable {t/0.42}",
             project,
         )
         == []
     )
     # In a project, the results files a document reads with \ckvalue are
-    # within its reach, every number in them at any depth, as are those a
-    # json-to-latex stage reads, while what Calkit writes for calkit.sty and
-    # a table a stage writes aren't manuscripts
+    # within its reach, every number a key names at any depth but not those
+    # in lists, as are those a json-to-latex stage reads, while what
+    # Calkit writes for calkit.sty and tables stages write, one by one or in
+    # a folder, aren't manuscripts
     for path, data in {
         "results/drag.json": {
             "Cd": 0.42,
             "cases": {"a": {"cp": 0.7321}},
             "runs": [{"Re": 12500}],
+            "history": list(range(3000)),
         },
         "results/lift.json": {"Cl": 1.234},
         "results/wake.json": {"St": 0.215},
@@ -453,14 +456,16 @@ def test_find_retyped_values(tmp_dir):
             "\\documentclass{article}\n\\usepackage{calkit}\n"
             "\\begin{document}\n"
             "Read: \\ckvalue[.2f]{results/drag.json}{Cd}.\n"
-            "Typed: 0.42, 0.7321, and 12500.\n"
-            "\\cktable{tables/summary}\n"
+            "Typed: 0.42 and 0.7321.\n"
+            "Not typed: 1000 samples in 2019, run 12500.\n"
+            "\\cktable{tables/summary}\n\\input{../gen/t2}\n"
             "\\end{document}\n"
         ),
         "paper/_calkit/values.tex": (
             "\\cksetvalue{results/drag.json}{Cd}{n}{0.42}\n"
         ),
         "tables/summary.tex": "0.42 & 0.7321 \\\\\n",
+        "gen/t2.tex": "0.42 & 0.7321 \\\\\n",
         "other/main.tex": (
             "\\documentclass{article}\n\\begin{document}\n"
             "\\input{lift}\nTyped: 1.234 and 0.215.\n\\end{document}\n"
@@ -472,7 +477,12 @@ def test_find_retyped_values(tmp_dir):
         with open(path, "w") as f:
             f.write(text)
     stages = {
-        "table": {"cmd": "python table.py", "outs": ["tables/summary.tex"]},
+        "table": {
+            "cmd": "python table.py",
+            "wdir": "scripts",
+            "outs": ["../tables/summary.tex"],
+        },
+        "tables": {"cmd": "python tables.py", "outs": ["gen"]},
         "paper": {
             "cmd": "calkit latex build -e tex --no-check paper/main.tex",
             "deps": [
@@ -509,9 +519,8 @@ def test_find_retyped_values(tmp_dir):
         ("other/main.tex", "0.215", "results/wake.json:St"),
         ("paper/main.tex", "0.42", "results/drag.json:Cd"),
         ("paper/main.tex", "0.7321", "results/drag.json:cases.a.cp"),
-        ("paper/main.tex", "12500", "results/drag.json:runs.0.Re"),
     ]
     suggestions = [f["suggestion"] for f in retyped]
     assert "json-to-latex" in suggestions[0]
     assert "\\ckvalue{results/wake.json}{St}" in suggestions[1]
-    assert "\\ckvalue{results/drag.json}{runs.0.Re}" in suggestions[4]
+    assert "\\ckvalue{results/drag.json}{cases.a.cp}" in suggestions[3]

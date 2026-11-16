@@ -88,9 +88,9 @@ calkit xr scripts/train.py \
 
 <!-- TODO: needs human review -->
 
-Create the `texlive` environment before running `xr` on a `.tex` file.
-`xr` uses it, and creates a Docker one with Calkit's LaTeX image when the
-project has none.
+Create the `texlive` environment before running `xr` on a `.tex` file, so
+`xr` uses it. Older versions of Calkit otherwise create a Docker one with
+Calkit's LaTeX image.
 
 `xr` is not magic—sometimes it won't get everything right. But it handles
 most of the boilerplate, so you can focus on verifying correctness and filling

@@ -528,10 +528,10 @@ def _mask_exclusion_zones(tex_source: str) -> str:
         r"\\include\{[^}]*\}",
         r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\includesvg(?:\[[^\]]*\])?\{[^}]*\}",
-        r"\\ckfigure(?:\[[^\]]*\])?\{[^}]*\}",
-        r"\\ckvalue(?:\[[^\]]*\])?\{[^}]*\}\{[^}]*\}",
-        r"\\cktable\{[^}]*\}",
-        r"\\ckinclude\{[^}]*\}",
+        r"\\ckfigure\s*(?:\[[^\]]*\])?\s*\{[^}]*\}",
+        r"\\ckvalue\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
+        r"\\cktable\s*\{[^}]*\}",
+        r"\\ckinclude\s*\{[^}]*\}",
         r"\\usepackage(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\documentclass(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\setlength\{[^}]*\}\{[^}]*\}",
@@ -616,7 +616,8 @@ def find_retyped_values(
     lines = tex_source.splitlines()
     findings: list[dict[str, Any]] = []
     for text, source in project_values.items():
-        if not _is_distinctive(text):
+        # Checked for first, since a project can have many values
+        if not _is_distinctive(text) or text not in masked_source:
             continue
         if source in (json_to_latex_sources or set()):
             suggestion = (
@@ -749,15 +750,18 @@ def _project_values(
     from calkit.questions import read_evidence_file, resolve_key
 
     def add_numbers(node: Any, path: str, key: str = "") -> None:
-        """Every number in a results file, by the key that reaches it."""
+        """Every number in a results file a key names, by that key, but
+        not those in lists, e.g., a residual history or a table of runs,
+        whose entries turn up in prose by chance.
+        """
         if isinstance(node, bool):
             return
-        if isinstance(node, (int, float)):
+        if isinstance(node, (int, float)) and key:
             values.setdefault(str(node), f"{path}:{key}")
-        elif isinstance(node, (dict, list)):
-            items = node.items() if isinstance(node, dict) else enumerate(node)
-            for name, child in items:
-                add_numbers(child, path, f"{key}.{name}" if key else str(name))
+        elif isinstance(node, dict):
+            for name, child in node.items():
+                if isinstance(name, str):
+                    add_numbers(child, path, f"{key}.{name}" if key else name)
 
     values: dict[str, str] = {}
     via_json_to_latex: set[str] = set()
@@ -787,14 +791,14 @@ def _project_values(
         # Whether a document inputs what the stage writes, so it already
         # uses the commands
         used = any(
-            os.path.abspath(os.path.join(wdir, str(out))) in tex_paths
-            for out in _out_paths(stage)
+            os.path.abspath(os.path.join(wdir, out)) in tex_paths
+            for out in _get_stage_paths(stage, "outs")
         )
-        for dep in stage.get("deps", []) or []:
-            if not str(dep).endswith(".json"):
+        for dep in _get_stage_paths(stage, "deps"):
+            if not dep.endswith(".json"):
                 continue
             try:
-                with open(os.path.join(wdir, str(dep))) as f:
+                with open(os.path.join(wdir, dep)) as f:
                     data = json.load(f)
             except (OSError, ValueError):
                 continue
@@ -827,11 +831,16 @@ def _project_values(
     return values, via_json_to_latex
 
 
-def _out_paths(stage: dict) -> list[str]:
-    """The paths a compiled stage writes."""
+def _get_stage_paths(stage: dict, field: str) -> list[str]:
+    """A compiled stage's deps or outs, relative to the project."""
+    base = stage.get("wdir") or ""
     return [
-        str(out if isinstance(out, str) else next(iter(out)))
-        for out in stage.get("outs", []) or []
+        posixpath.normpath(
+            posixpath.join(
+                base, str(item if isinstance(item, str) else next(iter(item)))
+            )
+        )
+        for item in stage.get(field, []) or []
     ]
 
 
@@ -850,23 +859,22 @@ def _named_keys(cmd: str) -> list[str]:
     ]
 
 
-def _generated_tex_paths(wdir: str, stages: dict) -> set[str]:
-    """LaTeX files the pipeline writes, which are not manuscripts, e.g., a
-    table, and those Calkit writes for calkit.sty, which a LaTeX stage
-    depends on.
+def _generated_paths(wdir: str, stages: dict) -> set[str]:
+    """What the pipeline writes, which holds no manuscripts, e.g., a table
+    or a folder of them, and the LaTeX Calkit writes for calkit.sty, which a
+    LaTeX stage depends on.
     """
     from calkit.latex import COMPONENTS_DIR
 
     paths: set[str] = set()
     for stage in stages.values():
         ours = [
-            str(dep)
-            for dep in stage.get("deps", []) or []
-            if COMPONENTS_DIR in posixpath.normpath(str(dep)).split("/")
+            dep
+            for dep in _get_stage_paths(stage, "deps")
+            if COMPONENTS_DIR in dep.split("/") and dep.endswith(".tex")
         ]
-        for path in _out_paths(stage) + ours:
-            if path.endswith(".tex"):
-                paths.add(os.path.abspath(os.path.join(wdir, path)))
+        for path in _get_stage_paths(stage, "outs") + ours:
+            paths.add(os.path.abspath(os.path.join(wdir, path)))
     return paths
 
 
@@ -881,9 +889,9 @@ def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
         if "calkit latex build" not in cmd:
             continue
-        for dep in stage.get("deps", []) or []:
-            if str(dep).endswith(".tex"):
-                targets.add(str(dep))
+        for dep in _get_stage_paths(stage, "deps"):
+            if dep.endswith(".tex"):
+                targets.add(dep)
     found: set[str] = set()
 
     def walk(rel: str) -> None:
@@ -922,10 +930,15 @@ def find_literals_in_project(
     weaker signal offered as something to look over.
     """
     sources = _tex_sources(wdir, ck_info, stages)
-    generated = _generated_tex_paths(wdir, stages)
+    generated = _generated_paths(wdir, stages)
     values, via_json_to_latex = _project_values(wdir, stages, sources)
     out: dict[str, list[dict]] = {"retyped": [], "unattributed": []}
-    for path in sorted(sources - generated):
+    for path in sorted(sources):
+        if any(
+            path == g or path.startswith(g.rstrip(os.sep) + os.sep)
+            for g in generated
+        ):
+            continue
         try:
             with open(path, encoding="utf-8", errors="replace") as f:
                 content = f.read()

@@ -2619,6 +2619,10 @@ def ignore(
 # one in user scripts), so it's bracketed by these and skipped when parsing.
 STAGE_OUTPUT_START = "--- calkit stage output ---"
 STAGE_OUTPUT_END = "--- end calkit stage output ---"
+MPL_FONTS_DOCS_URL = (
+    "https://docs.calkit.org/environments/"
+    "#using-tex-from-python-eg-for-matplotlib"
+)
 # The machine properties recorded for each stage run
 STAGE_RUN_SYSTEM_PROPERTIES = (
     "machine_id",
@@ -2762,6 +2766,36 @@ def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
             # to have run
             res.setdefault(current_stage_name, [])
     return {name: "\n".join(lines) for name, lines in res.items()}
+
+
+def _get_matplotlib_font_warnings_by_stage(
+    log_content: str,
+) -> dict[str, list[str]]:
+    """Return Matplotlib's messages about fonts each stage couldn't find,
+    one per font family, from a run log.
+
+    Matplotlib has no strict mode: it draws with another font and only logs
+    a warning, which reaches the stage's stderr unless the script
+    configures logging otherwise.
+    """
+    import re
+
+    pattern = re.compile(
+        r"findfont: (((?:Font|Generic) family) (.+?) not found.*)"
+    )
+    res: dict[str, list[str]] = {}
+    stdout_by_stage = _stage_stdout_from_log_content(log_content)
+    for stage_name, output in stdout_by_stage.items():
+        # By family, since Matplotlib can report one as 'X' and as ['X']
+        messages: dict[tuple[str, str], str] = {}
+        for message, kind, family in pattern.findall(output):
+            # Without the final period, since they're joined into a sentence
+            messages.setdefault(
+                (kind, family.strip("[]")), message.strip().rstrip(".")
+            )
+        if messages:
+            res[stage_name] = list(messages.values())
+    return res
 
 
 def _stage_run_info_from_log_content(
@@ -4631,6 +4665,15 @@ def run(
                     warn(message)
         except Exception as e:
             warn(f"Couldn't check where the stages' outputs are stored: {e}")
+    # Matplotlib only logs a font it can't find, and draws with another
+    for stage_name, messages in _get_matplotlib_font_warnings_by_stage(
+        log_content
+    ).items():
+        warn(
+            f"Matplotlib in stage '{stage_name}' used a fallback font, "
+            "so its figures can look different on another computer: "
+            f"{'; '.join(messages)}; see {MPL_FONTS_DOCS_URL}"
+        )
     if failed:
         try:
             calkit.dvc.restore_output_ignores()

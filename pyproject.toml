@@ -37,6 +37,7 @@ dependencies = [
   "filelock",
   "gitpython",
   "keyring",
+  "latex2arxiv",
   "nbconvert",
   "pathspec<1.0.0",
   "pillow",

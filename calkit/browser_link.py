@@ -61,6 +61,8 @@ PULL_FRESH_SECONDS = 10
 # How often an Overleaf project no checkout here syncs with is looked for
 # again, since that searches the home folder too
 LOOKUP_RESCAN_SECONDS = 600
+# How long a pipeline's status is reused for the provenance of figures
+PIPELINE_REUSE_SECONDS = 10
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
 JOB_KINDS = ("run", "sync", "clone", "install-editor")
@@ -1603,6 +1605,38 @@ def get_pipeline(wdir: str) -> dict:
     }
 
 
+# Each checkout's pipeline, as last read for provenance, with when and the
+# modification times of the files it was read from
+_recent_pipelines: dict[str, tuple[float, list[float], dict]] = {}
+
+
+def get_recent_pipeline(wdir: str) -> dict:
+    """``get_pipeline``'s answer, reused for ``PIPELINE_REUSE_SECONDS``
+    while calkit.yaml, dvc.yaml, and dvc.lock are unchanged, since a
+    figure's provenance is asked for once for each file it could be, and
+    each check of the pipeline's status takes a while.
+    """
+    import time
+
+    stamp = [
+        os.path.getmtime(p) if os.path.isfile(p) else 0.0
+        for p in (
+            os.path.join(wdir, name)
+            for name in ("calkit.yaml", "dvc.yaml", "dvc.lock")
+        )
+    ]
+    recent = _recent_pipelines.get(wdir)
+    if (
+        recent is not None
+        and time.time() - recent[0] < PIPELINE_REUSE_SECONDS
+        and recent[1] == stamp
+    ):
+        return recent[2]
+    pipeline = get_pipeline(wdir)
+    _recent_pipelines[wdir] = (time.time(), stamp, pipeline)
+    return pipeline
+
+
 def get_provenance(wdir: str, path: Any, key: str | None = None) -> dict:
     """Where a path in a checkout, or one value in a results file, came
     from, as the hub's provenance says it, from the checkout as it is,
@@ -1677,7 +1711,7 @@ def get_provenance(wdir: str, path: Any, key: str | None = None) -> dict:
     ):
         raise ValueError(f"{path} isn't a path in the project")
     root = os.path.realpath(wdir)
-    pipeline = get_pipeline(wdir)
+    pipeline = get_recent_pipeline(wdir)
     dvc_lock = {"stages": calkit.dvc.read_lock_stages(wdir=wdir)}
     lock_outs = [
         out

@@ -1082,6 +1082,18 @@ def test_get_provenance(tmp_path, monkeypatch):
         f.write("owner: me\nname: proj\n")
         calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
     subprocess.check_call(["calkit", "run"], cwd=project)
+    # The pipeline's status is checked once for several asked for together
+    checks = []
+    real_get_status = calkit.pipeline.get_status
+
+    def get_status(*args, **kwargs):
+        checks.append(1)
+        return real_get_status(*args, **kwargs)
+
+    monkeypatch.setattr(calkit.pipeline, "get_status", get_status)
+    for path in ["results.png", "results.pdf"]:
+        assert not get_provenance(str(project), path)["exists"]
+    assert len(checks) == 1
     # The stage that makes it here, its value, how fresh it is, and the
     # data nothing records the origin of, as the hub says them
     res = get_provenance(str(project), "results.json", key="n")

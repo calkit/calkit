@@ -570,8 +570,8 @@ To keep the versions an environment already uses,
 e.g., when converting one from a `uv-venv`,
 give them exactly, e.g., `pandas==2.2.3`.
 Passing `--python 3.13` writes a `.python-version` file next to the
-`pyproject.toml`, which is what decides the Python version uv uses,
-unless that file already exists.
+`pyproject.toml`, which is what decides the Python version uv uses.
+If that file already exists, it must pin the same version.
 
 To create a new uv venv,
 simply replace `uv-env` with `uv-venv` in the above command and a

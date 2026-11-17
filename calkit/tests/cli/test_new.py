@@ -564,6 +564,20 @@ def test_new_uv_env(tmp_dir):
     assert ".calkit/envs/other/.python-version" not in (
         git.Repo().git.ls_files().split()
     )
+    # One that disagrees with --python is refused before anything is written
+    os.makedirs(".calkit/envs/mismatch")
+    with open(".calkit/envs/mismatch/.python-version", "w") as f:
+        f.write("3.12\n")
+    res = subprocess.run(
+        ["calkit", "new", "uv-env", "--name", "mismatch", "--path"]
+        + [".calkit/envs/mismatch/pyproject.toml", "--python", "3.13"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "already pins Python '3.12'" in res.stdout + res.stderr
+    assert not os.path.isfile(".calkit/envs/mismatch/pyproject.toml")
+    assert "mismatch" not in calkit.load_calkit_info()["environments"]
     # A pin the project ignores isn't committed, whether written here or
     # already there
     with open(".gitignore", "a") as f:

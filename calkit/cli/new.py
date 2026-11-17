@@ -1868,6 +1868,23 @@ def new_uv_env(
             os.makedirs(envdir, exist_ok=True)
         else:
             envdir = "."
+    # uv picks the interpreter from .python-version, since requires-python
+    # is only a floor, so one already there has to agree with --python
+    python_version_path = os.path.join(envdir, ".python-version")
+    if python_version and os.path.isfile(python_version_path):
+        with open(python_version_path, encoding="utf-8") as f:
+            lines = [ln.strip() for ln in f.read().splitlines()]
+        existing_pin = next(
+            (ln for ln in lines if ln and not ln.startswith("#")), ""
+        )
+        if existing_pin != python_version and not existing_pin.startswith(
+            python_version + "."
+        ):
+            raise_error(
+                f"'{python_version_path}' already pins Python "
+                f"'{existing_pin}', not {python_version}; update it with "
+                f"'uv python pin {python_version}' or drop --python"
+            )
     if not os.path.isfile(path):
         res = subprocess.run(
             ["uv", "init", "--bare", "--directory", envdir, "--no-workspace"]
@@ -1875,9 +1892,6 @@ def new_uv_env(
         )
         if res.returncode != 0:
             raise_error("Failed to create uv environment")
-    # uv picks the interpreter from .python-version, since requires-python
-    # is only a floor
-    python_version_path = os.path.join(envdir, ".python-version")
     pinned_python = False
     if python_version and not os.path.isfile(python_version_path):
         res = subprocess.run(
@@ -1891,7 +1905,9 @@ def new_uv_env(
         if res.returncode != 0:
             raise_error("Failed to add packages to uv environment")
     if not no_check:
-        subprocess.run(["uv", "sync"], cwd=envdir)
+        res = subprocess.run(["uv", "sync"], cwd=envdir)
+        if res.returncode != 0:
+            raise_error("Failed to sync uv environment")
     env = dict(kind="uv", path=path)
     if description is not None:
         env["description"] = description

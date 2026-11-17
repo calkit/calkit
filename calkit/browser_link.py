@@ -1528,6 +1528,7 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
 
     import calkit.git
     import calkit.pipeline
+    import calkit.pipeline.detect
 
     def get_clean_path(value: Any, what: str) -> str:
         if not isinstance(value, str) or not value.strip():
@@ -1568,8 +1569,8 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
         return paths - {""}
 
     script_path = get_clean_path(msg.get("scriptPath"), "script")
-    if not script_path.lower().endswith(calkit.pipeline.SCRIPT_EXTS):
-        raise ValueError(calkit.pipeline.SCRIPT_EXTS_MESSAGE)
+    if not script_path.lower().endswith(calkit.pipeline.detect.SCRIPT_EXTS):
+        raise ValueError(calkit.pipeline.detect.SCRIPT_EXTS_MESSAGE)
     # Uploads go through the hub, which reads them in a checkout of their
     # own; here the script and its data are already on this computer
     if msg.get("content") is not None:
@@ -1593,10 +1594,21 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
             f"'{script_path}' is ignored by Git, so the stage couldn't run "
             "anywhere else; stop ignoring it first"
         )
+    # Read in this process from the checkout, as the pipeline's status is,
+    # rather than by 'calkit xr' in one of its own; what's answered at the
+    # same time uses full paths
+    prev_wdir = os.getcwd()
+    try:
+        os.chdir(wdir)
+        detected = calkit.pipeline.detect.detect_stage(
+            [script_path], calkit.load_calkit_info()
+        ).model_dump()
+    finally:
+        os.chdir(prev_wdir)
     ck_info = calkit.load_calkit_info(wdir=wdir)
-    plan = calkit.pipeline.get_stage_from_script_plan(
+    plan = calkit.pipeline.detect.get_stage_from_script_plan(
         script_path,
-        calkit.pipeline.get_script_detection(script_path, wdir=wdir),
+        detected,
         ck_info,
         wdir=wdir,
         shows=get_clean_path(shows, "shown") if shows else None,

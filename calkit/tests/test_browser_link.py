@@ -1056,8 +1056,10 @@ def test_get_figures(tmp_path):
 
 
 def test_add_stage_from_script(tmp_path, monkeypatch):
-    from calkit.browser_link import add_stage_from_script
+    import calkit.browser_link
+    from calkit.browser_link import add_stage_from_script, run_job, start_job
 
+    make_home(tmp_path, monkeypatch)
     for var in ("AUTHOR", "COMMITTER"):
         monkeypatch.setenv(f"GIT_{var}_NAME", "Test")
         monkeypatch.setenv(f"GIT_{var}_EMAIL", "test@example.com")
@@ -1101,6 +1103,37 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     assert res["produces"] == "figures/fit.png"
     assert res["included_in"] == ["paper/paper.tex"]
     assert repo.git.status("--porcelain", "-uall") == "?? scripts/plot.py"
+    # Read in a job of its own, the stage is the same, until the script
+    # changes
+    monkeypatch.setattr(
+        calkit.browser_link,
+        "get_checkout_paths",
+        lambda owner, name: [str(project)],
+    )
+    monkeypatch.setattr(calkit.browser_link, "start_detached", Mock())
+    job = start_job(
+        {
+            "kind": "detect",
+            "project": "me/proj",
+            "scriptPath": "scripts/plot.py",
+        }
+    )
+    run_job(job["id"])
+    from_job = add_stage_from_script(
+        str(project), msg | {"detectJob": job["id"]}
+    )
+    assert from_job == res
+    (project / "scripts" / "other.py").write_text("print(1)\n")
+    with pytest.raises(ValueError, match="didn't read 'scripts/other.py'"):
+        add_stage_from_script(
+            str(project),
+            msg | {"scriptPath": "scripts/other.py", "detectJob": job["id"]},
+        )
+    (project / "scripts" / "plot.py").write_text(script + "\n")
+    with pytest.raises(ValueError, match="changed since it was read"):
+        add_stage_from_script(str(project), msg | {"detectJob": job["id"]})
+    (project / "scripts" / "plot.py").write_text(script)
+    (project / "scripts" / "other.py").unlink()
     # A path given in full is the same script
     full_msg = msg | {"scriptPath": str(project / "scripts" / "plot.py")}
     assert (

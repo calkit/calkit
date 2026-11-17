@@ -68,7 +68,7 @@ LOOKUP_RESCAN_SECONDS = 600
 FILE_GIT_MAX_BYTES = 1_000_000
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
-JOB_KINDS = ("run", "sync", "clone", "install-editor")
+JOB_KINDS = ("run", "sync", "clone", "install-editor", "detect")
 # Those that change a checkout, so only one at a time works on each
 CHECKOUT_JOB_KINDS = ("run", "sync")
 # A job that hasn't started by then never will, e.g., its process died first
@@ -1234,13 +1234,18 @@ def start_job(msg: dict) -> dict:
             cmd = calkit_cmd + ["run"]
             if msg.get("sync", True):
                 cmd += ["--save", "--overleaf"]
+        elif kind == "detect":
+            # What a stage made from a script would be, which can take a
+            # while to read, e.g., a notebook
+            script_path = get_script_path(wdir, msg.get("scriptPath"))
+            cmd = calkit_cmd + ["xr", "--dry-run", "--json", script_path]
         else:
             folder = msg.get("path")
             if not isinstance(folder, str):
                 raise ValueError("A folder synced with Overleaf is needed")
             cmd = calkit_cmd + ["overleaf", "sync", folder]
         # One at a time, as on the hub, since each commits
-        for job in list_jobs():
+        for job in list_jobs() if kind in CHECKOUT_JOB_KINDS else []:
             if (
                 job["kind"] in CHECKOUT_JOB_KINDS
                 and job["wdir"] == wdir
@@ -1267,6 +1272,13 @@ def start_job(msg: dict) -> dict:
         "project": f"{owner}/{name}",
         "wdir": wdir,
         "location": cmd[-1] if kind == "clone" else None,
+        # For a detect, when it was read, so a change since is noticed
+        "script_path": cmd[-1] if kind == "detect" else None,
+        "script_stat": (
+            get_file_stat(os.path.join(wdir, cmd[-1]))
+            if kind == "detect"
+            else None
+        ),
         "cmd": cmd,
         "status": "queued",
         "created": datetime.now(timezone.utc).isoformat(),
@@ -1361,10 +1373,14 @@ def run_job(job_id: str) -> None:
     )
     tail: collections.deque[str] = collections.deque(maxlen=OUTPUT_LINES_KEPT)
     progress_lines: list[str] = []
+    # A detect's result is all it prints
+    printed: list[str] = []
     lock = threading.Lock()
 
     def read_output(stream: Any) -> None:
         for line in stream:
+            if job["kind"] == "detect":
+                printed.append(line)
             line = ANSI_ESCAPE_RE.sub("", line).rstrip()
             if not line.strip():
                 continue
@@ -1437,6 +1453,18 @@ def run_job(job_id: str) -> None:
             set_checkouts_found(
                 get_checkouts_key(*job["project"].split("/", 1)), None
             )
+        elif job["kind"] == "detect":
+            import calkit.pipeline
+
+            try:
+                job["result"] = calkit.pipeline.get_detection_from_output(
+                    "".join(printed)
+                )
+            except ValueError:
+                job |= {
+                    "status": "failed",
+                    "error": f"Can't read '{job['script_path']}'",
+                }
         elif job["kind"] == "sync":
             after = {"project": get_head(job["wdir"]), **get_overleaf_heads()}
             overleaf_ids = [k for k in after if k != "project"]
@@ -1632,6 +1660,50 @@ def commit_change(
         raise
 
 
+def get_script_path(wdir: str, value: Any) -> str:
+    """A script in a checkout that a stage can be made from."""
+    import calkit.pipeline
+
+    script_path = get_project_path(wdir, value, "script")
+    if not script_path.lower().endswith(calkit.pipeline.SCRIPT_EXTS):
+        raise ValueError(calkit.pipeline.SCRIPT_EXTS_MESSAGE)
+    if not os.path.isfile(os.path.join(wdir, script_path)):
+        raise ValueError(f"'{script_path}' isn't in the project")
+    return script_path
+
+
+def get_file_stat(path: str) -> list[float]:
+    """A file's size and modification time, to tell it's changed."""
+    stat = os.stat(path)
+    return [stat.st_size, stat.st_mtime]
+
+
+def get_detection(wdir: str, script_path: str, job_id: Any) -> dict:
+    """What ``calkit xr --dry-run`` found in a script: from a detect job
+    run for it, unless it's changed since, else read now.
+
+    The job is this host's own record, so what's planned from it can't be
+    made up by whoever asks.
+    """
+    import calkit.pipeline
+
+    if job_id is None:
+        return calkit.pipeline.get_script_detection(script_path, wdir=wdir)
+    job = get_job(str(job_id))
+    if (
+        job["kind"] != "detect"
+        or job["wdir"] != wdir
+        or (job["script_path"] != script_path)
+    ):
+        raise ValueError(f"Job {job_id} didn't read '{script_path}'")
+    if job["status"] != "succeeded":
+        raise ValueError(job.get("error") or f"Job {job_id} hasn't finished")
+    if job["script_stat"] != get_file_stat(os.path.join(wdir, script_path)):
+        raise ValueError(f"'{script_path}' changed since it was read")
+    detected: dict = job["result"]
+    return detected
+
+
 def add_stage_from_script(wdir: str, msg: dict) -> dict:
     """Make a stage from a script already in a checkout, as the hub does
     for one in its clone, read rather than run, as ``calkit xr --dry-run``
@@ -1641,15 +1713,14 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     first. With it, the stage, its environment, and each document changed
     to show what it makes from where it's made are committed, and only
     those, since anything else changed here is someone's work in progress.
-    Nothing's pushed; a run and sync does that.
+    Nothing's pushed; a run and sync does that. With ``detectJob``, what
+    the script does is what that detect job found, rather than read now.
     """
 
     import calkit.git
     import calkit.pipeline
 
-    script_path = get_project_path(wdir, msg.get("scriptPath"), "script")
-    if not script_path.lower().endswith(calkit.pipeline.SCRIPT_EXTS):
-        raise ValueError(calkit.pipeline.SCRIPT_EXTS_MESSAGE)
+    script_path = get_script_path(wdir, msg.get("scriptPath"))
     # Uploads go through the hub, which reads them in a checkout of their
     # own; here the script and its data are already on this computer
     if msg.get("content") is not None:
@@ -1662,8 +1733,6 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
             "Move the data the script reads into the project's folder, and "
             "change the script to read it from there"
         )
-    if not os.path.isfile(os.path.join(wdir, script_path)):
-        raise ValueError(f"'{script_path}' isn't in the project")
     shows = msg.get("shows")
     produces = msg.get("produces")
     repo = calkit.git.get_repo(wdir)
@@ -1676,7 +1745,7 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     ck_info = calkit.load_calkit_info(wdir=wdir)
     plan = calkit.pipeline.get_stage_from_script_plan(
         script_path,
-        calkit.pipeline.get_script_detection(script_path, wdir=wdir),
+        get_detection(wdir, script_path, msg.get("detectJob")),
         ck_info,
         wdir=wdir,
         shows=get_project_path(wdir, shows, "shown") if shows else None,

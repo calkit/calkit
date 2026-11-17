@@ -2278,7 +2278,6 @@ def get_script_detection(
     running it or writing anything: its environment, from what it imports,
     and its stage, with inputs and outputs from the paths it opens.
     """
-    import json
     import subprocess
 
     try:
@@ -2296,12 +2295,17 @@ def get_script_detection(
         lines = [x.strip() for x in result.stderr.splitlines() if x.strip()]
         detail = lines[-1].removeprefix("Error: ") if lines else ""
         raise ValueError(detail or f"Can't read '{script_path}'")
+    return get_detection_from_output(result.stdout)
+
+
+def get_detection_from_output(stdout: str) -> dict:
+    """What ``calkit xr --dry-run --json`` found, from what it printed."""
+    import json
+
     # Anything printed before the JSON is xr saying what it chose
-    start = result.stdout.find("\n{")
+    start = stdout.find("\n{")
     detected: dict = json.loads(
-        result.stdout
-        if result.stdout.startswith("{")
-        else result.stdout[start + 1 :]
+        stdout if stdout.startswith("{") else stdout[start + 1 :]
     )
     return detected
 

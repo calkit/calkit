@@ -4925,3 +4925,54 @@ def test_clone(monkeypatch):
     assert "doesn't match" in result.output and not hubs
     result = clone("a/b/c/d")
     assert "HUB/OWNER/NAME" in result.output and not hubs
+
+
+def test_run_fails_naming_every_markdown_whose_values_cant_be_written(tmp_dir):
+    """One unparsable document must not silence the rest.
+
+    The values are re-injected on every run, so prose can't drift from the
+    results it cites -- which means a document the injection can't rewrite is
+    showing whatever it was last written with, and a run that passes with a
+    warning leaves that in the record unnoticed.
+    """
+    subprocess.check_call(["calkit", "init"])
+    with open("r.json", "w") as f:
+        json.dump({"v": 7}, f)
+    doc = (
+        "```sh calkit stage name={name} environment=_system "
+        "outputs=[{{path: {name}.txt, storage: git}}]\n"
+        "echo {name} > {name}.txt\n"
+        "```\n"
+        "\n"
+        "<!-- calkit values path=r.json -->\n"
+        "\n"
+        "The value is <!-- calkit value key=v -->0<!-- /calkit value -->.\n"
+    )
+    # Sorted first, so this is the one that used to abort the whole pass
+    with open("a-bad.md", "w") as f:
+        f.write(doc.format(name="bad"))
+    with open("b-good.md", "w") as f:
+        f.write(doc.format(name="good") + "\n<!-- /calkit values -->\n")
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "bad-doc": {"kind": "markdown", "target_path": "a-bad.md"},
+                "good-doc": {"kind": "markdown", "target_path": "b-good.md"},
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "run"], capture_output=True, text=True, check=False
+    )
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, out
+    assert "a-bad.md:5" in out, out
+    assert "is not ended" in out, out
+    # The stages themselves ran, and the document that parses was still
+    # brought into line with the results file
+    with open("good.txt") as f:
+        assert f.read().strip() == "good"
+    with open("b-good.md") as f:
+        assert "-->7<!-- /calkit value -->" in f.read()

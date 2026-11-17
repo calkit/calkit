@@ -1745,8 +1745,13 @@ class LatexStage(Stage):
             ):
                 copied.append(rel)
         # What it includes plainly, e.g., with \includegraphics, is as much
-        # an input, e.g., a figure a stage exports
+        # an input, e.g., a figure a stage exports, except the component
+        # copies, which come after, so the order doesn't depend on whether
+        # they've been written yet
         wdir = self.wdir or ""
+        doc_dir = posixpath.dirname(self.target_path)
+        style_path = posixpath.join(doc_dir, calkit.latex.STYLE_FNAME)
+        copies_dir = posixpath.join(doc_dir, calkit.latex.COMPONENTS_DIR)
         for rel in calkit.latex.detect_inputs(
             self.target_path,
             wdir=os.path.join(project_dir or "", wdir),
@@ -1757,6 +1762,10 @@ class LatexStage(Stage):
                 else lambda p: is_exact_output(posixpath.join(wdir, p))
             ),
         ):
+            if self._loads_calkit and (
+                rel == style_path or rel.startswith(copies_dir + "/")
+            ):
+                continue
             paths.append(posixpath.normpath(posixpath.join(wdir, rel)))
         self._component_paths = list(dict.fromkeys(paths))
         self._copied_paths = list(dict.fromkeys(copied))

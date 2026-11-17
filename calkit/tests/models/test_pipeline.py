@@ -178,7 +178,7 @@ def test_appexportstage():
             model(**{"source_path": "a.svg", "outputs": ["a.png"], **bad})
 
 
-def test_latexstage():
+def test_latexstage(tmp_path):
     s = LatexStage(
         name="something", environment="tex", target_path="my-paper.tex"
     )
@@ -308,6 +308,32 @@ def test_latexstage():
         target_path="my paper.tex",
     )
     assert "'my paper.tex'" in s.dvc_cmd
+    # The deps of a document loading calkit.sty come in the same order on a
+    # fresh clone as after its component copies are written beside it
+    (tmp_path / "paper").mkdir()
+    (tmp_path / "paper" / "main.tex").write_text(
+        "\\documentclass{article}\n\\usepackage{calkit}\n"
+        "\\begin{document}\n\\bibliography{references}\n"
+        "\\end{document}\n"
+    )
+    (tmp_path / "paper" / "references.bib").write_text("")
+    all_deps = []
+    for write_files in [False, True, False]:
+        s = LatexStage(
+            name="paper", environment="tex", target_path="paper/main.tex"
+        )
+        s.preprocess(
+            str(tmp_path), is_output=lambda p: False, write_files=write_files
+        )
+        all_deps.append(s.dvc_deps)
+    assert (tmp_path / "paper" / "calkit.sty").is_file()
+    expected = [
+        "paper/main.tex",
+        "paper/references.bib",
+        "paper/calkit.sty",
+        "paper/_calkit/values.tex",
+    ]
+    assert all_deps == [expected] * 3
 
 
 def test_quartostage():

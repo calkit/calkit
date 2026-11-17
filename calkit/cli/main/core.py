@@ -5336,8 +5336,14 @@ def run_in_env(
         abs_wdir = os.path.abspath(wdir) if wdir else os.getcwd()
         env_vars = run_env_vars or os.environ.copy()
         env_vars["RENV_PROJECT"] = env_dir
-        # Check if the first argument is an R script
-        if cmd and cmd[0] == "Rscript" and len(cmd) > 1:
+        # Check if the first argument is an R script, rather than an option,
+        # e.g., -e
+        if (
+            cmd
+            and cmd[0] == "Rscript"
+            and len(cmd) > 1
+            and not cmd[1].startswith("-")
+        ):
             script_path = cmd[1]
             script_abspath = os.path.abspath(
                 os.path.join(abs_wdir, script_path)

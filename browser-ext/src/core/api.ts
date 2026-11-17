@@ -96,11 +96,16 @@ async function refreshCredentials(apiUrl: string): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: credentials.refreshToken }),
   });
-  if (!resp.ok) {
-    // A refresh token that the hub rejects is never going to work again, so
-    // drop it rather than retrying with it on every request.
+  // A refresh token that the hub rejects is never going to work again, so
+  // drop it rather than retrying with it on every request. Anything else,
+  // e.g., a 502 from a proxy while the hub restarts, says nothing about the
+  // token, so the user stays signed in.
+  if (resp.status === 401 || resp.status === 403) {
     await setCredentials(apiUrl, null);
     throw new NotSignedInError(await readError(resp));
+  }
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await readError(resp));
   }
   const token = (await resp.json()) as TokenResponse;
   await setCredentials(apiUrl, {

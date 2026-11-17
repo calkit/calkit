@@ -131,6 +131,16 @@ hub storage, and contact other services, like GitHub, only when you
 configure and use them. The same goes for the Calkit VS Code and JupyterLab
 extensions, which work through the CLI.
 
+<!-- TODO: needs human review -->
+
+The exception is the hub link (`calkit hub link`), which you install to
+reach a machine from the hub.
+When it checks in, it sends how many of each kind of request the hub made
+to the machine, e.g., runs started or terminals opened, and which coding
+agents were started, never what was run or where.
+The hub keeps these as usage information only if you allowed it, as
+described [above](#usage-information).
+
 We may later add a way to opt in to sharing usage information from the CLI,
 to help decide which features to improve or remove as described
 [above](#how-usage-information-is-used). If we do, it will be off unless
@@ -196,6 +206,32 @@ Two other requests do not involve your data:
   page you are on.
 - Artifacts are downloaded from the object storage your hub uses (Amazon S3
   or Google Cloud Storage), using a short-lived signed link the hub issued.
+
+### Calkit on your computer
+
+<!-- TODO: needs human review -->
+
+If you connect the extension to Calkit on your computer, from its options,
+the browser starts Calkit there and passes it the extension's requests
+directly, without the network: which project, by owner and name, and which
+file in it to open, e.g., the script that makes a figure. Calkit answers
+with its version, the editor projects open in, where the project is on
+your computer, and which of its files there aren't saved or synced with
+Overleaf. None of it goes to a hub.
+
+<!-- TODO: needs human review -->
+
+On Overleaf, the extension also asks Calkit there which of your projects
+syncs with the Overleaf project you're on, and to run, save, sync, or
+clone a project, and to send the PDF it built. Calkit keeps a list of
+your projects' Overleaf projects, the checkout to use for each project,
+and a record of each run, sync, and clone in `~/.calkit/browser-link`.
+Running, saving, and syncing reach GitHub, Overleaf, and your hub, as
+the same commands do from a terminal.
+
+You can disconnect it by removing
+the extension's permission to communicate with cooperating native
+applications, or with `calkit browser-link uninstall`.
 
 ### What is never collected
 

@@ -917,9 +917,12 @@ def check_requirements(
         elif kind == "app":
             cmd = f"command -v {shlex.quote(name)}"
             if _remote_rc(workspace, cmd, verbose=verbose) != 0:
-                raise ValueError(
-                    f"app '{name}' was not found on {described_as}"
-                )
+                msg = f"app '{name}' was not found on {described_as}"
+                if req.get("setup_command"):
+                    msg += (
+                        f". To install it there, run: {req['setup_command']}"
+                    )
+                raise ValueError(msg)
             spec = req.get("version_spec")
             if spec:
                 calkit.check_app_version(
@@ -1850,7 +1853,7 @@ def dvc_remote_url(workspace: Workspace) -> str:
 def _dvc(
     args: list[str], wdir: str | None = None
 ) -> subprocess.CompletedProcess:
-
+    calkit.dvc.ensure_writable_site_cache()
     return subprocess.run(
         ["dvc"] + args,
         cwd=wdir,

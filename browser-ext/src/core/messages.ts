@@ -1,22 +1,32 @@
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
+import type { CheckoutStatus, LocalStatus } from "./local";
 import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
   CalkitYamlInfo,
   ContentsItem,
   DvcOutput,
   TextDiff,
-  Figure,
+  FiguresPage,
   GithubRepo,
+  ExportStage,
+  PipelineRun,
+  ProjectPipeline,
+  PipelineRuns,
+  StageFile,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
+  Provenance,
   PullRequestRefs,
   ProjectsPublic,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
+  Result,
+  StageFromScriptOrNotebookResponse,
+  Table,
 } from "./types";
 
 /**
@@ -55,6 +65,8 @@ export type Request =
        * would then fail.
        */
       minAccessLevel?: "read" | "write";
+      /** Only the project for this GitHub repo, e.g., "owner/repo". */
+      githubRepo?: string;
     }
   | ({ type: "projects.byGithubRepo"; githubRepo: string } & HubScoped)
   | ({
@@ -70,6 +82,7 @@ export type Request =
     } & HubScoped)
   | { type: "github.calkitInfo"; githubRepo: string }
   | { type: "github.repos"; perPage?: number }
+  | { type: "github.installations" }
   | ({
       type: "github.pullRequest";
       owner: string;
@@ -99,7 +112,76 @@ export type Request =
       base: string;
       head: string;
     } & HubScoped)
+  | { type: "project.contentPaths"; owner: string; project: string }
   | { type: "project.figures"; owner: string; project: string }
+  | { type: "project.tables"; owner: string; project: string }
+  | { type: "project.results"; owner: string; project: string }
+  | {
+      type: "project.provenance";
+      owner: string;
+      project: string;
+      path: string;
+      /** A value in a results file; without one, the file comes back whole. */
+      key?: string;
+    }
+  | {
+      type: "project.stageFromScriptOrNotebook";
+      owner: string;
+      project: string;
+      scriptPath: string;
+      /** An uploaded script, base64-encoded. */
+      content?: string;
+      /** What the document shows, e.g., the figure at the cursor. */
+      shows?: string;
+      /** Which of the script's outputs that is. */
+      produces?: string;
+      /**
+       * Data it reads from outside the project, to read from the project
+       * instead, with any files uploaded, base64-encoded.
+       */
+      data?: {
+        external: string;
+        path: string;
+        files: { path: string; content: string }[];
+      }[];
+      save?: boolean;
+    }
+  | {
+      type: "project.recordOrigin";
+      owner: string;
+      project: string;
+      path: string;
+      /** One of calkit's `imported_from` forms, e.g., `{ url }`. */
+      importedFrom?: Record<string, unknown>;
+      createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
+    }
+  | { type: "project.pipeline"; owner: string; project: string }
+  | { type: "project.pipelineRuns"; owner: string; project: string }
+  | {
+      /** The whole log of a run on this computer, as far as it's got. */
+      type: "project.pipelineRunLog";
+      owner: string;
+      project: string;
+      runId: string;
+    }
+  | {
+      type: "project.startPipelineRun";
+      owner: string;
+      project: string;
+      /** Whether to save and sync with Overleaf after, when run here. */
+      sync?: boolean;
+    }
+  | {
+      type: "project.addExportStage";
+      owner: string;
+      project: string;
+      /** The file it's exported from, and the figure it's exported to. */
+      source: string;
+      output: string;
+      /** The app a person exports it with, e.g., Photoshop. */
+      app?: string;
+      files?: StageFile[];
+    }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
   | {
@@ -115,10 +197,25 @@ export type Request =
       project: string;
       overleafProjectId?: string;
       path?: string;
+      /**
+       * False for what's known from the last pull from Overleaf, without
+       * pulling, when answered on this computer, to show while it pulls.
+       */
+      pull?: boolean;
+      /**
+       * What Overleaf's editor has: every file's Git hash and the
+       * documents' text, by path, so this computer's copy can be checked or
+       * updated without downloading the project.
+       */
+      overleafFiles?: Record<string, string>;
+      overleafTexts?: Record<string, string>;
     }
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }
   | { type: "overleaf.connectSession" }
+  | { type: "overleaf.openTokenSettings" }
+  | { type: "overleaf.tokenTab" }
+  | { type: "overleaf.returnFromTokenTab" }
   | {
       type: "overleaf.import";
       owner: string;
@@ -159,6 +256,38 @@ export type Request =
       path: string;
       bibKey: string;
       notes: ReferenceNote[];
+    }
+  | { type: "local.status" }
+  | {
+      type: "local.openProject";
+      /** As "owner/name". */
+      project: string;
+      /** A file in it to open too, e.g., the script that makes a figure. */
+      path?: string;
+    }
+  | {
+      type: "local.projectStatus";
+      /** As "owner/name". */
+      project: string;
+    }
+  | { type: "local.openOptions" }
+  /** Install the editor projects open in, i.e., VS Code. */
+  | { type: "local.installEditor"; project: string }
+  | {
+      type: "local.checkout";
+      /** As "owner/name". */
+      project: string;
+    }
+  | {
+      type: "local.chooseCheckout";
+      project: string;
+      path: string;
+    }
+  | {
+      type: "local.clone";
+      project: string;
+      /** Where to, by default ~/calkit/NAME. */
+      location?: string;
     };
 
 export interface ResponseMap {
@@ -173,11 +302,23 @@ export interface ResponseMap {
   "projects.create": ProjectPublic;
   "github.calkitInfo": CalkitYamlInfo;
   "github.repos": GithubRepo[];
+  "github.installations": { total_count: number };
   "github.pullRequest": PullRequestRefs;
   "project.contents": ContentsItem;
   "project.dvcOutputs": DvcOutput[];
   "project.textDiff": TextDiff;
-  "project.figures": Figure[];
+  "project.contentPaths": string[];
+  "project.figures": FiguresPage;
+  "project.tables": Table[];
+  "project.results": Result[];
+  "project.provenance": Provenance;
+  "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
+  "project.recordOrigin": { path: string };
+  "project.addExportStage": ExportStage;
+  "project.pipeline": ProjectPipeline;
+  "project.pipelineRuns": PipelineRuns;
+  "project.startPipelineRun": PipelineRun;
+  "project.pipelineRunLog": { log: string };
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;
@@ -185,12 +326,32 @@ export interface ResponseMap {
   "overleaf.sync": OverleafSyncResponse;
   "overleaf.setToken": { message: string };
   "overleaf.connectSession": { message: string };
+  "overleaf.openTokenSettings": null;
+  "overleaf.tokenTab": { requested: boolean };
+  "overleaf.returnFromTokenTab": { returned: boolean };
   "overleaf.import": { path: string; title: string };
   "references.list": References[];
   "references.search": ReferenceSearchMatch[];
   "references.add": { message: string };
   "references.notes.get": { notes: ReferenceNote[] };
   "references.notes.put": { notes: ReferenceNote[] };
+  "local.status": LocalStatus;
+  "local.openProject": Record<string, never>;
+  "local.projectStatus": { checkouts: CheckoutStatus[] };
+  "local.openOptions": null;
+  "local.installEditor": null;
+  /**
+   * The checkout used for a project here, and the others, or none when the
+   * extension isn't connected or the project isn't here; ``connected``
+   * says which.
+   */
+  "local.checkout": {
+    connected: boolean;
+    path: string | null;
+    paths: string[];
+  };
+  "local.chooseCheckout": { path: string; paths: string[] };
+  "local.clone": { path: string };
 }
 
 /**

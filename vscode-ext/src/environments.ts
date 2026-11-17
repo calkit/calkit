@@ -17,8 +17,30 @@ export interface SlurmLaunchOptions {
   gpus?: string;
   time?: string;
   partition?: string;
+  cpus?: string;
+  mem?: string;
   extra?: string;
 }
+
+type SlurmOptionField = Exclude<keyof SlurmLaunchOptions, "extra">;
+
+// srun flags for the launch options we know, long form first
+const SLURM_OPTION_FLAGS: Record<SlurmOptionField, string[]> = {
+  gpus: ["--gpus", "-G"],
+  time: ["--time", "-t"],
+  partition: ["--partition", "-p"],
+  cpus: ["--cpus-per-task", "-c"],
+  mem: ["--mem"],
+};
+
+// Resources a notebook job asks for when its environment doesn't set them, so
+// it doesn't silently get the cluster's defaults
+export const NOTEBOOK_SLURM_RESOURCES: SlurmOptionField[] = [
+  "partition",
+  "time",
+  "cpus",
+  "mem",
+];
 
 export interface CalkitEnvironment {
   kind: EnvKind;
@@ -59,8 +81,86 @@ export function compactSlurmOptions(
     gpus: options.gpus?.trim() || undefined,
     time: options.time?.trim() || undefined,
     partition: options.partition?.trim() || undefined,
+    cpus: options.cpus?.trim() || undefined,
+    mem: options.mem?.trim() || undefined,
     extra: options.extra?.trim() || undefined,
   };
+}
+
+// Memory flags besides --mem; SLURM takes only one of them
+const SLURM_MEMORY_FLAGS = ["--mem-per-cpu", "--mem-per-gpu"];
+
+// srun options split into flags with their values, keeping quoted values, e.g.,
+// --comment="a -p b", whole
+function groupSlurmFlags(
+  options: string[],
+): Array<{ flag: string; tokens: string[] }> {
+  const groups: Array<{ flag: string; tokens: string[] }> = [];
+  for (const token of options.flatMap(
+    (opt) => opt.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [],
+  )) {
+    if (token.startsWith("-") || groups.length === 0) {
+      const eq = token.indexOf("=");
+      groups.push({
+        flag: eq < 0 ? token : token.slice(0, eq),
+        tokens: [token],
+      });
+    } else {
+      groups[groups.length - 1].tokens.push(token);
+    }
+  }
+  return groups;
+}
+
+function setsSlurmMemory(options: SlurmLaunchOptions): boolean {
+  return (
+    Boolean(options.mem) ||
+    groupSlurmFlags([options.extra ?? ""]).some((g) =>
+      SLURM_MEMORY_FLAGS.includes(g.flag),
+    )
+  );
+}
+
+// Options from base, overridden by whatever override sets. Known flags saved
+// in extra, e.g., by older versions, are normalized first so they can't
+// conflict, and memory flags override each other as a group.
+export function mergeSlurmOptions(
+  base: SlurmLaunchOptions | undefined,
+  override: SlurmLaunchOptions | undefined,
+): SlurmLaunchOptions {
+  const normalize = (options: SlurmLaunchOptions | undefined) =>
+    parseSlurmOptionList(slurmOptionsToOptionList(options ?? {})) ?? {};
+  const merged = normalize(base);
+  const over = normalize(override);
+  const overExtra = groupSlurmFlags([over.extra ?? ""]);
+  const overridden = new Set(overExtra.map((g) => g.flag));
+  if (setsSlurmMemory(over)) {
+    merged.mem = undefined;
+    SLURM_MEMORY_FLAGS.forEach((flag) => overridden.add(flag));
+  }
+  for (const key of Object.keys(SLURM_OPTION_FLAGS) as SlurmOptionField[]) {
+    if (over[key]) {
+      merged[key] = over[key];
+    }
+  }
+  merged.extra = [
+    ...groupSlurmFlags([merged.extra ?? ""]).filter(
+      (g) => !overridden.has(g.flag),
+    ),
+    ...overExtra,
+  ]
+    .flatMap((g) => g.tokens)
+    .join(" ");
+  return compactSlurmOptions(merged);
+}
+
+export function getMissingSlurmResources(
+  options: SlurmLaunchOptions | undefined,
+): SlurmOptionField[] {
+  const compact = compactSlurmOptions(options ?? {});
+  return NOTEBOOK_SLURM_RESOURCES.filter((key) =>
+    key === "mem" ? !setsSlurmMemory(compact) : !compact[key],
+  );
 }
 
 export function slurmOptionsToOptionList(
@@ -68,14 +168,11 @@ export function slurmOptionsToOptionList(
 ): string[] {
   const compact = compactSlurmOptions(options);
   const result: string[] = [];
-  if (compact.gpus) {
-    result.push(`--gpus=${compact.gpus}`);
-  }
-  if (compact.time) {
-    result.push(`--time=${compact.time}`);
-  }
-  if (compact.partition) {
-    result.push(`--partition=${compact.partition}`);
+  for (const [key, flags] of Object.entries(SLURM_OPTION_FLAGS)) {
+    const value = compact[key as SlurmOptionField];
+    if (value) {
+      result.push(`${flags[0]}=${value}`);
+    }
   }
   if (compact.extra) {
     result.push(compact.extra);
@@ -88,36 +185,28 @@ export function parseSlurmOptionList(
 ): SlurmLaunchOptions | undefined {
   const result: SlurmLaunchOptions = {};
   const extraParts: string[] = [];
-
-  for (const raw of options) {
-    const opt = raw.trim();
-    if (!opt) {
+  for (const { flag, tokens } of groupSlurmFlags(options)) {
+    const key = (Object.keys(SLURM_OPTION_FLAGS) as SlurmOptionField[]).find(
+      (k) => SLURM_OPTION_FLAGS[k].includes(flag),
+    );
+    if (!key) {
+      extraParts.push(...tokens);
       continue;
     }
-    const gpusMatch = opt.match(/^--gpus(?:=|\s+)(.+)$/);
-    if (gpusMatch) {
-      result.gpus = gpusMatch[1].trim();
-      continue;
+    // The value is after "=" or in the next token; anything else is extra
+    const [first, ...rest] = tokens;
+    const eq = first.indexOf("=");
+    const value = eq < 0 ? rest.shift() : first.slice(eq + 1);
+    if (value) {
+      result[key] = value;
     }
-    const timeMatch = opt.match(/^--time(?:=|\s+)(.+)$/);
-    if (timeMatch) {
-      result.time = timeMatch[1].trim();
-      continue;
-    }
-    const partitionMatch = opt.match(/^--partition(?:=|\s+)(.+)$/);
-    if (partitionMatch) {
-      result.partition = partitionMatch[1].trim();
-      continue;
-    }
-    extraParts.push(opt);
+    extraParts.push(...rest);
   }
-
   if (extraParts.length > 0) {
     result.extra = extraParts.join(" ");
   }
-
   const compact = compactSlurmOptions(result);
-  if (!compact.gpus && !compact.time && !compact.partition && !compact.extra) {
+  if (Object.values(compact).every((value) => !value)) {
     return undefined;
   }
   return compact;
@@ -138,6 +227,47 @@ export function getDefaultSlurmOptions(
   }
 
   return undefined;
+}
+
+// Printed by the SLURM launch command, since Jupyter bound to 0.0.0.0 doesn't
+// report which compute node it's on.
+export const SLURM_NODE_MARKER = "CALKIT_SLURM_NODE=";
+
+// Compute node and port of a Jupyter server started in a SLURM job, from its
+// output so far. The port can differ from the requested one if it was taken.
+// The node only counts once its line ends, since output arrives in chunks.
+export function parseSlurmServerOutput(output: string): {
+  host?: string;
+  port?: number;
+} {
+  const host = output.match(
+    new RegExp(`${SLURM_NODE_MARKER}(\\S+)\\r?\\n`),
+  )?.[1];
+  const port = output.match(/https?:\/\/[^\s/:]+:(\d+)\/lab\b/)?.[1];
+  return { host, port: port ? Number(port) : undefined };
+}
+
+// Host a Remote-SSH window connected to, from its workspace URI authority,
+// e.g., "ssh-remote+login.hpc.caltech.edu". Remote-SSH hex-encodes the host as
+// JSON when it carries more than a name.
+export function parseRemoteSshHost(authority: string): string | undefined {
+  const prefix = "ssh-remote+";
+  if (!authority.startsWith(prefix)) {
+    return undefined;
+  }
+  let host = authority.slice(prefix.length);
+  if (/^([0-9a-f]{2})+$/i.test(host)) {
+    try {
+      const decoded = JSON.parse(Buffer.from(host, "hex").toString("utf8"));
+      if (typeof decoded?.hostName === "string") {
+        host = decoded.hostName;
+      }
+    } catch {
+      // A plain host name that happens to look like hex
+    }
+  }
+  host = host.replace(/^[^@]*@/, "").replace(/:\d+$/, "");
+  return host || undefined;
 }
 
 export function makeCalkitEnvKernelSourceCandidates(

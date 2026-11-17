@@ -37,10 +37,12 @@ from calkit.models.io import (
     ScheduleInput,
 )
 from calkit.models.iteration import (
+    DateRangeIteration,
     ExpandedParametersType,
     ParameterIteration,
     ParametersType,
     RangeIteration,
+    get_date_range_state_dir,
 )
 from calkit.models.requirements import RequirementType
 
@@ -82,6 +84,33 @@ def quote_arg(arg: str) -> str:
         return arg
     # Doubled, so a trailing backslash doesn't escape the closing quote
     body = arg.rstrip("\\")
+    return '"' + body + "\\" * 2 * (len(arg) - len(body)) + '"'
+
+
+def quote_literal_arg(arg: str) -> str:
+    """An arg as one word that sh and cmd.exe, which DVC runs stage commands
+    with on Windows, both pass through unchanged, so the command is the same
+    on every platform.
+
+    Double quotes protect everything else in both, so an arg with a
+    character one of them still acts on there is refused rather than
+    passed changed.
+    """
+    if arg and re.fullmatch(r"[\w@%+=:,./-]+", arg):
+        return arg
+    for char in ['"', "$", "`", "\n"]:
+        if char in arg:
+            raise ValueError(
+                f"{arg!r} can't be passed to a shell unchanged on every "
+                f"platform, since it contains {char!r}"
+            )
+    # Trailing backslashes are doubled, which both read back as one each
+    body = arg.rstrip("\\")
+    if "\\\\" in body:
+        raise ValueError(
+            f"{arg!r} can't be passed to a shell unchanged on every "
+            "platform, since it contains consecutive backslashes"
+        )
     return '"' + body + "\\" * 2 * (len(arg) - len(body)) + '"'
 
 
@@ -135,6 +164,22 @@ def _non_glob_prefix(path: str) -> str:
     return "/".join(kept)
 
 
+def _remove_period_file(period_dir: str, stop: str) -> None:
+    """Remove a date-range period's ``period.json``, if it has one, and the
+    directories it leaves empty, up to ``stop``.
+    """
+    fpath = os.path.join(period_dir, "period.json")
+    if not os.path.isfile(fpath):
+        return
+    os.remove(fpath)
+    dpath = period_dir
+    while os.path.normpath(dpath) != os.path.normpath(stop) and not (
+        os.listdir(dpath)
+    ):
+        os.rmdir(dpath)
+        dpath = os.path.dirname(dpath)
+
+
 class StageIteration(Model):
     """A model for the ``iterate_over`` key in a stage definition.
 
@@ -151,6 +196,7 @@ class StageIteration(Model):
         | float
         | str
         | RangeIteration
+        | DateRangeIteration
         | ParameterIteration
         | list[int | float | str]
     ] = Field(description="Values over which to iterate.")
@@ -166,10 +212,13 @@ class StageIteration(Model):
             expected_length = len(arg_name)
             for i, value in enumerate(v):
                 # TODO: Support RangeIteration and ParameterIteration
-                if isinstance(value, (RangeIteration, ParameterIteration)):
+                if isinstance(
+                    value,
+                    (RangeIteration, DateRangeIteration, ParameterIteration),
+                ):
                     raise ValueError(
-                        "RangeIteration and ParameterIteration are not "
-                        "allowed when arg_name is a list"
+                        "Ranges and parameters are not allowed when "
+                        "arg_name is a list"
                     )
                 # Check if the value is a list and has the correct length
                 if not isinstance(value, list):
@@ -185,6 +234,106 @@ class StageIteration(Model):
                         "elements"
                     )
         return v
+
+    @model_validator(mode="after")
+    def _one_state_storage(self) -> StageIteration:
+        # Every item depends on its period's directory, so all must have one
+        storage = {
+            v.state_storage if isinstance(v, DateRangeIteration) else None
+            for v in self.values
+        }
+        if len(storage) > 1:
+            raise ValueError(
+                f"Values of '{self.arg_name}' must all be date ranges with "
+                "the same state_storage, or none may have one"
+            )
+        # Each period is an item, so no two ranges can share one
+        spans = [
+            v.span for v in self.values if isinstance(v, DateRangeIteration)
+        ]
+        for n, (unit, first, end) in enumerate(spans):
+            for other_unit, other_first, other_end in spans[n + 1 :]:
+                if (
+                    unit == other_unit
+                    and (other_end is None or first < other_end)
+                    and (end is None or other_first < end)
+                ):
+                    raise ValueError(
+                        f"Date ranges of '{self.arg_name}' overlap, so "
+                        "they'd share periods"
+                    )
+        return self
+
+    @property
+    def state_storage(self) -> str | None:
+        """Where the state of each date-range period is kept, if anywhere."""
+        first = self.values[0] if self.values else None
+        if isinstance(first, DateRangeIteration):
+            return first.state_storage
+        return None
+
+    def write_date_range_state(
+        self, stage_name: str, wdir: str | None = None
+    ) -> str | None:
+        """Write each period's ``period.json``, if it changed, and remove
+        those of periods no longer iterated over, returning the directory
+        the periods are in.
+
+        Only ``period.json`` is removed, since whatever else is in a
+        period's directory was written there by something else. A closed
+        period's window can't change while the range doesn't, so one
+        already checked on this machine isn't read again.
+        """
+        import datetime
+
+        from calkit.core import ensure_local_dir, write_if_changed
+
+        if self.state_storage is None:
+            return None
+        local_dir = ensure_local_dir(wdir=wdir)
+        state_dir = get_date_range_state_dir(stage_name, self.state_storage)
+        root = os.path.join(wdir or ".", state_dir)
+        ranges = [v for v in self.values if isinstance(v, DateRangeIteration)]
+        periods = {p["period"]: p for v in ranges for p in v.periods}
+        # Closed periods ending by 'closed_before' were checked for ranges
+        # written as 'ranges'
+        check_fpath = os.path.join(
+            local_dir, "date-range-checks", f"{stage_name}.json"
+        )
+        key = [v.model_dump(mode="json") for v in ranges]
+        try:
+            with open(check_fpath) as f:
+                check = json.load(f)
+        except (OSError, ValueError):
+            check = {}
+        checked_before = (
+            check.get("closed_before", "")
+            if check.get("ranges") == key
+            else ""
+        )
+        closed_before = ""
+        one_day = datetime.timedelta(days=1)
+        for name, period in periods.items():
+            fpath = os.path.join(root, name, "period.json")
+            last_day = datetime.date.fromisoformat(period["end"]) - one_day
+            closed = period["through"] == last_day.isoformat()
+            if closed:
+                closed_before = max(closed_before, period["end"])
+            if (
+                closed
+                and period["end"] <= checked_before
+                and os.path.isfile(fpath)
+            ):
+                continue
+            write_if_changed(fpath, json.dumps(period, indent=2) + "\n")
+        write_if_changed(
+            check_fpath,
+            json.dumps({"ranges": key, "closed_before": closed_before}) + "\n",
+        )
+        for name in os.listdir(root) if os.path.isdir(root) else []:
+            if name not in periods:
+                _remove_period_file(os.path.join(root, name), stop=root)
+        return state_dir
 
     def expand_values(
         self, params: ParametersType | ExpandedParametersType
@@ -208,7 +357,7 @@ class StageIteration(Model):
             for vals_i in self.values:
                 if isinstance(vals_i, ParameterIteration):
                     vals += vals_i.values_from_params(params)
-                elif isinstance(vals_i, RangeIteration):
+                elif isinstance(vals_i, (RangeIteration, DateRangeIteration)):
                     vals += vals_i.values
                 else:
                     vals.append(vals_i)
@@ -316,12 +465,16 @@ class Stage(Model):
         "julia-script",
         "julia-command",
         "word-to-pdf",
+        "manual-step",
+        "inkscape-export",
+        "gimp-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
         "markdown-pdf",
         "procedure",
         "questions-to-latex",
+        "references-check",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -422,7 +575,10 @@ class Stage(Model):
     # Env vars whose values this stage depends on, from its own inputs and
     # its environments', resolved when the pipeline is compiled
     _env_var_names: list[str] = PrivateAttr(default_factory=list)
-
+    # The runtime environment each item of an iterated stage uses, when its
+    # environment depends on their values, resolved when the pipeline is
+    # compiled
+    _item_environments: list[str] = PrivateAttr(default_factory=list)
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
     # runs fine.
@@ -432,6 +588,18 @@ class Stage(Model):
         description="Deprecated name for 'scheduler'; set 'scheduler' "
         "instead.",
     )
+
+    @field_validator("iterate_over")
+    @classmethod
+    def _one_date_range_state(
+        cls, value: list[StageIteration] | None
+    ) -> list[StageIteration] | None:
+        # The periods of two would share the stage's state directory
+        if len([it for it in value or [] if it.state_storage]) > 1:
+            raise ValueError(
+                "Only one iteration of a stage can have a state_storage"
+            )
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -526,6 +694,13 @@ class Stage(Model):
         return self.environment
 
     @property
+    def environment_names(self) -> list[str]:
+        """The environments this stage uses, inner first, with its items'."""
+        names = [self.inner_environment, self.outer_environment]
+        names += self._item_environments
+        return [n for n in dict.fromkeys(names) if "{" not in n]
+
+    @property
     def dvc_cmd(self) -> str:
         raise NotImplementedError
 
@@ -581,18 +756,14 @@ class Stage(Model):
         rel_path = self.setup_file_path
         if rel_path is None:
             return None
+        from calkit.core import write_if_changed
+
         fpath = os.path.join(wdir, rel_path) if wdir else rel_path
-        os.makedirs(os.path.dirname(fpath), exist_ok=True)
-        content = json.dumps(self._system_env_setup, indent=2) + "\n"
-        if os.path.isfile(fpath):
-            with open(fpath) as f:
-                if f.read() == content:
-                    return rel_path
-        # newline="\n" so the file is byte-identical on every platform:
-        # text mode writes CRLF on Windows, and this is a DVC dep, so the
-        # stage would rerun purely from switching machine
-        with open(fpath, "w", newline="\n") as f:
-            f.write(content)
+        # Byte-identical on every platform, since it's a DVC dep, so the
+        # stage would otherwise rerun purely from switching machine
+        write_if_changed(
+            fpath, json.dumps(self._system_env_setup, indent=2) + "\n"
+        )
         return rel_path
 
     @property
@@ -662,6 +833,25 @@ class Stage(Model):
                 paths.append(path)
         return paths
 
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Work out what the stage depends on from the project before it's
+        compiled, for a kind of stage whose sources name some of it.
+
+        ``project_dir`` is where the project is, and ``is_output`` says
+        whether a stage makes a project path, including by matching an
+        iterated stage's output pattern, while ``is_exact_output`` says
+        whether a stage declares it as is. With ``write_files``, the stage also
+        writes files it reads that aren't kept in the project, since it's
+        about to run or have its status checked. That happens on every
+        call, so only fast work belongs here.
+        """
+
     @property
     def dvc_deps(self) -> list[str]:
         deps = []
@@ -676,6 +866,15 @@ class Stage(Model):
                 period_file = self.path_from_wdir(i.period_file_path)
                 if period_file not in deps:
                     deps.append(period_file)
+        # Each item's period directory, filled in when the matrix is formatted
+        for it in self.iterate_over or []:
+            if it.state_storage is not None and isinstance(it.arg_name, str):
+                state_dir = get_date_range_state_dir(
+                    str(self.name), it.state_storage
+                )
+                deps.append(
+                    self.path_from_wdir(f"{state_dir}/{{{it.arg_name}}}")
+                )
         for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
@@ -871,6 +1070,13 @@ class Stage(Model):
             storage=self.scheduler.log_storage,
             delete_before_run=False,
         )
+
+    def run_properties(self) -> dict[str, Any]:
+        """What a run of it records about the machine, beyond what every
+        run does, e.g., the version of an app it runs that no environment
+        pins.
+        """
+        return {}
 
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
@@ -1271,18 +1477,23 @@ class LatexStage(Stage):
         Without keys the only honest option for a revision that can move
         is to run every time.
         """
+        desc = (
+            f"Automatically generated from the '{self.name}' stage "
+            "in calkit.yaml. Changes made here will be overwritten."
+        )
+        stages: dict[str, dict] = {}
         deps = self.dvc_deps + (extra_inputs or [])
         inputs = [
             path
             for path in deps
             if path not in (self.target_path, self.latexmkrc_path)
+            and path not in self.component_copies
             and not path.startswith(".calkit/")
         ]
         # Changing the filter's script rebuilds the diff
         filter_deps = (
             [self.diff_filter.script_path] if self.diff_filter else []
         )
-        stages = {}
         for entry, (from_ref, to_ref), path in zip(
             self.diffs, self.diff_pairs, self.diff_paths
         ):
@@ -1353,10 +1564,7 @@ class LatexStage(Stage):
                 "cmd": cmd,
                 "deps": (deps if moving else []) + filter_deps,
                 "outs": [out],
-                "desc": (
-                    f"Automatically generated from the '{self.name}' stage "
-                    "in calkit.yaml. Changes made here will be overwritten."
-                ),
+                "desc": desc,
             }
             if self.wdir is not None:
                 stage["wdir"] = self.wdir
@@ -1462,9 +1670,130 @@ class LatexStage(Stage):
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
+    # Project paths the document's components depend on, the files among
+    # them it reads copies of, and whether it loads calkit.sty, set by
+    # preprocess
+    _component_paths: list[str] = PrivateAttr(default_factory=list)
+    _copied_paths: list[str] = PrivateAttr(default_factory=list)
+    _loads_calkit: bool = PrivateAttr(default=False)
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Read which components the document includes with calkit.sty's
+        commands, since they're as much inputs as its source, and with
+        ``write_files``, map them in beside it.
+
+        Each is depended on where it's kept: the file, if it's there, stored
+        with DVC, or a stage output, or the folder holding it, if that's
+        stored with DVC or a stage output. A typo or a figure not made yet
+        prints as ?? instead of stopping the pipeline. The copies read of
+        files kept in Git are depended on too, which, unlike other copies,
+        are there before the stage runs on any clone.
+        """
+
+        def exists(p: str) -> bool:
+            return os.path.isfile(os.path.join(project_dir or "", p))
+
+        def is_input(p: str) -> bool:
+            return exists(p) or exists(p + ".dvc") or is_output(p)
+
+        def folder_kept_elsewhere(p: str) -> str | None:
+            parts = p.split("/")
+            for i in range(1, len(parts)):
+                folder = "/".join(parts[:i])
+                if is_output(folder) or exists(folder + ".dvc"):
+                    return folder
+            return None
+
+        document = os.path.join(
+            project_dir or "", self.wdir or "", self.target_path
+        )
+        self._loads_calkit, components = calkit.latex.read_ck_usage(document)
+        paths = []
+        copied = []
+        for c in components:
+            named, _ = calkit.latex.component_path(c, lambda p: True)
+            if named is None:
+                continue
+            folder = folder_kept_elsewhere(named)
+            if folder is not None:
+                paths.append(folder)
+                continue
+            rel, _ = calkit.latex.component_path(c, is_input)
+            if rel is None:
+                continue
+            paths.append(rel)
+            if (
+                c.kind != "value"
+                and exists(rel)
+                and not exists(rel + ".dvc")
+                and not is_output(rel)
+            ):
+                copied.append(rel)
+        # What it includes plainly, e.g., with \includegraphics, is as much
+        # an input, e.g., a figure a stage exports
+        wdir = self.wdir or ""
+        for rel in calkit.latex.detect_inputs(
+            self.target_path,
+            wdir=os.path.join(project_dir or "", wdir),
+            is_output=lambda p: is_output(posixpath.join(wdir, p)),
+            is_exact_output=(
+                None
+                if is_exact_output is None
+                else lambda p: is_exact_output(posixpath.join(wdir, p))
+            ),
+        ):
+            paths.append(posixpath.normpath(posixpath.join(wdir, rel)))
+        self._component_paths = list(dict.fromkeys(paths))
+        self._copied_paths = list(dict.fromkeys(copied))
+        if write_files and self._loads_calkit:
+            calkit.latex.map_ck_components(document)
+
+    @property
+    def component_copies(self) -> list[str]:
+        """What the document reads its components from, relative to the
+        stage's ``wdir``: ``calkit.sty`` and ``_calkit/values.tex`` beside
+        it, and the copies of figures and tables kept in Git, or nothing if
+        it doesn't load calkit.sty.
+
+        Like cleaned notebooks, they're written before the pipeline runs or
+        is checked, and kept out of Git. A figure a stage makes or DVC
+        stores may only be copied after DVC checks the stage's dependencies
+        are there, so the stage depends on the figure itself instead.
+        """
+        if not self._loads_calkit:
+            return []
+        folder = posixpath.dirname(self.target_path)
+        components_dir = posixpath.join(folder, calkit.latex.COMPONENTS_DIR)
+        return [
+            posixpath.join(folder, calkit.latex.STYLE_FNAME),
+            posixpath.join(components_dir, calkit.latex.VALUES_FNAME),
+        ] + [posixpath.join(components_dir, p) for p in self._copied_paths]
+
+    @property
+    def found_paths(self) -> list[str]:
+        """What the document reads that preprocessing found, relative to the
+        stage's ``wdir``.
+        """
+        return [self.path_from_wdir(p) for p in self._component_paths]
+
     @property
     def dvc_deps(self) -> list[str]:
-        deps = [self.target_path] + super().dvc_deps
+        # The copies the document reads, and what they're copied from, so it
+        # builds after the stages making them, unless in a folder it declares
+        declared = super().dvc_deps
+        folders = tuple(d.rstrip("/") + "/" for d in declared)
+        deps = (
+            [self.target_path]
+            + declared
+            + [p for p in self.found_paths if not p.startswith(folders)]
+            + self.component_copies
+        )
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
         return _unique_paths(deps)
@@ -1560,21 +1889,28 @@ class JsonToLatexStage(Stage):
         # Only the declared paths, since what's generated for the stage, e.g.,
         # its setup or schedule period file, isn't data
         for input_path in self.input_paths:
-            cmd += f" '{input_path}'"
+            cmd += f" {quote_literal_arg(input_path)}"
         for out in self.outputs:
             if isinstance(out, str):
                 out_path = out
             elif isinstance(out, PathOutput):
                 out_path = out.path
-            cmd += f" --output '{out_path}'"
+            cmd += f" --output {quote_literal_arg(out_path)}"
         if self.command_name is not None:
-            cmd += f" --command {self.command_name}"
+            cmd += f" --command {quote_literal_arg(self.command_name)}"
         for key in self.keys:
-            cmd += f" --key {shlex.quote(key)}"
-        if self.format is not None:
-            fmt_json = json.dumps(self.format)
-            cmd += f" --format-json '{fmt_json}'"
+            cmd += f" --key {quote_literal_arg(key)}"
+        # One arg per format rather than JSON, whose quotes neither shell's
+        # quoting can carry unchanged on both
+        for name, fmt in (self.format or {}).items():
+            cmd += f" --format {quote_literal_arg(f'{name}={fmt}')}"
         return cmd
+
+    @model_validator(mode="after")
+    def check_args_quotable(self) -> "JsonToLatexStage":
+        # So calkit.yaml says why, rather than the pipeline failing to compile
+        self.dvc_cmd
+        return self
 
     @property
     def dvc_outs(self) -> list[str | dict]:
@@ -1645,6 +1981,141 @@ class QuestionsToLatexStage(Stage):
         return outs
 
 
+class ReferencesCheckStage(Stage):
+    """Whether the references a document cites are real.
+
+    Its inputs are the target document, the files it inputs, and the
+    bibliographies it names, or ``calkit.yaml`` and the collections it
+    declares if it names none, all found when the pipeline is compiled.
+    Its outputs are that document's report, by default under
+    ``.calkit/reference-checks``, and beside it the services' responses
+    the report is based on. The responses are kept between runs and
+    reused, since the services' answers change over time, so a rerun
+    reproduces the report and asks only about what's new. One stage
+    checks one document, so a project with two papers has one of these
+    each and each goes out of date on its own.
+    """
+
+    kind: Literal["references-check"] = "references-check"
+    target_path: str = Field(
+        description="What to check: a .tex or Markdown document, the PDF "
+        "a stage builds from one, or a .bib file, whose every entry is "
+        "checked."
+    )
+    environment: str = Field(
+        default="_system",
+        description="Where to run the check. Defaults to the system, "
+        "which is where the Calkit running the pipeline already is.",
+    )
+    offline: bool = Field(
+        default=False,
+        description=(
+            "Use only the recorded responses instead of calling out to "
+            "Crossref, DataCite, OpenAlex, and arXiv, e.g., where the "
+            "pipeline runs without a network."
+        ),
+    )
+    wdir: None = Field(
+        default=None,
+        description="Not supported; the stage reads the project's "
+        "calkit.yaml and documents from the project root.",
+    )
+
+    # What the check reads besides the document, set by preprocess
+    _found_paths: list[str] = PrivateAttr(default_factory=list)
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Find the files the document inputs and the bibliographies it
+        names, including ones a stage makes that aren't there yet."""
+        import calkit.references
+
+        self._found_paths = calkit.references.get_input_paths(
+            self.target_path, project_dir=project_dir, is_output=is_output
+        )
+
+    @property
+    def report_path(self) -> str:
+        """Where the report is written: the first declared output, or
+        beside other generated files."""
+        import calkit.references
+
+        if not self.outputs:
+            return calkit.references.get_report_path(self.target_path)
+        out = self.outputs[0]
+        return out if isinstance(out, str) else out.path
+
+    @property
+    def check_outputs(self) -> list[PathOutput]:
+        """What the check writes that isn't declared, so its storage can be
+        respected: the report, in Git, and the responses it's based on, in
+        DVC and kept between runs, since they're reused.
+        """
+        import calkit.references
+
+        responses_path = calkit.references.get_responses_path(self.report_path)
+        declared = {
+            out if isinstance(out, str) else out.path for out in self.outputs
+        }
+        outs = []
+        if not self.outputs:
+            outs.append(PathOutput(path=self.report_path, storage="git"))
+        if responses_path not in declared:
+            outs.append(
+                PathOutput(
+                    path=responses_path,
+                    storage="dvc",
+                    delete_before_run=False,
+                )
+            )
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        import calkit.references
+
+        responses_path = calkit.references.get_responses_path(self.report_path)
+        cmd = (
+            f"calkit check references {shlex.quote(self.target_path)}"
+            f" --output {shlex.quote(self.report_path)}"
+            f" --responses {shlex.quote(responses_path)}"
+        )
+        if self.offline:
+            cmd += " --offline"
+        # Empty for _system, but dispatches to a remote or scheduler env
+        return f"{self.xenv_cmd} {cmd}".strip()
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return _unique_paths(
+            [self.target_path] + super().dvc_deps + self._found_paths
+        )
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        """Declared outputs, stored with Git by default since a report is
+        small text, then what the check writes that isn't declared."""
+        outs: list[str | dict] = []
+        for out in list(self.outputs) + list(self.check_outputs):
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=out.storage == "dvc",
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
     script_path: RelativeChildPathString = Field(
@@ -1685,6 +2156,10 @@ class MatlabCommandStage(Stage):
             cmd = f"{cmd} matlab -noFigureWindows -batch".lstrip()
         cmd += f' "{matlab_cmd}"'
         return cmd
+
+
+# What a shell takes to skip the user's startup files
+NORC_ARGS = {"bash": " --noprofile --norc", "zsh": " -f", "sh": ""}
 
 
 class ShellCommandStage(Stage):
@@ -1739,17 +2214,16 @@ class ShellCommandStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = self.xenv_cmd
-        if self.shell == "zsh":
-            norc_args = "-f"
-        else:
-            norc_args = "--noprofile --norc"
+        # Without startup files; a POSIX sh run like this reads none anyway,
+        # and refuses Bash's options for skipping them
+        norc_args = NORC_ARGS[self.shell]
         command_file = self.command_file_path
         if command_file is not None:
             command_file = self.path_from_wdir(command_file)
-            cmd += f" {self.shell} {norc_args} {command_file}"
+            cmd += f" {self.shell}{norc_args} {command_file}"
             return cmd.strip()
         shell_cmd = self.command.replace('"', '\\"')
-        cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
+        cmd += f' {self.shell}{norc_args} -c "{shell_cmd}"'
         return cmd.strip()
 
 
@@ -1789,11 +2263,7 @@ class ShellScriptStage(Stage):
                 cmd = cmd.replace(dep_txt, "")
             return cmd
         cmd = self.xenv_cmd
-        if self.shell == "zsh":
-            norc_args = "-f"
-        else:
-            norc_args = "--noprofile --norc"
-        cmd += f" {self.shell} {norc_args} {self.script_path}"
+        cmd += f" {self.shell}{NORC_ARGS[self.shell]} {self.script_path}"
         for arg in self.args:
             cmd += f" {quote_arg(arg)}"
         return cmd.strip()
@@ -2152,6 +2622,166 @@ class WordToPdfStage(Stage):
         return (
             f'calkit office word-to-pdf "{self.word_doc_path}" '
             f'-o "{self.out_path}"'
+        )
+
+
+class ManualStepOpen(Model):
+    """What a manual step opens.
+
+    The app is always named, since the default app for a file differs
+    between machines, e.g., Illustrator rather than Inkscape for an SVG.
+    """
+
+    app: str = Field(description="App to open, e.g., 'Inkscape'.")
+    path: str | None = Field(
+        default=None,
+        description="File to open in it, e.g., the Inkscape SVG.",
+    )
+
+
+class ManualStepStage(Stage):
+    """A step someone does manually, e.g., exporting a figure from
+    Photoshop, which the pipeline asks for when its inputs change, e.g.,
+    the Photoshop file.
+
+    Its outputs are kept while it runs, since they're what the person
+    replaces, and the step checks that they changed.
+    """
+
+    kind: Literal["manual-step"] = "manual-step"
+    message: str = Field(
+        description=(
+            "What to do, e.g., 'In Photoshop, export "
+            "figures/wake-diagram.png'."
+        )
+    )
+    open: ManualStepOpen | None = Field(
+        default=None,
+        description="App to open for the step, and the file to open in it.",
+    )
+    environment: str = "_system"
+
+    @property
+    def output_paths(self) -> list[str]:
+        return [o if isinstance(o, str) else o.path for o in self.outputs]
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(persist=True)})
+            else:
+                outs.append(
+                    {out.path: dict(cache=out.storage == "dvc", persist=True)}
+                )
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit manual-step --message {shlex.quote(self.message)}"
+        if self.open is not None:
+            cmd += f" --app {shlex.quote(self.open.app)}"
+            if self.open.path is not None:
+                cmd += f" --open {shlex.quote(self.open.path)}"
+        for path in self.output_paths:
+            cmd += f" --output {shlex.quote(path)}"
+        return cmd
+
+
+class AppExportStage(Stage):
+    """A figure an app exports from the file it's drawn in, e.g., a PNG
+    from an Inkscape SVG. Each app is its own kind, since what it takes and
+    what it needs installed differ.
+
+    A source no app can export without a person, e.g., a Photoshop file, is
+    a manual step instead.
+    """
+
+    source_path: RelativeChildPathString = Field(
+        description="The file to export from."
+    )
+    environment: str = "_system"
+
+    @property
+    def output_path(self) -> str:
+        out = self.outputs[0]
+        return out if isinstance(out, str) else out.path
+
+    @model_validator(mode="after")
+    def _check_one_output(self) -> "AppExportStage":
+        if len(self.outputs) != 1:
+            raise ValueError("An export stage has exactly one output")
+        return self
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = super().dvc_deps
+        if self.source_path not in deps:
+            deps = [self.source_path] + deps
+        return deps
+
+    def run_properties(self) -> dict[str, Any]:
+        # The app runs from the system, so nothing else says which version
+        # made the output
+        from calkit.export import exporters
+
+        return {
+            f"{e.name}_version": e.version()
+            for e in exporters()
+            if e.kind == self.kind
+        }
+
+
+class InkscapeExportStage(AppExportStage):
+    """A figure Inkscape exports from an SVG, e.g., a PNG or PDF."""
+
+    kind: Literal["inkscape-export"] = "inkscape-export"
+    source_path: RelativeChildPathString = Field(
+        description="The SVG to export from."
+    )
+    dpi: int | None = Field(
+        default=None, description="Resolution of an exported PNG."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "InkscapeExportStage":
+        from calkit.export import INKSCAPE
+
+        INKSCAPE.check(self.source_path, self.output_path)
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            f"calkit export inkscape {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
+        )
+        if self.dpi is not None:
+            cmd += f" --dpi {self.dpi}"
+        return cmd
+
+
+class GimpExportStage(AppExportStage):
+    """A figure GIMP exports, flattened, from an XCF file, e.g., a PNG."""
+
+    kind: Literal["gimp-export"] = "gimp-export"
+    source_path: RelativeChildPathString = Field(
+        description="The XCF file to export from."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "GimpExportStage":
+        from calkit.export import GIMP
+
+        GIMP.check(self.source_path, self.output_path)
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f"calkit export gimp {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
         )
 
 
@@ -2555,6 +3185,7 @@ class Pipeline(Model):
                 | QuartoStage
                 | JsonToLatexStage
                 | QuestionsToLatexStage
+                | ReferencesCheckStage
                 | MatlabScriptStage
                 | MatlabCommandStage
                 | ShellCommandStage
@@ -2563,6 +3194,9 @@ class Pipeline(Model):
                 | CommandStage
                 | RScriptStage
                 | WordToPdfStage
+                | ManualStepStage
+                | InkscapeExportStage
+                | GimpExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage
@@ -2642,6 +3276,21 @@ class Pipeline(Model):
         }
         for stage in self.stages.values():
             env_name = stage.outer_environment
+            # An item's runtime, checked when the pipeline was compiled, which
+            # has nowhere to run setup commands
+            if (
+                stage._item_environments
+                and env_name == stage.inner_environment
+            ):
+                if stage.setup or stage.env_default_setup != "replace":
+                    raise ValueError(
+                        f"Stage '{stage.name}' sets 'setup' commands but "
+                        f"runs in environment '{env_name}', which its items "
+                        "pick among runtimes that have no setup step to run "
+                        "them in; run it inside a 'system', 'slurm', or "
+                        f"'pbs' environment, e.g., 'machine:{env_name}'"
+                    )
+                continue
             if env_name != "_system" and env_name not in environments:
                 raise ValueError(
                     f"Stage '{stage.name}' has outer environment "
@@ -2699,7 +3348,10 @@ class Pipeline(Model):
                     stage.setup,
                     stage.env_default_setup,
                 )
-                if stage.inner_environment == stage.outer_environment:
+                if (
+                    stage.inner_environment == stage.outer_environment
+                    or stage._item_environments
+                ):
                     continue
                 inner_env = environments.get(stage.inner_environment)
                 if inner_env is None:
@@ -2726,7 +3378,10 @@ class Pipeline(Model):
             scheduler_label = (
                 "machine switch" if is_machine_switch else str(kind).upper()
             )
-            if stage.kind not in plain_ok_kinds:
+            if (
+                stage.kind not in plain_ok_kinds
+                and not stage._item_environments
+            ):
                 if stage.inner_environment == stage.outer_environment:
                     raise ValueError(
                         f"Stage '{stage.name}' has kind '{stage.kind}' but "
@@ -2813,6 +3468,7 @@ class Pipeline(Model):
                 else StageSchedulerOptions(),
                 **stage_setup,
             )
+            new_stage._item_environments = stage._item_environments
             self.stages[name] = new_stage
             calkit_yaml_stage: dict = {
                 "kind": "shell-script",
@@ -2853,6 +3509,77 @@ class Pipeline(Model):
             converted[name] = calkit_yaml_stage
         return converted
 
+    def write_date_range_state(self, wdir: str | None = None) -> None:
+        """Write the state of each stage's date-range periods, and remove
+        what's left of those of stages that were renamed, deleted, or no
+        longer keep any.
+        """
+        kept = set()
+        for name, stage in self.stages.items():
+            for iteration in stage.iterate_over or []:
+                state_dir = iteration.write_date_range_state(name, wdir=wdir)
+                if state_dir is not None:
+                    kept.add(
+                        os.path.normpath(os.path.join(wdir or ".", state_dir))
+                    )
+        for root in [".calkit/date-ranges", ".calkit/local/date-ranges"]:
+            root_path = os.path.normpath(os.path.join(wdir or ".", root))
+            for dirpath, dirnames, filenames in os.walk(root_path):
+                if os.path.normpath(dirpath) in kept:
+                    dirnames.clear()
+                elif "period.json" in filenames:
+                    _remove_period_file(dirpath, stop=root_path)
+
+    def preprocess_stages(
+        self, project_dir: str | None, write_files: bool = False
+    ) -> None:
+        """Let each stage work out what it depends on from the project,
+        telling it where the project is and what stages make.
+
+        An iterated stage's outputs are patterns, e.g., ``plot-{n}.png``,
+        which match whatever each iteration makes.
+        """
+        outputs: set[str] = set()
+        patterns: list[re.Pattern[str]] = []
+        for stage in self.stages.values():
+            try:
+                dvc_outs = stage.dvc_outs
+            except Exception:
+                continue
+            for dvc_out in dvc_outs:
+                path = (
+                    next(iter(dvc_out))
+                    if isinstance(dvc_out, dict)
+                    else dvc_out
+                )
+                if not isinstance(path, str):
+                    continue
+                path = posixpath.normpath(
+                    posixpath.join(stage.wdir or "", path)
+                )
+                if stage.iterate_over and "{" in path:
+                    patterns.append(
+                        re.compile(
+                            re.sub(
+                                r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)
+                            )
+                            + r"\Z"
+                        )
+                    )
+                elif "${" not in path:
+                    outputs.add(path)
+
+        def is_output(path: str) -> bool:
+            return path in outputs or any(p.match(path) for p in patterns)
+
+        for stage in self.stages.values():
+            stage.preprocess(
+                project_dir,
+                is_output,
+                write_files=write_files,
+                is_exact_output=outputs.__contains__,
+            )
+
     def resolve_procedure_paths(self, procedures: dict) -> None:
         """Tell procedure stages where their procedure is written down.
 
@@ -2883,14 +3610,48 @@ class Pipeline(Model):
 
         Both the stage's inner and outer environments are considered, so a
         SLURM/PBS env used as the outer half of a composite environment
-        contributes its files as stage dependencies.
+        contributes its files as stage dependencies, as do those its items
+        use, when they depend on their values.
         """
+
+        def get_templated_fpath(
+            fpath: str, env_name: str, template: str
+        ) -> str:
+            # The environment's name put back as it's written, e.g., '{env}'
+            parts = fpath.split("/")
+            for i, part in enumerate(parts):
+                if part == env_name or part.startswith(env_name + "."):
+                    parts[i] = template + part[len(env_name) :]
+            return "/".join(parts)
+
         for _, stage in self.stages.items():
-            for env_name in (
-                stage.inner_environment,
-                stage.outer_environment,
-            ):
-                for fpath in env_lock_fpaths.get(env_name, []):
-                    fpath = stage.path_from_wdir(fpath)
-                    if fpath not in stage.inputs:
-                        stage.inputs.append(fpath)
+            fpaths = [
+                fpath
+                for env_name in (
+                    stage.inner_environment,
+                    stage.outer_environment,
+                )
+                for fpath in env_lock_fpaths.get(env_name, [])
+            ]
+            # An item only depends on its own environment's files when
+            # they're named after it, as they usually are, so a skipped
+            # item's needn't exist; otherwise on all of them
+            templated = {
+                tuple(
+                    get_templated_fpath(p, n, stage.inner_environment)
+                    for p in env_lock_fpaths.get(n, [])
+                )
+                for n in stage._item_environments
+            }
+            if len(templated) == 1:
+                fpaths += templated.pop()
+            else:
+                fpaths += [
+                    fpath
+                    for env_name in stage._item_environments
+                    for fpath in env_lock_fpaths.get(env_name, [])
+                ]
+            for fpath in fpaths:
+                fpath = stage.path_from_wdir(fpath)
+                if fpath not in stage.inputs:
+                    stage.inputs.append(fpath)

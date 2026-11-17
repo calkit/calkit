@@ -97,6 +97,8 @@ devcontainer-image: ## Build the dev container image and smoke test it.
 	@echo "🚀 Smoke testing the dev container image"
 	@docker run --rm calkit/devcontainer:dev bash -c \
 		"calkit --version && uv --version && pixi --version && conda --version"
+	@docker run --rm --user vscode calkit/devcontainer:dev bash -lc \
+		"calkit --version && dvc --version && conda --version"
 
 .PHONY: docs
 docs: sync-docs ## Build and serve the documentation.

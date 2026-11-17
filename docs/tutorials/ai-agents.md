@@ -208,7 +208,7 @@ to the raw data it came from.
 We can check the rendered answer with:
 
 ```sh
-calkit list questions
+calkit show question 1
 ```
 
 and verify that the evidence is current with:

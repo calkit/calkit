@@ -116,12 +116,19 @@ def parse_bibtex(text: str) -> list[dict]:
     bibtexparser 2 dropped ``loads`` for ``parse_string`` and returns objects
     instead of dicts, so normalize whichever version is installed to the
     shape version 1 produced: a dict of fields per entry, with the citation
-    key under ``ID`` and the entry type under ``ENTRYTYPE``.
+    key under ``ID`` and the entry type under ``ENTRYTYPE``. Entry types
+    BibTeX doesn't define but biblatex does, e.g., ``@software``, are kept,
+    which version 1 drops by default.
     """
     import bibtexparser  # type: ignore[import-untyped]
 
     if hasattr(bibtexparser, "loads"):
-        return list(bibtexparser.loads(text).entries)
+        from bibtexparser.bparser import (  # type: ignore[import-untyped]
+            BibTexParser,
+        )
+
+        parser = BibTexParser(ignore_nonstandard_types=False)
+        return list(bibtexparser.loads(text, parser=parser).entries)
     entries = []
     for entry in bibtexparser.parse_string(text).entries:
         fields = {field.key: field.value for field in entry.fields}
@@ -632,6 +639,8 @@ def save_docker_images(
     Returns breadcrumbs keyed by image ID, which the environment check reads
     to fetch an image back out of a release when no registry can serve it.
     """
+    from calkit.environments import docker as env_docker
+
     ck_info = calkit.load_calkit_info(wdir=wdir)
     resp = {}
     for env_name, env in (ck_info.get("environments") or {}).items():
@@ -639,8 +648,9 @@ def save_docker_images(
             continue
         if not env.get("path"):
             continue
-        image = calkit.docker.get_image_name(env, env_name)
-        if not image:
+        try:
+            image = env_docker.get_image_name(env_name, env, wdir=wdir)
+        except ValueError:
             continue
         info = calkit.docker.inspect_image(image)
         if info is None:
@@ -880,3 +890,94 @@ def prune_for_stage(
         elif any(p_posix == n or p_posix.startswith(n + "/") for n in needed):
             paths.append(p)
     return overrides, paths
+
+
+def _prompt_optional(text: str, default: str | None) -> str | None:
+    """Prompt for a value that can be left out.
+
+    With no default, a blank answer leaves it out. With one, Enter keeps the
+    default, and a ``-`` leaves it out.
+    """
+    import typer
+
+    if default:
+        answer = typer.prompt(f"{text} ('-' for none)", default=default)
+    else:
+        answer = typer.prompt(
+            f"{text} (blank for none)", default="", show_default=False
+        )
+    answer = answer.strip()
+    return None if answer in ["", "-"] else answer
+
+
+def prompt_authors(save_user: bool = True) -> list[dict]:
+    """Prompt for a release's authors.
+
+    The first author defaults to the user, as recorded in the Calkit config,
+    or failing that their name from Git, since it's usually them releasing
+    their own work. With ``save_user``, what they enter there can be saved to
+    the config, so the next release only needs Enter pressed.
+    """
+    import typer
+
+    from calkit.core import normalize_orcid
+
+    me = calkit.config.get_user_author()
+    authors = []
+    n = 0
+    while True:
+        n += 1
+        author: dict = {}
+        author["first_name"] = typer.prompt(
+            f"Enter the first name of author {n}",
+            default=me["first_name"] if n == 1 else None,
+        )
+        author["last_name"] = typer.prompt(
+            f"Enter the last name of author {n}",
+            default=me["last_name"] if n == 1 else None,
+        )
+        # The user's affiliation and ORCID only prefill when author 1 is
+        # still them, not someone else whose name was typed over theirs
+        is_me = n == 1 and (author["first_name"], author["last_name"]) == (
+            me["first_name"],
+            me["last_name"],
+        )
+        affiliation = _prompt_optional(
+            f"Enter the affiliation of author {n}",
+            default=me["affiliation"] if is_me else None,
+        )
+        if affiliation:
+            author["affiliation"] = affiliation
+        while True:
+            orcid = _prompt_optional(
+                f"Enter the ORCID of author {n}",
+                default=me["orcid"] if is_me else None,
+            )
+            if orcid is None:
+                break
+            try:
+                # Releases want the bare identifier, which CITATION.cff
+                # turns back into a URL
+                author["orcid"] = normalize_orcid(orcid).removeprefix(
+                    "https://orcid.org/"
+                )
+                break
+            except ValueError as e:
+                typer.echo(str(e))
+        authors.append(author)
+        # Author 1 isn't always the person releasing, so ask before saving
+        if (
+            n == 1
+            and save_user
+            and calkit.config.differs_from_user_author(author)
+            and typer.confirm(
+                "Save author 1 as you, to prefill future releases?",
+                default=True,
+            )
+        ):
+            calkit.config.save_user_author(author)
+        if not typer.confirm(
+            "Are there more authors to enter?", default=False
+        ):
+            break
+    return authors

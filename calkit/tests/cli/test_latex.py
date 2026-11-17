@@ -12,12 +12,10 @@ import calkit
 import calkit.git
 import calkit.pipeline
 
-skipif_windows_docker = pytest.mark.skipif(
+# Built with the machine's TeX, or else Calkit's default TeX Live
+skipif_windows_default_tex = pytest.mark.skipif(
     sys.platform == "win32",
-    reason=(
-        "TODO: Docker Linux images are unavailable on windows-latest GHA "
-        "runners"
-    ),
+    reason="TODO: not yet run in the default TeX Live on Windows",
 )
 
 
@@ -125,6 +123,31 @@ def test_from_json(tmp_dir):
     assert r"\newcommand\results" in tex
     assert get_value(tex, "result4") == "hello"
     assert get_value(tex, "sup") == "5.555"
+    # Formats can come one per arg too, as stages pass them
+    subprocess.run(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "test2.json",
+            "-o",
+            "paper/results.tex",
+            "--format",
+            "greeting=say {result4}",
+        ],
+        check=True,
+    )
+    with open("paper/results.tex") as f:
+        assert get_value(f.read(), "greeting") == "say hello"
+    out = subprocess.run(
+        ["calkit", "latex", "from-json", "test2.json", "-o", "r.tex"]
+        + ["--format", "no-equals"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert out.returncode != 0
+    assert "NAME=FORMAT" in out.stderr
 
 
 def test_from_json_keys(tmp_dir):
@@ -185,7 +208,7 @@ def test_from_json_keys(tmp_dir):
     assert "not in nested.json" in out.stderr
 
 
-@skipif_windows_docker
+@skipif_windows_default_tex
 def test_build(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper", exist_ok=True)
@@ -223,7 +246,272 @@ def test_build(tmp_dir):
         assert built[0].count(b"/ID [<") == 1
 
 
-@skipif_windows_docker
+@skipif_windows_default_tex
+def test_build_ck_components(tmp_dir):
+    import struct
+    import zlib
+
+    import pypdfium2
+
+    from calkit.cli import latex as cli_latex
+
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("results")
+    with open("results/metrics.json", "w") as f:
+        json.dump(
+            {
+                "rmse": 0.123456,
+                "big": 1234567,
+                "label": "run_a",
+                "tiny": 1.234e-05,
+                "half": 0.5,
+            },
+            f,
+        )
+    with open("results/count.tex", "w") as f:
+        f.write("Trials: 42.\n")
+    # The smallest PNG TeX will read: one white pixel
+    raw = zlib.compress(b"\x00\xff\xff\xff")
+    png = b"\x89PNG\r\n\x1a\n" + b"".join(
+        struct.pack(">I", len(data))
+        + tag
+        + data
+        + struct.pack(">I", zlib.crc32(tag + data))
+        for tag, data in [
+            (b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)),
+            (b"IDAT", raw),
+            (b"IEND", b""),
+        ]
+    )
+    os.makedirs("figures")
+    with open("figures/plot.png", "wb") as f:
+        f.write(png)
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{calkit}\n"
+            # Options of the document's own don't clash with calkit's
+            "\\usepackage[final]{graphicx}\n"
+            "\\usepackage{hyperref}\n"
+            "\\begin{document}\n"
+            "Error: \\ckvalue[.2f]{results/metrics.json}{rmse}.\n"
+            "Figures: \\ckvalue[.3g]{results/metrics.json}{rmse}.\n"
+            "Options: \\ckvalue[round-mode=places,round-precision=1]"
+            "{results/metrics.json}{rmse}.\n"
+            "Grouped: \\ckvalue[,d]{results/metrics.json}{big}.\n"
+            "Ungrouped: \\ckvalue[.1f]{results/metrics.json}{big}.\n"
+            "Half: \\ckvalue[.3g]{results/metrics.json}{half}.\n"
+            "Large: \\ckvalue[.3g]{results/metrics.json}{big}.\n"
+            "Label: \\ckvalue[.2f]{results/metrics.json}{label}.\n"
+            "Tiny: \\ckvalue[.2f]{results/metrics.json}{tiny}.\n"
+            "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
+            "\\ckfigure[width=1cm]{figures/plot}\n"
+            "\\ckfigure{figures/not-yet.png}\n"
+            "\\ckinclude{results/count}\n"
+            "\\end{document}\n"
+        )
+    # Components can be mapped in without building
+    out = subprocess.run(
+        ["calkit", "latex", "map-components", "paper/main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "figures/not-yet.png is not in the project yet" in out.stdout
+    assert os.path.isfile("paper/_calkit/figures/plot.png")
+    assert os.path.isfile("paper/calkit.sty")
+    # Written whenever it's needed, so kept out of Git, even outside a run
+    ignored = subprocess.run(["git", "check-ignore", "-q", "paper/calkit.sty"])
+    assert ignored.returncode == 0
+    out = subprocess.run(
+        ["calkit", "latex", "build", "paper/main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert os.path.isfile("paper/main.pdf")
+    # Not brought in yet, so it prints as ?? rather than failing the build
+    assert "figures/not-yet.png is not in the project yet" in out.stdout
+    # Nothing says where the figure came from, which a build points out
+    assert "Origin not defined for figures/plot.png" in out.stdout
+
+    def gaps(stdout: str) -> list[str]:
+        return [ln for ln in stdout.splitlines() if "Origin not defined" in ln]
+
+    # Built from the document's folder, it's still the project that says
+    # what's accounted for
+    from_paper = subprocess.run(
+        ["calkit", "latex", "build", "main.tex"],
+        capture_output=True,
+        text=True,
+        cwd="paper",
+    )
+    assert from_paper.returncode == 0, from_paper.stderr
+    assert gaps(from_paper.stdout) == gaps(out.stdout)
+    with open("paper/main.log", errors="replace") as f:
+        log = f.read()
+    assert "figures/not-yet.png hasn't been brought in yet" in log
+    assert "_calkit/figures/plot.png" in log
+
+    def pdf_text() -> str:
+        pdf = pypdfium2.PdfDocument("paper/main.pdf")
+        try:
+            return " ".join(pdf[0].get_textpage().get_text_range().split())
+        finally:
+            pdf.close()
+
+    # calkit.sty formats numbers, from Python specs or siunitx options, and
+    # leaves text alone
+    text = pdf_text()
+    assert "Error: 0.12." in text
+    assert "Figures: 0.123." in text
+    assert "Options: 0.1." in text
+    assert "Grouped: 1,234,567." in text
+    # As in Python, only grouped with a comma, and g neither pads nor
+    # writes a large number in full
+    assert "Ungrouped: 1234567.0." in text
+    assert "Half: 0.5." in text
+    assert "Large: 1.23 × 106" in text
+    # An underscore comes back from the PDF as a space
+    assert "Label: run a." in text
+    # Fixed notation, though the value is written in exponent form
+    assert "Tiny: 0.00." in text
+    assert "Trials: 42." in text
+    # A bookmark shows the value as it is, rather than the command
+    pdf = pypdfium2.PdfDocument("paper/main.pdf")
+    try:
+        titles = [item.get_title() for item in pdf.get_toc()]
+    finally:
+        pdf.close()
+    assert titles == ["RMSE of 0.123456"]
+    # A changed format applies without the values changing
+    with open("paper/_calkit/values.tex") as f:
+        values = f.read()
+    with open("paper/main.tex") as f:
+        main = f.read()
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            main.replace(
+                "[.2f]{results/metrics.json}{rmse}",
+                "[.4f]{results/metrics.json}{rmse}",
+            )
+        )
+    out = subprocess.run(
+        ["calkit", "latex", "build", "paper/main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "Error: 0.1235." in pdf_text()
+    with open("paper/_calkit/values.tex") as f:
+        assert f.read() == values
+    # A file found for one named without an extension, but not copied, e.g.,
+    # stored with DVC and not pulled, prints as ?? too
+    with open("paper/_calkit/values.tex", "a") as f:
+        f.write("\\cksetfile{figures/gone}{figures/gone.png}\n")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            main.replace(
+                "\\end{document}", "\\ckfigure{figures/gone}\n\\end{document}"
+            )
+        )
+    # Compiled without mapping again, with the machine's TeX or Calkit's
+    from calkit.environments import texlive as env_texlive
+
+    latexmk_cmd = ["latexmk", "-pdf", "-cd", "-interaction=nonstopmode"]
+    latexmk_cmd += ["paper/main.tex"]
+    latexmk_env = None
+    default_tex = cli_latex._get_texlive_env(None)
+    if default_tex is not None:
+        latexmk_env = env_texlive.get_run_env_vars(
+            env_texlive.check(*default_tex)
+        )
+        latexmk_cmd = env_texlive.get_run_cmd(latexmk_cmd, latexmk_env)
+    out = subprocess.run(
+        latexmk_cmd,
+        env=latexmk_env,
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    assert out.returncode == 0, out.stdout
+    with open("paper/main.log", errors="replace") as f:
+        assert "figures/gone hasn't been brought in yet" in f.read()
+
+    def link_urls(pdf_path: str) -> list[str]:
+        # hyperref's link targets, from wherever pdfTeX put them
+        with open(pdf_path, "rb") as f:
+            data = f.read()
+        chunks = [data]
+        for m in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.S):
+            try:
+                chunks.append(zlib.decompress(m.group(1)))
+            except zlib.error:
+                pass
+        return sorted(
+            u.decode()
+            for chunk in chunks
+            for u in re.findall(rb"/URI\s*\((.*?)\)", chunk)
+        )
+
+    # Components link to the project on its hub only when asked, whether or
+    # not the document loads hyperref itself
+    with open("calkit.yaml", "a") as f:
+        f.write("owner: someone\nname: test\n")
+    with open("figures/other.png", "wb") as f:
+        f.write(png)
+    os.makedirs("tables")
+    with open("tables/float.tex", "w") as f:
+        f.write(
+            "\\begin{table}\\caption{Generated}"
+            "\\begin{tabular}{l}a\\end{tabular}\\end{table}\n"
+        )
+    # So do captions: one in a float with a figure, unless it has several,
+    # and one in a generated table, but not one that's for neither
+    body = (
+        "\\begin{document}\n"
+        "\\ckvalue[.2f]{results/metrics.json}{rmse}\n"
+        "\\begin{figure}\\ckfigure[width=1cm]{figures/plot}"
+        "\\caption{Plot}\\end{figure}\n"
+        "\\begin{figure}\\ckfigure[width=1cm]{figures/plot}"
+        "\\ckfigure{figures/other.png}\\caption{Both}\\end{figure}\n"
+        "\\cktable{tables/float}\n"
+        "\\begin{figure}\\rule{1cm}{1cm}\\caption{Other}\\end{figure}\n"
+        "\\end{document}\n"
+    )
+    preambles = {
+        "unasked": "\\usepackage{calkit}\n\\usepackage{hyperref}\n",
+        "asked": "\\usepackage[links]{calkit}\n",
+        "own": "\\usepackage[links]{calkit}\n\\usepackage[colorlinks]{hyperref}\n",
+        "captions": "\\usepackage[links]{calkit}\n\\usepackage{caption}\n",
+    }
+    urls = {}
+    for name, preamble in preambles.items():
+        with open(f"paper/{name}.tex", "w") as f:
+            f.write("\\documentclass{article}\n" + preamble + body)
+        out = subprocess.run(
+            ["calkit", "latex", "build", f"paper/{name}.tex"],
+            capture_output=True,
+            text=True,
+        )
+        assert out.returncode == 0, out.stderr
+        urls[name] = link_urls(f"paper/{name}.pdf")
+    base = "https://calkit.io/someone/test"
+    assert urls["unasked"] == []
+    assert urls["asked"] == [
+        f"{base}/figures?path=figures/other.png",
+        f"{base}/figures?path=figures/plot.png",
+        f"{base}/figures?path=figures/plot.png",
+        f"{base}/figures?path=figures/plot.png",
+        f"{base}/results?path=results/metrics.json&key=rmse",
+        f"{base}/tables?path=tables/float.tex",
+    ]
+    assert urls["own"] == urls["asked"]
+    assert urls["captions"] == urls["asked"]
+
+
+@skipif_windows_default_tex
 def test_build_output_and_aux_dirs(tmp_dir):
     # --output-dir / --aux-dir are given relative to the current directory but
     # latexmk runs with -cd, so the build command must translate them to the
@@ -268,6 +556,138 @@ def test_build_output_and_aux_dirs(tmp_dir):
             assert f.read().count(b"/ID [<") == 1, pdf
 
 
+@pytest.mark.xdist_group("texlive")
+def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    subprocess.check_call(["git", "init", "-q"])
+    calkit.save_calkit_info(
+        {
+            "name": "tex",
+            "environments": {"tex": {"kind": "texlive"}},
+            "pipeline": {
+                "stages": {
+                    "build-paper": {
+                        "kind": "latex",
+                        "target_path": "paper/main.tex",
+                        "environment": "tex",
+                    }
+                }
+            },
+        }
+    )
+    os.makedirs("paper")
+    # siunitx needs array.sty, from tools, which the document doesn't name,
+    # so that's read from siunitx itself. A package named by a macro can't
+    # be read from the source, so that's added after a failed compile.
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{amsmath}\n"
+            "\\usepackage{siunitx} % \\usepackage{nonexistent}\n"
+            "\\newcommand{\\tablepkg}{booktabs}\n"
+            "\\usepackage{\\tablepkg}\n"
+            "\\begin{document}\n\\SI{3}{\\meter}, $\\text{a}$\n"
+            "\\end{document}\n"
+        )
+    subprocess.check_call(
+        ["calkit", "latex", "build", "-e", "tex", "paper/main.tex"]
+    )
+    assert os.path.isfile("paper/main.pdf")
+    # What it was missing is recorded in the lock, and the spec stays as
+    # written
+    env = calkit.load_calkit_info()["environments"]["tex"]
+    assert env == {"kind": "texlive"}
+    with open(".calkit/env-locks/tex.json") as f:
+        lock = json.load(f)
+    assert {"amsmath", "booktabs", "siunitx", "tools"} <= set(lock["added"])
+    assert set(lock["added"]) <= set(lock["packages"])
+    # Relocking it explicitly keeps them
+    subprocess.check_call(["calkit", "update", "env", "-n", "tex", "--lock"])
+    with open(".calkit/env-locks/tex.json") as f:
+        assert json.load(f)["added"] == lock["added"]
+    # A stage builds in it, with the lock as a dependency, and nothing is
+    # out of date afterwards
+    os.remove("paper/main.pdf")
+    subprocess.check_call(["calkit", "run"])
+    assert os.path.isfile("paper/main.pdf")
+    with open("dvc.yaml") as f:
+        assert ".calkit/env-locks/tex.json" in f.read()
+    out = subprocess.check_output(["calkit", "status"], text=True)
+    assert "Pipeline is up to date" in out
+    # Converting it from the source gets TeX4ht without locking it, since
+    # it isn't part of the pipeline
+    if calkit.docx.find_soffice():
+        with open(".calkit/env-locks/tex.json") as f:
+            lock = json.load(f)
+        subprocess.check_call(
+            [
+                "calkit",
+                "latex",
+                "to-docx",
+                "--engine",
+                "libreoffice",
+                "--output",
+                "main.docx",
+                "paper/main.pdf",
+            ]
+        )
+        assert os.path.isfile("main.docx")
+        with open(".calkit/env-locks/tex.json") as f:
+            assert json.load(f) == lock
+        out = subprocess.check_output(["calkit", "status"], text=True)
+        assert "Pipeline is up to date" in out
+
+
+def test_get_texlive_env(tmp_dir, monkeypatch):
+    from calkit.cli import latex as cli_latex
+
+    # Removed afterward, since the project's variables are set in-process
+    monkeypatch.setenv("CK_TEX_TEST", "")
+    monkeypatch.delenv("CK_TEX_TEST")
+    tex = {"kind": "texlive"}
+    calkit.save_calkit_info(
+        {
+            "env_vars": {"CK_TEX_TEST": "1"},
+            "environments": {
+                "tex": tex,
+                "old": {"kind": "texlive", "release": 2024},
+                "auto": {
+                    "kind": "switch",
+                    "switch": [
+                        {
+                            "when": [{"env_var_set": "CK_TEX_TEST"}],
+                            "use": "tex",
+                        },
+                        {"use": "old"},
+                    ],
+                },
+            },
+        }
+    )
+    # A switch picks by the project's variables, as in 'calkit xenv'
+    assert cli_latex._get_texlive_env("auto") == ("tex", tex)
+    assert os.environ["CK_TEX_TEST"] == "1"
+    # Without an environment, the machine's TeX if it has one, else Calkit's
+    # default TeX Live, locked in the store rather than the project
+    from calkit.environments import texlive as env_texlive
+
+    for installed, expected in [
+        (True, None),
+        (
+            False,
+            (env_texlive.DEFAULT_ENV_NAME, env_texlive.DEFAULT_ENVIRONMENT),
+        ),
+    ]:
+        monkeypatch.setattr(calkit, "check_dep_exists", lambda d: installed)
+        assert cli_latex._get_texlive_env(None) == expected
+    assert env_texlive.get_lock_fpath(
+        env_texlive.DEFAULT_ENV_NAME, env_texlive.DEFAULT_ENVIRONMENT
+    ) == os.path.join(env_texlive.get_store_dir(), "default-lock.json")
+    assert env_texlive.get_lock_fpath("tex", tex) == os.path.join(
+        ".calkit", "env-locks", "tex.json"
+    )
+
+
 def test_build_localizes_synctex(tmp_dir, monkeypatch):
     import gzip
 
@@ -287,12 +707,61 @@ def test_build_localizes_synctex(tmp_dir, monkeypatch):
         return 0
 
     monkeypatch.setattr(cli_latex, "_tex_cmd", lambda cmd, **kwargs: cmd)
+    monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
     monkeypatch.setattr(cli_latex, "_run_latexmk", run_latexmk)
     cli_latex.build("paper/main.tex", latexmk_rc_path="paper/latexmkrc")
     with gzip.open("paper/build/main.synctex.gz", "rt") as f:
         text = f.read()
     here = os.path.realpath("paper/main.tex").replace(os.sep, "/")
     assert f"Input:1:{here}" in text
+
+
+def test_build_dirs_relative_to_tex_dir(
+    tmp_dir: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from calkit.cli import latex as cli_latex
+
+    os.makedirs("pubs/paper")
+    with open("pubs/paper/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    with open("main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    cmds: list[list[str]] = []
+    monkeypatch.setattr(cli_latex, "_tex_cmd", lambda cmd, **kwargs: cmd)
+    monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        cli_latex, "_run_latexmk", lambda cmd, **kwargs: cmds.append(cmd)
+    )
+    # Like Windows, which resolves 'aux' to a DOS device
+    relpath = os.path.relpath
+
+    def device_relpath(path: str, start: str = os.curdir) -> str:
+        if os.path.basename(os.path.normpath(path)).lower() == "aux":
+            raise ValueError("path is on mount '\\\\.\\aux', start on 'C:'")
+        return relpath(path, start)
+
+    monkeypatch.setattr(os.path, "relpath", device_relpath)
+    for tex, output_dir, aux_dir, expected in [
+        ("pubs/paper/main.tex", None, "aux", ["-auxdir=../../aux"]),
+        (
+            "pubs/paper/main.tex",
+            "pubs/paper/build",
+            "pubs/paper/aux",
+            ["-outdir=build", "-auxdir=aux"],
+        ),
+        (
+            "pubs/paper/main.tex",
+            "pubs/paper",
+            "pubs/other/aux",
+            ["-outdir=.", "-auxdir=../other/aux"],
+        ),
+        ("main.tex", "build", "aux", ["-outdir=build", "-auxdir=aux"]),
+        ("main.tex", None, "./AUX/", ["-auxdir=AUX"]),
+    ]:
+        cmds.clear()
+        cli_latex.build(tex, output_dir=output_dir, aux_dir=aux_dir)
+        dirs = [a for a in cmds[0] if a.startswith(("-outdir=", "-auxdir="))]
+        assert dirs == expected, (tex, output_dir, aux_dir)
 
 
 def _commit(message: str) -> None:
@@ -758,6 +1227,49 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert result.returncode == 0, result.stderr
     old_md5 = hashlib.md5(b"old\n").hexdigest()
     assert os.path.isfile(f".dvc/cache/files/md5/{old_md5[:2]}/{old_md5[2:]}")
+    # What each revision's calkit.sty commands include is fetched as it was
+    # then, even with no stage depending on it, at the paths TeX would try
+    os.makedirs("results", exist_ok=True)
+    os.makedirs("notes")
+    with open("notes/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\nX: \\ckvalue{results/m.json}{x}.\n"
+            "\\cktable{tables/t}\n\\end{document}\n"
+        )
+    os.makedirs("tables", exist_ok=True)
+    for x in [1, 2]:
+        with open("results/m.json", "w") as f:
+            json.dump({"x": x}, f)
+        with open("tables/t.tex", "w") as f:
+            f.write(f"Table {x}\n")
+        subprocess.check_call(
+            ["calkit", "dvc", "add", "-q", "results/m.json", "tables/t.tex"]
+        )
+        _commit(f"notes {x}")
+        if x == 1:
+            subprocess.check_call(["git", "tag", "notes-v1"])
+    os.remove("results/m.json")
+    os.remove("tables/t.tex")
+    result = subprocess.run(
+        ["calkit", "latex", "diff", "notes/main.tex", "--from", "notes-v1"]
+        + ["--to", "HEAD", "--keep-tex", "--force"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    kept_stem = get_diff_path(
+        "notes/main.tex", "notes-v1", "HEAD"
+    ).removesuffix(".pdf")
+    with open(f"{kept_stem}-old.tex", encoding="utf-8") as f:
+        old_tex = f.read()
+    with open(f"{kept_stem}-new.tex", encoding="utf-8") as f:
+        new_tex = f.read()
+    assert "X: \\cknum[]{1}." in old_tex
+    assert "Table 1" in old_tex
+    assert "X: \\cknum[]{2}." in new_tex
+    assert "Table 2" in new_tex
 
 
 def test_marked_up_digest_ignores_the_header():
@@ -782,7 +1294,7 @@ def test_marked_up_digest_ignores_the_header():
     assert _marked_up_digest(changed) != _marked_up_digest(first)
 
 
-@skipif_windows_docker
+@skipif_windows_default_tex
 def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     # Two revisions that resolve to the same commit is what a pull request
     # diff looks like from the default branch. The pipeline resolves both
@@ -865,14 +1377,27 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     from calkit.cli import latex as cli_latex
     from calkit.latex import find_missing_tex_files
 
-    # What LaTeX says, for a style file and for a font it has no metrics for
+    # What LaTeX says, for a style file, a font it has no metrics or
+    # outlines for, and a Lua module
     log = (
         "! LaTeX Error: File `xurl.sty' not found.\n"
         "! Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable: Metric (TFM) "
         "file not found.\n"
         "! LaTeX Error: File `xurl.sty' not found.\n"
+        "[\\directlua]:1: module 'pdftexcmds' not found:\n"
+        "!pdfTeX error: pdflatex (file ecrm1000): Font ecrm1000 at 600 not "
+        "found\n"
+        "! Font TU/texgyretermes-regular.otf(0)/m/n/10=[texgyretermes-regular"
+        ".otf]/OT at\n 10.0pt not loadable: Metric (TFM) file or installed "
+        "font not found.\n"
     )
-    assert find_missing_tex_files(log) == ["xurl.sty", "pcrr7t.tfm"]
+    assert find_missing_tex_files(log) == [
+        "xurl.sty",
+        "pcrr7t.tfm",
+        "pdftexcmds.lua",
+        "ecrm1000.pfb",
+        "texgyretermes-regular.otf",
+    ]
     assert find_missing_tex_files("Output written on main.pdf") == []
     os.makedirs("paper")
     log_path = os.path.join("paper", "main.log")
@@ -895,7 +1420,10 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
 
     def run(cmd, **kwargs):
         calls.append(cmd)
-        if cmd[0] == "latexmk":
+        if "printenv" in cmd:
+            out = "/work/.calkit/local/texmf\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=out)
+        if "latexmk" in cmd:
             captured.append(kwargs.get("capture_output"))
             return latexmk(cmd)
         if "search" in cmd:
@@ -910,17 +1438,28 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     captured: list[bool] = []
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: False)
-    monkeypatch.setattr(
-        calkit.docker, "ensure_image_available", lambda image: None
-    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "tex": {
+                        "kind": "docker",
+                        "image": calkit.latex.DEFAULT_LATEX_IMAGE,
+                    }
+                }
+            },
+            f,
+        )
 
-    def build(quiet: bool = False):
+    def build(quiet: bool = False, environment: str | None = "tex"):
         return cli_latex._run_latexmk(
             ["latexmk", "paper/main.tex"],
-            env=None,
+            env_vars={},
             log_path=log_path,
             fdb_path=fdb_path,
-            environment=None,
+            environment=environment,
+            texlive_env=None,
+            no_check=False,
             verbose=False,
             quiet=quiet,
         )
@@ -930,24 +1469,55 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     assert build() == 0
     installs = [c for c in calls if "install" in c]
     assert len(installs) == 1 and installs[0][-1] == "xurl"
-    assert "TEXMFHOME=/work/.calkit/local/texmf" in installs[0]
     assert os.path.isdir(os.path.join(".calkit", "local", "texmf"))
     # Something fetching doesn't fix fails rather than looping
     state["installed"].clear()
     state["unfetchable"] = {"nope.sty"}
     calls.clear()
     assert build() == 12
-    assert len([c for c in calls if c[0] == "latexmk"]) == 2
+    assert len([c for c in calls if "latexmk" in c]) == 2
     # A system TeX is the user's, so nothing is fetched into it
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: True)
     calls.clear()
-    assert build() == 12
+    assert build(environment=None) == 12
     assert not [c for c in calls if "tlmgr" in c]
     # Quiet keeps latexmk's output out of the way, for a caller that reports
     # what went wrong from the log
     captured.clear()
-    build(quiet=True)
+    build(quiet=True, environment=None)
     assert captured == [True]
+    # A TeX Live environment gets the engine latexmk will compile with,
+    # which a log can't name, since it fails to start
+    from calkit.environments import texlive as env_texlive
+
+    added: list[list[str]] = []
+    monkeypatch.setattr(
+        env_texlive,
+        "add_packages",
+        lambda name, env, packages: added.append(packages) or packages,
+    )
+    monkeypatch.setattr(env_texlive, "check", lambda *a, **kw: "view")
+    monkeypatch.setattr(
+        env_texlive, "get_run_env_vars", lambda view: {"PATH": view}
+    )
+    state["unfetchable"] = set()
+    state["installed"] = {"xurl.sty"}
+    for args, expected in [(["-xelatex"], [["xetex"]]), ([], [])]:
+        added.clear()
+        assert (
+            cli_latex._run_latexmk(
+                ["latexmk", "-pdf", *args, "paper/main.tex"],
+                env_vars={},
+                log_path=log_path,
+                fdb_path=fdb_path,
+                environment="tex",
+                texlive_env=("tex", {"kind": "texlive"}),
+                no_check=False,
+                verbose=False,
+            )
+            == 0
+        )
+        assert added == expected
 
 
 def test_from_questions(tmp_dir):
@@ -1177,7 +1747,8 @@ def test_comments(tmp_dir):
             "<!-- calkit values path=r.json -->\n"
             "\n"
             "Some **bold** text with a [link](https://x.org),\n"
-            "it's <!-- calkit value key=a -->2<!-- /calkit value -->x.\n"
+            "it's <!-- calkit value key=a -->2<!-- /calkit value -->x."
+            " <!-- /calkit values -->\n"
             "\n"
             "<!-- calkit stage name=s -->\n"
             "```python\n"
@@ -1298,6 +1869,7 @@ def test_from_markdown(tmp_dir):
             "<!-- calkit values path=results/r.json -->\n"
             "It's <!-- calkit value key=gain -->1.0<!-- /calkit value -->x"
             " faster.\n"
+            "<!-- /calkit values -->\n"
         )
     with open("template.tex", "w") as f:
         f.write("$body$\nBuilt by $calkit-version$ from $project$.\n")

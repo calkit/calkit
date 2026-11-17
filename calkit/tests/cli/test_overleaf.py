@@ -15,7 +15,7 @@ import typer
 from typer.testing import CliRunner
 
 import calkit
-import calkit.latex
+import calkit.environments.texlive
 from calkit.cli.overleaf import (
     _extract_title_from_tex,
     _get_overleaf_auth,
@@ -92,8 +92,7 @@ def test_overleaf(tmp_dir):
     # Check the TeX environment and pipeline was created properly
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["tex"]
-    assert env["kind"] == "docker"
-    assert env["image"] == calkit.latex.DEFAULT_LATEX_IMAGE
+    assert env == calkit.environments.texlive.DEFAULT_ENVIRONMENT
     stage = ck_info["pipeline"]["stages"]["build-ol-project"]
     assert stage["kind"] == "latex"
     assert stage["environment"] == "tex"
@@ -110,6 +109,14 @@ def test_overleaf(tmp_dir):
     with open("ol-project/main.tex", "a") as f:
         f.write("\nHere's another line from main project")
     repo.git.commit(["ol-project/main.tex", "-m", "Local edit"])
+    # Another synced folder, which resolving the conflict leaves alone
+    ck_info = calkit.load_calkit_info()
+    ck_info["overleaf_sync"]["other"] = {
+        "url": "https://www.overleaf.com/project/other123"
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.commit(["calkit.yaml", "-m", "Sync another folder"])
     res = subprocess.run(
         ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
         capture_output=True,
@@ -119,7 +126,7 @@ def test_overleaf(tmp_dir):
         txt = f.read()
     assert ">>>>>>>" in txt
     # Now let's resolve the commit without actually editing the file
-    subprocess.run(
+    res = subprocess.run(
         [
             "calkit",
             "overleaf",
@@ -128,8 +135,24 @@ def test_overleaf(tmp_dir):
             "--no-build",
             "--resolve",
         ],
-        check=True,
+        capture_output=True,
+        text=True,
     )
+    assert res.returncode == 0, res.stderr
+    assert "Syncing ol-project" in res.stdout
+    assert "other" not in res.stdout
+    ck_info = calkit.load_calkit_info()
+    del ck_info["overleaf_sync"]["other"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    info_fpath = calkit.overleaf.get_sync_info_fpath()
+    with open(info_fpath) as f:
+        private_info = json.load(f)
+    del private_info["other"]
+    with open(info_fpath, "w") as f:
+        json.dump(private_info, f, indent=2)
+    repo.git.add(["calkit.yaml", info_fpath])
+    repo.git.commit(["-m", "Stop syncing the other folder"])
     # Now make another change on Overleaf but allow the sync to succeed
     with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
         f.write("\nHere's another line from Overleaf")
@@ -533,6 +556,65 @@ def test_overleaf_sync_trailing_slash_or_space(tmp_dir):
         text=True,
     )
     assert res2.returncode == 0, f"Trailing space sync failed: {res2.stderr}"
+
+
+def test_overleaf_link(tmp_dir):
+    pid = str(uuid.uuid4())
+    ol_repo = _make_temp_overleaf_project(pid)
+    ol_repo.git.config(["receive.denyCurrentBranch", "ignore"])
+    subprocess.run(["calkit", "init"], check=True)
+    repo = git.Repo()
+    tmp_remote = (
+        Path(tempfile.gettempdir()) / "overleaf-sync-remotes" / pid
+    ).as_posix()
+    os.makedirs(tmp_remote, exist_ok=True)
+    git.Repo.init(path=tmp_remote, bare=True)
+    repo.git.config(["push.autoSetupRemote", "true"])
+    repo.git.remote(["add", "origin", tmp_remote])
+    ol_url = calkit.overleaf.get_git_remote_url(pid, "no token")
+    # A paper already in the project, with no title the TeX would give
+    os.makedirs("paper")
+    with open(os.path.join("paper", "main.tex"), "w") as f:
+        f.write("\\documentclass{article}\n\\begin{document}\nHi\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "paper": {
+                "kind": "latex",
+                "environment": "tex",
+                "target_path": "paper/main.tex",
+            }
+        }
+    }
+    ck_info["publications"] = [
+        {"path": "paper/main.pdf", "title": "A paper", "kind": "report"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.add("-A")
+    repo.git.commit("-m", "Add paper")
+    # Linking keeps the publication, fills in its stage, and pushes
+    subprocess.run(["calkit", "overleaf", "link", "paper", ol_url], check=True)
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["publications"] == [
+        {
+            "path": "paper/main.pdf",
+            "title": "A paper",
+            "kind": "report",
+            "stage": "paper",
+        }
+    ]
+    assert list(ck_info["pipeline"]["stages"]) == ["paper"]
+    assert ck_info["overleaf_sync"]["paper"]["url"] == ol_url
+    assert "Hi" in ol_repo.git.show("HEAD:main.tex")
+    # A folder already synced is refused before anything changes
+    res = subprocess.run(
+        ["calkit", "overleaf", "link", "paper", ol_url],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "already synced with Overleaf" in res.stderr + res.stdout
 
 
 def test_get_repo_disables_credential_store(tmp_dir):
@@ -1465,6 +1547,14 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "input")
+    # The first push must work without push.autoSetupRemote, which CI sets
+    # globally, and which no other config can turn back off
+    git_config = os.path.join(tempfile.mkdtemp(), "config")
+    open(git_config, "w").close()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", git_config)
+    for role in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Calkit Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@calkit.org")
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     remote = tempfile.mkdtemp()
@@ -1961,6 +2051,15 @@ def test_overleaf_credentials(monkeypatch):
 
     monkeypatch.setattr(calkit.overleaf, "get_repo", get_repo)
     monkeypatch.setattr(calkit.overleaf, "pull", pull)
+    # Nothing's saved to the hub until a test says so
+    hub_saved: dict = {}
+
+    def hub_get(path, **kwargs):
+        if path not in hub_saved:
+            raise RuntimeError("Not found")
+        return hub_saved[path]
+
+    monkeypatch.setattr(calkit.hub, "get", hub_get)
 
     class Terminal(io.StringIO):
         def isatty(self):
@@ -1988,6 +2087,19 @@ def test_overleaf_credentials(monkeypatch):
     with pytest.raises(typer.Exit):
         _get_pulled_overleaf_repo("abc", "expired")
     assert saved == ["fresh"]
+    # A newer token saved to the hub, e.g., from another computer, is used
+    # instead, without asking
+    hub_saved["/user/overleaf-token"] = {"access_token": "from-hub"}
+    tokens_tried.clear()
+    repo, token = _get_pulled_overleaf_repo("abc", "expired")
+    assert tokens_tried == ["expired", "from-hub"]
+    assert token == "from-hub" and saved == ["fresh", "from-hub"]
+    # But not the one just rejected
+    hub_saved["/user/overleaf-token"] = {"access_token": "expired"}
+    with pytest.raises(typer.Exit):
+        _get_pulled_overleaf_repo("abc", "expired")
+    del hub_saved["/user/overleaf-token"]
+    saved.remove("from-hub")
     # A rejected session should prompt for a new one the same way
     sessions_tried = []
 
@@ -2086,6 +2198,11 @@ def test_overleaf_credentials(monkeypatch):
     config.overleaf_session = None
     hub["/user/overleaf-token"] = {"access_token": "olp_hub"}
     assert _get_overleaf_auth() == config.overleaf_token == "olp_hub"
+    # A token on the hub comes before a session here too
+    config.overleaf_token = None
+    config.overleaf_session = "here"
+    assert _get_overleaf_auth() == "olp_hub"
+    config.overleaf_session = None
     # A rejected session is replaced by a newer one on the hub without
     # prompting or warning, but the same one again isn't retried, however
     # it's written
@@ -2107,7 +2224,9 @@ def test_overleaf_credentials(monkeypatch):
         _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))
     assert warnings == ["Session expired"]
     # A rejected Git token falls back to a browser session if there is one,
-    # since tokens stop working when Premium ends, and is forgotten
+    # since tokens stop working when Premium ends, and is forgotten, unless
+    # the hub has a newer token
+    del hub["/user/overleaf-token"]
     config.overleaf_token = calkit.config.KeyringOptionalSecret("expired")
     config.overleaf_session = calkit.config.KeyringOptionalSecret("fresh")
     tokens_tried.clear()
@@ -2118,3 +2237,8 @@ def test_overleaf_credentials(monkeypatch):
     assert sessions_tried == ["fresh"]
     assert config.overleaf_token is None
     assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    # Nor is the hub's copy of it tried first again
+    hub["/user/overleaf-token"] = {"access_token": "expired"}
+    assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    assert config.overleaf_token is None
+    del hub["/user/overleaf-token"]

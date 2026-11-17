@@ -154,7 +154,8 @@ popup.html             Toolbar popup page, built to dist/popup.html
 options.html           Options page, built to dist/options.html
 src/background/        Service worker: auth, API calls, message routing
 src/content/           One content script per site (github, overleaf,
-                       references)
+                       references), plus overleaf-editor, which runs in
+                       Overleaf's own world to mark problems in its editor
 src/core/              Hub config, storage, API client, page detection, UI
 src/popup/             Popup script and shared page styles
 src/options/           Options script

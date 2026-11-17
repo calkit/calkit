@@ -8,11 +8,13 @@ import {
   Button,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import type { AxiosError } from "axios"
 import React from "react"
 import { useForm } from "react-hook-form"
 
-import { ProjectsService, UsersService } from "../../client"
+import { OrgsService, ProjectsService, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import { handleError } from "../../lib/errors"
 
 interface DeleteProps {
   type: string
@@ -24,6 +26,8 @@ interface DeleteProps {
   // For a GitHub-less (native) collaborator, whose removal is keyed by user id
   // rather than a GitHub username.
   userId?: string | null
+  // For an org member, whose removal is keyed by username
+  orgName?: string
   // Called once the deletion succeeds, e.g., to leave a page for what's gone
   onDeleted?: () => void
 }
@@ -36,6 +40,7 @@ const Delete = ({
   projectOwner,
   projectName,
   userId,
+  orgName,
   onDeleted,
 }: DeleteProps) => {
   const queryClient = useQueryClient()
@@ -73,6 +78,11 @@ const Delete = ({
       } else {
         throw new Error("No collaborator identifier")
       }
+    } else if (type === "Org member" && orgName) {
+      await OrgsService.deleteOrgMember({
+        org_name: orgName,
+        username: id,
+      }).then((response) => response.data)
     } else if (type === "Question" && projectOwner && projectName) {
       await ProjectsService.deleteProjectQuestion({
         owner_name: projectOwner,
@@ -95,7 +105,13 @@ const Delete = ({
       onClose()
       onDeleted?.()
     },
-    onError: () => {
+    onError: (err: AxiosError) => {
+      // A refusal to remove an org member has a reason worth showing, e.g.,
+      // that they're its last owner
+      if (type === "Org member") {
+        handleError(err, showToast)
+        return
+      }
       showToast(
         "An error occurred.",
         `An error occurred while deleting the ${type.toLowerCase()}.`,
@@ -112,6 +128,11 @@ const Delete = ({
         queryClient.invalidateQueries({
           queryKey: ["projects", projectOwner, projectName, "collaborators"],
         })
+      }
+      if (type === "Org member") {
+        queryClient.invalidateQueries({ queryKey: ["org-users", orgName] })
+        // Removing yourself takes away your role on the org page
+        queryClient.invalidateQueries({ queryKey: ["accounts", orgName] })
       }
       if (type === "Question") {
         queryClient.invalidateQueries({

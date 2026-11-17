@@ -516,7 +516,8 @@ def test_markdown_pdf(tmp_path, monkeypatch):
         "<!-- calkit values path=results/r.json -->\n"
         "It's <!-- calkit value key=gain -->1.0<!-- /calkit value -->x"
         " faster, see ![remote](https://example.org/a.png), ![plot][p],"
-        " ![Q] and `![inline](code.png)`.\n\n"
+        " ![Q] and `![inline](code.png)`.\n"
+        "<!-- /calkit values -->\n\n"
         "```md\n"
         "<!-- calkit value key=gain -->1.0<!-- /calkit value -->\n"
         "![example](missing.png)\n"
@@ -1454,6 +1455,7 @@ def test_values(tmp_path, monkeypatch):
         "Elsewhere: <!-- calkit value key=n path=other.json -->"
         "<!-- /calkit value -->, <!-- calkit value key=ok --><!-- /calkit value -->"
         ", <!-- calkit value key=label --><!-- /calkit value -->.\n\n"
+        "<!-- /calkit values -->\n\n"
         "````md\n"
         "<!-- calkit value key=rms -->example<!-- /calkit value -->\n"
         "````\n\n"
@@ -1515,6 +1517,265 @@ def test_values(tmp_path, monkeypatch):
     # A value annotation on a fence is a mistake, not a block
     with pytest.raises(MarkdownParseError, match="inline marker"):
         parse_markdown("```python calkit value key=rms\npass\n```\n")
+    # YAML and TOML results files are read by extension, as calkit.sty does
+    (tmp_path / "r.yaml").write_text("fit:\n  rms: 0.5\n")
+    (tmp_path / "r.toml").write_text("[fit]\nn = 12\n")
+    (tmp_path / "r.out").write_text('{"n": 3}')
+    new, _ = set_values(
+        "<!-- ckvalue r.yaml fit.rms .2f -->?<!-- /ckvalue -->, "
+        "<!-- ckvalue r.toml fit.n -->?<!-- /ckvalue -->, "
+        "<!-- ckvalue r.out n -->?<!-- /ckvalue -->\n",
+        "README.md",
+    )
+    assert new == (
+        "<!-- ckvalue r.yaml fit.rms .2f -->0.50<!-- /ckvalue -->, "
+        "<!-- ckvalue r.toml fit.n -->12<!-- /ckvalue -->, "
+        "<!-- ckvalue r.out n -->3<!-- /ckvalue -->\n"
+    )
+    (tmp_path / "bad.toml").write_text("not = [toml\n")
+    with pytest.raises(MarkdownParseError, match="not valid TOML"):
+        set_values("<!-- ckvalue bad.toml n -->?<!-- /ckvalue -->\n", "x.md")
+
+
+def test_value_blocks_and_brackets(tmp_path, monkeypatch):
+    from calkit.markdown import (
+        MarkdownParseError,
+        extract_values,
+        heal_markers,
+        pdf_inputs,
+        set_values,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    results = {"metrics": "results.json"}
+    # In a block, a marker naming no source takes the block's: a long one
+    # without 'path=', or a compact one giving only its key, by name or as
+    # its one positional argument. One naming its own keeps it.
+    text = (
+        "<!-- calkit values path=r.json -->\n\n"
+        "<!-- calkit value key=a -->1<!-- /calkit value -->, "
+        "<!-- ckvalue key=b -->2<!-- /ckvalue -->, "
+        "<!-- ckvalue c -->3<!-- /ckvalue -->, "
+        "<!-- ckvalue d format=.1f -->4<!-- /ckvalue -->, "
+        "<!-- ckvalue other.json e -->5<!-- /ckvalue -->, "
+        "<!-- ckvalue metrics f -->6<!-- /ckvalue -->\n\n"
+        "<!-- /calkit values -->\n\n"
+        "<!-- ckvalue other.json g -->7<!-- /ckvalue -->\n"
+    )
+    assert [
+        (v.key, v.path, v.format)
+        for v in extract_values(text, "x.md", results=results)
+    ] == [
+        ("a", "r.json", None),
+        ("b", "r.json", None),
+        ("c", "r.json", None),
+        ("d", "r.json", "{:.1f}"),
+        ("e", "other.json", None),
+        ("f", "results.json", None),
+        ("g", "other.json", None),
+    ]
+    # A block must be ended, and an end must end something, with a hint
+    for bad, match, line in [
+        (
+            "<!-- calkit values path=r.json -->\n\n"
+            "<!-- calkit value key=a -->1<!-- /calkit value -->\n",
+            "add '<!-- /calkit values -->' after the last value",
+            1,
+        ),
+        ("Text.\n\n<!-- /calkit values -->\n", "ends no", 3),
+        # Outside a block, a compact marker still names its own source
+        ("<!-- ckvalue key=b -->2<!-- /ckvalue -->\n", "names no results", 1),
+    ]:
+        with pytest.raises(MarkdownParseError, match=match) as e:
+            extract_values(bad, "x.md")
+        assert e.value.line == line
+    # A bracketed format, as LaTeX's \\ckvalue takes one, can't be read
+    # as written, which is said with what to write instead...
+    bracketed = "<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n"
+    with pytest.raises(
+        MarkdownParseError, match="ckvalue results.json rms .4f"
+    ):
+        extract_values(bracketed, "x.md", results=results)
+    # ...and updating values moves it after the key, as named if the
+    # arguments before it are, and quoted if it would read as more than one
+    for written, healed in [
+        (bracketed, "<!-- ckvalue metrics rms .4f -->0<!-- /ckvalue -->\n"),
+        (
+            "<!-- ckvalue[.4f] name=metrics key=rms -->0<!-- /ckvalue -->\n",
+            "<!-- ckvalue name=metrics key=rms format=.4f -->0"
+            "<!-- /ckvalue -->\n",
+        ),
+        (
+            "<!-- ckvalue[n={value}] metrics rms -->0<!-- /ckvalue -->\n",
+            '<!-- ckvalue metrics rms "n={value}" -->0<!-- /ckvalue -->\n',
+        ),
+    ]:
+        assert heal_markers(written) == (healed, 1)
+        assert extract_values(healed, "x.md", results=results)
+    # Markers in code are examples, inline or fenced, but backticks inside
+    # a marker don't make it code
+    in_code = (
+        "`<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->`\n\n"
+        "```md\n<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n```\n"
+    )
+    assert heal_markers(in_code) == (in_code, 0)
+    assert heal_markers(
+        "<!-- ckvalue[`{value}`] metrics rms -->0<!-- /ckvalue -->\n"
+    ) == ("<!-- ckvalue metrics rms `{value}` -->0<!-- /ckvalue -->\n", 1)
+    # Updating values does it, and so does finding a PDF's inputs
+    (tmp_path / "results.json").write_text('{"rms": 0.29331}')
+    assert set_values(bracketed, "x.md", results=results) == (
+        "<!-- ckvalue metrics rms .4f -->0.2933<!-- /ckvalue -->\n",
+        True,
+    )
+    assert pdf_inputs(bracketed, "x.md", results=results) == ["results.json"]
+
+
+def test_compact_value_markers(tmp_path, monkeypatch):
+    from calkit.markdown import (
+        MarkdownParseError,
+        extract_values,
+        results_by_name,
+        set_values,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "results.json").write_text(
+        '{"rms": 0.29330001, "n": 401, "fit": {"coeffs": [1.974, 0.1]}}'
+    )
+    (tmp_path / "other.json").write_text('{"n": 7}')
+    declared = {"metrics": "results.json"}
+    text = (
+        "# Title\n\n"
+        "The RMS is <!-- ckvalue results.json rms .4f -->?"
+        "<!-- /ckvalue --> over <!-- ckvalue metrics n -->?"
+        "<!-- /ckvalue --> samples.\n\n"
+        "Nested: <!-- ckvalue metrics fit.coeffs.0 -->stale"
+        "<!-- /ckvalue -->.\n\n"
+        "````md\n"
+        "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->\n"
+        "````\n"
+    )
+    values = extract_values(text, "README.md", results=declared)
+    # A name resolves to the declared path; a fenced marker is an example
+    assert [(v.key, v.path, v.source, v.format, v.line) for v in values] == [
+        ("rms", "results.json", "results.json", "{:.4f}", 3),
+        ("n", "results.json", "metrics", None, 3),
+        ("fit.coeffs.0", "results.json", "metrics", None, 5),
+    ]
+    new, changed = set_values(text, "README.md", results=declared)
+    assert changed
+    assert (
+        "The RMS is <!-- ckvalue results.json rms .4f -->0.2933"
+        "<!-- /ckvalue --> over <!-- ckvalue metrics n -->401"
+        "<!-- /ckvalue --> samples."
+    ) in new
+    assert "Nested: <!-- ckvalue metrics fit.coeffs.0 -->1.974" in new
+    assert "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->" in new
+    assert set_values(new, "README.md", results=declared) == (new, False)
+
+    # Source, key and format read like a Python call: positional in that
+    # order, or by name, or positional then keyword
+    def one(marker, **kw):
+        got = extract_values(marker + "\n", "README.md", **kw)
+        assert len(got) == 1, got
+        return got[0]
+
+    for marker in (
+        "<!-- ckvalue metrics rms .4f -->?<!-- /ckvalue -->",
+        "<!-- ckvalue name=metrics key=rms format=.4f -->?<!-- /ckvalue -->",
+        "<!-- ckvalue metrics rms format=.4f -->?<!-- /ckvalue -->",
+        "<!-- ckvalue metrics key=rms format=.4f -->?<!-- /ckvalue -->",
+    ):
+        v = one(marker, results=declared)
+        assert (v.path, v.key, v.format) == (
+            "results.json",
+            "rms",
+            "{:.4f}",
+        ), marker
+    # A whole replacement field works as well as a bare format spec, and a
+    # quoted one may hold spaces
+    assert (
+        one(
+            '<!-- ckvalue metrics rms "{value:,.1f}" -->?<!-- /ckvalue -->',
+            results=declared,
+        ).format
+        == "{value:,.1f}"
+    )
+    # `path=` says the source is a path, so it is not looked up as a name
+    assert (
+        one(
+            "<!-- ckvalue path=metrics key=n -->?<!-- /ckvalue -->",
+            results=declared,
+        ).path
+        == "metrics"
+    )
+
+    for bad, match in [
+        ("<!-- ckvalue -->x<!-- /ckvalue -->", "names no results file"),
+        ("<!-- ckvalue metrics -->x<!-- /ckvalue -->", "names no key"),
+        ("<!-- ckvalue a b c d -->x<!-- /ckvalue -->", "at most 3 arguments"),
+        (
+            "<!-- ckvalue key=rms metrics -->x<!-- /ckvalue -->",
+            "positional argument after a keyword",
+        ),
+        (
+            "<!-- ckvalue metrics name=o key=k -->x<!-- /ckvalue -->",
+            "multiple values for source",
+        ),
+        (
+            "<!-- ckvalue name=a path=b key=k -->x<!-- /ckvalue -->",
+            "multiple values for source",
+        ),
+        (
+            "<!-- ckvalue metrics rms nope=1 -->x<!-- /ckvalue -->",
+            "unexpected argument 'nope'",
+        ),
+        (
+            "<!-- ckvalue name=nope key=k -->x<!-- /ckvalue -->",
+            "no result is named",
+        ),
+        ("<!-- ckvalue nope k -->x<!-- /ckvalue -->", "not a declared result"),
+        ("<!-- ckvalue results.json no -->x<!-- /ckvalue -->", "has no key"),
+        (
+            "<!-- ckvalue missing.json n -->x<!-- /ckvalue -->",
+            "does not exist",
+        ),
+    ]:
+        with pytest.raises(MarkdownParseError, match=match):
+            set_values(
+                "Intro.\n\n" + bad + "\n", "README.md", results=declared
+            )
+
+    # Both forms on one line stay paired with their own sources, which two
+    # patterns walked separately would not
+    mixed = (
+        "<!-- calkit values path=other.json -->\n"
+        "L <!-- calkit value key=n -->?<!-- /calkit value --> "
+        "C <!-- ckvalue results.json n -->?<!-- /ckvalue -->\n"
+        "<!-- /calkit values -->\n"
+    )
+    out, _ = set_values(mixed, "README.md")
+    assert "L <!-- calkit value key=n -->7<!-- /calkit value -->" in out
+    assert "C <!-- ckvalue results.json n -->401<!-- /ckvalue -->" in out
+    # The long form's default never applies to a compact marker
+    assert extract_values(mixed, "README.md")[1].path == "results.json"
+
+    # Results without a name are skipped rather than keyed on None
+    assert results_by_name(
+        {"results": [{"path": "a.json"}, {"name": "b", "path": "b.json"}]}
+    ) == {"b": "b.json"}
+    assert results_by_name({}) == {}
+    # One name for two files would make which is quoted depend on order
+    with pytest.raises(ValueError, match="Two results are named"):
+        results_by_name(
+            {
+                "results": [
+                    {"name": "x", "path": "a.json"},
+                    {"name": "x", "path": "b.json"},
+                ]
+            }
+        )
 
 
 def test_expand_ck_info_one_stage_per_file(tmp_path, monkeypatch):

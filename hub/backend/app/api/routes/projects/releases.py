@@ -21,6 +21,7 @@ import secrets
 import uuid
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import quote
 
@@ -36,7 +37,7 @@ import app.projects
 from app import arxiv, messaging, mixpanel, users
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.config import settings
-from app.core import ryaml, utcnow
+from app.core import ryaml, utcnow, web_url_or_none
 from app.git import (
     get_repo,
     get_repo_tree_for_ref,
@@ -393,10 +394,7 @@ def _store_internal_release_copy(
                 }
             ]
         }
-        with open(
-            os.path.join(repo.working_dir, stored_rel + ".dvc"), "w"
-        ) as f:
-            ryaml.dump(pointer, f)
+        ryaml.dump(pointer, Path(repo.working_dir, stored_rel + ".dvc"))
         with open(
             os.path.join(repo.working_dir, release_dir, ".gitignore"), "a"
         ) as f:
@@ -484,8 +482,7 @@ def _record_internal_release_in_calkit_yaml(
     ).model_dump(exclude_none=True, exclude_defaults=True)
     releases[release_in.name] = entry
     ck_info["releases"] = releases
-    with open(ck_path, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(ck_path))
     _commit_calkit_change(
         project,
         repo,
@@ -726,8 +723,7 @@ def post_external_release(
     ).model_dump(exclude_none=True, exclude_defaults=True)
     releases[release_in.name] = entry
     ck_info["releases"] = releases
-    with open(ck_path, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(ck_path))
     _commit_calkit_change(
         project,
         repo,
@@ -1142,8 +1138,7 @@ def import_github_releases(
     if not imported:
         return Message(message="No new GitHub releases to import")
     ck_info["releases"] = releases
-    with open(ck_path, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(ck_path))
     # A clear error instead of an opaque 500 when the user has Calkit write
     # access but not GitHub push access to the repo.
     _commit_calkit_change(
@@ -1281,7 +1276,7 @@ def get_project_releases(
                 # A missing ``public`` key means public. Visibility is separate
                 # from where it was released (internal vs an external venue).
                 public=rel.get("public", True),
-                url=rel.get("url"),
+                url=web_url_or_none(rel.get("url")),
                 doi=rel.get("doi"),
                 publisher=rel.get("publisher"),
                 date=release_date,
@@ -1363,8 +1358,7 @@ def delete_project_release(
     if isinstance(entry, dict) and entry.get("internal"):
         del releases[release_name]
         ck_info["releases"] = releases
-        with open(ck_path, "w") as f:
-            ryaml.dump(ck_info, f)
+        ryaml.dump(ck_info, Path(ck_path))
         _commit_calkit_change(
             project,
             repo,

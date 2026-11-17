@@ -30,10 +30,14 @@ concurrency:
 jobs:
   run:
     name: run
-    # A fork's branch can't be pushed to with this repo's token
+    # A fork's branch can't be pushed to with this repo's token, and
+    # Dependabot's runs get a read-only one and no OIDC token to log in with
     if: >-
       github.event_name != 'pull_request'
-      || github.event.pull_request.head.repo.full_name == github.repository
+      || (
+        github.event.pull_request.head.repo.full_name == github.repository
+        && github.actor != 'dependabot[bot]'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -66,7 +70,7 @@ jobs:
           git checkout -B "$DATA_BRANCH"
           git config remote.origin.push "+HEAD:refs/heads/$DATA_BRANCH"
       - name: Setup uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       # Stages use what this branch's Calkit can do, not the last release,
       # and the action only installs Calkit when it isn't already there
       - name: Install Calkit from this branch

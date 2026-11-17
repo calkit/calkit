@@ -1,6 +1,18 @@
 import { ApiError, NotSignedInError, request } from "../core/api";
-import { getAuthState, signIn, signOut } from "../core/auth";
+import {
+  announceAuthChange,
+  getAuthState,
+  signIn,
+  signOut,
+} from "../core/auth";
 import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
+import {
+  askLocal,
+  forgetLocalStatus,
+  getLocalStatus,
+  LocalError,
+  type LocalJob,
+} from "../core/local";
 import {
   isLoopbackHost,
   resolveHubByWebUrl,
@@ -19,17 +31,25 @@ import type {
   ContentsItem,
   DvcOutput,
   TextDiff,
-  Figure,
+  FiguresPage,
   GithubRepo,
+  ExportStage,
+  PipelineRun,
+  ProjectPipeline,
+  PipelineRuns,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
   ProjectsPublic,
+  Provenance,
   PullRequestRefs,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
+  Result,
+  StageFromScriptOrNotebookResponse,
+  Table,
 } from "../core/types";
 
 function projectPath(owner: string, project: string): string {
@@ -42,6 +62,15 @@ function projectPath(owner: string, project: string): string {
 // users without Overleaf Premium, whose Git integration needs a token
 const OVERLEAF_URL = "https://www.overleaf.com";
 const OVERLEAF_SESSION_COOKIE = "overleaf_session2";
+const OVERLEAF_GIT_SETTINGS = `${OVERLEAF_URL}/user/settings#git-integration`;
+// Settings tabs opened to get a Git token, mapped to the tab that asked, kept
+// in session storage since the service worker can stop between messages
+const TOKEN_TABS_KEY = "overleafTokenTabs";
+
+async function getTokenTabs(): Promise<Record<string, number>> {
+  const stored = await chrome.storage.session.get(TOKEN_TABS_KEY);
+  return (stored[TOKEN_TABS_KEY] as Record<string, number>) ?? {};
+}
 
 const MAX_PREVIEW_BYTES = 2_000_000;
 const MAX_VIEWER_BYTES = 25_000_000;
@@ -118,12 +147,88 @@ async function readCalkitYaml(githubRepo: string): Promise<CalkitYamlInfo> {
   return { present: true, hubUrl: hubUrlFromCalkitYaml(await resp.text()) };
 }
 
+// How long whether a project is on this computer is trusted, so each of
+// a page's requests doesn't ask again
+const LOCAL_CHECKOUT_TTL_MS = 30_000;
+const JOB_POLL_MS = 2_000;
+
+interface LocalCheckout {
+  connected: boolean;
+  path: string | null;
+  paths: string[];
+}
+
+const localCheckouts = new Map<
+  string,
+  { at: number; checkout: Promise<LocalCheckout> }
+>();
+
+/**
+ * The checkout of a project on this computer that answers for it instead
+ * of the hub, if the extension is connected to Calkit here and it's
+ * checked out.
+ */
+function getLocalCheckout(project: string): Promise<LocalCheckout> {
+  const cached = localCheckouts.get(project);
+  if (cached && Date.now() - cached.at < LOCAL_CHECKOUT_TTL_MS) {
+    return cached.checkout;
+  }
+  const checkout = (async () => {
+    const status = await getLocalStatus();
+    if (!status.version) {
+      return { connected: false, path: null, paths: [] };
+    }
+    try {
+      const found = await askLocal<{ path: string | null; paths: string[] }>({
+        type: "checkouts.get",
+        project,
+      });
+      return { connected: true, ...found };
+    } catch {
+      return { connected: true, path: null, paths: [] };
+    }
+  })();
+  localCheckouts.set(project, { at: Date.now(), checkout });
+  return checkout;
+}
+
+/** Wait for a job Calkit here started to finish, failing if it did. */
+async function waitForJob(job: LocalJob): Promise<LocalJob> {
+  while (job.status === "queued" || job.status === "running") {
+    await new Promise((resolve) => setTimeout(resolve, JOB_POLL_MS));
+    job = await askLocal<LocalJob>({ type: "job.get", job_id: job.id });
+  }
+  if (job.status === "failed") {
+    throw new LocalError(job.error ?? "It failed", job.error_status);
+  }
+  return job;
+}
+
+function toPipelineRun(job: LocalJob): PipelineRun {
+  return {
+    id: job.id,
+    location: "local",
+    status: job.status,
+    created: job.created,
+    started: job.started,
+    finished: job.finished,
+    git_rev: job.git_rev,
+    branch: job.branch,
+    error: job.error,
+    output: job.output,
+    progress: job.progress ?? null,
+  };
+}
+
 /** The hub a message names, or the configured one. */
 function hubFor(message: { hubUrl?: string }): Hub | undefined {
   return message.hubUrl ? resolveHubByWebUrl(message.hubUrl) : undefined;
 }
 
-async function handle(message: Request): Promise<unknown> {
+async function handle(
+  message: Request,
+  sender: chrome.runtime.MessageSender,
+): Promise<unknown> {
   switch (message.type) {
     case "auth.state":
       return getAuthState(hubFor(message));
@@ -152,6 +257,7 @@ async function handle(message: Request): Promise<unknown> {
           search_for: message.searchFor,
           limit: message.limit ?? 100,
           min_access_level: message.minAccessLevel ?? "write",
+          github_repo: message.githubRepo,
         },
       });
     case "projects.create":
@@ -174,6 +280,10 @@ async function handle(message: Request): Promise<unknown> {
       return request<GithubRepo[]>("/user/github/repos", {
         query: { per_page: message.perPage ?? 100 },
       });
+    case "github.installations":
+      // Where the Calkit GitHub app is installed, without which the hub can't
+      // create or update a project's repo
+      return request<{ total_count: number }>("/user/github-app-installations");
     case "github.pullRequest":
       // Through the hub, which holds a GitHub token, so a private repo
       // resolves where an unauthenticated request would not
@@ -216,9 +326,185 @@ async function handle(message: Request): Promise<unknown> {
           hub: hubFor(message),
         },
       );
-    case "project.figures":
-      return request<Figure[]>(
-        `${projectPath(message.owner, message.project)}/figures`,
+    case "project.contentPaths": {
+      // As they are on this computer, when it's here, including files not
+      // saved yet, e.g., a script just written
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<string[]>({
+          type: "project.contentPaths",
+          project: local,
+        });
+      }
+      return request<string[]>(
+        `${projectPath(message.owner, message.project)}/contents-paths`,
+      );
+    }
+    case "project.figures": {
+      // As they are on this computer, when it's here, including ones not
+      // pushed yet
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<FiguresPage>({
+          type: "project.figures",
+          project: local,
+        });
+      }
+      // The hub pages at most 100 figures, so gather paths and titles only
+      const items: FiguresPage["items"] = [];
+      let total = 0;
+      do {
+        const page = await request<FiguresPage>(
+          `${projectPath(message.owner, message.project)}/figures`,
+          {
+            query: {
+              limit: 100,
+              offset: items.length,
+              include_content: false,
+            },
+          },
+        );
+        items.push(...page.items);
+        total = page.items.length ? page.total : items.length;
+      } while (items.length < total);
+      return { items, total };
+    }
+    case "project.tables":
+      return request<Table[]>(
+        `${projectPath(message.owner, message.project)}/tables`,
+      );
+    case "project.results":
+      return request<Result[]>(
+        `${projectPath(message.owner, message.project)}/results`,
+      );
+    case "project.provenance":
+      return request<Provenance>(
+        `${projectPath(message.owner, message.project)}/provenance`,
+        { query: { path: message.path, key: message.key } },
+      );
+    case "project.stageFromScriptOrNotebook": {
+      // Made from the script on this computer, and committed there, when
+      // the project's here
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        // Reading the script can take as long as calkit xr allows it, and
+        // a save reads it again before committing
+        return askLocal<StageFromScriptOrNotebookResponse>(
+          {
+            type: "project.stageFromScriptOrNotebook",
+            project: local,
+            scriptPath: message.scriptPath,
+            content: message.content,
+            shows: message.shows,
+            produces: message.produces,
+            data: message.data ?? [],
+            save: message.save ?? false,
+          },
+          5 * 60 * 1000,
+        );
+      }
+      return request<StageFromScriptOrNotebookResponse>(
+        `${projectPath(message.owner, message.project)}` +
+          "/pipeline/stages/from-script-or-notebook",
+        {
+          method: "POST",
+          body: {
+            script_path: message.scriptPath,
+            content: message.content,
+            shows: message.shows,
+            produces: message.produces,
+            data: message.data ?? [],
+            save: message.save ?? false,
+          },
+        },
+      );
+    }
+    case "project.recordOrigin":
+      // Recorded as a misc artifact, which the hub only takes for a path
+      // nothing else declares
+      return request<{ path: string }>(
+        `${projectPath(message.owner, message.project)}/misc`,
+        {
+          method: "POST",
+          body: {
+            path: message.path,
+            imported_from: message.importedFrom,
+            created_by: message.createdBy,
+            message: `Record where ${message.path} came from`,
+          },
+        },
+      );
+    case "project.pipeline": {
+      // As it is on this computer, when it's here, rather than as pushed
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        return askLocal<ProjectPipeline>({ type: "project.pipeline", project });
+      }
+      return request<ProjectPipeline>(
+        `${projectPath(message.owner, message.project)}/pipeline`,
+      );
+    }
+    case "project.pipelineRuns": {
+      // Run on this computer when it's here, rather than on GitHub Actions
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        const jobs = await askLocal<LocalJob[]>({
+          type: "jobs.list",
+          project,
+          kind: "run",
+        });
+        const active = jobs.some(
+          (j) => j.status === "queued" || j.status === "running",
+        );
+        return {
+          runs: jobs.map(toPipelineRun),
+          total: jobs.length,
+          github_workflow: null,
+          can_start: !active,
+          cannot_start_reason: active
+            ? "The pipeline is already running on this computer"
+            : null,
+        } satisfies PipelineRuns;
+      }
+      return request<PipelineRuns>(
+        `${projectPath(message.owner, message.project)}/pipeline/runs`,
+      );
+    }
+    case "project.pipelineRunLog":
+      // Only runs on this computer keep a log here; GitHub has the others'
+      return askLocal<{ log: string }>({
+        type: "job.log",
+        job_id: message.runId,
+      });
+    case "project.startPipelineRun": {
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        return toPipelineRun(
+          await askLocal<LocalJob>({
+            type: "job.start",
+            kind: "run",
+            project,
+            sync: message.sync ?? true,
+          }),
+        );
+      }
+      return request<PipelineRun>(
+        `${projectPath(message.owner, message.project)}/pipeline/runs`,
+        { method: "POST", body: { location: "github-actions" } },
+      );
+    }
+    case "project.addExportStage":
+      return request<ExportStage>(
+        `${projectPath(message.owner, message.project)}/pipeline/stages/export`,
+        {
+          method: "POST",
+          body: {
+            source: message.source,
+            output: message.output,
+            app: message.app || null,
+            files: message.files ?? [],
+          },
+        },
       );
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });
@@ -226,8 +512,22 @@ async function handle(message: Request): Promise<unknown> {
       // The viewer page shows PDFs and notebooks too, which run
       // larger than an inline preview ever would
       return fetchDataUrl(message.url, { maxBytes: MAX_VIEWER_BYTES });
-    case "overleaf.lookup":
-      return request<OverleafLookup>(
+    case "overleaf.lookup": {
+      // Calkit here knows its checkouts' Overleaf projects without the hub
+      if ((await getLocalStatus()).version) {
+        try {
+          const found = await askLocal<OverleafLookup>({
+            type: "overleaf.lookup",
+            overleaf_project_id: message.overleafProjectId,
+          });
+          if (found.links.length) {
+            return found;
+          }
+        } catch {
+          // The hub may know it
+        }
+      }
+      const lookup = await request<OverleafLookup>(
         `/user/overleaf-syncs/${encodeURIComponent(message.overleafProjectId)}`,
         {
           query: {
@@ -236,7 +536,41 @@ async function handle(message: Request): Promise<unknown> {
           },
         },
       );
-    case "overleaf.status":
+      // One the hub knows may be checked out here, e.g., without its
+      // Overleaf link pulled yet
+      await Promise.all(
+        lookup.links.map(async (link) => {
+          link.local_path = (
+            await getLocalCheckout(
+              `${link.project_owner_name}/${link.project_name}`,
+            )
+          ).path;
+        }),
+      );
+      return lookup;
+    }
+    case "overleaf.status": {
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        const local = await askLocal<OverleafSyncStatus[]>({
+          type: "overleaf.status",
+          project,
+          overleaf_project_id: message.overleafProjectId,
+          path: message.path,
+          pull: message.pull ?? true,
+          overleaf_files: message.overleafFiles,
+          overleaf_texts: message.overleafTexts,
+        }).catch((e) => {
+          if (/isn't synced with Overleaf/.test(String(e?.message ?? e))) {
+            return null;
+          }
+          throw e;
+        });
+        // Unless the checkout here hasn't pulled a link the hub knows of
+        if (local?.length) {
+          return local;
+        }
+      }
       return request<OverleafSyncStatus[]>(
         `${projectPath(message.owner, message.project)}/overleaf-syncs/status`,
         {
@@ -246,16 +580,77 @@ async function handle(message: Request): Promise<unknown> {
           },
         },
       );
-    case "overleaf.sync":
+    }
+    case "overleaf.sync": {
+      // With 'calkit overleaf sync' in the checkout here
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        const job = await waitForJob(
+          await askLocal<LocalJob>({
+            type: "job.start",
+            kind: "sync",
+            project,
+            path: message.path,
+          }),
+        );
+        return job.result as unknown as OverleafSyncResponse;
+      }
       return request<OverleafSyncResponse>(
         `${projectPath(message.owner, message.project)}/overleaf-syncs`,
         { method: "POST", body: { path: message.path } },
       );
-    case "overleaf.setToken":
-      return request<{ message: string }>("/user/overleaf-token", {
+    }
+    case "overleaf.setToken": {
+      const saved = await request<{ message: string }>("/user/overleaf-token", {
         method: "PUT",
         body: { token: message.token },
       });
+      // So panels in other tabs stop asking for one
+      void announceAuthChange();
+      return saved;
+    }
+    case "overleaf.openTokenSettings": {
+      const opener = sender.tab;
+      const tab = await chrome.tabs.create({
+        url: OVERLEAF_GIT_SETTINGS,
+        openerTabId: opener?.id,
+        index: opener ? opener.index + 1 : undefined,
+      });
+      if (tab.id !== undefined && opener?.id !== undefined) {
+        const tabs = await getTokenTabs();
+        tabs[tab.id] = opener.id;
+        await chrome.storage.session.set({ [TOKEN_TABS_KEY]: tabs });
+      }
+      return null;
+    }
+    case "overleaf.tokenTab": {
+      const tabs = await getTokenTabs();
+      return {
+        requested: sender.tab?.id !== undefined && sender.tab.id in tabs,
+      };
+    }
+    case "overleaf.returnFromTokenTab": {
+      // Back to the project that asked, closing the settings tab it opened
+      const tabs = await getTokenTabs();
+      const tabId = sender.tab?.id;
+      if (tabId === undefined || !(tabId in tabs)) {
+        return { returned: false };
+      }
+      const openerId = tabs[tabId];
+      delete tabs[tabId];
+      await chrome.storage.session.set({ [TOKEN_TABS_KEY]: tabs });
+      try {
+        const opener = await chrome.tabs.update(openerId, { active: true });
+        if (opener?.windowId !== undefined) {
+          await chrome.windows.update(opener.windowId, { focused: true });
+        }
+      } catch {
+        // The project tab was closed meanwhile, so stay here
+        return { returned: false };
+      }
+      await chrome.tabs.remove(tabId);
+      return { returned: true };
+    }
     case "overleaf.connectSession": {
       // Read here, since Overleaf keeps the cookie from page scripts, and
       // only when the user asks, so it's never held otherwise
@@ -266,10 +661,12 @@ async function handle(message: Request): Promise<unknown> {
       if (!cookie) {
         throw new Error("Sign in to Overleaf first");
       }
-      return request<{ message: string }>("/user/overleaf-session", {
-        method: "PUT",
-        body: { session: cookie.value },
-      });
+      const saved = await request<{ message: string }>(
+        "/user/overleaf-session",
+        { method: "PUT", body: { session: cookie.value } },
+      );
+      void announceAuthChange();
+      return saved;
     }
     case "overleaf.import":
       return request<{ path: string; title: string }>(
@@ -326,8 +723,97 @@ async function handle(message: Request): Promise<unknown> {
           body: { path: message.path, notes: message.notes },
         },
       );
+    case "local.status":
+      return getLocalStatus();
+    case "local.openProject":
+      return askLocal({
+        type: "project.open",
+        project: message.project,
+        path: message.path,
+      });
+    case "local.projectStatus":
+      return askLocal({ type: "project.status", project: message.project });
+    case "local.openOptions":
+      await chrome.runtime.openOptionsPage();
+      return null;
+    case "local.installEditor":
+      await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "install-editor",
+          project: message.project,
+        }),
+      );
+      // So it's known to be installed now
+      forgetLocalStatus();
+      return null;
+    case "local.checkout":
+      return getLocalCheckout(message.project);
+    case "local.chooseCheckout": {
+      const chosen = await askLocal<{ path: string; paths: string[] }>({
+        type: "checkouts.choose",
+        project: message.project,
+        path: message.path,
+      });
+      localCheckouts.delete(message.project);
+      return chosen;
+    }
+    case "local.clone": {
+      const job = await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "clone",
+          project: message.project,
+          location: message.location,
+        }),
+      );
+      // Found from now on, so the hub stops answering for it
+      localCheckouts.delete(message.project);
+      return { path: (job.result as { path: string }).path };
+    }
   }
 }
+
+// Installing, updating, or reloading the extension cuts off the scripts in
+// tabs already open, e.g., Overleaf, or never put them there, so new ones
+// are put in rather than leaving those tabs needing a refresh
+chrome.runtime.onInstalled.addListener((details) => {
+  // A Chrome update leaves the extension, and so its scripts, running
+  if (details.reason !== "install" && details.reason !== "update") {
+    return;
+  }
+  void (async () => {
+    for (const script of chrome.runtime.getManifest().content_scripts ?? []) {
+      // Scripts in the page's own world don't depend on the extension, so
+      // after a reload or update they're still running, but after the
+      // first install they were never put in
+      const main = (script as { world?: string }).world === "MAIN";
+      if ((main && details.reason !== "install") || !script.js) {
+        continue;
+      }
+      for (const tab of await chrome.tabs.query({ url: script.matches })) {
+        if (tab.id !== undefined) {
+          await chrome.scripting
+            .executeScript({
+              target: { tabId: tab.id },
+              files: script.js,
+              world: main ? "MAIN" : "ISOLATED",
+            })
+            .catch(() => undefined);
+        }
+      }
+    }
+  })();
+});
+
+// Back from the reload the options page asks for once the extension may
+// reach Calkit on this computer
+void chrome.storage.local.get("reopenOptions").then(({ reopenOptions }) => {
+  if (reopenOptions) {
+    void chrome.storage.local.remove("reopenOptions");
+    void chrome.runtime.openOptionsPage();
+  }
+});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Only this extension's own pages and content scripts may drive the API.
@@ -336,7 +822,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) {
     return false;
   }
-  handle(message as Request)
+  handle(message as Request, sender)
     .then((data) => sendResponse({ ok: true, data } as Envelope<unknown>))
     .catch((e: unknown) => {
       const error = e instanceof Error ? e.message : String(e);
@@ -346,7 +832,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         notSignedIn: e instanceof NotSignedInError,
         // Carried across so a surface can tell a hub that lacks an endpoint
         // from one that answered with a real error
-        status: e instanceof ApiError ? e.status : undefined,
+        status:
+          e instanceof ApiError || e instanceof LocalError
+            ? e.status
+            : undefined,
       } as Envelope<unknown>);
     });
   // Keep the message channel open for the async response above

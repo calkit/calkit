@@ -2,6 +2,9 @@
 
 import os
 from copy import deepcopy
+from pathlib import Path
+
+import pytest
 
 from app.dvc import (
     get_data_fpath_for_md5,
@@ -34,7 +37,17 @@ def test_ck_remote_scheme_is_registered(tmp_path):
     assert run_dvc_command(["status"], wdir=wdir) == 0
 
 
-def test_make_mermaid_diagram():
+def test_make_mermaid_diagram(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dvc.exceptions import OutputDuplicationError
+    from dvc.parsing import ResolveError
+
+    # Run from a directory away from the root, where DVC's paths relative
+    # to the working directory would show up in labels
+    wdir = tmp_path / "a" / "b"
+    wdir.mkdir(parents=True)
+    monkeypatch.chdir(wdir)
     pipeline = {
         "stages": {
             "do-something": {
@@ -43,14 +56,120 @@ def test_make_mermaid_diagram():
                 "outs": ["something.png"],
             },
             "do-something-else": {
-                "cmd": "echo sup2",
+                "cmd": "echo ${lr}",
                 "deps": ["something.png"],
                 "outs": ["else.pdf"],
             },
+            "loop": {
+                "foreach": [1, 2],
+                "do": {
+                    "cmd": "echo ${item}",
+                    "deps": ["else.pdf"],
+                    "outs": ["out-${item}.txt"],
+                },
+            },
         }
     }
-    mm = make_mermaid_diagram(pipeline)
-    return mm
+    mm = make_mermaid_diagram(pipeline, params={"lr": 0.1})
+    assert mm == (
+        "flowchart TD"
+        '\n\tnode1["do-something"]'
+        '\n\tnode2["do-something-else"]'
+        '\n\tnode3["loop@1"]'
+        '\n\tnode4["loop@2"]'
+        '\n\tnode1-->|"something.png"|node2'
+        '\n\tnode2-->|"else.pdf"|node3'
+        '\n\tnode2-->|"else.pdf"|node4'
+    )
+    # An arrow carries every output read downstream, including through a
+    # directory either side names, and a few at most
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                "make": {
+                    "cmd": "x",
+                    "outs": ["a.csv", "b.csv", "c.csv", "d.csv", "figs"],
+                },
+                "use": {
+                    "cmd": "y",
+                    "deps": ["a.csv", "b.csv", "c.csv", "d.csv"],
+                },
+                "plot": {"cmd": "z", "deps": ["figs/one.png"]},
+                "nothing": {"cmd": "w", "deps": ["other.txt"]},
+            }
+        }
+    )
+    assert '\n\tnode1-->|"a.csv<br>b.csv<br>+2 more"|' in mm
+    assert '-->|"figs"|' in mm
+    # By file name, since the full paths are in calkit.yaml
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                "a": {"cmd": "x", "outs": ["results/deep/x.json"]},
+                "b": {"cmd": "y", "deps": ["results/deep/x.json"]},
+            }
+        }
+    )
+    assert mm.endswith('node1-->|"x.json"|node2')
+    # Too many arrows to label
+    mm = make_mermaid_diagram(
+        {
+            "stages": {"src": {"cmd": "x", "outs": ["o"]}}
+            | {f"s{i}": {"cmd": "y", "deps": ["o"]} for i in range(31)}
+        }
+    )
+    assert "|" not in mm
+    # A name can't end its label and add statements, e.g., a click handler
+    evil = 'a"]\n\tclick node1 call alert(1)\n\tnodeX["b'
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                evil: {"cmd": "x", "outs": ['o"\nclick']},
+                "b": {"cmd": "y", "deps": ['o"\nclick']},
+            }
+        }
+    )
+    lines = mm.split("\n")
+    assert len(lines) == 4
+    assert lines[1].startswith('\tnode1["a#34;#93;#10;')
+    assert not any(line.strip().startswith("click") for line in lines)
+    # Neither the working directory nor its contents change
+    assert os.getcwd() == str(wdir)
+    assert os.listdir(wdir) == []
+    # Errors name stages, not their paths relative to the working directory
+    with pytest.raises(OutputDuplicationError) as exc_info:
+        make_mermaid_diagram(
+            {
+                "stages": {
+                    "a": {"cmd": "x", "outs": ["o"]},
+                    "b": {"cmd": "y", "outs": ["o"]},
+                }
+            }
+        )
+    assert "\t- a\n" in str(exc_info.value)
+    assert "dvc.yaml" not in str(exc_info.value)
+    # A missing param still fails
+    with pytest.raises(ResolveError, match="Could not find 'lr'"):
+        make_mermaid_diagram(pipeline)
+    # Stage names come from the repo, so they can't add Mermaid of their own,
+    # e.g., a click with a javascript: link
+    name = 'x"]\n\tclick node1 href "javascript:alert(1)"\n\tnode9["`<b>`'
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                name: {"cmd": "echo", "outs": ["o"]},
+                "b": {"cmd": "echo", "deps": ["o"]},
+            }
+        }
+    )
+    lines = mm.splitlines()
+    assert lines[0] == "flowchart TD"
+    assert lines[1] == '\tnode1["b"]'
+    assert lines[2].startswith('\tnode2["x#34;#93;#10;#9;click node1 href')
+    assert lines[2].endswith('#96;#60;b#62;#96;"]')
+    assert lines[3:] == ['\tnode2-->|"o"|node1']
+    for c in '"[]`<>\n':
+        assert c not in lines[2][len('\tnode2["') : -len('"]')]
 
 
 def test_output_from_pipeline():

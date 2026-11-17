@@ -1,6 +1,6 @@
 import { build } from "vite";
 
-// Rebuild on save. Four separate builds, for the same reason the one-shot
+// Rebuild on save. Five separate builds, for the same reason the one-shot
 // build has them: the pages and the service worker are ES modules built
 // together, and each content script is its own IIFE because Rollup can't
 // code-split one.
@@ -8,7 +8,7 @@ import { build } from "vite";
 // Chrome still has to be told to reload the extension. A content script is
 // read from disk when a page loads, and the service worker when it starts,
 // so a rebuilt file doesn't reach a tab that's already open.
-const entries = ["github", "overleaf", "references"];
+const entries = ["github", "overleaf", "overleaf-editor", "references"];
 
 console.log("Watching for changes; reload the extension in Chrome to pick");
 console.log("them up (chrome://extensions).");

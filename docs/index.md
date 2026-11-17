@@ -115,6 +115,16 @@ which is a critical feature to have when using generative AI.
 
 ## Features
 
+- [Research questions and answers](questions.md) as the front door to a
+  project.
+  Each answer cites its evidence, with numbers read from results files
+  rather than typed in, and leads back through the pipeline to the code and
+  data behind it.
+  Answers whose evidence has changed are flagged,
+  and people can sign off on answers, with sign-offs that lapse when the
+  evidence moves,
+  so a project can be checked a little at a time as the work goes,
+  rather than all at once at the end.
 - A simplified [version control](version-control.md)
   interface that unifies Git and DVC (Data Version Control),
   so everything can be kept in the same project repository.

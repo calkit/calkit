@@ -68,3 +68,30 @@ post = partial(_request, "post")
 patch = partial(_request, "patch")
 put = partial(_request, "put")
 delete = partial(_request, "delete")
+
+
+def can_use_ssh(interactive: bool = False) -> bool:
+    """Whether Git can reach GitHub over SSH, i.e., there's a key GitHub
+    accepts.
+
+    Unless ``interactive``, nothing is asked, e.g., to trust GitHub's host
+    key or for a key's passphrase, so an SSH setup that would need either
+    counts as not set up.
+    """
+    import subprocess
+
+    cmd = ["ssh", "-T", "-o", "ConnectTimeout=5"]
+    if not interactive:
+        cmd += ["-o", "BatchMode=yes"]
+    try:
+        p = subprocess.run(
+            [*cmd, "git@github.com"],
+            capture_output=True,
+            text=True,
+            timeout=None if interactive else 15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    # GitHub greets an accepted key, then exits with 1 since it gives no
+    # shell
+    return "successfully authenticated" in p.stdout + p.stderr

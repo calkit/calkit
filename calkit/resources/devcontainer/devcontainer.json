@@ -11,8 +11,6 @@
       "extensions": [
         "Calkit.calkit-vscode",
         "james-yu.latex-workshop",
-        "lakefs.lakefs-dvc",
-        "ms-vscode-remote.remote-containers",
         "esbenp.prettier-vscode",
         "ms-python.python",
         "ms-python.vscode-pylance",
@@ -27,16 +25,20 @@
         "redhat.vscode-yaml",
         "akamud.vscode-theme-onedark",
         "mechatroner.rainbow-csv",
-        "julialang.language-julia"
+        "julialang.language-julia",
+        "-lakefs.lakefs-dvc",
+        "-ms-vscode-remote.remote-containers",
+        "-github.vscode-pull-request-github",
+        "-github.vscode-github-actions"
       ],
       "settings": {
         "latex-workshop.bibtex-format.tab": "4 spaces",
         "latex-workshop.latex.autoBuild.run": "onSave",
-        "latex-workshop.docker.image.latex": "ghcr.io/calkit/latex:0.1.7",
+        "latex-workshop.docker.image.latex": "ghcr.io/calkit/latex:0.1.8",
         "latex-workshop.docker.enabled": true,
         "dvc.doNotShowSetupAfterInstall": true,
         "workbench.editorAssociations": {
-          "*.pdf": "latex-workshop-pdf-hook"
+          "*.pdf": "calkit.pdfReview"
         },
         "git.autofetch": true,
         "[python]": {
@@ -46,6 +48,7 @@
           "calkit",
           "Calkit"
         ],
+        "python.useEnvironmentsExtension": false,
         "python.terminal.activateEnvironment": false,
         "python.terminal.activateEnvInCurrentTerminal": false,
         "redhat.telemetry.enabled": false,

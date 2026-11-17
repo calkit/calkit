@@ -31,6 +31,7 @@ from calkit.cli.scheduler import (
     _slurm_exit_code,
     _wait_for_output_file,
     _wait_until_done,
+    record_interactive_job,
 )
 
 
@@ -512,6 +513,78 @@ def test_count_queued_jobs(tmp_dir, monkeypatch):
     # over-counting delays a submission, under-counting floods the queue.
     _record_job("e", {"kind": "slurm", "job_id": "5"})
     assert _count_queued_jobs("hpc", exclude="none") == 3
+    # Interactive sessions don't take a slot from pipeline jobs
+    active.add("6")
+    _record_job("f", {"kind": "slurm", "job_id": "6", "interactive": True})
+    assert _count_queued_jobs("hpc", exclude="none") == 3
+
+
+def test_record_interactive_job(tmp_dir, monkeypatch):
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    monkeypatch.delenv("PBS_JOBID", raising=False)
+    # Outside a scheduler job, nothing is recorded
+    with open("calkit.yaml", "w") as f:
+        f.write("name: test\n")
+    record_interactive_job("jupyter")
+    assert _load_jobs() == {}
+    # Inside a SLURM job, the allocation is recorded, once however many
+    # sessions it runs
+    monkeypatch.setenv("SLURM_JOB_ID", "123")
+    record_interactive_job("jupyter")
+    record_interactive_job("jupyter")
+    jobs = _load_jobs()
+    assert list(jobs) == ["jupyter:123"]
+    assert jobs["jupyter:123"]["kind"] == "slurm"
+    assert jobs["jupyter:123"]["job_id"] == "123"
+    assert jobs["jupyter:123"]["interactive"]
+    # PBS jobs too
+    monkeypatch.delenv("SLURM_JOB_ID")
+    monkeypatch.setenv("PBS_JOBID", "456.server")
+    record_interactive_job("jupyter")
+    assert _load_jobs()["jupyter:456.server"]["kind"] == "pbs"
+    # Outside a project, there's nowhere to record it
+    os.remove("calkit.yaml")
+    monkeypatch.setenv("PBS_JOBID", "789.server")
+    record_interactive_job("jupyter")
+    assert "jupyter:789.server" not in _load_jobs()
+
+
+def test_get_queue(tmp_dir, monkeypatch, capsys):
+    monkeypatch.delenv(sched.MOCK_ENV_VAR, raising=False)
+    calls = []
+    monkeypatch.setattr(
+        sched.subprocess, "run", lambda cmd, **kwargs: calls.append(cmd)
+    )
+    active = {"1", "3"}
+    monkeypatch.setattr(
+        sched,
+        "_active_job_ids",
+        lambda kind, job_ids: {j for j in job_ids if j in active},
+    )
+    with pytest.raises(typer.Exit):
+        sched.get_queue()
+    assert "No jobs found" in capsys.readouterr().out
+    _record_job("stage", {"kind": "slurm", "job_id": "1"})
+    _record_job("old-stage", {"kind": "slurm", "job_id": "2"})
+    _record_job(
+        "jupyter:3", {"kind": "slurm", "job_id": "3", "interactive": True}
+    )
+    _record_job(
+        "jupyter:4", {"kind": "slurm", "job_id": "4", "interactive": True}
+    )
+    sched.get_queue()
+    # Only live jobs are queried, since squeue errors on purged IDs
+    assert calls == [["squeue", "-j", "1,3"]]
+    # Interactive sessions that ended are dropped; pipeline records stay
+    assert set(_load_jobs()) == {"stage", "old-stage", "jupyter:3"}
+    # Nothing live
+    active.clear()
+    calls.clear()
+    with pytest.raises(typer.Exit):
+        sched.get_queue()
+    assert "No queued or running jobs" in capsys.readouterr().out
+    assert calls == []
+    assert set(_load_jobs()) == {"stage", "old-stage"}
 
 
 def test_queue_slot_waits_for_room(tmp_dir, monkeypatch):

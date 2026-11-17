@@ -80,7 +80,12 @@ calkit-python = { workspace = true }
 # tag a commit that is usually already built (staging deploys every push to
 # main), so `commit` alone would not catch it; `tags` is the one that does.
 [tool.uv]
-cache-keys = [{ git = { commit = true, tags = true } }]
+# Listing any key replaces uv's default of pyproject.toml, without which
+# an uncommitted dependency change is ignored
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
+]
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

@@ -400,3 +400,72 @@ export function mappedPaths(
   }
   return out
 }
+
+// calkit.sty's commands, e.g. \ckvalue{results/m.json}{rmse}, name project
+// files by path. Calkit brings what they name into _calkit/ beside the
+// document before it compiles, and none of that is committed, so the
+// browser asks the hub for it.
+const LOADS_CALKIT_RE =
+  /^[^%\n]*\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{[^}]*\bcalkit\b[^}]*\}/m
+
+export function loadsCalkit(texts: Iterable<string>): boolean {
+  for (const text of texts) {
+    if (LOADS_CALKIT_RE.test(text)) return true
+  }
+  return false
+}
+
+// What the document at `texPath` needs beside it for calkit.sty's commands:
+// calkit.sty itself, _calkit/values.tex, and a copy of each figure or table
+// it includes, fetched like any other project file. `sources` is the
+// editor's text, which may not be committed. Copies already fetched are
+// reused from `fetched`, by project path.
+export async function loadCalkitComponents(
+  ownerName: string,
+  projectName: string,
+  texPath: string,
+  sources: Record<string, string>,
+  fetched: Map<string, ProjectFile | null>,
+): Promise<{ files: ProjectFile[]; problems: string[] }> {
+  const body = await ProjectsService.postProjectLatexComponents({
+    owner_name: ownerName,
+    project_name: projectName,
+    latexComponentsRequest: { path: texPath, sources },
+  }).then((response) => response.data)
+  if (!body.loads_calkit) {
+    return { files: [], problems: [] }
+  }
+  const dir = texPath.includes("/")
+    ? texPath.slice(0, texPath.lastIndexOf("/"))
+    : ""
+  const beside = (p: string) => (dir ? `${dir}/${p}` : p)
+  await Promise.all(
+    (body.copies ?? [])
+      .filter((rel) => !fetched.has(rel))
+      .map(async (rel) => {
+        fetched.set(
+          rel,
+          await fetchOne(ownerName, projectName, beside(`_calkit/${rel}`), rel),
+        )
+      }),
+  )
+  const files: ProjectFile[] = [
+    {
+      path: beside("calkit.sty"),
+      kind: "text",
+      text: body.style ?? "",
+      generated: true,
+    },
+    {
+      path: beside("_calkit/values.tex"),
+      kind: "text",
+      text: body.values ?? "",
+      generated: true,
+    },
+  ]
+  for (const rel of body.copies ?? []) {
+    const file = fetched.get(rel)
+    if (file) files.push(file)
+  }
+  return { files, problems: body.problems ?? [] }
+}

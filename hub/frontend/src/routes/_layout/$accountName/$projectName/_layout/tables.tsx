@@ -35,6 +35,7 @@ import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import TableThumbnail from "../../../../../components/Tables/TableThumbnail"
 import TableView from "../../../../../components/Tables/TableView"
 import { useProjectTables } from "../../../../../hooks/useProject"
+import { safeHref } from "../../../../../lib/strings"
 
 const tablesSearchSchema = z.object({
   ref: z.string().optional(),
@@ -183,7 +184,7 @@ function TableModal({
                 {table.url ? (
                   <Button
                     as="a"
-                    href={String(table.url)}
+                    href={safeHref(String(table.url))}
                     download
                     target="_blank"
                     rel="noopener noreferrer"

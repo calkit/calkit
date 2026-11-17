@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -28,8 +28,10 @@ jobs:
       - name: Install hub frontend dependencies
         run: npm ci
         working-directory: hub/frontend
+      # Pre-commit fails if a hook changes a file, but syncing the
+      # environment to run it can rewrite uv.lock, which this checks instead
       - name: Check format
         run: make format
-      - name: Fail if any files were reformatted
+      - name: Check uv.lock is up to date
         if: always()
-        run: git diff --exit-code
+        run: uv lock --check

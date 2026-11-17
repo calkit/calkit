@@ -576,6 +576,11 @@
           "group": "calkit@2"
         },
         {
+          "command": "calkit-vscode.defineNotebookStage",
+          "when": "calkit-vscode.hasProject && resourceExtname == .ipynb && resourcePath not in calkit-vscode.stagedNotebooks",
+          "group": "calkit@2"
+        },
+        {
           "command": "calkit-vscode.defineProvenance",
           "when": "!explorerResourceIsFolder",
           "group": "calkit@3"

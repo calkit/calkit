@@ -6,6 +6,7 @@ import sys
 import pytest
 
 import calkit
+import calkit.windows
 from calkit import upgrade
 
 
@@ -93,6 +94,7 @@ def test_check_in_background(tmp_path, monkeypatch):
     monkeypatch.setattr(upgrade, "can_auto_upgrade", lambda: True)
     monkeypatch.setattr(upgrade, "get_upgrade_cmd", lambda: ["up"])
     monkeypatch.setattr(upgrade, "get_calkit_pids", lambda: [2])
+    monkeypatch.setattr(calkit.windows, "smart_app_control_on", lambda: False)
     runs = []
     monkeypatch.setattr(
         upgrade, "run_after_exit", lambda cmds, pids: runs.append((cmds, pids))
@@ -102,10 +104,16 @@ def test_check_in_background(tmp_path, monkeypatch):
     upgrade.check_in_background([1])
     assert upgrade.read_state()["latest"] == "1.1.0"
     assert not runs
+    # Likewise under Smart App Control, which could block upgraded files
+    monkeypatch.delenv("CALKIT_TEST_AUTO_UPGRADE")
+    monkeypatch.setattr(calkit.windows, "smart_app_control_on", lambda: True)
+    upgrade.check_in_background([1])
+    assert not runs
+    assert "upgraded_from" not in upgrade.read_state()
+    monkeypatch.setattr(calkit.windows, "smart_app_control_on", lambda: False)
     # On by default, it upgrades once the command that started it exits,
     # and on Windows this process too, since it holds files the upgrade
     # replaces
-    monkeypatch.delenv("CALKIT_TEST_AUTO_UPGRADE")
     upgrade.check_in_background([1])
     pids = [1, 2] if sys.platform == "win32" else [1]
     assert runs == [([["up"]], pids)]
@@ -224,3 +232,49 @@ def test_get_dev_upgrade_cmds(tmp_path, monkeypatch):
     monkeypatch.setattr(upgrade, "get_editable_path", lambda: None)
     with pytest.raises(ValueError, match="not an editable"):
         upgrade.get_dev_upgrade_cmds()
+
+
+def test_upgrade_with_hub_links(tmp_path, monkeypatch, capsys):
+    from calkit.hub import link as hub_link
+
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    requests = []
+    running = [("calkit.io", 123), ("other.hub", 456)]
+
+    def request_restarts(stop=False):
+        requests.append(stop)
+        return running
+
+    monkeypatch.setattr(hub_link, "request_restarts", request_restarts)
+    # Elsewhere, running hub links restart once it's done, which also
+    # catches a dev install updated without a new version
+    monkeypatch.setattr(sys, "platform", "linux")
+    marker = tmp_path / "upgraded"
+    upgrade.run_upgrade_cmds([["touch", str(marker)]])
+    assert marker.exists()
+    assert requests == [False]
+    assert "hub links will restart" in capsys.readouterr().out
+    # On Windows they stop so their files can be replaced, the upgrade
+    # waits for them, and those installed as a service start again either
+    # way
+    monkeypatch.setattr(sys, "platform", "win32")
+    startup = tmp_path / "calkit-hub-link-calkit.io.vbs"
+    startup.write_text("")
+    monkeypatch.setattr(
+        hub_link,
+        "_windows_startup_path",
+        lambda key: str(startup if key == "calkit.io" else tmp_path / "none"),
+    )
+    started = []
+    monkeypatch.setattr(
+        upgrade, "_popen_detached", lambda cmd, **kw: started.append(cmd)
+    )
+    requests.clear()
+    assert upgrade.run_after_exit([["up"]], [1]) == ["calkit.io", "other.hub"]
+    assert requests == [True]
+    script = started[0][-1]
+    for pid in [1, 123, 456]:
+        assert f"Wait-Process -Id {pid} " in script
+    assert script.index("& 'up'") < script.index(f"& wscript '{startup}'")
+    assert script.count("wscript") == 1
+    assert script.endswith("exit $failed")

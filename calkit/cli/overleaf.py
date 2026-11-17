@@ -104,29 +104,48 @@ def _get_overleaf_session_from_hub(stale: str | None = None) -> str | None:
     return str(session)
 
 
-def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
-    """Get a Git token, or, if only a session is available, a web client
-    for syncing without Overleaf Premium.
-
-    Credentials in config come first, then a token saved to the hub, then a
-    session saved to the hub, before prompting for a token.
+def _get_overleaf_token_from_hub(stale: str | None = None) -> str | None:
+    """Get an Overleaf Git token saved to the hub, other than a ``stale``
+    one, and store it in config.
     """
-    calkit_config = calkit.config.read()
-    if calkit_config.overleaf_token:
-        return calkit_config.overleaf_token
-    if calkit_config.overleaf_session:
-        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
+    import hashlib
+
     try:
         token = calkit.hub.get(
             "/user/overleaf-token", allow_login=False, max_retries=2
         )["access_token"]
     except Exception:
-        token = None
+        return None
+    if not token or token == stale:
+        return None
+    calkit_config = calkit.config.read()
+    # Rejected by Overleaf already, e.g., since Premium ended
+    token_sha = hashlib.sha256(str(token).encode()).hexdigest()
+    if token_sha == calkit_config.overleaf_rejected_token_sha:
+        return None
+    calkit_config.overleaf_token = token
+    calkit_config.write()
+    return str(token)
+
+
+def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
+    """Get a Git token, or, if only a session is available, a web client
+    for syncing without Overleaf Premium.
+
+    A token comes first, in config or else saved to the hub, since Git
+    integration fetches only what's new and keeps each edit's author, then a
+    session, in config or else saved to the hub, before prompting for a
+    token.
+    """
+    calkit_config = calkit.config.read()
+    if calkit_config.overleaf_token:
+        return calkit_config.overleaf_token
+    token = _get_overleaf_token_from_hub()
     if token:
         typer.echo("Using the Overleaf token saved to the hub")
-        calkit_config.overleaf_token = token
-        calkit_config.write()
-        return str(token)
+        return token
+    if calkit_config.overleaf_session:
+        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
     session = _get_overleaf_session_from_hub()
     if session:
         typer.echo("Using the Overleaf session saved to the hub")
@@ -143,6 +162,7 @@ def _get_pulled_overleaf_repo(
     Returns the repo and the credentials that worked, so later projects use
     them too.
     """
+    import hashlib
 
     def get_new_session(stale: str, error: Exception) -> str:
         """Get a new Overleaf session from the hub, or prompt for one, and
@@ -184,6 +204,13 @@ def _get_pulled_overleaf_repo(
                     get_new_session(stale=auth.session, error=e)
                 )
             else:
+                # A newer token on the hub, e.g., one made on another
+                # computer, replaces one that expired
+                token = _get_overleaf_token_from_hub(stale=auth)
+                if token:
+                    typer.echo("Using the Overleaf token saved to the hub")
+                    auth = token
+                    continue
                 # A token stops working when Premium ends, but a browser
                 # session still does
                 session = (
@@ -198,10 +225,14 @@ def _get_pulled_overleaf_repo(
                     )
                     # Forget the token, so later syncs go straight to the
                     # session
+                    # and the hub's copy isn't tried first again
                     calkit_config = calkit.config.read()
                     if calkit_config.overleaf_token == auth:
                         calkit_config.overleaf_token = None
-                        calkit_config.write()
+                    calkit_config.overleaf_rejected_token_sha = hashlib.sha256(
+                        str(auth).encode()
+                    ).hexdigest()
+                    calkit_config.write()
                     auth = calkit.overleaf.WebClient(str(session))
                 else:
                     auth = _get_overleaf_token(rejected=True)
@@ -365,6 +396,8 @@ def import_publication(
     os.makedirs(dest_dir, exist_ok=True)
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
+    if dest_dir in (ck_info.get("overleaf_sync") or {}):
+        raise_error(f"'{dest_dir}' is already synced with Overleaf")
     # TODO: Don't allow the same Overleaf project ID in multiple publications
     repo = calkit.git.get_repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
@@ -400,55 +433,52 @@ def import_publication(
             "please specify with --target"
         )
         return
-    # Try to extract title from the target LaTeX file if not provided
-    if not title:
-        target_tex_path = os.path.join(
-            dest_dir if push_only else overleaf_project_dir, target_path
-        )
-        extracted_title = _extract_title_from_tex(target_tex_path)
-        if extracted_title:
-            typer.echo(f"Detected title: {extracted_title}")
-            title = extracted_title
-    if not title:
-        raise_error(
-            "Title could not be detected from the LaTeX file; "
-            "please specify with --title"
-        )
     # Determine the PDF output path
-    pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
+    pdf_path = target_path.removesuffix(".tex") + ".pdf"
     typer.echo(f"Using PDF path: {pdf_path}")
     tex_path = pdf_path.removesuffix(".pdf") + ".tex"
     target_tex_path = Path(dest_dir, tex_path).as_posix()
     pub_path = Path(dest_dir, pdf_path).as_posix()
-    pub_paths = [pub.get("path") for pub in pubs]
-    if not overwrite and pub_path in pub_paths:
-        raise_error(
-            f"A publication already exists in this project at {pub_path}"
-        )
-    elif overwrite and pub_path in pub_paths:
+    # A publication already in the project is linked as it is, unless asked
+    # to replace it
+    existing_pub = next((p for p in pubs if p.get("path") == pub_path), None)
+    if existing_pub is not None and overwrite:
         # Note: This publication will go to the end of the list
         pubs = [p for p in pubs if p.get("path") != pub_path]
+        existing_pub = None
+    if existing_pub is not None:
+        typer.echo(f"Using the publication already at {pub_path}")
+    # Try to extract title from the target LaTeX file if not provided
+    if existing_pub is None and not title:
+        extracted_title = _extract_title_from_tex(
+            os.path.join(
+                dest_dir if push_only else overleaf_project_dir, target_path
+            )
+        )
+        if extracted_title:
+            typer.echo(f"Detected title: {extracted_title}")
+            title = extracted_title
+    if existing_pub is None and not title:
+        raise_error(
+            "Title could not be detected from the LaTeX file; "
+            "please specify with --title"
+        )
     # Check that we have a LaTeX environment
     typer.echo("Checking that this project has a LaTeX environment")
     envs = ck_info.get("environments", {})
-    tex_env_name = None
-    for name, env in envs.items():
-        image = env.get("image", "")
-        if env.get("kind") == "docker" and (
-            "texlive" in image or "calkit/latex" in image
-        ):
-            tex_env_name = name
-            break
+    tex_env_name = next(
+        (n for n, e in envs.items() if calkit.latex.is_latex_env(e)), None
+    )
     if tex_env_name is None:
-        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+        from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
-        typer.echo("Creating TeX Live Docker environment")
+        typer.echo("Creating TeX Live environment")
         tex_env_name = "tex"
         n = 1
         while tex_env_name in envs:
             tex_env_name = f"tex-{n}"
             n += 1
-        envs[tex_env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
+        envs[tex_env_name] = dict(DEFAULT_ENVIRONMENT)
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
@@ -457,14 +487,18 @@ def import_publication(
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})
     stage_name = None
-    for stage_name_i, stage in stages.items():
-        if (
-            stage.get("kind") == "latex"
-            and stage.get("target_path") == target_tex_path
-        ):
-            stage_name = stage_name_i
-            typer.echo(f"Found build stage '{stage_name}' in pipeline")
-            break
+    if existing_pub is not None and existing_pub.get("stage") in stages:
+        stage_name = existing_pub["stage"]
+        typer.echo(f"Using the publication's build stage '{stage_name}'")
+    else:
+        for stage_name_i, stage in stages.items():
+            if (
+                stage.get("kind") == "latex"
+                and stage.get("target_path") == target_tex_path
+            ):
+                stage_name = stage_name_i
+                typer.echo(f"Found build stage '{stage_name}' in pipeline")
+                break
     if stage_name is None:
         # Create a new stage
         stage_name = calkit.to_kebab_case("build-" + dest_dir)
@@ -482,21 +516,24 @@ def import_publication(
             no_commit=True,
         )
         repo.git.add("calkit.yaml")
-    # Add to publications in calkit.yaml
-    typer.echo("Adding publication to calkit.yaml")
     ck_info = calkit.load_calkit_info()
-    new_pub = dict(
-        path=pub_path,
-        title=title,
-        description=description,
-        kind=kind,
-        stage=stage_name,
-    )
-    pubs.append(new_pub)
-    ck_info["publications"] = pubs
+    if existing_pub is None:
+        typer.echo("Adding publication to calkit.yaml")
+        pubs.append(
+            dict(
+                path=pub_path,
+                title=title,
+                description=description,
+                kind=kind,
+                stage=stage_name,
+            )
+        )
+        ck_info["publications"] = pubs
+    else:
+        for pub in ck_info.get("publications") or []:
+            if pub.get("path") == pub_path and not pub.get("stage"):
+                pub["stage"] = stage_name
     ol_sync = ck_info.get("overleaf_sync", {})
-    if dest_dir in ol_sync:
-        raise_error(f"'{dest_dir}' is already synced with Overleaf")
     ol_sync[dest_dir] = dict(url=src_url)
     if push_paths:
         ol_sync[dest_dir]["push_paths"] = push_paths
@@ -523,6 +560,65 @@ def import_publication(
         push_only=push_only,
         allow_stale=True,
         any_branch=True,
+    )
+
+
+@overleaf_app.command(name="link")
+def link_publication(
+    folder: Annotated[
+        str,
+        typer.Argument(help="Folder in the project, e.g., 'paper'."),
+    ],
+    project_url: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Overleaf project URL, e.g., "
+                "https://www.overleaf.com/project/6800005973cb2e35."
+            )
+        ),
+    ],
+    title: Annotated[
+        str | None,
+        typer.Option(
+            "--title",
+            "-t",
+            help="Title, if the publication isn't in calkit.yaml yet.",
+        ),
+    ] = None,
+    target_path: Annotated[
+        str | None,
+        typer.Option("--target", "-T", help="Target TeX file in the folder."),
+    ] = None,
+    push_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--push-path",
+            "-p",
+            help="Paths in the folder to only push to Overleaf, e.g., 'figures'.",
+        ),
+    ] = [],
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit changes to repo."),
+    ] = False,
+) -> None:
+    """Link a folder in the project to an Overleaf project, pushing its files
+    there.
+
+    Like 'import --push-only', for a document that starts in the project.
+    """
+    import_publication(
+        src_url=project_url,
+        dest_dir=folder,
+        title=title,
+        target_path=target_path,
+        description=None,
+        kind=None,
+        push_paths=push_paths,
+        no_commit=no_commit,
+        overwrite=False,
+        push_only=True,
     )
 
 
@@ -935,6 +1031,9 @@ def sync(
             continue
         if paths is not None and synced_folder not in paths:
             continue
+        # Resolving a conflict only finishes the sync that hit it
+        if resolve and synced_folder != resolving_info["wdir"]:
+            continue
         overleaf_project_id = sync_data.get("project_id")
         if not overleaf_project_id:
             raise_error(
@@ -950,7 +1049,7 @@ def sync(
             f"Syncing {folder} with Overleaf project ID {overleaf_project_id}"
         )
         wdir = synced_folder
-        if resolve and wdir == resolving_info["wdir"]:
+        if resolve:
             repo.git.add(wdir)
             if repo.git.diff(["--staged", wdir]):
                 repo.git.commit(
@@ -959,8 +1058,6 @@ def sync(
             if in_am_session:
                 with calkit.overleaf.staged_changes_set_aside(repo):
                     repo.git.am("--skip")
-        elif resolve:
-            continue
         # Local edits are saved first so they're what's synced and rebuilt
         # from. Untracked files aren't sent to Overleaf, so they're left out.
         if repo.git.diff(wdir) or repo.index.diff("HEAD", wdir):
@@ -1131,7 +1228,7 @@ def sync(
         ):
             # Push to the project remote
             typer.echo("Pushing changes to project Git remote")
-            repo.git.push()
+            repo.git.push(*calkit.git.get_set_upstream_args(repo))
         # Built outputs DVC tracks are only recorded in Git by their hash
         if built and push_dvc:
             calkit_push(targets=["dvc"])

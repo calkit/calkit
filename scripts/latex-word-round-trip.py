@@ -6,6 +6,7 @@ platform. Saves the PDFs and the Word copy for the figure, and counts what
 went out and came back to results/latex-word-round-trip.json.
 """
 
+import argparse
 import glob
 import hashlib
 import json
@@ -33,6 +34,17 @@ def digest(paths: list[str]) -> str:
     for p in sorted(paths):
         h.update(Path(p).read_bytes())
     return h.hexdigest()
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--engine",
+    help="Engine to use (word or libreoffice).",
+    choices=["libreoffice", "word"],
+    default="libreoffice",
+)
+
+args = parser.parse_args()
 
 
 OUT.mkdir(parents=True, exist_ok=True)
@@ -84,7 +96,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "to-docx",
         "paper/main.pdf",
         "--engine",
-        "libreoffice",
+        args.engine,
         "-o",
         "paper/review.docx",
     )
@@ -116,7 +128,7 @@ with tempfile.TemporaryDirectory() as tmp:
     merges = sorted(Path(calkit.latex.LOCAL_DOCX_MERGES_DIR).glob("*.json"))
     merge = json.loads(merges[-1].read_text())
     results = {
-        "engine": "libreoffice",
+        "engine": args.engine,
         "source_unchanged": before == after,
         "display_equations": {
             "source": sum(len(b.rows) for b in blks if b.display),

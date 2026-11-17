@@ -35,6 +35,7 @@ OTHER_PRODUCT_DIRS = [
     "browser-ext",
     "assistant",
     "images/latex",
+    "images/libreoffice",
 ]
 
 PRODUCTS = [
@@ -52,6 +53,11 @@ PRODUCTS = [
     Product(name="assistant", tag_glob="assistant/v*", paths=["assistant"]),
     Product(
         name="latex-image", tag_glob="latex-image/v*", paths=["images/latex"]
+    ),
+    Product(
+        name="libreoffice-image",
+        tag_glob="libreoffice-image/v*",
+        paths=["images/libreoffice"],
     ),
 ]
 

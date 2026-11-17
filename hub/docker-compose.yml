@@ -143,6 +143,9 @@ services:
       - ENVIRONMENT=${ENVIRONMENT}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
       - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - RELAY_SECRET_KEY=${RELAY_SECRET_KEY:?Variable not set}
+      # Empty means wss://relay.$DOMAIN
+      - RELAY_URL=${RELAY_URL-}
       - FERNET_KEY=${FERNET_KEY?Variable not set}
       - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
       - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
@@ -392,6 +395,53 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.entrypoints=https
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.tls=true
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.tls.certresolver=le
+
+  # Pairs browsers with machines over websockets. One process, so both ends
+  # of a pairing meet in memory; see docs/dev/hub-link-protocol.md.
+  relay:
+    image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
+    restart: always
+    pull_policy: never # We build locally on deploy
+    # It needs nothing internal, e.g., the database, so it isn't on the
+    # default network
+    networks:
+      - traefik-public
+    environment:
+      - RELAY_SECRET_KEY=${RELAY_SECRET_KEY:?Variable not set}
+    # Messages are limited before they're buffered (relay.MAX_MESSAGE_BYTES
+    # plus room for framing), with few queued per connection
+    command:
+      - uvicorn
+      - relay:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - --workers
+      - "1"
+      - --ws-max-size
+      - "300000"
+      - --ws-max-queue
+      - "4"
+      - --ws-per-message-deflate
+      - "false"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.${STACK_NAME?Variable not set}-relay.loadbalancer.server.port=8002
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-http.rule=Host(`relay.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.rule=Host(`relay.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.tls.certresolver=le
+      # Limits how many connections each client address can hold open
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-relay-inflight.inflightreq.amount=50
+      # By the connection's own address, since by default it groups by host
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-relay-inflight.inflightreq.sourcecriterion.ipstrategy.depth=0
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.middlewares=${STACK_NAME?Variable not set}-relay-inflight
 
   texmf-proxy:
     image: '${DOCKER_IMAGE_TEXMF_PROXY-texmf-proxy}:${TAG-latest}'

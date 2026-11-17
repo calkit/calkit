@@ -1,15 +1,13 @@
 # TinyTeX image
 
-<!-- calkit values path=images/latex/sizes.json -->
-
 Based on
 [carteakey/tinytex-docker](https://github.com/carteakey/tinytex-docker),
 the purpose of this image is to provide most of the packages scientific
-articles need without the <!-- calkit value key=texlive_full.unpacked_gb format="{:.1f}" -->6.3<!-- /calkit value --> GB
-of `texlive/texlive:latest-full`, a <!-- calkit value key=texlive_full.download_gb format="{:.1f}" -->2.8<!-- /calkit value --> GB
+articles need without the <!-- ckvalue images/latex/sizes.json texlive_full.unpacked_gb .1f -->6.3<!-- /ckvalue --> GB
+of `texlive/texlive:latest-full`, a <!-- ckvalue images/latex/sizes.json texlive_full.download_gb .1f -->2.8<!-- /ckvalue --> GB
 download.
-Instead, this one is <!-- calkit value key=calkit.unpacked_mb format="{:.0f}" -->900<!-- /calkit value --> MB
-unpacked and <!-- calkit value key=calkit.download_mb format="{:.0f}" -->430<!-- /calkit value --> MB
+Instead, this one is <!-- ckvalue images/latex/sizes.json calkit.unpacked_mb .0f -->900<!-- /ckvalue --> MB
+unpacked and <!-- ckvalue images/latex/sizes.json calkit.download_mb .0f -->430<!-- /ckvalue --> MB
 to download, which speeds up downloads.
 These are measured for amd64, as described [below](#measuring-its-size).
 When run through `calkit latex build`,

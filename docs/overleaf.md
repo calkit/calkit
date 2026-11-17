@@ -91,6 +91,11 @@ When Overleaf rejects it, Calkit first checks your Calkit account for a
 newer one, e.g., after you've connected again from the extension,
 and otherwise asks for a new one,
 so copy the cookie again after signing back in.
+
+<!-- TODO: needs human review -->
+
+With both a Git token and a session, in your config or your Calkit account,
+Calkit uses the token.
 If a Git token stops working, e.g., because Premium has ended,
 Calkit uses the session instead, if one is set.
 
@@ -122,7 +127,7 @@ Push paths are relative to the publication folder,
 and multiple can be specified.
 
 If necessary, this command will also
-create a TeXlive Docker [environment](environments.md)
+create a TeX Live [environment](environments.md#tex-live)
 and a build stage in the [pipeline](pipeline/index.md),
 which will build and cache the PDF upon calling `calkit run`.
 
@@ -307,6 +312,19 @@ Those copies are pushed even though they're gitignored, since without them
 Overleaf can't compile.
 If one of them is edited on Overleaf, `calkit overleaf sync` says which
 files it's about to overwrite.
+
+Once the document loads the `calkit` package with `\usepackage{calkit}`,
+each sync also puts `calkit.sty` and the `_calkit` folder on Overleaf,
+so it can use Calkit's
+[commands for including project components](latex.md#including-project-components)
+there too.
+If the package is first loaded on Overleaf,
+the document can't compile there until the next sync brings `calkit.sty` in.
+Something newly included on Overleaf prints as **??** until the next sync
+brings it in, while a changed format takes effect right away.
+These are pushed one-way like other generated files,
+so edits made to them on Overleaf are overwritten,
+and they're never committed to the project.
 
 Everything else is treated as ignored and is never pushed to, pulled from,
 or deleted from Overleaf.

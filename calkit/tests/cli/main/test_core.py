@@ -31,7 +31,7 @@ from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
     STAGE_OUTPUT_START,
     STAGE_RUNS_FPATH,
-    _get_missing_fonts_by_stage,
+    _get_font_warnings_by_stage,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
     _prune_run_logs,
@@ -3311,7 +3311,7 @@ def test_stage_stdout_from_log_content():
     assert "other" not in res
 
 
-def test_get_missing_fonts_by_stage() -> None:
+def test_get_font_warnings_by_stage() -> None:
     log = "\n".join(
         [
             "2025-01-01T00:00:00 - INFO - Running stage 'plot':",
@@ -3321,9 +3321,13 @@ def test_get_missing_fonts_by_stage() -> None:
             "findfont: Font family 'Arial' not found.",
             "findfont: Generic family 'sans-serif' not found because none "
             "of the following families were found: Arial, Helvetica",
-            # A script's own logging format, and Matplotlib's older message
+            # A script's own logging format, and Matplotlib's other
+            # message, reported once per family whichever form says it
             "WARNING:matplotlib.font_manager:findfont: Font family "
             "['Arial'] not found. Falling back to DejaVu Sans.",
+            "findfont: Font family ['Times New Roman'] not found. Falling "
+            "back to DejaVu Sans.",
+            "findfont: Font family 'Times New Roman' not found.",
             # Papermill's progress bar can share the line
             "Executing:   0%|   | 0/1 [00:00<?, ?cell/s]findfont: Font "
             "family 'CMU Serif' not found.",
@@ -3338,16 +3342,17 @@ def test_get_missing_fonts_by_stage() -> None:
             "not found.",
         ]
     )
-    assert _get_missing_fonts_by_stage(log) == {
+    assert _get_font_warnings_by_stage(log) == {
         "plot": [
             "Font family 'Arial' not found",
             "Generic family 'sans-serif' not found because none of the "
             "following families were found: Arial, Helvetica",
-            "Font family ['Arial'] not found. Falling back to DejaVu Sans",
+            "Font family ['Times New Roman'] not found. Falling back to "
+            "DejaVu Sans",
             "Font family 'CMU Serif' not found",
         ]
     }
-    assert _get_missing_fonts_by_stage("") == {}
+    assert _get_font_warnings_by_stage("") == {}
 
 
 def test_run_refuses_outside_a_project(tmp_dir):

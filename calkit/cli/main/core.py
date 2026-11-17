@@ -2768,9 +2768,9 @@ def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
     return {name: "\n".join(lines) for name, lines in res.items()}
 
 
-def _get_missing_fonts_by_stage(log_content: str) -> dict[str, list[str]]:
-    """Return Matplotlib's messages, each once, about fonts each stage
-    couldn't find, from a run log.
+def _get_font_warnings_by_stage(log_content: str) -> dict[str, list[str]]:
+    """Return Matplotlib's messages about fonts each stage couldn't find,
+    one per font family, from a run log.
 
     Matplotlib has no strict mode: it draws with another font and only logs
     a warning, which reaches the stage's stderr unless the script
@@ -2779,15 +2779,20 @@ def _get_missing_fonts_by_stage(log_content: str) -> dict[str, list[str]]:
     import re
 
     pattern = re.compile(
-        r"findfont: ((?:Font|Generic) family .+? not found.*)"
+        r"findfont: (((?:Font|Generic) family) (.+?) not found.*)"
     )
     res: dict[str, list[str]] = {}
     stdout_by_stage = _stage_stdout_from_log_content(log_content)
     for stage_name, output in stdout_by_stage.items():
-        # Without the final period, since they're joined into a sentence
-        messages = [m.strip().rstrip(".") for m in pattern.findall(output)]
+        # By family, since Matplotlib can report one as 'X' and as ['X']
+        messages: dict[tuple[str, str], str] = {}
+        for message, kind, family in pattern.findall(output):
+            # Without the final period, since they're joined into a sentence
+            messages.setdefault(
+                (kind, family.strip("[]")), message.strip().rstrip(".")
+            )
         if messages:
-            res[stage_name] = list(dict.fromkeys(messages))
+            res[stage_name] = list(messages.values())
     return res
 
 
@@ -4659,7 +4664,7 @@ def run(
         except Exception as e:
             warn(f"Couldn't check where the stages' outputs are stored: {e}")
     # Matplotlib only logs a font it can't find, and draws with another
-    for stage_name, messages in _get_missing_fonts_by_stage(
+    for stage_name, messages in _get_font_warnings_by_stage(
         log_content
     ).items():
         warn(

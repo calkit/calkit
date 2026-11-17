@@ -1,6 +1,4 @@
-"""Working out a pipeline stage from what it runs, as ``calkit xr`` does,
-without running it or writing anything.
-"""
+"""Detecting pipeline stages."""
 
 from __future__ import annotations
 

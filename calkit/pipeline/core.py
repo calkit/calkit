@@ -2332,6 +2332,54 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     return containing[1] if containing else None
 
 
+def write_stage_from_script(
+    plan: dict, ck_info: dict, wdir: str = "."
+) -> list[str]:
+    """Write what ``get_stage_from_script_plan`` planned, as ``calkit xr``
+    would: the stage and any new environment into ``ck_info``, which is
+    left to the caller to write, and the environment's spec and the
+    documents changed to show the output, returning their paths.
+    """
+    from calkit.models.pipeline import Pipeline
+
+    stage_name = plan["stage_name"]
+    # Validated as a one-stage pipeline, for the dispatch on kind
+    try:
+        Pipeline.model_validate({"stages": {stage_name: plan["stage"]}})
+    except Exception as e:
+        raise ValueError(f"Invalid stage: {e}")
+    texts = dict(plan["included"])
+    if plan["environment_spec_path"] and (
+        plan["environment_spec_content"] is not None
+    ):
+        texts[plan["environment_spec_path"]] = plan["environment_spec_content"]
+    # Nothing is written through a symlink that leads out of the project
+    root = os.path.realpath(wdir)
+    for path in texts:
+        real = os.path.realpath(os.path.join(wdir, path))
+        if not real.startswith(root + os.sep):
+            raise ValueError(f"'{path}' leads outside the project")
+    for path, text in texts.items():
+        full = os.path.join(wdir, path)
+        os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+        # Keeping the file's line endings, whatever this system's are
+        newline = "\n"
+        if os.path.isfile(full):
+            with open(full, "rb") as f:
+                newline = "\r\n" if b"\r\n" in f.read() else "\n"
+        with open(full, "w", encoding="utf-8", newline=newline) as f:
+            f.write(text)
+    if plan["environment_is_new"]:
+        ck_info.setdefault("environments", {})[plan["environment"]] = plan[
+            "env"
+        ]
+    pipeline = ck_info.setdefault("pipeline", {})
+    stages = pipeline.get("stages") or {}
+    stages[stage_name] = plan["stage"]
+    pipeline["stages"] = stages
+    return list(texts)
+
+
 def get_output_storage_map(
     ck_info: dict | None = None,
     wdir: str | None = None,

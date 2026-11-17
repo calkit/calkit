@@ -982,6 +982,21 @@ USER_HOME_ENV_VAR = "CALKIT_USER_HOME"
 # These are here rather than in calkit.config, which every command's update
 # check would otherwise import, with keyring and pydantic-settings, only to
 # find where its state is kept
+def get_calkit_cmd(module: str = "calkit") -> list[str]:
+    """The command that runs one of Calkit's modules with this Python,
+    without importing anything from the folder it runs in first, e.g., a
+    project's own ``queue.py``.
+    """
+    if sys.version_info >= (3, 11):
+        return [sys.executable, "-P", "-m", module]
+    return [
+        sys.executable,
+        "-c",
+        "import runpy, sys; sys.path.pop(0); "
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)",
+    ]
+
+
 def get_user_home() -> str:
     """The home directory Calkit keeps its own files in."""
     return os.environ.get(USER_HOME_ENV_VAR) or os.path.expanduser("~")

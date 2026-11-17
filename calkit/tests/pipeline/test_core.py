@@ -22,12 +22,14 @@ from calkit.environments import get_env_lock_fpath
 from calkit.models.pipeline import LatexStage, Pipeline
 from calkit.pipeline import (
     StaleStage,
+    collapse_dvc_stages,
+    stages_are_similar,
+)
+from calkit.pipeline.core import (
     _ensure_latex_aux_gitignore,
     _expand_dep_excluding_subprojects,
     _status_target_matches,
     _warn_on_latexmkrc_out_dir_mismatch,
-    collapse_dvc_stages,
-    stages_are_similar,
 )
 
 
@@ -2824,7 +2826,7 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
     }
     # ``../figs`` in the subproject is the external dep; after normalization
     # it becomes a parent-relative path.  No dep should tree-overlap any out.
-    from calkit.pipeline import _paths_overlap
+    from calkit.pipeline.core import _paths_overlap
 
     for dep in wrapper2_deps:
         for out in wrapper2_out_paths:
@@ -3510,7 +3512,7 @@ def test_revision_key(tmp_dir):
         commit(path, name)
         os.chdir(path)
         try:
-            key = calkit.pipeline._revision_key(None, ["paper/"])
+            key = calkit.pipeline.core._revision_key(None, ["paper/"])
             assert key is not None
             keys[name] = key("HEAD")
         finally:
@@ -3521,7 +3523,7 @@ def test_revision_key(tmp_dir):
     one = os.path.join(tmp_dir, "one")
     os.chdir(one)
     try:
-        key = calkit.pipeline._revision_key(None, ["paper/"])
+        key = calkit.pipeline.core._revision_key(None, ["paper/"])
         assert key is not None
         with open("other.txt", "w") as f:
             f.write("unrelated")

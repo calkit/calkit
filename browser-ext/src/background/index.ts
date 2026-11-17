@@ -326,10 +326,20 @@ async function handle(
           hub: hubFor(message),
         },
       );
-    case "project.contentPaths":
+    case "project.contentPaths": {
+      // As they are on this computer, when it's here, including files not
+      // saved yet, e.g., a script just written
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<string[]>({
+          type: "project.contentPaths",
+          project: local,
+        });
+      }
       return request<string[]>(
         `${projectPath(message.owner, message.project)}/contents-paths`,
       );
+    }
     case "project.figures": {
       // As they are on this computer, when it's here, including ones not
       // pushed yet
@@ -384,7 +394,27 @@ async function handle(
         { query: { path: message.path, key: message.key } },
       );
     }
-    case "project.stageFromScriptOrNotebook":
+    case "project.stageFromScriptOrNotebook": {
+      // Made from the script on this computer, and committed there, when
+      // the project's here
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        // Reading the script can take as long as calkit xr allows it, and
+        // a save reads it again before committing
+        return askLocal<StageFromScriptOrNotebookResponse>(
+          {
+            type: "project.stageFromScriptOrNotebook",
+            project: local,
+            scriptPath: message.scriptPath,
+            content: message.content,
+            shows: message.shows,
+            produces: message.produces,
+            data: message.data ?? [],
+            save: message.save ?? false,
+          },
+          5 * 60 * 1000,
+        );
+      }
       return request<StageFromScriptOrNotebookResponse>(
         `${projectPath(message.owner, message.project)}` +
           "/pipeline/stages/from-script-or-notebook",
@@ -400,6 +430,7 @@ async function handle(
           },
         },
       );
+    }
     case "project.recordOrigin":
       // Recorded as a misc artifact, which the hub only takes for a path
       // nothing else declares

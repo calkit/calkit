@@ -258,6 +258,18 @@ function renderAddScript(
   const read = el("button", { class: "action", text: `Read the ${kind}` });
   const message = el("div", { class: "small" });
   const review = el("div", { class: "stack", style: { marginTop: "6px" } });
+  // On this computer, the script and its data are already in the project's
+  // folder, so there's nothing to upload
+  let isLocal = false;
+  void send({ type: "local.checkout", project: `${owner}/${project}` })
+    .then((local) => {
+      if (local.path) {
+        isLocal = true;
+        file.style.display = "none";
+        path.placeholder = "Find it in the project";
+      }
+    })
+    .catch(() => undefined);
   let request: {
     scriptPath: string;
     content?: string;
@@ -311,7 +323,11 @@ function renderAddScript(
     const upload = file.files?.[0];
     const typed = path.value.trim();
     if (!upload && !typed) {
-      fail(`Choose the ${kind}, or find it in the project.`);
+      fail(
+        isLocal
+          ? `Find the ${kind} in the project.`
+          : `Choose the ${kind}, or find it in the project.`,
+      );
       return;
     }
     read.disabled = true;
@@ -338,6 +354,16 @@ function renderAddScript(
     external: string,
     detected: StageFromScriptOrNotebookResponse,
   ) => {
+    if (isLocal) {
+      return el("div", {
+        class: "small",
+        style: { color: "var(--ck-warning)", marginTop: "4px" },
+        text:
+          `Reads ${external}, which is outside the project, so it will ` +
+          "only run on this computer. Move it into the project's folder, " +
+          "and change the script to read it from there.",
+      });
+    }
     const chosen = data.get(external);
     const name = external.split(/[\\/]/).filter(Boolean).pop() ?? "data";
     const dest = textInput({ value: chosen?.path ?? `data/${name}` });
@@ -606,6 +632,17 @@ function renderExported(
   });
   const save = el("button", { class: "action", text: "Add the export step" });
   const message = el("div", { class: "small" });
+  // On this computer, the file is already in the project's folder
+  let isLocal = false;
+  void send({ type: "local.checkout", project: `${owner}/${project}` })
+    .then((local) => {
+      if (local.path) {
+        isLocal = true;
+        file.style.display = "none";
+        path.placeholder = "Find it in the project";
+      }
+    })
+    .catch(() => undefined);
   const fail = (e: unknown) =>
     clear(message).append(
       errorMessage(e instanceof Error ? e.message : String(e)),
@@ -615,7 +652,11 @@ function renderExported(
     const upload = file.files?.[0];
     const typed = path.value.trim();
     if (!upload && !typed) {
-      fail("Choose the file it's exported from, or find it in the project.");
+      fail(
+        isLocal
+          ? "Find the file it's exported from in the project."
+          : "Choose the file it's exported from, or find it in the project.",
+      );
       return;
     }
     // Kept out of the paper's folder, which syncs to Overleaf

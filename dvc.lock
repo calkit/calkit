@@ -1,92 +1,5 @@
 schema: '2.0'
 stages:
-  one-pager-latex:
-    cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
-    deps:
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: calkit.yaml
-      hash: md5
-      md5: 8779e0cdc87aa70208958bbd47b837a0
-      size: 9731
-    - path: docs/one-pager/main.md
-      hash: md5
-      md5: 5cd8fbf6f5bc6ad0804d6b64c527e016
-      size: 4878
-    - path: docs/one-pager/one-pager.lua
-      hash: md5
-      md5: 161bbc0cccd2e991cdc03924cedaef55
-      size: 2101
-    - path: docs/one-pager/template.tex
-      hash: md5
-      md5: 4955559c1e551988f2738cb2ac98880e
-      size: 3243
-    - path: results/2027-budget.json
-      hash: md5
-      md5: d223d73c9ad60723f06e3c13496fd205
-      size: 1649
-    - path: results/research-flow.json
-      hash: md5
-      md5: 22cd7480f5fc01cad15fe8a43578d3c4
-      size: 72078
-    - path: scripts/one-pager-to-latex.py
-      hash: md5
-      md5: e73c08678ba3867ff3b30feefa72bb9e
-      size: 2899
-    - path: uv.lock
-      hash: md5
-      md5: 252c68ccae32923f843aa23a43371454
-      size: 1725871
-    outs:
-    - path: docs/one-pager/main.tex
-      hash: md5
-      md5: 8835e721da8192d0c2102133b690b937
-      size: 8153
-  one-pager:
-    cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
-    deps:
-    - path: .calkit/env-locks/tex
-      hash: md5
-      md5: 754729e57f9f4aa1cb5ceb64a84b6901.dir
-      size: 2658
-      nfiles: 2
-    - path: docs/img/pipeline.png
-      hash: md5
-      md5: 0c09798b4e2fd432f0ca5f0edefb5b38
-      size: 50359
-    - path: docs/one-pager/main.tex
-      hash: md5
-      md5: 8835e721da8192d0c2102133b690b937
-      size: 8153
-    - path: docs/one-pager/main.tex
-      hash: md5
-      md5: 8835e721da8192d0c2102133b690b937
-      size: 8153
-    outs:
-    - path: docs/one-pager/main.pdf
-      hash: md5
-      md5: 4960953114330139033d7281122861de
-      size: 135957
-  one-pager-font:
-    cmd: calkit xenv -n tex --no-check -- sh 
-      .calkit/stage-commands/one-pager-font.sh
-    deps:
-    - path: .calkit/env-locks/tex
-      hash: md5
-      md5: b2d28555a90965646645402d6964aa46.dir
-      size: 2832
-      nfiles: 2
-    - path: .calkit/stage-commands/one-pager-font.sh
-      hash: md5
-      md5: ec8d7395661d6af8e24623c6b1840985
-      size: 59
-    outs:
-    - path: docs/one-pager/texgyreheros-regular.otf
-      hash: md5
-      md5: 46896831ad260afebc87cd85a7ea159a
-      size: 133600
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -168,8 +81,77 @@ stages:
       hash: md5
       md5: ecdd9b9085bd15268d23a349a2e8de2d
       size: 335476
+  one-pager-latex:
+    cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: calkit.yaml
+      hash: md5
+      md5: 8779e0cdc87aa70208958bbd47b837a0
+      size: 9731
+    - path: docs/one-pager/main.md
+      hash: md5
+      md5: 5cd8fbf6f5bc6ad0804d6b64c527e016
+      size: 4878
+    - path: docs/one-pager/one-pager.lua
+      hash: md5
+      md5: 161bbc0cccd2e991cdc03924cedaef55
+      size: 2101
+    - path: docs/one-pager/template.tex
+      hash: md5
+      md5: 4955559c1e551988f2738cb2ac98880e
+      size: 3243
+    - path: results/2027-budget.json
+      hash: md5
+      md5: d223d73c9ad60723f06e3c13496fd205
+      size: 1649
+    - path: results/research-flow.json
+      hash: md5
+      md5: 22cd7480f5fc01cad15fe8a43578d3c4
+      size: 72078
+    - path: scripts/one-pager-to-latex.py
+      hash: md5
+      md5: e73c08678ba3867ff3b30feefa72bb9e
+      size: 2899
+    - path: uv.lock
+      hash: md5
+      md5: 252c68ccae32923f843aa23a43371454
+      size: 1725871
+    outs:
+    - path: docs/one-pager/main.tex
+      hash: md5
+      md5: 8835e721da8192d0c2102133b690b937
+      size: 8153
+  one-pager:
+    cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: 754729e57f9f4aa1cb5ceb64a84b6901.dir
+      size: 2658
+      nfiles: 2
+    - path: docs/img/pipeline.png
+      hash: md5
+      md5: 0c09798b4e2fd432f0ca5f0edefb5b38
+      size: 50359
+    - path: docs/one-pager/main.tex
+      hash: md5
+      md5: 8835e721da8192d0c2102133b690b937
+      size: 8153
+    - path: docs/one-pager/main.tex
+      hash: md5
+      md5: 8835e721da8192d0c2102133b690b937
+      size: 8153
+    outs:
+    - path: docs/one-pager/main.pdf
+      hash: md5
+      md5: 4960953114330139033d7281122861de
+      size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
       --attendees=25 --supported=60 --indirect-rate=0
     deps:
     - path: .python-version
@@ -221,6 +203,24 @@ stages:
       hash: md5
       md5: 1078d8d6187e0e072d20f488176ff71e
       size: 50208
+  one-pager-font:
+    cmd: calkit xenv -n tex --no-check -- sh 
+      .calkit/stage-commands/one-pager-font.sh
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: b2d28555a90965646645402d6964aa46.dir
+      size: 2832
+      nfiles: 2
+    - path: .calkit/stage-commands/one-pager-font.sh
+      hash: md5
+      md5: ec8d7395661d6af8e24623c6b1840985
+      size: 59
+    outs:
+    - path: docs/one-pager/texgyreheros-regular.otf
+      hash: md5
+      md5: 46896831ad260afebc87cd85a7ea159a
+      size: 133600
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/plot-latex-word-round-trip.py
@@ -307,8 +307,8 @@ stages:
       md5: fc3e4471f273f3612ecefed279d9d3f7
       size: 179604
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/latex-word-round-trip.py --engine=libreoffice
+    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
+      --engine=libreoffice
     deps:
     - path: .python-version
       hash: md5

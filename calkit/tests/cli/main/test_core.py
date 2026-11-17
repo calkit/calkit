@@ -1998,6 +1998,35 @@ def test_run_downstream(tmp_dir):
     )
     assert os.path.exists("a.txt")
     assert os.path.exists("b.txt")
+    # An inline subproject's pipeline doesn't run in full alongside
+    os.makedirs("sub")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "other": {
+                            "kind": "shell-command",
+                            "command": "echo other > other.txt",
+                            "environment": "_system",
+                            "outputs": [
+                                {"path": "other.txt", "storage": "git"}
+                            ],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f) or {}
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(
+        ["calkit", "run", "--downstream", "stage-a", "--force"]
+    )
+    assert not os.path.exists("sub/other.txt")
 
 
 def test_stage_run_info_from_log_content():

@@ -4097,7 +4097,9 @@ def run(
     # Inline subprojects (no .dvc/ dir) share the parent DVC project.
     # Tell DVC to discover all pipelines so their dvc.yaml files are included,
     # unless the user already specified targets that include dvc.yaml paths
-    # (translated from subproject shorthand) or --all-pipelines was passed.
+    # (translated from subproject shorthand), named stages to start from
+    # with --downstream, which all pipelines would run in full instead, or
+    # passed --all-pipelines.
     inline_subprojects = [
         sp
         for sp in subprojects
@@ -4111,6 +4113,7 @@ def run(
     if (
         inline_subprojects
         and not targets
+        and not downstream
         and not all_pipelines
         and not translated_targets_have_dvc_yaml
     ):

@@ -4,10 +4,7 @@ name: Check format
 permissions:
   contents: read
 
-on:
-  pull_request:
-  # For the daily pipeline run's pull request, whose pushes don't start it
-  workflow_dispatch:
+on: pull_request
 
 jobs:
   all:

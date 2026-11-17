@@ -513,6 +513,20 @@ def check_environment(
     if found is None:
         raise_error(f"Environment '{env_name}' does not exist")
     env = found
+    try:
+        guests = calkit.environments.get_guest_envs(env_name, env, envs)
+    except ValueError as e:
+        raise_error(str(e))
+    for guest_name, guest in guests:
+        check_environment(env_name=guest_name, verbose=verbose)
+        try:
+            added = calkit.environments.add_host_tex_packages(
+                env_name, env, guest_name, guest
+            )
+        except ValueError as e:
+            raise_error(str(e))
+        if added:
+            check_environment(env_name=guest_name, verbose=verbose)
     # Docker records its inputs in its lock, which rebuilds it already
     try:
         rebuild = force or (

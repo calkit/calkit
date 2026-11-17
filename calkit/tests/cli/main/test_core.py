@@ -31,7 +31,7 @@ from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
     STAGE_OUTPUT_START,
     STAGE_RUNS_FPATH,
-    _get_font_warnings_by_stage,
+    _get_matplotlib_font_warnings_by_stage,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
     _prune_run_logs,
@@ -3138,7 +3138,7 @@ def test_run_captures_stage_logs(tmp_dir):
         res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
         assert res.returncode == exit_code
         warning = res.stdout.split("Matplotlib in stage 'test_stage'")[-1]
-        assert warning.startswith(" drew with a fallback font")
+        assert warning.startswith(" used a fallback font")
         assert warning.count("Font family 'Arial' not found") == 1
         assert "not found; see https://docs.calkit.org/" in warning
 
@@ -3311,7 +3311,7 @@ def test_stage_stdout_from_log_content():
     assert "other" not in res
 
 
-def test_get_font_warnings_by_stage() -> None:
+def test_get_matplotlib_font_warnings_by_stage() -> None:
     log = "\n".join(
         [
             "2025-01-01T00:00:00 - INFO - Running stage 'plot':",
@@ -3342,7 +3342,7 @@ def test_get_font_warnings_by_stage() -> None:
             "not found.",
         ]
     )
-    assert _get_font_warnings_by_stage(log) == {
+    assert _get_matplotlib_font_warnings_by_stage(log) == {
         "plot": [
             "Font family 'Arial' not found",
             "Generic family 'sans-serif' not found because none of the "
@@ -3352,7 +3352,7 @@ def test_get_font_warnings_by_stage() -> None:
             "Font family 'CMU Serif' not found",
         ]
     }
-    assert _get_font_warnings_by_stage("") == {}
+    assert _get_matplotlib_font_warnings_by_stage("") == {}
 
 
 def test_run_refuses_outside_a_project(tmp_dir):

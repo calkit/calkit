@@ -2768,7 +2768,9 @@ def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
     return {name: "\n".join(lines) for name, lines in res.items()}
 
 
-def _get_font_warnings_by_stage(log_content: str) -> dict[str, list[str]]:
+def _get_matplotlib_font_warnings_by_stage(
+    log_content: str,
+) -> dict[str, list[str]]:
     """Return Matplotlib's messages about fonts each stage couldn't find,
     one per font family, from a run log.
 
@@ -4664,11 +4666,11 @@ def run(
         except Exception as e:
             warn(f"Couldn't check where the stages' outputs are stored: {e}")
     # Matplotlib only logs a font it can't find, and draws with another
-    for stage_name, messages in _get_font_warnings_by_stage(
+    for stage_name, messages in _get_matplotlib_font_warnings_by_stage(
         log_content
     ).items():
         warn(
-            f"Matplotlib in stage '{stage_name}' drew with a fallback font, "
+            f"Matplotlib in stage '{stage_name}' used a fallback font, "
             "so its figures can look different on another computer: "
             f"{'; '.join(messages)}; see {MPL_FONTS_DOCS_URL}"
         )

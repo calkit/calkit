@@ -18,8 +18,8 @@ stages:
       size: 134496
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: images/latex/sizes.json
       hash: md5
@@ -42,8 +42,8 @@ stages:
       size: 14225
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: results/research-flow.json
       hash: md5
@@ -66,8 +66,8 @@ stages:
       size: 12155
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
@@ -82,7 +82,7 @@ stages:
       md5: ecdd9b9085bd15268d23a349a2e8de2d
       size: 335476
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
       --attendees=25 --supported=60 --indirect-rate=0
     deps:
     - path: .python-version
@@ -99,8 +99,8 @@ stages:
       size: 2015
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: results/2027-budget.json
       hash: md5
@@ -127,8 +127,8 @@ stages:
       size: 1616
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
@@ -182,8 +182,8 @@ stages:
       size: 2652
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
@@ -238,8 +238,8 @@ stages:
       md5: fc3e4471f273f3612ecefed279d9d3f7
       size: 179604
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
-      --engine=libreoffice
+    cmd: calkit xenv -n dev --no-check -- python 
+      scripts/latex-word-round-trip.py --engine=libreoffice
     deps:
     - path: .python-version
       hash: md5
@@ -283,8 +283,8 @@ stages:
       size: 4976
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5
@@ -324,8 +324,8 @@ stages:
       size: 4216
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: results/traction.json
       hash: md5
@@ -348,12 +348,12 @@ stages:
       size: 9233
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 83a1c9fbcf2791e0e377de15a1192154
+      md5: 33c4aa89fe4cf749f7613c77cb1f9b51
       size: 11920
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
@@ -368,7 +368,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 83a1c9fbcf2791e0e377de15a1192154
+      md5: 33c4aa89fe4cf749f7613c77cb1f9b51
       size: 11920
     - path: scripts/find-calkit-papers.py
       hash: md5
@@ -376,8 +376,8 @@ stages:
       size: 6400
     - path: uv.lock
       hash: md5
-      md5: 5fc19b4cc18a1d7785d1ac6180fdc085
-      size: 1728848
+      md5: 997974425bb05312ed143b082d00d960
+      size: 1728845
     outs:
     - path: data/calkit-projects/papers.csv
       hash: md5

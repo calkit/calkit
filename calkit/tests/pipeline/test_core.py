@@ -22,12 +22,14 @@ from calkit.environments import get_env_lock_fpath
 from calkit.models.pipeline import LatexStage, Pipeline
 from calkit.pipeline import (
     StaleStage,
+    collapse_dvc_stages,
+    stages_are_similar,
+)
+from calkit.pipeline.core import (
     _ensure_latex_aux_gitignore,
     _expand_dep_excluding_subprojects,
     _status_target_matches,
     _warn_on_latexmkrc_out_dir_mismatch,
-    collapse_dvc_stages,
-    stages_are_similar,
 )
 
 
@@ -2824,7 +2826,7 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
     }
     # ``../figs`` in the subproject is the external dep; after normalization
     # it becomes a parent-relative path.  No dep should tree-overlap any out.
-    from calkit.pipeline import _paths_overlap
+    from calkit.pipeline.core import _paths_overlap
 
     for dep in wrapper2_deps:
         for out in wrapper2_out_paths:
@@ -3510,7 +3512,7 @@ def test_revision_key(tmp_dir):
         commit(path, name)
         os.chdir(path)
         try:
-            key = calkit.pipeline._revision_key(None, ["paper/"])
+            key = calkit.pipeline.core._revision_key(None, ["paper/"])
             assert key is not None
             keys[name] = key("HEAD")
         finally:
@@ -3521,7 +3523,7 @@ def test_revision_key(tmp_dir):
     one = os.path.join(tmp_dir, "one")
     os.chdir(one)
     try:
-        key = calkit.pipeline._revision_key(None, ["paper/"])
+        key = calkit.pipeline.core._revision_key(None, ["paper/"])
         assert key is not None
         with open("other.txt", "w") as f:
             f.write("unrelated")
@@ -5538,6 +5540,90 @@ def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
     )
 
 
+def test_composed_env_locks_are_stage_deps(tmp_dir):
+    import calkit
+
+    with open("pyproject.toml", "w") as f:
+        f.write(
+            '[project]\nname = "p"\nversion = "0"\n'
+            'requires-python = ">=3.10"\ndependencies = []\n'
+        )
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {
+                "tex": {"kind": "texlive"},
+                "py": {
+                    "kind": "uv",
+                    "path": "pyproject.toml",
+                    "with": ["tex"],
+                },
+            },
+            "pipeline": {
+                "stages": {
+                    "fig": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "py",
+                        "outputs": ["a.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert "uv.lock" in stages["fig"]["deps"]
+    assert ".calkit/env-locks/tex.json" in stages["fig"]["deps"]
+    # As are those of the environments a switch picks from
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {
+                "tex": {"kind": "texlive"},
+                "py": {
+                    "kind": "uv",
+                    "path": "pyproject.toml",
+                    "with": ["tex"],
+                },
+                "sw": {"kind": "switch", "switch": [{"use": "py"}]},
+            },
+            "pipeline": {
+                "stages": {
+                    "fig": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "sw",
+                        "outputs": ["a.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert ".calkit/env-locks/tex.json" in stages["fig"]["deps"]
+    # One that can't be composed is reported
+    with pytest.raises(ValueError, match="isn't defined"):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {
+                    "py": {
+                        "kind": "uv",
+                        "path": "pyproject.toml",
+                        "with": ["x"],
+                    }
+                },
+                "pipeline": {
+                    "stages": {
+                        "fig": {
+                            "kind": "shell-command",
+                            "command": "echo a",
+                            "environment": "py",
+                        },
+                    }
+                },
+            },
+            write=False,
+        )
+
+
 def test_get_figure_paths_with_origins(tmp_dir):
     ck_info = {
         "pipeline": {
@@ -5600,111 +5686,6 @@ def test_get_figure_paths_with_origins(tmp_dir):
         "paper/exported.png",
         "paper/drawn.png",
     ]
-
-
-def test_get_stage_from_script_plan(tmp_path):
-    from calkit.pipeline import (
-        get_stage_from_script_plan,
-        write_stage_from_script,
-    )
-
-    subprocess.check_call(["git", "init", "-q"], cwd=tmp_path)
-    (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "raw.csv").write_text("x\n1\n")
-    (tmp_path / "paper" / "figures").mkdir(parents=True)
-    (tmp_path / "paper" / "paper.tex").write_text(
-        "\\documentclass{article}\n\\begin{document}\n"
-        "\\includegraphics{figures/fit.png}\n\\end{document}\n"
-    )
-    detected = {
-        "environment": {
-            "name": "py",
-            "exists": False,
-            "created_from_dependencies": True,
-            "env": {"kind": "uv", "path": "pyproject.toml"},
-            "spec_path": "pyproject.toml",
-            "spec_content": "[project]\nname = 'p'\n",
-            "dependencies": ["pandas"],
-        },
-        "stage": {
-            "name": "plot",
-            "stage": {
-                "kind": "python-script",
-                "script_path": "scripts/plot.py",
-                "environment": "py",
-                "inputs": ["data/raw.csv", "data/new.csv", "data/up.csv"],
-                "outputs": ["figures/fit.png"],
-            },
-        },
-        "external_inputs": ["/Users/me/runs"],
-    }
-    ck_info = {"overleaf_sync": {"paper": {}}}
-    # What a document shows is matched to the output with its file name,
-    # with the document changed to show it from there
-    plan = get_stage_from_script_plan(
-        "scripts/plot.py",
-        detected,
-        ck_info,
-        wdir=str(tmp_path),
-        shows="paper/figures/fit.png",
-        data_paths=["data/up.csv"],
-    )
-    assert plan["produces"] == "figures/fit.png"
-    assert list(plan["included"]) == ["paper/paper.tex"]
-    assert "\\ckfigure{figures/fit.png}" in plan["included"]["paper/paper.tex"]
-    # Only what isn't here, made, or uploaded with it is missing
-    assert plan["missing_inputs"] == ["data/new.csv"]
-    assert plan["external_inputs"] == ["/Users/me/runs"]
-    assert plan["environment_spec_path"] == "pyproject.toml"
-    # An output it doesn't write can't be picked
-    with pytest.raises(ValueError, match="doesn't write 'other.png'"):
-        get_stage_from_script_plan(
-            "scripts/plot.py",
-            detected,
-            ck_info,
-            wdir=str(tmp_path),
-            shows="paper/figures/fit.png",
-            produces="other.png",
-        )
-    # Not shown anywhere it can be shown from, so it's made where it's shown
-    plan_here = get_stage_from_script_plan(
-        "scripts/plot.py",
-        detected,
-        ck_info,
-        wdir=str(tmp_path),
-        shows="paper/figures/drawn.png",
-    )
-    assert plan_here["produces"] == "paper/figures/drawn.png"
-    assert "paper/figures/drawn.png" in plan_here["outputs"]
-    assert not plan_here["included"]
-    # A stage already running it keeps what it declares
-    existing = {
-        "pipeline": {
-            "stages": {
-                "plot": {
-                    **detected["stage"]["stage"],
-                    "inputs": [{"kind": "env-var", "name": "SEED"}],
-                    "outputs": ["figures/extra.png"],
-                }
-            }
-        }
-    }
-    merged = get_stage_from_script_plan(
-        "scripts/plot.py", detected, existing, wdir=str(tmp_path)
-    )
-    assert merged["outputs"] == ["figures/extra.png", "figures/fit.png"]
-    assert merged["stage"]["inputs"][0] == {"kind": "env-var", "name": "SEED"}
-    # Written: the stage, the environment, its spec, and the document
-    written = write_stage_from_script(plan, ck_info, wdir=str(tmp_path))
-    assert sorted(written) == ["paper/paper.tex", "pyproject.toml"]
-    assert ck_info["pipeline"]["stages"]["plot"] == plan["stage"]
-    assert ck_info["environments"]["py"] == detected["environment"]["env"]
-    assert (tmp_path / "pyproject.toml").read_text().startswith("[project]")
-    assert "\\ckfigure" in (tmp_path / "paper" / "paper.tex").read_text()
-    # An invalid stage isn't written
-    bad = plan | {"stage": {"kind": "nope"}, "included": {}}
-    with pytest.raises(ValueError, match="Invalid stage"):
-        write_stage_from_script(bad, {}, wdir=str(tmp_path))
 
 
 def test_get_stage_to_add():

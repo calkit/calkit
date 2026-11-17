@@ -73,6 +73,8 @@ JOB_KINDS = ("run", "sync", "clone", "install-editor", "detect")
 CHECKOUT_JOB_KINDS = ("run", "sync")
 # A job that hasn't started by then never will, e.g., its process died first
 JOB_START_SECONDS = 60
+# Reading a script for a stage, as the hub allows it
+DETECT_JOB_SECONDS = 120
 # A GitHub owner or repo name, so neither is read as an option or a URL
 PROJECT_PART_RE = re.compile(r"^(?!\.+$)[A-Za-z0-9_.][A-Za-z0-9_.-]*$")
 # The requests answered alongside others, since they don't change the
@@ -226,7 +228,9 @@ def get_result(msg: dict) -> Any:
         result: Any = {"version": calkit.__version__} | get_editor_info()
     elif kind == "projects.find":
         owner, name = split_project(msg.get("project"))
-        found = calkit.get_project_checkouts(name, owner=owner)
+        found = calkit.get_project_checkouts(
+            name, owner=owner, search_protected=False
+        )
         result = {"paths": sorted(found)}
     elif kind == "project.open":
         owner, name = split_project(msg.get("project"))
@@ -559,7 +563,11 @@ def get_checkout_paths(
             os.path.isfile(os.path.join(p, "calkit.yaml")) for p in paths
         )
     ):
-        paths = sorted(calkit.get_project_checkouts(name, owner=owner))
+        paths = sorted(
+            calkit.get_project_checkouts(
+                name, owner=owner, search_protected=False
+            )
+        )
         set_checkouts_found(key, [time.time(), paths])
     return sort_checkouts(owner, name, paths)
 
@@ -707,7 +715,7 @@ def get_overleaf_links(overleaf_project_id: str) -> list[dict]:
             not links
             and time.time() - index["scanned"] > LOOKUP_RESCAN_SECONDS
         ):
-            for path in calkit.find_project_dirs():
+            for path in calkit.find_project_dirs(search_protected=False):
                 path = os.path.realpath(path)
                 if path not in index["checkouts"]:
                     index["checkouts"][path] = read_checkout(path)
@@ -1325,6 +1333,7 @@ def run_job(job_id: str) -> None:
     """Run a job started with ``start_job``, recording how it went."""
     import collections
     import threading
+    import time
     from datetime import datetime, timezone
 
     import calkit.git
@@ -1413,11 +1422,20 @@ def run_job(job_id: str) -> None:
         )
         reader = threading.Thread(target=read_output, args=(proc.stdout,))
         reader.start()
+        started = time.monotonic()
         while True:
             try:
                 returncode = proc.wait(timeout=JOB_SAVE_SECONDS)
                 break
             except subprocess.TimeoutExpired:
+                if (
+                    job["kind"] == "detect"
+                    and time.monotonic() - started > DETECT_JOB_SECONDS
+                ):
+                    proc.kill()
+                    tail.append(
+                        f"Error: Reading '{job['script_path']}' took too long"
+                    )
                 update(job)
                 save(job)
         reader.join()
@@ -1454,11 +1472,13 @@ def run_job(job_id: str) -> None:
                 get_checkouts_key(*job["project"].split("/", 1)), None
             )
         elif job["kind"] == "detect":
-            import calkit.pipeline
+            import calkit.pipeline.detect
 
             try:
-                job["result"] = calkit.pipeline.get_detection_from_output(
-                    "".join(printed)
+                job["result"] = (
+                    calkit.pipeline.detect.get_detection_from_output(
+                        "".join(printed)
+                    )
                 )
             except ValueError:
                 job |= {
@@ -1662,11 +1682,11 @@ def commit_change(
 
 def get_script_path(wdir: str, value: Any) -> str:
     """A script in a checkout that a stage can be made from."""
-    import calkit.pipeline
+    import calkit.pipeline.detect
 
     script_path = get_project_path(wdir, value, "script")
-    if not script_path.lower().endswith(calkit.pipeline.SCRIPT_EXTS):
-        raise ValueError(calkit.pipeline.SCRIPT_EXTS_MESSAGE)
+    if not script_path.lower().endswith(calkit.pipeline.detect.SCRIPT_EXTS):
+        raise ValueError(calkit.pipeline.detect.SCRIPT_EXTS_MESSAGE)
     if not os.path.isfile(os.path.join(wdir, script_path)):
         raise ValueError(f"'{script_path}' isn't in the project")
     return script_path
@@ -1679,16 +1699,25 @@ def get_file_stat(path: str) -> list[float]:
 
 
 def get_detection(wdir: str, script_path: str, job_id: Any) -> dict:
-    """What ``calkit xr --dry-run`` found in a script: from a detect job
+    """What ``calkit xr --dry-run`` finds in a script: from a detect job
     run for it, unless it's changed since, else read now.
 
     The job is this host's own record, so what's planned from it can't be
     made up by whoever asks.
     """
-    import calkit.pipeline
+    import calkit.pipeline.detect
 
+    # Read in this process from the checkout, as the pipeline's status is;
+    # what's answered at the same time uses full paths
     if job_id is None:
-        return calkit.pipeline.get_script_detection(script_path, wdir=wdir)
+        prev_wdir = os.getcwd()
+        try:
+            os.chdir(wdir)
+            return calkit.pipeline.detect.detect_stage(
+                [script_path], calkit.load_calkit_info()
+            ).model_dump()
+        finally:
+            os.chdir(prev_wdir)
     job = get_job(str(job_id))
     if (
         job["kind"] != "detect"
@@ -1716,9 +1745,9 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     Nothing's pushed; a run and sync does that. With ``detectJob``, what
     the script does is what that detect job found, rather than read now.
     """
-
     import calkit.git
     import calkit.pipeline
+    import calkit.pipeline.detect
 
     script_path = get_script_path(wdir, msg.get("scriptPath"))
     # Uploads go through the hub, which reads them in a checkout of their
@@ -1743,7 +1772,7 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
             "anywhere else; stop ignoring it first"
         )
     ck_info = calkit.load_calkit_info(wdir=wdir)
-    plan = calkit.pipeline.get_stage_from_script_plan(
+    plan = calkit.pipeline.detect.get_stage_from_script_plan(
         script_path,
         get_detection(wdir, script_path, msg.get("detectJob")),
         ck_info,

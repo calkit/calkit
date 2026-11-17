@@ -16,6 +16,7 @@ import calkit
 import calkit.config
 import calkit.git
 import calkit.pipeline
+import calkit.pipeline.detect
 from calkit.browser_link import (
     get_editor_info,
     get_host_status,
@@ -1103,6 +1104,17 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     assert res["produces"] == "figures/fit.png"
     assert res["included_in"] == ["paper/paper.tex"]
     assert repo.git.status("--porcelain", "-uall") == "?? scripts/plot.py"
+    # Detection failing leaves the host where it was
+    cwd = os.getcwd()
+    with monkeypatch.context() as m:
+        m.setattr(
+            calkit.pipeline.detect,
+            "detect_stage",
+            Mock(side_effect=ValueError("no")),
+        )
+        with pytest.raises(ValueError, match="no"):
+            add_stage_from_script(str(project), msg)
+    assert os.getcwd() == cwd
     # Read in a job of its own, the stage is the same, until the script
     # changes
     monkeypatch.setattr(
@@ -1134,6 +1146,28 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
         add_stage_from_script(str(project), msg | {"detectJob": job["id"]})
     (project / "scripts" / "plot.py").write_text(script)
     (project / "scripts" / "other.py").unlink()
+    # One that takes too long is stopped
+    with monkeypatch.context() as m:
+        m.setattr(calkit.browser_link, "DETECT_JOB_SECONDS", 0)
+        m.setattr(
+            calkit.browser_link,
+            "get_calkit_cmd",
+            lambda *args: [
+                sys.executable,
+                "-c",
+                "import time; time.sleep(60)",
+            ],
+        )
+        stuck = start_job(
+            {
+                "kind": "detect",
+                "project": "me/proj",
+                "scriptPath": "scripts/plot.py",
+            }
+        )
+        run_job(stuck["id"])
+    with pytest.raises(ValueError, match="took too long"):
+        add_stage_from_script(str(project), msg | {"detectJob": stuck["id"]})
     # A path given in full is the same script
     full_msg = msg | {"scriptPath": str(project / "scripts" / "plot.py")}
     assert (

@@ -73,8 +73,8 @@ RUN uv pip install --system --no-cache-dir \
 # environment's first build doesn't download its base packages. A local or
 # PR build gets the latest Calkit on PyPI, which may predate the command.
 USER vscode
-RUN if [ -n "${CALKIT_VERSION}" ] || calkit latex warm --help > /dev/null 2>&1; then \
-        calkit latex warm; \
+RUN if [ -n "${CALKIT_VERSION}" ] || calkit latex warm-cache --help > /dev/null 2>&1; then \
+        calkit latex warm-cache; \
     fi
 USER root
 

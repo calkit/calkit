@@ -1239,7 +1239,7 @@ To download TeX Live's base packages ahead of time, e.g., when setting up a
 computer or a container image, run:
 
 ```sh
-calkit latex warm
+calkit latex warm-cache
 ```
 
 Calkit's dev container image comes with them, so a new container's first

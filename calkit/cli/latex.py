@@ -681,8 +681,8 @@ def map_components(
         warn(f"{problem}; it will print as ??")
 
 
-@latex_app.command(name="warm")
-def warm(
+@latex_app.command(name="warm-cache")
+def warm_cache(
     release: Annotated[
         int | None,
         typer.Option(

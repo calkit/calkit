@@ -653,7 +653,7 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
     out = subprocess.check_output(["calkit", "status"], text=True)
     assert "Pipeline is up to date" in out
     # The store can be filled without a project, e.g., for an image
-    out = subprocess.check_output(["calkit", "latex", "warm"], text=True)
+    out = subprocess.check_output(["calkit", "latex", "warm-cache"], text=True)
     assert "TeX Live is ready" in out
     # Converting it from the source gets TeX4ht without locking it, since
     # it isn't part of the pipeline

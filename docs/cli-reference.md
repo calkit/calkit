@@ -4215,7 +4215,7 @@ Work with LaTeX.
 | [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.          |
 | [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.                |
 | [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands.      |
-| [`warm`](#subcommand-latex-tex-warm)                     | Download TeX Live's base packages and build its formats ahead of time. |
+| [`warm-cache`](#subcommand-latex-tex-warm-cache)         | Download TeX Live's base packages and build its formats ahead of time. |
 | [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                          |
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.                  |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                     |
@@ -4322,9 +4322,9 @@ Arguments:
 | ---------- | ---- | -------- | ------- | -------------------------------------- |
 | `tex_file` | str  | yes      |         | The .tex file whose components to map. |
 
-<a id="subcommand-latex-tex-warm"></a>
+<a id="subcommand-latex-tex-warm-cache"></a>
 
-#### `calkit latex|tex warm`
+#### `calkit latex|tex warm-cache`
 
 Download TeX Live's base packages and build its formats ahead of time.
 
@@ -4333,7 +4333,7 @@ For a machine or image without a project yet, e.g., a dev container, so a TeX Li
 Usage:
 
 ```text
-calkit latex|tex warm [OPTIONS]
+calkit latex|tex warm-cache [OPTIONS]
 ```
 
 Options:

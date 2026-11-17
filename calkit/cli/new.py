@@ -1878,12 +1878,14 @@ def new_uv_env(
     # uv picks the interpreter from .python-version, since requires-python
     # is only a floor
     python_version_path = os.path.join(envdir, ".python-version")
+    pinned_python = False
     if python_version and not os.path.isfile(python_version_path):
         res = subprocess.run(
             ["uv", "python", "pin", python_version], cwd=envdir
         )
         if res.returncode != 0:
             raise_error(f"Failed to pin Python {python_version}")
+        pinned_python = True
     if packages:
         res = subprocess.run(["uv", "add"] + packages, cwd=envdir)
         if res.returncode != 0:
@@ -1900,7 +1902,8 @@ def new_uv_env(
     if not no_commit:
         repo = calkit.git.get_repo()
         repo.git.add(path)
-        if os.path.isfile(python_version_path):
+        # A project that ignores the pin has chosen not to commit it
+        if pinned_python and not repo.ignored(python_version_path):
             repo.git.add(python_version_path)
         repo.git.add("calkit.yaml")
         if repo.git.diff("--staged"):

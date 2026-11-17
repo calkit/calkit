@@ -561,6 +561,29 @@ def test_new_uv_env(tmp_dir):
     )
     with open(".calkit/envs/other/.python-version") as f:
         assert f.read() == "3.12.0\n"
+    assert ".calkit/envs/other/.python-version" not in (
+        git.Repo().git.ls_files().split()
+    )
+    # A pin the project ignores isn't committed, whether written here or
+    # already there
+    with open(".gitignore", "a") as f:
+        f.write("\n.python-version\n")
+    os.makedirs(".calkit/envs/ignored1")
+    with open(".calkit/envs/ignored1/.python-version", "w") as f:
+        f.write("3.12\n")
+    for i, python_args in enumerate([["--python", "3.12"], []]):
+        subprocess.check_call(
+            ["calkit", "new", "uv-env", "--name", f"ignored{i}", "--path"]
+            + [f".calkit/envs/ignored{i}/pyproject.toml", "--no-check"]
+            + python_args
+        )
+        repo = git.Repo()
+        assert os.path.isfile(f".calkit/envs/ignored{i}/.python-version")
+        assert f"ignored{i}" in calkit.load_calkit_info()["environments"]
+        assert f".calkit/envs/ignored{i}/pyproject.toml" in (
+            repo.git.ls_files().split()
+        )
+        assert not repo.is_dirty(path="calkit.yaml")
 
 
 @pytest.mark.xdist_group("texlive")

@@ -968,13 +968,15 @@ def get_composed_env_vars(
     envs: dict,
     keep: list[str] | None = None,
     verbose: bool = False,
+    env_vars: dict | None = None,
 ) -> dict | None:
     """Return the environmental variables an environment's commands get
     with the environments in its ``with`` composed in, or None if it has
     none. Those named in ``keep``, e.g., the project's own, keep their
     values.
 
-    Each is checked first, which is fast once it's ready. Fontconfig is
+    These are ``env_vars``, by default this process's, with each composed
+    in. Each is checked first, which is fast once it's ready. Fontconfig is
     pointed at the system's fonts as well as the TeX Live environment's,
     and Matplotlib, which keys its TeX output and font list caches by
     neither the TeX nor the fonts it found, gets a config directory of its
@@ -992,7 +994,7 @@ def get_composed_env_vars(
     guests = get_guest_envs(env_name, env, envs)
     if not guests:
         return None
-    env_vars = dict(os.environ)
+    env_vars = dict(os.environ if env_vars is None else env_vars)
     view_dirs = []
     for name, guest in guests:
         try:

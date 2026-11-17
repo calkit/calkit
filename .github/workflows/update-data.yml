@@ -3,8 +3,8 @@ name: Update data
 # The pipeline's stages that collect data once a day, e.g., the projects found
 # on GitHub and the one-pager's usage numbers, run here rather than in every
 # pull request or on every machine, so that work and its API calls happen once
-# a day. Their results only add data, so they're committed straight to main,
-# with a deploy key the main ruleset lets bypass it.
+# a day. Their results wait in one pull request, updated each day, for an
+# admin to merge.
 on:
   schedule:
     # Early in the UTC day, when their schedule inputs go out of date, and off
@@ -13,8 +13,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
+  pull-requests: write
 
 concurrency:
   group: update-data
@@ -22,33 +23,24 @@ concurrency:
 
 jobs:
   update:
-    # Its results belong on main, not on a branch they'd conflict from
+    # Each day's results are built on main as it is
     if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      DATA_BRANCH: data-update
     steps:
-      - name: Check for the deploy key
-        env:
-          HAS_KEY: ${{ secrets.DATA_DEPLOY_KEY != '' }}
-        run: |
-          if [ "$HAS_KEY" != "true" ]; then
-            echo "::error::Set DATA_DEPLOY_KEY to the private half of a" \
-              "deploy key with write access, and let deploy keys bypass" \
-              "the main ruleset"
-            exit 1
-          fi
       - uses: actions/checkout@v7
         with:
-          # Its pushes can go straight to main, unlike this run's token's
-          ssh-key: ${{ secrets.DATA_DEPLOY_KEY }}
           # As in run-pipeline.yml, so built documents are dated and stamped
           # as they would be locally
           fetch-depth: 0
-      - name: Configure Git credentials
+      - name: Configure Git
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email \
             '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B "$DATA_BRANCH"
       - name: Setup uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Install Calkit from this branch
@@ -66,12 +58,19 @@ jobs:
           # A hub superuser's token lets the traction stage read the hub's
           # usage stats; without one, that stage is skipped
           dvc_token: ${{ secrets.CALKIT_STATS_TOKEN }}
-          # Only they and what depends on them run, so nothing else reaches
-          # main without review
+          # Only they and what depends on them run, so the pull request
+          # holds nothing but data
           run_args: --downstream find-calkit-projects
-          # Saved below instead, so a push main moved under can be retried
+          # Saved below instead, since the branch is rebuilt each day
           save: "false"
-      - name: Commit the results to main
+      # Each run writes whole snapshots, so rebuilding the branch from main
+      # loses nothing an earlier day's commit had, and never conflicts with it
+      - name: Propose the results to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+            github.run_id }}
         run: |
           before=$(git rev-parse HEAD)
           calkit save -am "Update pipeline data" --no-push
@@ -79,8 +78,15 @@ jobs:
             echo "Nothing changed"
             exit 0
           fi
-          for _ in 1 2 3; do
-            calkit push && exit 0
-            git pull --rebase
-          done
-          exit 1
+          calkit push --no-git
+          git push --force origin "HEAD:refs/heads/$DATA_BRANCH"
+          body="Data from the pipeline's daily stages, rebuilt on main by $RUN_URL.
+          Pushes from this workflow don't start checks, so merge it bypassing them."
+          open=$(gh pr list --head "$DATA_BRANCH" --base main --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -z "$open" ]; then
+            gh pr create --head "$DATA_BRANCH" --base main \
+              --title "Update pipeline data" --body "$body"
+          else
+            gh pr edit "$open" --body "$body"
+          fi

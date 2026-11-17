@@ -1326,8 +1326,16 @@ on Linux, keep finding the ones they used before.
 Only `uv`, `uv-venv`, `venv`, `conda`, `pixi`, `julia`, and `renv`
 environments can have another composed into them with `with`,
 and only one TeX Live environment each.
-A notebook kernel your editor starts, rather than Calkit, doesn't get it
-yet.
+
+<!-- TODO: needs human review -->
+
+The Jupyter kernel Calkit registers for `py`,
+e.g., when you pick `py` for a notebook in VS Code or JupyterLab,
+gets TeX Live's programs too,
+ahead of everything on the editor's PATH.
+It keeps the TeX Live environment it got when it was registered,
+so after changing `tex`, pick `py` again,
+or run `calkit nb check-kernel -e py`.
 
 ### R
 

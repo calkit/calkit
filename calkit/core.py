@@ -42,6 +42,18 @@ import ruamel.yaml
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
+# Folders in the home folder that macOS asks before a process reads, which
+# projects aren't kept in, e.g., Pictures, which has the Photos library
+MACOS_MEDIA_FOLDERS = (
+    "Applications",
+    "Library",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Public",
+)
+# Those macOS asks about where projects may be kept
+MACOS_PROTECTED_FOLDERS = ("Desktop", "Documents", "Downloads")
 
 
 class _FoldedPlainStr(str):
@@ -723,24 +735,49 @@ def record_project_path(wdir: str = ".") -> None:
         write_json(fpath, paths + [path], indent=2)
 
 
-def find_project_dirs(relative=False, max_depth=3) -> list[str]:
+def find_project_dirs(
+    relative: bool = False, max_depth: int = 3, search_protected: bool = True
+) -> list[str]:
     """Find all Calkit project directories, i.e., those up to
     ``max_depth`` folders into the home folder, and, unless ``relative``,
-    those recorded when created or cloned.
+    those recorded when created, cloned, or found before.
+
+    On macOS, the home folder's media and system folders are never
+    searched, and, without ``search_protected``, nor are its Desktop,
+    Documents, and Downloads folders, since macOS asks before a process
+    reads any of them, e.g., one the browser starts; recorded projects in
+    them are still found.
     """
     if relative:
         start = ""
     else:
         start = os.path.expanduser("~")
+    skipped = set()
+    if platform.system() == "Darwin" and not relative:
+        skipped |= set(MACOS_MEDIA_FOLDERS)
+        if not search_protected:
+            skipped |= set(MACOS_PROTECTED_FOLDERS)
+    try:
+        top_names = sorted(
+            entry.name
+            for entry in os.scandir(start or ".")
+            if not entry.name.startswith(".")
+            and entry.name not in skipped
+            and entry.is_dir()
+        )
+    except OSError:
+        top_names = []
     res = []
     for i in range(max_depth):
-        pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
-        res += glob.glob(pattern)
-        # Check GitHub documents for users who use GitHub Desktop
-        pattern = os.path.join(
-            start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
-        )
-        res += glob.glob(pattern)
+        for top_name in top_names:
+            top = os.path.join(glob.escape(start), glob.escape(top_name))
+            pattern = os.path.join(top, *["*"] * i, "calkit.yaml")
+            res += glob.glob(pattern)
+            # Check GitHub documents for users who use GitHub Desktop
+            pattern = os.path.join(
+                top, "GitHub", *["*"] * (i + 1), "calkit.yaml"
+            )
+            res += glob.glob(pattern)
     if not relative:
         res += [
             os.path.join(p, "calkit.yaml")
@@ -761,15 +798,20 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
 
 
 def get_project_checkouts(
-    name: str, owner: str = "", warn: Any = None
+    name: str,
+    owner: str = "",
+    warn: Any = None,
+    search_protected: bool = True,
 ) -> dict[str, str]:
     """Find the checkouts of a project on this machine, by the owner and
     name each says it has, returning each one's owner by its real path.
 
     ``warn`` is called with why a project that can't be read was skipped.
+    ``search_protected`` is as for :func:`find_project_dirs`. Each found is
+    recorded, so it's found again without searching where it is.
     """
     found: dict[str, str] = {}
-    for path in find_project_dirs():
+    for path in find_project_dirs(search_protected=search_protected):
         path = os.path.realpath(path)
         if path in found:
             continue
@@ -820,6 +862,9 @@ def get_project_checkouts(
             continue
         if p_name == name and owner in ("", p_owner):
             found[path] = p_owner
+    for path in found:
+        with contextlib.suppress(Exception):
+            record_project_path(path)
     return found
 
 

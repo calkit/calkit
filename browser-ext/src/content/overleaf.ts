@@ -4104,13 +4104,15 @@ function scheduleReviewThreads(): void {
 /**
  * The source file and line at a place in the PDF: by SyncTeX for
  * Overleaf's, else the paragraph sharing the most words with the text
- * there, as a line in the source now.
+ * there, as a line in the source now. With ``withStart``, also where its
+ * paragraph starts in the PDF, which takes Overleaf another lookup.
  */
 async function getSourceAt(
   page: number,
   x: number,
   y: number,
   context: string,
+  withStart = false,
 ): Promise<{
   file: string;
   line: number;
@@ -4136,13 +4138,19 @@ async function getSourceAt(
     const data = response.ok
       ? ((await response.json()) as { code?: { file: string; line: number }[] })
       : {};
-    const found = data.code?.find((c) => sources.current.has(c.file));
+    // Named as the build found it, e.g., "./sections/intro.tex"
+    const found = data.code
+      ?.map((c) => ({ ...c, file: c.file.replace(/^(\.\/)+/, "") }))
+      .find((c) => sources.current.has(c.file));
     if (found) {
       const map = lineMap(
         (sources.built.get(found.file) ?? "").split("\n"),
         (sources.current.get(found.file) ?? "").split("\n"),
       );
       const line = map.toAfter(found.line);
+      if (!withStart) {
+        return { file: found.file, line };
+      }
       const lines = (sources.current.get(found.file) ?? "").split("\n");
       const para = paragraphLines(lines, line);
       const [box] = await synctex(
@@ -4292,6 +4300,9 @@ async function postToOverleaf(
   }
 }
 
+// Which go to source is the latest
+let sourceAtSeq = 0;
+
 /** Do what the viewer with comments asks. */
 async function onReviewMessage(message: FromReview): Promise<void> {
   const r = review;
@@ -4320,12 +4331,16 @@ async function onReviewMessage(message: FromReview): Promise<void> {
           message.x,
           message.y,
           message.context,
+          true,
         ).catch(() => null);
         postToReview({ type: "located", reqId: message.reqId, ...found });
         return;
       }
       case "sourceAt":
       case "openSource": {
+        // Overleaf takes a second or more to say, so only the last asked
+        // for is gone to, not whichever's answered last
+        const seq = ++sourceAtSeq;
         const found =
           message.type === "openSource"
             ? { file: message.file, line: message.line }
@@ -4335,8 +4350,14 @@ async function onReviewMessage(message: FromReview): Promise<void> {
                 message.y,
                 message.context,
               );
+        if (seq !== sourceAtSeq) {
+          return;
+        }
         if (!found || !(await openDocument(found.file))) {
           postToReview({ type: "status", text: "No source found there." });
+          return;
+        }
+        if (seq !== sourceAtSeq) {
           return;
         }
         toEditor({ type: "goto", line: found.line, column: 0 });

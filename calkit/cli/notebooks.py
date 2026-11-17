@@ -207,7 +207,8 @@ def check_env_kernel(
             os.dup2(stdout_fd, 1)
             os.close(stdout_fd)
 
-    envs = calkit.load_calkit_info().get("environments", {})
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
     if env_name not in envs:
         raise_error(f"No environment '{env_name}' defined for this project")
     env = envs[env_name]
@@ -215,7 +216,8 @@ def check_env_kernel(
     if language is None:
         language = language_from_env(env) or "python"
     # A kernel an editor starts doesn't go through Calkit, so its spec gives
-    # it the environments composed into this one, ahead of the editor's PATH
+    # it the environments composed into this one, ahead of the editor's PATH,
+    # but not what the project sets, which the spec's values would override
     try:
         with send_stdout_to_stderr():
             kernel_env_vars = get_composed_env_vars(
@@ -227,6 +229,16 @@ def check_env_kernel(
             )
     except (ValueError, RuntimeError, OSError) as e:
         raise_error(str(e))
+    if kernel_env_vars is not None:
+        project_env_var_names = {
+            *(ck_info.get("env_vars") or {}),
+            *dotenv.dotenv_values(".env"),
+        }
+        kernel_env_vars = {
+            k: v
+            for k, v in kernel_env_vars.items()
+            if k not in project_env_var_names
+        }
     project_name = calkit.detect_project_name(prepend_owner=False)
     if not project_name:
         raise_error("Project name cannot be empty")
@@ -396,8 +408,10 @@ def check_env_kernel(
         with open(spec_fpath, encoding="utf-8") as f:
             spec = json.load(f)
         spec["env"] = spec.get("env", {}) | kernel_env_vars
-        with open(spec_fpath, "w", encoding="utf-8") as f:
+        tmp_fpath = f"{spec_fpath}.{os.getpid()}.tmp"
+        with open(tmp_fpath, "w", encoding="utf-8") as f:
             json.dump(spec, f, indent=1)
+        os.replace(tmp_fpath, spec_fpath)
     # Output result
     if json_output:
         result = {

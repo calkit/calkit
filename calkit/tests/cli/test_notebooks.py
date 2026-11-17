@@ -318,26 +318,43 @@ def test_check_env_kernel_composed(
     assert composed is not None
     for name in ["FONTCONFIG_FILE", "MPLCONFIGDIR"]:
         assert env_vars[name] == composed[name]
+    # What the project sets is left to whatever starts the kernel, since the
+    # spec's values would override it
+    ck_info["env_vars"] = {"MPLCONFIGDIR": "mplconfig"}
+    calkit.save_calkit_info(ck_info)
+    kernel_name, env_vars = check_kernel()
+    assert "MPLCONFIGDIR" not in env_vars
+    assert env_vars["FONTCONFIG_FILE"] == composed["FONTCONFIG_FILE"]
     # Jupyter fills in the PATH it was started with
     path = os.environ["PATH"]
     monkeypatch.setenv("PATH", os.defpath)
+    monkeypatch.setenv("MPLCONFIGDIR", "/project/mplconfig")
     km, kc = start_new_kernel(kernel_name=kernel_name)
     assert isinstance(kc, BlockingKernelClient)
     try:
         kc.execute_interactive(
             "import json, os, shutil\n"
             "with open('kernel-env.json', 'w') as f:\n"
-            "    json.dump([os.environ['PATH'], shutil.which('kpsewhich')], f)",
+            "    json.dump([os.environ['PATH'], shutil.which('kpsewhich'),\n"
+            "        os.environ['MPLCONFIGDIR']], f)",
             timeout=60,
         )
     finally:
         kc.stop_channels()
         km.shutdown_kernel(now=True)
     monkeypatch.setenv("PATH", path)
+    monkeypatch.delenv("MPLCONFIGDIR")
     with open("kernel-env.json") as f:
-        kernel_path, kpsewhich_fpath = json.load(f)
+        kernel_path, kpsewhich_fpath, mplconfig_dir = json.load(f)
     assert kernel_path == bin_dir + os.pathsep + os.defpath
     assert os.path.dirname(kpsewhich_fpath) == bin_dir
+    assert mplconfig_dir == "/project/mplconfig"
+    # Nor does the spec touch a PATH the project sets, e.g., in .env
+    with open(".env", "w") as f:
+        f.write(f"PATH={path}\n")
+    _, env_vars = check_kernel()
+    assert "PATH" not in env_vars
+    assert env_vars["FONTCONFIG_FILE"] == composed["FONTCONFIG_FILE"]
     # Taking it out of 'with' takes it out of the spec
     ck_info["environments"]["main"].pop("with")
     calkit.save_calkit_info(ck_info)

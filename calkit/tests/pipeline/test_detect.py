@@ -48,6 +48,10 @@ def test_detect_stage(tmp_path, monkeypatch):
         "stage",
         "external_inputs",
     }
+    # Whatever the case of its extension
+    for name, kind in [("other.r", "r-script"), ("Other.PY", "python-script")]:
+        (tmp_path / name).write_text("x = 1\n")
+        assert detect_stage([name], ck_info).stage.stage["kind"] == kind
     # Declared paths are kept, and none found without looking
     detection = detect_stage(
         ["plot.py"], ck_info, inputs=["data"], detect_paths=False
@@ -158,6 +162,20 @@ def test_get_stage_from_script_plan(tmp_path):
     )
     assert merged["outputs"] == ["figures/extra.png", "figures/fit.png"]
     assert merged["stage"]["inputs"][0] == {"kind": "env-var", "name": "SEED"}
+    # By whatever name, and in the environment it runs in, rather than a
+    # second stage for the same script in a new one
+    existing["pipeline"]["stages"] = {
+        "figures": existing["pipeline"]["stages"]["plot"]
+        | {"environment": "main"}
+    }
+    existing["environments"] = {"main": {"kind": "uv", "path": "uv.lock"}}
+    merged = get_stage_from_script_plan(
+        "scripts/plot.py", detected, existing, wdir=str(tmp_path)
+    )
+    assert merged["stage_name"] == "figures"
+    assert merged["environment"] == "main"
+    assert not merged["environment_is_new"]
+    assert merged["stage"]["environment"] == "main"
     # Written: the stage, the environment, its spec, and the document
     written = write_stage_from_script(plan, ck_info, wdir=str(tmp_path))
     assert sorted(written) == ["paper/paper.tex", "pyproject.toml"]

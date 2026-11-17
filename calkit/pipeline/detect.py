@@ -250,14 +250,14 @@ def detect_stage(
                             dependencies=[],
                             created_from_dependencies=False,
                         )
-    elif first_arg.endswith(".ipynb"):
+    elif first_arg.lower().endswith(".ipynb"):
         cls = JupyterNotebookStage
         stage["kind"] = "jupyter-notebook"
         stage["notebook_path"] = first_arg
         storage = calkit.notebooks.determine_storage(first_arg)
         stage["html_storage"] = storage
         stage["executed_ipynb_storage"] = storage
-    elif first_arg.endswith(".tex"):
+    elif first_arg.lower().endswith(".tex"):
         cls = LatexStage
         stage["kind"] = "latex"
         stage["target_path"] = first_arg
@@ -271,28 +271,36 @@ def detect_stage(
                 stage["pdf_storage"] = "dvc"
         except InvalidGitRepositoryError:
             stage["pdf_storage"] = "dvc"
-    elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
+    elif (
+        first_arg == "python"
+        and len(cmd) > 1
+        and cmd[1].lower().endswith(".py")
+    ):
         cls = PythonScriptStage
         stage["kind"] = "python-script"
         stage["script_path"] = cmd[1]
         if len(cmd) > 2:
             stage["args"] = cmd[2:]
         language = "python"
-    elif first_arg.endswith(".py"):
+    elif first_arg.lower().endswith(".py"):
         cls = PythonScriptStage
         stage["kind"] = "python-script"
         stage["script_path"] = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
         language = "python"
-    elif first_arg == "julia" and len(cmd) > 1 and cmd[1].endswith(".jl"):
+    elif (
+        first_arg == "julia"
+        and len(cmd) > 1
+        and cmd[1].lower().endswith(".jl")
+    ):
         cls = JuliaScriptStage
         stage["kind"] = "julia-script"
         stage["script_path"] = cmd[1]
         if len(cmd) > 2:
             stage["args"] = cmd[2:]
         language = "julia"
-    elif first_arg.endswith(".jl"):
+    elif first_arg.lower().endswith(".jl"):
         cls = JuliaScriptStage
         stage["kind"] = "julia-script"
         stage["script_path"] = first_arg
@@ -304,12 +312,16 @@ def detect_stage(
         stage["kind"] = "julia-command"
         stage["command"] = " ".join(cmd[1:])
         language = "julia"
-    elif first_arg == "matlab" and len(cmd) > 1 and cmd[1].endswith(".m"):
+    elif (
+        first_arg == "matlab"
+        and len(cmd) > 1
+        and cmd[1].lower().endswith(".m")
+    ):
         cls = MatlabScriptStage
         stage["kind"] = "matlab-script"
         stage["script_path"] = cmd[1]
         language = "matlab"
-    elif first_arg.endswith(".m"):
+    elif first_arg.lower().endswith(".m"):
         cls = MatlabScriptStage
         stage["kind"] = "matlab-script"
         stage["script_path"] = first_arg
@@ -319,29 +331,33 @@ def detect_stage(
         stage["kind"] = "matlab-command"
         stage["command"] = " ".join(cmd[1:])
         language = "matlab"
-    elif first_arg == "Rscript" and len(cmd) > 1 and cmd[1].endswith(".R"):
+    elif (
+        first_arg == "Rscript"
+        and len(cmd) > 1
+        and cmd[1].lower().endswith(".r")
+    ):
         cls = RScriptStage
         stage["kind"] = "r-script"
         stage["script_path"] = cmd[1]
         if len(cmd) > 2:
             stage["args"] = cmd[2:]
         language = "r"
-    elif first_arg.endswith(".R"):
+    elif first_arg.lower().endswith(".r"):
         cls = RScriptStage
         stage["kind"] = "r-script"
         stage["script_path"] = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
         language = "r"
-    elif first_arg.endswith((".sh", ".bash", ".zsh")):
+    elif first_arg.lower().endswith((".sh", ".bash", ".zsh")):
         cls = ShellScriptStage
         stage["kind"] = "shell-script"
         stage["script_path"] = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
-        if first_arg.endswith(".bash"):
+        if first_arg.lower().endswith(".bash"):
             stage["shell"] = "bash"
-        elif first_arg.endswith(".zsh"):
+        elif first_arg.lower().endswith(".zsh"):
             stage["shell"] = "zsh"
         else:
             stage["shell"] = "sh"
@@ -564,7 +580,27 @@ def get_stage_from_script_plan(
     # Copied, since what's found or already declared is added to
     stage = copy.deepcopy(detected["stage"]["stage"])
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # A stage that already runs the script, by whatever name, is the one
+    # added to, in the environment it runs in
+    running_it = next(
+        (
+            name
+            for name, s in stages.items()
+            if isinstance(s, dict)
+            and script_path in (s.get("script_path"), s.get("notebook_path"))
+        ),
+        None,
+    )
+    if running_it is not None and running_it != stage_name:
+        stage_name = running_it
     existing_stage = stages.get(stage_name)
+    if isinstance(existing_stage, dict) and existing_stage.get("environment"):
+        envs = ck_info.get("environments") or {}
+        env = {
+            "name": existing_stage["environment"],
+            "exists": True,
+            "env": envs.get(existing_stage["environment"]) or {},
+        }
     if isinstance(existing_stage, dict):
         merged = copy.deepcopy(existing_stage)
         for field in ("outputs", "inputs"):

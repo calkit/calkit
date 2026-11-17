@@ -1164,6 +1164,99 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     assert repo.head.commit.hexsha == head
 
 
+def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
+    from calkit.browser_link import add_export_stage, record_origin
+
+    for var in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{var}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "test@example.com")
+    project = tmp_path / "project"
+    (project / "drawings").mkdir(parents=True)
+    (project / "figures").mkdir()
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    repo = calkit.git.get_repo(str(project))
+    repo.git.config("user.email", "test@example.com")
+    repo.git.config("user.name", "Test")
+    (project / "figures" / "photo.jpg").write_bytes(b"jpg")
+    (project / "notes.txt").write_text("first")
+    repo.git.add("-A")
+    repo.git.commit("-m", "Start")
+    (project / "notes.txt").write_text("second")
+    # Where a file came from, committed alone
+    person = [{"name": "Pat", "email": "pat@example.com"}]
+    entry = record_origin(
+        str(project), {"path": "./figures/photo.jpg", "createdBy": person}
+    )
+    assert entry["path"] == "figures/photo.jpg"
+    ck_info = calkit.load_calkit_info(wdir=str(project))
+    assert ck_info["misc"][0]["created_by"][0]["email"] == "pat@example.com"
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split()
+    assert "calkit.yaml" in committed and "notes.txt" not in committed
+    for msg, error in [
+        ({"path": "figures/none.jpg", "createdBy": person}, "isn't in"),
+        ({"path": "figures/photo.jpg", "createdBy": person}, "already"),
+        ({"path": "figures/photo.jpg"}, "who created it or where"),
+        ({"path": "../x.jpg", "createdBy": person}, "isn't in the project"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            record_origin(str(project), msg)
+    # An export stage, shown first and then added, with the file it's
+    # drawn in, made by whoever commits here, committed alongside
+    (project / "drawings" / "setup.psd").write_bytes(b"psd")
+    msg = {
+        "source": "drawings/setup.psd",
+        "output": "figures/setup.png",
+        "app": "Photoshop",
+        "files": [{"path": "drawings/setup.psd", "created_by_me": True}],
+    }
+    head = repo.head.commit.hexsha
+    shown = add_export_stage(str(project), msg | {"save": False})
+    assert not shown["saved"] and shown["name"] == "export-setup"
+    assert shown["stage"]["kind"] == "manual-step"
+    assert repo.head.commit.hexsha == head
+    for bad, error in [
+        (
+            {"files": [{"path": "drawings/setup.psd", "content": "eA=="}]},
+            "on this computer",
+        ),
+        ({"files": [{"path": "drawings/none.psd"}]}, "isn't in the project"),
+        ({"output": "../setup.png"}, "isn't in the project"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            add_export_stage(str(project), msg | bad)
+    res = add_export_stage(str(project), msg)
+    assert res["saved"] and res["name"] == "export-setup"
+    ck_info = calkit.load_calkit_info(wdir=str(project))
+    assert ck_info["pipeline"]["stages"]["export-setup"]["kind"] == (
+        "manual-step"
+    )
+    made = [m for m in ck_info["misc"] if m["path"] == "drawings/setup.psd"]
+    assert made[0]["created_by"] == [
+        {"email": "test@example.com", "name": "Test"}
+    ]
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split()
+    assert {"calkit.yaml", "dvc.yaml", "drawings/setup.psd"} <= set(committed)
+    assert repo.git.status("--porcelain") == " M notes.txt"
+    # The same figure can't be exported twice
+    with pytest.raises(ValueError, match="is made by stage 'export-setup'"):
+        add_export_stage(str(project), msg)
+    # One too big for Git is stored with DVC
+    (project / "drawings" / "big.psd").write_bytes(b"0" * 1_000_001)
+    res = add_export_stage(
+        str(project),
+        {
+            "source": "drawings/big.psd",
+            "output": "figures/big.png",
+            "app": "Photoshop",
+            "files": [{"path": "drawings/big.psd"}],
+        },
+    )
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split()
+    assert "drawings/big.psd.dvc" in committed
+    assert "drawings/big.psd" not in committed
+    assert repo.git.status("--porcelain") == " M notes.txt"
+
+
 def test_get_content_paths(tmp_path):
     from calkit.browser_link import get_content_paths
 

@@ -1190,3 +1190,45 @@ def test_is_data_path(tmp_path):
     assert is_data("pointers")
     assert is_data("store.zarr")
     assert is_data("nested")
+
+
+def test_add_origin_and_add_creator():
+    from calkit.provenance import add_creator, add_origin
+
+    url = {"url": "https://x.org/a"}
+    person = {"name": "Pat", "email": "pat@example.com"}
+    ck_info: dict = {
+        "figures": [
+            {"path": "./figures/a.png", "title": "A"},
+            {"path": "figures/b.png", "stage": "plot"},
+        ]
+    }
+    # A declared figure saying nothing of where it came from gets it
+    entry = add_origin(
+        ck_info, "figures/a.png", imported_from={"url": "https://x.org/a"}
+    )
+    assert entry["imported_from"] == {"url": "https://x.org/a"}
+    assert ck_info["figures"][0]["imported_from"] == entry["imported_from"]
+    assert "misc" not in ck_info
+    # Anything else is a misc artifact
+    add_origin(ck_info, "drawings/c.svg", created_by=[person], title="C")
+    assert ck_info["misc"] == [
+        {"path": "drawings/c.svg", "title": "C", "created_by": [person]}
+    ]
+    for path, kwargs, error in [
+        ("figures/b.png", {"imported_from": url}, "already declared"),
+        ("figures/a.png", {"imported_from": url}, "already declared"),
+        ("drawings/d.svg", {}, "who created it or where"),
+        ("figures/d.png", {"created_by": [person]}, "can't be the origin"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            add_origin(ck_info, path, **kwargs)
+    # Who made a file, unless something already says
+    add_creator(
+        ck_info, ["drawings/c.svg", "drawings/e.psd"], {"email": "me@x.org"}
+    )
+    assert ck_info["misc"][0]["created_by"] == [person]
+    assert ck_info["misc"][1] == {
+        "path": "drawings/e.psd",
+        "created_by": [{"email": "me@x.org"}],
+    }

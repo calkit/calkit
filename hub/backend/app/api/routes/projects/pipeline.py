@@ -57,7 +57,7 @@ from app.api.routes.projects.core import (
     _push_dvc_cache_to_storage,
     _validate_ck_stage,
 )
-from app.api.routes.projects.figures import _clean_rel_path, _slug
+from app.api.routes.projects.figures import _clean_rel_path
 from app.config import settings
 from app.core import logger, ryaml, utcnow
 from app.dvc import run_dvc_command
@@ -787,37 +787,23 @@ def post_project_pipeline_stage(
     ck_info = get_ck_info_from_repo(repo=repo)
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     stage = dict(req.stage)
-    # Outputs are made by one stage only, and one already in Git can't
-    # move to DVC
-    outputs = []
     for out in stage.get("outputs") or []:
-        path = _clean_rel_path(
+        _clean_rel_path(
             out["path"] if isinstance(out, dict) else str(out), "output"
         )
-        producer = calkit.pipeline.get_stage_for_output(path, ck_info)
-        if producer is not None:
-            raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
-        if not isinstance(out, dict):
-            tracked = repo.git.ls_files("--", path).strip()
-            out = {"path": path, "storage": "git"} if tracked else path
-        outputs.append(out)
-    if outputs:
-        stage["outputs"] = outputs
-    first = outputs[0] if outputs else None
-    first_path = first["path"] if isinstance(first, dict) else first
-    base_name = req.name or (
-        _slug(os.path.splitext(os.path.basename(first_path))[0])
-        if first_path
-        else "stage"
-    )
-    if not STAGE_NAME_RE.fullmatch(base_name or ""):
-        raise HTTPException(422, f"Invalid stage name: {req.name!r}")
-    stage_name = base_name
-    n = 2
-    while stage_name in stages:
-        stage_name = f"{base_name}-{n}"
-        n += 1
-    _validate_ck_stage(stage, stage_name)
+    # Outputs are made by one stage only, and one already in Git can't
+    # move to DVC
+    try:
+        stage_name, stage = calkit.pipeline.get_stage_to_add(
+            stage,
+            ck_info,
+            name=req.name,
+            is_tracked=lambda p: bool(repo.git.ls_files("--", p).strip()),
+        )
+    except calkit.pipeline.OutputTakenError as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     # Files are all checked before any is written
     uploads: list[tuple[str, bytes]] = []
     created: list[str] = []
@@ -881,27 +867,7 @@ def post_project_pipeline_stage(
     person = {"email": current_user.email}
     if current_user.full_name:
         person["name"] = current_user.full_name
-    for path in created:
-        entry = next(
-            (
-                e
-                for items in ck_info.values()
-                if isinstance(items, list)
-                for e in items
-                if isinstance(e, dict) and e.get("path") == path
-            ),
-            None,
-        )
-        if entry is None:
-            ck_info.setdefault("misc", []).append(
-                {"path": path, "created_by": [person]}
-            )
-        elif not (
-            entry.get("created_by")
-            or entry.get("imported_from")
-            or entry.get("stage")
-        ):
-            entry["created_by"] = [person]
+    calkit.provenance.add_creator(ck_info, created, person)
     stages[stage_name] = stage
     ck_info.setdefault("pipeline", {})["stages"] = stages
     _commit_pipeline(

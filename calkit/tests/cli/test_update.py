@@ -81,11 +81,10 @@ def test_update_project_config(tmp_dir, monkeypatch):
         in_container = json.load(f)["customizations"]["vscode"]["settings"]
     for s in [settings, in_container]:
         assert s["latex-workshop.docker.enabled"] is False
-        assert s["latex-workshop.latex.tools"][0]["args"][:4] == [
+        assert s["latex-workshop.latex.tools"][0]["args"][:3] == [
             "latex",
             "build",
-            "-e",
-            "tex",
+            "--as-stage",
         ]
     assert repo.git.log("-1", "--format=%s") == "Update devcontainer"
     assert not repo.git.status("--porcelain", "--", ".vscode", ".devcontainer")

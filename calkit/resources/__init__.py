@@ -94,13 +94,14 @@ def get_latex_workshop_settings(settings: dict, ck_info: dict) -> dict:
     documents the way its pipeline does.
 
     The bundled settings build in Calkit's LaTeX Docker image, which a
-    project keeps unless its LaTeX stages use a TeX Live environment. Then
-    each of those stages gets a recipe that runs ``calkit latex build`` in
-    its environment with its options, with stages that build alike sharing
-    one. A project without LaTeX stages gets one for its only TeX Live
-    environment, if it has one. Builds are verbose, with errors named by
-    file and line, since that's how LaTeX Workshop finds them in TeX's
-    output.
+    project keeps unless its LaTeX stages use a TeX Live environment, or it
+    has none and only one TeX Live environment. Then one recipe builds every
+    document with ``calkit latex build --as-stage``, which finds the stage
+    for the document LaTeX Workshop builds, so each builds in its stage's
+    environment, Docker or not, with its options. A recipe per stage would
+    have LaTeX Workshop pick one on save by its position or last use, not
+    by the document. Builds are verbose, with errors named by file and
+    line, since that's how LaTeX Workshop finds them in TeX's output.
     """
     from calkit.models.pipeline import LatexStage
 
@@ -121,44 +122,46 @@ def get_latex_workshop_settings(settings: dict, ck_info: dict) -> dict:
             )
         except ValueError:
             continue
-    # Each build's working directory and arguments, with the stages it's for
-    builds: dict[tuple[str, ...], list[str]] = {}
+    if not (
+        any(s.environment in texlive_names for s in latex_stages)
+        or (not latex_stages and len(texlive_names) == 1)
+    ):
+        return settings
     # Where each puts its PDF, if not beside the document
     out_dirs: set[str | None] = set()
     for s in latex_stages:
-        if s.environment not in texlive_names:
-            continue
-        key = (s.wdir or "", "-e", s.environment, *s.build_args)
-        builds.setdefault(key, []).append(str(s.name))
         if s.latexmkrc_path is None and s.output_dir is not None:
             pdf_path = posixpath.join(s.wdir or "", s.pdf_path)
             out_dirs.add(posixpath.dirname(posixpath.normpath(pdf_path)))
         else:
             out_dirs.add(None)
-    if not latex_stages and len(texlive_names) == 1:
-        builds[("", "-e", texlive_names[0])] = [texlive_names[0]]
-    if not builds:
-        return settings
     settings = dict(settings)
     settings.pop("latex-workshop.docker.image.latex", None)
     settings["latex-workshop.docker.enabled"] = False
-    tools = []
-    for (wdir, *args), names in builds.items():
-        if "--verbose" not in args:
-            args.append("--verbose")
-        args += ["--latexmk-arg", "-file-line-error"]
-        tools.append(
-            {
-                "name": "Calkit: " + ", ".join(names),
-                "command": "calkit",
-                "args": ["latex", "build", *args, "%DOC_EXT%"],
-                "cwd": posixpath.join("%WORKSPACE_FOLDER%", wdir).rstrip("/"),
-            }
-        )
-    settings["latex-workshop.latex.tools"] = tools
-    settings["latex-workshop.latex.recipes"] = [
-        {"name": tool["name"], "tools": [tool["name"]]} for tool in tools
+    # A magic comment, e.g., % !TEX program = xelatex, would bypass the
+    # recipe and run the machine's TeX
+    settings["latex-workshop.latex.build.enableMagicComments"] = False
+    settings["latex-workshop.latex.tools"] = [
+        {
+            "name": "Calkit",
+            "command": "calkit",
+            "args": [
+                "latex",
+                "build",
+                "--as-stage",
+                "--verbose",
+                "--latexmk-arg",
+                "-file-line-error",
+                "%DOC_EXT%",
+            ],
+            "cwd": "%WORKSPACE_FOLDER%",
+        }
     ]
+    settings["latex-workshop.latex.recipes"] = [
+        {"name": "Calkit", "tools": ["Calkit"]}
+    ]
+    # Over a default a user may have set by name
+    settings["latex-workshop.latex.recipe.default"] = "first"
     # LaTeX Workshop finds the PDF, and its SyncTeX, where the stage's
     # output_dir puts it, if they all put it in one place
     out_dir = out_dirs.pop() if len(out_dirs) == 1 else None

@@ -4365,17 +4365,18 @@ Arguments:
 
 Options:
 
-| Option               | Type      | Required | Default | Description                                                                                      |
-| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `--env`, `-e`        | str       | no       |         | Environment in which to run latexmk, if applicable.                                              |
-| `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running latexmk.                                     |
-| `--latexmk-rc`, `-r` | str       | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
-| `--output-dir`       | str       | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
-| `--aux-dir`          | str       | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
-| `--latexmk-arg`      | list[str] | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
-| `--no-synctex`       | boolean   | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
-| `--force`, `-f`      | boolean   | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
-| `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                            |
+| Option               | Type      | Required | Default | Description                                                                                                                                                                                                               |
+| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--env`, `-e`        | str       | no       |         | Environment in which to run latexmk, if applicable.                                                                                                                                                                       |
+| `--as-stage`         | boolean   | no       | False   | Build as the pipeline's latex stage for the document does (its environment, options, and working directory), or in the project's only TeX Live environment if no stage builds it. Other options are added to the stage's. |
+| `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running latexmk.                                                                                                                                                              |
+| `--latexmk-rc`, `-r` | str       | no       |         | Path to a latexmkrc file to use for compilation.                                                                                                                                                                          |
+| `--output-dir`       | str       | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir.                                                                                                                          |
+| `--aux-dir`          | str       | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.                                                                                                                           |
+| `--latexmk-arg`      | list[str] | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.                                                                                                                                       |
+| `--no-synctex`       | boolean   | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                                                                                                                                                    |
+| `--force`, `-f`      | boolean   | no       | False   | Force latexmk to recompile all files, even if they are up to date.                                                                                                                                                        |
+| `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                                                                                                                                                     |
 
 <a id="subcommand-latex-tex-diff"></a>
 

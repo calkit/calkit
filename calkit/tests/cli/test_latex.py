@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import pytest
+import typer
 
 import calkit
 import calkit.git
@@ -616,21 +617,29 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
         assert ".calkit/env-locks/tex.json" in f.read()
     out = subprocess.check_output(["calkit", "status"], text=True)
     assert "Pipeline is up to date" in out
-    # The editor builds it the way the stage does, with SyncTeX pointing at
-    # the source here, and building an edit there leaves the stage out of
-    # date until it runs
+    # The editor builds it the way the stage does, writing the same PDF from
+    # the same sources, so the stage stays up to date, with SyncTeX pointing
+    # at the source here, and building an edit there leaves the stage out
+    # of date until it runs
     settings = calkit.resources.get_latex_workshop_settings(
         {}, calkit.load_calkit_info()
     )
     tool = settings["latex-workshop.latex.tools"][0]
     doc_fpath = os.path.abspath("paper/main.tex")
+    with open("paper/main.pdf", "rb") as f:
+        pdf = f.read()
+    editor_cmd = [tool["command"]] + [
+        a.replace("%DOC_EXT%", doc_fpath) for a in tool["args"]
+    ]
+    editor_cwd = tool["cwd"].replace("%WORKSPACE_FOLDER%", os.getcwd())
+    subprocess.check_call(editor_cmd, cwd=editor_cwd)
+    with open("paper/main.pdf", "rb") as f:
+        assert f.read() == pdf
+    out = subprocess.check_output(["calkit", "status"], text=True)
+    assert "Pipeline is up to date" in out
     with open(doc_fpath, "a") as f:
         f.write("% An edit\n")
-    subprocess.check_call(
-        [tool["command"]]
-        + [a.replace("%DOC_EXT%", doc_fpath) for a in tool["args"]],
-        cwd=tool["cwd"].replace("%WORKSPACE_FOLDER%", os.getcwd()),
-    )
+    subprocess.check_call(editor_cmd, cwd=editor_cwd)
     with gzip.open("paper/main.synctex.gz", "rt") as f:
         inputs = [
             line.split(":", 2)[2].strip()
@@ -794,6 +803,112 @@ def test_build_dirs_relative_to_tex_dir(
         cli_latex.build(tex, output_dir=output_dir, aux_dir=aux_dir)
         dirs = [a for a in cmds[0] if a.startswith(("-outdir=", "-auxdir="))]
         assert dirs == expected, (tex, output_dir, aux_dir)
+
+
+def test_build_as_stage(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    from calkit.cli import latex as cli_latex
+
+    # Beside a folder that isn't in a project
+    os.makedirs("project")
+    os.makedirs("elsewhere")
+    with open("elsewhere/a.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    monkeypatch.chdir("project")
+    root = os.getcwd()
+    tex = {"kind": "texlive"}
+    calkit.save_calkit_info(
+        {
+            "environments": {
+                "tex": tex,
+                "tex2": tex,
+                "dock": {"kind": "docker", "image": "texlive/texlive"},
+            },
+            "pipeline": {
+                "stages": {
+                    "paper": {
+                        "kind": "latex",
+                        "environment": "tex",
+                        "target_path": "paper/main.tex",
+                        "output_dir": "build",
+                        "verbose": True,
+                        "latexmk_args": ["-lualatex"],
+                    },
+                    "thesis": {
+                        "kind": "latex",
+                        "environment": "tex2",
+                        "wdir": "thesis",
+                        "target_path": "main.tex",
+                    },
+                    "slides": {
+                        "kind": "latex",
+                        "environment": "dock",
+                        "target_path": "slides/main.tex",
+                    },
+                }
+            },
+        }
+    )
+    for doc in [
+        "paper/main.tex",
+        "thesis/main.tex",
+        "slides/main.tex",
+        "x.tex",
+    ]:
+        os.makedirs(os.path.dirname(doc) or ".", exist_ok=True)
+        with open(doc, "w") as f:
+            f.write("\\documentclass{article}\n")
+    runs: list[tuple[list[str], str | None, str]] = []
+    monkeypatch.setattr(cli_latex, "_tex_cmd", lambda cmd, **kwargs: cmd)
+    monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        cli_latex,
+        "_run_latexmk",
+        lambda cmd, **kwargs: runs.append(
+            (cmd, kwargs["environment"], os.getcwd())
+        ),
+    )
+    # Each document builds as its own stage does, from wherever, with what
+    # the editor adds after the stage's options, including a Docker stage's,
+    # which builds in its container rather than natively
+    for doc, env, cwd, latexmk_args in [
+        ("paper/main.tex", "tex", root, ["-lualatex", "-file-line-error"]),
+        ("thesis/main.tex", "tex2", "thesis", ["-file-line-error"]),
+        ("slides/main.tex", "dock", root, ["-file-line-error"]),
+    ]:
+        monkeypatch.chdir(root)
+        runs.clear()
+        cli_latex.build(
+            os.path.join(root, doc),
+            as_stage=True,
+            verbose=True,
+            latexmk_args=["-file-line-error"],
+        )
+        cmd, ran_env, ran_cwd = runs[0]
+        assert ran_env == env, doc
+        assert os.path.samefile(ran_cwd, os.path.join(root, cwd)), doc
+        assert cmd[-1] == os.path.relpath(doc, cwd), doc
+        assert cmd[-1 - len(latexmk_args) : -1] == latexmk_args, doc
+        assert "-silent" not in cmd
+        assert ("-outdir=../build" in cmd) == (doc == "paper/main.tex")
+    # A document no stage builds gets the default TeX, since there's more
+    # than one TeX Live environment, or else the only one
+    monkeypatch.chdir(os.path.join(root, "paper"))
+    runs.clear()
+    cli_latex.build("../x.tex", as_stage=True)
+    assert runs[0][1] is None
+    assert runs[0][0][-1] == "x.tex"
+    assert os.path.samefile(runs[0][2], root)
+    info = calkit.load_calkit_info(wdir=root)
+    del info["environments"]["tex2"]
+    calkit.save_calkit_info(info, wdir=root)
+    runs.clear()
+    cli_latex.build(os.path.join(root, "x.tex"), as_stage=True)
+    assert runs[0][1] == "tex"
+    # The stage says where it builds and in what
+    with pytest.raises(typer.Exit):
+        cli_latex.build("x.tex", as_stage=True, environment="tex")
+    with pytest.raises(typer.Exit):
+        cli_latex.build("../elsewhere/a.tex", as_stage=True)
 
 
 def _commit(message: str) -> None:

@@ -722,6 +722,18 @@ def build(
             help=("Environment in which to run latexmk, if applicable."),
         ),
     ] = None,
+    as_stage: Annotated[
+        bool,
+        typer.Option(
+            "--as-stage",
+            help=(
+                "Build as the pipeline's latex stage for the document does "
+                "(its environment, options, and working directory), or in "
+                "the project's only TeX Live environment if no stage builds "
+                "it. Other options are added to the stage's."
+            ),
+        ),
+    ] = False,
     no_check: Annotated[
         bool,
         typer.Option(
@@ -821,6 +833,72 @@ def build(
             n += 1
         return "/".join([".."] * (len(s) - n) + list(target.parts[n:])) or "."
 
+    # An editor builds every document with the same command, so each one
+    # finds its stage here and builds with the stage's own arguments
+    if as_stage:
+        from typing import cast
+
+        import click
+
+        from calkit.models.pipeline import LatexStage
+
+        if any(
+            v is not None
+            for v in [environment, latexmk_rc_path, output_dir, aux_dir]
+        ):
+            raise_error(
+                "--as-stage takes the environment and directories from "
+                "the stage"
+            )
+        doc_path = os.path.realpath(tex_file)
+        project_dir = os.path.dirname(doc_path)
+        while not os.path.isfile(os.path.join(project_dir, "calkit.yaml")):
+            parent = os.path.dirname(project_dir)
+            if parent == project_dir:
+                raise_error(f"{tex_file} isn't in a Calkit project")
+            project_dir = parent
+        ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
+        for name, stage in (
+            (ck_info.get("pipeline") or {}).get("stages") or {}
+        ).items():
+            if not isinstance(stage, dict) or stage.get("kind") != "latex":
+                continue
+            try:
+                s = LatexStage.model_validate(stage | {"name": name})
+            except ValueError:
+                continue
+            stage_dir = os.path.join(project_dir, s.wdir or "")
+            stage_doc_path = os.path.join(stage_dir, s.target_path)
+            if os.path.normcase(
+                os.path.realpath(stage_doc_path)
+            ) != os.path.normcase(doc_path):
+                continue
+            args = ["-e", s.environment, *s.build_args]
+            for flag, given in [
+                ("--no-check", no_check),
+                ("--verbose", verbose),
+                ("-f", force),
+                ("--no-synctex", no_synctex),
+            ]:
+                if given and flag not in args:
+                    args.append(flag)
+            for arg in latexmk_args:
+                args += ["--latexmk-arg", arg]
+            os.chdir(stage_dir)
+            group = cast(click.Group, typer.main.get_command(latex_app))
+            command = group.commands["build"]
+            with command.make_context("build", args + [s.target_path]) as ctx:
+                command.invoke(ctx)
+            return
+        texlive_names = [
+            name
+            for name, env in (ck_info.get("environments") or {}).items()
+            if isinstance(env, dict) and env.get("kind") == "texlive"
+        ]
+        if len(texlive_names) == 1:
+            environment = texlive_names[0]
+        tex_file = os.path.relpath(doc_path, project_dir)
+        os.chdir(project_dir)
     # latexmk records a failed run in its file database and then refuses
     # to try again, reporting "Nothing to do" and exiting non-zero with no
     # PDF. Running it again is the first thing anyone does after a

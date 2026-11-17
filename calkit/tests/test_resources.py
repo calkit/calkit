@@ -155,7 +155,10 @@ def test_get_latex_workshop_settings(tmp_path):
     ]:
         assert get(settings, ck_info) == settings
     assert settings["latex-workshop.docker.enabled"] is True
-    # A TeX Live stage builds the way its pipeline does, natively
+    # A TeX Live stage builds the way its pipeline does, natively, through
+    # one recipe that finds the stage from the document, so LaTeX Workshop
+    # can't pick another document's on save, and a magic comment can't
+    # bypass it
     ck_info = make_info(
         {"tex": tex, "py": {"kind": "uv"}}, {"build-paper": paper("tex")}
     )
@@ -163,15 +166,16 @@ def test_get_latex_workshop_settings(tmp_path):
     assert got["latex-workshop.docker.enabled"] is False
     assert "latex-workshop.docker.image.latex" not in got
     assert "latex-workshop.latex.outDir" not in got
-    assert got["latex-workshop.latex.tools"] == [
+    assert got["latex-workshop.latex.build.enableMagicComments"] is False
+    assert got["latex-workshop.latex.recipe.default"] == "first"
+    tools = [
         {
-            "name": "Calkit: build-paper",
+            "name": "Calkit",
             "command": "calkit",
             "args": [
                 "latex",
                 "build",
-                "-e",
-                "tex",
+                "--as-stage",
                 "--verbose",
                 "--latexmk-arg",
                 "-file-line-error",
@@ -180,91 +184,53 @@ def test_get_latex_workshop_settings(tmp_path):
             "cwd": "%WORKSPACE_FOLDER%",
         }
     ]
-    assert got["latex-workshop.latex.recipes"] == [
-        {"name": "Calkit: build-paper", "tools": ["Calkit: build-paper"]}
-    ]
+    recipes = [{"name": "Calkit", "tools": ["Calkit"]}]
+    assert got["latex-workshop.latex.tools"] == tools
+    assert got["latex-workshop.latex.recipes"] == recipes
     # Everything else is kept, and the input isn't changed
     for key, value in settings.items():
         if not key.startswith("latex-workshop.docker."):
             assert got[key] == value
     assert settings["latex-workshop.docker.enabled"] is True
-    # Stage options are passed on, the PDF is looked for where they put it,
-    # and stages that build alike share a recipe while a Docker one gets none
-    ck_info = make_info(
-        {"tex": tex, "docker-tex": docker},
-        {
-            "paper": paper(
-                "tex",
-                output_dir="build",
-                verbose=True,
-                latexmk_args=["-lualatex"],
-            ),
-            "slides": paper(
-                "tex",
-                target_path="slides/main.tex",
-                output_dir="build",
-                verbose=True,
-                latexmk_args=["-lualatex"],
-            ),
-            "poster": paper("docker-tex", target_path="poster/main.tex"),
-        },
-    )
-    got = get(settings, ck_info)
-    assert got["latex-workshop.latex.tools"] == [
-        {
-            "name": "Calkit: paper, slides",
-            "command": "calkit",
-            "args": [
-                "latex",
-                "build",
-                "-e",
-                "tex",
-                "--output-dir",
-                "build",
-                "--verbose",
-                "--latexmk-arg",
-                "-lualatex",
-                "--latexmk-arg",
-                "-file-line-error",
-                "%DOC_EXT%",
-            ],
-            "cwd": "%WORKSPACE_FOLDER%",
-        }
-    ]
-    assert got["latex-workshop.latex.outDir"] == "%WORKSPACE_FOLDER%/build"
-    # Stages that build differently each get one, run from their wdir, with
-    # the PDF left to be found beside each document
-    ck_info = make_info(
-        {"tex": tex},
-        {
-            "paper": paper("tex", output_dir="build"),
-            "thesis": paper("tex", wdir="thesis", synctex=False),
-        },
-    )
-    got = get(settings, ck_info)
-    tools = got["latex-workshop.latex.tools"]
-    assert [t["name"] for t in tools] == ["Calkit: paper", "Calkit: thesis"]
-    assert tools[1]["args"] == [
-        "latex",
-        "build",
-        "-e",
-        "tex",
-        "--no-synctex",
-        "--verbose",
-        "--latexmk-arg",
-        "-file-line-error",
-        "%DOC_EXT%",
-    ]
-    assert tools[1]["cwd"] == "%WORKSPACE_FOLDER%/thesis"
-    assert [r["name"] for r in got["latex-workshop.latex.recipes"]] == [
-        "Calkit: paper",
-        "Calkit: thesis",
-    ]
-    assert "latex-workshop.latex.outDir" not in got
-    # Without a LaTeX stage, the only TeX Live environment is used
-    got = get(settings, make_info({"tex": tex, "py": {"kind": "uv"}}, {}))
-    assert got["latex-workshop.latex.tools"][0]["name"] == "Calkit: tex"
-    assert got["latex-workshop.latex.tools"][0]["args"][2:4] == ["-e", "tex"]
+    # Stages in other environments, working directories, or Docker, and
+    # without a LaTeX stage, the only TeX Live environment, all build
+    # through the same recipe, with the PDF looked for where they all put
+    # it, if they do
+    for stages, out_dir in [
+        (
+            {
+                "paper": paper("tex", output_dir="build", verbose=True),
+                "slides": paper(
+                    "tex2",
+                    target_path="slides/main.tex",
+                    output_dir="build",
+                    latexmk_args=["-lualatex"],
+                ),
+            },
+            "%WORKSPACE_FOLDER%/build",
+        ),
+        (
+            {
+                "paper": paper("tex", output_dir="build"),
+                "thesis": paper("tex2", wdir="thesis", synctex=False),
+                "poster": paper("docker-tex", target_path="poster/main.tex"),
+            },
+            None,
+        ),
+        ({"paper": paper("tex", output_dir=".")}, "%WORKSPACE_FOLDER%"),
+        (
+            {"paper": paper("tex", wdir="pubs", output_dir="out")},
+            "%WORKSPACE_FOLDER%/pubs/out",
+        ),
+        ({}, None),
+    ]:
+        envs = {"tex": tex, "tex2": tex, "docker-tex": docker}
+        if not stages:
+            envs = {"tex": tex, "py": {"kind": "uv"}}
+        got = get(settings, make_info(envs, stages))
+        assert got["latex-workshop.latex.tools"] == tools, stages
+        assert got["latex-workshop.latex.recipes"] == recipes, stages
+        assert got.get("latex-workshop.latex.outDir") == out_dir, stages
     # Both commands write them, read from the project when not given
     assert calkit.resources.make_vscode_settings(
         {}

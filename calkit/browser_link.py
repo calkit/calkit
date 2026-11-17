@@ -226,7 +226,9 @@ def get_result(msg: dict) -> Any:
         result: Any = {"version": calkit.__version__} | get_editor_info()
     elif kind == "projects.find":
         owner, name = split_project(msg.get("project"))
-        found = calkit.get_project_checkouts(name, owner=owner)
+        found = calkit.get_project_checkouts(
+            name, owner=owner, search_protected=False
+        )
         result = {"paths": sorted(found)}
     elif kind == "project.open":
         owner, name = split_project(msg.get("project"))
@@ -562,7 +564,11 @@ def get_checkout_paths(
             os.path.isfile(os.path.join(p, "calkit.yaml")) for p in paths
         )
     ):
-        paths = sorted(calkit.get_project_checkouts(name, owner=owner))
+        paths = sorted(
+            calkit.get_project_checkouts(
+                name, owner=owner, search_protected=False
+            )
+        )
         set_checkouts_found(key, [time.time(), paths])
     return sort_checkouts(owner, name, paths)
 
@@ -710,7 +716,7 @@ def get_overleaf_links(overleaf_project_id: str) -> list[dict]:
             not links
             and time.time() - index["scanned"] > LOOKUP_RESCAN_SECONDS
         ):
-            for path in calkit.find_project_dirs():
+            for path in calkit.find_project_dirs(search_protected=False):
                 path = os.path.realpath(path)
                 if path not in index["checkouts"]:
                     index["checkouts"][path] = read_checkout(path)

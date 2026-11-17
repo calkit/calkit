@@ -11,6 +11,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -217,6 +218,30 @@ COMPOSITE_ENV_SEP = ":"
 VALID_OUTER_ENV_KINDS = ["slurm", "pbs", "system"]
 # A switch can be an outer env too, when every option it picks from is one
 SWITCH_KIND = "switch"
+# Kinds that run a command on this machine with the environmental variables
+# they're given, so another environment's programs can be put on PATH for
+# it with ``with``
+COMPOSABLE_HOST_KINDS = [
+    "conda",
+    "julia",
+    "pixi",
+    "renv",
+    "uv",
+    "uv-venv",
+    "venv",
+]
+# Kinds that add programs without an interpreter to compete with a host's
+COMPOSABLE_GUEST_KINDS = ["texlive"]
+# What Matplotlib's usetex needs from TeX beyond the basics, whatever font
+# it's set to: the packages its preamble loads and the program it makes
+# PNGs with
+MATPLOTLIB_TEX_PACKAGES = [
+    "cm-super",
+    "dvipng",
+    "geometry",
+    "type1cm",
+    "underscore",
+]
 
 
 def host_is_local(host: str | None) -> bool:
@@ -839,6 +864,206 @@ def env_can_be_outer(env_name: str, envs: dict) -> bool:
     if kind == SWITCH_KIND:
         return switch_is_outer(env_name, envs)
     return kind in VALID_OUTER_ENV_KINDS
+
+
+def get_guest_envs(
+    env_name: str, env: dict, envs: dict
+) -> list[tuple[str, dict]]:
+    """Return the environments composed into one with ``with``, in order.
+
+    Raises ``ValueError`` if the environment's kind can't have others
+    composed into it, or one it names doesn't exist or can't be composed.
+    """
+    names = env.get("with")
+    if not names:
+        return []
+    if not isinstance(names, list) or not all(
+        isinstance(n, str) for n in names
+    ):
+        raise ValueError(
+            f"Environment '{env_name}' has 'with: {names}'; write it as a "
+            "list of environment names"
+        )
+    kind = env.get("kind")
+    if kind not in COMPOSABLE_HOST_KINDS:
+        raise ValueError(
+            f"Environment '{env_name}' is of kind '{kind}', which can't have "
+            "others composed into it with 'with'; only "
+            f"{', '.join(COMPOSABLE_HOST_KINDS)} environments can"
+        )
+    guests = []
+    for name in dict.fromkeys(names):
+        guest = envs.get(name)
+        if guest is None:
+            raise ValueError(
+                f"Environment '{env_name}' has '{name}' in 'with', which "
+                "isn't defined"
+            )
+        if guest.get("kind") not in COMPOSABLE_GUEST_KINDS:
+            raise ValueError(
+                f"Environment '{env_name}' has '{name}' in 'with', which is "
+                f"of kind '{guest.get('kind')}'; only "
+                f"{', '.join(COMPOSABLE_GUEST_KINDS)} environments can be "
+                "composed into another"
+            )
+        if guest.get("with"):
+            raise ValueError(
+                f"Environment '{name}' is composed into '{env_name}', so it "
+                "can't have a 'with' of its own"
+            )
+        guests.append((name, guest))
+    # Each sets the fonts fontconfig finds, which only one can do
+    if sum(g["kind"] == "texlive" for _, g in guests) > 1:
+        raise ValueError(
+            f"Environment '{env_name}' has more than one TeX Live "
+            "environment in 'with'; put their packages in one"
+        )
+    return guests
+
+
+def add_host_tex_packages(
+    env_name: str, env: dict, guest_name: str, guest: dict
+) -> list[str]:
+    """Add what the programs in an environment need from a TeX Live one
+    composed into it to the TeX Live environment's lock, and return the
+    packages added.
+
+    Those programs only write their TeX when they run, so it can't be read
+    beforehand like a document's. Matplotlib's needs are mostly the same
+    whatever a script does, so they're added if the host's spec or lock
+    names it. The guest must be locked already.
+    """
+    from calkit.environments import texlive
+
+    fpaths = [env.get("path"), get_env_lock_fpath(env, env_name)]
+    uses_matplotlib = False
+    for fpath in fpaths:
+        if not fpath or not os.path.isfile(fpath):
+            continue
+        with open(fpath, encoding="utf-8", errors="replace") as f:
+            # Not matplotlib-inline, which Jupyter kernels bring along
+            if re.search(
+                r"(?<![\w.-])matplotlib(-base)?(?![\w.]|-[a-z])", f.read()
+            ):
+                uses_matplotlib = True
+                break
+    if not uses_matplotlib:
+        return []
+    lock = texlive.read_lock(texlive.get_lock_fpath(guest_name, guest)) or {}
+    if all(p in lock.get("packages", {}) for p in MATPLOTLIB_TEX_PACKAGES):
+        return []
+    added = texlive.add_packages(guest_name, guest, MATPLOTLIB_TEX_PACKAGES)
+    if added:
+        print(
+            f"Added Matplotlib's usetex packages to TeX Live environment "
+            f"'{guest_name}': {', '.join(added)}",
+            file=sys.stderr,
+        )
+    return added
+
+
+def get_composed_env_vars(
+    env_name: str,
+    env: dict,
+    envs: dict,
+    keep: list[str] | None = None,
+    verbose: bool = False,
+) -> dict | None:
+    """Return the environmental variables an environment's commands get
+    with the environments in its ``with`` composed in, or None if it has
+    none. Those named in ``keep``, e.g., the project's own, keep their
+    values.
+
+    Each is checked first, which is fast once it's ready. Fontconfig is
+    pointed at the system's fonts as well as the TeX Live environment's,
+    and Matplotlib, which keys its TeX output and font list caches by
+    neither the TeX nor the fonts it found, gets a config directory of its
+    own, both kept in a folder for the host and its guests.
+    """
+    from xml.sax.saxutils import escape
+
+    from calkit.environments import texlive
+
+    if env.get("kind") == SWITCH_KIND:
+        picked = resolve_switch(env_name, envs)
+        if picked is None:
+            return None
+        env_name, env = picked, get_env(picked, envs) or {}
+    guests = get_guest_envs(env_name, env, envs)
+    if not guests:
+        return None
+    env_vars = dict(os.environ)
+    view_dirs = []
+    for name, guest in guests:
+        try:
+            view_dir = texlive.check(name, guest, verbose=verbose)
+            if add_host_tex_packages(env_name, env, name, guest):
+                view_dir = texlive.check(name, guest, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise RuntimeError(f"Environment '{name}': {e}") from e
+        env_vars = texlive.get_run_env_vars(view_dir, env_vars=env_vars)
+        view_dirs.append(view_dir)
+    # The system's fontconfig configuration, which the host's programs would
+    # read without one of the guest's, wherever this machine keeps it
+    calkit_dir = os.path.join(calkit.get_user_home(), ".calkit")
+    prior = os.environ.get("FONTCONFIG_FILE", "")
+    if prior and not os.path.abspath(prior).startswith(calkit_dir):
+        system_confs = [prior]
+    else:
+        prefixes = ["/", "/opt/homebrew", "/usr/local"]
+        if os.environ.get("CONDA_PREFIX"):
+            prefixes.append(os.environ["CONDA_PREFIX"])
+        if env.get("kind") == "conda" and env.get("prefix"):
+            prefixes.append(os.path.abspath(env["prefix"]))
+        if env.get("kind") == "pixi" and env.get("path"):
+            prefixes.append(
+                os.path.join(
+                    os.path.dirname(os.path.abspath(env["path"])),
+                    ".pixi",
+                    "envs",
+                    env.get("name") or "default",
+                )
+            )
+        system_confs = [
+            os.path.join(p, "etc", "fonts", "fonts.conf") for p in prefixes
+        ]
+    key = hashlib.sha256(
+        "\n".join(
+            [os.path.abspath(env.get("path", env_name))]
+            + system_confs
+            + view_dirs
+        ).encode()
+    ).hexdigest()[:16]
+    composed_dir = os.path.join(calkit_dir, "composed", key)
+    fonts_conf_fpath = os.path.join(composed_dir, "fonts.conf")
+    if not os.path.isfile(fonts_conf_fpath):
+        includes = system_confs + [env_vars["FONTCONFIG_FILE"]]
+        os.makedirs(composed_dir, exist_ok=True)
+        tmp_fpath = f"{fonts_conf_fpath}.{os.getpid()}.tmp"
+        with open(tmp_fpath, "w", newline="\n") as f:
+            f.write(
+                "\n".join(
+                    [
+                        '<?xml version="1.0"?>',
+                        '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">',
+                        "<fontconfig>",
+                        *(
+                            '  <include ignore_missing="yes">'
+                            f"{escape(c.replace(os.sep, '/'))}</include>"
+                            for c in includes
+                        ),
+                        "</fontconfig>",
+                    ]
+                )
+                + "\n"
+            )
+        os.replace(tmp_fpath, fonts_conf_fpath)
+    env_vars["FONTCONFIG_FILE"] = fonts_conf_fpath
+    env_vars["MPLCONFIGDIR"] = os.path.join(composed_dir, "matplotlib")
+    for name in keep or []:
+        if name in os.environ:
+            env_vars[name] = os.environ[name]
+    return env_vars
 
 
 def get_env(name: str, envs: dict) -> dict | None:
@@ -2272,6 +2497,12 @@ def get_pipeline_env_names(
                 split_envs.append(sub_env_name)
         else:
             split_envs.append(env_name)
+    # Environments composed into one are checked with it
+    for env_name in list(split_envs):
+        env = envs.get(env_name)
+        if isinstance(env, dict):
+            for name, _ in get_guest_envs(env_name, env, envs):
+                split_envs.append(name)
     return list(dict.fromkeys(split_envs)), ck_info, stages
 
 

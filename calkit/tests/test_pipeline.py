@@ -5538,6 +5538,90 @@ def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
     )
 
 
+def test_composed_env_locks_are_stage_deps(tmp_dir):
+    import calkit
+
+    with open("pyproject.toml", "w") as f:
+        f.write(
+            '[project]\nname = "p"\nversion = "0"\n'
+            'requires-python = ">=3.10"\ndependencies = []\n'
+        )
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {
+                "tex": {"kind": "texlive"},
+                "py": {
+                    "kind": "uv",
+                    "path": "pyproject.toml",
+                    "with": ["tex"],
+                },
+            },
+            "pipeline": {
+                "stages": {
+                    "fig": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "py",
+                        "outputs": ["a.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert "uv.lock" in stages["fig"]["deps"]
+    assert ".calkit/env-locks/tex.json" in stages["fig"]["deps"]
+    # As are those of the environments a switch picks from
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {
+                "tex": {"kind": "texlive"},
+                "py": {
+                    "kind": "uv",
+                    "path": "pyproject.toml",
+                    "with": ["tex"],
+                },
+                "sw": {"kind": "switch", "switch": [{"use": "py"}]},
+            },
+            "pipeline": {
+                "stages": {
+                    "fig": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "sw",
+                        "outputs": ["a.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert ".calkit/env-locks/tex.json" in stages["fig"]["deps"]
+    # One that can't be composed is reported
+    with pytest.raises(ValueError, match="isn't defined"):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {
+                    "py": {
+                        "kind": "uv",
+                        "path": "pyproject.toml",
+                        "with": ["x"],
+                    }
+                },
+                "pipeline": {
+                    "stages": {
+                        "fig": {
+                            "kind": "shell-command",
+                            "command": "echo a",
+                            "environment": "py",
+                        },
+                    }
+                },
+            },
+            write=False,
+        )
+
+
 def test_get_figure_paths_with_origins(tmp_dir):
     ck_info = {
         "pipeline": {

@@ -199,3 +199,40 @@ stages:
       hash: md5
       md5: 7a8be604536d5ba9bfdb3b9fb485a1ef
       size: 6134
+  check-mpl-texlive:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/check-mpl-texlive.py
+      --out=results/mpl-texlive.json
+    deps:
+    - path: ../.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: ../calkit/environments/core.py
+      hash: md5
+      md5: 0df2be0ce82b4566203aed677142f0c7
+      size: 163008
+    - path: ../calkit/environments/texlive.py
+      hash: md5
+      md5: 3ddd6a3654dd51a7eaee7bf946793ddb
+      size: 56651
+    - path: ../uv.lock
+      hash: md5
+      md5: bb50eb7dfaf930ec43914aa42b3e4222
+      size: 1727945
+    - path: .calkit/env-locks/mpl-fonts.json
+      hash: md5
+      md5: e3890237b8069bf8b1a06210bf109e2d
+      size: 21080
+    - path: .calkit/env-locks/mpl-tex.json
+      hash: md5
+      md5: 1e046f0c6db3f86cbd0328894531154c
+      size: 22647
+    - path: scripts/check-mpl-texlive.py
+      hash: md5
+      md5: 412e243e89c5a110234ddf9d32877e38
+      size: 11119
+    outs:
+    - path: results/mpl-texlive.json
+      hash: md5
+      md5: 13bf6cb448a6cd56d1eab098f20cd283
+      size: 2211

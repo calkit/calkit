@@ -16,6 +16,7 @@ import calkit
 import calkit.config
 import calkit.git
 import calkit.pipeline
+import calkit.pipeline.detect
 from calkit.browser_link import (
     get_editor_info,
     get_host_status,
@@ -1101,6 +1102,17 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     assert res["produces"] == "figures/fit.png"
     assert res["included_in"] == ["paper/paper.tex"]
     assert repo.git.status("--porcelain", "-uall") == "?? scripts/plot.py"
+    # Detection failing leaves the host where it was
+    cwd = os.getcwd()
+    with monkeypatch.context() as m:
+        m.setattr(
+            calkit.pipeline.detect,
+            "detect_stage",
+            Mock(side_effect=ValueError("no")),
+        )
+        with pytest.raises(ValueError, match="no"):
+            add_stage_from_script(str(project), msg)
+    assert os.getcwd() == cwd
     # A path given in full is the same script
     full_msg = msg | {"scriptPath": str(project / "scripts" / "plot.py")}
     assert (

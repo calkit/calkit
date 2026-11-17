@@ -45,6 +45,7 @@ import calkit.detect
 import calkit.export
 import calkit.latex
 import calkit.pipeline
+import calkit.pipeline.detect
 import calkit.provenance
 import calkit.resources
 from app.api.deps import CurrentUser, SessionDep
@@ -439,8 +440,8 @@ def post_project_stage_from_script_or_notebook(
     )
     wdir = str(repo.working_dir)
     script_path = _clean_rel_path(req.script_path, "script")
-    if not script_path.lower().endswith(calkit.pipeline.SCRIPT_EXTS):
-        raise HTTPException(422, calkit.pipeline.SCRIPT_EXTS_MESSAGE)
+    if not script_path.lower().endswith(calkit.pipeline.detect.SCRIPT_EXTS):
+        raise HTTPException(422, calkit.pipeline.detect.SCRIPT_EXTS_MESSAGE)
     content = None
     if req.content is not None:
         try:
@@ -592,7 +593,7 @@ def post_project_stage_from_script_or_notebook(
             with open(dest, "wb") as fb:
                 fb.write(content)
         try:
-            detected = calkit.pipeline.get_script_detection(
+            detected = calkit.pipeline.detect.get_script_detection(
                 script_path, wdir=scan_dir
             )
         except TimeoutError as e:
@@ -606,7 +607,7 @@ def post_project_stage_from_script_or_notebook(
     tree = get_repo_tree_for_ref(repo, None)
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
     try:
-        plan = calkit.pipeline.get_stage_from_script_plan(
+        plan = calkit.pipeline.detect.get_stage_from_script_plan(
             script_path,
             detected,
             ck_info,

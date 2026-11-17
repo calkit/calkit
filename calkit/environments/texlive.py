@@ -1181,10 +1181,13 @@ def assemble_view(lock: dict, platform: str, verbose: bool = False) -> str:
     return view_dir
 
 
-def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
+def get_run_env_vars(
+    view_dir: str, platform: str | None = None, env_vars: dict | None = None
+) -> dict:
     """Return the environmental variables a command in an environment gets.
 
-    The environment's programs come first on PATH, and every variable
+    These are ``env_vars``, by default this process's, with the
+    environment's programs first on PATH, and every variable
     kpathsea would take from the environment over ``texmf.cnf``, e.g.,
     ``TEXINPUTS`` or ``TEXINPUTS.xelatex``, is dropped. Nothing else is
     needed for TeX: the programs find the environment's configuration from
@@ -1203,7 +1206,9 @@ def get_run_env_vars(view_dir: str, platform: str | None = None) -> dict:
         re.IGNORECASE,
     )
     env_vars = {
-        k: v for k, v in os.environ.items() if not pattern.fullmatch(k)
+        k: v
+        for k, v in (os.environ if env_vars is None else env_vars).items()
+        if not pattern.fullmatch(k)
     }
     bin_dir = os.path.join(view_dir, "bin", platform)
     env_vars["PATH"] = bin_dir + os.pathsep + env_vars.get("PATH", "")

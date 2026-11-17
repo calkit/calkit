@@ -9,9 +9,9 @@ name: Run pipeline
 on:
   pull_request:
   schedule:
-    # The start of the UTC day, when those stages' schedule inputs go out of
-    # date
-    - cron: "0 0 * * *"
+    # Early in the UTC day, when those stages' schedule inputs go out of
+    # date, off the hour, when GitHub delays or drops scheduled runs most
+    - cron: "17 0 * * *"
   workflow_dispatch:
 
 permissions:

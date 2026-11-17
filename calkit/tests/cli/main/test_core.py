@@ -4314,7 +4314,7 @@ def test_run_skip(tmp_dir):
         text=True,
     )
     assert res.returncode == 0, res.stdout + res.stderr
-    assert "Skipped out-of-date stage 'fetch' as asked" in res.stdout
+    assert "Skipped out-of-date stage 'fetch' as requested" in res.stdout
     assert "successfully" in res.stdout
     assert "can't run" not in res.stdout + res.stderr
     with open("data.txt") as f:
@@ -4459,6 +4459,16 @@ def test_run_offers_requirements_of_stages_that_would_run(
         res = runner.invoke(calkit_app, args, input="\n")
         assert res.exit_code != 0
         assert "'fetch' is out of date and couldn't run" in res.output
+    # Nor is anything asked for stages skipped by name, which stay skipped
+    res = runner.invoke(
+        calkit_app,
+        ["run", "--skip", "fetch", "--skip", "fetch2"],
+        input="third\n",
+    )
+    assert res.exit_code == 0, res.output
+    assert "Missing env var" not in res.output
+    with open("data.txt") as f:
+        assert f.read().strip() == "second"
     # Without a terminal nothing is asked
     monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
     res = runner.invoke(calkit_app, ["run"], input="third\n")

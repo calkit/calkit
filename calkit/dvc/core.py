@@ -254,7 +254,7 @@ _tolerate_purged_rwlock_entries()
 DEFAULT_RUN_LOCK_TIMEOUT = 120.0
 # The reason ``skip_stages`` gets for a stage skipped by name, e.g., with
 # ``calkit run --skip``, rather than because it can't run here
-SKIP_REQUESTED = "skipped as asked"
+SKIP_REQUESTED = "skipped as requested"
 
 
 @contextlib.contextmanager
@@ -360,7 +360,8 @@ def skip_stages(
             return None
         if reason == SKIP_REQUESTED:
             logging.getLogger("dvc").info(
-                "Stage '%s' is out of date, skipping as asked", self.addressing
+                "Stage '%s' is out of date, skipping as requested",
+                self.addressing,
             )
         else:
             logging.getLogger("dvc").info(

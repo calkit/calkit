@@ -3512,10 +3512,12 @@ def run(
                 gated |= retried
         except Exception as e:
             raise_error(f"Failed to check stage requirements: {e}")
-        # Those skipped as asked needn't be able to run
+        # Those skipped as requested needn't be able to run, nor be offered
+        # what they need to
         for name in skip:
             gated.pop(name, None)
             errors.pop(name, None)
+            unmet_requirements.pop(name, None)
         for stage_name, reason in errors.items():
             warn(f"Stage '{stage_name}' can't run: {reason}")
         gate_errors.update(errors)
@@ -4285,7 +4287,7 @@ def run(
     # nobody asked for it by name, or for every stage with --strict
     targeted = {t.split("@")[0] for t in targets or []}
     error_reasons = set(gate_errors.values())
-    # Skipped as asked, so not reported with those that can't run here
+    # Skipped as requested, so not reported with those that can't run here
     skipped_as_asked = [
         addressing
         for addressing, reason in skipped_stale.items()
@@ -4707,7 +4709,7 @@ def run(
             f"{'; '.join(messages)}; see {MPL_FONTS_DOCS_URL}"
         )
     for addressing in skipped_as_asked:
-        typer.echo(f"Skipped out-of-date stage '{addressing}' as asked")
+        typer.echo(f"Skipped out-of-date stage '{addressing}' as requested")
     if failed:
         try:
             calkit.dvc.restore_output_ignores()

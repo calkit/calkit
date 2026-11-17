@@ -886,7 +886,7 @@ def test_build_as_stage(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
         cmd, ran_env, ran_cwd = runs[0]
         assert ran_env == env, doc
         assert os.path.samefile(ran_cwd, os.path.join(root, cwd)), doc
-        assert cmd[-1] == os.path.relpath(doc, cwd), doc
+        assert os.path.normpath(cmd[-1]) == os.path.relpath(doc, cwd), doc
         assert cmd[-1 - len(latexmk_args) : -1] == latexmk_args, doc
         assert "-silent" not in cmd
         assert ("-outdir=../build" in cmd) == (doc == "paper/main.tex")

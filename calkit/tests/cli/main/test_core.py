@@ -14,6 +14,7 @@ from pathlib import Path
 from pprint import pprint
 from unittest.mock import Mock, patch
 
+import click
 import dvc.repo
 import git
 import pytest
@@ -31,8 +32,10 @@ from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
     STAGE_OUTPUT_START,
     STAGE_RUNS_FPATH,
+    _get_iteration_item_counts,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
+    _print_running_pipeline_status,
     _prune_run_logs,
     _run_dvc_repro,
     _stage_run_info_from_log_content,
@@ -2286,6 +2289,58 @@ def test_running_status_names_concurrent_sweep_items(tmp_dir):
         for p in holders:
             p.terminate()
             p.wait()
+
+
+def test_get_iteration_item_counts():
+    ck_info = {
+        "parameters": {"seeds": [1, 2]},
+        "pipeline": {
+            "stages": {
+                "plain": {"kind": "shell-command", "command": "echo"},
+                "sweep": {
+                    "kind": "shell-command",
+                    "command": "echo {month} {seed}",
+                    "iterate_over": [
+                        {"arg_name": "month", "values": ["a", "b", "c"]},
+                        {"arg_name": "seed", "values": [1, 2]},
+                    ],
+                },
+            }
+        },
+    }
+    assert _get_iteration_item_counts(ck_info) == {"sweep": 6}
+
+
+def test_print_running_pipeline_status_groups_items(capsys):
+    """An iterated stage shows once, with how many items have finished."""
+    start = calkit.utcnow(remove_tz=True).isoformat()
+    done = {"status": "completed", "start_time": start, "end_time": start}
+    stages = {f"fetch@{m:02d}": done for m in range(1, 13)}
+    stages["prep"] = done
+    stages |= {"model@a": done, "model@b": {"start_time": start}}
+    _print_running_pipeline_status(
+        {
+            "processes": [{"pid": 1}],
+            "stages": stages,
+            "running_stages": ["model@b"],
+            "item_counts": {"fetch": 14, "model": 3},
+        }
+    )
+    out = click.unstyle(capsys.readouterr().out)
+    assert "completed: fetch (12/14), prep\n" in out
+    assert "running:   model (1/3, " in out
+    assert "fetch@" not in out and "model@" not in out
+    # Concurrent items of a sweep, before the run log knows of them
+    _print_running_pipeline_status(
+        {
+            "processes": [{"pid": 1}, {"pid": 2}],
+            "stages": {},
+            "running_stages": ["sweep@1", "sweep@3"],
+            "item_counts": {"sweep": 4},
+        }
+    )
+    out = click.unstyle(capsys.readouterr().out)
+    assert "running:   sweep (0/4, 2 running)\n" in out
 
 
 def test_status_reports_running_pipeline(tmp_dir):

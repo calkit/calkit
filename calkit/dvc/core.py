@@ -836,7 +836,15 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     :func:`_rwlock_holder_is_live`), so neither dead PIDs nor reused ones are
     reported. An empty list means no pipeline run is currently in progress.
     """
-    rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
+    project_dir = os.path.abspath(wdir or ".")
+    # A project in a subdirectory of a DVC repo shares the repo's lock
+    root = project_dir
+    while not os.path.isdir(os.path.join(root, ".dvc")):
+        parent = os.path.dirname(root)
+        if parent == root:
+            return []
+        root = parent
+    rwlock_path = os.path.join(root, ".dvc", "tmp", "rwlock")
     if not os.path.isfile(rwlock_path):
         return []
     try:
@@ -844,13 +852,23 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
             lock = json.load(f)
     except (OSError, json.JSONDecodeError):
         return []
+
+    def in_project(path: str) -> bool:
+        # Only this project's run, not another one sharing the repo's lock
+        path = os.path.join(root, path)
+        return os.path.commonpath([project_dir, os.path.abspath(path)]) == (
+            project_dir
+        )
+
     # The rwlock format is
     # {"write": {path: {pid, cmd}}, "read": {path: [{pid, cmd}]}}
     by_pid: dict[int, str] = {}
-    for info in lock.get("write", {}).values():
-        if isinstance(info, dict) and "pid" in info:
+    for path, info in lock.get("write", {}).items():
+        if isinstance(info, dict) and "pid" in info and in_project(path):
             by_pid[info["pid"]] = info.get("cmd", "")
-    for infos in lock.get("read", {}).values():
+    for path, infos in lock.get("read", {}).items():
+        if not in_project(path):
+            continue
         for info in infos or []:
             if isinstance(info, dict) and "pid" in info:
                 by_pid[info["pid"]] = info.get("cmd", "")

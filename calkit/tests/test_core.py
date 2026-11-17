@@ -80,6 +80,26 @@ def test_get_project_checkouts(tmp_path, monkeypatch):
         "windows",
     ]
     assert set(found.values()) == {"me"}
+    # macOS asks before its media folders are read, so they're never
+    # searched, nor, for the browser's host, Desktop, Documents, or
+    # Downloads, but one found there before still is
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    for folder in ["Documents", "Pictures"]:
+        path = home / folder / "proj"
+        os.makedirs(path)
+        (path / "calkit.yaml").write_text("owner: me\nname: proj\n")
+        git.Repo.init(path)
+    quiet = calkit.find_project_dirs(search_protected=False)
+    assert not any(os.sep + "Documents" + os.sep in p for p in quiet)
+    assert not any(os.sep + "Pictures" + os.sep in p for p in quiet)
+    found = calkit.get_project_checkouts("proj", owner="me")
+    in_documents = os.path.realpath(home / "Documents" / "proj")
+    assert in_documents in found
+    assert not any(os.sep + "Pictures" + os.sep in p for p in found)
+    found = calkit.get_project_checkouts(
+        "proj", owner="me", search_protected=False
+    )
+    assert in_documents in found
 
 
 def test_to_kebab_case():

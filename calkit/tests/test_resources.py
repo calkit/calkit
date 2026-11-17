@@ -265,15 +265,32 @@ def test_github_actions_workflow(tmp_path):
     # for a Calkit one
     assert workflow["permissions"]["contents"] == "write"
     assert workflow["permissions"]["id-token"] == "write"
-    # Released versions get pinned to a tag that exists in this repo; dev
-    # versions have no tag to point at, so they stay on main
+    # Released versions get pinned to a tag that exists in this repo
     pinned = calkit.resources.render_github_actions_workflow(version="1.2.3")
     assert "uses: calkit/calkit/actions/run@v1.2.3" in pinned
     assert calkit.resources.ACTION_REF not in pinned
+    # Development builds get pinned to the release they're based on, and
+    # versions with no release to point at stay on main
+    for version, ref in [
+        ("1.2.4.dev0+g21c9bb93", "v1.2.3"),
+        ("0.51.1.dev19+gc4093debd", "v0.51.0"),
+        ("0.51.1.dev0+gc4093debd.d20261115", "v0.51.0"),
+        ("1.2.4.dev3", "v1.2.3"),
+        ("1.0.0.dev3", "main"),
+        ("0.1.dev1+g21c9bb93", "main"),
+        ("0+unknown", "main"),
+        ("1.2.3rc1", "main"),
+    ]:
+        expected = f"{calkit.resources.ACTION_PATH}@{ref}"
+        assert calkit.resources.get_action_ref(version) == expected
     unpinned = calkit.resources.render_github_actions_workflow(
-        version="1.2.3.dev0+g21c9bb93"
+        version="0+unknown"
     )
     assert calkit.resources.ACTION_REF in unpinned
+    repinned = calkit.resources.set_action_ref(
+        pinned, version="1.2.5.dev2+g21c9bb93"
+    )
+    assert "uses: calkit/calkit/actions/run@v1.2.4" in repinned
     # A project's workflow can be repinned in place, at whatever ref and in
     # whatever style it was written, including the action's previous home,
     # without touching anything else in it

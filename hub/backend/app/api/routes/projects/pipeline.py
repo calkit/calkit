@@ -17,7 +17,6 @@ import base64
 import binascii
 import glob
 import hashlib
-import json
 import os
 import posixpath
 import re
@@ -46,6 +45,7 @@ import calkit.detect
 import calkit.export
 import calkit.latex
 import calkit.pipeline
+import calkit.pipeline.detect
 import calkit.provenance
 import calkit.resources
 from app.api.deps import CurrentUser, SessionDep
@@ -338,8 +338,6 @@ def _commit_pipeline(
         record_project_update(project, repo, session)
 
 
-# What calkit xr makes a script stage from, by extension
-SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
 MAX_SCRIPT_BYTES = 1_000_000
 # All the data uploaded with a script, which arrives in one request
 MAX_SCRIPT_DATA_BYTES = 50_000_000
@@ -442,12 +440,8 @@ def post_project_stage_from_script_or_notebook(
     )
     wdir = str(repo.working_dir)
     script_path = _clean_rel_path(req.script_path, "script")
-    if not script_path.lower().endswith(SCRIPT_EXTS):
-        raise HTTPException(
-            422,
-            "Scripts can be Python, R, Julia, MATLAB, shell, or Jupyter "
-            "notebooks",
-        )
+    if not script_path.lower().endswith(calkit.pipeline.detect.SCRIPT_EXTS):
+        raise HTTPException(422, calkit.pipeline.detect.SCRIPT_EXTS_MESSAGE)
     content = None
     if req.content is not None:
         try:
@@ -599,157 +593,51 @@ def post_project_stage_from_script_or_notebook(
             with open(dest, "wb") as fb:
                 fb.write(content)
         try:
-            result = subprocess.run(
-                ["calkit", "xr", "--dry-run", "--json", script_path],
-                cwd=scan_dir,
-                capture_output=True,
-                text=True,
-                timeout=120,
+            detected = calkit.pipeline.detect.get_script_detection(
+                script_path, wdir=scan_dir
             )
-        except subprocess.TimeoutExpired:
-            raise HTTPException(504, f"Reading '{script_path}' took too long")
+        except TimeoutError as e:
+            raise HTTPException(504, str(e))
+        except ValueError as e:
+            logger.info(f"xr --dry-run on {script_path} failed: {e}")
+            raise HTTPException(422, str(e))
     finally:
         repo.git.worktree("remove", "--force", scan_dir)
-    # Anything printed before the JSON is xr saying what it chose
-    start = result.stdout.find("\n{")
-    if result.returncode != 0 or not result.stdout.strip():
-        lines = [x.strip() for x in result.stderr.splitlines() if x.strip()]
-        detail = lines[-1].removeprefix("Error: ") if lines else ""
-        logger.info(f"xr --dry-run on {script_path} failed: {result.stderr}")
-        raise HTTPException(422, detail or f"Can't read '{script_path}'")
-    detected = json.loads(
-        result.stdout
-        if result.stdout.startswith("{")
-        else result.stdout[start + 1 :]
-    )
-    env = detected["environment"]
-    stage_name = detected["stage"]["name"]
-    stage = detected["stage"]["stage"]
     ck_info = get_ck_info_from_repo(repo=repo)
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    # A stage that already runs this script keeps what it declares, with
-    # anything newly found added
-    existing_stage = stages.get(stage_name)
-    if isinstance(existing_stage, dict):
-        merged = dict(existing_stage)
-        for field in ("outputs", "inputs"):
-            items = list(existing_stage.get(field) or [])
-            known = {
-                i.get("path") if isinstance(i, dict) else i for i in items
-            }
-            items += [
-                i
-                for i in stage.get(field) or []
-                if (i["path"] if isinstance(i, dict) else i) not in known
-            ]
-            if items:
-                merged[field] = items
-        stage = merged
-    outputs = [
-        o["path"] if isinstance(o, dict) else o
-        for o in stage.get("outputs") or []
-    ]
-    # Env vars, schedules, and other stages' outputs aren't paths
-    inputs = [
-        i if isinstance(i, str) else i["path"]
-        for i in stage.get("inputs") or []
-        if isinstance(i, str) or "path" in i
-    ]
     tree = get_repo_tree_for_ref(repo, None)
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
-    missing = [
-        i
-        for i in inputs
-        if not os.path.exists(os.path.join(wdir, i))
-        and i not in dvc_outs
-        and calkit.pipeline.get_stage_for_output(i, ck_info) is None
-        and not any(i == p or i.startswith(p + "/") for p in data_paths)
-    ]
-
-    def include(shown: str, path: str) -> dict[str, str]:
-        # The new text of each document file that would show it from path
-        documents = [
-            s["target_path"]
-            for s in stages.values()
-            if isinstance(s, dict)
-            and s.get("kind") == "latex"
-            and s.get("target_path")
-        ]
-        for folder in ck_info.get("overleaf_sync") or {}:
-            if os.path.isdir(os.path.join(wdir, folder)):
-                documents += [
-                    os.path.relpath(d, wdir)
-                    for d in calkit.latex.root_documents(
-                        os.path.join(wdir, folder)
-                    )
-                ]
-        changed: dict[str, str] = {}
-        for document in dict.fromkeys(documents):
-            changed.update(
-                calkit.latex.include_figure(document, shown, path, wdir=wdir)
-            )
-        return changed
-
-    # The output the document shows: the same path, or the one the user
-    # picked, or else the only one with the same file name
-    shows = _clean_rel_path(req.shows, "shown") if req.shows else None
-    produces = None
-    if req.produces is not None:
-        produces = _clean_rel_path(req.produces, "output")
-        if produces not in outputs and produces != shows:
-            raise HTTPException(
-                422, f"'{script_path}' doesn't write '{produces}'"
-            )
-    elif shows in outputs:
-        produces = shows
-    elif shows is not None:
-        same_name = [
-            o
-            for o in outputs
-            if os.path.basename(o) == os.path.basename(shows)
-        ]
-        # Only worth guessing if a document includes it, so it can show it
-        # from there instead
-        if len(same_name) == 1 and include(shows, same_name[0]):
-            produces = same_name[0]
-    # What the document shows is what the stage makes, so if the script
-    # isn't found writing it anywhere, it writes it there
-    if shows is not None and produces is None:
-        produces = shows
-    if produces is not None and produces not in outputs:
-        tracked = bool(repo.git.ls_files("--", produces).strip())
-        stage.setdefault("outputs", []).append(
-            {"path": produces, "storage": "git"} if tracked else produces
+    try:
+        plan = calkit.pipeline.detect.get_stage_from_script_plan(
+            script_path,
+            detected,
+            ck_info,
+            wdir=wdir,
+            shows=_clean_rel_path(req.shows, "shown") if req.shows else None,
+            produces=(
+                _clean_rel_path(req.produces, "output")
+                if req.produces is not None
+                else None
+            ),
+            data_paths=data_paths,
+            is_dvc_output=lambda path: path in dvc_outs,
         )
-        outputs.append(produces)
-    included: dict[str, str] = {}
-    if shows is not None and produces is not None and produces != shows:
-        included = include(shows, produces)
-        if not included:
-            raise HTTPException(
-                422,
-                f"No document includes '{shows}' to show it from "
-                f"'{produces}' instead",
-            )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     out = StageFromScriptOrNotebookResponse(
-        stage_name=stage_name,
-        stage_yaml=_dump_ck_stage_map(stage),
-        environment=env["name"],
-        environment_is_new=not env["exists"],
-        environment_spec_path=(
-            env["spec_path"] if env["created_from_dependencies"] else None
-        ),
-        environment_spec_content=(
-            env["spec_content"] if env["created_from_dependencies"] else None
-        ),
-        dependencies=env.get("dependencies") or [],
-        inputs=inputs,
-        outputs=outputs,
-        missing_inputs=missing,
-        external_inputs=detected.get("external_inputs") or [],
+        stage_name=plan["stage_name"],
+        stage_yaml=_dump_ck_stage_map(plan["stage"]),
+        environment=plan["environment"],
+        environment_is_new=plan["environment_is_new"],
+        environment_spec_path=plan["environment_spec_path"],
+        environment_spec_content=plan["environment_spec_content"],
+        dependencies=plan["dependencies"],
+        inputs=plan["inputs"],
+        outputs=plan["outputs"],
+        missing_inputs=plan["missing_inputs"],
+        external_inputs=plan["external_inputs"],
         rewritten=rewritten,
-        produces=produces,
-        included_in=sorted(included),
+        produces=plan["produces"],
+        included_in=sorted(plan["included"]),
         git_repo_url=project.git_repo_url,
     )
     if not req.save:
@@ -760,7 +648,7 @@ def post_project_stage_from_script_or_notebook(
         writes.append(
             _clean_rel_path(out.environment_spec_path, "environment")
         )
-    for path in writes + list(included):
+    for path in writes + list(plan["included"]):
         if not _inside(wdir, os.path.join(wdir, path)):
             raise HTTPException(422, f"'{path}' leads outside the project")
     # The data goes where calkit add puts it, Git or DVC, with only what it
@@ -827,21 +715,10 @@ def post_project_stage_from_script_or_notebook(
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as fb:
             fb.write(content)
-    if out.environment_spec_path and out.environment_spec_content is not None:
-        spec_path = os.path.join(
-            wdir, _clean_rel_path(out.environment_spec_path, "environment")
-        )
-        os.makedirs(os.path.dirname(spec_path) or wdir, exist_ok=True)
-        with open(spec_path, "w") as f:
-            f.write(out.environment_spec_content)
-    if out.environment_is_new:
-        ck_info.setdefault("environments", {})[env["name"]] = env["env"]
-    _validate_ck_stage(stage, stage_name)
-    stages[stage_name] = stage
-    for path, text in included.items():
-        with open(os.path.join(wdir, path), "w") as f:
-            f.write(text)
-    ck_info.setdefault("pipeline", {})["stages"] = stages
+    try:
+        calkit.pipeline.write_stage_from_script(plan, ck_info, wdir=wdir)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     _commit_pipeline(
         project,
         session,
@@ -850,7 +727,7 @@ def post_project_stage_from_script_or_notebook(
         None,
         [],
         [],
-        f"Add stage {stage_name} for {script_path}",
+        f"Add stage {plan['stage_name']} for {script_path}",
     )
     out.saved = True
     return out

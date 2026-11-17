@@ -4204,7 +4204,7 @@ Options:
 
 Drop dvc.lock entries and run records of stages no longer in the pipeline.
 
-Same as 'calkit check stage-runs --fix'.
+'calkit check stage-runs --fix' does this too, then checks the rest.
 
 Usage:
 

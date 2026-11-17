@@ -1898,17 +1898,30 @@ def test_check_stage_runs(tmp_dir):
     del ck_info["pipeline"]["stages"]["b"]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    # Another stage's problem, which only rerunning fixes, doesn't fail it
+    stage_runs = calkit.read_stage_runs()
+    a_lock_hash = stage_runs["a"]["dvc_lock_hash"]
+    stage_runs["a"]["dvc_lock_hash"] = "sha256:0"
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
     res = subprocess.run(
         ["calkit", "fix", "stage-runs"], capture_output=True, text=True
     )
     assert res.returncode == 0
     assert "Dropped stage 'b' from dvc.lock" in res.stdout
+    assert "Stage 'a'" not in res.stdout
     assert list(calkit.dvc.read_lock_stages()) == ["a"]
     assert list(calkit.read_stage_runs()) == ["a"]
     staged = subprocess.check_output(
         ["git", "diff", "--cached", "--name-only"], text=True
     ).splitlines()
     assert "dvc.lock" in staged
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'a' has changed in dvc.lock" in res.stdout
+    stage_runs = calkit.read_stage_runs()
+    stage_runs["a"]["dvc_lock_hash"] = a_lock_hash
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
     subprocess.check_call(check)
     ck_info["pipeline"]["stages"]["b"] = b_stage
     with open("calkit.yaml", "w") as f:

@@ -1917,6 +1917,29 @@ def check_project_requirements(
     calkit.echo(message)
 
 
+def drop_removed_stages() -> None:
+    """Drop and stage the ``dvc.lock`` entries and run records of stages no
+    longer in the pipeline, saying which.
+    """
+    import calkit.pipeline
+
+    def stage_pruned(pruned: dict[str, list[str]]) -> None:
+        for fpath, names in pruned.items():
+            for name in names:
+                typer.echo(f"Dropped stage '{name}' from {fpath}")
+        calkit.environments.stage_calkit_files(extra_paths=list(pruned))
+
+    # Compiled first, so dvc.yaml has every stage calkit.yaml makes
+    try:
+        calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
+        pruned = calkit.pipeline.prune_removed_stages()
+    except Exception as e:
+        if isinstance(e, calkit.pipeline.PruneError):
+            stage_pruned(e.pruned)
+        raise_error(f"Can't drop removed stages: {e}")
+    stage_pruned(pruned)
+
+
 @check_app.command(name="stage-runs")
 def check_stage_runs(
     fix: Annotated[
@@ -1942,17 +1965,8 @@ def check_stage_runs(
     """
     import calkit.pipeline
 
-    # Compiled first, so dvc.yaml has every stage calkit.yaml makes
     if fix:
-        try:
-            calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
-            pruned = calkit.pipeline.prune_removed_stages()
-        except Exception as e:
-            raise_error(f"Can't drop removed stages: {e}")
-        for fpath, names in pruned.items():
-            for name in names:
-                typer.echo(f"Dropped stage '{name}' from {fpath}")
-        calkit.environments.stage_calkit_files(extra_paths=list(pruned))
+        drop_removed_stages()
     # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
     # subproject's, against the record kept beside its dvc.lock
     lock_dirs = calkit.dvc.get_lock_dirs()

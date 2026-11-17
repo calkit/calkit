@@ -4406,6 +4406,8 @@ def run(
         try:
             written += list(calkit.pipeline.prune_removed_stages())
         except Exception as e:
+            if isinstance(e, calkit.pipeline.PruneError):
+                written += list(e.pruned)
             warn(f"Couldn't drop removed stages from dvc.lock: {e}")
     if ran and not dry:
         # By the directory of the dvc.lock recording each stage, since a

@@ -190,11 +190,11 @@ def fix_stage_runs() -> None:
     """Drop dvc.lock entries and run records of stages no longer in the
     pipeline.
 
-    Same as 'calkit check stage-runs --fix'.
+    'calkit check stage-runs --fix' does this too, then checks the rest.
     """
-    from calkit.cli.check import check_stage_runs
+    from calkit.cli.check import drop_removed_stages
 
-    check_stage_runs(fix=True)
+    drop_removed_stages()
 
 
 @fix_app.command(name="storage")

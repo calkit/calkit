@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import warnings
@@ -713,6 +714,21 @@ def test_prune_removed_stages(tmp_dir):
     ]
     assert list(calkit.read_stage_runs("sub")) == ["c"]
     assert calkit.pipeline.prune_removed_stages() == {}
+    # A file that can't be written stops it, saying which already were, so
+    # they can be staged
+    write_lock("dvc.lock", kept + ["old"])
+    write_lock("sub/dvc.lock", ["c", "d"])
+    os.chmod("sub/dvc.lock", stat.S_IREAD)
+    try:
+        with pytest.raises(calkit.pipeline.PruneError) as exc_info:
+            calkit.pipeline.prune_removed_stages()
+    finally:
+        os.chmod("sub/dvc.lock", stat.S_IREAD | stat.S_IWRITE)
+    assert exc_info.value.pruned == {"dvc.lock": ["old"]}
+    assert list(calkit.dvc.read_lock_stages()) == kept
+    assert calkit.pipeline.prune_removed_stages() == {
+        os.path.join("sub", "dvc.lock"): ["sub/dvc.yaml:d"]
+    }
     # Nothing is dropped beside a dvc.yaml that can't be read
     with open("sub/dvc.yaml", "w") as f:
         f.write("stages: [\n")

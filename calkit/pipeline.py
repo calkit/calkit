@@ -764,6 +764,18 @@ def _rename_lock_entries(
     return True
 
 
+class PruneError(Exception):
+    """Dropping removed stages failed partway.
+
+    ``pruned`` has the files already rewritten, as
+    :func:`prune_removed_stages` returns them.
+    """
+
+    def __init__(self, message: str, pruned: dict[str, list[str]]) -> None:
+        super().__init__(message)
+        self.pruned = pruned
+
+
 def prune_removed_stages(write: bool = True) -> dict[str, list[str]]:
     """Drop ``dvc.lock`` entries and run records of stages no longer in the
     pipeline.
@@ -781,7 +793,8 @@ def prune_removed_stages(write: bool = True) -> dict[str, list[str]]:
     Refuses to write while a merge, rebase, or cherry-pick is in progress,
     since 'calkit fix merge-conflicts' merges these files from each side.
     Returns the stages dropped, or to drop if not ``write``, named as in
-    'calkit check stage-runs', by the file they're in.
+    'calkit check stage-runs', by the file they're in. Raises
+    :class:`PruneError` with the files already rewritten if one fails.
     """
     import json
 
@@ -856,25 +869,28 @@ def prune_removed_stages(write: bool = True) -> dict[str, list[str]]:
                 )
             except Exception:
                 removed = {}
-            if removed:
-                pruned[lock_fpath] = list(removed.values())
             if removed and write:
                 with modify_yaml(lock_fpath) as lock:
                     for key in removed:
                         lock["stages"].pop(key, None)
+            if removed:
+                pruned[lock_fpath] = list(removed.values())
             runs_fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
             try:
                 runs = calkit.read_stage_runs(lock_dir)
             except json.JSONDecodeError:
                 continue
             removed = get_removed_names(lock_dir, runs)
-            if removed:
-                pruned[runs_fpath] = list(removed.values())
             if removed and write:
                 runs = {k: v for k, v in runs.items() if k not in removed}
                 with open(runs_fpath, "w") as f:
                     json.dump(dict(sorted(runs.items())), f, indent=2)
                     f.write("\n")
+            if removed:
+                pruned[runs_fpath] = list(removed.values())
+    except Exception as e:
+        # So the files already rewritten can still be staged
+        raise PruneError(str(e), pruned=pruned if write else {}) from e
     finally:
         dvc_repo.close()
     return pruned

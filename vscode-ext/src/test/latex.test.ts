@@ -5,8 +5,8 @@ import {
   documentStageSource,
   findInSource,
   findText,
+  findLatexStage,
   latexPreviewCommand,
-  latexStageName,
   latexStagePdf,
   latexStageSource,
   latexWorkingDiffPath,
@@ -21,6 +21,7 @@ import {
   synctexReverse,
   synctexTag,
 } from "../latex/core";
+import { mergeSubprojectConfigs } from "../subprojects";
 
 test("latexWorkingDiffPath mirrors the CLI's working tree diff path", () => {
   // No revision means the CLI's default-branch merge base.
@@ -321,9 +322,42 @@ test("a latex stage's document previews with the build it compiled to", () => {
     paper: { kind: "latex", target_path: "paper/main.tex" },
     thesis: { kind: "latex", wdir: "thesis", target_path: "main.tex" },
   };
-  assert.equal(latexStageName(stages, "paper/main.tex"), "paper");
-  assert.equal(latexStageName(stages, "thesis/main.tex"), "thesis");
-  assert.equal(latexStageName(stages, "main.tex"), undefined);
+  assert.deepEqual(findLatexStage(stages, "paper/main.tex"), {
+    name: "paper",
+    wdir: "",
+  });
+  assert.deepEqual(findLatexStage(stages, "thesis/main.tex"), {
+    name: "thesis",
+    wdir: "thesis",
+  });
+  assert.equal(findLatexStage(stages, "main.tex"), undefined);
+  // A subproject's builds from its own directory, which merging it into the
+  // root's config and dvc.yaml takes out of their wdir
+  const { config } = mergeSubprojectConfigs(
+    { subprojects: [{ path: "sub" }] },
+    [
+      {
+        dir: "sub",
+        config: {
+          environments: { tex: { kind: "texlive" } },
+          pipeline: {
+            stages: {
+              paper: {
+                kind: "latex",
+                environment: "tex",
+                wdir: "paper",
+                target_path: "main.tex",
+              },
+            },
+          },
+        },
+      },
+    ],
+  );
+  assert.deepEqual(
+    findLatexStage(config.pipeline?.stages ?? {}, "sub/paper/main.tex"),
+    { name: "sub:paper", wdir: "sub/paper" },
+  );
   // The environment is checked, since no pipeline run did, and the build runs
   // where the stage's does
   assert.equal(
@@ -344,9 +378,20 @@ test("a latex stage's document previews with the build it compiled to", () => {
   // its defaults or a user's own
   assert.equal(
     latexWorkshopBuildsWithCalkit([
-      { name: "Calkit: paper", command: "calkit", args: [] },
+      {
+        name: "Calkit",
+        command: "calkit",
+        args: ["latex", "build", "--as-stage", "%DOC_EXT%"],
+      },
     ]),
     true,
+  );
+  // Not if they build every document with one stage's options
+  assert.equal(
+    latexWorkshopBuildsWithCalkit([
+      { name: "Calkit", command: "calkit", args: ["latex", "build", "-e"] },
+    ]),
+    false,
   );
   assert.equal(
     latexWorkshopBuildsWithCalkit([{ name: "latexmk", command: "latexmk" }]),

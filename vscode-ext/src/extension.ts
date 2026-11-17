@@ -74,10 +74,10 @@ import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import {
   documentStagePdf,
   documentStageSource,
+  findLatexStage,
   latexStagePdf,
   latexStageSource,
   latexPreviewCommand,
-  latexStageName,
   latexWorkingDiffPath,
   latexWorkshopBuildsWithCalkit,
   pipelineLatexDiffs,
@@ -759,11 +759,11 @@ export function activate(context: vscode.ExtensionContext): void {
         const texFile = path
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
-        const stageName = latexStageName(
+        const latexStage = findLatexStage(
           currentCalkitConfig?.pipeline?.stages ?? {},
           texFile,
         );
-        if (!stageName) {
+        if (!latexStage) {
           void vscode.window.showInformationMessage(
             "No latex stage in the pipeline builds this document.",
           );
@@ -793,15 +793,13 @@ export function activate(context: vscode.ExtensionContext): void {
         } else {
           await vscode.workspace.save(fileUri);
         }
-        const stage = currentDvcYaml?.stages?.[stageName];
-        const wdir = typeof stage?.wdir === "string" ? stage.wdir : "";
         const cmd = latexPreviewCommand(
-          stage?.cmd,
-          path.join(workspaceRoot, wdir),
+          currentDvcYaml?.stages?.[latexStage.name]?.cmd,
+          path.join(workspaceRoot, latexStage.wdir),
         );
         if (!cmd) {
           void vscode.window.showInformationMessage(
-            `Stage '${stageName}' isn't compiled yet; run it once first.`,
+            `Stage '${latexStage.name}' isn't compiled yet; run it once first.`,
           );
           return;
         }

@@ -147,19 +147,21 @@ export function latexStageSource(
   )?.source;
 }
 
-// The latex stage that builds `texFile`, if one does.
-export function latexStageName(
+// The latex stage that builds `texFile`, if one does, and the directory its
+// build runs in, which for a subproject's is its own, though its target is
+// relative to the root.
+export function findLatexStage(
   stages: Record<string, unknown>,
   texFile: string,
-): string | undefined {
+): { name: string; wdir: string } | undefined {
   for (const [name, raw] of Object.entries(stages)) {
-    const stage = raw as DocumentStageFields;
+    const stage = raw as DocumentStageFields & { subproject_wdir?: string };
     if (
       stage?.kind === "latex" &&
       typeof stage.target_path === "string" &&
       path.posix.join(stage.wdir ?? "", stage.target_path) === texFile
     ) {
-      return name;
+      return { name, wdir: stage.subproject_wdir ?? stage.wdir ?? "" };
     }
   }
   return undefined;
@@ -182,13 +184,20 @@ export function latexPreviewCommand(
   return `calkit -C ${quoted} latex build ${args.trim()}`;
 }
 
-// Whether LaTeX Workshop builds with Calkit, as `calkit update vscode-config`
-// sets it up to for a project with a TeX Live environment, given its
-// `latex.tools` setting.
+// Whether LaTeX Workshop builds each document as its stage does, as
+// `calkit update vscode-config` sets it up to for a project with a TeX Live
+// environment, given its `latex.tools` setting.
 export function latexWorkshopBuildsWithCalkit(tools: unknown): boolean {
   return (
     Array.isArray(tools) &&
-    tools.some((tool) => (tool as { command?: unknown })?.command === "calkit")
+    tools.some((raw) => {
+      const tool = raw as { command?: unknown; args?: unknown };
+      return (
+        tool?.command === "calkit" &&
+        Array.isArray(tool.args) &&
+        tool.args.includes("--as-stage")
+      );
+    })
   );
 }
 

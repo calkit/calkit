@@ -2275,10 +2275,6 @@ def get_stage_from_script_plan(
     stage = copy.deepcopy(detected["stage"]["stage"])
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     existing_stage = stages.get(stage_name)
-    existing_outputs = {
-        o.get("path") if isinstance(o, dict) else o
-        for o in (existing_stage or {}).get("outputs") or []
-    }
     if isinstance(existing_stage, dict):
         merged = copy.deepcopy(existing_stage)
         for field in ("outputs", "inputs"):
@@ -2350,12 +2346,8 @@ def get_stage_from_script_plan(
             if posixpath.basename(o) == posixpath.basename(shows)
         ]
         # Only worth guessing if a document includes it, so it can show it
-        # from there instead, or the stage already makes it, e.g., when
-        # asked again after a document was changed to show it
-        if len(same_name) == 1 and (
-            same_name[0] in existing_outputs
-            or get_included_texts(shows, same_name[0])
-        ):
+        # from there instead
+        if len(same_name) == 1 and get_included_texts(shows, same_name[0]):
             produces = same_name[0]
     # What the document shows is what the stage makes, so if the script
     # isn't found writing it anywhere, it writes it there
@@ -2371,7 +2363,7 @@ def get_stage_from_script_plan(
     included: dict[str, str] = {}
     if shows is not None and produces is not None and produces != shows:
         included = get_included_texts(shows, produces)
-        if not included and produces not in existing_outputs:
+        if not included:
             raise ValueError(
                 f"No document includes '{shows}' to show it from "
                 f"'{produces}' instead"

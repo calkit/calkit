@@ -1154,9 +1154,11 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     } <= set(committed)
     assert "notes.txt" not in committed
     assert repo.git.status("--porcelain") == " M notes.txt"
-    # Asked again, it's the stage as saved, with nothing new to commit
+    # Asked again for what the document now shows, it's the stage as saved,
+    # with nothing new to commit
     head = repo.head.commit.hexsha
-    res = add_stage_from_script(str(project), msg | {"save": True})
+    again = msg | {"shows": "figures/fit.png", "save": True}
+    res = add_stage_from_script(str(project), again)
     assert res["produces"] == "figures/fit.png"
     assert res["outputs"] == ["figures/fit.png"]
     assert repo.head.commit.hexsha == head

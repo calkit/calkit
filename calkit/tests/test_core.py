@@ -276,6 +276,12 @@ def test_set_yaml_item() -> None:
         assert set_item(txt, key, {"kind": "conda"}) == txt.replace(
             f"{key}:\n    kind: uv", f"{key}:\n    kind: conda"
         )
+    # A scalar replacing the last item keeps the comment at the end of its
+    # line too
+    txt = "envs:\n  a: 1  # eol\n\nnext: 2\n"
+    assert set_item(txt, "a", 5) == "envs:\n  a: 5  # eol\n\nnext: 2\n"
+    txt = "envs:\n  a:\n    b: 1  # eol\n\nnext: 2\n"
+    assert set_item(txt, "a", 5) == "envs:\n  a: 5\n\nnext: 2\n"
     # Plain dicts, e.g., environments converted from a list, still get set
     envs: dict = {"a": {"kind": "uv"}}
     calkit.set_yaml_item(envs, "b", {"kind": "conda"})

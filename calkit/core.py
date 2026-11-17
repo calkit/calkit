@@ -452,8 +452,16 @@ def set_yaml_item(mapping: dict, key: Any, value: Any) -> None:
         return node
 
     is_last = bool(mapping) and key == next(reversed(mapping))
+    # A scalar replacing a scalar keeps the item's comments as they are
     if not isinstance(mapping, CommentedMap) or (
-        key in mapping and not is_last
+        key in mapping
+        and (
+            not is_last
+            or (
+                not isinstance(mapping[key], (dict, list))
+                and not isinstance(value, (dict, list))
+            )
+        )
     ):
         mapping[key] = value
         return

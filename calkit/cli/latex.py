@@ -873,7 +873,7 @@ def build(
                 os.path.realpath(stage_doc_path)
             ) != os.path.normcase(doc_path):
                 continue
-            args = ["-e", s.environment, *s.build_args]
+            args = ["-e", s.environment, *s.make_build_args()]
             for flag, given in [
                 ("--no-check", no_check),
                 ("--verbose", verbose),

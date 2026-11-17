@@ -1641,8 +1641,7 @@ class LatexStage(Stage):
             out_base = target
         return Path(os.path.normpath(out_base)).with_suffix(".pdf").as_posix()
 
-    @property
-    def build_args(self) -> list[str]:
+    def make_build_args(self) -> list[str]:
         """Options for ``calkit latex build`` beyond the environment and
         target, so a build outside the pipeline, e.g., an editor's, can
         match the stage's.
@@ -1675,7 +1674,7 @@ class LatexStage(Stage):
         # them don't corrupt the compiled DVC command.
         return "calkit latex build " + shlex.join(
             ["-e", self.environment, "--no-check"]
-            + self.build_args
+            + self.make_build_args()
             + [self.target_path]
         )
 

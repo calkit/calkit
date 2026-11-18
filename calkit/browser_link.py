@@ -91,8 +91,8 @@ MAX_JOBS_KEPT = 20
 # bigger, keeping it well under the browser's limit
 PDF_CHUNK_BYTES = 600_000
 OVERLEAF_AUTH_MISSING = (
-    "Calkit on this computer has no Overleaf credentials that work; connect "
-    "Overleaf to Calkit, which saves them for every computer you use"
+    "Calkit on this machine has no Overleaf credentials that work; connect "
+    "Overleaf to Calkit, which saves them for every machine you use"
 )
 # Where each browser looks for hosts' manifests in the home folder, by
 # platform; each is only written if the folder above it exists, i.e., the
@@ -268,7 +268,7 @@ def get_result(msg: dict) -> Any:
             )
             if "isn't on this machine" in error:
                 error = (
-                    f"{owner}/{name} isn't on this computer; clone it "
+                    f"{owner}/{name} isn't on this machine; clone it "
                     f"with 'calkit clone {owner}/{name}'"
                 )
             raise ValueError(error)
@@ -309,7 +309,7 @@ def get_result(msg: dict) -> Any:
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_overleaf_sync_statuses(
             paths[0],
             overleaf_project_id=msg.get("overleaf_project_id"),
@@ -322,31 +322,31 @@ def get_result(msg: dict) -> Any:
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_figures(paths[0])
     elif kind == "project.contentPaths":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_content_paths(paths[0])
     elif kind == "project.stageFromScriptOrNotebook":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = add_stage_from_script(paths[0], msg)
     elif kind == "project.pipeline":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_pipeline(paths[0])
     elif kind == "publication.pdf":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         offset = msg.get("offset", 0)
         if not isinstance(offset, int) or offset < 0:
             raise ValueError("An offset must be a whole number")
@@ -945,7 +945,7 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         raise ValueError(f"{path} isn't in the project")
     if not os.path.isfile(full_path):
         raise ValueError(
-            f"{path} hasn't been built on this computer; run the pipeline"
+            f"{path} hasn't been built on this machine; run the pipeline"
         )
     stat = os.stat(full_path)
     with open(full_path, "rb") as f:
@@ -1220,7 +1220,7 @@ def start_job(msg: dict) -> dict:
     else:
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         wdir = paths[0]
         if kind == "run":
             # Saved and synced with Overleaf after unless asked not to
@@ -1572,10 +1572,10 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     if not script_path.lower().endswith(calkit.pipeline.detect.SCRIPT_EXTS):
         raise ValueError(calkit.pipeline.detect.SCRIPT_EXTS_MESSAGE)
     # Uploads go through the hub, which reads them in a checkout of their
-    # own; here the script and its data are already on this computer
+    # own; here the script and its data are already on this machine
     if msg.get("content") is not None:
         raise ValueError(
-            "Put the script in the project's folder on this computer, then "
+            "Put the script in the project's folder on this machine, then "
             "find it in the project"
         )
     if msg.get("data"):

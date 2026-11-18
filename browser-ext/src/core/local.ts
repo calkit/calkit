@@ -1,5 +1,5 @@
 /**
- * Calkit on this computer, which the browser starts when the extension
+ * Calkit on this machine, which the browser starts when the extension
  * connects to it, so the extension can work with projects here directly
  * rather than through a hub. See calkit/browser_link.py.
  *
@@ -78,18 +78,18 @@ export async function isLocalPermitted(): Promise<boolean> {
 export function describeHostError(message: string): string {
   if (/not found/i.test(message)) {
     return (
-      "Calkit isn't set up for the browser on this computer; install it, " +
+      "Calkit isn't set up for the browser on this machine; install it, " +
       "or run 'calkit browser-link install'"
     );
   }
   if (/forbidden/i.test(message)) {
     return (
-      "Calkit on this computer doesn't allow this extension; run " +
+      "Calkit on this machine doesn't allow this extension; run " +
       "'calkit browser-link install'"
     );
   }
   if (/exited/i.test(message)) {
-    return "Calkit on this computer stopped unexpectedly";
+    return "Calkit on this machine stopped unexpectedly";
   }
   return message;
 }
@@ -152,7 +152,7 @@ function getPort(): chrome.runtime.Port {
   });
   p.onDisconnect.addListener(() => {
     const error = describeHostError(
-      chrome.runtime.lastError?.message ?? "Calkit on this computer closed",
+      chrome.runtime.lastError?.message ?? "Calkit on this machine closed",
     );
     if (port === p) {
       port = null;
@@ -179,14 +179,14 @@ function keepAliveUntilIdle(): void {
   }, IDLE_MS);
 }
 
-/** Ask Calkit on this computer something, starting it if need be. */
+/** Ask Calkit on this machine something, starting it if need be. */
 export async function askLocal<T>(
   request: { type: string } & Record<string, unknown>,
   timeoutMs = TIMEOUT_MS,
 ): Promise<T> {
   if (!(await isLocalPermitted())) {
     throw new Error(
-      "The extension isn't allowed to reach Calkit on this computer; " +
+      "The extension isn't allowed to reach Calkit on this machine; " +
         "connect it from the extension's options",
     );
   }
@@ -194,7 +194,7 @@ export async function askLocal<T>(
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(new Error("Calkit on this computer didn't answer"));
+      reject(new Error("Calkit on this machine didn't answer"));
     }, timeoutMs);
     pending.set(id, {
       resolve: resolve as (value: unknown) => void,
@@ -213,7 +213,7 @@ export async function askLocal<T>(
 }
 
 /**
- * Whether Calkit on this computer can be reached, and its version, as it
+ * Whether Calkit on this machine can be reached, and its version, as it
  * last said within ``STATUS_TTL_MS``.
  */
 export async function getLocalStatus(): Promise<LocalStatus> {
@@ -278,7 +278,7 @@ export function getEditorLabel(editor: string | undefined): string {
   return names[editor ?? ""] ?? names[command] ?? "your editor";
 }
 
-/** A part of a PDF read from this computer, with how fresh it is. */
+/** A part of a PDF read from this machine, with how fresh it is. */
 export interface LocalPdfChunk {
   path: string;
   size: number;
@@ -293,7 +293,7 @@ export interface LocalPdfChunk {
 }
 
 /**
- * The PDF a folder synced with Overleaf builds to on this computer, read a
+ * The PDF a folder synced with Overleaf builds to on this machine, read a
  * part at a time, since a message to or from Calkit here can't be over
  * 1 MB, with the first part, which says how fresh it is.
  */

@@ -232,7 +232,7 @@ function valueText(value: unknown): string {
  * The hub reads the script the way `calkit xr --dry-run` does, without
  * running it, so the user sees the environment, inputs, and outputs before
  * anything is committed. Overleaf can't run it, so once it's saved the
- * panel says how to, on the user's own computer.
+ * panel says how to, on the user's own machine.
  */
 function renderAddScript(
   container: HTMLElement,
@@ -333,7 +333,7 @@ function renderAddScript(
     }
   });
   // Where data from outside the project goes in it, uploaded from this
-  // computer, which is likely the one the script ran on
+  // machine, which is likely the one the script ran on
   const renderExternal = (
     external: string,
     detected: StageFromScriptOrNotebookResponse,
@@ -419,7 +419,7 @@ function renderAddScript(
     const n = chosen?.files.length ?? 0;
     const status = !chosen
       ? `Reads ${external}, which is outside the project, so it will only ` +
-        "run on the computer it came from. Upload it to read it from the " +
+        "run on the machine it came from. Upload it to read it from the " +
         "project instead:"
       : detected.rewritten?.includes(external)
       ? `Reads ${external}, outside the project. ${n} ` +
@@ -892,7 +892,7 @@ function renderRunIt(
         class: "small",
         text:
           `Added stage ${saved.stage_name}. It hasn't run yet. Run it on ` +
-          "this computer, and its results come into this paper when it " +
+          "this machine, and its results come into this paper when it " +
           "finishes:",
       }),
       renderRuns(link, true),
@@ -925,7 +925,7 @@ function renderRunIt(
     el("div", {
       class: "small",
       style: { marginTop: "6px" },
-      text: "Or on your computer:",
+      text: "Or on your machine:",
     }),
     el("pre", {
       class: "name",
@@ -952,7 +952,7 @@ let runsRequest: { key: string; promise: Promise<void> } | null = null;
 let runsFailures = 0;
 // A start from a run button, kept across their redraws
 let starting: { key: string; busy: boolean; error?: string } | null = null;
-// Whether syncing from this computer runs what's out of date first, as last
+// Whether syncing from this machine runs what's out of date first, as last
 // chosen
 const RUN_BEFORE_SYNC_KEY = "runBeforeSync";
 let runBeforeSync = true;
@@ -1144,7 +1144,7 @@ function syncNow(
 }
 
 /**
- * Start the pipeline on this computer, saving and syncing after if chosen,
+ * Start the pipeline on this machine, saving and syncing after if chosen,
  * or else on GitHub Actions, which syncs here when it's done.
  */
 async function startRun(link: OverleafLinkPublic): Promise<void> {
@@ -1189,7 +1189,7 @@ async function bringInRun(link: OverleafLinkPublic): Promise<void> {
   // 'calkit run --save --overleaf' synced already, unless it was only run
   if (pipelineRuns.runs.runs[0]?.location === "local") {
     pipelineRuns.notice =
-      "The pipeline ran on this computer, and its results were saved " +
+      "The pipeline ran on this machine, and its results were saved " +
       "and synced here.";
   } else if (canWrite(link)) {
     try {
@@ -1309,7 +1309,7 @@ function drawRuns(): void {
     const staleShown = editorProblems?.found.some((problems) =>
       problems.some((p) => p.kind === "stale"),
     );
-    // On this computer, running is part of syncing, below
+    // On this machine, running is part of syncing, below
     if (
       link.local_path ||
       (!offer && !staleShown && latest?.status !== "failed")
@@ -1338,11 +1338,11 @@ function drawRuns(): void {
   }
 }
 
-/** What a run on this computer is doing now, as a line would say it. */
+/** What a run on this machine is doing now, as a line would say it. */
 function getRunActivity(run: PipelineRun): string {
   const progress = run.progress;
   if (run.status === "queued") {
-    return "Waiting to run on this computer";
+    return "Waiting to run on this machine";
   }
   const of = progress?.n_stages ? ` of ${progress.n_stages}` : "";
   switch (progress?.phase) {
@@ -1362,14 +1362,14 @@ function getRunActivity(run: PipelineRun): string {
 }
 
 /**
- * Show the whole log of a run on this computer, kept up to date while it
+ * Show the whole log of a run on this machine, kept up to date while it
  * runs.
  */
 function openRunLog(link: OverleafLinkPublic, run: PipelineRun): void {
   const started = run.started ?? run.created;
   const overlay = mountOverlay({
     id: "calkit-run-log",
-    title: `Run on this computer, ${new Date(started).toLocaleString([], {
+    title: `Run on this machine, ${new Date(started).toLocaleString([], {
       dateStyle: "medium",
       timeStyle: "short",
     })}`,
@@ -1772,12 +1772,12 @@ function renderProvenance(
   );
 }
 
-// Whether Calkit on this computer answers, asked once per page, since the
+// Whether Calkit on this machine answers, asked once per page, since the
 // browser starts it to find out
 let localStatus: Promise<LocalStatus> | null = null;
 
 /**
- * A button that opens the project in the editor on this computer, at a
+ * A button that opens the project in the editor on this machine, at a
  * file if given, e.g., the notebook that makes a figure, through Calkit
  * here rather than a hub, or installs the editor first if it isn't there.
  */
@@ -1794,7 +1794,7 @@ function renderOpenLocally(
   const open = el("button", {
     class: shown ? "link" : "action secondary",
     text: shown ?? "Open in editor",
-    title: path ? `Open ${path} on this computer` : "Open it on this computer",
+    title: path ? `Open ${path} on this machine` : "Open it on this machine",
   });
   const message = el("div", { class: "small" });
   const label = (status: LocalStatus) => {
@@ -1818,8 +1818,8 @@ function renderOpenLocally(
       clear(message).append(
         el("span", {
           text: status.permitted
-            ? `${status.error ?? "Calkit on this computer didn't answer"}. `
-            : "Connect the extension to Calkit on this computer. ",
+            ? `${status.error ?? "Calkit on this machine didn't answer"}. `
+            : "Connect the extension to Calkit on this machine. ",
         }),
         el("button", {
           class: "action secondary",
@@ -1858,7 +1858,7 @@ function renderOpenLocally(
 }
 
 /**
- * What's on this computer that Overleaf won't see until it's saved and
+ * What's on this machine that Overleaf won't see until it's saved and
  * synced, e.g., a figure remade by running a notebook, or a way to connect
  * if the extension isn't connected to Calkit here. With ``localPath``, the
  * checkout the panel already works with, only what the panel doesn't show
@@ -1883,8 +1883,8 @@ function renderLocalChanges(
           el("div", {
             class: "dim small grow",
             text: status.permitted
-              ? `${status.error ?? "Calkit on this computer didn't answer"}.`
-              : "Connect this computer to see what's on it that Overleaf " +
+              ? `${status.error ?? "Calkit on this machine didn't answer"}.`
+              : "Connect this machine to see what's on it that Overleaf " +
                 "doesn't have yet.",
           }),
           el("button", {
@@ -2000,7 +2000,7 @@ function renderLocalChanges(
         el("div", { class: "muted-box", style: { marginTop: "8px" } }, [
           el("div", { class: "row" }, [
             el("div", { class: "grow" }, [
-              el("div", { class: "small", text: "On this computer" }),
+              el("div", { class: "small", text: "On this machine" }),
               el("div", { class: "dim small", text: checkout.path }),
             ]),
             el("span", { class: "badge warn", text: "not synced" }),
@@ -2021,7 +2021,7 @@ function renderLocalChanges(
         el("div", {
           class: "dim small",
           style: { marginTop: "6px" },
-          text: "Everything on this computer is saved and synced.",
+          text: "Everything on this machine is saved and synced.",
         }),
       );
     }
@@ -2030,7 +2030,7 @@ function renderLocalChanges(
 }
 
 /**
- * Clone a project that isn't on this computer, so this panel works with
+ * Clone a project that isn't on this machine, so this panel works with
  * it here from then on.
  */
 function renderClone(project: string, reload: () => void): HTMLElement {
@@ -2044,7 +2044,7 @@ function renderClone(project: string, reload: () => void): HTMLElement {
   const message = el("div", { class: "small" });
   const clone = el("button", {
     class: "action",
-    text: "Clone to this computer",
+    text: "Clone to this machine",
   });
   clone.addEventListener("click", async () => {
     clone.disabled = true;
@@ -2067,7 +2067,7 @@ function renderClone(project: string, reload: () => void): HTMLElement {
     el("div", {
       class: "small",
       text:
-        "This project isn't on this computer. Clone it to run, save, and " +
+        "This project isn't on this machine. Clone it to run, save, and " +
         "sync from here:",
     }),
     el("div", { class: "row", style: { marginTop: "6px" } }, [location, clone]),
@@ -3269,7 +3269,7 @@ function fileRow(file: OverleafSyncStatusFile): HTMLElement {
   ]);
 }
 
-// The PDF from this computer shown over Overleaf's, if it is
+// The PDF from this machine shown over Overleaf's, if it is
 let localPdf: {
   host: HTMLElement;
   link: OverleafLinkPublic;
@@ -3277,7 +3277,7 @@ let localPdf: {
 } | null = null;
 
 /**
- * Show the PDF a synced folder builds to on this computer, e.g., from a
+ * Show the PDF a synced folder builds to on this machine, e.g., from a
  * pipeline run, over Overleaf's, so there's no waiting on Overleaf to
  * compile, until it's turned off. Overleaf's own PDF features, e.g.,
  * double-clicking to go to the source, don't work in it.
@@ -3293,7 +3293,7 @@ function showLocalPdf(link: OverleafLinkPublic, path: string): void {
     folder: path,
   });
   const frame = el("iframe", {
-    title: "PDF from this computer",
+    title: "PDF from this machine",
     style: { flex: "1", width: "100%", border: "none", background: "#fff" },
   });
   // Always with comments, whose own toggle hides them, since without them
@@ -3343,7 +3343,7 @@ const COMMENTS_KEY = "pdfComments";
 let review: {
   frame: HTMLIFrameElement;
   host: HTMLElement;
-  /** Showing the PDF built on this computer, rather than Overleaf's. */
+  /** Showing the PDF built on this machine, rather than Overleaf's. */
   local: boolean;
   ready: boolean;
   /** The build of Overleaf's PDF it has. */
@@ -3383,7 +3383,7 @@ function readEditor(): Promise<string | null> {
 
 /**
  * What the Overleaf project has, from its editor: every file's Git hash
- * and the documents' text, by path, so Calkit on this computer can tell if
+ * and the documents' text, by path, so Calkit on this machine can tell if
  * its copy is current, or bring it up to date, without downloading the
  * project. Null if Overleaf's file tree can't be read.
  */
@@ -4522,7 +4522,7 @@ function mountCommentsToggle(): void {
   const toolbar = document.querySelector<HTMLElement>(".toolbar-pdf-left");
   const existing = document.getElementById("calkit-comments-toggle");
   const projectId = currentProjectId;
-  // This computer's PDF always has them, so it's only for Overleaf's
+  // This machine's PDF always has them, so it's only for Overleaf's
   if (!toolbar || !projectId || localPdf) {
     existing?.remove();
     return;
@@ -4612,7 +4612,7 @@ const PDF_SOURCE_KEY = "pdfSources";
 
 /**
  * A switch in Overleaf's PDF toolbar between its PDF and the one built on
- * this computer, for a project checked out here, remembered per Overleaf
+ * this machine, for a project checked out here, remembered per Overleaf
  * project. Mounted again whenever Overleaf redraws the toolbar.
  */
 function mountPdfSwitch(): void {
@@ -4659,7 +4659,7 @@ function mountPdfSwitch(): void {
     el("button", {
       text,
       title: useLocal
-        ? "The PDF the pipeline built on this computer, without waiting " +
+        ? "The PDF the pipeline built on this machine, without waiting " +
           "on Overleaf to compile" +
           (edits
             ? `, without ${edits} edit${
@@ -4698,7 +4698,7 @@ function mountPdfSwitch(): void {
         background: "rgba(127, 127, 127, 0.18)",
       },
     },
-    [option("Overleaf", false), option("This computer", true)],
+    [option("Overleaf", false), option("This machine", true)],
   );
   toggle.dataset.local = `${local}`;
   toggle.dataset.edits = `${edits}`;
@@ -4721,7 +4721,7 @@ function mountPdfSwitch(): void {
 }
 
 /**
- * Where the panel's answers come from: the checkout on this computer, or
+ * Where the panel's answers come from: the checkout on this machine, or
  * the hub, with, from the hub, a way to work on the project without
  * installing anything.
  */
@@ -4729,7 +4729,7 @@ function renderWhere(link: OverleafLinkPublic): HTMLElement {
   if (link.local_path) {
     // Opens it in the editor, which is what the path is there for
     return el("div", { class: "dim small" }, [
-      document.createTextNode("On this computer: "),
+      document.createTextNode("On this machine: "),
       renderOpenLocally(linkKey(link), undefined, true, link.local_path),
     ]);
   }
@@ -4753,7 +4753,7 @@ function renderWhere(link: OverleafLinkPublic): HTMLElement {
 
 /** Where a run of the pipeline happens, as a sentence would say it. */
 function getRunPlace(run: PipelineRun | undefined): string {
-  return run?.location === "local" ? "on this computer" : "on GitHub Actions";
+  return run?.location === "local" ? "on this machine" : "on GitHub Actions";
 }
 
 function renderStatus(
@@ -4810,7 +4810,7 @@ function renderStatus(
         class: "dim small",
         style: { paddingTop: "6px" },
         text: local
-          ? "Overleaf has everything from this computer."
+          ? "Overleaf has everything from this machine."
           : "Everything here matches the Calkit project.",
       }),
     );
@@ -4916,7 +4916,7 @@ function renderStatus(
       );
     }
   });
-  // Syncing, and on this computer running what's out of date first, or,
+  // Syncing, and on this machine running what's out of date first, or,
   // with nothing to sync, running and syncing after. Redrawn once it's
   // known what's out of date, which takes a moment.
   const actions = el("div", { class: "actions" });
@@ -5066,7 +5066,7 @@ async function renderPicker(
         ],
       ),
       message,
-      back("Pick a different project"),
+      back("Select a different project"),
     );
     try {
       const statuses = await send({
@@ -5387,7 +5387,7 @@ async function renderAttachForm(
         throw new Error("A project name is required");
       }
       if (existsOnGithub.checked && !chosenRepo) {
-        throw new Error("Pick a GitHub repo");
+        throw new Error("Select a GitHub repo");
       }
       if (!created) {
         clear(message).append(loading("Creating project"));
@@ -5585,7 +5585,7 @@ async function load(overleafProjectId: string): Promise<void> {
     hubWebUrl = await getHubWebUrl();
     const settings = await send({ type: "settings.get" });
     // Filled in as the hub answers, without holding up the rest, which
-    // for a project on this computer doesn't need the hub at all
+    // for a project on this machine doesn't need the hub at all
     const pickers = el("div", {
       class: "muted-box stack",
       style: { marginBottom: "8px" },
@@ -5680,7 +5680,7 @@ async function load(overleafProjectId: string): Promise<void> {
       overleafProjectId,
       path: link.path,
     } as const;
-    // On this computer, what's known from the last pull comes at once,
+    // On this machine, what's known from the last pull comes at once,
     // and is shown while Overleaf is asked for anything newer
     if (link.local_path) {
       const known = await send({ ...statusRequest, pull: false }).catch(
@@ -5713,7 +5713,7 @@ async function load(overleafProjectId: string): Promise<void> {
           class: "dim small",
           text:
             "The project no longer syncs a folder with this Overleaf " +
-            "project. Reload to pick a different project.",
+            "project. Reload to select a different project.",
         }),
       );
       return;
@@ -6076,7 +6076,7 @@ let recheckTimer: ReturnType<typeof setTimeout> | undefined;
 /**
  * Check again what there is to sync, a while after the last change, e.g.,
  * a save, or an edit Overleaf saves by itself, like a comment added from
- * the PDF, which the sync has to bring to this computer.
+ * the PDF, which the sync has to bring to this machine.
  */
 function recheckAfterEdit(delay: number): void {
   clearTimeout(recheckTimer);
@@ -6125,7 +6125,7 @@ let drawPanelActions: () => void = () => undefined;
 
 /**
  * A stage's details in the sidebar: why it's out of date, what it runs,
- * reads, and makes, with ways to open it in the editor on this computer
+ * reads, and makes, with ways to open it in the editor on this machine
  * or on the hub.
  */
 function renderStageCard(
@@ -6756,7 +6756,7 @@ function drawRail(): void {
     }
   }
   body.append(renderRuns(link, true));
-  // On this computer, a run is offered only when something's out of date
+  // On this machine, a run is offered only when something's out of date
   const staleStages = (pipeline?.ck_stages ?? []).filter((name) =>
     ["stale", "not-run"].includes(pipeline?.stage_statuses[name]?.status ?? ""),
   );

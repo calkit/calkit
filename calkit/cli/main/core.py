@@ -4671,7 +4671,7 @@ def run(
     ).items():
         warn(
             f"Matplotlib in stage '{stage_name}' used a fallback font, "
-            "so its figures can look different on another computer: "
+            "so its figures can look different on another machine: "
             f"{'; '.join(messages)}; see {MPL_FONTS_DOCS_URL}"
         )
     if failed:

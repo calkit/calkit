@@ -5,7 +5,7 @@
  *
  * The page it's shown on, e.g., Overleaf's editor, does everything with
  * the source: it sends the PDF and the threads with where they are in it,
- * and makes the edits this asks for. A PDF built on this computer is read
+ * and makes the edits this asks for. A PDF built on this machine is read
  * from it here instead, since this page can reach it.
  */
 import "pdfjs-dist/legacy/web/pdf_viewer.css";
@@ -1354,10 +1354,10 @@ window.addEventListener("message", (e) => {
 });
 
 applyState();
-// A PDF built on this computer is read from it here
+// A PDF built on this machine is read from it here
 const localProject = params.get("localProject");
 if (localProject) {
-  setStatus("Reading PDF from this computer…");
+  setStatus("Reading PDF from this machine…");
   getLocalPdf(localProject, params.get("folder") ?? "")
     .then(async ({ parts, first }) => {
       const data = new Uint8Array(first.size);

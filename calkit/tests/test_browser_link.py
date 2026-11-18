@@ -136,7 +136,7 @@ def test_get_reply(tmp_path, monkeypatch):
     reply = get_reply({"type": "project.open", "project": "me/gone", "id": 3})
     assert reply["id"] == 3 and not reply["ok"]
     assert reply["error"] == (
-        "me/gone isn't on this computer; clone it with 'calkit clone me/gone'"
+        "me/gone isn't on this machine; clone it with 'calkit clone me/gone'"
     )
     reply = get_reply({"type": "project.open", "project": "me/far", "path": 1})
     assert reply["error"] == "A path must be a string"
@@ -709,7 +709,7 @@ def test_start_job(tmp_path, monkeypatch):
     for msg, error in [
         ({"kind": "rm", "project": "me/proj"}, "Unknown kind"),
         ({"kind": "sync", "project": "me/proj"}, "folder"),
-        ({"kind": "run", "project": "me/gone"}, "isn't on this computer"),
+        ({"kind": "run", "project": "me/gone"}, "isn't on this machine"),
         (
             {"kind": "clone", "project": "me/proj", "location": str(project)},
             "isn't empty",
@@ -1120,7 +1120,7 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     )
     # Uploads, data, and paths outside the project are for the hub
     for bad, error in [
-        ({"content": "cHJpbnQoMSk="}, "folder on this computer"),
+        ({"content": "cHJpbnQoMSk="}, "folder on this machine"),
         ({"data": [{"external": "/x", "path": "data/x"}]}, "Move the data"),
         ({"scriptPath": "../plot.py"}, "isn't in the project"),
         ({"scriptPath": "scripts/none.py"}, "isn't in the project"),

@@ -158,7 +158,7 @@ export type Request =
   | { type: "project.pipeline"; owner: string; project: string }
   | { type: "project.pipelineRuns"; owner: string; project: string }
   | {
-      /** The whole log of a run on this computer, as far as it's got. */
+      /** The whole log of a run on this machine, as far as it's got. */
       type: "project.pipelineRunLog";
       owner: string;
       project: string;
@@ -199,12 +199,12 @@ export type Request =
       path?: string;
       /**
        * False for what's known from the last pull from Overleaf, without
-       * pulling, when answered on this computer, to show while it pulls.
+       * pulling, when answered on this machine, to show while it pulls.
        */
       pull?: boolean;
       /**
        * What Overleaf's editor has: every file's Git hash and the
-       * documents' text, by path, so this computer's copy can be checked or
+       * documents' text, by path, so this machine's copy can be checked or
        * updated without downloading the project.
        */
       overleafFiles?: Record<string, string>;

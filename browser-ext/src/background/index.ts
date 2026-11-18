@@ -147,7 +147,7 @@ async function readCalkitYaml(githubRepo: string): Promise<CalkitYamlInfo> {
   return { present: true, hubUrl: hubUrlFromCalkitYaml(await resp.text()) };
 }
 
-// How long whether a project is on this computer is trusted, so each of
+// How long whether a project is on this machine is trusted, so each of
 // a page's requests doesn't ask again
 const LOCAL_CHECKOUT_TTL_MS = 30_000;
 const JOB_POLL_MS = 2_000;
@@ -164,7 +164,7 @@ const localCheckouts = new Map<
 >();
 
 /**
- * The checkout of a project on this computer that answers for it instead
+ * The checkout of a project on this machine that answers for it instead
  * of the hub, if the extension is connected to Calkit here and it's
  * checked out.
  */
@@ -327,7 +327,7 @@ async function handle(
         },
       );
     case "project.contentPaths": {
-      // As they are on this computer, when it's here, including files not
+      // As they are on this machine, when it's here, including files not
       // saved yet, e.g., a script just written
       const local = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(local)).path) {
@@ -341,7 +341,7 @@ async function handle(
       );
     }
     case "project.figures": {
-      // As they are on this computer, when it's here, including ones not
+      // As they are on this machine, when it's here, including ones not
       // pushed yet
       const local = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(local)).path) {
@@ -383,7 +383,7 @@ async function handle(
         { query: { path: message.path, key: message.key } },
       );
     case "project.stageFromScriptOrNotebook": {
-      // Made from the script on this computer, and committed there, when
+      // Made from the script on this machine, and committed there, when
       // the project's here
       const local = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(local)).path) {
@@ -435,7 +435,7 @@ async function handle(
         },
       );
     case "project.pipeline": {
-      // As it is on this computer, when it's here, rather than as pushed
+      // As it is on this machine, when it's here, rather than as pushed
       const project = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(project)).path) {
         return askLocal<ProjectPipeline>({ type: "project.pipeline", project });
@@ -445,7 +445,7 @@ async function handle(
       );
     }
     case "project.pipelineRuns": {
-      // Run on this computer when it's here, rather than on GitHub Actions
+      // Run on this machine when it's here, rather than on GitHub Actions
       const project = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(project)).path) {
         const jobs = await askLocal<LocalJob[]>({
@@ -462,7 +462,7 @@ async function handle(
           github_workflow: null,
           can_start: !active,
           cannot_start_reason: active
-            ? "The pipeline is already running on this computer"
+            ? "The pipeline is already running on this machine"
             : null,
         } satisfies PipelineRuns;
       }
@@ -471,7 +471,7 @@ async function handle(
       );
     }
     case "project.pipelineRunLog":
-      // Only runs on this computer keep a log here; GitHub has the others'
+      // Only runs on this machine keep a log here; GitHub has the others'
       return askLocal<{ log: string }>({
         type: "job.log",
         job_id: message.runId,
@@ -807,7 +807,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 // Back from the reload the options page asks for once the extension may
-// reach Calkit on this computer
+// reach Calkit on this machine
 void chrome.storage.local.get("reopenOptions").then(({ reopenOptions }) => {
   if (reopenOptions) {
     void chrome.storage.local.remove("reopenOptions");

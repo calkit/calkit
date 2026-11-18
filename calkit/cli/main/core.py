@@ -2381,7 +2381,7 @@ def push(
                 if asked_for_docker:
                     warn(
                         "No local image for Docker environment "
-                        f"'{env_name}' to push; run the pipeline first"
+                        f"'{env_name}' to push; run pipeline"
                     )
                 continue
             pushable[env_name] = dict(info, identity=identity)

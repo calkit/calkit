@@ -1357,7 +1357,7 @@ applyState();
 // A PDF built on this computer is read from it here
 const localProject = params.get("localProject");
 if (localProject) {
-  setStatus("Reading the PDF from this computer…");
+  setStatus("Reading PDF from this computer…");
   getLocalPdf(localProject, params.get("folder") ?? "")
     .then(async ({ parts, first }) => {
       const data = new Uint8Array(first.size);

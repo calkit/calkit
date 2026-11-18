@@ -532,7 +532,7 @@ function renderAddScript(
     }
     const save = el("button", {
       class: "action",
-      text: "Add to the pipeline",
+      text: "Add to pipeline",
     });
     save.addEventListener("click", async () => {
       if (!request) {
@@ -604,7 +604,7 @@ function renderExported(
   const appName = textInput({
     placeholder: "App it's exported with, e.g., Photoshop (optional)",
   });
-  const save = el("button", { class: "action", text: "Add the export step" });
+  const save = el("button", { class: "action", text: "Add export step" });
   const message = el("div", { class: "small" });
   const fail = (e: unknown) =>
     clear(message).append(
@@ -1123,7 +1123,7 @@ function syncNow(
     text: "Sync now",
     disabled: !canWrite(link) || syncing,
     title: canWrite(link)
-      ? "Push project files to Overleaf and pull Overleaf edits back"
+      ? "Push project files to Overleaf and pull Overleaf edits"
       : "You need write access to this project to sync",
   });
   button.addEventListener("click", async () => {
@@ -1324,7 +1324,7 @@ function drawRuns(): void {
       title: !canWrite(link)
         ? "You need write access to this project to run it"
         : runs.cannot_start_reason ??
-          "Run the pipeline on GitHub Actions, then sync what it makes here",
+          "Run pipeline on GitHub Actions and sync its outputs here",
       onClick: () => void startRun(link),
     });
     box.append(
@@ -1355,9 +1355,9 @@ function getRunActivity(run: PipelineRun): string {
     case "finishing":
       return "Finishing up";
     case "saving":
-      return "Saving the project";
+      return "Saving project";
     default:
-      return "Getting ready to run on this computer";
+      return "Preparing to run";
   }
 }
 
@@ -1424,7 +1424,7 @@ function getStatusBusyText(link: OverleafLinkPublic): string | null {
   if (run) {
     return run.progress?.phase === "syncing"
       ? "Syncing with Overleaf"
-      : "What to sync is checked again once the run is done.";
+      : "Sync status updates after the run.";
   }
   return checkingAfterSync ? "Checking what's synced now" : null;
 }
@@ -1819,7 +1819,7 @@ function renderOpenLocally(
         el("span", {
           text: status.permitted
             ? `${status.error ?? "Calkit on this computer didn't answer"}. `
-            : "Connect the extension to Calkit on this computer first. ",
+            : "Connect the extension to Calkit on this computer. ",
         }),
         el("button", {
           class: "action secondary",
@@ -2946,7 +2946,7 @@ function renderInsert(
     el("div", {
       class: "small",
       style: { fontWeight: "600" },
-      text: "Insert from the project",
+      text: "Insert from project",
     }),
     el("div", { class: "actions" }, [
       el("button", {
@@ -4557,9 +4557,7 @@ function mountCommentsToggle(): void {
   };
   const button = el("button", {
     text: "Comments",
-    title: commentsOn
-      ? "Hide the comments in the source"
-      : "Show the PDF with the comments in its source, and add some",
+    title: commentsOn ? "Hide comments" : "Show PDF with comments",
     attrs: {
       id: "calkit-comments-toggle",
       "aria-pressed": String(commentsOn),
@@ -4869,7 +4867,7 @@ function renderStatus(
     text: "Sync now",
     disabled: !canWrite(link) || status.in_sync,
     title: canWrite(link)
-      ? "Push project files to Overleaf and pull Overleaf edits back"
+      ? "Push project files to Overleaf and pull Overleaf edits"
       : "You need write access to this project to sync",
   });
   const message = el("div", { class: "small" });
@@ -4961,7 +4959,7 @@ function renderStatus(
           ? el("button", {
               class: "action",
               text: "Run and sync",
-              title: `Run the pipeline on this computer, then save and sync. ${stagesText}`,
+              title: `Run pipeline, save, and sync. ${stagesText}`,
               disabled: !canWrite(link) || running,
               onClick: () => void startRun(link),
             })
@@ -4973,7 +4971,7 @@ function renderStatus(
     );
     syncButton.disabled = !canWrite(link) || status.in_sync || running;
     syncButton.title = staleStages.length
-      ? `Push project files to Overleaf and pull Overleaf edits back. ${stagesText}`
+      ? `Push project files to Overleaf and pull Overleaf edits. ${stagesText}`
       : syncButton.title;
   };
   drawPanelActions = () => {
@@ -5389,10 +5387,10 @@ async function renderAttachForm(
         throw new Error("A project name is required");
       }
       if (existsOnGithub.checked && !chosenRepo) {
-        throw new Error("Pick the GitHub repo to use");
+        throw new Error("Pick a GitHub repo");
       }
       if (!created) {
-        clear(message).append(loading("Creating the project"));
+        clear(message).append(loading("Creating project"));
         try {
           created = await send({
             type: "projects.create",
@@ -5433,7 +5431,7 @@ async function renderAttachForm(
           },
         });
       }
-      clear(message).append(loading("Bringing in the document from Overleaf"));
+      clear(message).append(loading("Importing from Overleaf"));
       await send({
         type: "overleaf.import",
         owner: created.owner_account_name,
@@ -5453,7 +5451,7 @@ async function renderAttachForm(
           el("div", { class: "actions" }, [
             el("button", {
               class: "action secondary",
-              text: "Give the Calkit app access",
+              text: "Give Calkit app access",
               onClick: openAccounts,
             }),
           ]),
@@ -5543,7 +5541,7 @@ function renderImportForm(
   const message = el("div", { class: "small" });
   importButton.addEventListener("click", async () => {
     importButton.disabled = true;
-    clear(message).append(loading("Bringing in the document from Overleaf"));
+    clear(message).append(loading("Importing from Overleaf"));
     try {
       await send({
         type: "overleaf.import",
@@ -5623,7 +5621,7 @@ async function load(overleafProjectId: string): Promise<void> {
       showNotice();
       content.append(loading("Checking for changes"));
     } else {
-      content.append(loading("Looking for the linked project"));
+      content.append(loading("Finding linked project"));
     }
     // The index answers at once when this Overleaf project has been seen
     // before; otherwise the hub reads through the user's projects, active
@@ -6174,7 +6172,7 @@ function renderStageCard(
       ? el("div", {
           class: "small",
           style: { color: "var(--ck-warning)" },
-          text: `Changed since it last ran: ${changed.join(", ")}`,
+          text: `Modified: ${changed.join(", ")}`,
         })
       : status?.missing_outputs.length
       ? el("div", {
@@ -6574,7 +6572,7 @@ function drawRail(): void {
       ? lastCheck.status
       : null;
   if (syncing) {
-    body.append(loading("Syncing with the project"));
+    body.append(loading("Syncing with project"));
   } else if (checkingAfterSync && !running) {
     body.append(loading("Checking what's synced now"));
   } else if (running) {
@@ -6591,7 +6589,7 @@ function drawRail(): void {
     body.append(
       el("div", { class: "row small" }, [
         el("span", { class: "dot" }),
-        el("span", { text: "In sync with the project" }),
+        el("span", { text: "In sync with project" }),
       ]),
     );
   } else if (status) {
@@ -6769,7 +6767,7 @@ function drawRail(): void {
           class: "action",
           text: "Run and sync",
           title:
-            "Run the pipeline on this computer, then save and sync. " +
+            "Run pipeline, save, and sync. " +
             `Out of date: ${staleStages.join(", ")}`,
           disabled: !canWrite(link) || Boolean(starting?.busy),
           onClick: () => void startRun(link),

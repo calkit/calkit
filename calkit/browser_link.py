@@ -351,7 +351,7 @@ def get_result(msg: dict) -> Any:
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         if kind == "project.recordOrigin":
             result = record_origin(paths[0], msg)
         else:
@@ -1632,16 +1632,19 @@ def commit_change(
     message: str,
     checked: Iterable[str] = (),
     also_commit: Iterable[str] = (),
+    compile_pipeline: bool = True,
 ) -> None:
     """Change a checkout as the hub would its clone, and commit only that,
     since anything else changed here is someone's work in progress.
 
-    ``write`` writes any files, returning their paths, after which
-    ``ck_info`` is written as calkit.yaml and the pipeline compiled.
-    Refused if calkit.yaml, dvc.yaml, or ``checked`` have edits that
-    aren't saved, which would be swept up or overwritten; ``also_commit``
-    are committed even so, e.g., a new script. Undone if any of it fails.
-    Nothing's pushed; a run and sync does that.
+    ``write`` writes any files, returning their paths, and may add to
+    ``ck_info``, which is written as calkit.yaml after it, and the pipeline
+    compiled, unless ``compile_pipeline`` is false. Refused if calkit.yaml,
+    dvc.yaml, or ``checked`` have unsaved changes, which would be swept up
+    or overwritten; ``also_commit`` are committed even so, e.g., a new
+    script. If any of it fails, files it changed are put back and files
+    that appeared while it ran are deleted. Nothing's pushed; a run and
+    sync does that.
     """
     import calkit.git
     import calkit.pipeline
@@ -1660,7 +1663,8 @@ def commit_change(
             os.path.join(wdir, "calkit.yaml"), "w", encoding="utf-8"
         ) as f:
             calkit.ryaml.dump(ck_info, f)
-        calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
+        if compile_pipeline:
+            calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
         commit_paths = sorted(
             (get_changed_paths(repo) - changed_before)
             | set(written)
@@ -1795,7 +1799,7 @@ def record_origin(wdir: str, msg: dict) -> dict:
     if imported_from is not None and not isinstance(imported_from, dict):
         raise ValueError("Where it was imported from must be a mapping")
     ck_info = calkit.load_calkit_info(wdir=wdir)
-    entry = calkit.provenance.add_origin(
+    ck_info, entry = calkit.provenance.add_origin(
         ck_info, path, created_by=created_by, imported_from=imported_from
     )
     # Whether tracked by Git or DVC, or made by a stage and not pulled, it
@@ -1812,11 +1816,13 @@ def record_origin(wdir: str, msg: dict) -> dict:
         or any(path == o or path.startswith(o + "/") for o in lock_outs)
     ):
         raise ValueError(f"'{path}' isn't in the project")
+    # Only calkit.yaml's artifacts change, which the pipeline doesn't read
     commit_change(
         wdir,
         ck_info,
         lambda: [],
         msg.get("message") or f"Record where {path} came from",
+        compile_pipeline=False,
     )
     return entry
 
@@ -1852,14 +1858,14 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
     if not msg.get("save", True):
         return out
     # Uploads go through the hub; here the files are already on this
-    # computer
+    # machine
     files = []
     for file in msg.get("files") or []:
         if not isinstance(file, dict):
             raise ValueError("Each file must be a mapping")
         if file.get("content") is not None:
             raise ValueError(
-                "Put the file in the project's folder on this computer, "
+                "Put the file in the project's folder on this machine, "
                 "then find it in the project"
             )
         path = get_project_path(wdir, file.get("path"), "file")
@@ -1899,10 +1905,12 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
         person = {"email": str(email)}
         if person_name:
             person["name"] = str(person_name)
-        calkit.provenance.add_creator(ck_info, created, person)
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    stages[stage_name] = stage
-    ck_info.setdefault("pipeline", {})["stages"] = stages
+        ck_info = calkit.provenance.add_creator(ck_info, created, person)
+    if not ck_info.get("pipeline"):
+        ck_info["pipeline"] = {}
+    if not ck_info["pipeline"].get("stages"):
+        ck_info["pipeline"]["stages"] = {}
+    ck_info["pipeline"]["stages"][stage_name] = stage
     untracked = [
         path
         for path, _ in files
@@ -1914,18 +1922,30 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
         for path in untracked
         if os.path.getsize(os.path.join(wdir, path)) > FILE_GIT_MAX_BYTES
     ]
+    # Elsewhere, e.g., in CI, the stage couldn't read a file Git leaves out
+    for path in untracked:
+        if path not in too_big and repo.ignored(path):
+            raise ValueError(
+                f"'{path}' is ignored by Git, so the stage couldn't run "
+                "anywhere else; stop ignoring it first"
+            )
 
     def write() -> list[str]:
         # Too big for Git, so stored with DVC, as the hub stores an upload;
         # in its own process, since DVC prints, and this one's output is
         # the extension's
         for path in too_big:
-            subprocess.run(
+            res = subprocess.run(
                 calkit.get_calkit_cmd() + ["dvc", "add", path],
                 cwd=wdir,
-                check=True,
                 capture_output=True,
+                text=True,
             )
+            if res.returncode != 0:
+                raise ValueError(
+                    f"DVC couldn't store {path}: "
+                    + (res.stderr or res.stdout).strip()
+                )
         return [path + ".dvc" for path in too_big]
 
     commit_change(

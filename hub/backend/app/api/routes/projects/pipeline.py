@@ -786,12 +786,17 @@ def post_project_pipeline_stage(
     )
     wdir = str(repo.working_dir)
     ck_info = get_ck_info_from_repo(repo=repo)
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     stage = dict(req.stage)
-    for out in stage.get("outputs") or []:
-        _clean_rel_path(
-            out["path"] if isinstance(out, dict) else str(out), "output"
+    stage["outputs"] = [
+        (
+            out | {"path": _clean_rel_path(out["path"], "output")}
+            if isinstance(out, dict)
+            else _clean_rel_path(str(out), "output")
         )
+        for out in stage.get("outputs") or []
+    ]
+    if not stage["outputs"]:
+        stage.pop("outputs")
     # Outputs are made by one stage only, and one already in Git can't
     # move to DVC
     try:
@@ -868,9 +873,12 @@ def post_project_pipeline_stage(
     person = {"email": current_user.email}
     if current_user.full_name:
         person["name"] = current_user.full_name
-    calkit.provenance.add_creator(ck_info, created, person)
-    stages[stage_name] = stage
-    ck_info.setdefault("pipeline", {})["stages"] = stages
+    ck_info = calkit.provenance.add_creator(ck_info, created, person)
+    if not ck_info.get("pipeline"):
+        ck_info["pipeline"] = {}
+    if not ck_info["pipeline"].get("stages"):
+        ck_info["pipeline"]["stages"] = {}
+    ck_info["pipeline"]["stages"][stage_name] = stage
     _commit_pipeline(
         project,
         session,

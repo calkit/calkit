@@ -420,7 +420,7 @@ async function handle(
       );
     }
     case "project.recordOrigin": {
-      // Recorded and committed on this computer when the project's here
+      // Recorded and committed on this machine when the project's here
       const local = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(local)).path) {
         return askLocal<{ path: string }>({

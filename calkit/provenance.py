@@ -421,15 +421,17 @@ def add_origin(
     imported_from: dict | None = None,
     title: str | None = None,
     description: str | None = None,
-) -> dict:
-    """Record who made ``path`` or where it was imported from, in
-    ``ck_info``, returning the entry.
+) -> tuple[dict, dict]:
+    """Get a copy of ``ck_info`` that records who made ``path`` or where it
+    was imported from, and the misc artifact entry saying so.
 
     A declared artifact that doesn't say where it came from yet, or only
-    describes where it was imported from, gets it in its own entry;
-    anything else is a new misc artifact. Whether the path is in the
-    project is the caller's to check.
+    describes where it was imported from, gets it in its own entry, so the
+    entry's title and description aren't used; anything else is added as
+    the entry. Whether the path is in the project is the caller's to check.
     """
+    import copy
+
     from pydantic import ValidationError
 
     from calkit.models.core import MiscArtifact
@@ -445,6 +447,8 @@ def add_origin(
             "else exports that format; add the stage that makes it, or "
             "record where it was imported from"
         )
+    # Copied, keeping its comments, so the caller's is left as it was
+    ck_info = copy.deepcopy(ck_info)
     declared = None
     for section, label in [
         ("figures", "figure"),
@@ -498,13 +502,18 @@ def add_origin(
         if not ck_info.get("misc"):
             ck_info["misc"] = []
         ck_info["misc"].append(entry)
-    return entry
+    return ck_info, entry
 
 
-def add_creator(ck_info: dict, paths: list[str], person: dict) -> None:
-    """Record ``person`` as having made each of ``paths``, e.g., the file a
-    figure is exported from, unless something already says otherwise.
+def add_creator(ck_info: dict, paths: list[str], person: dict) -> dict:
+    """Get a copy of ``ck_info`` that records ``person`` as having made each
+    of ``paths``, e.g., the file a figure is exported from, unless
+    something already says otherwise.
     """
+    import copy
+
+    # Copied, keeping its comments, so the caller's is left as it was
+    ck_info = copy.deepcopy(ck_info)
     for path in paths:
         entry = next(
             (
@@ -512,7 +521,8 @@ def add_creator(ck_info: dict, paths: list[str], person: dict) -> None:
                 for items in ck_info.values()
                 if isinstance(items, list)
                 for e in items
-                if isinstance(e, dict) and e.get("path") == path
+                if isinstance(e, dict)
+                and posixpath.normpath(str(e.get("path") or "")) == path
             ),
             None,
         )
@@ -526,6 +536,7 @@ def add_creator(ck_info: dict, paths: list[str], person: dict) -> None:
             or entry.get("stage")
         ):
             entry["created_by"] = [person]
+    return ck_info
 
 
 def how_to_define_origin(path: str) -> str:

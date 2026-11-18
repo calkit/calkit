@@ -1193,6 +1193,8 @@ def test_is_data_path(tmp_path):
 
 
 def test_add_origin_and_add_creator():
+    import copy
+
     from calkit.provenance import add_creator, add_origin
 
     url = {"url": "https://x.org/a"}
@@ -1203,15 +1205,20 @@ def test_add_origin_and_add_creator():
             {"path": "figures/b.png", "stage": "plot"},
         ]
     }
-    # A declared figure saying nothing of where it came from gets it
-    entry = add_origin(
+    # A declared figure saying nothing of where it came from gets it, in a
+    # copy
+    before = copy.deepcopy(ck_info)
+    ck_info, entry = add_origin(
         ck_info, "figures/a.png", imported_from={"url": "https://x.org/a"}
     )
     assert entry["imported_from"] == {"url": "https://x.org/a"}
     assert ck_info["figures"][0]["imported_from"] == entry["imported_from"]
     assert "misc" not in ck_info
+    assert "imported_from" not in before["figures"][0]
     # Anything else is a misc artifact
-    add_origin(ck_info, "drawings/c.svg", created_by=[person], title="C")
+    ck_info, _ = add_origin(
+        ck_info, "drawings/c.svg", created_by=[person], title="C"
+    )
     assert ck_info["misc"] == [
         {"path": "drawings/c.svg", "title": "C", "created_by": [person]}
     ]
@@ -1223,12 +1230,23 @@ def test_add_origin_and_add_creator():
     ]:
         with pytest.raises(ValueError, match=error):
             add_origin(ck_info, path, **kwargs)
-    # Who made a file, unless something already says
-    add_creator(
-        ck_info, ["drawings/c.svg", "drawings/e.psd"], {"email": "me@x.org"}
+    # Who made a file, unless something already says, matched however its
+    # path is written
+    ck_info["misc"].append({"path": "./drawings/f.psd"})
+    before = copy.deepcopy(ck_info)
+    ck_info = add_creator(
+        ck_info,
+        ["drawings/c.svg", "drawings/e.psd", "drawings/f.psd"],
+        {"email": "me@x.org"},
     )
+    assert before["misc"][1] == {"path": "./drawings/f.psd"}
     assert ck_info["misc"][0]["created_by"] == [person]
     assert ck_info["misc"][1] == {
+        "path": "./drawings/f.psd",
+        "created_by": [{"email": "me@x.org"}],
+    }
+    assert ck_info["misc"][2] == {
         "path": "drawings/e.psd",
         "created_by": [{"email": "me@x.org"}],
     }
+    assert len(ck_info["misc"]) == 3

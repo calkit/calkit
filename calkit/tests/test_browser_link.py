@@ -1238,7 +1238,7 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     ck_info = calkit.load_calkit_info(wdir=str(project))
     assert ck_info["misc"][0]["created_by"][0]["email"] == "pat@example.com"
     committed = repo.git.show("--name-only", "--format=", "HEAD").split()
-    assert "calkit.yaml" in committed and "notes.txt" not in committed
+    assert committed == ["calkit.yaml"]
     for msg, error in [
         ({"path": "figures/none.jpg", "createdBy": person}, "isn't in"),
         ({"path": "figures/photo.jpg", "createdBy": person}, "already"),
@@ -1250,6 +1250,8 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     # An export stage, shown first and then added, with the file it's
     # drawn in, made by whoever commits here, committed alongside
     (project / "drawings" / "setup.psd").write_bytes(b"psd")
+    (project / "drawings" / "ignored.psd").write_bytes(b"psd")
+    (project / ".git" / "info" / "exclude").write_text("ignored.psd\n")
     msg = {
         "source": "drawings/setup.psd",
         "output": "figures/setup.png",
@@ -1264,9 +1266,10 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     for bad, error in [
         (
             {"files": [{"path": "drawings/setup.psd", "content": "eA=="}]},
-            "on this computer",
+            "on this machine",
         ),
         ({"files": [{"path": "drawings/none.psd"}]}, "isn't in the project"),
+        ({"files": [{"path": "drawings/ignored.psd"}]}, "ignored by Git"),
         ({"output": "../setup.png"}, "isn't in the project"),
     ]:
         with pytest.raises(ValueError, match=error):

@@ -949,7 +949,9 @@ def get_source_text(wdir: str, folder: str, path: str) -> dict:
     """A LaTeX file in a folder synced with Overleaf, by its path there, as
     it is in this checkout.
     """
-    rel_path = os.path.normpath(os.path.join(folder, path))
+    import posixpath
+
+    rel_path = posixpath.normpath(posixpath.join(folder, path))
     full_path = os.path.join(wdir, rel_path)
     if not os.path.realpath(full_path).startswith(
         os.path.join(os.path.realpath(os.path.join(wdir, folder)), "")

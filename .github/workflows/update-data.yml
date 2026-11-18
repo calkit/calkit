@@ -55,9 +55,10 @@ jobs:
         with:
           # Its Docker environments only pull public images
           login_ghcr: "false"
-          # A hub superuser's token lets the traction stage read the hub's
-          # usage stats; without one, that stage is skipped
-          dvc_token: ${{ secrets.CALKIT_STATS_TOKEN }}
+          # A hub superuser's token, for DVC and the hub, since the traction
+          # stage reads the hub's usage stats; without one, GitHub's OIDC
+          # login is used and that stage is skipped
+          dvc_token: ${{ secrets.CALKIT_TOKEN }}
           # Only they and what depends on them run, so the pull request
           # holds nothing but data
           run_args: --downstream find-calkit-projects

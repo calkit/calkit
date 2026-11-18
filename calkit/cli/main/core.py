@@ -2381,7 +2381,7 @@ def push(
                 if asked_for_docker:
                     warn(
                         "No local image for Docker environment "
-                        f"'{env_name}' to push; run the pipeline first"
+                        f"'{env_name}' to push; run pipeline"
                     )
                 continue
             pushable[env_name] = dict(info, identity=identity)
@@ -4708,7 +4708,7 @@ def run(
     ).items():
         warn(
             f"Matplotlib in stage '{stage_name}' used a fallback font, "
-            "so its figures can look different on another computer: "
+            "so its figures can look different on another machine: "
             f"{'; '.join(messages)}; see {MPL_FONTS_DOCS_URL}"
         )
     for addressing in skipped_as_asked:

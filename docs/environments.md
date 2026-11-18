@@ -1343,11 +1343,11 @@ and only one TeX Live environment each.
 <!-- TODO: needs human review -->
 
 The Jupyter kernel Calkit registers for `py`,
-e.g., when you pick `py` for a notebook in VS Code or JupyterLab,
+e.g., when you select `py` for a notebook in VS Code or JupyterLab,
 gets TeX Live's programs too,
 ahead of everything on the editor's PATH.
 It keeps the TeX Live environment it got when it was registered,
-so after changing `tex`, pick `py` again,
+so after changing `tex`, select `py` again,
 or run `calkit nb check-kernel -e py`.
 
 ### R

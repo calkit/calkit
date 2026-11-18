@@ -51,7 +51,7 @@ export interface OverleafSyncStatusFile {
 
 export interface OverleafSyncStatus {
   path: string;
-  /** Whether Overleaf was asked just now, when answered on this computer. */
+  /** Whether Overleaf was asked just now, when answered on this machine. */
   pulled?: boolean;
   overleaf_project_id?: string | null;
   overleaf_url?: string | null;
@@ -74,7 +74,7 @@ export interface OverleafLinkPublic {
   /** Its repo on GitHub, e.g., `https://github.com/owner/name`. */
   github_repo_url?: string | null;
   /**
-   * The checkout on this computer that answers for it, when the extension
+   * The checkout on this machine that answers for it, when the extension
    * is connected to Calkit here, rather than the hub.
    */
   local_path?: string | null;
@@ -285,14 +285,14 @@ export interface PipelineRun {
   github_workflow?: string | null;
   /** Unknown for one just started, until GitHub lists it. */
   github_run_id?: number | null;
-  /** For one on this computer, why it failed, and the end of its output. */
+  /** For one on this machine, why it failed, and the end of its output. */
   error?: string | null;
   output?: string | null;
-  /** For one on this computer that's running, what it's doing now. */
+  /** For one on this machine that's running, what it's doing now. */
   progress?: RunProgress | null;
 }
 
-/** How far a run on this computer has got, from what it's printed. */
+/** How far a run on this machine has got, from what it's printed. */
 export interface RunProgress {
   phase: "starting" | "syncing" | "running" | "finishing" | "saving";
   /** The stage running now, if one is, e.g., "sweep@1". */

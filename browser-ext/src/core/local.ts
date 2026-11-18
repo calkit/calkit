@@ -182,6 +182,7 @@ function keepAliveUntilIdle(): void {
 /** Ask Calkit on this computer something, starting it if need be. */
 export async function askLocal<T>(
   request: { type: string } & Record<string, unknown>,
+  timeoutMs = TIMEOUT_MS,
 ): Promise<T> {
   if (!(await isLocalPermitted())) {
     throw new Error(
@@ -194,7 +195,7 @@ export async function askLocal<T>(
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error("Calkit on this computer didn't answer"));
-    }, TIMEOUT_MS);
+    }, timeoutMs);
     pending.set(id, {
       resolve: resolve as (value: unknown) => void,
       reject,

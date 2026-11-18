@@ -5,7 +5,7 @@
  *
  * The page it's shown on, e.g., Overleaf's editor, does everything with
  * the source: it sends the PDF and the threads with where they are in it,
- * and makes the edits this asks for. A PDF built on this computer is read
+ * and makes the edits this asks for. A PDF built on this machine is read
  * from it here instead, since this page can reach it.
  */
 import "pdfjs-dist/legacy/web/pdf_viewer.css";
@@ -16,9 +16,11 @@ import {
   findText,
   normalizeSelection,
   type PdfTextItem,
+  type Synctex,
+  synctexReverse,
   type TextRange,
 } from "../../../vscode-ext/src/latex/core";
-import { getLocalPdf } from "../core/local";
+import { getLocalPdf, getLocalSynctex } from "../core/local";
 import { type PdfBox, placePdfBoxes } from "../core/pdf-boxes";
 import type {
   FromReview,
@@ -704,6 +706,10 @@ function select(key: string, scroll: boolean): void {
   if (scroll && t?.start) {
     reveal(t.start);
   }
+  // And in the source, so the comment's in view in all three
+  if (t) {
+    post({ type: "openSource", file: t.path, line: t.line });
+  }
 }
 
 function reveal(rect: PdfRect): void {
@@ -937,11 +943,17 @@ function pointAt(
   return { page: n, at: fromViewport(n, cx - box.left, cy - box.top) };
 }
 
+// What a PDF built on this machine was built with, once it's read
+let localSynctex: Synctex | null = null;
+
 // Go to the source of the selection, or of a point on a page
 async function sourceAt(
   point: { page: number; at: { x: number; y: number } } | null,
 ): Promise<void> {
   const sel = point ? null : await getCommentSelection();
+  const getSynctex = (page: number, at: { x: number; y: number }) =>
+    (localSynctex && synctexReverse(localSynctex, page, at.x, at.y)) ??
+    undefined;
   if (sel) {
     post({
       type: "sourceAt",
@@ -950,6 +962,7 @@ async function sourceAt(
       y: sel.at.y,
       context: sel.context,
       focus: sel.text,
+      synctex: getSynctex(sel.page, sel.at),
     });
   } else if (point) {
     post({
@@ -958,6 +971,7 @@ async function sourceAt(
       x: point.at.x,
       y: point.at.y,
       context: await getLineText(point.page, point.at.y),
+      synctex: getSynctex(point.page, point.at),
     });
   }
 }
@@ -1350,10 +1364,10 @@ window.addEventListener("message", (e) => {
 });
 
 applyState();
-// A PDF built on this computer is read from it here
+// A PDF built on this machine is read from it here
 const localProject = params.get("localProject");
 if (localProject) {
-  setStatus("Reading the PDF from this computer…");
+  setStatus("Reading PDF from this machine…");
   getLocalPdf(localProject, params.get("folder") ?? "")
     .then(async ({ parts, first }) => {
       const data = new Uint8Array(first.size);
@@ -1363,6 +1377,10 @@ if (localProject) {
         offset += part.length;
       }
       await load(data);
+      // Where each place in it came from, for going to its source
+      void getLocalSynctex(localProject, params.get("folder") ?? "").then(
+        (s) => (localSynctex = s),
+      );
       setStatus(
         first.edited_since_built
           ? `${params.get("folder")} has changed since this PDF was built`

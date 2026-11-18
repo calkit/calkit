@@ -25,6 +25,9 @@ jobs:
   update:
     # Each day's results are built on main as it is
     if: github.ref_name == github.event.repository.default_branch
+    # Holds CALKIT_TOKEN, a hub superuser's, and only lets jobs running on
+    # main read it, so a workflow on another branch or a pull request can't
+    environment: data-update
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -47,6 +50,10 @@ jobs:
         run: |
           uv tool install --editable .
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # Only the data stages and what depends on them run, so the pull
+      # request holds nothing but data. The superuser token only reaches the
+      # stage that needs it, not the others, which read what anyone can put
+      # on GitHub or run Docker images, nor DVC, which logs in through OIDC.
       - name: Run the data stages
         uses: ./actions/run
         env:
@@ -55,15 +62,16 @@ jobs:
         with:
           # Its Docker environments only pull public images
           login_ghcr: "false"
-          # A hub superuser's token, for DVC and the hub, since the traction
-          # stage reads the hub's usage stats; without one, GitHub's OIDC
-          # login is used and that stage is skipped
-          dvc_token: ${{ secrets.CALKIT_TOKEN }}
-          # Only they and what depends on them run, so the pull request
-          # holds nothing but data
-          run_args: --downstream find-calkit-projects
+          run_args: --downstream find-calkit-projects --skip traction
           # Saved below instead, since the branch is rebuilt each day
           save: "false"
+      - name: Fetch the usage numbers
+        env:
+          # For the hub's usage stats
+          CALKIT_TOKEN: ${{ secrets.CALKIT_TOKEN }}
+        run: calkit run traction
+      - name: Run what depends on them
+        run: calkit run --downstream traction --skip traction
       # Each run writes whole snapshots, so rebuilding the branch from main
       # loses nothing an earlier day's commit had, and never conflicts with it
       - name: Propose the results to main

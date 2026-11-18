@@ -733,6 +733,13 @@ async function handle(
       });
     case "local.projectStatus":
       return askLocal({ type: "project.status", project: message.project });
+    case "local.publicationSource":
+      return askLocal({
+        type: "publication.source",
+        project: message.project,
+        folder: message.folder,
+        path: message.path,
+      });
     case "local.openOptions":
       await chrome.runtime.openOptionsPage();
       return null;

@@ -891,7 +891,11 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     import time
 
     import calkit.browser_link
-    from calkit.browser_link import get_pdf_chunk, get_pdf_path
+    from calkit.browser_link import (
+        get_pdf_chunk,
+        get_pdf_path,
+        get_source_text,
+    )
 
     home = make_home(tmp_path, monkeypatch)
     project = home / "calkit" / "proj"
@@ -974,6 +978,23 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     assert base64.b64decode(reply["result"]["data"]) == b"synctex"
     assert "built" in reply["result"]
     assert "commit_sha" not in reply["result"]
+    # A LaTeX file in the folder as it is here, by its path on Overleaf
+    reply = get_reply(
+        {
+            "type": "publication.source",
+            "project": "me/proj",
+            "folder": "paper",
+            "path": "café.tex",
+        }
+    )
+    assert reply["result"] == {"path": "paper/café.tex", "text": "Hi\n"}
+    for path, error in [
+        ("../calkit.yaml", "isn't in paper"),
+        ("main.pdf", "isn't a LaTeX file"),
+        ("none.tex", "isn't on this machine"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            get_source_text(str(project), "paper", path)
     # Never one outside the project, e.g., through a link
     if os.name != "nt":
         (tmp_path / "outside.pdf").write_bytes(pdf)

@@ -82,6 +82,7 @@ CONCURRENT_REQUEST_TYPES = (
     "overleaf.lookup",
     "publication.pdf",
     "publication.synctex",
+    "publication.source",
     "job.get",
     "job.log",
     "jobs.list",
@@ -91,6 +92,8 @@ MAX_JOBS_KEPT = 20
 # How much of a PDF goes in each message, which base64 makes a third
 # bigger, keeping it well under the browser's limit
 PDF_CHUNK_BYTES = 600_000
+# The most of a LaTeX file read for the extension, which no paper's comes near
+SOURCE_MAX_BYTES = 1_000_000
 OVERLEAF_AUTH_MISSING = (
     "Calkit on this machine has no Overleaf credentials that work; connect "
     "Overleaf to Calkit, which saves them for every machine you use"
@@ -180,6 +183,9 @@ def get_reply(msg: dict) -> dict:
     - ``publication.pdf``: part of the PDF a folder synced with Overleaf
       builds to, from ``offset``, with how fresh it is, so it can be shown
       in place of Overleaf's.
+    - ``publication.source``: a LaTeX file in a folder synced with
+      Overleaf, as it is here, to map a line SyncTeX gives for a PDF built
+      here to the same line in Overleaf's copy.
     - ``job.start``, ``job.get``, and ``jobs.list``: run something that
       takes a while, i.e., a pipeline run, an Overleaf sync, or a clone, in
       a process of its own, which outlives the host, and check on it.
@@ -356,6 +362,14 @@ def get_result(msg: dict) -> Any:
             str(msg.get("folder")),
             offset,
             synctex=kind == "publication.synctex",
+        )
+    elif kind == "publication.source":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        result = get_source_text(
+            paths[0], str(msg.get("folder")), str(msg.get("path"))
         )
     elif kind == "job.start":
         result = start_job(msg)
@@ -929,6 +943,26 @@ def get_pdf_path(wdir: str, folder: str) -> str | None:
         )
         return posixpath.normpath(f"{stage_wdir}/{built}")
     return None
+
+
+def get_source_text(wdir: str, folder: str, path: str) -> dict:
+    """A LaTeX file in a folder synced with Overleaf, by its path there, as
+    it is in this checkout.
+    """
+    rel_path = os.path.normpath(os.path.join(folder, path))
+    full_path = os.path.join(wdir, rel_path)
+    if not os.path.realpath(full_path).startswith(
+        os.path.join(os.path.realpath(os.path.join(wdir, folder)), "")
+    ):
+        raise ValueError(f"{path} isn't in {folder}")
+    if not rel_path.lower().endswith((".tex", ".sty", ".cls", ".bib")):
+        raise ValueError(f"{path} isn't a LaTeX file")
+    if not os.path.isfile(full_path):
+        raise ValueError(f"{rel_path} isn't on this machine")
+    if os.path.getsize(full_path) > SOURCE_MAX_BYTES:
+        raise ValueError(f"{rel_path} is too big to read")
+    with open(full_path, encoding="utf-8", errors="replace") as f:
+        return {"path": rel_path, "text": f.read()}
 
 
 def get_pdf_chunk(

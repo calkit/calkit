@@ -4171,8 +4171,23 @@ async function getSourceAt(
     const file = synctexInputFile(localSynctex.input, (f) =>
       sources.current.has(f),
     );
-    if (file) {
-      return { file, line: localSynctex.line };
+    if (file && localPdf) {
+      // Mapped from this machine's copy to Overleaf's, which may have
+      // more, e.g., comments not synced here yet
+      const link = localPdf.link;
+      const built = await send({
+        type: "local.publicationSource",
+        project: `${link.project_owner_name}/${link.project_name}`,
+        folder: localPdf.path,
+        path: file,
+      }).catch(() => null);
+      const line = built
+        ? lineMap(
+            built.text.split("\n"),
+            (sources.current.get(file) ?? "").split("\n"),
+          ).toAfter(localSynctex.line)
+        : localSynctex.line;
+      return { file, line };
     }
   }
   const para = findParagraphByText(sources.current, context);

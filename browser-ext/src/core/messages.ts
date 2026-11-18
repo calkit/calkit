@@ -270,6 +270,15 @@ export type Request =
       /** As "owner/name". */
       project: string;
     }
+  | {
+      /** A LaTeX file in a synced folder, as it is on this machine. */
+      type: "local.publicationSource";
+      /** As "owner/name". */
+      project: string;
+      folder: string;
+      /** As Overleaf names it. */
+      path: string;
+    }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */
   | { type: "local.installEditor"; project: string }
@@ -338,6 +347,7 @@ export interface ResponseMap {
   "local.status": LocalStatus;
   "local.openProject": Record<string, never>;
   "local.projectStatus": { checkouts: CheckoutStatus[] };
+  "local.publicationSource": { path: string; text: string };
   "local.openOptions": null;
   "local.installEditor": null;
   /**

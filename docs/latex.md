@@ -69,6 +69,11 @@ so it also previews each time you save,
 and "Preview PDF" uses the same build.
 Otherwise, LaTeX Workshop builds on save with its own settings,
 and "Preview PDF" builds in a terminal.
+LaTeX Workshop looks for every document's PDF in one place:
+if all the `latex` stages set the same `output_dir`, it looks there,
+so a document no stage builds won't show in its viewer;
+otherwise, it looks beside each document,
+so a stage that puts its PDF elsewhere won't.
 
 ## Using a template
 

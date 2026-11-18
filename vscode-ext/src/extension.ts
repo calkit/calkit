@@ -4620,10 +4620,16 @@ async function findStageForFile(
   for (const [stageName, stage] of Object.entries(
     calkitConfig?.pipeline?.stages ?? {},
   )) {
+    // A root stage's paths are relative to its wdir; a subproject's were
+    // rebased onto the root, dropping it
+    const wdir = typeof stage.wdir === "string" ? stage.wdir : "";
+    const isFile = (p: unknown) =>
+      typeof p === "string" &&
+      path.posix.join(wdir, p.replace(/\\/g, "/")) === relPath;
     if (
-      stage.notebook_path === relPath ||
-      stage.script_path === relPath ||
-      stage.target_path === relPath ||
+      isFile(stage.notebook_path) ||
+      isFile(stage.script_path) ||
+      isFile(stage.target_path) ||
       pipelineStageOutputPaths(stage).includes(relPath)
     ) {
       return stageName;

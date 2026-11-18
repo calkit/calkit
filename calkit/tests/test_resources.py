@@ -153,7 +153,7 @@ def test_get_latex_workshop_settings(tmp_path):
         # A stage that isn't valid is skipped
         make_info({"a": tex, "b": tex}, {"build-paper": {"kind": "latex"}}),
     ]:
-        assert get(settings, ck_info) == settings
+        assert get(settings, [(".", ck_info)]) == settings
     assert settings["latex-workshop.docker.enabled"] is True
     # A TeX Live stage builds the way its pipeline does, natively, through
     # one recipe that finds the stage from the document, so LaTeX Workshop
@@ -162,7 +162,7 @@ def test_get_latex_workshop_settings(tmp_path):
     ck_info = make_info(
         {"tex": tex, "py": {"kind": "uv"}}, {"build-paper": paper("tex")}
     )
-    got = get(settings, ck_info)
+    got = get(settings, [(".", ck_info)])
     assert got["latex-workshop.docker.enabled"] is False
     assert "latex-workshop.docker.image.latex" not in got
     assert "latex-workshop.latex.outDir" not in got
@@ -223,11 +223,29 @@ def test_get_latex_workshop_settings(tmp_path):
             "%WORKSPACE_FOLDER%/pubs/out",
         ),
         ({}, None),
+        # A switch that can pick TeX Live, by name or defined in place
+        (
+            {
+                "paper": paper("pick"),
+                "slides": paper("pick-inline", target_path="slides/a.tex"),
+            },
+            None,
+        ),
     ]:
-        envs = {"tex": tex, "tex2": tex, "docker-tex": docker}
+        envs = {
+            "tex": tex,
+            "tex2": tex,
+            "docker-tex": docker,
+            "pick": {
+                "kind": "switch",
+                "switch": [{"when": [{"os_is": "linux"}], "use": "docker-tex"}]
+                + [{"use": "tex"}],
+            },
+            "pick-inline": {"kind": "switch", "switch": [{"use": tex}]},
+        }
         if not stages:
             envs = {"tex": tex, "py": {"kind": "uv"}}
-        got = get(settings, make_info(envs, stages))
+        got = get(settings, [(".", make_info(envs, stages))])
         assert got["latex-workshop.latex.tools"] == tools, stages
         assert got["latex-workshop.latex.recipes"] == recipes, stages
         assert got.get("latex-workshop.latex.outDir") == out_dir, stages
@@ -238,7 +256,7 @@ def test_get_latex_workshop_settings(tmp_path):
     ck_info = make_info({"tex": tex}, {"build-paper": paper("tex")})
     with open(tmp_path / "calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    expected = get(settings, ck_info)
+    expected = get(settings, [(".", ck_info)])
     txt = calkit.resources.make_vscode_settings(wdir=str(tmp_path))
     assert txt.endswith("}\n")
     assert json.loads(txt) == expected
@@ -249,6 +267,38 @@ def test_get_latex_workshop_settings(tmp_path):
     for key, value in expected.items():
         assert in_container[key] == value
     assert "latex-workshop.docker.image.latex" not in in_container
+    # A switch that only picks Docker keeps the bundled settings, but one
+    # in a subproject that picks TeX Live doesn't, with its PDF looked for
+    # where it puts it, under the subproject
+    switch = {"kind": "switch", "switch": [{"use": "docker-tex"}]}
+    ck_info = make_info(
+        {"pick": switch, "docker-tex": docker}, {"paper": paper("pick")}
+    )
+    assert get(settings, [(".", ck_info)]) == settings
+    sub_info = make_info(
+        {"tex": tex}, {"paper": paper("tex", output_dir="build")}
+    )
+    got = get(settings, [(".", ck_info), ("sub", sub_info)])
+    assert got["latex-workshop.latex.tools"] == tools
+    assert "latex-workshop.latex.outDir" not in got
+    got = get(settings, [(".", {}), ("sub", sub_info)])
+    assert got["latex-workshop.latex.outDir"] == "%WORKSPACE_FOLDER%/sub/build"
+    os.makedirs(tmp_path / "sub")
+    with open(tmp_path / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"subprojects": [{"path": "sub"}]}, f)
+    with open(tmp_path / "sub" / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    for txt in [
+        calkit.resources.make_vscode_settings(wdir=str(tmp_path)),
+        json.dumps(
+            json.loads(
+                calkit.resources.make_devcontainer_spec(wdir=str(tmp_path))
+            )["customizations"]["vscode"]["settings"]
+        ),
+    ]:
+        got = json.loads(txt)
+        assert got["latex-workshop.latex.tools"] == tools
+        assert got["latex-workshop.docker.enabled"] is False
 
 
 def test_github_actions_workflow(tmp_path):

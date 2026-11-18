@@ -840,6 +840,7 @@ def build(
 
         import click
 
+        from calkit.environments import texlive as env_texlive
         from calkit.models.pipeline import LatexStage
 
         if any(
@@ -858,6 +859,7 @@ def build(
                 raise_error(f"{tex_file} isn't in a Calkit project")
             project_dir = parent
         ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
+        matches = []
         for name, stage in (
             (ck_info.get("pipeline") or {}).get("stages") or {}
         ).items():
@@ -867,12 +869,21 @@ def build(
                 s = LatexStage.model_validate(stage | {"name": name})
             except ValueError:
                 continue
-            stage_dir = os.path.join(project_dir, s.wdir or "")
-            stage_doc_path = os.path.join(stage_dir, s.target_path)
+            stage_doc_path = os.path.join(
+                project_dir, s.wdir or "", s.target_path
+            )
             if os.path.normcase(
                 os.path.realpath(stage_doc_path)
-            ) != os.path.normcase(doc_path):
-                continue
+            ) == os.path.normcase(doc_path):
+                matches.append(s)
+        if matches:
+            s = matches[0]
+            if len(matches) > 1:
+                others = ", ".join(f"'{m.name}'" for m in matches[1:])
+                warn(
+                    f"Stages '{s.name}' and {others} all build {tex_file}; "
+                    f"building it as '{s.name}'"
+                )
             args = ["-e", s.environment, *s.make_build_args()]
             for flag, given in [
                 ("--no-check", no_check),
@@ -884,19 +895,25 @@ def build(
                     args.append(flag)
             for arg in latexmk_args:
                 args += ["--latexmk-arg", arg]
-            os.chdir(stage_dir)
+            os.chdir(os.path.join(project_dir, s.wdir or ""))
             group = cast(click.Group, typer.main.get_command(latex_app))
             command = group.commands["build"]
             with command.make_context("build", args + [s.target_path]) as ctx:
                 command.invoke(ctx)
             return
-        texlive_names = [
-            name
+        # Otherwise the only TeX Live environment, or switch picking one
+        # here, unless they pick different ones
+        selected = {
+            name: env_texlive.get_selected_env(name, wdir=project_dir)
             for name, env in (ck_info.get("environments") or {}).items()
-            if isinstance(env, dict) and env.get("kind") == "texlive"
-        ]
-        if len(texlive_names) == 1:
-            environment = texlive_names[0]
+            if isinstance(env, dict)
+        }
+        names = [name for name, env in selected.items() if env is not None]
+        picked = {env[0] for env in selected.values() if env is not None}
+        if len(picked) == 1:
+            environment = next(
+                (name for name in names if name in picked), names[0]
+            )
         tex_file = os.path.relpath(doc_path, project_dir)
         os.chdir(project_dir)
     # latexmk records a failed run in its file database and then refuses

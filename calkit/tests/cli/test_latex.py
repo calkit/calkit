@@ -622,7 +622,7 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
     # at the source here, and building an edit there leaves the stage out
     # of date until it runs
     settings = calkit.resources.get_latex_workshop_settings(
-        {}, calkit.load_calkit_info()
+        {}, [(".", calkit.load_calkit_info())]
     )
     tool = settings["latex-workshop.latex.tools"][0]
     doc_fpath = os.path.abspath("paper/main.tex")
@@ -805,7 +805,11 @@ def test_build_dirs_relative_to_tex_dir(
         assert dirs == expected, (tex, output_dir, aux_dir)
 
 
-def test_build_as_stage(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_as_stage(
+    tmp_dir: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from calkit.cli import latex as cli_latex
 
     # Beside a folder that isn't in a project
@@ -843,6 +847,11 @@ def test_build_as_stage(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
                         "kind": "latex",
                         "environment": "dock",
                         "target_path": "slides/main.tex",
+                    },
+                    "paper-arxiv": {
+                        "kind": "latex",
+                        "environment": "tex2",
+                        "target_path": "paper/main.tex",
                     },
                 }
             },
@@ -890,6 +899,11 @@ def test_build_as_stage(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
         assert cmd[-1 - len(latexmk_args) : -1] == latexmk_args, doc
         assert "-silent" not in cmd
         assert ("-outdir=../build" in cmd) == (doc == "paper/main.tex")
+        # Of two stages building it, the first is used, saying so
+        out = capsys.readouterr().out
+        assert ("Stages 'paper' and 'paper-arxiv' all build" in out) == (
+            doc == "paper/main.tex"
+        )
     # A document no stage builds gets the default TeX, since there's more
     # than one TeX Live environment, or else the only one
     monkeypatch.chdir(os.path.join(root, "paper"))
@@ -904,6 +918,18 @@ def test_build_as_stage(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
     runs.clear()
     cli_latex.build(os.path.join(root, "x.tex"), as_stage=True)
     assert runs[0][1] == "tex"
+    # Or a switch picking it, or one picking TeX Live defined in place
+    for switch_to, env in [("tex", "tex"), ({"kind": "texlive"}, "pick")]:
+        info["environments"]["pick"] = {
+            "kind": "switch",
+            "switch": [{"use": switch_to}],
+        }
+        if env == "pick":
+            del info["environments"]["tex"]
+        calkit.save_calkit_info(info, wdir=root)
+        runs.clear()
+        cli_latex.build(os.path.join(root, "x.tex"), as_stage=True)
+        assert runs[0][1] == env
     # The stage says where it builds and in what
     with pytest.raises(typer.Exit):
         cli_latex.build("x.tex", as_stage=True, environment="tex")

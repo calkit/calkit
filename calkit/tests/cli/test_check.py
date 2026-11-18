@@ -1878,55 +1878,6 @@ def test_check_stage_runs(tmp_dir):
     # Rerunning them records them again
     subprocess.check_call(["calkit", "run", "--force"])
     subprocess.check_call(check)
-    # A stage removed from the pipeline is called out as such, and fixing
-    # drops its dvc.lock entry and record, after compiling to see it's gone
-    b_stage = ck_info["pipeline"]["stages"].pop("b")
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    subprocess.check_call(check)
-    subprocess.check_call(["calkit", "check", "pipeline", "-c"])
-    res = subprocess.run(check, capture_output=True, text=True)
-    assert res.returncode != 0
-    assert "Stage 'b' is no longer in the pipeline" in res.stdout
-    assert "'calkit check stage-runs --fix' drops them" in res.stderr
-    assert "calkit run --force" not in res.stderr
-    ck_info["pipeline"]["stages"]["b"] = b_stage
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    subprocess.check_call(check + ["--fix"])
-    assert "b" in calkit.dvc.read_lock_stages()
-    del ck_info["pipeline"]["stages"]["b"]
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    # Another stage's problem, which only rerunning fixes, doesn't fail it
-    stage_runs = calkit.read_stage_runs()
-    a_lock_hash = stage_runs["a"]["dvc_lock_hash"]
-    stage_runs["a"]["dvc_lock_hash"] = "sha256:0"
-    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
-        json.dump(stage_runs, f)
-    res = subprocess.run(
-        ["calkit", "fix", "stage-runs"], capture_output=True, text=True
-    )
-    assert res.returncode == 0
-    assert "Dropped stage 'b' from dvc.lock" in res.stdout
-    assert "Stage 'a'" not in res.stdout
-    assert list(calkit.dvc.read_lock_stages()) == ["a"]
-    assert list(calkit.read_stage_runs()) == ["a"]
-    staged = subprocess.check_output(
-        ["git", "diff", "--cached", "--name-only"], text=True
-    ).splitlines()
-    assert "dvc.lock" in staged
-    res = subprocess.run(check, capture_output=True, text=True)
-    assert "Stage 'a' has changed in dvc.lock" in res.stdout
-    stage_runs = calkit.read_stage_runs()
-    stage_runs["a"]["dvc_lock_hash"] = a_lock_hash
-    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
-        json.dump(stage_runs, f)
-    subprocess.check_call(check)
-    ck_info["pipeline"]["stages"]["b"] = b_stage
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    subprocess.check_call(["calkit", "run"])
     # A subproject's runs are kept beside its dvc.lock under their names
     # there, so it is the same record whichever directory ran them
     os.makedirs("sub")
@@ -2008,6 +1959,49 @@ def test_check_stage_runs(tmp_dir):
     res = subprocess.run(check, capture_output=True, text=True)
     assert "Stage 'tools/dvc.yaml:t' has changed in dvc.lock" in res.stdout
     subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:t"])
+    # Like DVC, it ignores the entries of stages no longer in the pipeline,
+    # each foreach item by its own name, and still checks the rest
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "t": {"cmd": "echo t > t.txt", "outs": ["t.txt"]},
+                    "f": {
+                        "foreach": ["x", "y"],
+                        "do": {"cmd": "echo ${item} > ${item}.txt"},
+                    },
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(check)
+    with open(os.path.join("tools", "dvc.yaml")) as f:
+        tools_dvc_yaml = calkit.ryaml.load(f)
+    tools_dvc_yaml["stages"]["f"]["foreach"] = ["x"]
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(tools_dvc_yaml, f)
+    ck_info["pipeline"]["stages"].pop("b")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "status"])
+    assert "b" in calkit.dvc.read_lock_stages()
+    assert "f@y" in calkit.dvc.read_lock_stages("tools")
+    stage_runs = calkit.read_stage_runs()
+    del stage_runs["b"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    tools_runs = calkit.read_stage_runs("tools")
+    del tools_runs["f@x"], tools_runs["f@y"]
+    with open(os.path.join("tools", calkit.STAGE_RUNS_FPATH), "w") as f:
+        json.dump(tools_runs, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Stage 'tools/dvc.yaml:f@x' has no recorded run" in res.stdout
+    assert "f@y" not in res.stdout
+    assert "'b'" not in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:f@x"])
+    subprocess.check_call(check)
     # One inside a DVC repo of its own isn't, since its wrapper stage runs
     # it without recording its stages
     os.makedirs(os.path.join("iso", ".dvc"))

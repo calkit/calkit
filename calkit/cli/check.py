@@ -1917,40 +1917,8 @@ def check_project_requirements(
     calkit.echo(message)
 
 
-def drop_removed_stages() -> None:
-    """Drop and stage the ``dvc.lock`` entries and run records of stages no
-    longer in the pipeline, saying which.
-    """
-    import calkit.pipeline
-
-    def stage_pruned(pruned: dict[str, list[str]]) -> None:
-        for fpath, names in pruned.items():
-            for name in names:
-                typer.echo(f"Dropped stage '{name}' from {fpath}")
-        calkit.environments.stage_calkit_files(extra_paths=list(pruned))
-
-    # Compiled first, so dvc.yaml has every stage calkit.yaml makes
-    try:
-        calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
-        pruned = calkit.pipeline.prune_removed_stages()
-    except Exception as e:
-        if isinstance(e, calkit.pipeline.PruneError):
-            stage_pruned(e.pruned)
-        raise_error(f"Can't drop removed stages: {e}")
-    stage_pruned(pruned)
-
-
 @check_app.command(name="stage-runs")
-def check_stage_runs(
-    fix: Annotated[
-        bool,
-        typer.Option(
-            "--fix",
-            help="Drop dvc.lock entries and run records of stages no "
-            "longer in the pipeline.",
-        ),
-    ] = False,
-) -> None:
+def check_stage_runs() -> None:
     """Check each stage in dvc.lock matches the recorded run that made it.
 
     A stage's entry in .calkit/stage-runs.json records a checksum of its
@@ -1958,28 +1926,39 @@ def check_stage_runs(
     entry some other way, e.g., 'dvc commit' after an output was edited, an
     edit or merge of dvc.lock, or running it outside Calkit. This catches
     mistakes and shortcuts, not forgery, since a matching entry can be
-    written by anyone.
-
-    A stage removed from the pipeline keeps its dvc.lock entry until
-    'calkit run' or --fix drops it.
+    written by anyone. Like DVC, it ignores the entries of stages no longer
+    in the pipeline.
     """
-    import calkit.pipeline
+    from dvc.parsing import DataResolver
 
-    if fix:
-        drop_removed_stages()
     # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
-    # subproject's, against the record kept beside its dvc.lock
-    lock_dirs = calkit.dvc.get_lock_dirs()
+    # subproject's, against the record kept beside its dvc.lock: any other
+    # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
+    # a wrapper stage, which doesn't record its stages.
     try:
-        to_prune = calkit.pipeline.prune_removed_stages(write=False)
-    except Exception:
-        to_prune = {}
-    removed = {
-        name
-        for fpath, names in to_prune.items()
-        if os.path.basename(fpath) == "dvc.lock"
-        for name in names
-    }
+        listed = subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*/dvc.yaml",
+            ],
+            text=True,
+        ).splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        listed = []
+    lock_dirs: list[str | None] = [None]
+    for path in sorted(listed):
+        parts = path.split("/")[:-1]
+        if not os.path.isfile(path) or any(
+            os.path.isdir(os.path.join(*parts[:i], ".dvc"))
+            for i in range(1, len(parts) + 1)
+        ):
+            continue
+        lock_dirs.append("/".join(parts))
     stage_runs: dict[str | None, dict] = {}
     for lock_dir in lock_dirs:
         try:
@@ -1992,12 +1971,38 @@ def check_stage_runs(
     parent_runs = {
         k.replace("\\", "/"): v for k, v in stage_runs[None].items()
     }
+    # DVC keeps the dvc.lock entry of a stage removed from dvc.yaml, and
+    # ignores it, so these are skipped, named as DVC resolves them, e.g.,
+    # each foreach item. Nothing is skipped beside a dvc.yaml DVC can't read.
+    removed: dict[str | None, set[str]] = {}
+    try:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+    except Exception:
+        dvc_repo = None
+    for lock_dir in lock_dirs if dvc_repo is not None else []:
+        try:
+            fpath = os.path.join(lock_dir or ".", "dvc.yaml")
+            with open(fpath, encoding="utf-8") as f:
+                dvc_yaml = calkit.core._load_yaml_readonly(f)
+            resolver = DataResolver(
+                dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
+            )
+            removed[lock_dir] = {
+                name
+                for name in calkit.dvc.read_lock_stages(lock_dir)
+                if not resolver.has_key(name)
+            }
+        except Exception:
+            continue
+    if dvc_repo is not None:
+        dvc_repo.close()
     problems = []
-    n_removed = 0
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
         for lock_name, locked in sorted(lock_stages.items()):
-            if not isinstance(locked, dict):
+            if not isinstance(locked, dict) or lock_name in removed.get(
+                lock_dir, set()
+            ):
                 continue
             name = (
                 lock_name
@@ -2011,10 +2016,7 @@ def check_stage_runs(
                 candidates.append(parent_runs.get(name))
             records = [r for r in candidates if isinstance(r, dict)]
             lock_hash = calkit.dvc.stage_lock_hash(locked)
-            if name in removed:
-                problems.append(f"Stage '{name}' is no longer in the pipeline")
-                n_removed += 1
-            elif not records:
+            if not records:
                 problems.append(f"Stage '{name}' has no recorded run")
             elif all(r.get("dvc_lock_hash") != lock_hash for r in records):
                 problems.append(
@@ -2024,19 +2026,11 @@ def check_stage_runs(
     for problem in problems:
         typer.echo(problem)
     if problems:
-        messages = []
-        if len(problems) > n_removed:
-            messages.append(
-                f"{len(problems) - n_removed} stage(s) in dvc.lock don't "
-                f"match a recorded run in {calkit.STAGE_RUNS_FPATH}; "
-                "rerunning them with 'calkit run --force <stage>' records them"
-            )
-        if n_removed:
-            messages.append(
-                f"{n_removed} stage(s) in dvc.lock are no longer in the "
-                "pipeline; 'calkit check stage-runs --fix' drops them"
-            )
-        raise_error("\n".join(messages))
+        raise_error(
+            f"{len(problems)} stage(s) in dvc.lock don't match a recorded "
+            f"run in {calkit.STAGE_RUNS_FPATH}; rerunning them with "
+            "'calkit run --force <stage>' records them"
+        )
     typer.echo("Every stage in dvc.lock matches its recorded run")
 
 

@@ -4432,17 +4432,6 @@ def run(
         if info.get("status") == "completed"
     ]
     written: list[str] = []
-    # Stages removed from the pipeline leave their entries behind, which
-    # DVC never drops. Done here rather than when compiling, since it reads
-    # every dvc.lock, and 'calkit status' compiles too. Not mid-merge, since
-    # resolving its conflicts reads them.
-    if not dry and calkit.merge.get_operation(repo) is None:
-        try:
-            written += list(calkit.pipeline.prune_removed_stages())
-        except Exception as e:
-            if isinstance(e, calkit.pipeline.PruneError):
-                written += list(e.pruned)
-            warn(f"Couldn't drop removed stages from dvc.lock: {e}")
     if ran and not dry:
         # By the directory of the dvc.lock recording each stage, since a
         # subproject's runs are kept with it. This project's too, for the

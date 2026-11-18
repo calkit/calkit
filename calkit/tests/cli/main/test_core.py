@@ -2372,29 +2372,6 @@ def test_run_writes_private_logs(tmp_dir):
     assert not os.path.exists(os.path.join(".calkit", "systems"))
     with open(STAGE_RUNS_FPATH) as f:
         assert json.load(f)["s1"]["start_time"] > entry["start_time"]
-    # A stage removed from the pipeline loses its dvc.lock entry and record
-    # on the next run, except a dry one, and both are staged, even with no
-    # stage run for DVC to stage dvc.lock
-    dvc_yaml["stages"]["s2"] = {
-        "cmd": "python -c \"open('out2.txt', 'w').write('y')\"",
-        "outs": ["out2.txt"],
-    }
-    with open("dvc.yaml", "w") as f:
-        calkit.ryaml.dump(dvc_yaml, f)
-    subprocess.check_call(["calkit", "run"])
-    del dvc_yaml["stages"]["s1"]
-    with open("dvc.yaml", "w") as f:
-        calkit.ryaml.dump(dvc_yaml, f)
-    subprocess.check_call(["calkit", "run", "--dry"])
-    assert "s1" in calkit.dvc.read_lock_stages()
-    subprocess.check_call(["calkit", "run"])
-    assert list(calkit.dvc.read_lock_stages()) == ["s2"]
-    assert list(calkit.read_stage_runs()) == ["s2"]
-    unstaged = subprocess.check_output(
-        ["git", "diff", "--name-only"], text=True
-    ).splitlines()
-    assert "dvc.lock" not in unstaged
-    assert STAGE_RUNS_FPATH not in unstaged
 
 
 def test_prune_run_logs(tmp_dir):

@@ -4002,21 +4002,13 @@ Options:
 
 Check each stage in dvc.lock matches the recorded run that made it.
 
-A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone.
-
-A stage removed from the pipeline keeps its dvc.lock entry until 'calkit run' or --fix drops it.
+A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone. Like DVC, it ignores the entries of stages no longer in the pipeline.
 
 Usage:
 
 ```text
-calkit check stage-runs [OPTIONS]
+calkit check stage-runs
 ```
-
-Options:
-
-| Option  | Type    | Required | Default | Description                                                                |
-| ------- | ------- | -------- | ------- | -------------------------------------------------------------------------- |
-| `--fix` | boolean | no       | False   | Drop dvc.lock entries and run records of stages no longer in the pipeline. |
 
 <a id="subcommand-check-env-vars"></a>
 
@@ -4170,11 +4162,10 @@ Options:
 
 Fix things.
 
-| Command                                              | Description                                                                |
-| ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.                 |
-| [`stage-runs`](#subcommand-fix-stage-runs)           | Drop dvc.lock entries and run records of stages no longer in the pipeline. |
-| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC).            |
+| Command                                              | Description                                                     |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.      |
+| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC). |
 
 <a id="subcommand-fix-merge-conflicts"></a>
 
@@ -4198,20 +4189,6 @@ Options:
 | `--theirs`, `-t` | list[str] | no       |         | Keep their side of this stage (repeatable).                                  |
 | `--rerun`, `-r`  | list[str] | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
 | `--prefer`       | str       | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
-
-<a id="subcommand-fix-stage-runs"></a>
-
-#### `calkit fix stage-runs`
-
-Drop dvc.lock entries and run records of stages no longer in the pipeline.
-
-'calkit check stage-runs --fix' does this too, then checks the rest.
-
-Usage:
-
-```text
-calkit fix stage-runs
-```
 
 <a id="subcommand-fix-storage"></a>
 

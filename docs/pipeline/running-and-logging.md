@@ -35,13 +35,6 @@ and a checksum of the stage's `dvc.lock` entry after it ran.
 doesn't match its recorded run,
 e.g., after `dvc commit` of an edited output.
 
-<!-- TODO: needs human review -->
-
-When a stage is removed from the pipeline,
-the next `calkit run` drops its entries from `dvc.lock`
-and `.calkit/stage-runs.json`.
-To drop them without running, use `calkit fix stage-runs`.
-
 If the `--log` option is specified,
 DVC logs will be sent into `.calkit/logs` while the run is executing,
 and after it's complete, run metadata,

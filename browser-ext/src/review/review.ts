@@ -704,6 +704,10 @@ function select(key: string, scroll: boolean): void {
   if (scroll && t?.start) {
     reveal(t.start);
   }
+  // And in the source, so the comment's in view in all three
+  if (t) {
+    post({ type: "openSource", file: t.path, line: t.line });
+  }
 }
 
 function reveal(rect: PdfRect): void {

@@ -630,6 +630,11 @@ def test_get_set_upstream_args(tmp_dir: Path) -> None:
     assert calkit.git.get_set_upstream_args(repo) == args
     repo.git.config("--unset", f"branch.{branch}.pushRemote")
     repo.git.config("--unset", "remote.pushDefault")
+    # Nor where the remote's push refspecs say what to push, e.g., a CI
+    # run force pushing a branch it rebuilds each time
+    repo.git.config("remote.origin.push", f"+HEAD:refs/heads/{branch}-data")
+    assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.config("--unset", "remote.origin.push")
     repo.git.push(*args)
     # Once the branch tracks one, a plain push is fine
     assert calkit.git.get_set_upstream_args(repo) == []

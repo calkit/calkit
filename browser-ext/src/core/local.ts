@@ -1,3 +1,4 @@
+import { type Synctex, parseSynctex } from "../../../vscode-ext/src/latex/core";
 /**
  * Calkit on this machine, which the browser starts when the extension
  * connects to it, so the extension can work with projects here directly
@@ -300,13 +301,14 @@ export interface LocalPdfChunk {
 export async function getLocalPdf(
   project: string,
   folder: string,
+  type: "publication.pdf" | "publication.synctex" = "publication.pdf",
 ): Promise<{ parts: Uint8Array[]; first: LocalPdfChunk }> {
   const parts: Uint8Array[] = [];
   let first: LocalPdfChunk | null = null;
   let offset = 0;
   do {
     const chunk: LocalPdfChunk = await askLocal({
-      type: "publication.pdf",
+      type,
       project,
       folder,
       offset,
@@ -320,6 +322,28 @@ export async function getLocalPdf(
     }
   } while (offset < first.size);
   return { parts, first };
+}
+
+/**
+ * The SyncTeX the PDF a folder builds to on this computer was built with,
+ * which says where in the source each place in it came from, or null if
+ * there isn't any.
+ */
+export async function getLocalSynctex(
+  project: string,
+  folder: string,
+): Promise<Synctex | null> {
+  try {
+    const { parts } = await getLocalPdf(project, folder, "publication.synctex");
+    const text = await new Response(
+      new Blob(parts as BlobPart[])
+        .stream()
+        .pipeThrough(new DecompressionStream("gzip")),
+    ).text();
+    return parseSynctex(text);
+  } catch {
+    return null;
+  }
 }
 
 /** The hash Git gives a file with these contents, as Overleaf's are given. */

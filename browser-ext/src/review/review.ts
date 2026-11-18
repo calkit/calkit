@@ -16,9 +16,11 @@ import {
   findText,
   normalizeSelection,
   type PdfTextItem,
+  type Synctex,
+  synctexReverse,
   type TextRange,
 } from "../../../vscode-ext/src/latex/core";
-import { getLocalPdf } from "../core/local";
+import { getLocalPdf, getLocalSynctex } from "../core/local";
 import { type PdfBox, placePdfBoxes } from "../core/pdf-boxes";
 import type {
   FromReview,
@@ -941,11 +943,17 @@ function pointAt(
   return { page: n, at: fromViewport(n, cx - box.left, cy - box.top) };
 }
 
+// What a PDF built on this computer was built with, once it's read
+let localSynctex: Synctex | null = null;
+
 // Go to the source of the selection, or of a point on a page
 async function sourceAt(
   point: { page: number; at: { x: number; y: number } } | null,
 ): Promise<void> {
   const sel = point ? null : await getCommentSelection();
+  const getSynctex = (page: number, at: { x: number; y: number }) =>
+    (localSynctex && synctexReverse(localSynctex, page, at.x, at.y)) ??
+    undefined;
   if (sel) {
     post({
       type: "sourceAt",
@@ -954,6 +962,7 @@ async function sourceAt(
       y: sel.at.y,
       context: sel.context,
       focus: sel.text,
+      synctex: getSynctex(sel.page, sel.at),
     });
   } else if (point) {
     post({
@@ -962,6 +971,7 @@ async function sourceAt(
       x: point.at.x,
       y: point.at.y,
       context: await getLineText(point.page, point.at.y),
+      synctex: getSynctex(point.page, point.at),
     });
   }
 }
@@ -1367,6 +1377,10 @@ if (localProject) {
         offset += part.length;
       }
       await load(data);
+      // Where each place in it came from, for going to its source
+      void getLocalSynctex(localProject, params.get("folder") ?? "").then(
+        (s) => (localSynctex = s),
+      );
       setStatus(
         first.edited_since_built
           ? `${params.get("folder")} has changed since this PDF was built`

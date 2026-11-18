@@ -79,6 +79,7 @@ import {
   findInSource,
   lineMap,
   paragraphLines,
+  synctexInputFile,
 } from "../../../vscode-ext/src/latex/core";
 import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
 
@@ -4113,6 +4114,7 @@ async function getSourceAt(
   y: number,
   context: string,
   withStart = false,
+  localSynctex?: { input: string; line: number },
 ): Promise<{
   file: string;
   line: number;
@@ -4161,6 +4163,16 @@ async function getSourceAt(
         0,
       );
       return { file: found.file, line, start: box && toPdfRect(box) };
+    }
+  }
+  // A PDF built on this computer was made from the project's copy of the
+  // files Overleaf has, so they're matched by their trailing paths
+  if (review?.local && localSynctex) {
+    const file = synctexInputFile(localSynctex.input, (f) =>
+      sources.current.has(f),
+    );
+    if (file) {
+      return { file, line: localSynctex.line };
     }
   }
   const para = findParagraphByText(sources.current, context);
@@ -4349,6 +4361,8 @@ async function onReviewMessage(message: FromReview): Promise<void> {
                 message.x,
                 message.y,
                 message.context,
+                false,
+                message.synctex,
               );
         if (seq !== sourceAtSeq) {
           return;

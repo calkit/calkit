@@ -960,6 +960,20 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     assert get_pdf_chunk(str(project), "paper", 0)["changed_since_commit"]
     with pytest.raises(ValueError, match="hasn't been built"):
         get_pdf_chunk(str(project), "notes", 0)
+    # Its SyncTeX file the same way, with only when it was built
+    (project / "paper" / "main.synctex.gz").write_bytes(b"synctex")
+    reply = get_reply(
+        {
+            "type": "publication.synctex",
+            "project": "me/proj",
+            "folder": "paper",
+            "offset": 0,
+        }
+    )
+    assert reply["result"]["path"] == "paper/main.synctex.gz"
+    assert base64.b64decode(reply["result"]["data"]) == b"synctex"
+    assert "built" in reply["result"]
+    assert "commit_sha" not in reply["result"]
     # Never one outside the project, e.g., through a link
     if os.name != "nt":
         (tmp_path / "outside.pdf").write_bytes(pdf)

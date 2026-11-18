@@ -81,6 +81,7 @@ CONCURRENT_REQUEST_TYPES = (
     "checkouts.get",
     "overleaf.lookup",
     "publication.pdf",
+    "publication.synctex",
     "job.get",
     "job.log",
     "jobs.list",
@@ -342,7 +343,7 @@ def get_result(msg: dict) -> Any:
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_pipeline(paths[0])
-    elif kind == "publication.pdf":
+    elif kind in ("publication.pdf", "publication.synctex"):
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
@@ -350,7 +351,12 @@ def get_result(msg: dict) -> Any:
         offset = msg.get("offset", 0)
         if not isinstance(offset, int) or offset < 0:
             raise ValueError("An offset must be a whole number")
-        result = get_pdf_chunk(paths[0], str(msg.get("folder")), offset)
+        result = get_pdf_chunk(
+            paths[0],
+            str(msg.get("folder")),
+            offset,
+            synctex=kind == "publication.synctex",
+        )
     elif kind == "job.start":
         result = start_job(msg)
     elif kind == "job.get":
@@ -925,11 +931,17 @@ def get_pdf_path(wdir: str, folder: str) -> str | None:
     return None
 
 
-def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
+def get_pdf_chunk(
+    wdir: str, folder: str, offset: int, synctex: bool = False
+) -> dict:
     """Part of the PDF a folder synced with Overleaf builds to, as base64
     ``data``, from ``offset``, with its ``size``, when it was built, the
     commit that saved it, if any, whether it's changed since, and whether
     anything else in the folder has, i.e., it's older than its source.
+
+    With ``synctex``, it's the build's compressed SyncTeX file instead,
+    which says where in the source each place in the PDF came from, with
+    only when it was built.
     """
     import base64
 
@@ -938,6 +950,8 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
     path = get_pdf_path(wdir, folder)
     if path is None:
         raise ValueError(f"No PDF is built from {folder}")
+    if synctex:
+        path = os.path.splitext(path)[0] + ".synctex.gz"
     full_path = os.path.join(wdir, path)
     if not os.path.realpath(full_path).startswith(
         os.path.join(os.path.realpath(wdir), "")
@@ -957,6 +971,8 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         "offset": offset,
         "data": base64.b64encode(data).decode("ascii"),
     }
+    if synctex:
+        return chunk | {"built": stat.st_mtime}
     # How fresh it is, only with the first part
     if offset == 0:
         repo = calkit.git.get_repo(wdir)

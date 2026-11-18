@@ -77,6 +77,8 @@ export type FromReview =
       y: number;
       context: string;
       focus?: string;
+      /** Where SyncTeX says it is, for a PDF built on this computer. */
+      synctex?: { input: string; line: number };
     }
   | {
       calkit: "review";

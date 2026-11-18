@@ -192,7 +192,7 @@ function getLocalCheckout(project: string): Promise<LocalCheckout> {
   return checkout;
 }
 
-// The job each script on this computer was last read in, by project and
+// The job each script on this machine was last read in, by project and
 // path, for making a stage from it
 const detectJobs = new Map<string, string>();
 

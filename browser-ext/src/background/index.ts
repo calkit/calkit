@@ -419,7 +419,18 @@ async function handle(
         },
       );
     }
-    case "project.recordOrigin":
+    case "project.recordOrigin": {
+      // Recorded and committed on this machine when the project's here
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<{ path: string }>({
+          type: "project.recordOrigin",
+          project: local,
+          path: message.path,
+          importedFrom: message.importedFrom,
+          createdBy: message.createdBy,
+        });
+      }
       // Recorded as a misc artifact, which the hub only takes for a path
       // nothing else declares
       return request<{ path: string }>(
@@ -434,6 +445,7 @@ async function handle(
           },
         },
       );
+    }
     case "project.pipeline": {
       // As it is on this machine, when it's here, rather than as pushed
       const project = `${message.owner}/${message.project}`;
@@ -493,7 +505,18 @@ async function handle(
         { method: "POST", body: { location: "github-actions" } },
       );
     }
-    case "project.addExportStage":
+    case "project.addExportStage": {
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<ExportStage>({
+          type: "project.addExportStage",
+          project: local,
+          source: message.source,
+          output: message.output,
+          app: message.app || null,
+          files: message.files ?? [],
+        });
+      }
       return request<ExportStage>(
         `${projectPath(message.owner, message.project)}/pipeline/stages/export`,
         {
@@ -506,6 +529,7 @@ async function handle(
           },
         },
       );
+    }
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });
     case "content.dataUrl":

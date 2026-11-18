@@ -2200,6 +2200,70 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     return containing[1] if containing else None
 
 
+# What a stage can be named in calkit.yaml
+STAGE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+
+class OutputTakenError(ValueError):
+    """An output another stage already makes."""
+
+
+def get_stage_to_add(
+    stage: dict,
+    ck_info: dict,
+    name: str | None = None,
+    is_tracked: Callable[[str], bool] = lambda path: False,
+) -> tuple[str, dict]:
+    """The name and stage to add to the pipeline for ``stage``, as written
+    in calkit.yaml, checked against the models.
+
+    A taken name gets a number appended; without one, it's named after its
+    first output. An output another stage already makes is refused, and
+    one already in Git, as ``is_tracked`` says, stays there.
+    """
+    from calkit.models.pipeline import Pipeline
+
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    stage = dict(stage)
+    outputs = []
+    for out in stage.get("outputs") or []:
+        raw_path = out["path"] if isinstance(out, dict) else str(out)
+        path = posixpath.normpath(raw_path.replace("\\", "/"))
+        if posixpath.isabs(path) or path == ".." or path.startswith("../"):
+            raise ValueError(f"Invalid output path: {raw_path!r}")
+        producer = get_stage_for_output(path, ck_info)
+        if producer is not None:
+            raise OutputTakenError(f"'{path}' is made by stage '{producer}'")
+        if not isinstance(out, dict):
+            out = (
+                {"path": path, "storage": "git"} if is_tracked(path) else path
+            )
+        outputs.append(out)
+    if outputs:
+        stage["outputs"] = outputs
+    first = outputs[0] if outputs else None
+    first_path = first["path"] if isinstance(first, dict) else first
+    stem = posixpath.splitext(posixpath.basename(first_path or ""))[0]
+    base_name = name or (
+        re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-") or "figure"
+        if first_path
+        else "stage"
+    )
+    if not STAGE_NAME_RE.fullmatch(base_name or ""):
+        raise ValueError(f"Invalid stage name: {name!r}")
+    stage_name = base_name
+    n = 2
+    while stage_name in stages:
+        stage_name = f"{base_name}-{n}"
+        n += 1
+    # Validated as a one-stage pipeline, for the dispatch on kind
+    try:
+        Pipeline.model_validate({"stages": {stage_name: stage}})
+    except Exception as e:
+        raise ValueError(f"Invalid stage: {e}")
+    return stage_name, stage
+
+
 def write_stage_from_script(
     plan: dict, ck_info: dict, wdir: str = "."
 ) -> list[str]:

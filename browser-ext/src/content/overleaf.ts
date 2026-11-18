@@ -4165,7 +4165,7 @@ async function getSourceAt(
       return { file: found.file, line, start: box && toPdfRect(box) };
     }
   }
-  // A PDF built on this computer was made from the project's copy of the
+  // A PDF built on this machine was made from the project's copy of the
   // files Overleaf has, so they're matched by their trailing paths
   if (review?.local && localSynctex) {
     const file = synctexInputFile(localSynctex.input, (f) =>

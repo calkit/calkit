@@ -77,7 +77,7 @@ export type FromReview =
       y: number;
       context: string;
       focus?: string;
-      /** Where SyncTeX says it is, for a PDF built on this computer. */
+      /** Where SyncTeX says it is, for a PDF built on this machine. */
       synctex?: { input: string; line: number };
     }
   | {

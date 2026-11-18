@@ -325,7 +325,7 @@ export async function getLocalPdf(
 }
 
 /**
- * The SyncTeX the PDF a folder builds to on this computer was built with,
+ * The SyncTeX the PDF a folder builds to on this machine was built with,
  * which says where in the source each place in it came from, or null if
  * there isn't any.
  */

@@ -943,7 +943,7 @@ function pointAt(
   return { page: n, at: fromViewport(n, cx - box.left, cy - box.top) };
 }
 
-// What a PDF built on this computer was built with, once it's read
+// What a PDF built on this machine was built with, once it's read
 let localSynctex: Synctex | null = null;
 
 // Go to the source of the selection, or of a point on a page

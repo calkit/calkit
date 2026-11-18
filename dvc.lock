@@ -119,7 +119,7 @@ stages:
       md5: 4960953114330139033d7281122861de
       size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
       --attendees=25 --supported=60 --indirect-rate=0
     deps:
     - path: .python-version
@@ -178,8 +178,8 @@ stages:
       size: 13383
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: f4cebb77c9a0a98fa433ac90258bc0cd
-      size: 57430
+      md5: 1078d8d6187e0e072d20f488176ff71e
+      size: 50208
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
@@ -207,8 +207,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: d9e031d4001ffc8ba95f01024f65223b
-      size: 179650
+      md5: fc3e4471f273f3612ecefed279d9d3f7
+      size: 179604
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit
@@ -388,8 +388,8 @@ stages:
       md5: e26e6d8161aee299460812cd7efbaa0d
       size: 202869
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
-      --engine=libreoffice
+    cmd: calkit xenv -n dev --no-check -- python 
+      scripts/latex-word-round-trip.py --engine=libreoffice
     deps:
     - path: .python-version
       hash: md5

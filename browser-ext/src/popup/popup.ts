@@ -218,9 +218,7 @@ function renderSignedOut(hubLabel: string): void {
   const signInButton = el("button", { class: "action", text: "Sign in" });
   signInButton.addEventListener("click", async () => {
     signInButton.disabled = true;
-    clear(message).append(
-      loading("Approve the request in the tab that just opened"),
-    );
+    clear(message).append(loading("Approve the request in the new tab"));
     try {
       await send({ type: "auth.signIn" });
       void render();

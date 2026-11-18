@@ -1079,7 +1079,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const picker = vscode.window.createQuickPick();
         picker.title = `Diff ${path.basename(texFile)} against...`;
-        picker.placeholder = "Pick or type a Git revision";
+        picker.placeholder = "Select or type a Git revision";
         picker.items = items;
         picker.onDidChangeValue((value) => {
           const typed = value.trim();
@@ -5512,7 +5512,7 @@ async function runCreateEnvironmentWizard(
 
     const kindPick = await vscode.window.showQuickPick(kindItems, {
       title: options?.title ?? "Create Calkit environment",
-      placeHolder: options?.placeHolder ?? "Pick environment kind",
+      placeHolder: options?.placeHolder ?? "Select environment kind",
     });
     if (!kindPick) {
       return undefined;
@@ -6568,7 +6568,7 @@ async function runCreateNotebookEnvironmentCreationFlow(
         ? {
             includeSlurm: false,
             title: `Create inner environment for ${outerSlurmEnvironment}`,
-            placeHolder: "Pick an environment kind to run inside SLURM",
+            placeHolder: "Select environment kind to run inside SLURM",
           }
         : undefined,
     );

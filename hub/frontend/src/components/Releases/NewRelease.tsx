@@ -489,7 +489,7 @@ const NewRelease = ({
                     onChange={(p) => setValue("path", p, { shouldDirty: true })}
                   />
                   <FormHelperText>
-                    Pick a file to release, or release the whole project.
+                    Select a file to release, or release the whole project.
                   </FormHelperText>
                 </FormControl>
 

@@ -414,7 +414,7 @@ function renderConnect(
     title,
     el("label", { class: "row", style: { fontWeight: "400" } }, [
       isPublic,
-      el("div", { class: "grow small", text: "Make the project public" }),
+      el("div", { class: "grow small", text: "Make project public" }),
     ]),
     el("div", { class: "actions" }, [connect]),
     message,
@@ -1013,9 +1013,7 @@ async function openPanel(state: RepoState): Promise<void> {
       });
       signIn.addEventListener("click", async () => {
         signIn.disabled = true;
-        clear(message).append(
-          loading("Approve the request in the tab that just opened"),
-        );
+        clear(message).append(loading("Approve the request in the new tab"));
         try {
           await send({ type: "auth.signIn", hubUrl: state.hubWebUrl });
           reload();

@@ -136,7 +136,7 @@ def test_get_reply(tmp_path, monkeypatch):
     reply = get_reply({"type": "project.open", "project": "me/gone", "id": 3})
     assert reply["id"] == 3 and not reply["ok"]
     assert reply["error"] == (
-        "me/gone isn't on this computer; clone it with 'calkit clone me/gone'"
+        "me/gone isn't on this machine; clone it with 'calkit clone me/gone'"
     )
     reply = get_reply({"type": "project.open", "project": "me/far", "path": 1})
     assert reply["error"] == "A path must be a string"
@@ -709,7 +709,7 @@ def test_start_job(tmp_path, monkeypatch):
     for msg, error in [
         ({"kind": "rm", "project": "me/proj"}, "Unknown kind"),
         ({"kind": "sync", "project": "me/proj"}, "folder"),
-        ({"kind": "run", "project": "me/gone"}, "isn't on this computer"),
+        ({"kind": "run", "project": "me/gone"}, "isn't on this machine"),
         (
             {"kind": "clone", "project": "me/proj", "location": str(project)},
             "isn't empty",
@@ -891,7 +891,11 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     import time
 
     import calkit.browser_link
-    from calkit.browser_link import get_pdf_chunk, get_pdf_path
+    from calkit.browser_link import (
+        get_pdf_chunk,
+        get_pdf_path,
+        get_source_text,
+    )
 
     home = make_home(tmp_path, monkeypatch)
     project = home / "calkit" / "proj"
@@ -960,6 +964,37 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     assert get_pdf_chunk(str(project), "paper", 0)["changed_since_commit"]
     with pytest.raises(ValueError, match="hasn't been built"):
         get_pdf_chunk(str(project), "notes", 0)
+    # Its SyncTeX file the same way, with only when it was built
+    (project / "paper" / "main.synctex.gz").write_bytes(b"synctex")
+    reply = get_reply(
+        {
+            "type": "publication.synctex",
+            "project": "me/proj",
+            "folder": "paper",
+            "offset": 0,
+        }
+    )
+    assert reply["result"]["path"] == "paper/main.synctex.gz"
+    assert base64.b64decode(reply["result"]["data"]) == b"synctex"
+    assert "built" in reply["result"]
+    assert "commit_sha" not in reply["result"]
+    # A LaTeX file in the folder as it is here, by its path on Overleaf
+    reply = get_reply(
+        {
+            "type": "publication.source",
+            "project": "me/proj",
+            "folder": "paper",
+            "path": "café.tex",
+        }
+    )
+    assert reply["result"] == {"path": "paper/café.tex", "text": "Hi\n"}
+    for path, error in [
+        ("../calkit.yaml", "isn't in paper"),
+        ("main.pdf", "isn't a LaTeX file"),
+        ("none.tex", "isn't on this machine"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            get_source_text(str(project), "paper", path)
     # Never one outside the project, e.g., through a link
     if os.name != "nt":
         (tmp_path / "outside.pdf").write_bytes(pdf)
@@ -1175,7 +1210,7 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     )
     # Uploads, data, and paths outside the project are for the hub
     for bad, error in [
-        ({"content": "cHJpbnQoMSk="}, "folder on this computer"),
+        ({"content": "cHJpbnQoMSk="}, "folder on this machine"),
         ({"data": [{"external": "/x", "path": "data/x"}]}, "Move the data"),
         ({"scriptPath": "../plot.py"}, "isn't in the project"),
         ({"scriptPath": "scripts/none.py"}, "isn't in the project"),
@@ -1258,7 +1293,7 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     ck_info = calkit.load_calkit_info(wdir=str(project))
     assert ck_info["misc"][0]["created_by"][0]["email"] == "pat@example.com"
     committed = repo.git.show("--name-only", "--format=", "HEAD").split()
-    assert "calkit.yaml" in committed and "notes.txt" not in committed
+    assert committed == ["calkit.yaml"]
     for msg, error in [
         ({"path": "figures/none.jpg", "createdBy": person}, "isn't in"),
         ({"path": "figures/photo.jpg", "createdBy": person}, "already"),
@@ -1270,6 +1305,8 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     # An export stage, shown first and then added, with the file it's
     # drawn in, made by whoever commits here, committed alongside
     (project / "drawings" / "setup.psd").write_bytes(b"psd")
+    (project / "drawings" / "ignored.psd").write_bytes(b"psd")
+    (project / ".git" / "info" / "exclude").write_text("ignored.psd\n")
     msg = {
         "source": "drawings/setup.psd",
         "output": "figures/setup.png",
@@ -1284,9 +1321,10 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     for bad, error in [
         (
             {"files": [{"path": "drawings/setup.psd", "content": "eA=="}]},
-            "on this computer",
+            "on this machine",
         ),
         ({"files": [{"path": "drawings/none.psd"}]}, "isn't in the project"),
+        ({"files": [{"path": "drawings/ignored.psd"}]}, "ignored by Git"),
         ({"output": "../setup.png"}, "isn't in the project"),
     ]:
         with pytest.raises(ValueError, match=error):

@@ -375,6 +375,7 @@ Options:
 | `--no-push`              | boolean   | no       | False   | Do not push to Git and DVC after saving.                                                                                                     |
 | `--mock-scheduler`, `-K` | boolean   | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler.                                                 |
 | `--strict`               | boolean   | no       | False   | Fail if an out-of-date stage can't run on this machine rather than skipping it, e.g., in CI for a project whose stages should all run there. |
+| `--skip`                 | list[str] | no       |         | Skip stage, keeping its outputs, e.g., a scheduled one in CI for pull requests.                                                              |
 
 <a id="top-command-manual-step"></a>
 
@@ -1281,9 +1282,9 @@ calkit new|create uv-env [OPTIONS] [PACKAGES...]
 
 Arguments:
 
-| Argument   | Type      | Required | Default | Description                             |
-| ---------- | --------- | -------- | ------- | --------------------------------------- |
-| `packages` | list[str] | no       |         | Packages to include in the environment. |
+| Argument   | Type      | Required | Default | Description                                                                      |
+| ---------- | --------- | -------- | ------- | -------------------------------------------------------------------------------- |
+| `packages` | list[str] | no       |         | Packages to include in the environment, e.g., 'pandas==2.2.3' to keep a version. |
 
 Options:
 
@@ -1292,6 +1293,7 @@ Options:
 | `--name`, `-n`   | str     | no       | main    | Environment name.                                      |
 | `--path`         | str     | no       |         | Environment file path. Must end with 'pyproject.toml'. |
 | `--python`, `-p` | str     | no       |         | Python version.                                        |
+| `--description`  | str     | no       |         | Description.                                           |
 | `--no-check`     | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`    | boolean | no       | False   | Do not commit changes.                                 |
 
@@ -4001,7 +4003,7 @@ Options:
 
 Check each stage in dvc.lock matches the recorded run that made it.
 
-A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone.
+A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone. Like DVC, it ignores the entries of stages no longer in the pipeline.
 
 Usage:
 

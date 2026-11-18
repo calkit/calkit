@@ -6616,7 +6616,7 @@ def post_project_misc(
     )
     ck_info = get_ck_info_from_repo(repo)
     try:
-        entry = calkit.provenance.add_origin(
+        ck_info, entry = calkit.provenance.add_origin(
             ck_info,
             path,
             created_by=(

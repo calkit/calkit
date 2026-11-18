@@ -137,17 +137,27 @@ def get_action_ref(version: str | None = None) -> str:
 
     The action lives in this repo at ``actions/run``, so its refs are
     Calkit's own release tags, and a project ends up pinned to the version
-    of Calkit that wrote its workflow.
+    of Calkit that wrote its workflow, or for a development build, the
+    release it's based on.
     """
     if version is None:
         import calkit
 
         version = calkit.__version__
-    # Development installs report versions like 0.42.2.dev0+g21c9bb93, which
-    # isn't a tag anyone can reference, so those stay on main
-    if re.fullmatch(r"\d+\.\d+\.\d+", version):
-        return f"{ACTION_PATH}@v{version}"
-    return ACTION_REF
+    match = re.fullmatch(
+        r"(\d+)\.(\d+)\.(\d+)(?P<dev>\.dev\d+(?:\+.+)?)?", version
+    )
+    if match is None:
+        return ACTION_REF
+    major, minor, patch = (int(n) for n in match.groups()[:3])
+    # Development builds, e.g., 0.51.1.dev19+gc4093debd, aren't tags, but
+    # hatch-vcs numbers them by bumping the patch of the release they're
+    # based on, which is fixed, unlike main
+    if match["dev"]:
+        if patch == 0:
+            return ACTION_REF
+        patch -= 1
+    return f"{ACTION_PATH}@v{major}.{minor}.{patch}"
 
 
 def uses_run_action(workflow_txt: str) -> bool:

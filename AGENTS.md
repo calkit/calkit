@@ -76,6 +76,24 @@ For prose, only use one space after punctuation.
 
 Always put a comma after "i.e." and "e.g.".
 
+<!-- TODO: needs human review -->
+
+Text people read in an app, e.g., labels, buttons, statuses, tooltips, and
+error messages, uses the fewest words that say it:
+
+- Drop articles and words the layout already implies, e.g., "Run pipeline"
+  rather than "Run the pipeline first", "Creating project" rather than
+  "Creating the project".
+- Put the adjective first, e.g., "unsaved changes" rather than
+  "changes not saved".
+- Name the specific thing, or say the state plainly, rather than
+  paraphrasing it, e.g., "Out of date: data/raw.csv modified" or
+  "Out of date", not "Out of date: what it's made from changed since it last
+  ran".
+- Use these terms, in the docs too:
+  - "this machine" or "your machine", not "computer"
+  - "Select", not "Pick", when asking someone to choose
+
 Don't overzealously split up functions just because they're long.
 Functions should usually be used ~3 times before abstracting.
 Otherwise, split up long ones into logical sections with comments.

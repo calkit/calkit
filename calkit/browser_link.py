@@ -85,6 +85,8 @@ CONCURRENT_REQUEST_TYPES = (
     "checkouts.get",
     "overleaf.lookup",
     "publication.pdf",
+    "publication.synctex",
+    "publication.source",
     "job.get",
     "job.log",
     "jobs.list",
@@ -94,9 +96,11 @@ MAX_JOBS_KEPT = 20
 # How much of a PDF goes in each message, which base64 makes a third
 # bigger, keeping it well under the browser's limit
 PDF_CHUNK_BYTES = 600_000
+# The most of a LaTeX file read for the extension, which no paper's comes near
+SOURCE_MAX_BYTES = 1_000_000
 OVERLEAF_AUTH_MISSING = (
-    "Calkit on this computer has no Overleaf credentials that work; connect "
-    "Overleaf to Calkit, which saves them for every computer you use"
+    "Calkit on this machine has no Overleaf credentials that work; connect "
+    "Overleaf to Calkit, which saves them for every machine you use"
 )
 # Where each browser looks for hosts' manifests in the home folder, by
 # platform; each is only written if the folder above it exists, i.e., the
@@ -183,6 +187,9 @@ def get_reply(msg: dict) -> dict:
     - ``publication.pdf``: part of the PDF a folder synced with Overleaf
       builds to, from ``offset``, with how fresh it is, so it can be shown
       in place of Overleaf's.
+    - ``publication.source``: a LaTeX file in a folder synced with
+      Overleaf, as it is here, to map a line SyncTeX gives for a PDF built
+      here to the same line in Overleaf's copy.
     - ``job.start``, ``job.get``, and ``jobs.list``: run something that
       takes a while, i.e., a pipeline run, an Overleaf sync, or a clone, in
       a process of its own, which outlives the host, and check on it.
@@ -272,7 +279,7 @@ def get_result(msg: dict) -> Any:
             )
             if "isn't on this machine" in error:
                 error = (
-                    f"{owner}/{name} isn't on this computer; clone it "
+                    f"{owner}/{name} isn't on this machine; clone it "
                     f"with 'calkit clone {owner}/{name}'"
                 )
             raise ValueError(error)
@@ -313,7 +320,7 @@ def get_result(msg: dict) -> Any:
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_overleaf_sync_statuses(
             paths[0],
             overleaf_project_id=msg.get("overleaf_project_id"),
@@ -326,19 +333,19 @@ def get_result(msg: dict) -> Any:
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_figures(paths[0])
     elif kind == "project.contentPaths":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_content_paths(paths[0])
     elif kind == "project.stageFromScriptOrNotebook":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = add_stage_from_script(paths[0], msg)
     elif kind in ("project.recordOrigin", "project.addExportStage"):
         owner, name = split_project(msg.get("project"))
@@ -353,17 +360,30 @@ def get_result(msg: dict) -> Any:
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_pipeline(paths[0])
-    elif kind == "publication.pdf":
+    elif kind in ("publication.pdf", "publication.synctex"):
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         offset = msg.get("offset", 0)
         if not isinstance(offset, int) or offset < 0:
             raise ValueError("An offset must be a whole number")
-        result = get_pdf_chunk(paths[0], str(msg.get("folder")), offset)
+        result = get_pdf_chunk(
+            paths[0],
+            str(msg.get("folder")),
+            offset,
+            synctex=kind == "publication.synctex",
+        )
+    elif kind == "publication.source":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        result = get_source_text(
+            paths[0], str(msg.get("folder")), str(msg.get("path"))
+        )
     elif kind == "job.start":
         result = start_job(msg)
     elif kind == "job.get":
@@ -938,11 +958,39 @@ def get_pdf_path(wdir: str, folder: str) -> str | None:
     return None
 
 
-def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
+def get_source_text(wdir: str, folder: str, path: str) -> dict:
+    """A LaTeX file in a folder synced with Overleaf, by its path there, as
+    it is in this checkout.
+    """
+    import posixpath
+
+    rel_path = posixpath.normpath(posixpath.join(folder, path))
+    full_path = os.path.join(wdir, rel_path)
+    if not os.path.realpath(full_path).startswith(
+        os.path.join(os.path.realpath(os.path.join(wdir, folder)), "")
+    ):
+        raise ValueError(f"{path} isn't in {folder}")
+    if not rel_path.lower().endswith((".tex", ".sty", ".cls", ".bib")):
+        raise ValueError(f"{path} isn't a LaTeX file")
+    if not os.path.isfile(full_path):
+        raise ValueError(f"{rel_path} isn't on this machine")
+    if os.path.getsize(full_path) > SOURCE_MAX_BYTES:
+        raise ValueError(f"{rel_path} is too big to read")
+    with open(full_path, encoding="utf-8", errors="replace") as f:
+        return {"path": rel_path, "text": f.read()}
+
+
+def get_pdf_chunk(
+    wdir: str, folder: str, offset: int, synctex: bool = False
+) -> dict:
     """Part of the PDF a folder synced with Overleaf builds to, as base64
     ``data``, from ``offset``, with its ``size``, when it was built, the
     commit that saved it, if any, whether it's changed since, and whether
     anything else in the folder has, i.e., it's older than its source.
+
+    With ``synctex``, it's the build's compressed SyncTeX file instead,
+    which says where in the source each place in the PDF came from, with
+    only when it was built.
     """
     import base64
 
@@ -951,6 +999,8 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
     path = get_pdf_path(wdir, folder)
     if path is None:
         raise ValueError(f"No PDF is built from {folder}")
+    if synctex:
+        path = os.path.splitext(path)[0] + ".synctex.gz"
     full_path = os.path.join(wdir, path)
     if not os.path.realpath(full_path).startswith(
         os.path.join(os.path.realpath(wdir), "")
@@ -958,7 +1008,7 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         raise ValueError(f"{path} isn't in the project")
     if not os.path.isfile(full_path):
         raise ValueError(
-            f"{path} hasn't been built on this computer; run the pipeline"
+            f"{path} hasn't been built on this machine; run the pipeline"
         )
     stat = os.stat(full_path)
     with open(full_path, "rb") as f:
@@ -970,6 +1020,8 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         "offset": offset,
         "data": base64.b64encode(data).decode("ascii"),
     }
+    if synctex:
+        return chunk | {"built": stat.st_mtime}
     # How fresh it is, only with the first part
     if offset == 0:
         repo = calkit.git.get_repo(wdir)
@@ -1233,7 +1285,7 @@ def start_job(msg: dict) -> dict:
     else:
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         wdir = paths[0]
         if kind == "run":
             # Saved and synced with Overleaf after unless asked not to
@@ -1657,10 +1709,10 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     if not script_path.lower().endswith(calkit.pipeline.detect.SCRIPT_EXTS):
         raise ValueError(calkit.pipeline.detect.SCRIPT_EXTS_MESSAGE)
     # Uploads go through the hub, which reads them in a checkout of their
-    # own; here the script and its data are already on this computer
+    # own; here the script and its data are already on this machine
     if msg.get("content") is not None:
         raise ValueError(
-            "Put the script in the project's folder on this computer, then "
+            "Put the script in the project's folder on this machine, then "
             "find it in the project"
         )
     if msg.get("data"):

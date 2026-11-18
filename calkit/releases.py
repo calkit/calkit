@@ -658,7 +658,7 @@ def save_docker_images(
 
             warn(
                 f"Docker environment '{env_name}' has no local image "
-                f"({image}) to archive; run the pipeline first"
+                f"({image}) to archive; run pipeline"
             )
             continue
         fname = f"docker-image-{env_name}.tar.gz"

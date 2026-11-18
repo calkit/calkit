@@ -31,6 +31,7 @@ from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
     STAGE_OUTPUT_START,
     STAGE_RUNS_FPATH,
+    _get_matplotlib_font_warnings_by_stage,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
     _prune_run_logs,
@@ -3121,6 +3122,25 @@ def test_run_captures_stage_logs(tmp_dir):
     stage_info = _read_only_run_info()["stages"]["test_stage"]
     assert stage_info["status"] == "completed"
     assert stage_info["end_time"] >= stage_info["start_time"]
+    assert "fallback font" not in res.stdout
+    # A font Matplotlib couldn't find is reported once the run is done,
+    # whether or not the stage failed
+    for exit_code in [0, 1]:
+        with open("stage_script.py", "w") as f:
+            f.write(
+                "import logging, sys\n"
+                "log = logging.getLogger('matplotlib.font_manager')\n"
+                "for _ in range(3):\n"
+                "    log.warning(\"findfont: Font family 'Arial' not "
+                'found.")\n'
+                f"sys.exit({exit_code})\n"
+            )
+        res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+        assert res.returncode == exit_code
+        warning = res.stdout.split("Matplotlib in stage 'test_stage'")[-1]
+        assert warning.startswith(" used a fallback font")
+        assert warning.count("Font family 'Arial' not found") == 1
+        assert "not found; see https://docs.calkit.org/" in warning
 
 
 def test_run_captures_stage_logs_failure(tmp_dir):
@@ -3289,6 +3309,50 @@ def test_stage_stdout_from_log_content():
     # A skipped stage produced no output this run, so it must not be
     # listed---its block should keep what it has
     assert "other" not in res
+
+
+def test_get_matplotlib_font_warnings_by_stage() -> None:
+    log = "\n".join(
+        [
+            "2025-01-01T00:00:00 - INFO - Running stage 'plot':",
+            STAGE_OUTPUT_START,
+            # Logged once per text drawn, and reported once
+            "findfont: Font family 'Arial' not found.",
+            "findfont: Font family 'Arial' not found.",
+            "findfont: Generic family 'sans-serif' not found because none "
+            "of the following families were found: Arial, Helvetica",
+            # A script's own logging format, and Matplotlib's other
+            # message, reported once per family whichever form says it
+            "WARNING:matplotlib.font_manager:findfont: Font family "
+            "['Arial'] not found. Falling back to DejaVu Sans.",
+            "findfont: Font family ['Times New Roman'] not found. Falling "
+            "back to DejaVu Sans.",
+            "findfont: Font family 'Times New Roman' not found.",
+            # Papermill's progress bar can share the line
+            "Executing:   0%|   | 0/1 [00:00<?, ?cell/s]findfont: Font "
+            "family 'CMU Serif' not found.",
+            "findfont: score(FontEntry(name='DejaVu Sans')) = 0.05",
+            STAGE_OUTPUT_END,
+            "2025-01-01T00:00:01 - INFO - Running stage 'clean':",
+            STAGE_OUTPUT_START,
+            "Font family 'Arial' not found, but not from Matplotlib",
+            STAGE_OUTPUT_END,
+            # Matplotlib's messages from DVC itself aren't a stage's
+            "2025-01-01T00:00:02 - WARNING - findfont: Font family 'X' "
+            "not found.",
+        ]
+    )
+    assert _get_matplotlib_font_warnings_by_stage(log) == {
+        "plot": [
+            "Font family 'Arial' not found",
+            "Generic family 'sans-serif' not found because none of the "
+            "following families were found: Arial, Helvetica",
+            "Font family ['Times New Roman'] not found. Falling back to "
+            "DejaVu Sans",
+            "Font family 'CMU Serif' not found",
+        ]
+    }
+    assert _get_matplotlib_font_warnings_by_stage("") == {}
 
 
 def test_run_refuses_outside_a_project(tmp_dir):

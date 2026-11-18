@@ -562,6 +562,17 @@ this will create a `pyproject.toml` file in the project directory,
 and otherwise in `.calkit/envs/my-env/pyproject.toml`.
 The path can be controlled with the `--path` option.
 
+<!-- TODO: needs human review -->
+
+Packages given without a version get the latest one, with that as a floor,
+e.g., `matplotlib>=3.10`.
+To keep the versions an environment already uses,
+e.g., when converting one from a `uv-venv`,
+give them exactly, e.g., `pandas==2.2.3`.
+Passing `--python 3.13` writes a `.python-version` file next to the
+`pyproject.toml`, which is what decides the Python version uv uses.
+If that file already exists, it must pin the same version.
+
 To create a new uv venv,
 simply replace `uv-env` with `uv-venv` in the above command and a
 `requirements.txt`
@@ -1312,6 +1323,19 @@ Fontconfig still finds the fonts installed on your computer too,
 so programs that look fonts up through it, e.g., R's and Julia's plotting
 on Linux, keep finding the ones they used before.
 
+<!-- TODO: needs human review -->
+
+When Matplotlib can't find a font, it draws with another and only prints a
+warning, which is easy to miss.
+`calkit run` repeats it at the end for each stage that printed one,
+whether the font was named in a `matplotlibrc` or in a script.
+It can't catch what Matplotlib doesn't print:
+a script that turns off or redirects Matplotlib's logging,
+or a list like `font.sans-serif: Arial, DejaVu Sans`,
+which goes to DejaVu Sans without a warning when Arial is missing.
+Nor does it look at scripts run outside `calkit run`, e.g., with
+`calkit xenv`.
+
 Only `uv`, `uv-venv`, `venv`, `conda`, `pixi`, `julia`, and `renv`
 environments can have another composed into them with `with`,
 and only one TeX Live environment each.
@@ -1319,11 +1343,11 @@ and only one TeX Live environment each.
 <!-- TODO: needs human review -->
 
 The Jupyter kernel Calkit registers for `py`,
-e.g., when you pick `py` for a notebook in VS Code or JupyterLab,
+e.g., when you select `py` for a notebook in VS Code or JupyterLab,
 gets TeX Live's programs too,
 ahead of everything on the editor's PATH.
 It keeps the TeX Live environment it got when it was registered,
-so after changing `tex`, pick `py` again,
+so after changing `tex`, select `py` again,
 or run `calkit nb check-kernel -e py`.
 
 ### R

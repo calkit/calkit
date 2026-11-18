@@ -4954,7 +4954,7 @@ function renderStatus(
         !status.in_sync && staleStages.length
           ? el("label", { class: "check", title: stagesText }, [
               runFirst,
-              document.createTextNode("Run the pipeline first"),
+              document.createTextNode("Run pipeline"),
             ])
           : null,
         status.in_sync && staleStages.length

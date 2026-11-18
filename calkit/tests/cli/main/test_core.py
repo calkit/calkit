@@ -1998,6 +1998,35 @@ def test_run_downstream(tmp_dir):
     )
     assert os.path.exists("a.txt")
     assert os.path.exists("b.txt")
+    # An inline subproject's pipeline doesn't run in full alongside
+    os.makedirs("sub")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "other": {
+                            "kind": "shell-command",
+                            "command": "echo other > other.txt",
+                            "environment": "_system",
+                            "outputs": [
+                                {"path": "other.txt", "storage": "git"}
+                            ],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f) or {}
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(
+        ["calkit", "run", "--downstream", "stage-a", "--force"]
+    )
+    assert not os.path.exists("sub/other.txt")
 
 
 def test_stage_run_info_from_log_content():
@@ -4270,6 +4299,81 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
         assert f.read().split() == ["second", "second"]
 
 
+def test_run_skip(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    period_file = ".calkit/local/current-periods/1-day-utc.txt"
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": f"cat {period_file} > data.txt",
+                    "environment": "_system",
+                    "inputs": [{"kind": "schedule", "period": "1 day"}],
+                    "outputs": [{"path": "data.txt", "storage": "git"}],
+                },
+                "use": {
+                    "kind": "shell-command",
+                    "command": "cat data.txt > result.txt",
+                    "environment": "_system",
+                    "inputs": ["data.txt"],
+                    "outputs": [{"path": "result.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ) | {"CALKIT_NOW": "2026-10-20T08:00:00Z"}
+    subprocess.check_call(["calkit", "run"], env=env)
+    # The next day, a skipped stage keeps its output, what depends on it
+    # still runs from that, and even --strict doesn't fail on it
+    env["CALKIT_NOW"] = "2026-10-21T08:00:00Z"
+    ck_info["pipeline"]["stages"]["use"]["command"] = (
+        "cat data.txt data.txt > result.txt"
+    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open(STAGE_RUNS_FPATH) as f:
+        fetch_run = json.load(f)["fetch"]
+    res = subprocess.run(
+        ["calkit", "run", "--skip", "fetch", "--strict"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "Skipped out-of-date stage 'fetch' as requested" in res.stdout
+    assert "successfully" in res.stdout
+    assert "can't run" not in res.stdout + res.stderr
+    with open("data.txt") as f:
+        assert f.read().strip() == "2026-10-20"
+    with open("result.txt") as f:
+        assert f.read().split() == ["2026-10-20", "2026-10-20"]
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f)["fetch"] == fetch_run
+    runs = sorted(os.listdir(os.path.join(".calkit", "local", "runs")))
+    with open(os.path.join(".calkit", "local", "runs", runs[-1])) as f:
+        run_info = json.load(f)
+    assert run_info["stages"]["fetch"]["status"] == "skipped"
+    assert "fetch" not in run_info.get("gated", {})
+    # It stays out of date, so a run without the skip catches it up
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "fetch" in out
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("result.txt") as f:
+        assert f.read().split() == ["2026-10-21", "2026-10-21"]
+    # A stage that isn't there is an error rather than nothing skipped
+    res = subprocess.run(
+        ["calkit", "run", "--skip", "fetchh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "No stage to skip named: fetchh" in res.stdout + res.stderr
+
+
 def test_run_offers_requirements_of_stages_that_would_run(
     tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4384,6 +4488,16 @@ def test_run_offers_requirements_of_stages_that_would_run(
         res = runner.invoke(calkit_app, args, input="\n")
         assert res.exit_code != 0
         assert "'fetch' is out of date and couldn't run" in res.output
+    # Nor is anything asked for stages skipped by name, which stay skipped
+    res = runner.invoke(
+        calkit_app,
+        ["run", "--skip", "fetch", "--skip", "fetch2"],
+        input="third\n",
+    )
+    assert res.exit_code == 0, res.output
+    assert "Missing env var" not in res.output
+    with open("data.txt") as f:
+        assert f.read().strip() == "second"
     # Without a terminal nothing is asked
     monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
     res = runner.invoke(calkit_app, ["run"], input="third\n")

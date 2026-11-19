@@ -68,7 +68,7 @@ LOOKUP_RESCAN_SECONDS = 600
 FILE_GIT_MAX_BYTES = 1_000_000
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
-JOB_KINDS = ("run", "sync", "clone", "install-editor")
+JOB_KINDS = ("run", "sync", "clone", "create", "install-editor")
 # Those that change a checkout, so only one at a time works on each
 CHECKOUT_JOB_KINDS = ("run", "sync")
 # A job that hasn't started by then never will, e.g., its process died first
@@ -1312,8 +1312,12 @@ def start_job(msg: dict) -> dict:
     """Start a job for a project, in a process of its own: running its
     pipeline, then saving and syncing with Overleaf unless ``sync`` is
     false, as ``calkit run --save --overleaf`` does, syncing a
-    folder with Overleaf, or cloning it to a ``location``, returning its
-    record.
+    folder with Overleaf, cloning it to a ``location``, or creating it on a
+    ``hub`` from a folder here at ``location``, with an Overleaf project
+    imported into it, returning its record.
+
+    A job runs ``cmd``, then each of ``then`` in turn, stopping at the
+    first that fails.
     """
     import uuid
     from datetime import datetime, timezone
@@ -1327,6 +1331,53 @@ def start_job(msg: dict) -> dict:
         # VS Code, the only editor Calkit installs, for opening the project
         wdir = calkit.get_user_home()
         cmd = calkit_cmd + ["install", "code", "--yes"]
+    elif kind == "create":
+        # A folder here, e.g., the analysis a paper on Overleaf is written
+        # from, made a project on the hub, signing in first if need be,
+        # with the paper imported into it and pushed
+        location = msg.get("location")
+        if not isinstance(location, str) or not location:
+            raise ValueError("A folder is needed")
+        location = os.path.abspath(os.path.expanduser(location))
+        check_clone_location(location)
+        if not os.path.isdir(location):
+            raise ValueError(f"{location} isn't a folder")
+        if os.path.exists(os.path.join(location, ".git")):
+            raise ValueError(f"{location} is already a Git repo")
+        hub = msg.get("hub")
+        title = msg.get("title")
+        overleaf_url = msg.get("overleafProjectUrl")
+        path = msg.get("path")
+        doc_kind = msg.get("docKind")
+        if not isinstance(hub, str) or not re.fullmatch(
+            r"https?://[\w.:-]+/?", hub
+        ):
+            raise ValueError("A hub URL is needed")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("A title is needed")
+        if not isinstance(overleaf_url, str) or not re.fullmatch(
+            r"https://www\.overleaf\.com/project/[0-9a-f]+", overleaf_url
+        ):
+            raise ValueError("An Overleaf project URL is needed")
+        if not isinstance(path, str) or not re.fullmatch(
+            r"[\w-]+(/[\w-]+)*", path
+        ):
+            raise ValueError("A folder for the document is needed")
+        if not isinstance(doc_kind, str) or not re.fullmatch(
+            r"[a-z-]+", doc_kind
+        ):
+            raise ValueError("A kind of document is needed")
+        wdir = location
+        cmd = calkit_cmd + ["hub", "login", "--hub", hub]
+        then = [
+            calkit_cmd
+            + ["new", "project", ".", "--hub", hub, "--name", name]
+            + ["--title", title.strip()]
+            + (["--public"] if msg.get("isPublic") else []),
+            calkit_cmd
+            + ["overleaf", "import", overleaf_url, path, "--kind", doc_kind],
+            calkit_cmd + ["push", "git"],
+        ]
     elif kind == "clone":
         location = msg.get("location") or os.path.join(
             calkit.get_user_home(), "calkit", name
@@ -1335,10 +1386,8 @@ def start_job(msg: dict) -> dict:
             raise ValueError("A location must be a string")
         location = os.path.abspath(os.path.expanduser(location))
         check_clone_location(location)
-        # A folder with files in it, e.g., the analysis, gets the project's
-        # files around them, but not if it's a repo already
-        if os.path.exists(os.path.join(location, ".git")):
-            raise ValueError(f"{location} is already a Git repo")
+        if os.path.exists(location) and os.listdir(location):
+            raise ValueError(f"{location} is already there and isn't empty")
         wdir = os.path.dirname(location)
         os.makedirs(wdir, exist_ok=True)
         cmd = calkit_cmd + ["clone", f"{owner}/{name}", location]
@@ -1371,7 +1420,7 @@ def start_job(msg: dict) -> dict:
                 )
     job_id = uuid.uuid4().hex
     repo_info: dict[str, Any] = {"git_rev": None, "branch": None}
-    if kind not in ("clone", "install-editor"):
+    if kind not in ("clone", "create", "install-editor"):
         from calkit.git import get_repo
 
         repo = get_repo(wdir)
@@ -1384,8 +1433,9 @@ def start_job(msg: dict) -> dict:
         "kind": kind,
         "project": f"{owner}/{name}",
         "wdir": wdir,
-        "location": cmd[-1] if kind == "clone" else None,
+        "location": location if kind in ("clone", "create") else None,
         "cmd": cmd,
+        "then": then if kind == "create" else [],
         "status": "queued",
         "created": datetime.now(timezone.utc).isoformat(),
         "started": None,
@@ -1503,26 +1553,29 @@ def run_job(job_id: str) -> None:
             job["log_path"] = get_run_log_path(job["wdir"], job["started"])
 
     try:
-        proc = subprocess.Popen(
-            job["cmd"],
-            cwd=job["wdir"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            env=os.environ | {"PYTHONUNBUFFERED": "1"},
-            text=True,
-            errors="replace",
-        )
-        reader = threading.Thread(target=read_output, args=(proc.stdout,))
-        reader.start()
-        while True:
-            try:
-                returncode = proc.wait(timeout=JOB_SAVE_SECONDS)
+        for cmd in [job["cmd"], *job.get("then", [])]:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=job["wdir"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                env=os.environ | {"PYTHONUNBUFFERED": "1"},
+                text=True,
+                errors="replace",
+            )
+            reader = threading.Thread(target=read_output, args=(proc.stdout,))
+            reader.start()
+            while True:
+                try:
+                    returncode = proc.wait(timeout=JOB_SAVE_SECONDS)
+                    break
+                except subprocess.TimeoutExpired:
+                    update(job)
+                    save(job)
+            reader.join()
+            if returncode != 0:
                 break
-            except subprocess.TimeoutExpired:
-                update(job)
-                save(job)
-        reader.join()
     except OSError as e:
         tail.append(str(e))
         returncode = 1
@@ -1547,13 +1600,19 @@ def run_job(job_id: str) -> None:
             }
     else:
         job["status"] = "succeeded"
-        if job["kind"] == "clone":
-            job["result"] = {"path": job["location"]}
+        if job["kind"] in ("clone", "create"):
+            project = job["project"]
+            # As the hub named a new one, which is only known now
+            if job["kind"] == "create":
+                ck_info = calkit.load_calkit_info(wdir=job["location"])
+                if ck_info.get("owner") and ck_info.get("name"):
+                    project = f"{ck_info['owner']}/{ck_info['name']}"
+            job["result"] = {"path": job["location"], "project": project}
             calkit.record_project_path(job["location"])
             # So it's found, rather than none being, until that's looked
             # into again
             set_checkouts_found(
-                get_checkouts_key(*job["project"].split("/", 1)), None
+                get_checkouts_key(*project.split("/", 1)), None
             )
         elif job["kind"] == "sync":
             after = {"project": get_head(job["wdir"]), **get_overleaf_heads()}

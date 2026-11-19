@@ -798,6 +798,25 @@ async function handle(
       localCheckouts.delete(message.project);
       return chosen;
     }
+    case "local.createProject": {
+      const job = await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "create",
+          project: `${message.owner}/${message.name}`,
+          location: message.folder,
+          hub: message.hubUrl,
+          title: message.title,
+          overleafProjectUrl: message.overleafProjectUrl,
+          path: message.path,
+          docKind: message.kind,
+          isPublic: message.isPublic,
+        }),
+      );
+      const made = job.result as { path: string; project: string };
+      localCheckouts.delete(made.project);
+      return made;
+    }
     case "local.clone": {
       const job = await waitForJob(
         await askLocal<LocalJob>({

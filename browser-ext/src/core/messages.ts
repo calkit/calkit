@@ -291,6 +291,24 @@ export type Request =
       type: "local.chooseFolder";
       prompt: string;
     }
+  | {
+      /**
+       * A folder on this machine made a project on a hub, with an Overleaf
+       * project imported into it.
+       */
+      type: "local.createProject";
+      /** Who'll own it, for the job until the hub names it. */
+      owner: string;
+      name: string;
+      title: string;
+      isPublic: boolean;
+      folder: string;
+      overleafProjectUrl: string;
+      /** The document's folder in the project. */
+      path: string;
+      kind: string;
+      hubUrl: string;
+    }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */
   | { type: "local.installEditor"; project: string }
@@ -362,6 +380,7 @@ export interface ResponseMap {
   "local.publicationSource": { path: string; text: string };
   "local.publicationSynctex": string | null;
   "local.chooseFolder": { path: string | null; empty: boolean };
+  "local.createProject": { path: string; project: string };
   "local.openOptions": null;
   "local.installEditor": null;
   /**

@@ -684,6 +684,47 @@ def test_start_job(tmp_path, monkeypatch):
     run_only = start_job({"kind": "run", "project": "me/proj", "sync": False})
     assert run_only["cmd"] == calkit_cmd + ["run"]
     os.remove(calkit.browser_link.get_job_path(run_only["id"]))
+    # A project made from a folder here, signing in first, then importing
+    # the paper and pushing
+    analysis = home / "calkit" / "analysis"
+    analysis.mkdir()
+    (analysis / "fit.py").write_text("")
+    create = {
+        "kind": "create",
+        "project": "me/dye",
+        "location": str(analysis),
+        "hub": "http://localhost:5173",
+        "title": "Dye fading",
+        "overleafProjectUrl": "https://www.overleaf.com/project/abc123",
+        "path": "paper",
+        "docKind": "journal-article",
+        "isPublic": True,
+    }
+    creating = start_job(create)
+    hub = ["--hub", "http://localhost:5173"]
+    assert creating["wdir"] == str(analysis)
+    assert creating["location"] == str(analysis)
+    assert creating["cmd"] == calkit_cmd + ["hub", "login", *hub]
+    assert creating["then"] == [
+        calkit_cmd
+        + ["new", "project", ".", *hub, "--name", "dye"]
+        + ["--title", "Dye fading", "--public"],
+        calkit_cmd
+        + ["overleaf", "import", "https://www.overleaf.com/project/abc123"]
+        + ["paper", "--kind", "journal-article"],
+        calkit_cmd + ["push", "git"],
+    ]
+    os.remove(calkit.browser_link.get_job_path(creating["id"]))
+    for bad, error in [
+        ({"location": str(project)}, "already a Git repo"),
+        ({"location": str(analysis / "fit.py")}, "isn't a folder"),
+        ({"location": "~/.config"}, "Can't clone"),
+        ({"overleafProjectUrl": "https://x.org/project/1"}, "Overleaf"),
+        ({"path": "../up"}, "folder for the document"),
+        ({"hub": "file:///x"}, "hub URL"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            start_job(create | bad)
     # VS Code, the editor Calkit installs, from the user's home folder
     installing = start_job({"kind": "install-editor", "project": "me/proj"})
     assert installing["cmd"] == calkit_cmd + ["install", "code", "--yes"]
@@ -712,7 +753,7 @@ def test_start_job(tmp_path, monkeypatch):
         ({"kind": "run", "project": "me/gone"}, "isn't on this machine"),
         (
             {"kind": "clone", "project": "me/proj", "location": str(project)},
-            "already a Git repo",
+            "isn't empty",
         ),
         # Only to a folder of the user's own, not one config is read from
         (
@@ -727,29 +768,28 @@ def test_start_job(tmp_path, monkeypatch):
     ]:
         with pytest.raises(ValueError, match=error):
             start_job(msg)
-    # A folder with an analysis in it already gets the project around it
-    analysis = home / "calkit" / "analysis"
-    analysis.mkdir()
-    (analysis / "fit.py").write_text("")
-    cloning = start_job(
-        {"kind": "clone", "project": "me/x", "location": str(analysis)}
-    )
-    assert cloning["cmd"] == calkit_cmd + ["clone", "me/x", str(analysis)]
-    os.remove(calkit.browser_link.get_job_path(cloning["id"]))
     with pytest.raises(ValueError):
         get_job("../../etc/passwd")
     # Running it records how it went, with the error it ended with
     job_path = calkit.browser_link.get_job_path(job["id"])
 
-    def run(code):
+    def run(code, then=()):
         with open(job_path) as f:
             record = json.load(f)
         record["cmd"] = [sys.executable, "-c", code]
+        record["then"] = [[sys.executable, "-c", c] for c in then]
         with open(job_path, "w") as f:
             json.dump(record, f)
         run_job(job["id"])
         return get_job(job["id"])
 
+    # Each command after the first, until one fails
+    chained = run(
+        "print('One')",
+        then=["print('Two')", "import sys; sys.exit(3)", "print('Four')"],
+    )
+    assert chained["status"] == "failed" and chained["returncode"] == 3
+    assert chained["output"] == "One\nTwo"
     done = run("print('Ran it')")
     assert done["status"] == "succeeded" and done["output"] == "Ran it"
     assert "progress" not in done and not done["log_path"]

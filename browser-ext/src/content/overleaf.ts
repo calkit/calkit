@@ -2091,31 +2091,6 @@ function renderClone(project: string, reload: () => void): HTMLElement {
     class: "action",
     text: "Clone to this machine",
   });
-  // A folder with the analysis in it already becomes the project's, with
-  // the project's files around its own
-  const select = el("button", { text: "Select analysis folder" });
-  select.addEventListener("click", async () => {
-    clear(message);
-    try {
-      const chosen = await send({
-        type: "local.chooseFolder",
-        prompt: `Select analysis folder for ${name}`,
-      });
-      if (chosen.path) {
-        location.value = chosen.path;
-        clone.textContent = chosen.empty
-          ? "Clone to this machine"
-          : "Use folder";
-      }
-    } catch (e) {
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
-    }
-  });
-  location.addEventListener("input", () => {
-    clone.textContent = "Clone to this machine";
-  });
   clone.addEventListener("click", async () => {
     clone.disabled = true;
     clear(message).append(loading("Cloning"));
@@ -2140,11 +2115,7 @@ function renderClone(project: string, reload: () => void): HTMLElement {
         "This project isn't on this machine. Clone it to run, save, and " +
         "sync from here:",
     }),
-    el("div", { class: "row", style: { marginTop: "6px" } }, [
-      location,
-      select,
-    ]),
-    el("div", { class: "actions" }, [clone]),
+    el("div", { class: "row", style: { marginTop: "6px" } }, [location, clone]),
     message,
   ]);
 }
@@ -5445,8 +5416,19 @@ async function renderAttachForm(
   const message = el("div", { class: "small" });
   let repos: GithubRepo[] | null = null;
   let chosenRepo: GithubRepo | null = null;
+  // A folder on this machine with the analysis in it, which becomes the
+  // project, as 'calkit new project' makes one, rather than a new repo
+  let analysisFolder: string | null = null;
   const describe = () => {
     const folder = doc.folder();
+    if (analysisFolder) {
+      where.textContent =
+        `Calkit will make ${analysisFolder} a project, with a ` +
+        `${isPublic.checked ? "public" : "private"} repo, ${githubName}/` +
+        `${nameInput.value.trim() || "..."}, and this document's files in ` +
+        `${folder}/, kept in sync with Overleaf.`;
+      return;
+    }
     where.textContent = existsOnGithub.checked
       ? chosenRepo
         ? `Calkit will commit this document's files to ${folder}/ in ` +
@@ -5544,6 +5526,28 @@ async function renderAttachForm(
       if (existsOnGithub.checked && !chosenRepo) {
         throw new Error("Select a GitHub repo");
       }
+      // Made on this machine, which signs in to the hub if it needs to
+      if (analysisFolder) {
+        clear(message).append(loading("Creating project"));
+        const made = await send({
+          type: "local.createProject",
+          owner: githubName,
+          name,
+          title: titleInput.value.trim() || name,
+          isPublic: isPublic.checked,
+          folder: analysisFolder,
+          overleafProjectUrl: `https://www.overleaf.com/project/${overleafProjectId}`,
+          path: doc.folder(),
+          kind: doc.kind.value,
+          hubUrl: hubWebUrl,
+        });
+        await send({
+          type: "settings.set",
+          update: { activeProject: made.project },
+        });
+        reload();
+        return;
+      }
       if (!created) {
         clear(message).append(loading("Creating project"));
         try {
@@ -5614,18 +5618,49 @@ async function renderAttachForm(
       }
     }
   });
-  container.append(
-    el("label", { text: "Project title" }),
-    titleInput,
-    el("label", { text: "Project name" }),
-    nameInput,
-    el("label", { class: "row", style: { fontWeight: "400" } }, [
+  const existsField = el(
+    "label",
+    { class: "row", style: { fontWeight: "400" } },
+    [
       existsOnGithub,
       el("div", {
         class: "grow small",
         text: "This project already has a GitHub repo",
       }),
-    ]),
+    ],
+  );
+  const folderName = el("div", { class: "grow small dim" });
+  const selectFolder = el("button", { text: "Select analysis folder" });
+  selectFolder.addEventListener("click", async () => {
+    clear(message);
+    try {
+      const chosen = await send({
+        type: "local.chooseFolder",
+        prompt: "Select analysis folder",
+      });
+      if (!chosen.path) {
+        return;
+      }
+      analysisFolder = chosen.path;
+      folderName.textContent = chosen.path;
+      // Its own repo is made from it
+      existsOnGithub.checked = false;
+      syncGithubFields();
+      existsField.style.display = "none";
+      describe();
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  container.append(
+    el("label", { text: "Project title" }),
+    titleInput,
+    el("label", { text: "Project name" }),
+    nameInput,
+    el("div", { class: "row" }, [folderName, selectFolder]),
+    existsField,
     repoFields,
     publicField,
     ...doc.fields,

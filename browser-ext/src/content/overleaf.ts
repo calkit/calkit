@@ -2013,7 +2013,7 @@ function renderLocalChanges(
         );
       } else if (checkout.n_unsaved_files) {
         const message = el("div", { class: "small" });
-        const save = el("button", { text: "Save" });
+        const save = el("button", { class: "action secondary", text: "Save" });
         save.addEventListener("click", async () => {
           save.disabled = true;
           clear(message).append(loading("Saving"));
@@ -5727,7 +5727,10 @@ async function renderAttachForm(
     ],
   );
   const folderName = el("div", { class: "grow small dim" });
-  const selectFolder = el("button", { text: "Select analysis folder" });
+  const selectFolder = el("button", {
+    class: "action secondary",
+    text: "Select analysis folder",
+  });
   selectFolder.addEventListener("click", async () => {
     clear(message);
     try {

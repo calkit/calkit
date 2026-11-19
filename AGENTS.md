@@ -62,6 +62,9 @@ a feature in one function over many different test functions.
 
 Do not write docstrings in test functions.
 
+Start every TypeScript module, other than tests, with a doc comment saying
+what it's for, even if it's one sentence.
+
 Do not put blank lines inside function bodies; separate logical sections with
 comments instead. This only applies to blank lines we write, not ones the
 formatter inserts, e.g., ruff-format adds one after an in-function import
@@ -81,9 +84,10 @@ Always put a comma after "i.e." and "e.g.".
 Text people read in an app, e.g., labels, buttons, statuses, tooltips, and
 error messages, uses the fewest words that say it:
 
-- Drop articles and words the layout already implies, e.g., "Run pipeline"
-  rather than "Run the pipeline first", "Creating project" rather than
-  "Creating the project".
+- Drop articles, pronouns, and words the layout already implies, e.g.,
+  "Run pipeline" rather than "Run the pipeline first", "Creating project"
+  rather than "Creating the project", "Make public" rather than
+  "Make it public".
 - Put the adjective first, e.g., "unsaved changes" rather than
   "changes not saved".
 - Name the specific thing, or say the state plainly, rather than

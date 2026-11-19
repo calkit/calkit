@@ -1,3 +1,7 @@
+/**
+ * The service worker: signs in, calls hubs and this machine, and answers
+ * requests from content scripts and pages.
+ */
 import { ApiError, NotSignedInError, request } from "../core/api";
 import {
   announceAuthChange,
@@ -10,6 +14,7 @@ import {
   askLocal,
   forgetLocalStatus,
   getLocalStatus,
+  getLocalSynctexText,
   LocalError,
   type LocalJob,
 } from "../core/local";
@@ -34,6 +39,7 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  ImportUpdate,
   PipelineRun,
   ProjectPipeline,
   PipelineRuns,
@@ -377,11 +383,23 @@ async function handle(
       return request<Result[]>(
         `${projectPath(message.owner, message.project)}/results`,
       );
-    case "project.provenance":
+    case "project.provenance": {
+      // As it is on this machine, when it's here, including what isn't
+      // pushed yet
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<Provenance>({
+          type: "project.provenance",
+          project: local,
+          path: message.path,
+          key: message.key,
+        });
+      }
       return request<Provenance>(
         `${projectPath(message.owner, message.project)}/provenance`,
         { query: { path: message.path, key: message.key } },
       );
+    }
     case "project.stageFromScriptOrNotebook": {
       // Made from the script on this machine, and committed there, when
       // the project's here
@@ -446,6 +464,11 @@ async function handle(
         },
       );
     }
+    case "project.updateImport":
+      return request<ImportUpdate>(
+        `${projectPath(message.owner, message.project)}/imports/update`,
+        { method: "POST", body: { path: message.path } },
+      );
     case "project.pipeline": {
       // As it is on this machine, when it's here, rather than as pushed
       const project = `${message.owner}/${message.project}`;
@@ -764,6 +787,14 @@ async function handle(
         folder: message.folder,
         path: message.path,
       });
+    case "local.chooseFolder":
+      // However long someone takes to choose
+      return askLocal(
+        { type: "folder.choose", prompt: message.prompt },
+        30 * 60 * 1000,
+      );
+    case "local.publicationSynctex":
+      return getLocalSynctexText(message.project, message.folder);
     case "local.openOptions":
       await chrome.runtime.openOptionsPage();
       return null;
@@ -788,6 +819,54 @@ async function handle(
       });
       localCheckouts.delete(message.project);
       return chosen;
+    }
+    case "project.moveExternalData":
+      return askLocal({
+        type: "project.moveExternalData",
+        project: `${message.owner}/${message.project}`,
+        scriptPath: message.scriptPath,
+        external: message.external,
+        dest: message.dest,
+      });
+    case "project.originSuggestions": {
+      // Read from the scripts on this machine, when the project's here
+      const local = `${message.owner}/${message.project}`;
+      if (!(await getLocalCheckout(local)).path) {
+        return [];
+      }
+      return askLocal({
+        type: "project.originSuggestions",
+        project: local,
+        path: message.path,
+      });
+    }
+    case "local.save":
+      await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "save",
+          project: message.project,
+        }),
+      );
+      return null;
+    case "local.createProject": {
+      const job = await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "create",
+          project: `${message.owner}/${message.name}`,
+          location: message.folder,
+          hub: message.hubUrl,
+          title: message.title,
+          overleafProjectUrl: message.overleafProjectUrl,
+          path: message.path,
+          docKind: message.kind,
+          isPublic: message.isPublic,
+        }),
+      );
+      const made = job.result as { path: string; project: string };
+      localCheckouts.delete(made.project);
+      return made;
     }
     case "local.clone": {
       const job = await waitForJob(

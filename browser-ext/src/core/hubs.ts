@@ -1,3 +1,7 @@
+/**
+ * The hubs the extension knows, e.g., calkit.io and a local one, and how their
+ * web and API URLs relate.
+ */
 export interface Hub {
   /** Identifier stored in settings. */
   name: string;

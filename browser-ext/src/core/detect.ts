@@ -1,3 +1,7 @@
+/**
+ * What a URL or typed text names, e.g., a GitHub repo, an Overleaf project,
+ * a reference's DOI, or where an imported file came from.
+ */
 /** Pull the ``owner/repo`` out of a GitHub URL, if it names a repository. */
 export function getGithubRepo(url: string): string | null {
   const parsed = new URL(url);
@@ -282,4 +286,59 @@ export function getGithubPullNumber(url: string): number | null {
   }
   const number = Number(parts[3]);
   return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+/** Where an imported file came from, as calkit.yaml's `imported_from`. */
+export type ImportSource =
+  | { kind: "doi"; importedFrom: { doi: string } }
+  | {
+      kind: "git";
+      importedFrom: { git_repo_url: string; path: string; git_ref: string };
+    }
+  | { kind: "project"; importedFrom: { project: string; path: string } }
+  | { kind: "url"; importedFrom: { url: string } };
+
+/**
+ * Where a file came from, from one thing pasted: a DOI, a link to a file on
+ * GitHub, `owner/project/path` for another Calkit project, or any URL.
+ */
+export function getImportSource(text: string): ImportSource | null {
+  const value = text.trim();
+  if (!value) {
+    return null;
+  }
+  const doi = normalizeDoi(value);
+  if (doi) {
+    return { kind: "doi", importedFrom: { doi } };
+  }
+  if (!/^https?:\/\//i.test(value)) {
+    const parts = value.split("/").filter(Boolean);
+    return parts.length >= 3 && !value.includes(" ")
+      ? {
+          kind: "project",
+          importedFrom: {
+            project: parts.slice(0, 2).join("/"),
+            path: parts.slice(2).join("/"),
+          },
+        }
+      : null;
+  }
+  const url = new URL(value);
+  const parts = url.pathname.split("/").filter(Boolean);
+  // A file on GitHub, e.g., github.com/owner/repo/blob/main/data/x.csv
+  if (
+    url.hostname === "github.com" &&
+    ["blob", "tree"].includes(parts[2]) &&
+    parts.length >= 5
+  ) {
+    return {
+      kind: "git",
+      importedFrom: {
+        git_repo_url: `https://github.com/${parts[0]}/${parts[1]}`,
+        git_ref: decodeURIComponent(parts[3]),
+        path: parts.slice(4).map(decodeURIComponent).join("/"),
+      },
+    };
+  }
+  return { kind: "url", importedFrom: { url: value } };
 }

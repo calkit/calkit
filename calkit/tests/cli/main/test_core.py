@@ -5103,3 +5103,32 @@ def test_clone(monkeypatch):
     assert "doesn't match" in result.output and not hubs
     result = clone("a/b/c/d")
     assert "HUB/OWNER/NAME" in result.output and not hubs
+
+
+def test_run_untracks_git_tracked_outputs(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # A figure imported, e.g., from Overleaf, before a stage made it
+    with open("fig.txt", "w") as f:
+        f.write("imported\n")
+    subprocess.check_call(["git", "add", "fig.txt"])
+    subprocess.check_call(["git", "commit", "-qm", "Import figure"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo made > fig.txt",
+                "outputs": ["fig.txt"],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    result = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Stopped tracking fig.txt with Git" in result.stdout + result.stderr
+    assert not subprocess.check_output(
+        ["git", "ls-files", "--", "fig.txt"], text=True
+    ).strip()
+    with open("fig.txt") as f:
+        assert f.read() == "made\n"

@@ -203,6 +203,10 @@ export interface Provenance {
   origin?: string | null;
   origin_url?: string | null;
   origin_path?: string | null;
+  /** Imported from a Git repo or another project, so it can be updated. */
+  updatable?: boolean;
+  /** Whether its source has something newer, if that's known. */
+  update_available?: boolean | null;
   /** Data behind it, however far back, nothing records the origin of. */
   gaps?: ProvenanceGap[];
 }
@@ -226,6 +230,13 @@ export interface StageFile {
   created_by_me?: boolean;
 }
 
+export interface ImportUpdate {
+  path: string;
+  /** Whether the file changed, not only the commit it's recorded at. */
+  changed: boolean;
+  rev?: string | null;
+}
+
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */
 export interface StageFromScriptOrNotebookResponse {
   stage_name: string;
@@ -237,6 +248,8 @@ export interface StageFromScriptOrNotebookResponse {
   dependencies: string[];
   inputs: string[];
   outputs: string[];
+  /** Found by reading it or declared by its stage, not just shown. */
+  found_outputs?: string[];
   /** Inputs that aren't in the project and that no stage produces. */
   missing_inputs: string[];
   /** Data read from outside the project, as the script names it. */

@@ -1,3 +1,4 @@
+/** Which hub a project belongs to, from its calkit.yaml. */
 import { HUBS, normalizeHubUrl } from "./hubs";
 
 /**

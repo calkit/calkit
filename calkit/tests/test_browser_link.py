@@ -681,9 +681,61 @@ def test_start_job(tmp_path, monkeypatch):
         record = json.load(f)
     with open(job_path, "w") as f:
         json.dump(record | {"status": "succeeded"}, f)
+    # Saving everything, which waits its turn like a run or sync
+    saving = start_job({"kind": "save", "project": "me/proj"})
+    assert saving["cmd"] == calkit_cmd + [
+        "save",
+        "-a",
+        "-m",
+        "Save from Overleaf",
+    ]
+    with pytest.raises(ValueError, match="already saving"):
+        start_job({"kind": "save", "project": "me/proj"})
+    os.remove(calkit.browser_link.get_job_path(saving["id"]))
     run_only = start_job({"kind": "run", "project": "me/proj", "sync": False})
     assert run_only["cmd"] == calkit_cmd + ["run"]
     os.remove(calkit.browser_link.get_job_path(run_only["id"]))
+    # A project made from a folder here, signing in first, then importing
+    # the paper and saving everything
+    analysis = home / "calkit" / "analysis"
+    analysis.mkdir()
+    (analysis / "fit.py").write_text("")
+    create = {
+        "kind": "create",
+        "project": "me/dye",
+        "location": str(analysis),
+        "hub": "http://localhost:5173",
+        "title": "Dye fading",
+        "overleafProjectUrl": "https://www.overleaf.com/project/abc123",
+        "path": "paper",
+        "docKind": "journal-article",
+        "isPublic": True,
+    }
+    creating = start_job(create)
+    hub = ["--hub", "http://localhost:5173"]
+    assert creating["wdir"] == str(analysis)
+    assert creating["location"] == str(analysis)
+    assert creating["cmd"] == calkit_cmd + ["hub", "login", *hub]
+    assert creating["then"] == [
+        calkit_cmd
+        + ["new", "project", ".", *hub, "--name", "dye"]
+        + ["--title", "Dye fading", "--public"],
+        calkit_cmd
+        + ["overleaf", "import", "https://www.overleaf.com/project/abc123"]
+        + ["paper", "--kind", "journal-article"],
+        calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
+    ]
+    os.remove(calkit.browser_link.get_job_path(creating["id"]))
+    for bad, error in [
+        ({"location": str(project)}, "already a Git repo"),
+        ({"location": str(analysis / "fit.py")}, "isn't a folder"),
+        ({"location": "~/.config"}, "Can't clone"),
+        ({"overleafProjectUrl": "https://x.org/project/1"}, "Overleaf"),
+        ({"path": "../up"}, "folder for the document"),
+        ({"hub": "file:///x"}, "hub URL"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            start_job(create | bad)
     # VS Code, the editor Calkit installs, from the user's home folder
     installing = start_job({"kind": "install-editor", "project": "me/proj"})
     assert installing["cmd"] == calkit_cmd + ["install", "code", "--yes"]
@@ -732,15 +784,23 @@ def test_start_job(tmp_path, monkeypatch):
     # Running it records how it went, with the error it ended with
     job_path = calkit.browser_link.get_job_path(job["id"])
 
-    def run(code):
+    def run(code, then=()):
         with open(job_path) as f:
             record = json.load(f)
         record["cmd"] = [sys.executable, "-c", code]
+        record["then"] = [[sys.executable, "-c", c] for c in then]
         with open(job_path, "w") as f:
             json.dump(record, f)
         run_job(job["id"])
         return get_job(job["id"])
 
+    # Each command after the first, until one fails
+    chained = run(
+        "print('One')",
+        then=["print('Two')", "import sys; sys.exit(3)", "print('Four')"],
+    )
+    assert chained["status"] == "failed" and chained["returncode"] == 3
+    assert chained["output"] == "One\nTwo"
     done = run("print('Ran it')")
     assert done["status"] == "succeeded" and done["output"] == "Ran it"
     assert "progress" not in done and not done["log_path"]
@@ -1069,6 +1129,119 @@ def test_get_pipeline(tmp_path):
     assert status["make-b"]["status"] == "up-to-date"
 
 
+def test_get_provenance(tmp_path, monkeypatch):
+    from calkit.browser_link import get_provenance
+
+    home = make_home(tmp_path, monkeypatch)
+    # Committing with no Git config in the home folder
+    for var in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{var}_NAME", "T")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "t@example.com")
+    project = home / "calkit" / "proj"
+    project.mkdir(parents=True)
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    (project / "data.csv").write_text("x\n1\n")
+    stages = {
+        "summarize": {
+            "kind": "command",
+            "environment": "_system",
+            # The same in Windows' shell as in others
+            "command": (
+                f'"{sys.executable}" -c "import json; '
+                "json.dump({'n': 1}, open('results.json', 'w'))\""
+            ),
+            "inputs": ["data.csv"],
+            "outputs": ["results.json"],
+        },
+        "copy": {
+            "kind": "command",
+            "environment": "_system",
+            "command": (
+                f'"{sys.executable}" -c "'
+                "open('out-{n}.txt', 'w').write(open('in-{n}.txt').read())\""
+            ),
+            "inputs": ["in-{n}.txt"],
+            "outputs": ["out-{n}.txt"],
+            "iterate_over": [{"arg_name": "n", "values": ["x", "y"]}],
+        },
+        "draw": {
+            "kind": "command",
+            "environment": "_system",
+            "command": (
+                f'"{sys.executable}" -c "import os; '
+                "os.makedirs('figs', exist_ok=True); "
+                "open('figs/a.txt', 'w').write('a')\""
+            ),
+            "outputs": ["figs"],
+        },
+    }
+    for n in ["x", "y"]:
+        (project / f"in-{n}.txt").write_text(n)
+    with open(project / "calkit.yaml", "a") as f:
+        f.write("owner: me\nname: proj\n")
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    subprocess.check_call(["calkit", "run"], cwd=project)
+    # The pipeline's status is checked once for several asked for together
+    checks = []
+    real_get_status = calkit.pipeline.get_status
+
+    def get_status(*args, **kwargs):
+        checks.append(1)
+        return real_get_status(*args, **kwargs)
+
+    monkeypatch.setattr(calkit.pipeline, "get_status", get_status)
+    for path in ["results.png", "results.pdf"]:
+        assert not get_provenance(str(project), path)["exists"]
+    assert len(checks) == 1
+    # The stage that makes it here, its value, how fresh it is, and the
+    # data nothing records the origin of, as the hub says them
+    res = get_provenance(str(project), "results.json", key="n")
+    assert res["stage"] == "summarize" and res["value"] == 1
+    assert res["stage_status"]["status"] == "up-to-date"
+    assert res["inputs"] == ["data.csv"]
+    assert [g["path"] for g in res["gaps"]] == ["data.csv"]
+    assert get_reply(
+        {
+            "type": "project.provenance",
+            "project": "me/proj",
+            "path": "data.csv",
+        }
+    )["result"]["input_to_stages"] == ["summarize"]
+    # Each iteration has its own status, and an entry dvc.lock kept from
+    # before the stage was a matrix isn't taken for the current stage
+    (project / "in-y.txt").write_text("changed")
+    lock = calkit.ryaml.load((project / "dvc.lock").read_text())
+    lock["stages"] = {"copy": lock["stages"]["copy@x"], **lock["stages"]}
+    with open(project / "dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    res = get_provenance(str(project), "out-x.txt")
+    assert res["stage"] == "copy@x"
+    assert res["stage_status"]["status"] == "up-to-date"
+    res = get_provenance(str(project), "out-y.txt")
+    assert res["stage"] == "copy@y" and res["stale_reason"] == "pipeline"
+    # A file in a folder a stage makes is there when DVC has it, even if
+    # it isn't pulled, but not a name that folder doesn't have
+    (project / "figs" / "a.txt").unlink()
+    assert get_provenance(str(project), "figs/a.txt")["exists"]
+    assert not get_provenance(str(project), "figs/typo.txt")["exists"]
+    # Nothing a symlink takes outside the project is read
+    if sys.platform != "win32":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.json").write_text('{"n": 2}')
+        os.symlink(outside / "secret.json", project / "link.json")
+        os.symlink(outside, project / "ext")
+        for path in ["link.json", "ext/secret.json"]:
+            res = get_provenance(str(project), path, key="n")
+            assert res["value"] is None and not res["exists"]
+    # Only paths in the project
+    for path in ["../x", "/etc/passwd", 5]:
+        reply = get_reply(
+            {"type": "project.provenance", "project": "me/proj", "path": path}
+        )
+        assert not reply["ok"]
+
+
 def test_get_figures(tmp_path):
     from calkit.browser_link import get_figures
 
@@ -1211,6 +1384,55 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     assert repo.head.commit.hexsha == head
 
 
+def test_move_external_data(tmp_path, monkeypatch):
+    from calkit.browser_link import move_external_data
+
+    for var in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{var}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "test@example.com")
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    (tmp_path / "instrument").mkdir()
+    (tmp_path / "instrument" / "log.csv").write_text("t,T\n0,25\n")
+    script = "import pandas as pd\ndf = pd.read_csv('../instrument/log.csv')\n"
+    (project / "fit.py").write_text(script)
+    repo = calkit.git.get_repo(str(project))
+    repo.git.add("-A")
+    repo.git.commit("-m", "Start")
+    msg = {
+        "scriptPath": "fit.py",
+        "external": "../instrument/log.csv",
+        "dest": "data/log.csv",
+    }
+    # Copied in, the script pointed at the copy, and both committed, with
+    # the original left where it was
+    res = move_external_data(str(project), msg)
+    assert res == {"path": "data/log.csv", "script_path": "fit.py"}
+    assert (project / "data" / "log.csv").read_text() == "t,T\n0,25\n"
+    assert "pd.read_csv('data/log.csv')" in (project / "fit.py").read_text()
+    assert (tmp_path / "instrument" / "log.csv").exists()
+    assert not repo.git.status("--porcelain")
+    assert repo.head.commit.message.strip() == (
+        "Move ../instrument/log.csv into the project as data/log.csv"
+    )
+    # Nothing in the project is replaced
+    (project / "fit.py").write_text(script)
+    with pytest.raises(ValueError, match="already in the project"):
+        move_external_data(str(project), msg)
+    # Nor is anything moved that the script doesn't name, or isn't here
+    (tmp_path / "log.csv").write_text("x")
+    with pytest.raises(ValueError, match="Couldn't find"):
+        move_external_data(
+            str(project), msg | {"external": "../log.csv", "dest": "data/x"}
+        )
+    with pytest.raises(ValueError, match="isn't on this machine"):
+        move_external_data(
+            str(project), msg | {"external": "../nope.csv", "dest": "data/y"}
+        )
+    assert not (project / "data" / "x").exists()
+
+
 def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     from calkit.browser_link import add_export_stage, record_origin
 
@@ -1274,8 +1496,12 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     ]:
         with pytest.raises(ValueError, match=error):
             add_export_stage(str(project), msg | bad)
+    # A dvc.yaml left unsaved, e.g., compiled by checking the pipeline's
+    # status, is compiled again and saved with it, not refused
+    (project / "dvc.yaml").write_text("# Stale\n")
     res = add_export_stage(str(project), msg)
     assert res["saved"] and res["name"] == "export-setup"
+    assert "Stale" not in (project / "dvc.yaml").read_text()
     ck_info = calkit.load_calkit_info(wdir=str(project))
     assert ck_info["pipeline"]["stages"]["export-setup"]["kind"] == (
         "manual-step"
@@ -1290,6 +1516,27 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     # The same figure can't be exported twice
     with pytest.raises(ValueError, match="is made by stage 'export-setup'"):
         add_export_stage(str(project), msg)
+    # Slides export with what's installed here, e.g., LibreOffice
+    monkeypatch.setattr(
+        calkit.export.Exporter,
+        "find_executable",
+        lambda self: "/bin/soffice" if self.name == "libreoffice" else None,
+    )
+    (project / "drawings" / "setup.pptx").write_bytes(b"pptx")
+    res = add_export_stage(
+        str(project),
+        {
+            "source": "drawings/setup.pptx",
+            "output": "figures/setup.pdf",
+            "files": [{"path": "drawings/setup.pptx", "created_by_me": True}],
+        },
+    )
+    ck_info = calkit.load_calkit_info(wdir=str(project))
+    env_name = ck_info["pipeline"]["stages"][res["name"]]["environment"]
+    assert ck_info["environments"][env_name] == {
+        "kind": "system",
+        "requirements": ["libreoffice"],
+    }
     # One too big for Git is stored with DVC
     (project / "drawings" / "big.psd").write_bytes(b"0" * 1_000_001)
     res = add_export_stage(
@@ -1335,3 +1582,36 @@ def test_get_content_paths(tmp_path):
         "results/fit.json",
         "script.py",
     ]
+
+
+def test_choose_folder(tmp_path, monkeypatch):
+    from calkit.browser_link import choose_folder
+
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    (analysis / "fit.py").write_text("")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    calls = []
+
+    def run(answer, returncode=0):
+        def fake(cmd, **kwargs):
+            calls.append((cmd, kwargs["env"]["CALKIT_PROMPT"]))
+            return subprocess.CompletedProcess(cmd, returncode, answer, "")
+
+        monkeypatch.setattr("subprocess.run", fake)
+        return choose_folder("Select a folder for proj")
+
+    # The prompt goes in the environment, so nothing in it is run
+    assert run(f"{analysis}/\n") == {"path": str(analysis), "empty": False}
+    assert calls[-1][1] == "Select a folder for proj"
+    assert run(f"{empty}\n") == {"path": str(empty), "empty": True}
+    # Cancelled
+    assert run("", returncode=1) == {"path": None, "empty": True}
+
+    def missing(cmd, **kwargs):
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr("subprocess.run", missing)
+    with pytest.raises(ValueError, match="no folder dialog"):
+        choose_folder("Select")

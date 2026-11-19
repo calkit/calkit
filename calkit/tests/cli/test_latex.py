@@ -585,6 +585,9 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
     with open("paper/main.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n"
+            # As a class testing for fonts does, which would otherwise
+            # leave an error waiting for an answer
+            "\\errorstopmode\\typeout{Mode \\the\\interactionmode}\n"
             "\\usepackage{amsmath}\n"
             "\\usepackage{siunitx} % \\usepackage{nonexistent}\n"
             "\\newcommand{\\tablepkg}{booktabs}\n"
@@ -596,6 +599,9 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
         ["calkit", "latex", "build", "-e", "tex", "paper/main.tex"]
     )
     assert os.path.isfile("paper/main.pdf")
+    # Still nonstop mode (1) after the document asks for error stop mode
+    with open("paper/main.log", encoding="utf-8", errors="replace") as f:
+        assert "Mode 1" in f.read()
     # What it was missing is recorded in the lock, and the spec stays as
     # written
     env = calkit.load_calkit_info()["environments"]["tex"]

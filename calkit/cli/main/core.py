@@ -5523,8 +5523,7 @@ def run_in_env(
             # commands it runs, which is how a stage is told apart from
             # someone running 'calkit xenv' themselves
             "-it"
-            if calkit.core.is_terminal(sys.stdin)
-            and not os.getenv("DVC_STAGE")
+            if calkit.core.is_tty() and not os.getenv("DVC_STAGE")
             else "-i",
             "--rm",
             "-w",

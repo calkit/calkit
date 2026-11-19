@@ -584,7 +584,15 @@ def _run_latexmk(
             )
             env = os.environ | env_vars
         try:
-            subprocess.run(cmd, env=env, check=True, capture_output=quiet)
+            # No stdin, so anything else that asks for input fails rather
+            # than waiting for an answer that never comes
+            subprocess.run(
+                cmd,
+                env=env,
+                check=True,
+                capture_output=quiet,
+                stdin=subprocess.DEVNULL,
+            )
             return 0
         except subprocess.CalledProcessError as e:
             status = e.returncode
@@ -980,7 +988,9 @@ def build(
     if aux_dir is not None:
         latexmk_cmd.append(f"-auxdir={rel_to_tex_dir(aux_dir)}")
     latexmk_cmd.append("-interaction=nonstopmode")
-    latexmk_cmd.append(f"-usepretex={calkit.latex.PDF_PRETEX}")
+    latexmk_cmd.append(
+        "-usepretex=" + calkit.latex.NONSTOP_PRETEX + calkit.latex.PDF_PRETEX
+    )
     # User pass-through args come last so they can override Calkit's defaults.
     latexmk_cmd += latexmk_args
     latexmk_cmd.append(tex_file)
@@ -2158,7 +2168,9 @@ def _build_diff(
             "-interaction=nonstopmode",
             f"-auxdir={rel_aux}",
             f"-outdir={rel_aux}",
-            f"-usepretex={calkit.latex.PDF_PRETEX}",
+            "-usepretex="
+            + calkit.latex.NONSTOP_PRETEX
+            + calkit.latex.PDF_PRETEX,
         ]
         if not verbose:
             latexmk_cmd.append("-silent")

@@ -259,7 +259,7 @@ function renderAddScript(
   const read = el("button", { class: "action", text: `Read the ${kind}` });
   const message = el("div", { class: "small" });
   const review = el("div", { class: "stack", style: { marginTop: "6px" } });
-  // On this computer, the script and its data are already in the project's
+  // On this machine, the script and its data are already in the project's
   // folder, so there's nothing to upload
   let isLocal = false;
   void send({ type: "local.checkout", project: `${owner}/${project}` })
@@ -361,7 +361,7 @@ function renderAddScript(
         style: { color: "var(--ck-warning)", marginTop: "4px" },
         text:
           `Reads ${external}, which is outside the project, so it will ` +
-          "only run on this computer. Move it into the project's folder, " +
+          "only run on this machine. Move it into the project's folder, " +
           "and change the script to read it from there.",
       });
     }
@@ -633,7 +633,7 @@ function renderExported(
   });
   const save = el("button", { class: "action", text: "Add export step" });
   const message = el("div", { class: "small" });
-  // On this computer, the file is already in the project's folder
+  // On this machine, the file is already in the project's folder
   let isLocal = false;
   void send({ type: "local.checkout", project: `${owner}/${project}` })
     .then((local) => {

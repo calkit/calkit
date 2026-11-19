@@ -75,6 +75,7 @@ import {
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import { isSyncedWithOverleaf } from "./overleaf/core";
 import {
+  checkOverleaf,
   registerOverleaf,
   setOverleafSynced,
   suggestCommitMessage,
@@ -1754,8 +1755,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, async () => {
       // refreshPipelineOutputContext already re-scans detected files; force the
-      // staleness check too, since the user explicitly asked to refresh.
+      // staleness check too, since the user explicitly asked to refresh, and
+      // ask Overleaf what's changed there
       void refreshPipelineOutputContext(context, true);
+      void checkOverleaf();
     }),
   );
 

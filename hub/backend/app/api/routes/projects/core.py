@@ -6594,6 +6594,12 @@ def _fetch_import(
             read_only=True,
         )
         rev = src_repo.head.commit.hexsha
+        source = {
+            "kind": "calkit",
+            "project": f"{src_owner}/{src_name}",
+            "path": src_path,
+            "git_repo_url": src_project.git_repo_url,
+        }
         tree = get_repo_tree_for_ref(src_repo, rev)
         # From Git or DVC storage, including a DVC file that project
         # imported in turn, whose bytes are in its source's storage
@@ -6617,6 +6623,12 @@ def _fetch_import(
     elif imported_from.get("git_repo_url"):
         if not imported_from.get("path"):
             raise HTTPException(422, "Name the file in that repo")
+        source = {
+            "kind": "git",
+            "repo_url": str(imported_from["git_repo_url"]),
+            "path": str(imported_from["path"]),
+            "ref": imported_from.get("git_ref"),
+        }
         with tempfile.TemporaryDirectory() as tmp:
             rev = app.imports.fetch_git_path(
                 str(imported_from["git_repo_url"]),
@@ -6639,8 +6651,9 @@ def _fetch_import(
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with open(dest, "wb") as f:
         f.write(content)
-    lock: dict[str, Any] = calkit.provenance.import_lock({}, dest, rev=rev)
-    return lock
+    return calkit.provenance.get_finished_lock(
+        {"source": source, "git_rev": rev}, dest
+    )
 
 
 class MiscArtifactPost(BaseModel):
@@ -6817,7 +6830,7 @@ def post_project_import_update(
         push_and_expire(project, repo)
         record_project_update(project, repo, session)
     return ImportUpdate(
-        path=path, changed=changed, rev=(lock or {}).get("rev")
+        path=path, changed=changed, rev=calkit.provenance.get_locked_rev(lock)
     )
 
 

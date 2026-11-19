@@ -1359,13 +1359,6 @@ def check_dep_exists(
         return True
     if system_info is not None and system_info.get(f"{name.lower()}_version"):
         return True
-    # Apps Calkit exports with can be installed off the PATH, e.g., as a
-    # macOS app bundle
-    from calkit.export import exporters
-
-    known = {e.name: e for e in exporters()}
-    if name.lower() in known:
-        return known[name.lower()].find_executable() is not None
     # Conda and mamba are frequently installed but not on the PATH (most
     # commonly on Windows), so search their typical install locations
     # rather than relying on the bare name being directly executable.
@@ -1383,6 +1376,13 @@ def check_dep_exists(
         from calkit.docx import find_soffice
 
         return find_soffice() is not None
+    # Apps Calkit exports with can be installed off the PATH, e.g., as a
+    # macOS app bundle
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if name.lower() in known:
+        return known[name.lower()].find_executable() is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":

@@ -343,7 +343,7 @@ def test_post_project_import_update(
         )
         assert resp.status_code == 200, resp.text
         assert (wdir / "paper" / "plot.png").read_bytes() == b"v1"
-        assert locks()["paper/plot.png"]["rev"] == src.head.commit.hexsha
+        assert locks()["paper/plot.png"]["git_rev"] == src.head.commit.hexsha
         assert not repo.git.status("--porcelain")
         # Nothing new
         update = "/projects/o/p/imports/update"
@@ -373,7 +373,7 @@ def test_post_project_import_update(
             "rev": src.head.commit.hexsha,
         }
         assert (wdir / "paper" / "plot.png").read_bytes() == b"v2"
-        assert locks()["paper/plot.png"]["rev"] == src.head.commit.hexsha
+        assert locks()["paper/plot.png"]["git_rev"] == src.head.commit.hexsha
         assert repo.head.commit.message.strip() == (
             "Update paper/plot.png from its source"
         )
@@ -401,7 +401,7 @@ def test_post_project_import_update(
         )
         assert resp.status_code == 200, resp.text
         assert (wdir / "paper" / "fig.png").read_bytes() == b"from git"
-        assert locks()["paper/fig.png"]["rev"] == "abc1234"
+        assert locks()["paper/fig.png"]["git_rev"] == "abc1234"
         # One too big to import, or a folder, leaves the file and its lock
         # as they were, so a later update still works
         lock_before = locks()["paper/fig.png"]

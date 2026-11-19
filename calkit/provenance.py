@@ -1374,7 +1374,7 @@ def _ref_and_path_resolve(repo_dir: str, ref: str, path: str) -> bool:
     return False
 
 
-def _with_state(lock: dict, dest_path: str) -> dict:
+def get_finished_lock(lock: dict, dest_path: str) -> dict:
     """Finish a lock entry with what every kind records: a checksum of what
     was fetched, and when. Fields with nothing to say are left out."""
     from datetime import datetime, timezone
@@ -1523,7 +1523,7 @@ def fetch(
             },
             "git_rev": rev,
         }
-        return imported_from, _with_state(lock, dest_path)
+        return imported_from, get_finished_lock(lock, dest_path)
     if (url := imported_from.get("url")) is not None:
         import requests
 
@@ -1554,7 +1554,7 @@ def fetch(
         finally:
             if os.path.exists(part_path):
                 os.remove(part_path)
-        return imported_from, _with_state(lock, dest_path)
+        return imported_from, get_finished_lock(lock, dest_path)
     if (project := imported_from.get("project")) is not None:
         import base64
 
@@ -1600,7 +1600,7 @@ def fetch(
         if content is not None:
             with open(dest_path, "wb") as f:
                 f.write(base64.b64decode(content))
-            return imported_from, _with_state(lock, dest_path)
+            return imported_from, get_finished_lock(lock, dest_path)
         download_url = contents.get("url")
         if download_url is None:
             raise ValueError(f"Could not fetch {src_path} from {project}")
@@ -1608,7 +1608,7 @@ def fetch(
         # URL branch above finishes the job. The entry still records the
         # project, since that is where the file came from.
         fetch({"url": download_url}, dest_path=dest_path)
-        return imported_from, _with_state(lock, dest_path)
+        return imported_from, get_finished_lock(lock, dest_path)
     if imported_from.get("doi") is not None:
         raise ValueError(
             "Fetching by DOI is not supported here, since a DOI resolves to "

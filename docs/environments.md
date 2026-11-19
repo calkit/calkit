@@ -1240,6 +1240,22 @@ Run any TeX program in it with `calkit xenv`, e.g.:
 calkit xenv -n tex -- latexmk -lualatex paper.tex
 ```
 
+<!-- TODO: needs human review -->
+
+In VS Code, `calkit update vscode-config` and `calkit update devcontainer`
+set up LaTeX Workshop to build each document in the environment its stage
+uses, the same way the pipeline does, rather than in Docker.
+
+To download TeX Live's base packages ahead of time, e.g., when setting up a
+computer or a container image, run:
+
+```sh
+calkit latex warm-cache
+```
+
+Calkit's dev container image comes with them, so a new container's first
+build is quicker.
+
 The environment only sees fonts from TeX Live packages, not those
 installed on your computer, so a document builds the same everywhere.
 

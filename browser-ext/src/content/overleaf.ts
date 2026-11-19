@@ -1030,7 +1030,7 @@ function activeRun(): PipelineRun | null {
 function remountLauncher(): void {
   if (!panel && currentProjectId) {
     const id = currentProjectId;
-    mountLauncher(() => openPanel(id), launcherTone());
+    mountLauncher(() => openPanel(id), launcherTone(), true);
   }
 }
 
@@ -6056,9 +6056,21 @@ type LauncherTone =
   | "syncing"
   | "origins";
 
-function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
-  document.getElementById(LAUNCHER_ID)?.remove();
+function mountLauncher(
+  onClick: () => void,
+  tone: LauncherTone = "idle",
+  keep = false,
+): void {
+  const missing = getComponentsWithoutOrigin().length;
+  const state = `${currentProjectId}|${tone}|${missing}`;
+  // Redrawn only for a change, since one under a click would swallow it
+  const existing = document.getElementById(LAUNCHER_ID);
+  if (keep && existing?.dataset.state === state) {
+    return;
+  }
+  existing?.remove();
   const host = el("div", { attrs: { id: LAUNCHER_ID } });
+  host.dataset.state = state;
   Object.assign(host.style, {
     position: "fixed",
     ...launcherPosition(),
@@ -6084,7 +6096,6 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
     button.attention { background: #d69e2e; }
     button.danger { background: #e5484d; }
   `;
-  const missing = getComponentsWithoutOrigin().length;
   const button = el("button", {
     text: {
       idle: "Calkit",

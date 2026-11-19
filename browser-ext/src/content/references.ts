@@ -260,7 +260,7 @@ async function renderAddForm(
     container.append(
       el("div", {
         class: "dim small",
-        text: "Pick an active project above to add this reference to it.",
+        text: "Select an active project above to add this reference to it.",
       }),
     );
     return;
@@ -297,7 +297,7 @@ async function renderAddForm(
       clear(message).append(
         el("span", {
           class: "dim",
-          text: "Already in this collection. Pick another, or a different project.",
+          text: "Already in this collection. Select another, or a different project.",
         }),
       );
     }
@@ -468,7 +468,7 @@ async function openPanel(reference: DetectedReference): Promise<void> {
           style: { marginTop: "8px" },
           text: settings.activeProject
             ? `Not in any collection in ${settings.activeProject}.`
-            : "Pick a project above to check it.",
+            : "Select a project above to check it.",
         }),
       );
     }

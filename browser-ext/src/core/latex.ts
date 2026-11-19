@@ -231,6 +231,23 @@ export function citationProblems(
     });
   }
   if (provenance.stale_reason) {
+    // What was modified, as its stage's status says, when it does
+    const status = provenance.stage_status;
+    const changed = [
+      ...(status?.modified_command ? ["command"] : []),
+      ...(status?.modified_inputs ?? []),
+    ];
+    const shown =
+      changed.length > 3
+        ? [...changed.slice(0, 2), `${changed.length - 2} more`]
+        : changed;
+    const modified = shown.length
+      ? `${
+          shown.length > 1
+            ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`
+            : shown[0]
+        } modified`
+      : "";
     problems.push({
       severity: "warning",
       kind: "stale",
@@ -240,9 +257,10 @@ export function citationProblems(
             "writes has moved since it ran"
           : // Made manually, so someone has to do it again
           provenance.stage_kind === "manual-step"
-          ? "Needs a manual step, since what it's made from changed" +
+          ? "Needs a manual step" +
+            (modified ? ` (${modified})` : "") +
             (provenance.message ? `: ${provenance.message}` : "")
-          : "Out of date: what it's made from changed since it last ran",
+          : "Out of date" + (modified ? `: ${modified}` : ""),
       path,
     });
   }

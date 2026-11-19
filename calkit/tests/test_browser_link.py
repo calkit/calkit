@@ -8,11 +8,15 @@ import shutil
 import struct
 import subprocess
 import sys
+from unittest.mock import Mock
 
 import pytest
 
 import calkit
 import calkit.config
+import calkit.git
+import calkit.pipeline
+import calkit.pipeline.detect
 from calkit.browser_link import (
     get_editor_info,
     get_host_status,
@@ -132,7 +136,7 @@ def test_get_reply(tmp_path, monkeypatch):
     reply = get_reply({"type": "project.open", "project": "me/gone", "id": 3})
     assert reply["id"] == 3 and not reply["ok"]
     assert reply["error"] == (
-        "me/gone isn't on this computer; clone it with 'calkit clone me/gone'"
+        "me/gone isn't on this machine; clone it with 'calkit clone me/gone'"
     )
     reply = get_reply({"type": "project.open", "project": "me/far", "path": 1})
     assert reply["error"] == "A path must be a string"
@@ -705,7 +709,7 @@ def test_start_job(tmp_path, monkeypatch):
     for msg, error in [
         ({"kind": "rm", "project": "me/proj"}, "Unknown kind"),
         ({"kind": "sync", "project": "me/proj"}, "folder"),
-        ({"kind": "run", "project": "me/gone"}, "isn't on this computer"),
+        ({"kind": "run", "project": "me/gone"}, "isn't on this machine"),
         (
             {"kind": "clone", "project": "me/proj", "location": str(project)},
             "isn't empty",
@@ -887,7 +891,11 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     import time
 
     import calkit.browser_link
-    from calkit.browser_link import get_pdf_chunk, get_pdf_path
+    from calkit.browser_link import (
+        get_pdf_chunk,
+        get_pdf_path,
+        get_source_text,
+    )
 
     home = make_home(tmp_path, monkeypatch)
     project = home / "calkit" / "proj"
@@ -956,6 +964,37 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
     assert get_pdf_chunk(str(project), "paper", 0)["changed_since_commit"]
     with pytest.raises(ValueError, match="hasn't been built"):
         get_pdf_chunk(str(project), "notes", 0)
+    # Its SyncTeX file the same way, with only when it was built
+    (project / "paper" / "main.synctex.gz").write_bytes(b"synctex")
+    reply = get_reply(
+        {
+            "type": "publication.synctex",
+            "project": "me/proj",
+            "folder": "paper",
+            "offset": 0,
+        }
+    )
+    assert reply["result"]["path"] == "paper/main.synctex.gz"
+    assert base64.b64decode(reply["result"]["data"]) == b"synctex"
+    assert "built" in reply["result"]
+    assert "commit_sha" not in reply["result"]
+    # A LaTeX file in the folder as it is here, by its path on Overleaf
+    reply = get_reply(
+        {
+            "type": "publication.source",
+            "project": "me/proj",
+            "folder": "paper",
+            "path": "café.tex",
+        }
+    )
+    assert reply["result"] == {"path": "paper/café.tex", "text": "Hi\n"}
+    for path, error in [
+        ("../calkit.yaml", "isn't in paper"),
+        ("main.pdf", "isn't a LaTeX file"),
+        ("none.tex", "isn't on this machine"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            get_source_text(str(project), "paper", path)
     # Never one outside the project, e.g., through a link
     if os.name != "nt":
         (tmp_path / "outside.pdf").write_bytes(pdf)
@@ -1050,3 +1089,249 @@ def test_get_figures(tmp_path):
         ],
         "total": 3,
     }
+
+
+def test_add_stage_from_script(tmp_path, monkeypatch):
+    from calkit.browser_link import add_stage_from_script
+
+    for var in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{var}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "test@example.com")
+    project = tmp_path / "project"
+    (project / "scripts").mkdir(parents=True)
+    (project / "paper" / "figures").mkdir(parents=True)
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    (project / "calkit.yaml").write_text(
+        "overleaf_sync:\n  paper:\n    url: https://www.overleaf.com/project/abc\n"
+    )
+    paper = (
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "\\includegraphics[width=\\linewidth]{figures/fit}\n"
+        "\\end{document}\n"
+    )
+    (project / "paper" / "paper.tex").write_text(paper)
+    (project / "paper" / "figures" / "fit.png").write_text("png")
+    (project / "notes.txt").write_text("first")
+    repo = calkit.git.get_repo(str(project))
+    repo.git.add("-A")
+    repo.git.commit("-m", "Start")
+    script = (
+        "import matplotlib.pyplot as plt\n"
+        "import pandas as pd\n"
+        "df = pd.read_csv('data/raw.csv')\n"
+        "fig, ax = plt.subplots()\n"
+        "fig.savefig('figures/fit.png')\n"
+    )
+    (project / "scripts" / "plot.py").write_text(script)
+    msg = {"scriptPath": "scripts/plot.py", "shows": "paper/figures/fit.png"}
+    # Read, not saved, leaving the checkout as it was
+    res = add_stage_from_script(str(project), msg)
+    assert not res["saved"]
+    assert res["stage_name"] == "plot"
+    assert res["environment_is_new"]
+    assert set(res["dependencies"]) == {"matplotlib", "pandas"}
+    assert res["inputs"] == ["data/raw.csv"]
+    assert res["missing_inputs"] == ["data/raw.csv"]
+    assert res["outputs"] == ["figures/fit.png"]
+    assert res["produces"] == "figures/fit.png"
+    assert res["included_in"] == ["paper/paper.tex"]
+    assert repo.git.status("--porcelain", "-uall") == "?? scripts/plot.py"
+    # Detection failing leaves the host where it was
+    cwd = os.getcwd()
+    with monkeypatch.context() as m:
+        m.setattr(
+            calkit.pipeline.detect,
+            "detect_stage",
+            Mock(side_effect=ValueError("no")),
+        )
+        with pytest.raises(ValueError, match="no"):
+            add_stage_from_script(str(project), msg)
+    assert os.getcwd() == cwd
+    # A path given in full is the same script
+    full_msg = msg | {"scriptPath": str(project / "scripts" / "plot.py")}
+    assert (
+        add_stage_from_script(str(project), full_msg)["stage_name"] == "plot"
+    )
+    # Uploads, data, and paths outside the project are for the hub
+    for bad, error in [
+        ({"content": "cHJpbnQoMSk="}, "folder on this machine"),
+        ({"data": [{"external": "/x", "path": "data/x"}]}, "Move the data"),
+        ({"scriptPath": "../plot.py"}, "isn't in the project"),
+        ({"scriptPath": "scripts/none.py"}, "isn't in the project"),
+        ({"scriptPath": "notes.txt"}, "Scripts can be"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            add_stage_from_script(str(project), msg | bad)
+    # Unsaved edits to what it changes aren't swept up or overwritten
+    (project / "paper" / "paper.tex").write_text(paper + "% draft\n")
+    with pytest.raises(ValueError, match="paper/paper.tex has changes"):
+        add_stage_from_script(str(project), msg | {"save": True})
+    (project / "paper" / "paper.tex").write_text(paper)
+    # Saved: only what it wrote is committed, and nothing else changed here
+    (project / "notes.txt").write_text("second")
+    # A save that fails is undone, so a try again isn't refused
+    with monkeypatch.context() as m:
+        m.setattr(
+            calkit.pipeline, "to_dvc", Mock(side_effect=RuntimeError("no"))
+        )
+        with pytest.raises(RuntimeError):
+            add_stage_from_script(str(project), msg | {"save": True})
+    assert repo.git.status("--porcelain", "-uall").splitlines() == [
+        " M notes.txt",
+        "?? scripts/plot.py",
+    ]
+    res = add_stage_from_script(str(project), msg | {"save": True})
+    assert res["saved"]
+    ck_info = calkit.load_calkit_info(wdir=str(project))
+    stage = ck_info["pipeline"]["stages"]["plot"]
+    assert stage["script_path"] == "scripts/plot.py"
+    assert stage["environment"] in ck_info["environments"]
+    assert (
+        "\\ckfigure[width=\\linewidth]{figures/fit.png}"
+        in (project / "paper" / "paper.tex").read_text()
+    )
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split()
+    assert {
+        "calkit.yaml",
+        "dvc.yaml",
+        "paper/paper.tex",
+        "scripts/plot.py",
+        res["environment_spec_path"],
+    } <= set(committed)
+    assert "notes.txt" not in committed
+    assert repo.git.status("--porcelain") == " M notes.txt"
+    # Asked again for what the document now shows, it's the stage as saved,
+    # with nothing new to commit
+    head = repo.head.commit.hexsha
+    again = msg | {"shows": "figures/fit.png", "save": True}
+    res = add_stage_from_script(str(project), again)
+    assert res["produces"] == "figures/fit.png"
+    assert res["outputs"] == ["figures/fit.png"]
+    assert repo.head.commit.hexsha == head
+
+
+def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
+    from calkit.browser_link import add_export_stage, record_origin
+
+    for var in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{var}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "test@example.com")
+    project = tmp_path / "project"
+    (project / "drawings").mkdir(parents=True)
+    (project / "figures").mkdir()
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    repo = calkit.git.get_repo(str(project))
+    repo.git.config("user.email", "test@example.com")
+    repo.git.config("user.name", "Test")
+    (project / "figures" / "photo.jpg").write_bytes(b"jpg")
+    (project / "notes.txt").write_text("first")
+    repo.git.add("-A")
+    repo.git.commit("-m", "Start")
+    (project / "notes.txt").write_text("second")
+    # Where a file came from, committed alone
+    person = [{"name": "Pat", "email": "pat@example.com"}]
+    entry = record_origin(
+        str(project), {"path": "./figures/photo.jpg", "createdBy": person}
+    )
+    assert entry["path"] == "figures/photo.jpg"
+    ck_info = calkit.load_calkit_info(wdir=str(project))
+    assert ck_info["misc"][0]["created_by"][0]["email"] == "pat@example.com"
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split()
+    assert committed == ["calkit.yaml"]
+    for msg, error in [
+        ({"path": "figures/none.jpg", "createdBy": person}, "isn't in"),
+        ({"path": "figures/photo.jpg", "createdBy": person}, "already"),
+        ({"path": "figures/photo.jpg"}, "who created it or where"),
+        ({"path": "../x.jpg", "createdBy": person}, "isn't in the project"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            record_origin(str(project), msg)
+    # An export stage, shown first and then added, with the file it's
+    # drawn in, made by whoever commits here, committed alongside
+    (project / "drawings" / "setup.psd").write_bytes(b"psd")
+    (project / "drawings" / "ignored.psd").write_bytes(b"psd")
+    (project / ".git" / "info" / "exclude").write_text("ignored.psd\n")
+    msg = {
+        "source": "drawings/setup.psd",
+        "output": "figures/setup.png",
+        "app": "Photoshop",
+        "files": [{"path": "drawings/setup.psd", "created_by_me": True}],
+    }
+    head = repo.head.commit.hexsha
+    shown = add_export_stage(str(project), msg | {"save": False})
+    assert not shown["saved"] and shown["name"] == "export-setup"
+    assert shown["stage"]["kind"] == "manual-step"
+    assert repo.head.commit.hexsha == head
+    for bad, error in [
+        (
+            {"files": [{"path": "drawings/setup.psd", "content": "eA=="}]},
+            "on this machine",
+        ),
+        ({"files": [{"path": "drawings/none.psd"}]}, "isn't in the project"),
+        ({"files": [{"path": "drawings/ignored.psd"}]}, "ignored by Git"),
+        ({"output": "../setup.png"}, "isn't in the project"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            add_export_stage(str(project), msg | bad)
+    res = add_export_stage(str(project), msg)
+    assert res["saved"] and res["name"] == "export-setup"
+    ck_info = calkit.load_calkit_info(wdir=str(project))
+    assert ck_info["pipeline"]["stages"]["export-setup"]["kind"] == (
+        "manual-step"
+    )
+    made = [m for m in ck_info["misc"] if m["path"] == "drawings/setup.psd"]
+    assert made[0]["created_by"] == [
+        {"email": "test@example.com", "name": "Test"}
+    ]
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split()
+    assert {"calkit.yaml", "dvc.yaml", "drawings/setup.psd"} <= set(committed)
+    assert repo.git.status("--porcelain") == " M notes.txt"
+    # The same figure can't be exported twice
+    with pytest.raises(ValueError, match="is made by stage 'export-setup'"):
+        add_export_stage(str(project), msg)
+    # One too big for Git is stored with DVC
+    (project / "drawings" / "big.psd").write_bytes(b"0" * 1_000_001)
+    res = add_export_stage(
+        str(project),
+        {
+            "source": "drawings/big.psd",
+            "output": "figures/big.png",
+            "app": "Photoshop",
+            "files": [{"path": "drawings/big.psd"}],
+        },
+    )
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split()
+    assert "drawings/big.psd.dvc" in committed
+    assert "drawings/big.psd" not in committed
+    assert repo.git.status("--porcelain") == " M notes.txt"
+
+
+def test_get_content_paths(tmp_path):
+    from calkit.browser_link import get_content_paths
+
+    project = tmp_path / "project"
+    (project / ".dvc").mkdir(parents=True)
+    (project / "data").mkdir()
+    subprocess.check_call(["git", "init", "-q"], cwd=project)
+    (project / ".gitignore").write_text("*.log\n/data/raw.csv\n")
+    (project / ".dvc" / "config").write_text("")
+    (project / "data" / "raw.csv.dvc").write_text("outs:\n- path: raw.csv\n")
+    (project / "run.log").write_text("")
+    (project / "script.py").write_text("")
+    (project / "dvc.lock").write_text(
+        "schema: '2.0'\nstages:\n  fit:\n    outs:\n"
+        "    - path: results/fit.json\n      md5: abc\n"
+        "    - path: results/plots\n      md5: def.dir\n"
+    )
+    repo = calkit.git.get_repo(str(project))
+    repo.git.add(".gitignore", "data/raw.csv.dvc", ".dvc/config", "dvc.lock")
+    # Tracked, made by the pipeline, and not saved yet, but not ignored, DVC
+    # internals, or folders the pipeline makes
+    assert get_content_paths(str(project)) == [
+        ".gitignore",
+        "data/raw.csv",
+        "dvc.lock",
+        "results/fit.json",
+        "script.py",
+    ]

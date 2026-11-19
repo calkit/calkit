@@ -2381,7 +2381,7 @@ def push(
                 if asked_for_docker:
                     warn(
                         "No local image for Docker environment "
-                        f"'{env_name}' to push; run the pipeline first"
+                        f"'{env_name}' to push; run pipeline"
                     )
                 continue
             pushable[env_name] = dict(info, identity=identity)
@@ -2619,6 +2619,10 @@ def ignore(
 # one in user scripts), so it's bracketed by these and skipped when parsing.
 STAGE_OUTPUT_START = "--- calkit stage output ---"
 STAGE_OUTPUT_END = "--- end calkit stage output ---"
+MPL_FONTS_DOCS_URL = (
+    "https://docs.calkit.org/environments/"
+    "#using-tex-from-python-eg-for-matplotlib"
+)
 # The machine properties recorded for each stage run
 STAGE_RUN_SYSTEM_PROPERTIES = (
     "machine_id",
@@ -2773,6 +2777,36 @@ def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
             # to have run
             res.setdefault(current_stage_name, [])
     return {name: "\n".join(lines) for name, lines in res.items()}
+
+
+def _get_matplotlib_font_warnings_by_stage(
+    log_content: str,
+) -> dict[str, list[str]]:
+    """Return Matplotlib's messages about fonts each stage couldn't find,
+    one per font family, from a run log.
+
+    Matplotlib has no strict mode: it draws with another font and only logs
+    a warning, which reaches the stage's stderr unless the script
+    configures logging otherwise.
+    """
+    import re
+
+    pattern = re.compile(
+        r"findfont: (((?:Font|Generic) family) (.+?) not found.*)"
+    )
+    res: dict[str, list[str]] = {}
+    stdout_by_stage = _stage_stdout_from_log_content(log_content)
+    for stage_name, output in stdout_by_stage.items():
+        # By family, since Matplotlib can report one as 'X' and as ['X']
+        messages: dict[tuple[str, str], str] = {}
+        for message, kind, family in pattern.findall(output):
+            # Without the final period, since they're joined into a sentence
+            messages.setdefault(
+                (kind, family.strip("[]")), message.strip().rstrip(".")
+            )
+        if messages:
+            res[stage_name] = list(messages.values())
+    return res
 
 
 def _stage_run_info_from_log_content(
@@ -3413,6 +3447,17 @@ def run(
             ),
         ),
     ] = False,
+    skip: Annotated[
+        list[str],
+        typer.Option(
+            "--skip",
+            help=(
+                "Skip stage, keeping its outputs, e.g., a scheduled one in CI "
+                "for pull requests."
+            ),
+            shell_complete=complete_stage_names,
+        ),
+    ] = [],
 ) -> dict:
     """Check requirements and run the pipeline."""
     import contextlib
@@ -3478,6 +3523,12 @@ def run(
                 gated |= retried
         except Exception as e:
             raise_error(f"Failed to check stage requirements: {e}")
+        # Those skipped as requested needn't be able to run, nor be offered
+        # what they need to
+        for name in skip:
+            gated.pop(name, None)
+            errors.pop(name, None)
+            unmet_requirements.pop(name, None)
         for stage_name, reason in errors.items():
             warn(f"Stage '{stage_name}' can't run: {reason}")
         gate_errors.update(errors)
@@ -3589,7 +3640,9 @@ def run(
     calkit.set_env_vars(ck_info=ck_info)
     # Stages that can't run here are skipped, keeping their outputs, and
     # their environments aren't checked
-    gated_stages: dict[str, str] = {}
+    gated_stages: dict[str, str] = {
+        name: calkit.dvc.SKIP_REQUESTED for name in skip
+    }
     gate_errors: dict[str, str] = {}
     # Those skipped for requirements, with them, which are offered for each
     # one that would run, and those skipped for another's missing output
@@ -3678,10 +3731,17 @@ def run(
         # environments are checked, since an environment declared there
         # must be in calkit.yaml before it can be created or entered.
         try:
-            calkit.pipeline.sync_markdown(ck_info=ck_info)
+            markdown = calkit.pipeline.sync_markdown(ck_info=ck_info)
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Failed to read markdown stages: {e}")
+        # A misspelled stage to skip would otherwise run
+        known = set(ck_info.get("pipeline", {}).get("stages", {})) | set(
+            markdown.ck_info.get("pipeline", {}).get("stages", {})
+        )
+        if unknown := [name for name in skip if name not in known]:
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            raise_error(f"No stage to skip named: {', '.join(unknown)}")
         # Stages that can't run here are skipped, keeping their outputs,
         # and their environments aren't checked
         gate(gate_stage_names)
@@ -4053,7 +4113,9 @@ def run(
     # Inline subprojects (no .dvc/ dir) share the parent DVC project.
     # Tell DVC to discover all pipelines so their dvc.yaml files are included,
     # unless the user already specified targets that include dvc.yaml paths
-    # (translated from subproject shorthand) or --all-pipelines was passed.
+    # (translated from subproject shorthand), named stages to start from
+    # with --downstream, which all pipelines would run in full instead, or
+    # passed --all-pipelines.
     inline_subprojects = [
         sp
         for sp in subprojects
@@ -4067,6 +4129,7 @@ def run(
     if (
         inline_subprojects
         and not targets
+        and not downstream
         and not all_pipelines
         and not translated_targets_have_dvc_yaml
     ):
@@ -4243,6 +4306,14 @@ def run(
     # nobody asked for it by name, or for every stage with --strict
     targeted = {t.split("@")[0] for t in targets or []}
     error_reasons = set(gate_errors.values())
+    # Skipped as requested, so not reported with those that can't run here
+    skipped_as_asked = [
+        addressing
+        for addressing, reason in skipped_stale.items()
+        if reason == calkit.dvc.SKIP_REQUESTED
+    ]
+    for addressing in skipped_as_asked:
+        del skipped_stale[addressing]
     for addressing, reason in skipped_stale.items():
         if (
             strict
@@ -4657,6 +4728,17 @@ def run(
                     warn(message)
         except Exception as e:
             warn(f"Couldn't check where the stages' outputs are stored: {e}")
+    # Matplotlib only logs a font it can't find, and draws with another
+    for stage_name, messages in _get_matplotlib_font_warnings_by_stage(
+        log_content
+    ).items():
+        warn(
+            f"Matplotlib in stage '{stage_name}' used a fallback font, "
+            "so its figures can look different on another machine: "
+            f"{'; '.join(messages)}; see {MPL_FONTS_DOCS_URL}"
+        )
+    for addressing in skipped_as_asked:
+        typer.echo(f"Skipped out-of-date stage '{addressing}' as requested")
     if failed:
         try:
             calkit.dvc.restore_output_ignores()
@@ -5351,8 +5433,14 @@ def run_in_env(
         abs_wdir = os.path.abspath(wdir) if wdir else os.getcwd()
         env_vars = run_env_vars or os.environ.copy()
         env_vars["RENV_PROJECT"] = env_dir
-        # Check if the first argument is an R script
-        if cmd and cmd[0] == "Rscript" and len(cmd) > 1:
+        # Check if the first argument is an R script, rather than an option,
+        # e.g., -e
+        if (
+            cmd
+            and cmd[0] == "Rscript"
+            and len(cmd) > 1
+            and not cmd[1].startswith("-")
+        ):
             script_path = cmd[1]
             script_abspath = os.path.abspath(
                 os.path.join(abs_wdir, script_path)
@@ -5461,7 +5549,7 @@ def run_in_env(
             # commands it runs, which is how a stage is told apart from
             # someone running 'calkit xenv' themselves
             "-it"
-            if sys.stdin.isatty() and not os.getenv("DVC_STAGE")
+            if calkit.core.is_tty() and not os.getenv("DVC_STAGE")
             else "-i",
             "--rm",
             "-w",

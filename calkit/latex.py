@@ -76,6 +76,10 @@ def is_latex_env(env: dict) -> bool:
     )
 
 
+# TeX run before the document, keeping it in nonstop mode when a class
+# switches back, e.g., one that tests for fonts in batch mode, so an error
+# doesn't stop a build that nobody is there to answer
+NONSTOP_PRETEX = r"\let\errorstopmode\nonstopmode"
 # TeX run before the document, leaving the dates and trailer ID out of the
 # PDF. Even taken from a commit, the date changes when history is rewritten,
 # e.g., by a squash merge, which changes the bytes of an identical document.

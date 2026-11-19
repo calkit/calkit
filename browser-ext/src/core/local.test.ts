@@ -127,7 +127,7 @@ describe("askLocal", () => {
     ports[1].close("Native host has exited.");
     expect(await failed).toEqual({
       permitted: true,
-      error: "Calkit on this computer stopped unexpectedly",
+      error: "Calkit on this machine stopped unexpectedly",
     });
     // Granted after the background started, which Chrome doesn't give the
     // API to until the extension reloads

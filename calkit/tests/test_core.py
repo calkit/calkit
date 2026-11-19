@@ -80,6 +80,26 @@ def test_get_project_checkouts(tmp_path, monkeypatch):
         "windows",
     ]
     assert set(found.values()) == {"me"}
+    # macOS asks before its media folders are read, so they're never
+    # searched, nor, for the browser's host, Desktop, Documents, or
+    # Downloads, but one found there before still is
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    for folder in ["Documents", "Pictures"]:
+        path = home / folder / "proj"
+        os.makedirs(path)
+        (path / "calkit.yaml").write_text("owner: me\nname: proj\n")
+        git.Repo.init(path)
+    quiet = calkit.find_project_dirs(search_protected=False)
+    assert not any(os.sep + "Documents" + os.sep in p for p in quiet)
+    assert not any(os.sep + "Pictures" + os.sep in p for p in quiet)
+    found = calkit.get_project_checkouts("proj", owner="me")
+    in_documents = os.path.realpath(home / "Documents" / "proj")
+    assert in_documents in found
+    assert not any(os.sep + "Pictures" + os.sep in p for p in found)
+    found = calkit.get_project_checkouts(
+        "proj", owner="me", search_protected=False
+    )
+    assert in_documents in found
 
 
 def test_to_kebab_case():
@@ -188,6 +208,24 @@ def test_is_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
             assert calkit.core.is_wsl() is expected, (version, container)
 
 
+def test_is_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Not a console on Windows, where its descriptor is checked too
+    tty = mock.Mock(isatty=lambda: True, fileno=lambda: -1)
+    # Windows says the NUL device is a TTY, which isn't a terminal
+    with open(os.devnull) as f:
+        for stdin, stdout in [(f, tty), (tty, f)]:
+            monkeypatch.setattr(sys, "stdin", stdin)
+            monkeypatch.setattr(sys, "stdout", stdout)
+            assert not calkit.core.is_tty()
+    for stdin in [None, object(), mock.Mock(isatty=lambda: False)]:
+        monkeypatch.setattr(sys, "stdin", stdin)
+        monkeypatch.setattr(sys, "stdout", tty)
+        assert not calkit.core.is_tty()
+    if sys.platform != "win32":
+        monkeypatch.setattr(sys, "stdin", tty)
+        assert calkit.core.is_tty()
+
+
 def test_is_mintty() -> None:
     import sys
 
@@ -235,6 +273,57 @@ def test_save_calkit_info_preserves_unicode(tmp_dir):
     raw = open("calkit.yaml", "rb").read()
     assert "ν".encode("utf-8") in raw
     assert "Î½".encode("utf-8") not in raw
+
+
+def test_set_yaml_item() -> None:
+    import io
+
+    def set_item(txt: str, key: str, value: object) -> str:
+        info = calkit.ryaml.load(txt)
+        calkit.set_yaml_item(info["envs"], key, value)
+        buf = io.StringIO()
+        calkit.ryaml.dump(info, buf)
+        return buf.getvalue()
+
+    # A new item goes above the blank line and comment ending the mapping,
+    # whether they trail a mapping or a sequence
+    txt = "envs:\n  a:\n    kind: uv\n\n# Stages\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda", "deps": ["x"]}) == (
+        "envs:\n  a:\n    kind: uv\n  b:\n    kind: conda\n    deps:\n"
+        "      - x\n\n# Stages\npipeline: {}\n"
+    )
+    txt = "envs:\n  a:\n    deps:\n      - x\n\npipeline: {}\n"
+    assert set_item(txt, "b", {}) == (
+        "envs:\n  a:\n    deps:\n      - x\n  b: {}\n\npipeline: {}\n"
+    )
+    # A comment at the end of the last item's line stays on it
+    txt = "envs:\n  a:\n    kind: uv  # Fast\n\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda"}) == (
+        "envs:\n  a:\n    kind: uv  # Fast\n  b:\n    kind: conda\n"
+        "\npipeline: {}\n"
+    )
+    txt = "envs:\n  a:\n    kind: uv  # Fast\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda"}) == (
+        "envs:\n  a:\n    kind: uv  # Fast\n  b:\n    kind: conda\n"
+        "pipeline: {}\n"
+    )
+    # Replacing the last item keeps the blank line, and replacing another
+    # leaves it where it was
+    txt = "envs:\n  a:\n    kind: uv\n  b:\n    kind: uv\n\npipeline: {}\n"
+    for key in ["a", "b"]:
+        assert set_item(txt, key, {"kind": "conda"}) == txt.replace(
+            f"{key}:\n    kind: uv", f"{key}:\n    kind: conda"
+        )
+    # A scalar replacing the last item keeps the comment at the end of its
+    # line too
+    txt = "envs:\n  a: 1  # eol\n\nnext: 2\n"
+    assert set_item(txt, "a", 5) == "envs:\n  a: 5  # eol\n\nnext: 2\n"
+    txt = "envs:\n  a:\n    b: 1  # eol\n\nnext: 2\n"
+    assert set_item(txt, "a", 5) == "envs:\n  a: 5\n\nnext: 2\n"
+    # Plain dicts, e.g., environments converted from a list, still get set
+    envs: dict = {"a": {"kind": "uv"}}
+    calkit.set_yaml_item(envs, "b", {"kind": "conda"})
+    assert envs == {"a": {"kind": "uv"}, "b": {"kind": "conda"}}
 
 
 def test_load_calkit_info(tmp_dir, monkeypatch):

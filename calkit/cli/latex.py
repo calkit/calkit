@@ -584,7 +584,15 @@ def _run_latexmk(
             )
             env = os.environ | env_vars
         try:
-            subprocess.run(cmd, env=env, check=True, capture_output=quiet)
+            # No stdin, so anything else that asks for input fails rather
+            # than waiting for an answer that never comes
+            subprocess.run(
+                cmd,
+                env=env,
+                check=True,
+                capture_output=quiet,
+                stdin=subprocess.DEVNULL,
+            )
             return 0
         except subprocess.CalledProcessError as e:
             status = e.returncode
@@ -681,6 +689,36 @@ def map_components(
         warn(f"{problem}; it will print as ??")
 
 
+@latex_app.command(name="warm-cache")
+def warm_cache(
+    release: Annotated[
+        int | None,
+        typer.Option(
+            "--release",
+            help="TeX Live release, e.g., 2025; defaults to Calkit's.",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+) -> None:
+    """Download TeX Live's base packages and build its formats ahead of time.
+
+    For a machine or image without a project yet, e.g., a dev container, so
+    a TeX Live environment's first build doesn't have to.
+    """
+    from calkit.environments import texlive as env_texlive
+
+    env: dict = {"kind": "texlive"}
+    if release is not None:
+        env["release"] = release
+    try:
+        view_dir = env_texlive.warm(env, verbose=verbose)
+    except (ValueError, RuntimeError, OSError) as e:
+        raise_error(str(e))
+    typer.echo(f"TeX Live is ready in {view_dir}")
+
+
 @latex_app.command(name="build")
 def build(
     tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
@@ -692,6 +730,18 @@ def build(
             help=("Environment in which to run latexmk, if applicable."),
         ),
     ] = None,
+    as_stage: Annotated[
+        bool,
+        typer.Option(
+            "--as-stage",
+            help=(
+                "Build as the pipeline's latex stage for the document does "
+                "(its environment, options, and working directory), or in "
+                "the project's only TeX Live environment if no stage builds "
+                "it. Other options are added to the stage's."
+            ),
+        ),
+    ] = False,
     no_check: Annotated[
         bool,
         typer.Option(
@@ -791,6 +841,89 @@ def build(
             n += 1
         return "/".join([".."] * (len(s) - n) + list(target.parts[n:])) or "."
 
+    # An editor builds every document with the same command, so each one
+    # finds its stage here and builds with the stage's own arguments
+    if as_stage:
+        from typing import cast
+
+        import click
+
+        from calkit.environments import texlive as env_texlive
+        from calkit.models.pipeline import LatexStage
+
+        if any(
+            v is not None
+            for v in [environment, latexmk_rc_path, output_dir, aux_dir]
+        ):
+            raise_error(
+                "--as-stage takes the environment and directories from "
+                "the stage"
+            )
+        doc_path = os.path.realpath(tex_file)
+        project_dir = os.path.dirname(doc_path)
+        while not os.path.isfile(os.path.join(project_dir, "calkit.yaml")):
+            parent = os.path.dirname(project_dir)
+            if parent == project_dir:
+                raise_error(f"{tex_file} isn't in a Calkit project")
+            project_dir = parent
+        ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
+        matches = []
+        for name, stage in (
+            (ck_info.get("pipeline") or {}).get("stages") or {}
+        ).items():
+            if not isinstance(stage, dict) or stage.get("kind") != "latex":
+                continue
+            try:
+                s = LatexStage.model_validate(stage | {"name": name})
+            except ValueError:
+                continue
+            stage_doc_path = os.path.join(
+                project_dir, s.wdir or "", s.target_path
+            )
+            if os.path.normcase(
+                os.path.realpath(stage_doc_path)
+            ) == os.path.normcase(doc_path):
+                matches.append(s)
+        if matches:
+            s = matches[0]
+            if len(matches) > 1:
+                others = ", ".join(f"'{m.name}'" for m in matches[1:])
+                warn(
+                    f"Stages '{s.name}' and {others} all build {tex_file}; "
+                    f"building it as '{s.name}'"
+                )
+            args = ["-e", s.environment, *s.make_build_args()]
+            for flag, given in [
+                ("--no-check", no_check),
+                ("--verbose", verbose),
+                ("-f", force),
+                ("--no-synctex", no_synctex),
+            ]:
+                if given and flag not in args:
+                    args.append(flag)
+            for arg in latexmk_args:
+                args += ["--latexmk-arg", arg]
+            os.chdir(os.path.join(project_dir, s.wdir or ""))
+            group = cast(click.Group, typer.main.get_command(latex_app))
+            command = group.commands["build"]
+            with command.make_context("build", args + [s.target_path]) as ctx:
+                command.invoke(ctx)
+            return
+        # Otherwise the only TeX Live environment, or switch picking one
+        # here, unless they pick different ones
+        selected = {
+            name: env_texlive.get_selected_env(name, wdir=project_dir)
+            for name, env in (ck_info.get("environments") or {}).items()
+            if isinstance(env, dict)
+        }
+        names = [name for name, env in selected.items() if env is not None]
+        picked = {env[0] for env in selected.values() if env is not None}
+        if len(picked) == 1:
+            environment = next(
+                (name for name in names if name in picked), names[0]
+            )
+        tex_file = os.path.relpath(doc_path, project_dir)
+        os.chdir(project_dir)
     # latexmk records a failed run in its file database and then refuses
     # to try again, reporting "Nothing to do" and exiting non-zero with no
     # PDF. Running it again is the first thing anyone does after a
@@ -855,7 +988,9 @@ def build(
     if aux_dir is not None:
         latexmk_cmd.append(f"-auxdir={rel_to_tex_dir(aux_dir)}")
     latexmk_cmd.append("-interaction=nonstopmode")
-    latexmk_cmd.append(f"-usepretex={calkit.latex.PDF_PRETEX}")
+    latexmk_cmd.append(
+        "-usepretex=" + calkit.latex.NONSTOP_PRETEX + calkit.latex.PDF_PRETEX
+    )
     # User pass-through args come last so they can override Calkit's defaults.
     latexmk_cmd += latexmk_args
     latexmk_cmd.append(tex_file)
@@ -1587,6 +1722,9 @@ def diff(
             if new_text != text:
                 source_path.write_text(new_text, encoding="utf-8")
 
+    # One spelling, e.g., without './' or Windows separators, since it's
+    # joined onto each side's root and sliced back off
+    tex_file = Path(os.path.normpath(tex_file)).as_posix()
     repo = calkit.git.get_repo()
     if repo.bare:
         raise_error("This is not a working Git repo")
@@ -1643,9 +1781,36 @@ def diff(
     # Per run, so diffs run at the same time, e.g., from the editor while
     # the pipeline runs, don't check out over each other
     run_dir = os.path.join(DIFF_TMP_DIR, str(os.getpid()))
-    # A run that was killed leaves its checkouts behind
+    # A run that was killed leaves its checkouts behind, and its build
+    # beside the working tree's document
     import psutil
 
+    doc_dir = os.path.dirname(tex_file) or "."
+    doc_dir_names = os.listdir(doc_dir) if os.path.isdir(doc_dir) else []
+    aux_prefix = f"{calkit.latex.DIFF_AUX_DIRNAME}-"
+    for name in doc_dir_names:
+        pid_str = name.removeprefix(aux_prefix)
+        if (
+            pid_str == name
+            or not pid_str.isdigit()
+            or psutil.pid_exists(int(pid_str))
+        ):
+            continue
+        shutil.rmtree(os.path.join(doc_dir, name), ignore_errors=True)
+        # The marked-up document of whichever document it built, and only
+        # beside its aux directory, so a file of the user's named like one
+        # is left alone
+        suffix = f"-diff-{pid_str}.tex"
+        for other in doc_dir_names:
+            if (
+                other.endswith(suffix)
+                and other.removesuffix(suffix) + ".tex" in doc_dir_names
+            ):
+                try:
+                    os.remove(os.path.join(doc_dir, other))
+                except OSError:
+                    # E.g., on Windows, still open in a TeX the run left
+                    pass
     if os.path.isdir(DIFF_TMP_DIR):
         for name in os.listdir(DIFF_TMP_DIR):
             if name.isdigit() and not psutil.pid_exists(int(name)):
@@ -1691,7 +1856,8 @@ def diff(
             )
             if not os.path.isfile(side):
                 raise_error(f"{tex_file} does not exist at {ref}")
-            sides[name] = side
+            # POSIX, since latexdiff may run in a Linux container
+            sides[name] = Path(side).as_posix()
         # The working tree already has its DVC-tracked files, if pulled
         head_root = checkouts.get("head", ".")
         context: list[str] = []
@@ -1719,7 +1885,7 @@ def diff(
         if "head" not in checkouts:
             shutil.rmtree(working_copy, ignore_errors=True)
             copy_working_sources(working_copy)
-            sides["head"] = os.path.join(working_copy, tex_file)
+            sides["head"] = Path(working_copy, tex_file).as_posix()
             prepared.append(working_copy)
         for root in prepared:
             break_verbatim_params(root)
@@ -1848,6 +2014,7 @@ def _build_diff(
     # --flatten or macro expansion failure can be inspected.
     kept_stem = os.path.splitext(output)[0]
     kept_diff_fpath = f"{kept_stem}-diff.tex"
+    kept_log_fpath = f"{kept_stem}-diff.log"
     kept_old_fpath = f"{kept_stem}-old.tex"
     kept_new_fpath = f"{kept_stem}-new.tex"
     marked_up: bytes | None = None
@@ -1905,8 +2072,11 @@ def _build_diff(
         inputs_digest = inputs.hexdigest()
         state_path = calkit.latex.diff_state_path(output)
         inputs_state_path = f"{state_path}.inputs"
+        # Not when the marked-up document is to be kept, since only
+        # latexdiff makes it
         if (
             not force
+            and not keep_tex
             and os.path.isfile(output)
             and _read(inputs_state_path) == inputs_digest
         ):
@@ -2029,14 +2199,16 @@ def _build_diff(
             "-interaction=nonstopmode",
             f"-auxdir={rel_aux}",
             f"-outdir={rel_aux}",
-            f"-usepretex={calkit.latex.PDF_PRETEX}",
+            "-usepretex="
+            + calkit.latex.NONSTOP_PRETEX
+            + calkit.latex.PDF_PRETEX,
         ]
         if not verbose:
             latexmk_cmd.append("-silent")
         # User pass-through args come last so they can override Calkit's
         # defaults
         latexmk_cmd += latexmk_args
-        latexmk_cmd.append(diff_tex_fpath)
+        latexmk_cmd.append(Path(diff_tex_fpath).as_posix())
         tex_env_vars = _tex_env_vars(
             calkit.latex.get_source_date_epoch(tex_file_fpath)
         )
@@ -2072,8 +2244,12 @@ def _build_diff(
                 if line.startswith("!"):
                     shown += log_lines[i : i + 3]
             excerpt = shown[:60] or log_lines[-20:]
+            # Not the aux directory's, which is removed afterwards
             if excerpt:
-                typer.echo(f"From {log_path.as_posix()}:", err=True)
+                typer.echo(
+                    f"From {kept_log_fpath}:" if keep_tex else "From the log:",
+                    err=True,
+                )
                 typer.echo("\n".join(excerpt), err=True)
             inspect = "" if keep_tex else "; rerun with --keep-tex to inspect"
             if not os.path.isfile(built):
@@ -2095,10 +2271,6 @@ def _build_diff(
         calkit.latex.set_content_id(built)
         os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
         shutil.move(built, output)
-        # A checkout is removed afterwards, but the working tree's document
-        # directory is the user's, so nothing is left behind in it
-        if os.path.abspath(head_root) == os.path.abspath("."):
-            shutil.rmtree(aux_dir, ignore_errors=True)
         os.makedirs(os.path.dirname(state_path), exist_ok=True)
         Path(state_path).write_text(digest)
         Path(inputs_state_path).write_text(inputs_digest)
@@ -2108,6 +2280,9 @@ def _build_diff(
             os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
             if marked_up is not None:
                 Path(kept_diff_fpath).write_bytes(marked_up)
+            built_log_path = os.path.join(aux_dir, f"{job}.log")
+            if os.path.isfile(built_log_path):
+                shutil.copy(built_log_path, kept_log_fpath)
             for src, kept_fpath in (
                 (base_tex_fpath, kept_old_fpath),
                 (head_tex_fpath, kept_new_fpath),
@@ -2118,11 +2293,17 @@ def _build_diff(
                 kept_old_fpath,
                 kept_new_fpath,
                 kept_diff_fpath,
+                kept_log_fpath,
             ):
                 if os.path.isfile(kept_fpath):
                     typer.echo(f"Kept {kept_fpath} for inspection")
         if os.path.isfile(diff_tex_fpath):
             os.remove(diff_tex_fpath)
+        # A checkout is removed afterwards, but the working tree's document
+        # directory is the user's, so nothing is left behind in it, even
+        # when the build fails
+        if os.path.abspath(head_root) == os.path.abspath("."):
+            shutil.rmtree(aux_dir, ignore_errors=True)
 
 
 @latex_app.command(name="to-docx")
@@ -3895,6 +4076,7 @@ def to_docx(
     # At random, so each export can be told apart, unless the build is asked
     # to be reproducible, in which case it comes from what was exported
     if os.environ.get("SOURCE_DATE_EPOCH"):
+        doc.strip_app_version()
         doc.save()
         export_id = str(
             uuid.uuid5(

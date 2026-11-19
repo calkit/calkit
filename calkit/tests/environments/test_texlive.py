@@ -428,6 +428,12 @@ def test_check_and_run(tmp_dir, texlive_user_home, monkeypatch, capsys):
     assert "pdftex.x86_64-linux" in lock["packages"]
     platform = texlive.get_platform()
     assert view_dir == texlive.get_view_dir(lock, platform)
+    # Warming from the spec alone, e.g., in an image, assembles the same
+    # environment without writing a lock
+    os.remove(lock_fpath)
+    assert texlive.warm(env) == view_dir
+    assert not os.path.exists(lock_fpath)
+    assert texlive.check("tex", env) == view_dir
     # Its programs find its own configuration, with nothing from elsewhere
     # on the machine, e.g., a user's own texmf tree
     exe = ".exe" if platform == "windows" else ""

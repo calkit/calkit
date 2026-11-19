@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import copy
 import csv
 import functools
 import glob
@@ -41,6 +42,18 @@ import ruamel.yaml
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
+# Folders in the home folder that macOS asks before a process reads, which
+# projects aren't kept in, e.g., Pictures, which has the Photos library
+MACOS_MEDIA_FOLDERS = (
+    "Applications",
+    "Library",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Public",
+)
+# Those macOS asks about where projects may be kept
+MACOS_PROTECTED_FOLDERS = ("Desktop", "Documents", "Downloads")
 
 
 class _FoldedPlainStr(str):
@@ -422,6 +435,77 @@ class _ThreadLocalYAMLProxy:
 
 ryaml = _ThreadLocalYAMLProxy()
 
+
+def set_yaml_item(mapping: dict, key: Any, value: Any) -> None:
+    """Set an item in a mapping loaded with ``ryaml``, keeping its layout.
+
+    ruamel.yaml attaches the blank lines and comments that follow a mapping
+    to its last item, however deeply nested, so a key appended after it
+    would land below them, e.g., below the blank line separating the mapping
+    from the next top-level key. The new last item takes them over instead.
+    """
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    def get_last_items(node: Any) -> list[tuple[Any, Any]]:
+        # The collection and key of each last item, outermost first
+        if isinstance(node, CommentedMap) and node:
+            last = next(reversed(node))
+        elif isinstance(node, CommentedSeq) and node:
+            last = len(node) - 1
+        else:
+            return []
+        return [(node, last)] + get_last_items(node[last])
+
+    def to_commented(node: Any) -> Any:
+        if isinstance(node, dict):
+            return CommentedMap((k, to_commented(v)) for k, v in node.items())
+        if isinstance(node, list):
+            return CommentedSeq(to_commented(v) for v in node)
+        return node
+
+    is_last = bool(mapping) and key == next(reversed(mapping))
+    # A scalar replacing a scalar keeps the item's comments as they are
+    if not isinstance(mapping, CommentedMap) or (
+        key in mapping
+        and (
+            not is_last
+            or (
+                not isinstance(mapping[key], (dict, list))
+                and not isinstance(value, (dict, list))
+            )
+        )
+    ):
+        mapping[key] = value
+        return
+    # Maps keep a trailing comment in slot 2 of an item, and sequences in 0
+    token = None
+    for node, k in reversed(get_last_items(mapping)):
+        slots = node.ca.items.get(k)
+        slot = 2 if isinstance(node, CommentedMap) else 0
+        if slots and slots[slot] is not None:
+            token = slots[slot]
+            slots[slot] = None
+            # A comment at the end of the item's own line stays with it
+            if token.value.startswith("#"):
+                eol, _, rest = token.value.partition("\n")
+                slots[slot] = copy.copy(token)
+                slots[slot].value = eol + "\n"
+                token = copy.copy(token)
+                token.value = "\n" + rest
+                if not rest:
+                    token = None
+            break
+    if token is None:
+        mapping[key] = value
+        return
+    mapping[key] = to_commented(value)
+    node, k = get_last_items(mapping)[-1]
+    if isinstance(node, CommentedMap):
+        node.ca.items[k] = [None, None, token, None]
+    else:
+        node.ca.items[k] = [token, None]
+
+
 try:
     # libyaml-backed loader, many times faster than the pure-Python one.
     # PyYAML ships prebuilt wheels with libyaml on every platform we target,
@@ -651,24 +735,49 @@ def record_project_path(wdir: str = ".") -> None:
         write_json(fpath, paths + [path], indent=2)
 
 
-def find_project_dirs(relative=False, max_depth=3) -> list[str]:
+def find_project_dirs(
+    relative: bool = False, max_depth: int = 3, search_protected: bool = True
+) -> list[str]:
     """Find all Calkit project directories, i.e., those up to
     ``max_depth`` folders into the home folder, and, unless ``relative``,
-    those recorded when created or cloned.
+    those recorded when created, cloned, or found before.
+
+    On macOS, the home folder's media and system folders are never
+    searched, and, without ``search_protected``, nor are its Desktop,
+    Documents, and Downloads folders, since macOS asks before a process
+    reads any of them, e.g., one the browser starts; recorded projects in
+    them are still found.
     """
     if relative:
         start = ""
     else:
         start = os.path.expanduser("~")
+    skipped = set()
+    if platform.system() == "Darwin" and not relative:
+        skipped |= set(MACOS_MEDIA_FOLDERS)
+        if not search_protected:
+            skipped |= set(MACOS_PROTECTED_FOLDERS)
+    try:
+        top_names = sorted(
+            entry.name
+            for entry in os.scandir(start or ".")
+            if not entry.name.startswith(".")
+            and entry.name not in skipped
+            and entry.is_dir()
+        )
+    except OSError:
+        top_names = []
     res = []
     for i in range(max_depth):
-        pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
-        res += glob.glob(pattern)
-        # Check GitHub documents for users who use GitHub Desktop
-        pattern = os.path.join(
-            start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
-        )
-        res += glob.glob(pattern)
+        for top_name in top_names:
+            top = os.path.join(glob.escape(start), glob.escape(top_name))
+            pattern = os.path.join(top, *["*"] * i, "calkit.yaml")
+            res += glob.glob(pattern)
+            # Check GitHub documents for users who use GitHub Desktop
+            pattern = os.path.join(
+                top, "GitHub", *["*"] * (i + 1), "calkit.yaml"
+            )
+            res += glob.glob(pattern)
     if not relative:
         res += [
             os.path.join(p, "calkit.yaml")
@@ -689,15 +798,20 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
 
 
 def get_project_checkouts(
-    name: str, owner: str = "", warn: Any = None
+    name: str,
+    owner: str = "",
+    warn: Any = None,
+    search_protected: bool = True,
 ) -> dict[str, str]:
     """Find the checkouts of a project on this machine, by the owner and
     name each says it has, returning each one's owner by its real path.
 
     ``warn`` is called with why a project that can't be read was skipped.
+    ``search_protected`` is as for :func:`find_project_dirs`. Each found is
+    recorded, so it's found again without searching where it is.
     """
     found: dict[str, str] = {}
-    for path in find_project_dirs():
+    for path in find_project_dirs(search_protected=search_protected):
         path = os.path.realpath(path)
         if path in found:
             continue
@@ -748,6 +862,9 @@ def get_project_checkouts(
             continue
         if p_name == name and owner in ("", p_owner):
             found[path] = p_owner
+    for path in found:
+        with contextlib.suppress(Exception):
+            record_project_path(path)
     return found
 
 
@@ -937,6 +1054,21 @@ USER_HOME_ENV_VAR = "CALKIT_USER_HOME"
 # These are here rather than in calkit.config, which every command's update
 # check would otherwise import, with keyring and pydantic-settings, only to
 # find where its state is kept
+def get_calkit_cmd(module: str = "calkit") -> list[str]:
+    """The command that runs one of Calkit's modules with this Python,
+    without importing anything from the folder it runs in first, e.g., a
+    project's own ``queue.py``.
+    """
+    if sys.version_info >= (3, 11):
+        return [sys.executable, "-P", "-m", module]
+    return [
+        sys.executable,
+        "-c",
+        "import runpy, sys; sys.path.pop(0); "
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)",
+    ]
+
+
 def get_user_home() -> str:
     """The home directory Calkit keeps its own files in."""
     return os.environ.get(USER_HOME_ENV_VAR) or os.path.expanduser("~")
@@ -1137,11 +1269,38 @@ def is_tty() -> bool:
     Stdout matters because the prompt needs to render; stdin matters because
     we need to read the user's answer. CI environments fail at least one
     and fall through to the abort-with-fix-command path.
+
+    On Windows, ``isatty`` is also true of the NUL device, which is what a
+    child given ``subprocess.DEVNULL`` reads, so only a stream with a console
+    mode counts there.
     """
-    try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError):
-        return False
+
+    def is_terminal(stream: Any) -> bool:
+        try:
+            if not stream.isatty():
+                return False
+        except (AttributeError, ValueError):
+            return False
+        if sys.platform != "win32":
+            return True
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        try:
+            handle = msvcrt.get_osfhandle(stream.fileno())
+        except (AttributeError, OSError, ValueError):
+            return False
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetConsoleMode.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetConsoleMode.restype = wintypes.BOOL
+        mode = wintypes.DWORD()
+        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+    return is_terminal(sys.stdin) and is_terminal(sys.stdout)
 
 
 def is_wsl() -> bool:

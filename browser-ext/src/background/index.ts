@@ -765,6 +765,12 @@ async function handle(
         folder: message.folder,
         path: message.path,
       });
+    case "local.chooseFolder":
+      // However long someone takes to choose
+      return askLocal(
+        { type: "folder.choose", prompt: message.prompt },
+        30 * 60 * 1000,
+      );
     case "local.publicationSynctex":
       return getLocalSynctexText(message.project, message.folder);
     case "local.openOptions":

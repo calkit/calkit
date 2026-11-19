@@ -1344,3 +1344,36 @@ def test_get_content_paths(tmp_path):
         "results/fit.json",
         "script.py",
     ]
+
+
+def test_choose_folder(tmp_path, monkeypatch):
+    from calkit.browser_link import choose_folder
+
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    (analysis / "fit.py").write_text("")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    calls = []
+
+    def run(answer, returncode=0):
+        def fake(cmd, **kwargs):
+            calls.append((cmd, kwargs["env"]["CALKIT_PROMPT"]))
+            return subprocess.CompletedProcess(cmd, returncode, answer, "")
+
+        monkeypatch.setattr("subprocess.run", fake)
+        return choose_folder("Select a folder for proj")
+
+    # The prompt goes in the environment, so nothing in it is run
+    assert run(f"{analysis}/\n") == {"path": str(analysis), "empty": False}
+    assert calls[-1][1] == "Select a folder for proj"
+    assert run(f"{empty}\n") == {"path": str(empty), "empty": True}
+    # Cancelled
+    assert run("", returncode=1) == {"path": None, "empty": True}
+
+    def missing(cmd, **kwargs):
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr("subprocess.run", missing)
+    with pytest.raises(ValueError, match="no folder dialog"):
+        choose_folder("Select")

@@ -87,6 +87,7 @@ CONCURRENT_REQUEST_TYPES = (
     "publication.pdf",
     "publication.synctex",
     "publication.source",
+    "folder.choose",
     "job.get",
     "job.log",
     "jobs.list",
@@ -190,6 +191,9 @@ def get_reply(msg: dict) -> dict:
     - ``publication.source``: a LaTeX file in a folder synced with
       Overleaf, as it is here, to map a line SyncTeX gives for a PDF built
       here to the same line in Overleaf's copy.
+    - ``folder.choose``: a folder chosen in this machine's own dialog,
+      e.g., one with an analysis to clone a project into, and whether it
+      has anything in it.
     - ``job.start``, ``job.get``, and ``jobs.list``: run something that
       takes a while, i.e., a pipeline run, an Overleaf sync, or a clone, in
       a process of its own, which outlives the host, and check on it.
@@ -384,6 +388,8 @@ def get_result(msg: dict) -> Any:
         result = get_source_text(
             paths[0], str(msg.get("folder")), str(msg.get("path"))
         )
+    elif kind == "folder.choose":
+        result = choose_folder(str(msg.get("prompt") or "Select a folder"))
     elif kind == "job.start":
         result = start_job(msg)
     elif kind == "job.get":
@@ -440,6 +446,58 @@ def check_clone_location(location: str) -> None:
             f"Can't clone to {location}; choose a folder in your home folder"
             ", e.g., ~/calkit"
         )
+
+
+def choose_folder(prompt: str) -> dict:
+    """Ask for a folder in this machine's own dialog, starting in the home
+    folder, giving its ``path``, or None if none was chosen, and whether
+    it's ``empty``.
+    """
+    import subprocess
+    import sys
+
+    home = calkit.get_user_home()
+    env = os.environ | {"CALKIT_PROMPT": prompt, "CALKIT_HOME": home}
+    if sys.platform == "darwin":
+        # In front of the browser, rather than behind it
+        cmd = [
+            "osascript",
+            "-e",
+            "activate",
+            "-e",
+            "POSIX path of (choose folder with prompt (system attribute "
+            '"CALKIT_PROMPT") default location POSIX file (system attribute '
+            '"CALKIT_HOME"))',
+        ]
+    elif sys.platform == "win32":
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-STA",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "$d.Description = $env:CALKIT_PROMPT; "
+            "$d.SelectedPath = $env:CALKIT_HOME; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }",
+        ]
+    else:
+        cmd = [
+            "zenity",
+            "--file-selection",
+            "--directory",
+            f"--title={prompt}",
+            f"--filename={home}/",
+        ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    except FileNotFoundError:
+        raise ValueError("This machine has no folder dialog; type the path")
+    path = res.stdout.strip() if res.returncode == 0 else ""
+    if not path:
+        return {"path": None, "empty": True}
+    path = os.path.normpath(path)
+    return {"path": path, "empty": not os.listdir(path)}
 
 
 class OverleafAuthMissing(Exception):

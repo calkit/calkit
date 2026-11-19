@@ -286,6 +286,11 @@ export type Request =
       project: string;
       folder: string;
     }
+  | {
+      /** A folder chosen in this machine's own dialog. */
+      type: "local.chooseFolder";
+      prompt: string;
+    }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */
   | { type: "local.installEditor"; project: string }
@@ -356,6 +361,7 @@ export interface ResponseMap {
   "local.projectStatus": { checkouts: CheckoutStatus[] };
   "local.publicationSource": { path: string; text: string };
   "local.publicationSynctex": string | null;
+  "local.chooseFolder": { path: string | null; empty: boolean };
   "local.openOptions": null;
   "local.installEditor": null;
   /**

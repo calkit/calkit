@@ -2091,6 +2091,31 @@ function renderClone(project: string, reload: () => void): HTMLElement {
     class: "action",
     text: "Clone to this machine",
   });
+  // A folder with the analysis in it already becomes the project's, with
+  // the project's files around its own
+  const select = el("button", { text: "Select folder" });
+  select.addEventListener("click", async () => {
+    clear(message);
+    try {
+      const chosen = await send({
+        type: "local.chooseFolder",
+        prompt: `Select a folder for ${name}`,
+      });
+      if (chosen.path) {
+        location.value = chosen.path;
+        clone.textContent = chosen.empty
+          ? "Clone to this machine"
+          : "Use folder";
+      }
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  location.addEventListener("input", () => {
+    clone.textContent = "Clone to this machine";
+  });
   clone.addEventListener("click", async () => {
     clone.disabled = true;
     clear(message).append(loading("Cloning"));
@@ -2112,10 +2137,15 @@ function renderClone(project: string, reload: () => void): HTMLElement {
     el("div", {
       class: "small",
       text:
-        "This project isn't on this machine. Clone it to run, save, and " +
-        "sync from here, into a new folder or one with your analysis in it:",
+        "This project isn't on this machine. Clone it into a new folder, " +
+        "or select one with your analysis in it, to run, save, and sync " +
+        "from here:",
     }),
-    el("div", { class: "row", style: { marginTop: "6px" } }, [location, clone]),
+    el("div", { class: "row", style: { marginTop: "6px" } }, [
+      location,
+      select,
+    ]),
+    el("div", { class: "actions" }, [clone]),
     message,
   ]);
 }

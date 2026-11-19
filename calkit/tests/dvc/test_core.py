@@ -1368,3 +1368,29 @@ def test_get_stage_output_dvc_files(tmp_dir):
     assert problem["kind"] == "stage-output-dvc-file"
     assert problem["dvc_file"] == "fig.png.dvc"
     assert problem["stage"] == "plot"
+
+
+def test_untrack_cached_stage_outputs(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("figs")
+    for path in ["fig.png", "kept.png", "figs/a.png", "other.txt"]:
+        with open(path, "w") as f:
+            f.write("x")
+    subprocess.check_call(["git", "add", "-A"])
+    stages = {
+        "plot": {
+            "cmd": "x",
+            "outs": ["fig.png", {"kept.png": {"cache": False}}],
+        },
+        "folder": {"cmd": "x", "outs": ["figs/"]},
+    }
+    # Only what DVC caches, a file or a folder, and not what's kept in Git
+    found = calkit.dvc.untrack_cached_stage_outputs(stages)
+    assert found == [
+        {"path": "fig.png", "stage": "plot"},
+        {"path": "figs", "stage": "folder"},
+    ]
+    tracked = subprocess.check_output(["git", "ls-files"], text=True).split()
+    assert tracked == ["kept.png", "other.txt"]
+    assert os.path.isfile("fig.png") and os.path.isfile("figs/a.png")
+    assert calkit.dvc.untrack_cached_stage_outputs(stages) == []

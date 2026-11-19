@@ -2113,6 +2113,60 @@ def get_stage_output_dvc_files(
     return found
 
 
+def untrack_cached_stage_outputs(
+    dvc_stages: dict, wdir: str | None = None
+) -> list[dict]:
+    """Stop Git tracking what a stage stores with DVC, e.g., a figure
+    imported from Overleaf before its stage was, which DVC refuses to save
+    as an output, returning each one's ``path`` and ``stage``.
+
+    The stage says where it's stored, as ``calkit check storage --fix``
+    takes it to. The files stay as they are, and DVC ignores them in Git
+    when it saves them. One ``git ls-files``, so fast enough to run before
+    every run.
+    """
+    import calkit.git
+
+    outs: dict[str, str] = {}
+    for name, stage in dvc_stages.items():
+        stage_wdir = stage.get("wdir") or ""
+        for out in stage.get("outs") or []:
+            if isinstance(out, dict):
+                path, opts = next(iter(out.items()))
+                if (opts or {}).get("cache") is False:
+                    continue
+            else:
+                path = out
+            if not isinstance(path, str) or "${" in path:
+                continue
+            path = posixpath.normpath(posixpath.join(stage_wdir, path))
+            outs[path.rstrip("/")] = name
+    if not outs:
+        return []
+    repo = calkit.git.get_repo(wdir)
+    root = Path(repo.working_dir).resolve()
+    base = Path(wdir or ".").resolve()
+    tracked = set()
+    paths = list(outs)
+    for i in range(0, len(paths), 100):
+        listed = repo.git.ls_files(
+            "-z", "--", *[str(base / p) for p in paths[i : i + 100]]
+        )
+        tracked |= {
+            Path(os.path.relpath(root / p, base)).as_posix()
+            for p in listed.split("\0")
+            if p
+        }
+    untracked = [
+        {"path": path, "stage": name}
+        for path, name in outs.items()
+        if path in tracked or any(t.startswith(path + "/") for t in tracked)
+    ]
+    for found in untracked:
+        repo.git.rm("-r", "-q", "--cached", "--", str(base / found["path"]))
+    return untracked
+
+
 def get_storage_problems(  # type: ignore[no-any-unimported]
     wdir: str | None = None,
     large_mb: float | None = LARGE_MB,

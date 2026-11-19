@@ -112,7 +112,14 @@ export class LocalError extends Error {
  */
 export interface LocalJob {
   id: string;
-  kind: "run" | "sync" | "save" | "clone" | "create" | "install-editor";
+  kind:
+    | "run"
+    | "sync"
+    | "save"
+    | "clone"
+    | "create"
+    | "install-editor"
+    | "detect";
   project: string;
   wdir: string;
   status: "queued" | "running" | "succeeded" | "failed";

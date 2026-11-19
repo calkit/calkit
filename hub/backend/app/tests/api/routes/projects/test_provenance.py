@@ -35,7 +35,14 @@ def test_get_project_provenance(client: TestClient) -> None:
         ),
     )
     ck_info = {
-        "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
+        "environments": {
+            "py": {"kind": "uv", "path": "pyproject.toml"},
+            "lo": {
+                "kind": "docker",
+                "image": "ghcr.io/calkit/libreoffice:0.1.0",
+            },
+            "ppt": {"kind": "system", "requirements": ["powerpoint"]},
+        },
         "datasets": [
             {
                 "path": "data/downloaded",
@@ -84,6 +91,18 @@ def test_get_project_provenance(client: TestClient) -> None:
                     "kind": "inkscape-export",
                     "source_path": "figs/setup.svg",
                     "outputs": ["paper/setup.png"],
+                },
+                # Slides, by whichever app each environment provides
+                **{
+                    f"export-slide-{env}": {
+                        "kind": "pptx-export",
+                        "source_path": "figs/slides.pptx",
+                        "environment": env,
+                        "outputs": [
+                            {"path": f"paper/slide-{env}.pdf", "slide": 1}
+                        ],
+                    }
+                    for env in ["lo", "ppt", "_system"]
                 },
                 # Puts the plot beside the paper, which includes it there
                 "copy": {
@@ -258,6 +277,10 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["stage_kind"] == "inkscape-export"
     assert body["stage_app"] == "Inkscape"
     assert body["source"] == "figs/setup.svg"
+    for env, app in [("lo", "LibreOffice"), ("ppt", "PowerPoint")]:
+        assert get(f"path=paper/slide-{env}.pdf")["stage_app"] == app
+    # though the system's own depends on the machine
+    assert get("path=paper/slide-_system.pdf")["stage_app"] is None
     # A figure nothing accounts for is a gap itself
     for path in ["paper/pasted.png", "paper/exported.png"]:
         body = get(f"path={path}")

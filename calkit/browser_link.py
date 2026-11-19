@@ -2010,6 +2010,13 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
         name=out["name"],
         is_tracked=lambda p: bool(repo.git.ls_files("--", p).strip()),
     )
+    # Slides are exported in Calkit's LibreOffice image unless the stage
+    # says otherwise, as the hub does, so they export the same anywhere
+    if stage.get("kind") == "pptx-export" and not stage.get("environment"):
+        env_name, env = calkit.export.get_slide_environment(ck_info)
+        stage["environment"] = env_name
+        if env is not None:
+            ck_info.setdefault("environments", {})[env_name] = env
     created = [path for path, by_me in files if by_me]
     if created:
         # Whoever commits here, as Git knows them

@@ -249,11 +249,17 @@
         "icon": "$(save)"
       },
       {
+        "command": "calkit-vscode.runSave",
+        "title": "Run and Save",
+        "category": "Calkit",
+        "icon": "$(run-all)",
+        "enablement": "calkit-vscode.hasProject"
+      },
+      {
         "command": "calkit-vscode.runSaveSync",
         "title": "Run, Save, and Sync with Overleaf",
         "category": "Calkit",
-        "icon": "$(run-all)",
-        "enablement": "calkit-vscode.syncsWithOverleaf"
+        "icon": "$(run-all)"
       },
       {
         "command": "calkit-vscode.syncOverleaf",
@@ -417,12 +423,12 @@
       },
       {
         "command": "calkit-vscode.enableAutoSyncOverleaf",
-        "title": "Auto-sync Overleaf",
+        "title": "Auto-sync Overleaf on run+save",
         "category": "Calkit"
       },
       {
         "command": "calkit-vscode.disableAutoSyncOverleaf",
-        "title": "✓ Auto-sync Overleaf",
+        "title": "✓ Auto-sync Overleaf on run+save",
         "category": "Calkit"
       },
       {
@@ -482,8 +488,13 @@
           "group": "navigation@0"
         },
         {
+          "command": "calkit-vscode.runSave",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject && !calkit-vscode.syncsWithOverleaf || view == calkit-sidebar && calkit-vscode.hasProject && !calkit-vscode.autoSyncOverleaf",
+          "group": "navigation@0"
+        },
+        {
           "command": "calkit-vscode.runSaveSync",
-          "when": "view == calkit-sidebar && calkit-vscode.hasProject && calkit-vscode.syncsWithOverleaf",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject && calkit-vscode.syncsWithOverleaf && calkit-vscode.autoSyncOverleaf",
           "group": "navigation@0"
         },
         {
@@ -1071,9 +1082,9 @@
         },
         "calkit.overleaf.autoSync": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "scope": "resource",
-          "description": "Sync folders with Overleaf in the background when a check finds changes on either side, saving and pushing what's synced. A file changed in both places still asks what to keep."
+          "description": "Sync with Overleaf too when running and saving from the Calkit sidebar, in a project that syncs with Overleaf."
         }
       }
     }

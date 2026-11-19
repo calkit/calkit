@@ -1928,7 +1928,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   sidebarProvider = new CalkitSidebarProvider();
-  registerOverleaf(context, sidebarProvider, getWorkspaceRoot, log);
+  registerOverleaf(context, sidebarProvider, getWorkspaceRoot);
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
     showCollapseAll: true,

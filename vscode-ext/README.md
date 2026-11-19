@@ -28,8 +28,9 @@ The **Calkit** activity-bar view presents the project as connected sections:
 - **Overleaf**: Each folder synced with an Overleaf project, checked in the
   background, showing whether it's in sync, has changes on Overleaf, e.g.,
   from a coauthor, or has files to push, with buttons to sync it, open it on
-  Overleaf, or import another project. **Run, Save, and Sync with Overleaf**
-  in the toolbar runs the pipeline, saves, and syncs in one step, and walks
+  Overleaf, or import another project. **Run and Save** in the toolbar runs
+  the pipeline and saves in one step, syncing with Overleaf too unless
+  **Auto-sync Overleaf on run+save** is off in the sidebar's menu, and walks
   you through a file that changed in two places if one did.
   <!-- TODO: needs human review -->
 
@@ -145,9 +146,10 @@ pipeline:
 - `calkit.overleaf.checkInterval`: How often, in seconds, to check folders
   synced with Overleaf while VS Code has focus (default 120; 0 turns it
   off).
-- `calkit.overleaf.autoSync`: Sync folders with Overleaf in the background
-  when a check finds changes on either side (off by default; toggled per
-  project with **Auto-sync Overleaf** in the sidebar's menu).
+- `calkit.overleaf.autoSync`: Sync with Overleaf too when running and saving
+  from the sidebar, in a project that syncs with Overleaf (on by default;
+  toggled per project with **Auto-sync Overleaf on run+save** in the
+  sidebar's menu).
 
 ## Commands
 

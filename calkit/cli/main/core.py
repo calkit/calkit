@@ -2705,18 +2705,16 @@ def _inject_markdown_values() -> tuple[list[str], list[str]]:
 
     Done after every run rather than only for stages that ran: the
     results files are tracked outputs, so whatever they hold is what the
-    prose should say. Returns the paths of the files that changed, and a
-    message for each file that could not be written: one document that
-    cannot be parsed must not stop the others from being brought into
-    line, and every one that failed has to be named, since fixing one
-    would otherwise only reveal the next.
+    prose should say. Returns the paths of the files that changed and an
+    error message for each that couldn't be parsed, which doesn't stop
+    the rest from being written.
     """
     import calkit.markdown
 
     ck_info = calkit.load_calkit_info()
     results = calkit.markdown.results_by_name(ck_info)
     changed_paths = []
-    errors = []
+    error_messages = []
     for md_path in sorted(
         set(calkit.markdown.get_markdown_stages(ck_info).values())
     ):
@@ -2728,14 +2726,14 @@ def _inject_markdown_values() -> tuple[list[str], list[str]]:
             new_text, changed = calkit.markdown.set_values(
                 text, md_path, results=results
             )
-        except Exception as e:
-            errors.append(str(e))
+        except calkit.markdown.MarkdownParseError as e:
+            error_messages.append(str(e))
             continue
         if changed:
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new_text)
             changed_paths.append(md_path)
-    return changed_paths, errors
+    return changed_paths, error_messages
 
 
 def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
@@ -4352,10 +4350,7 @@ def run(
         _, md_value_errors = _inject_markdown_values()
     except Exception as e:
         md_value_errors = [str(e)]
-    # A document whose values couldn't be rewritten still shows the numbers
-    # from whenever it was last written, so this can't pass as a warning: the
-    # run would report success with prose disagreeing with the results it
-    # cites, and nothing downstream would say so.
+    # Stale values in a document are a failure, not a warning
     for message in md_value_errors:
         typer.echo(
             f"Failed to write values into markdown: {message}", err=True

@@ -5106,13 +5106,6 @@ def test_clone(monkeypatch):
 
 
 def test_run_fails_naming_every_markdown_whose_values_cant_be_written(tmp_dir):
-    """One unparsable document must not silence the rest.
-
-    The values are re-injected on every run, so prose can't drift from the
-    results it cites -- which means a document the injection can't rewrite is
-    showing whatever it was last written with, and a run that passes with a
-    warning leaves that in the record unnoticed.
-    """
     subprocess.check_call(["calkit", "init"])
     with open("r.json", "w") as f:
         json.dump({"v": 7}, f)

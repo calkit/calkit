@@ -1339,8 +1339,6 @@ def test_ensure_writable_site_cache(tmp_path, monkeypatch):
 
 
 def test_running_processes_in_project_below_dvc_root(tmp_dir):
-    """A project in a subdirectory of a DVC repo sees the repo's lock, but
-    only the entries for its own paths."""
     import json
     import time
 

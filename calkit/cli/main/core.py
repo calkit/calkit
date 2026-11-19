@@ -3136,14 +3136,6 @@ def _get_running_pipeline_status(
     }
 
 
-def _group_stage_items(names: list[str]) -> dict[str, list[str]]:
-    """Stage names grouped by the stage they're an item of, in order."""
-    groups: dict[str, list[str]] = {}
-    for name in names:
-        groups.setdefault(name.partition("@")[0], []).append(name)
-    return groups
-
-
 def _print_running_pipeline_status(running_status: dict) -> None:
     """Print a human-readable summary of an in-progress pipeline run.
 
@@ -3151,6 +3143,22 @@ def _print_running_pipeline_status(running_status: dict) -> None:
     finished, rather than item by item, which for a big sweep would bury
     the rest of the pipeline.
     """
+
+    def group_stage_items(names: list[str]) -> dict[str, list[str]]:
+        """Stage names grouped by the stage they're an item of, in order."""
+        groups: dict[str, list[str]] = {}
+        for name in names:
+            groups.setdefault(name.partition("@")[0], []).append(name)
+        return groups
+
+    def get_progress(stage: str, items: list[str]) -> str | None:
+        """How many of an iterated stage's items have finished."""
+        if all("@" not in item for item in items):
+            return None
+        done = len(finished_groups.get(stage, []))
+        total = item_counts.get(stage)
+        return f"{done}/{total}" if total else f"{done} done"
+
     processes = running_status["processes"]
     pids = ", ".join(str(p["pid"]) for p in processes)
     typer.echo(f"Run in progress (PID {pids})")
@@ -3162,23 +3170,14 @@ def _print_running_pipeline_status(running_status: dict) -> None:
         if info.get("status") in ("completed", "skipped")
     ]
     running_stages = running_status["running_stages"]
-    finished_groups = _group_stage_items(finished)
-    running_groups = _group_stage_items(running_stages)
-
-    def progress(stage: str, items: list[str]) -> str | None:
-        """How many of an iterated stage's items have finished."""
-        if all("@" not in item for item in items):
-            return None
-        done = len(finished_groups.get(stage, []))
-        total = item_counts.get(stage)
-        return f"{done}/{total}" if total else f"{done} done"
-
+    finished_groups = group_stage_items(finished)
+    running_groups = group_stage_items(running_stages)
     # A stage with items still running is shown as running
     completed = []
     for stage, items in finished_groups.items():
         if stage in running_groups:
             continue
-        fraction = progress(stage, items)
+        fraction = get_progress(stage, items)
         completed.append(
             stage if fraction is None else f"{stage} ({fraction})"
         )
@@ -3187,7 +3186,7 @@ def _print_running_pipeline_status(running_status: dict) -> None:
     if running_stages:
         for stage, items in running_groups.items():
             details = []
-            fraction = progress(stage, items)
+            fraction = get_progress(stage, items)
             if fraction is not None:
                 details.append(fraction)
             if len(items) > 1:

@@ -2342,7 +2342,6 @@ def test_get_iteration_item_counts():
 
 
 def test_print_running_pipeline_status_groups_items(capsys):
-    """An iterated stage shows once, with how many items have finished."""
     start = calkit.utcnow(remove_tz=True).isoformat()
     done = {"status": "completed", "start_time": start, "end_time": start}
     stages = {f"fetch@{m:02d}": done for m in range(1, 13)}

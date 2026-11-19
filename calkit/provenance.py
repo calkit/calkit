@@ -409,6 +409,136 @@ def import_is_checkable(imported_from: object) -> bool:
     )
 
 
+class AlreadyDeclaredError(ValueError):
+    """A path that's declared as an artifact which already says where it
+    came from, so that entry is edited instead."""
+
+
+def add_origin(
+    ck_info: dict,
+    path: str,
+    created_by: list[dict] | None = None,
+    imported_from: dict | None = None,
+    title: str | None = None,
+    description: str | None = None,
+) -> tuple[dict, dict]:
+    """Get a copy of ``ck_info`` that records who made ``path`` or where it
+    was imported from, and the misc artifact entry saying so.
+
+    A declared artifact that doesn't say where it came from yet, or only
+    describes where it was imported from, gets it in its own entry, so the
+    entry's title and description aren't used; anything else is added as
+    the entry. Whether the path is in the project is the caller's to check.
+    """
+    import copy
+
+    from pydantic import ValidationError
+
+    from calkit.models.core import MiscArtifact
+
+    if created_by is None and imported_from is None:
+        raise ValueError(
+            "A misc artifact must say who created it or where it was "
+            "imported from"
+        )
+    if created_by is not None and not can_be_created_by_person(path):
+        raise ValueError(
+            f"A person can't be the origin of '{path}', since something "
+            "else exports that format; add the stage that makes it, or "
+            "record where it was imported from"
+        )
+    # Copied, keeping its comments, so the caller's is left as it was
+    ck_info = copy.deepcopy(ck_info)
+    declared = None
+    for section, label in [
+        ("figures", "figure"),
+        ("datasets", "dataset"),
+        ("publications", "publication"),
+        ("misc", "misc artifact"),
+    ]:
+        for existing in ck_info.get(section) or []:
+            if not isinstance(existing, dict) or (
+                posixpath.normpath(str(existing.get("path") or "")) != path
+            ):
+                continue
+            if (
+                section == "publications"
+                or any(
+                    existing.get(k) is not None
+                    for k in ("created_by", "stage")
+                )
+                or import_is_checkable(existing.get("imported_from"))
+            ):
+                raise AlreadyDeclaredError(
+                    f"'{path}' is already declared as a {label}; edit "
+                    "that entry instead"
+                )
+            declared = existing
+    entry: dict = {"path": path}
+    if title:
+        entry["title"] = title
+    if description:
+        entry["description"] = description
+    if created_by is not None:
+        entry["created_by"] = created_by
+    if imported_from is not None:
+        entry["imported_from"] = imported_from
+    # Validated against the model that owns calkit.yaml, which is where
+    # the rules live, e.g., made here or imported but not both, and at
+    # least one person named
+    try:
+        entry = MiscArtifact.model_validate(entry).model_dump(
+            exclude_none=True, mode="json"
+        )
+    except ValidationError as e:
+        raise ValueError(f"Invalid misc artifact: {e}")
+    if declared is not None:
+        for k in ("created_by", "imported_from"):
+            if k in entry:
+                declared[k] = entry[k]
+            else:
+                declared.pop(k, None)
+    else:
+        if not ck_info.get("misc"):
+            ck_info["misc"] = []
+        ck_info["misc"].append(entry)
+    return ck_info, entry
+
+
+def add_creator(ck_info: dict, paths: list[str], person: dict) -> dict:
+    """Get a copy of ``ck_info`` that records ``person`` as having made each
+    of ``paths``, e.g., the file a figure is exported from, unless
+    something already says otherwise.
+    """
+    import copy
+
+    # Copied, keeping its comments, so the caller's is left as it was
+    ck_info = copy.deepcopy(ck_info)
+    for path in paths:
+        entry = next(
+            (
+                e
+                for items in ck_info.values()
+                if isinstance(items, list)
+                for e in items
+                if isinstance(e, dict)
+                and posixpath.normpath(str(e.get("path") or "")) == path
+            ),
+            None,
+        )
+        if entry is None:
+            if not ck_info.get("misc"):
+                ck_info["misc"] = []
+            ck_info["misc"].append({"path": path, "created_by": [person]})
+        elif not (
+            entry.get("created_by")
+            or entry.get("imported_from")
+            or entry.get("stage")
+        ):
+            entry["created_by"] = [person]
+    return ck_info
+
+
 def how_to_define_origin(path: str) -> str:
     """Say what defines the origin of ``path``, for a message."""
     if can_be_created_by_person(path):

@@ -841,7 +841,7 @@ def color_mermaid_by_status(
 
 
 # The stage in dvc.lock that produces a path, shared with Calkit on a
-# user's computer
+# user's machine
 find_stage_for_path = calkit.pipeline.get_lock_stage_for_output
 
 

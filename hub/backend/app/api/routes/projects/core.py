@@ -214,7 +214,6 @@ from calkit.models import ProjectStatus
 from calkit.models.core import Dataset as CkDataset
 from calkit.models.core import Figure as CkFigure
 from calkit.models.core import ImportedDataset as CkImportedDataset
-from calkit.models.core import MiscArtifact as CkMiscArtifact
 from calkit.models.io import InputsFromStageOutputs
 from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
@@ -6584,55 +6583,27 @@ def post_project_misc(
         current_user=current_user,
         min_access_level="write",
     )
-    if req.created_by is None and req.imported_from is None:
-        raise HTTPException(
-            422,
-            "A misc artifact must say who created it or where it was "
-            "imported from",
-        )
-    if req.created_by is not None and not (
-        calkit.provenance.can_be_created_by_person(path)
-    ):
-        raise HTTPException(
-            422,
-            f"A person can't be the origin of '{path}', since something "
-            "else exports that format; add the stage that makes it, or "
-            "record where it was imported from",
-        )
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
     ck_info = get_ck_info_from_repo(repo)
-    # A declared artifact that doesn't say where it came from yet, or only
-    # describes where it was imported from, gets the origin added to its
-    # own entry
-    declared = None
-    for section, label in [
-        ("figures", "figure"),
-        ("datasets", "dataset"),
-        ("publications", "publication"),
-        ("misc", "misc artifact"),
-    ]:
-        for existing in ck_info.get(section) or []:
-            if isinstance(existing, dict) and (
-                normalize_artifact_path(str(existing.get("path") or ""))
-                == path
-            ):
-                imported_from = existing.get("imported_from")
-                if (
-                    section == "publications"
-                    or any(
-                        existing.get(k) is not None
-                        for k in ("created_by", "stage")
-                    )
-                    or calkit.provenance.import_is_checkable(imported_from)
-                ):
-                    raise HTTPException(
-                        400,
-                        f"'{path}' is already declared as a {label}; edit "
-                        "that entry instead",
-                    )
-                declared = existing
+    try:
+        ck_info, entry = calkit.provenance.add_origin(
+            ck_info,
+            path,
+            created_by=(
+                [p.model_dump(exclude_none=True) for p in req.created_by]
+                if req.created_by is not None
+                else None
+            ),
+            imported_from=req.imported_from,
+            title=req.title,
+            description=req.description,
+        )
+    except calkit.provenance.AlreadyDeclaredError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     # Whether tracked by Git or DVC, the path has to be here to attribute
     wdir = str(repo.working_dir)
     if not os.path.exists(os.path.join(wdir, path)) and not os.path.isfile(
@@ -6643,36 +6614,6 @@ def post_project_misc(
             project=project, tree=tree
         ):
             raise HTTPException(404, f"'{path}' does not exist in the project")
-    entry: dict[str, Any] = {"path": path}
-    if req.title:
-        entry["title"] = req.title
-    if req.description:
-        entry["description"] = req.description
-    if req.created_by is not None:
-        entry["created_by"] = [
-            person.model_dump(exclude_none=True) for person in req.created_by
-        ]
-    if req.imported_from is not None:
-        entry["imported_from"] = req.imported_from
-    # Validated against the model that owns calkit.yaml, which is where
-    # the rules live, e.g., made here or imported but not both, and at
-    # least one person named
-    try:
-        entry = CkMiscArtifact.model_validate(entry).model_dump(
-            exclude_none=True, mode="json"
-        )
-    except ValidationError as e:
-        raise HTTPException(422, f"Invalid misc artifact: {e}")
-    if declared is not None:
-        for k in ("created_by", "imported_from"):
-            if k in entry:
-                declared[k] = entry[k]
-            else:
-                declared.pop(k, None)
-    else:
-        misc = ck_info.get("misc", [])
-        misc.append(entry)
-        ck_info["misc"] = misc
     ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
@@ -8218,7 +8159,7 @@ def _load_ck_stage_map(stage_yaml: str) -> Any:
     return stage_map
 
 
-STAGE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+STAGE_NAME_RE = calkit.pipeline.STAGE_NAME_RE
 
 
 def _validate_ck_stage(stage_map: Any, stage_name: str) -> CkStage:

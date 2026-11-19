@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import copy
 import csv
 import functools
 import glob
@@ -433,6 +434,77 @@ class _ThreadLocalYAMLProxy:
 
 
 ryaml = _ThreadLocalYAMLProxy()
+
+
+def set_yaml_item(mapping: dict, key: Any, value: Any) -> None:
+    """Set an item in a mapping loaded with ``ryaml``, keeping its layout.
+
+    ruamel.yaml attaches the blank lines and comments that follow a mapping
+    to its last item, however deeply nested, so a key appended after it
+    would land below them, e.g., below the blank line separating the mapping
+    from the next top-level key. The new last item takes them over instead.
+    """
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    def get_last_items(node: Any) -> list[tuple[Any, Any]]:
+        # The collection and key of each last item, outermost first
+        if isinstance(node, CommentedMap) and node:
+            last = next(reversed(node))
+        elif isinstance(node, CommentedSeq) and node:
+            last = len(node) - 1
+        else:
+            return []
+        return [(node, last)] + get_last_items(node[last])
+
+    def to_commented(node: Any) -> Any:
+        if isinstance(node, dict):
+            return CommentedMap((k, to_commented(v)) for k, v in node.items())
+        if isinstance(node, list):
+            return CommentedSeq(to_commented(v) for v in node)
+        return node
+
+    is_last = bool(mapping) and key == next(reversed(mapping))
+    # A scalar replacing a scalar keeps the item's comments as they are
+    if not isinstance(mapping, CommentedMap) or (
+        key in mapping
+        and (
+            not is_last
+            or (
+                not isinstance(mapping[key], (dict, list))
+                and not isinstance(value, (dict, list))
+            )
+        )
+    ):
+        mapping[key] = value
+        return
+    # Maps keep a trailing comment in slot 2 of an item, and sequences in 0
+    token = None
+    for node, k in reversed(get_last_items(mapping)):
+        slots = node.ca.items.get(k)
+        slot = 2 if isinstance(node, CommentedMap) else 0
+        if slots and slots[slot] is not None:
+            token = slots[slot]
+            slots[slot] = None
+            # A comment at the end of the item's own line stays with it
+            if token.value.startswith("#"):
+                eol, _, rest = token.value.partition("\n")
+                slots[slot] = copy.copy(token)
+                slots[slot].value = eol + "\n"
+                token = copy.copy(token)
+                token.value = "\n" + rest
+                if not rest:
+                    token = None
+            break
+    if token is None:
+        mapping[key] = value
+        return
+    mapping[key] = to_commented(value)
+    node, k = get_last_items(mapping)[-1]
+    if isinstance(node, CommentedMap):
+        node.ca.items[k] = [None, None, token, None]
+    else:
+        node.ca.items[k] = [token, None]
+
 
 try:
     # libyaml-backed loader, many times faster than the pure-Python one.

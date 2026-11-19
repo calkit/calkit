@@ -198,6 +198,10 @@ function getLocalCheckout(project: string): Promise<LocalCheckout> {
   return checkout;
 }
 
+// The job each script on this machine was last read in, by project and
+// path, for making a stage from it
+const detectJobs = new Map<string, string>();
+
 /** Wait for a job Calkit here started to finish, failing if it did. */
 async function waitForJob(job: LocalJob): Promise<LocalJob> {
   while (job.status === "queued" || job.status === "running") {
@@ -405,10 +409,8 @@ async function handle(
       // the project's here
       const local = `${message.owner}/${message.project}`;
       if ((await getLocalCheckout(local)).path) {
-        // Reading the script can take as long as calkit xr allows it, and
-        // a save reads it again before committing
-        return askLocal<StageFromScriptOrNotebookResponse>(
-          {
+        const ask = (detectJob?: string) =>
+          askLocal<StageFromScriptOrNotebookResponse>({
             type: "project.stageFromScriptOrNotebook",
             project: local,
             scriptPath: message.scriptPath,
@@ -417,9 +419,36 @@ async function handle(
             produces: message.produces,
             data: message.data ?? [],
             save: message.save ?? false,
-          },
-          5 * 60 * 1000,
+            detectJob,
+          });
+        // Refused without reading the script
+        if (message.content != null || message.data?.length) {
+          return ask();
+        }
+        // Read in a job of its own, since that can take a while, e.g.,
+        // for a notebook, and once for both seeing the stage and saving
+        // it, unless the script's changed since
+        const key = `${local}:${message.scriptPath}`;
+        const known = detectJobs.get(key);
+        if (known) {
+          try {
+            return await ask(known);
+          } catch (e) {
+            if (!/changed since it was read|No job/.test(String(e))) {
+              throw e;
+            }
+          }
+        }
+        const job = await waitForJob(
+          await askLocal<LocalJob>({
+            type: "job.start",
+            kind: "detect",
+            project: local,
+            scriptPath: message.scriptPath,
+          }),
         );
+        detectJobs.set(key, job.id);
+        return ask(job.id);
       }
       return request<StageFromScriptOrNotebookResponse>(
         `${projectPath(message.owner, message.project)}` +

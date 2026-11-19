@@ -1384,6 +1384,55 @@ def test_add_stage_from_script(tmp_path, monkeypatch):
     assert repo.head.commit.hexsha == head
 
 
+def test_move_external_data(tmp_path, monkeypatch):
+    from calkit.browser_link import move_external_data
+
+    for var in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{var}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "test@example.com")
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    (tmp_path / "instrument").mkdir()
+    (tmp_path / "instrument" / "log.csv").write_text("t,T\n0,25\n")
+    script = "import pandas as pd\ndf = pd.read_csv('../instrument/log.csv')\n"
+    (project / "fit.py").write_text(script)
+    repo = calkit.git.get_repo(str(project))
+    repo.git.add("-A")
+    repo.git.commit("-m", "Start")
+    msg = {
+        "scriptPath": "fit.py",
+        "external": "../instrument/log.csv",
+        "dest": "data/log.csv",
+    }
+    # Copied in, the script pointed at the copy, and both committed, with
+    # the original left where it was
+    res = move_external_data(str(project), msg)
+    assert res == {"path": "data/log.csv", "script_path": "fit.py"}
+    assert (project / "data" / "log.csv").read_text() == "t,T\n0,25\n"
+    assert "pd.read_csv('data/log.csv')" in (project / "fit.py").read_text()
+    assert (tmp_path / "instrument" / "log.csv").exists()
+    assert not repo.git.status("--porcelain")
+    assert repo.head.commit.message.strip() == (
+        "Move ../instrument/log.csv into the project as data/log.csv"
+    )
+    # Nothing in the project is replaced
+    (project / "fit.py").write_text(script)
+    with pytest.raises(ValueError, match="already in the project"):
+        move_external_data(str(project), msg)
+    # Nor is anything moved that the script doesn't name, or isn't here
+    (tmp_path / "log.csv").write_text("x")
+    with pytest.raises(ValueError, match="Couldn't find"):
+        move_external_data(
+            str(project), msg | {"external": "../log.csv", "dest": "data/x"}
+        )
+    with pytest.raises(ValueError, match="isn't on this machine"):
+        move_external_data(
+            str(project), msg | {"external": "../nope.csv", "dest": "data/y"}
+        )
+    assert not (project / "data" / "x").exists()
+
+
 def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     from calkit.browser_link import add_export_stage, record_origin
 

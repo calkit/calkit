@@ -361,6 +361,12 @@ def get_result(msg: dict) -> Any:
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this machine")
         result = add_stage_from_script(paths[0], msg)
+    elif kind == "project.moveExternalData":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        result = move_external_data(paths[0], msg)
     elif kind in ("project.recordOrigin", "project.addExportStage"):
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
@@ -1974,6 +1980,84 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     )
     result["saved"] = True
     return result
+
+
+def move_external_data(wdir: str, msg: dict) -> dict:
+    """Copy data a script reads from outside the project into it, point
+    the script at the copy, and commit both, so its stage can run anywhere.
+
+    The original is left where it was, since something else may read it.
+    """
+    import posixpath
+    import shutil
+
+    import calkit.detect
+
+    script_path = get_project_path(wdir, msg.get("scriptPath"), "script")
+    external = msg.get("external")
+    if not isinstance(external, str) or not external.strip():
+        raise ValueError("Say which data to move")
+    dest = get_project_path(wdir, msg.get("dest"), "data")
+    # What a script names is relative to where it runs: a notebook's folder,
+    # or else the project
+    run_dir = (
+        posixpath.dirname(script_path)
+        if script_path.lower().endswith(".ipynb")
+        else "."
+    )
+    source = os.path.normpath(
+        os.path.join(wdir, run_dir, os.path.expanduser(external))
+    )
+    if not os.path.exists(source):
+        raise ValueError(f"'{external}' isn't on this machine")
+    full_dest = os.path.join(wdir, dest)
+    if os.path.lexists(full_dest) or is_dvc_tracked(wdir, dest):
+        raise ValueError(
+            f"'{dest}' is already in the project; pick another place for it"
+        )
+    full_script = os.path.join(wdir, script_path)
+    with open(full_script, encoding="utf-8", newline="") as f:
+        original = f.read()
+    text, found = calkit.detect.rewrite_paths(
+        original, {external: posixpath.relpath(dest, run_dir)}
+    )
+    if not found:
+        raise ValueError(
+            f"Couldn't find '{external}' written out in {script_path}; "
+            "change it there by hand"
+        )
+    os.makedirs(os.path.dirname(full_dest) or wdir, exist_ok=True)
+    if os.path.isdir(source):
+        shutil.copytree(source, full_dest)
+    else:
+        shutil.copy2(source, full_dest)
+    with open(full_script, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    # Git or DVC, by what it is, as 'calkit add' decides
+    res = subprocess.run(
+        get_calkit_cmd()
+        + [
+            "add",
+            dest,
+            script_path,
+            "-m",
+            f"Move {external} into the project as {dest}",
+        ],
+        cwd=wdir,
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        if os.path.isdir(full_dest):
+            shutil.rmtree(full_dest)
+        elif os.path.exists(full_dest):
+            os.remove(full_dest)
+        with open(full_script, "w", encoding="utf-8", newline="") as f:
+            f.write(original)
+        raise ValueError(
+            (res.stderr or res.stdout).strip() or f"Couldn't add {dest}"
+        )
+    return {"path": dest, "script_path": script_path}
 
 
 def record_origin(wdir: str, msg: dict) -> dict:

@@ -327,6 +327,19 @@ export type Request =
       project: string;
     }
   | {
+      /**
+       * Copy data a script reads from outside the project into it, on this
+       * machine, pointing the script at the copy.
+       */
+      type: "project.moveExternalData";
+      owner: string;
+      project: string;
+      scriptPath: string;
+      /** As the script names it. */
+      external: string;
+      dest: string;
+    }
+  | {
       /** What likely makes a file with no origin, for someone to confirm. */
       type: "project.originSuggestions";
       owner: string;
@@ -406,6 +419,7 @@ export interface ResponseMap {
   "local.publicationSynctex": string | null;
   "local.chooseFolder": { path: string | null; empty: boolean };
   "local.save": null;
+  "project.moveExternalData": { path: string; script_path: string };
   "project.originSuggestions": {
     kind: "script" | "notebook" | "exported";
     source: string;

@@ -820,6 +820,14 @@ async function handle(
       localCheckouts.delete(message.project);
       return chosen;
     }
+    case "project.moveExternalData":
+      return askLocal({
+        type: "project.moveExternalData",
+        project: `${message.owner}/${message.project}`,
+        scriptPath: message.scriptPath,
+        external: message.external,
+        dest: message.dest,
+      });
     case "project.originSuggestions": {
       // Read from the scripts on this machine, when the project's here
       const local = `${message.owner}/${message.project}`;

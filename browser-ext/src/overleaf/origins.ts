@@ -173,18 +173,53 @@ function renderAddScript(
     external: string,
     detected: StageFromScriptOrNotebookResponse,
   ) => {
+    const name = external.split(/[\\/]/).filter(Boolean).pop() ?? "data";
+    // Copied in, with the script pointed at the copy, in one step
     if (isLocal) {
-      return el("div", {
-        class: "small",
-        style: { color: "var(--ck-warning)", marginTop: "4px" },
-        text:
-          `Reads ${external}, which is outside the project, so it will ` +
-          "only run on this machine. Move it into the project's folder, " +
-          "and change the script to read it from there.",
+      const dest = textInput({ value: `data/${name}` });
+      const note = el("div", { class: "small" });
+      const copy = el("button", {
+        class: "action",
+        text: "Copy into project",
       });
+      copy.addEventListener("click", async () => {
+        if (!request) {
+          return;
+        }
+        copy.disabled = true;
+        clear(note).append(loading("Copying"));
+        try {
+          await send({
+            type: "project.moveExternalData",
+            owner,
+            project,
+            scriptPath: request.scriptPath,
+            external,
+            dest: dest.value.trim() || `data/${name}`,
+          });
+          await reread();
+        } catch (e) {
+          copy.disabled = false;
+          clear(note).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+        }
+      });
+      return el("div", { class: "stack", style: { marginTop: "4px" } }, [
+        el("div", {
+          class: "small",
+          style: { color: "var(--ck-warning)" },
+          text:
+            `Reads ${external}, outside the project, so it only runs on ` +
+            `this machine. Copy it in, and ${request?.scriptPath} will ` +
+            "read the copy:",
+        }),
+        dest,
+        el("div", { class: "actions" }, [copy]),
+        note,
+      ]);
     }
     const chosen = data.get(external);
-    const name = external.split(/[\\/]/).filter(Boolean).pop() ?? "data";
     const dest = textInput({ value: chosen?.path ?? `data/${name}` });
     const files = el("input", {
       type: "file",

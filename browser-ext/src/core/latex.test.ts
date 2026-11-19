@@ -12,6 +12,7 @@ import {
   refDirName,
   getShownValue,
 } from "./latex";
+import type { StageStatus } from "./types";
 
 describe("latexDiffPath", () => {
   test("mirrors the document's own path under the comparison", () => {
@@ -244,10 +245,39 @@ describe("citationProblems", () => {
         message: "In Photoshop, export figures/a.png",
         stale_reason: "pipeline",
       }).map((p) => p.message),
-    ).toEqual([
-      "Needs a manual step, since what it's made from changed: In " +
-        "Photoshop, export figures/a.png",
+    ).toEqual(["Needs a manual step: In Photoshop, export figures/a.png"]);
+    // Out of date, saying what was modified when the stage's status does
+    const stale = (stage_status?: StageStatus) =>
+      citationProblems(figure, {
+        ...base,
+        stage: "plot",
+        stale_reason: "pipeline",
+        stage_status,
+      }).map((p) => p.message);
+    const status = {
+      status: "stale" as const,
+      modified_command: false,
+      modified_inputs: [],
+      modified_outputs: [],
+      missing_outputs: [],
+    };
+    expect(stale()).toEqual(["Out of date"]);
+    expect(stale({ ...status, modified_inputs: ["data/raw.csv"] })).toEqual([
+      "Out of date: data/raw.csv modified",
     ]);
+    expect(
+      stale({
+        ...status,
+        modified_command: true,
+        modified_inputs: ["data/raw.csv"],
+      }),
+    ).toEqual(["Out of date: command and data/raw.csv modified"]);
+    expect(
+      stale({
+        ...status,
+        modified_inputs: ["a.csv", "b.csv", "c.csv", "d.csv"],
+      }),
+    ).toEqual(["Out of date: a.csv, b.csv and 2 more modified"]);
     // Imported from somewhere only described, which is worth a warning
     expect(
       citationProblems(figure, {

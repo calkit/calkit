@@ -23,6 +23,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Iterable
 from typing import Any, BinaryIO
 
 import calkit
@@ -62,6 +63,9 @@ PULL_FRESH_SECONDS = 10
 # How often an Overleaf project no checkout here syncs with is looked for
 # again, since that searches the home folder too
 LOOKUP_RESCAN_SECONDS = 600
+# A file bigger than this is stored with DVC rather than in Git, as the
+# hub stores an upload
+FILE_GIT_MAX_BYTES = 1_000_000
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
 JOB_KINDS = ("run", "sync", "clone", "install-editor")
@@ -81,6 +85,8 @@ CONCURRENT_REQUEST_TYPES = (
     "checkouts.get",
     "overleaf.lookup",
     "publication.pdf",
+    "publication.synctex",
+    "publication.source",
     "job.get",
     "job.log",
     "jobs.list",
@@ -90,9 +96,11 @@ MAX_JOBS_KEPT = 20
 # How much of a PDF goes in each message, which base64 makes a third
 # bigger, keeping it well under the browser's limit
 PDF_CHUNK_BYTES = 600_000
+# The most of a LaTeX file read for the extension, which no paper's comes near
+SOURCE_MAX_BYTES = 1_000_000
 OVERLEAF_AUTH_MISSING = (
-    "Calkit on this computer has no Overleaf credentials that work; connect "
-    "Overleaf to Calkit, which saves them for every computer you use"
+    "Calkit on this machine has no Overleaf credentials that work; connect "
+    "Overleaf to Calkit, which saves them for every machine you use"
 )
 # Where each browser looks for hosts' manifests in the home folder, by
 # platform; each is only written if the folder above it exists, i.e., the
@@ -179,6 +187,9 @@ def get_reply(msg: dict) -> dict:
     - ``publication.pdf``: part of the PDF a folder synced with Overleaf
       builds to, from ``offset``, with how fresh it is, so it can be shown
       in place of Overleaf's.
+    - ``publication.source``: a LaTeX file in a folder synced with
+      Overleaf, as it is here, to map a line SyncTeX gives for a PDF built
+      here to the same line in Overleaf's copy.
     - ``job.start``, ``job.get``, and ``jobs.list``: run something that
       takes a while, i.e., a pipeline run, an Overleaf sync, or a clone, in
       a process of its own, which outlives the host, and check on it.
@@ -268,7 +279,7 @@ def get_result(msg: dict) -> Any:
             )
             if "isn't on this machine" in error:
                 error = (
-                    f"{owner}/{name} isn't on this computer; clone it "
+                    f"{owner}/{name} isn't on this machine; clone it "
                     f"with 'calkit clone {owner}/{name}'"
                 )
             raise ValueError(error)
@@ -309,7 +320,7 @@ def get_result(msg: dict) -> Any:
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_overleaf_sync_statuses(
             paths[0],
             overleaf_project_id=msg.get("overleaf_project_id"),
@@ -322,35 +333,57 @@ def get_result(msg: dict) -> Any:
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_figures(paths[0])
     elif kind == "project.contentPaths":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_content_paths(paths[0])
     elif kind == "project.stageFromScriptOrNotebook":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = add_stage_from_script(paths[0], msg)
+    elif kind in ("project.recordOrigin", "project.addExportStage"):
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        if kind == "project.recordOrigin":
+            result = record_origin(paths[0], msg)
+        else:
+            result = add_export_stage(paths[0], msg)
     elif kind == "project.pipeline":
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_pipeline(paths[0])
-    elif kind == "publication.pdf":
+    elif kind in ("publication.pdf", "publication.synctex"):
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         offset = msg.get("offset", 0)
         if not isinstance(offset, int) or offset < 0:
             raise ValueError("An offset must be a whole number")
-        result = get_pdf_chunk(paths[0], str(msg.get("folder")), offset)
+        result = get_pdf_chunk(
+            paths[0],
+            str(msg.get("folder")),
+            offset,
+            synctex=kind == "publication.synctex",
+        )
+    elif kind == "publication.source":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        result = get_source_text(
+            paths[0], str(msg.get("folder")), str(msg.get("path"))
+        )
     elif kind == "job.start":
         result = start_job(msg)
     elif kind == "job.get":
@@ -925,11 +958,39 @@ def get_pdf_path(wdir: str, folder: str) -> str | None:
     return None
 
 
-def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
+def get_source_text(wdir: str, folder: str, path: str) -> dict:
+    """A LaTeX file in a folder synced with Overleaf, by its path there, as
+    it is in this checkout.
+    """
+    import posixpath
+
+    rel_path = posixpath.normpath(posixpath.join(folder, path))
+    full_path = os.path.join(wdir, rel_path)
+    if not os.path.realpath(full_path).startswith(
+        os.path.join(os.path.realpath(os.path.join(wdir, folder)), "")
+    ):
+        raise ValueError(f"{path} isn't in {folder}")
+    if not rel_path.lower().endswith((".tex", ".sty", ".cls", ".bib")):
+        raise ValueError(f"{path} isn't a LaTeX file")
+    if not os.path.isfile(full_path):
+        raise ValueError(f"{rel_path} isn't on this machine")
+    if os.path.getsize(full_path) > SOURCE_MAX_BYTES:
+        raise ValueError(f"{rel_path} is too big to read")
+    with open(full_path, encoding="utf-8", errors="replace") as f:
+        return {"path": rel_path, "text": f.read()}
+
+
+def get_pdf_chunk(
+    wdir: str, folder: str, offset: int, synctex: bool = False
+) -> dict:
     """Part of the PDF a folder synced with Overleaf builds to, as base64
     ``data``, from ``offset``, with its ``size``, when it was built, the
     commit that saved it, if any, whether it's changed since, and whether
     anything else in the folder has, i.e., it's older than its source.
+
+    With ``synctex``, it's the build's compressed SyncTeX file instead,
+    which says where in the source each place in the PDF came from, with
+    only when it was built.
     """
     import base64
 
@@ -938,6 +999,8 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
     path = get_pdf_path(wdir, folder)
     if path is None:
         raise ValueError(f"No PDF is built from {folder}")
+    if synctex:
+        path = os.path.splitext(path)[0] + ".synctex.gz"
     full_path = os.path.join(wdir, path)
     if not os.path.realpath(full_path).startswith(
         os.path.join(os.path.realpath(wdir), "")
@@ -945,7 +1008,7 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         raise ValueError(f"{path} isn't in the project")
     if not os.path.isfile(full_path):
         raise ValueError(
-            f"{path} hasn't been built on this computer; run the pipeline"
+            f"{path} hasn't been built on this machine; run the pipeline"
         )
     stat = os.stat(full_path)
     with open(full_path, "rb") as f:
@@ -957,6 +1020,8 @@ def get_pdf_chunk(wdir: str, folder: str, offset: int) -> dict:
         "offset": offset,
         "data": base64.b64encode(data).decode("ascii"),
     }
+    if synctex:
+        return chunk | {"built": stat.st_mtime}
     # How fresh it is, only with the first part
     if offset == 0:
         repo = calkit.git.get_repo(wdir)
@@ -1220,7 +1285,7 @@ def start_job(msg: dict) -> dict:
     else:
         paths = get_checkout_paths(owner, name)
         if not paths:
-            raise ValueError(f"{owner}/{name} isn't on this computer")
+            raise ValueError(f"{owner}/{name} isn't on this machine")
         wdir = paths[0]
         if kind == "run":
             # Saved and synced with Overleaf after unless asked not to
@@ -1513,6 +1578,122 @@ def get_content_paths(wdir: str) -> list[str]:
     return sorted(paths)
 
 
+def get_project_path(wdir: str, value: Any, what: str) -> str:
+    """A path the extension gave, relative to a checkout, refusing one
+    that isn't in it, e.g., through a symlink.
+    """
+    import posixpath
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"A {what} path is required")
+    # One given in full, e.g., from a file picker, is made relative
+    path = posixpath.normpath(
+        os.path.relpath(
+            os.path.join(wdir, value.strip()), os.path.abspath(wdir)
+        ).replace("\\", "/")
+    )
+    real = os.path.realpath(os.path.join(wdir, path))
+    if path.startswith("../") or not real.startswith(
+        os.path.join(os.path.realpath(wdir), "")
+    ):
+        raise ValueError(f"'{value}' isn't in the project")
+    return path
+
+
+def is_dvc_tracked(wdir: str, path: str) -> bool:
+    """Whether a path in a checkout has its own .dvc file or a folder's,
+    whether or not it's pulled.
+    """
+    parts = path.split("/")
+    return any(
+        os.path.isfile(os.path.join(wdir, *parts[:n]) + ".dvc")
+        for n in range(1, len(parts) + 1)
+    )
+
+
+def get_changed_paths(repo: Any) -> set[str]:
+    """Paths in a checkout that aren't committed, untracked ones too."""
+    # Unquoted, e.g., for names that aren't ASCII
+    entries = iter(repo.git.status("--porcelain", "-z", "-uall").split("\0"))
+    paths = set()
+    for entry in entries:
+        if len(entry) > 3:
+            paths.add(entry[3:])
+        # A rename or copy is followed by where it came from
+        if entry[:1] in ("R", "C"):
+            paths.add(next(entries, ""))
+    return paths - {""}
+
+
+def commit_change(
+    wdir: str,
+    ck_info: dict,
+    write: Callable[[], list[str]],
+    message: str,
+    checked: Iterable[str] = (),
+    also_commit: Iterable[str] = (),
+    compile_pipeline: bool = True,
+) -> None:
+    """Change a checkout as the hub would its clone, and commit only that,
+    since anything else changed here is someone's work in progress.
+
+    ``write`` writes any files, returning their paths, and may add to
+    ``ck_info``, which is written as calkit.yaml after it, and the pipeline
+    compiled, unless ``compile_pipeline`` is false. Refused if calkit.yaml,
+    dvc.yaml, or ``checked`` have unsaved changes, which would be swept up
+    or overwritten; ``also_commit`` are committed even so, e.g., a new
+    script. If any of it fails, files it changed are put back and files
+    that appeared while it ran are deleted. Nothing's pushed; a run and
+    sync does that.
+    """
+    import calkit.git
+    import calkit.pipeline
+
+    repo = calkit.git.get_repo(wdir)
+    changed_before = get_changed_paths(repo)
+    for path in ["calkit.yaml", "dvc.yaml", *checked]:
+        if path in changed_before:
+            raise ValueError(
+                f"{path} has changes that aren't saved; save or discard "
+                "them first"
+            )
+    try:
+        written = write()
+        with open(
+            os.path.join(wdir, "calkit.yaml"), "w", encoding="utf-8"
+        ) as f:
+            calkit.ryaml.dump(ck_info, f)
+        if compile_pipeline:
+            calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
+        commit_paths = sorted(
+            (get_changed_paths(repo) - changed_before)
+            | set(written)
+            | {"calkit.yaml"}
+            | (set(also_commit) & changed_before)
+        )
+        repo.git.add("--", *commit_paths)
+        # Already as asked, e.g., when saved before
+        if repo.git.diff("--cached", "--name-only", "--", *commit_paths):
+            repo.git.commit("-m", message, "--", *commit_paths)
+    except Exception:
+        # Put back what was written, so it isn't left half done, and a try
+        # again isn't refused for unsaved changes to it
+        undo = sorted(get_changed_paths(repo) - changed_before)
+        if undo:
+            repo.git.reset("-q", "--", *undo)
+            tracked = [
+                p
+                for p in repo.git.ls_files("-z", "--", *undo).split("\0")
+                if p
+            ]
+            if tracked:
+                repo.git.checkout("--", *tracked)
+            for path in set(undo) - set(tracked):
+                if os.path.isfile(os.path.join(wdir, path)):
+                    os.remove(os.path.join(wdir, path))
+        raise
+
+
 def add_stage_from_script(wdir: str, msg: dict) -> dict:
     """Make a stage from a script already in a checkout, as the hub does
     for one in its clone, read rather than run, as ``calkit xr --dry-run``
@@ -1524,58 +1705,18 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     those, since anything else changed here is someone's work in progress.
     Nothing's pushed; a run and sync does that.
     """
-    import posixpath
-
     import calkit.git
     import calkit.pipeline
     import calkit.pipeline.detect
 
-    def get_clean_path(value: Any, what: str) -> str:
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"A {what} path is required")
-        # One given in full, e.g., from a file picker, is made relative
-        path = posixpath.normpath(
-            os.path.relpath(
-                os.path.join(wdir, value.strip()), os.path.abspath(wdir)
-            ).replace("\\", "/")
-        )
-        real = os.path.realpath(os.path.join(wdir, path))
-        if path.startswith("../") or not real.startswith(
-            os.path.join(os.path.realpath(wdir), "")
-        ):
-            raise ValueError(f"'{value}' isn't in the project")
-        return path
-
-    def is_dvc_tracked(path: str) -> bool:
-        # Its own .dvc file or a folder's, whether or not it's pulled
-        parts = path.split("/")
-        return any(
-            os.path.isfile(os.path.join(wdir, *parts[:n]) + ".dvc")
-            for n in range(1, len(parts) + 1)
-        )
-
-    def get_changed_paths() -> set[str]:
-        # Unquoted, e.g., for names that aren't ASCII
-        entries = iter(
-            repo.git.status("--porcelain", "-z", "-uall").split("\0")
-        )
-        paths = set()
-        for entry in entries:
-            if len(entry) > 3:
-                paths.add(entry[3:])
-            # A rename or copy is followed by where it came from
-            if entry[:1] in ("R", "C"):
-                paths.add(next(entries, ""))
-        return paths - {""}
-
-    script_path = get_clean_path(msg.get("scriptPath"), "script")
+    script_path = get_project_path(wdir, msg.get("scriptPath"), "script")
     if not script_path.lower().endswith(calkit.pipeline.detect.SCRIPT_EXTS):
         raise ValueError(calkit.pipeline.detect.SCRIPT_EXTS_MESSAGE)
     # Uploads go through the hub, which reads them in a checkout of their
-    # own; here the script and its data are already on this computer
+    # own; here the script and its data are already on this machine
     if msg.get("content") is not None:
         raise ValueError(
-            "Put the script in the project's folder on this computer, then "
+            "Put the script in the project's folder on this machine, then "
             "find it in the project"
         )
     if msg.get("data"):
@@ -1611,9 +1752,11 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
         detected,
         ck_info,
         wdir=wdir,
-        shows=get_clean_path(shows, "shown") if shows else None,
-        produces=(get_clean_path(produces, "output") if produces else None),
-        is_dvc_output=is_dvc_tracked,
+        shows=get_project_path(wdir, shows, "shown") if shows else None,
+        produces=(
+            get_project_path(wdir, produces, "output") if produces else None
+        ),
+        is_dvc_output=lambda path: is_dvc_tracked(wdir, path),
     )
     result = {
         key: value
@@ -1627,57 +1770,193 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     }
     if not msg.get("save"):
         return result
-    # Edits not yet saved aren't swept into the commit, or overwritten
-    changed_before = get_changed_paths()
-    for path in ["calkit.yaml", "dvc.yaml", *plan["included"]]:
-        if path in changed_before:
-            raise ValueError(
-                f"{path} has changes that aren't saved; save or discard "
-                "them first"
-            )
-    try:
-        written = calkit.pipeline.write_stage_from_script(
+    commit_change(
+        wdir,
+        ck_info,
+        lambda: calkit.pipeline.write_stage_from_script(
             plan, ck_info, wdir=wdir
-        )
-        with open(
-            os.path.join(wdir, "calkit.yaml"), "w", encoding="utf-8"
-        ) as f:
-            calkit.ryaml.dump(ck_info, f)
-        calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
-        commit_paths = sorted(
-            (get_changed_paths() - changed_before)
-            | set(written)
-            | {"calkit.yaml"}
-            | ({script_path} if script_path in changed_before else set())
-        )
-        repo.git.add("--", *commit_paths)
-        # Already as asked, e.g., when saved before
-        if repo.git.diff("--cached", "--name-only", "--", *commit_paths):
-            repo.git.commit(
-                "-m",
-                f"Add stage {plan['stage_name']} for {script_path}",
-                "--",
-                *commit_paths,
-            )
-    except Exception:
-        # Put back what was written, so it isn't left half done, and a try
-        # again isn't refused for unsaved changes to it
-        undo = sorted(get_changed_paths() - changed_before)
-        if undo:
-            repo.git.reset("-q", "--", *undo)
-            tracked = [
-                p
-                for p in repo.git.ls_files("-z", "--", *undo).split("\0")
-                if p
-            ]
-            if tracked:
-                repo.git.checkout("--", *tracked)
-            for path in set(undo) - set(tracked):
-                if os.path.isfile(os.path.join(wdir, path)):
-                    os.remove(os.path.join(wdir, path))
-        raise
+        ),
+        f"Add stage {plan['stage_name']} for {script_path}",
+        checked=plan["included"],
+        also_commit=[script_path],
+    )
     result["saved"] = True
     return result
+
+
+def record_origin(wdir: str, msg: dict) -> dict:
+    """Record who made a file in a checkout or where it was imported from,
+    as the hub records a misc artifact, committed here.
+    """
+    import calkit.dvc
+    import calkit.provenance
+
+    path = get_project_path(wdir, msg.get("path"), "file")
+    created_by = msg.get("createdBy")
+    imported_from = msg.get("importedFrom")
+    if created_by is not None and not isinstance(created_by, list):
+        raise ValueError("Who created it must be a list of people")
+    if imported_from is not None and not isinstance(imported_from, dict):
+        raise ValueError("Where it was imported from must be a mapping")
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    ck_info, entry = calkit.provenance.add_origin(
+        ck_info, path, created_by=created_by, imported_from=imported_from
+    )
+    # Whether tracked by Git or DVC, or made by a stage and not pulled, it
+    # has to be in the project to attribute
+    lock_outs = [
+        out["path"].rstrip("/")
+        for stage in calkit.dvc.read_lock_stages(wdir=wdir).values()
+        for out in (stage or {}).get("outs") or []
+        if isinstance(out, dict) and isinstance(out.get("path"), str)
+    ]
+    if not (
+        os.path.exists(os.path.join(wdir, path))
+        or is_dvc_tracked(wdir, path)
+        or any(path == o or path.startswith(o + "/") for o in lock_outs)
+    ):
+        raise ValueError(f"'{path}' isn't in the project")
+    # Only calkit.yaml's artifacts change, which the pipeline doesn't read
+    commit_change(
+        wdir,
+        ck_info,
+        lambda: [],
+        msg.get("message") or f"Record where {path} came from",
+        compile_pipeline=False,
+    )
+    return entry
+
+
+def add_export_stage(wdir: str, msg: dict) -> dict:
+    """Add the stage that exports a figure from the file it's drawn in, as
+    the hub does, committed here.
+
+    An app that can do it as the pipeline runs does, unless another is
+    named; otherwise it's a manual step. Without ``save`` set false, it's
+    added; with it, only shown. A file the stage needs that isn't in Git
+    yet, e.g., a Photoshop file, is committed with it, or stored with DVC
+    if it's too big for Git.
+    """
+    import subprocess
+
+    import calkit.export
+    import calkit.git
+    import calkit.pipeline
+    import calkit.provenance
+
+    source = get_project_path(wdir, msg.get("source"), "source")
+    output = get_project_path(wdir, msg.get("output"), "output")
+    app = msg.get("app") or None
+    exporter = calkit.export.exporter_for(source, output, app=app)
+    stage = calkit.export.export_stage(source, output, app=app)
+    out = {
+        "name": calkit.export.export_stage_name(output),
+        "stage": stage,
+        "exported_by": exporter.app if exporter else None,
+        "saved": False,
+    }
+    if not msg.get("save", True):
+        return out
+    # Uploads go through the hub; here the files are already on this
+    # machine
+    files = []
+    for file in msg.get("files") or []:
+        if not isinstance(file, dict):
+            raise ValueError("Each file must be a mapping")
+        if file.get("content") is not None:
+            raise ValueError(
+                "Put the file in the project's folder on this machine, "
+                "then find it in the project"
+            )
+        path = get_project_path(wdir, file.get("path"), "file")
+        if not (
+            os.path.isfile(os.path.join(wdir, path))
+            or is_dvc_tracked(wdir, path)
+        ):
+            raise ValueError(f"'{path}' isn't in the project")
+        if file.get("created_by_me") and not (
+            calkit.provenance.can_be_created_by_person(path)
+        ):
+            raise ValueError(
+                f"'{path}' is exported from something itself, so it can't "
+                "be created by a person; add the file it's made from, e.g., "
+                "a Photoshop file"
+            )
+        files.append((path, bool(file.get("created_by_me"))))
+    repo = calkit.git.get_repo(wdir)
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    stage_name, stage = calkit.pipeline.get_stage_to_add(
+        stage,
+        ck_info,
+        name=out["name"],
+        is_tracked=lambda p: bool(repo.git.ls_files("--", p).strip()),
+    )
+    created = [path for path, by_me in files if by_me]
+    if created:
+        # Whoever commits here, as Git knows them
+        with repo.config_reader() as config:
+            email = config.get_value("user", "email", "")
+            person_name = config.get_value("user", "name", "")
+        if not email:
+            raise ValueError(
+                "Git doesn't know your email address, to record who made "
+                f"{created[0]}; set it with 'git config --global user.email'"
+            )
+        person = {"email": str(email)}
+        if person_name:
+            person["name"] = str(person_name)
+        ck_info = calkit.provenance.add_creator(ck_info, created, person)
+    if not ck_info.get("pipeline"):
+        ck_info["pipeline"] = {}
+    if not ck_info["pipeline"].get("stages"):
+        ck_info["pipeline"]["stages"] = {}
+    ck_info["pipeline"]["stages"][stage_name] = stage
+    untracked = [
+        path
+        for path, _ in files
+        if not repo.git.ls_files("--", path).strip()
+        and not is_dvc_tracked(wdir, path)
+    ]
+    too_big = [
+        path
+        for path in untracked
+        if os.path.getsize(os.path.join(wdir, path)) > FILE_GIT_MAX_BYTES
+    ]
+    # Elsewhere, e.g., in CI, the stage couldn't read a file Git leaves out
+    for path in untracked:
+        if path not in too_big and repo.ignored(path):
+            raise ValueError(
+                f"'{path}' is ignored by Git, so the stage couldn't run "
+                "anywhere else; stop ignoring it first"
+            )
+
+    def write() -> list[str]:
+        # Too big for Git, so stored with DVC, as the hub stores an upload;
+        # in its own process, since DVC prints, and this one's output is
+        # the extension's
+        for path in too_big:
+            res = subprocess.run(
+                calkit.get_calkit_cmd() + ["dvc", "add", path],
+                cwd=wdir,
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode != 0:
+                raise ValueError(
+                    f"DVC couldn't store {path}: "
+                    + (res.stderr or res.stdout).strip()
+                )
+        return [path + ".dvc" for path in too_big]
+
+    commit_change(
+        wdir,
+        ck_info,
+        write,
+        f"Export {output} from {source}"
+        + (f" with {exporter.app}" if exporter else " manually"),
+        also_commit=[p for p in untracked if p not in too_big],
+    )
+    return out | {"name": stage_name, "stage": stage, "saved": True}
 
 
 def get_pipeline(wdir: str) -> dict:

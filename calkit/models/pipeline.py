@@ -1641,34 +1641,42 @@ class LatexStage(Stage):
             out_base = target
         return Path(os.path.normpath(out_base)).with_suffix(".pdf").as_posix()
 
-    @property
-    def dvc_cmd(self) -> str:
-        # Quote user-controlled paths/args so spaces or shell metacharacters in
-        # them don't corrupt the compiled DVC command.
-        cmd = (
-            f"calkit latex build -e {shlex.quote(self.environment)} --no-check"
-        )
+    def make_build_args(self) -> list[str]:
+        """Options for ``calkit latex build`` beyond the environment and
+        target, so a build outside the pipeline, e.g., an editor's, can
+        match the stage's.
+        """
+        args = []
         if self.latexmkrc_path is not None:
-            cmd += f" -r {shlex.quote(self.latexmkrc_path)}"
+            args += ["-r", self.latexmkrc_path]
         else:
             # Only drive latexmk's output/aux directories when the user has not
             # supplied a latexmkrc; a CLI -outdir would override the rc's
             # $out_dir. With a latexmkrc, it stays authoritative (and the
             # output_dir drift lint in calkit.pipeline covers mismatches).
             if self.output_dir is not None:
-                cmd += f" --output-dir {shlex.quote(self.output_dir)}"
+                args += ["--output-dir", self.output_dir]
             if self.aux_dir is not None:
-                cmd += f" --aux-dir {shlex.quote(self.aux_dir)}"
+                args += ["--aux-dir", self.aux_dir]
         if self.verbose:
-            cmd += " --verbose"
+            args.append("--verbose")
         if self.force:
-            cmd += " -f"
+            args.append("-f")
         if not self.synctex:
-            cmd += " --no-synctex"
+            args.append("--no-synctex")
         for arg in self.latexmk_args:
-            cmd += f" --latexmk-arg {shlex.quote(arg)}"
-        cmd += f" {shlex.quote(self.target_path)}"
-        return cmd
+            args += ["--latexmk-arg", arg]
+        return args
+
+    @property
+    def dvc_cmd(self) -> str:
+        # Quote user-controlled paths/args so spaces or shell metacharacters in
+        # them don't corrupt the compiled DVC command.
+        return "calkit latex build " + shlex.join(
+            ["-e", self.environment, "--no-check"]
+            + self.make_build_args()
+            + [self.target_path]
+        )
 
     # Project paths the document's components depend on, the files among
     # them it reads copies of, and whether it loads calkit.sty, set by
@@ -1736,8 +1744,13 @@ class LatexStage(Stage):
             ):
                 copied.append(rel)
         # What it includes plainly, e.g., with \includegraphics, is as much
-        # an input, e.g., a figure a stage exports
+        # an input, e.g., a figure a stage exports, except the component
+        # copies, which come after, so the order doesn't depend on whether
+        # they've been written yet
         wdir = self.wdir or ""
+        doc_dir = posixpath.dirname(self.target_path)
+        style_path = posixpath.join(doc_dir, calkit.latex.STYLE_FNAME)
+        copies_dir = posixpath.join(doc_dir, calkit.latex.COMPONENTS_DIR)
         for rel in calkit.latex.detect_inputs(
             self.target_path,
             wdir=os.path.join(project_dir or "", wdir),
@@ -1748,6 +1761,10 @@ class LatexStage(Stage):
                 else lambda p: is_exact_output(posixpath.join(wdir, p))
             ),
         ):
+            if self._loads_calkit and (
+                rel == style_path or rel.startswith(copies_dir + "/")
+            ):
+                continue
             paths.append(posixpath.normpath(posixpath.join(wdir, rel)))
         self._component_paths = list(dict.fromkeys(paths))
         self._copied_paths = list(dict.fromkeys(copied))

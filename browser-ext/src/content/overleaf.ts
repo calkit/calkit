@@ -4916,7 +4916,7 @@ function renderStatus(
       n
         ? el("span", {
             class: "badge danger",
-            text: `${n} missing origin${n === 1 ? "" : "s"}`,
+            text: `${n} missing origin`,
           })
         : syncBadge,
     );
@@ -4928,7 +4928,7 @@ function renderStatus(
       el("div", {
         class: "small",
         style: { marginTop: "8px", fontWeight: "600" },
-        text: "Missing origins",
+        text: "Missing origin",
       }),
       ...missing.map((item) =>
         el("div", { class: "small" }, [
@@ -6077,7 +6077,7 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
       unlinked: "Calkit: not linked",
       running: "Calkit: running",
       syncing: "Calkit: syncing",
-      origins: `Calkit: ${missing} missing origin${missing === 1 ? "" : "s"}`,
+      origins: `Calkit: ${missing} missing origin`,
     }[tone],
     class:
       tone === "origins"

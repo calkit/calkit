@@ -76,3 +76,110 @@ export function getContinueArgs(clash: Clash): string[] {
     ? ["overleaf", "sync", "--resolve"]
     : ["merge", "--continue"];
 }
+
+/** A file a sync would send to Overleaf or delete there. */
+export interface OverleafStatusFile {
+  path: string;
+  project_path: string;
+  state: "new" | "modified" | "deleted";
+}
+
+/** What a sync of one folder would do, from `calkit overleaf status --json`. */
+export interface OverleafFolderStatus {
+  path: string;
+  overleaf_url?: string | null;
+  commits_from_overleaf: number;
+  files_to_push: OverleafStatusFile[];
+  files_to_delete: OverleafStatusFile[];
+  in_sync: boolean;
+}
+
+/** What's known about the folders synced with Overleaf, as last checked. */
+export interface OverleafState {
+  statuses?: OverleafFolderStatus[];
+  checking: boolean;
+  error?: string;
+  needsLogin?: boolean;
+  conflict?: boolean;
+}
+
+/** How a synced folder's row shows it: a codicon, short text, and tooltip. */
+export interface OverleafRow {
+  icon: string;
+  description: string;
+  tooltip: string;
+  needsSync: boolean;
+}
+
+/** A synced folder's row, from its status and the state of the last check. */
+export function getOverleafRow(
+  status: OverleafFolderStatus,
+  state: OverleafState,
+): OverleafRow {
+  const plural = (n: number, word: string) =>
+    `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (state.conflict) {
+    return {
+      icon: "warning",
+      description: "conflict",
+      tooltip:
+        "A file changed on Overleaf and on this machine. Select to resolve.",
+      needsSync: true,
+    };
+  }
+  const fromOverleaf = status.commits_from_overleaf;
+  const toOverleaf = [...status.files_to_push, ...status.files_to_delete];
+  const parts = [
+    fromOverleaf ? `${plural(fromOverleaf, "change")} on Overleaf` : "",
+    toOverleaf.length ? `${plural(toOverleaf.length, "file")} to push` : "",
+  ].filter(Boolean);
+  const files = toOverleaf.map(
+    (f) =>
+      `  ${f.project_path} (${
+        status.files_to_delete.includes(f) ? "deleted" : f.state
+      })`,
+  );
+  const tooltip = [
+    status.overleaf_url ?? "",
+    fromOverleaf
+      ? `${plural(fromOverleaf, "change")} on Overleaf since last sync`
+      : "",
+    files.length ? `To push:\n${files.join("\n")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const icon = state.checking
+    ? "sync~spin"
+    : fromOverleaf
+    ? "cloud-download"
+    : toOverleaf.length
+    ? "cloud-upload"
+    : "cloud";
+  return {
+    icon,
+    description: parts.length
+      ? parts.join(", ")
+      : status.in_sync
+      ? "in sync"
+      : "not synced",
+    tooltip,
+    needsSync: !status.in_sync || parts.length > 0,
+  };
+}
+
+/** Read `calkit overleaf status --json` output into the state it reports. */
+export function parseOverleafStatus(stdout: string): OverleafState {
+  try {
+    const data = JSON.parse(stdout.trim().split("\n").pop() ?? "");
+    if (Array.isArray(data.statuses)) {
+      return { statuses: data.statuses, checking: false };
+    }
+    return {
+      checking: false,
+      error: String(data.error ?? "Couldn't check Overleaf"),
+      needsLogin: Boolean(data.needs_login),
+    };
+  } catch {
+    return { checking: false, error: "Couldn't check Overleaf" };
+  }
+}

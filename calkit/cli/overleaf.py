@@ -1297,6 +1297,17 @@ def get_status(
             ),
         ),
     ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help=(
+                "Print what a sync of each folder would do as JSON, as "
+                "the hub reports it, or an error with 'needs_login' when "
+                "Overleaf credentials are missing."
+            ),
+        ),
+    ] = False,
 ):
     """Check the status of folders synced with Overleaf in a project."""
     # Read all synced folders, fixing legacy schema if applicable
@@ -1314,6 +1325,27 @@ def get_status(
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")
+    if as_json:
+        from calkit.browser_link import (
+            OverleafAuthMissing,
+            get_overleaf_sync_statuses,
+        )
+
+        targets: list[str | None] = list(paths) if paths else [None]
+        try:
+            statuses = [
+                status
+                for path in targets
+                for status in get_overleaf_sync_statuses(".", path=path)
+            ]
+        except OverleafAuthMissing as e:
+            typer.echo(json.dumps({"error": str(e), "needs_login": True}))
+            raise typer.Exit(1)
+        except ValueError as e:
+            typer.echo(json.dumps({"error": str(e)}))
+            raise typer.Exit(1)
+        typer.echo(json.dumps({"statuses": statuses}))
+        return
     overleaf_auth = _get_overleaf_auth()
     first = True
     for path_in_project, sync_data in overleaf_info.items():

@@ -4,7 +4,9 @@ import {
   getClash,
   getClashMessage,
   getContinueArgs,
+  getOverleafRow,
   isSyncedWithOverleaf,
+  parseOverleafStatus,
 } from "../overleaf/core";
 
 test("isSyncedWithOverleaf reads calkit.yaml and the sync info", () => {
@@ -75,5 +77,73 @@ test("getClash and its message say what to combine and how to go on", () => {
   assert.equal(
     getClashMessage({ kind: "merge", files: [] }, "https://github.com/a/b"),
     "Changes from GitHub are combined. Select Continue to finish.",
+  );
+});
+
+test("getOverleafRow says what a sync would do", () => {
+  const status = {
+    path: "paper",
+    overleaf_url: "https://www.overleaf.com/project/abc",
+    commits_from_overleaf: 0,
+    files_to_push: [],
+    files_to_delete: [],
+    in_sync: true,
+  };
+  const state = { checking: false };
+  assert.deepEqual(getOverleafRow(status, state), {
+    icon: "cloud",
+    description: "in sync",
+    tooltip: "https://www.overleaf.com/project/abc",
+    needsSync: false,
+  });
+  // A coauthor's edits on Overleaf come first, since they're pulled first
+  const both = {
+    ...status,
+    commits_from_overleaf: 2,
+    files_to_push: [
+      {
+        path: "figures/a.png",
+        project_path: "paper/figures/a.png",
+        state: "modified" as const,
+      },
+    ],
+    files_to_delete: [
+      {
+        path: "old.tex",
+        project_path: "paper/old.tex",
+        state: "new" as const,
+      },
+    ],
+    in_sync: false,
+  };
+  const row = getOverleafRow(both, state);
+  assert.equal(row.icon, "cloud-download");
+  assert.equal(row.description, "2 changes on Overleaf, 2 files to push");
+  assert.match(row.tooltip, /paper\/figures\/a\.png \(modified\)/);
+  assert.match(row.tooltip, /paper\/old\.tex \(deleted\)/);
+  assert.ok(row.needsSync);
+  assert.equal(
+    getOverleafRow({ ...both, commits_from_overleaf: 0 }, state).icon,
+    "cloud-upload",
+  );
+  assert.equal(getOverleafRow(both, { checking: true }).icon, "sync~spin");
+  assert.equal(
+    getOverleafRow(status, { checking: false, conflict: true }).description,
+    "conflict",
+  );
+});
+
+test("parseOverleafStatus reads statuses and errors", () => {
+  assert.deepEqual(parseOverleafStatus('Pulling\n{"statuses": []}\n'), {
+    statuses: [],
+    checking: false,
+  });
+  assert.deepEqual(
+    parseOverleafStatus('{"error": "No credentials", "needs_login": true}'),
+    { checking: false, error: "No credentials", needsLogin: true },
+  );
+  assert.equal(
+    parseOverleafStatus("Traceback").error,
+    "Couldn't check Overleaf",
   );
 });

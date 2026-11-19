@@ -1,17 +1,33 @@
 /**
- * The Calkit sidebar's Run, save, and sync button: runs the pipeline, saves,
- * and syncs with Overleaf, and walks someone through a file that changed in
- * two places when that stops it.
+ * The Calkit sidebar's Overleaf section: each synced folder's status,
+ * checked in the background, with buttons to sync, to run, save, and sync
+ * in one step, and to import a project, walking someone through a file
+ * that changed in two places when that stops a sync.
  */
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { getClash, getClashMessage, getContinueArgs, type Clash } from "./core";
+import type { CalkitSidebarProvider, SidebarItem } from "../sidebar";
+import {
+  getClash,
+  getClashMessage,
+  getContinueArgs,
+  parseOverleafStatus,
+  type Clash,
+  type OverleafState,
+} from "./core";
 
 const SIDEBAR_VIEW_ID = "calkit-sidebar";
+const RUN_SAVE_SYNC = ["run", "--save", "--overleaf"];
 
 let running = false;
+let provider: CalkitSidebarProvider | undefined;
+let state: OverleafState = { checking: false };
+// The workspace whose folders are checked, while it syncs with Overleaf
+let syncedRoot: string | undefined;
+let checkTimer: ReturnType<typeof setInterval> | undefined;
+let lastChecked = 0;
 
 /** Run a Calkit command as a task, so its output shows, for its exit code. */
 async function runCalkitTask(
@@ -53,37 +69,50 @@ async function runCalkitTask(
   });
 }
 
-/** Git's output for a command, or nothing if it failed. */
-function getGitOutput(root: string, args: string[]): Promise<string | null> {
+/** A command's output, or nothing if it failed. */
+function getOutput(
+  command: string,
+  root: string,
+  args: string[],
+  allowFailure = false,
+): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile("git", args, { cwd: root }, (error, stdout) =>
-      resolve(error ? null : stdout),
+    execFile(
+      command,
+      args,
+      { cwd: root, maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout) => resolve(error && !allowFailure ? null : stdout),
     );
   });
 }
 
-/** What a run stopped on, if it was a file changed in two places. */
+/** Whether a sync with Overleaf stopped on a file changed in both places. */
+function hasOverleafConflict(repoRoot: string): boolean {
+  return fs.existsSync(
+    path.join(repoRoot, ".calkit", "overleaf", "CONFLICT.json"),
+  );
+}
+
+/** What a run or sync stopped on, if it was a file changed in two places. */
 async function findClash(
   root: string,
 ): Promise<{ clash: Clash; repoRoot: string; remoteUrl?: string } | null> {
   const repoRoot = (
-    await getGitOutput(root, ["rev-parse", "--show-toplevel"])
+    await getOutput("git", root, ["rev-parse", "--show-toplevel"])
   )?.trim();
   if (!repoRoot) {
     return null;
   }
-  const unmerged = await getGitOutput(root, [
+  const unmerged = await getOutput("git", root, [
     "diff",
     "--name-only",
     "--diff-filter=U",
     "-z",
   ]);
   const clash = getClash({
-    overleafConflict: fs.existsSync(
-      path.join(repoRoot, ".calkit", "overleaf", "CONFLICT.json"),
-    ),
+    overleafConflict: hasOverleafConflict(repoRoot),
     merging:
-      (await getGitOutput(root, [
+      (await getOutput("git", root, [
         "rev-parse",
         "-q",
         "--verify",
@@ -95,7 +124,7 @@ async function findClash(
     return null;
   }
   const remoteUrl = (
-    await getGitOutput(root, ["remote", "get-url", "origin"])
+    await getOutput("git", root, ["remote", "get-url", "origin"])
   )?.trim();
   return { clash, repoRoot, remoteUrl };
 }
@@ -110,10 +139,14 @@ async function openClashedFile(repoRoot: string, file: string): Promise<void> {
   }
 }
 
-/** Say what clashed, with buttons to resolve it and carry on. */
+/**
+ * Say what clashed, with buttons to resolve it and carry on, finishing
+ * what stopped and then running ``then``.
+ */
 async function offerToResolve(
   root: string,
   found: { clash: Clash; repoRoot: string; remoteUrl?: string },
+  then: string[][],
 ): Promise<void> {
   const { clash, repoRoot, remoteUrl } = found;
   const actions = clash.files.length ? ["Resolve", "Continue"] : ["Continue"];
@@ -124,19 +157,22 @@ async function offerToResolve(
   if (choice === "Resolve") {
     await openClashedFile(repoRoot, clash.files[0]);
     // The message closes on a click, and is still needed to carry on
-    await offerToResolve(root, found);
+    await offerToResolve(root, found, then);
   } else if (choice === "Continue") {
-    await runSaveSync(root, getContinueArgs(clash));
+    await runSteps(root, [getContinueArgs(clash), ...then], then);
   }
 }
 
 /**
- * Run the pipeline, save, and sync with Overleaf, first running ``first``,
- * e.g., to finish combining a file, with the sidebar showing it's going.
+ * Run Calkit commands in turn, stopping at one that fails, with the sidebar
+ * showing they're going. A clash that stops one is offered to resolve,
+ * then ``after`` runs.
  */
-export async function runSaveSync(
+async function runSteps(
   root: string,
-  first?: string[],
+  steps: string[][],
+  after: string[][],
+  done?: string,
 ): Promise<void> {
   if (running) {
     void vscode.window.showInformationMessage("Already running");
@@ -148,27 +184,221 @@ export async function runSaveSync(
     ok = await vscode.window.withProgress(
       { location: { viewId: SIDEBAR_VIEW_ID } },
       async () => {
-        if (first && (await runCalkitTask(root, first)) !== 0) {
-          return false;
+        for (const step of steps) {
+          if ((await runCalkitTask(root, step)) !== 0) {
+            return false;
+          }
         }
-        return (
-          (await runCalkitTask(root, ["run", "--save", "--overleaf"])) === 0
-        );
+        return true;
       },
     );
   } finally {
     running = false;
+    void checkOverleaf();
   }
   if (ok) {
-    void vscode.window.showInformationMessage("Ran, saved, and synced");
+    if (done) {
+      void vscode.window.showInformationMessage(done);
+    }
     return;
   }
   const found = await findClash(root);
   if (found) {
-    await offerToResolve(root, found);
+    await offerToResolve(root, found, after);
   } else {
     void vscode.window.showErrorMessage(
-      "Run, save, and sync failed. See the terminal for why.",
+      "Calkit stopped. See the terminal for why.",
     );
   }
+}
+
+/** Run the pipeline, save, and sync with Overleaf, in one step. */
+export function runSaveSync(root: string): Promise<void> {
+  return runSteps(
+    root,
+    [RUN_SAVE_SYNC],
+    [RUN_SAVE_SYNC],
+    "Ran, saved, and synced",
+  );
+}
+
+/** Ask Calkit what a sync of each folder would do, and show it. */
+export async function checkOverleaf(): Promise<void> {
+  const root = syncedRoot;
+  if (!root || !provider || state.checking) {
+    return;
+  }
+  lastChecked = Date.now();
+  state = { ...state, checking: true };
+  provider.setOverleafState(state);
+  const stdout = await getOutput(
+    "calkit",
+    root,
+    ["overleaf", "status", "--json"],
+    true,
+  );
+  if (root !== syncedRoot) {
+    return;
+  }
+  const checked = parseOverleafStatus(stdout ?? "");
+  const repoRoot = (
+    await getOutput("git", root, ["rev-parse", "--show-toplevel"])
+  )?.trim();
+  state = {
+    ...checked,
+    // What was known stays shown when Overleaf can't be reached
+    statuses:
+      checked.statuses ?? (checked.needsLogin ? undefined : state.statuses),
+    error: checked.statuses ? undefined : checked.error,
+    conflict: repoRoot ? hasOverleafConflict(repoRoot) : false,
+  };
+  provider.setOverleafState(state);
+}
+
+/**
+ * Check folders synced with Overleaf in the background while a workspace
+ * syncs any, every ``calkit.overleaf.checkInterval`` seconds while VS Code
+ * has focus, and again on coming back to it.
+ */
+export function setOverleafSynced(root: string, synced: boolean): void {
+  const wasSynced = syncedRoot === root;
+  syncedRoot = synced ? root : undefined;
+  if (!synced) {
+    state = { checking: false };
+    provider?.setOverleafState(state);
+    return;
+  }
+  if (!wasSynced) {
+    void checkOverleaf();
+  }
+}
+
+/** Register the Overleaf section's commands and background checks. */
+export function registerOverleaf(
+  context: vscode.ExtensionContext,
+  sidebarProvider: CalkitSidebarProvider,
+  getWorkspaceRoot: () => string | undefined,
+): void {
+  provider = sidebarProvider;
+  const getInterval = () =>
+    vscode.workspace
+      .getConfiguration("calkit")
+      .get<number>("overleaf.checkInterval", 120);
+  const schedule = () => {
+    if (checkTimer) {
+      clearInterval(checkTimer);
+      checkTimer = undefined;
+    }
+    const seconds = getInterval();
+    if (seconds > 0) {
+      checkTimer = setInterval(() => {
+        if (vscode.window.state.focused) {
+          void checkOverleaf();
+        }
+      }, seconds * 1000);
+    }
+  };
+  schedule();
+  const withRoot =
+    (run: (root: string, item?: SidebarItem) => unknown) =>
+    (item?: SidebarItem) => {
+      const root = getWorkspaceRoot();
+      if (root) {
+        void run(root, item);
+      }
+    };
+  context.subscriptions.push(
+    { dispose: () => checkTimer && clearInterval(checkTimer) },
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("calkit.overleaf.checkInterval")) {
+        schedule();
+      }
+    }),
+    vscode.window.onDidChangeWindowState((windowState) => {
+      const seconds = getInterval();
+      if (
+        windowState.focused &&
+        seconds > 0 &&
+        Date.now() - lastChecked > seconds * 1000
+      ) {
+        void checkOverleaf();
+      }
+    }),
+    vscode.commands.registerCommand(
+      "calkit-vscode.runSaveSync",
+      withRoot((root) => runSaveSync(root)),
+    ),
+    vscode.commands.registerCommand(
+      "calkit-vscode.syncOverleaf",
+      withRoot((root, item) => {
+        const args = ["overleaf", "sync"];
+        if (item?.nodeKind.startsWith("overleaf-folder") && item.nodeId) {
+          args.push(item.nodeId);
+        }
+        return runSteps(root, [args], [], "Synced with Overleaf");
+      }),
+    ),
+    vscode.commands.registerCommand("calkit-vscode.refreshOverleaf", () =>
+      checkOverleaf(),
+    ),
+    vscode.commands.registerCommand(
+      "calkit-vscode.openOnOverleaf",
+      (item?: SidebarItem) => {
+        const url = state.statuses?.find(
+          (status) => status.path === item?.nodeId,
+        )?.overleaf_url;
+        if (url) {
+          void vscode.env.openExternal(vscode.Uri.parse(url));
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      "calkit-vscode.overleafLogin",
+      withRoot((root) => runSteps(root, [["overleaf", "login"]], [])),
+    ),
+    vscode.commands.registerCommand(
+      "calkit-vscode.resolveOverleafConflict",
+      withRoot(async (root) => {
+        const found = await findClash(root);
+        if (found) {
+          await offerToResolve(root, found, []);
+        } else {
+          void checkOverleaf();
+        }
+      }),
+    ),
+    vscode.commands.registerCommand(
+      "calkit-vscode.importOverleaf",
+      withRoot(async (root) => {
+        const url = await vscode.window.showInputBox({
+          title: "Import from Overleaf",
+          prompt: "Overleaf project URL",
+          placeHolder: "https://www.overleaf.com/project/...",
+          ignoreFocusOut: true,
+          validateInput: (value) =>
+            /overleaf\.com\/project\/\w+/.test(value)
+              ? undefined
+              : "Paste the URL of an Overleaf project",
+        });
+        if (!url) {
+          return;
+        }
+        const folder = await vscode.window.showInputBox({
+          title: "Import from Overleaf",
+          prompt: "Folder in this project to put it in",
+          value: "paper",
+          ignoreFocusOut: true,
+        });
+        if (!folder) {
+          return;
+        }
+        await runSteps(
+          root,
+          [["overleaf", "import", url.trim(), folder.trim()]],
+          [],
+          `Imported into ${folder.trim()}`,
+        );
+      }),
+    ),
+  );
 }

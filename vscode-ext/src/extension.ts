@@ -72,7 +72,7 @@ import {
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import { isSyncedWithOverleaf } from "./overleaf/core";
-import { runSaveSync } from "./overleaf/view";
+import { registerOverleaf, setOverleafSynced } from "./overleaf/view";
 import {
   documentStagePdf,
   documentStageSource,
@@ -140,7 +140,6 @@ const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
 const COMMAND_PDF_GO_TO_SOURCE_TO_SIDE = "calkit-vscode.pdfGoToSourceToSide";
 const COMMAND_TOGGLE_PDF_SOURCE = "calkit-vscode.togglePdfSource";
 const COMMAND_SAVE = "calkit-vscode.save";
-const COMMAND_RUN_SAVE_SYNC = "calkit-vscode.runSaveSync";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
 const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
@@ -158,6 +157,7 @@ const SIDEBAR_SECTIONS: { id: string; label: string }[] = [
   { id: "figures", label: "Figures" },
   { id: "datasets", label: "Datasets" },
   { id: "publications", label: "Publications" },
+  { id: "overleaf", label: "Overleaf" },
   { id: "presentations", label: "Presentations" },
   { id: "results", label: "Results" },
 ];
@@ -1256,15 +1256,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND_RUN_SAVE_SYNC, () => {
-      const workspaceRoot = getWorkspaceRoot();
-      if (workspaceRoot) {
-        void runSaveSync(workspaceRoot);
-      }
-    }),
-  );
-
   // Reveal a pipeline stage in the sidebar's Pipeline section, expanded. Invoked
   // by clicking a stage property under a figure/notebook, or its context menu.
   context.subscriptions.push(
@@ -1937,6 +1928,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   sidebarProvider = new CalkitSidebarProvider();
+  registerOverleaf(context, sidebarProvider, getWorkspaceRoot);
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
     showCollapseAll: true,
@@ -2705,17 +2697,20 @@ async function refreshPipelineOutputContext(
     "calkit-vscode.hasProject",
     calkitYamlExists,
   );
+  const syncsWithOverleaf =
+    calkitYamlExists &&
+    isSyncedWithOverleaf(
+      calkitConfig,
+      await fileExists(
+        path.join(workspaceRoot, ".calkit", "overleaf-sync.json"),
+      ),
+    );
   void vscode.commands.executeCommand(
     "setContext",
     "calkit-vscode.syncsWithOverleaf",
-    calkitYamlExists &&
-      isSyncedWithOverleaf(
-        calkitConfig,
-        await fileExists(
-          path.join(workspaceRoot, ".calkit", "overleaf-sync.json"),
-        ),
-      ),
+    syncsWithOverleaf,
   );
+  setOverleafSynced(workspaceRoot, syncsWithOverleaf);
   const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([
     ...pipelineOutputUris,

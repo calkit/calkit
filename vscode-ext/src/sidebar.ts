@@ -23,6 +23,7 @@ import {
   outputEntryPath,
 } from "./pipeline/core";
 import { envRefParts } from "./subprojects";
+import { getOverleafRow, type OverleafState } from "./overleaf/core";
 import {
   LETTER_COLORS,
   lettersDescription,
@@ -195,6 +196,12 @@ export class CalkitSidebarProvider
     "presentations",
   );
   private readonly resultsSectionItem = this.makeSection("Results", "results");
+  private readonly overleafSectionItem = this.makeSection(
+    "Overleaf",
+    "overleaf",
+  );
+  // The folders synced with Overleaf, as last checked in the background
+  private overleafState: OverleafState = { checking: false };
   private stageItemCache = new Map<string, SidebarItem>();
   private envItemCache = new Map<string, SidebarItem>();
 
@@ -265,6 +272,69 @@ export class CalkitSidebarProvider
     return this.filterText;
   }
 
+  // Show the folders synced with Overleaf as last checked, which arrives
+  // separately from refresh() since asking Overleaf is slow
+  setOverleafState(state: OverleafState): void {
+    this.overleafState = state;
+    this._onDidChangeTreeData.fire();
+  }
+
+  // A row per folder synced with Overleaf, with what a sync would do
+  private getOverleafItems(): SidebarItem[] {
+    const state = this.overleafState;
+    if (state.error) {
+      const item = new SidebarItem(
+        state.needsLogin ? "Sign in to Overleaf" : "Couldn't check Overleaf",
+        vscode.TreeItemCollapsibleState.None,
+        "overleaf-error",
+      );
+      item.iconPath = new vscode.ThemeIcon("warning");
+      item.tooltip = state.error;
+      if (state.needsLogin) {
+        item.command = {
+          command: "calkit-vscode.overleafLogin",
+          title: "Sign in to Overleaf",
+        };
+      }
+      return [item];
+    }
+    if (!state.statuses) {
+      const item = new SidebarItem(
+        state.checking ? "Checking Overleaf" : "Not synced with Overleaf",
+        vscode.TreeItemCollapsibleState.None,
+        "empty",
+      );
+      item.iconPath = new vscode.ThemeIcon(
+        state.checking ? "sync~spin" : "info",
+      );
+      return [item];
+    }
+    return state.statuses
+      .filter((status) => this.matchesFilter(status.path))
+      .map((status) => {
+        const row = getOverleafRow(status, state);
+        const item = new SidebarItem(
+          status.path,
+          vscode.TreeItemCollapsibleState.None,
+          "overleaf-folder",
+          status.path,
+        );
+        item.description = row.description;
+        item.tooltip = row.tooltip;
+        item.iconPath = new vscode.ThemeIcon(row.icon);
+        item.contextValue = status.overleaf_url
+          ? "overleaf-folder-url"
+          : "overleaf-folder";
+        if (state.conflict) {
+          item.command = {
+            command: "calkit-vscode.resolveOverleafConflict",
+            title: "Resolve",
+          };
+        }
+        return item;
+      });
+  }
+
   // Set each question's check, aligned with the merged questions. Kept
   // separate from refresh() since the check is slower and arrives later.
   setQuestionChecks(checks: (QuestionCheck | undefined)[]): void {
@@ -318,6 +388,13 @@ export class CalkitSidebarProvider
     // Stale pipeline stages
     if (this.staleStageNames.size > 0) {
       counts.set("pipeline", this.staleStageNames.size);
+    }
+    // Folders synced with Overleaf that a sync would change
+    const unsynced = (this.overleafState.statuses ?? []).filter(
+      (status) => getOverleafRow(status, this.overleafState).needsSync,
+    ).length;
+    if (unsynced > 0) {
+      counts.set("overleaf", unsynced);
     }
     // Notebooks with no environment
     const stages = this.calkitConfig?.pipeline?.stages ?? {};
@@ -446,6 +523,7 @@ export class CalkitSidebarProvider
           this.figuresSectionItem,
           this.datasetsSectionItem,
           this.publicationsSectionItem,
+          this.overleafSectionItem,
           this.presentationsSectionItem,
           this.resultsSectionItem,
         ]
@@ -482,6 +560,8 @@ export class CalkitSidebarProvider
         return this.getArtifactItems("presentations");
       case "section-results":
         return this.getArtifactItems("results");
+      case "section-overleaf":
+        return this.getOverleafItems();
       case "question":
         return this.getQuestionProps(element.nodeId ?? "");
       case "env":

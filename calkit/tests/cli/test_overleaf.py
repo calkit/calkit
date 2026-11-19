@@ -2256,3 +2256,62 @@ def test_overleaf_credentials(monkeypatch):
     assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
     assert config.overleaf_token is None
     del hub["/user/overleaf-token"]
+
+
+def test_get_status_json(tmp_dir, monkeypatch):
+    import calkit.browser_link
+    import calkit.cli.overleaf
+
+    tex = "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n"
+    os.makedirs("paper")
+    Path("paper/main.tex").write_text(tex)
+    Path("calkit.yaml").write_text(
+        "owner: me\nname: project\n"
+        "overleaf_sync:\n  paper:\n"
+        "    url: https://www.overleaf.com/project/abc123\n"
+    )
+    Path(".gitignore").write_text(".calkit/overleaf\n")
+    repo = git.Repo.init(".", initial_branch="main")
+    repo.git.add("-A")
+    repo.git.commit("-qm", "Init")
+    clone = Path(".calkit", "overleaf", "abc123")
+    os.makedirs(clone)
+    (clone / "main.tex").write_text(tex)
+    clone_repo = git.Repo.init(clone)
+    clone_repo.git.add("-A")
+    clone_repo.git.commit("-qm", "Init")
+    monkeypatch.setattr(calkit.browser_link, "_overleaf_auth", None)
+    monkeypatch.setattr(calkit.browser_link, "_overleaf_pulled_at", {})
+    monkeypatch.setattr(
+        calkit.cli.overleaf, "_get_overleaf_auth", lambda: "token"
+    )
+    monkeypatch.setattr(
+        calkit.cli.overleaf,
+        "_get_pulled_overleaf_repo",
+        lambda project_id, auth: (git.Repo(clone), auth),
+    )
+    Path("paper/main.tex").write_text(tex + "% More\n")
+    repo.git.commit("-qam", "Edit")
+    runner = CliRunner()
+    res = runner.invoke(overleaf_app, ["status", "--json"])
+    assert res.exit_code == 0, res.output
+    [status] = json.loads(res.output)["statuses"]
+    assert status["path"] == "paper"
+    assert [f["project_path"] for f in status["files_to_push"]] == [
+        "paper/main.tex"
+    ]
+    assert not status["in_sync"]
+    res = runner.invoke(overleaf_app, ["status", "--json", "paper/main.tex"])
+    assert json.loads(res.output)["statuses"] == [status]
+    # Without credentials it says so, for an editor to ask for them
+
+    def get_no_auth():
+        print("Error: No overleaf_token set; run 'calkit overleaf login'")
+        raise typer.Exit(1)
+
+    monkeypatch.setattr(calkit.browser_link, "_overleaf_auth", None)
+    monkeypatch.setattr(calkit.browser_link, "PULL_FRESH_SECONDS", 0)
+    monkeypatch.setattr(calkit.cli.overleaf, "_get_overleaf_auth", get_no_auth)
+    res = runner.invoke(overleaf_app, ["status", "--json"])
+    assert res.exit_code == 1
+    assert json.loads(res.output)["needs_login"]

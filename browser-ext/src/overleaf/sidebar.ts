@@ -281,10 +281,14 @@ function getOriginGaps(): Map<string, { citation: Citation; uses: string[] }> {
 }
 
 /**
- * The open document's components with no origin defined, with where each
- * is in the editor's scan, which its card needs.
+ * What the open document is made from that has no origin defined, e.g., a
+ * figure, or the data a figure's script reads, each with the components it
+ * makes and the first one's place in the editor's scan, which its card
+ * needs.
  */
-export function getComponentsWithoutOrigin(): {
+export function getMissingOrigins(): {
+  path: string;
+  uses: string[];
   item: EditorItem;
   citation: Citation;
   at: { version: number; index: number };
@@ -294,12 +298,30 @@ export function getComponentsWithoutOrigin(): {
   if (!currentLink || editorProblems?.version !== editorCitations?.version) {
     return [];
   }
-  return items.flatMap((item, index) =>
-    item.citation &&
-    editorProblems?.found[index]?.some((p) => p.kind === "origin")
-      ? [{ item, citation: item.citation, at: { version, index } }]
-      : [],
-  );
+  const missing = new Map<string, ReturnType<typeof getMissingOrigins>[0]>();
+  items.forEach((item, index) => {
+    const citation = item.citation;
+    if (!citation) {
+      return;
+    }
+    for (const problem of editorProblems?.found[index] ?? []) {
+      if (problem.kind !== "origin") {
+        continue;
+      }
+      const entry = missing.get(problem.path) ?? {
+        path: problem.path,
+        uses: [],
+        item,
+        citation,
+        at: { version, index },
+      };
+      if (!entry.uses.includes(citation.path)) {
+        entry.uses.push(citation.path);
+      }
+      missing.set(problem.path, entry);
+    }
+  });
+  return [...missing.values()];
 }
 
 /**

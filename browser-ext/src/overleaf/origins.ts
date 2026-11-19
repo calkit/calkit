@@ -2,11 +2,13 @@
  * Where a figure, table, or number comes from: its card, and the forms for
  * defining its origin, shown from the badge, the sidebar, and the PDF.
  */
+import { type ImportSource, getImportSource } from "../core/detect";
 import { renderPathPicker } from "../core/pickers";
 import { projectUrl } from "../core/hub-url";
 import {
   type Citation,
   canBeCreatedByPerson,
+  citationCandidates,
   citationProblems,
   getShownValue,
 } from "../core/latex";
@@ -567,218 +569,6 @@ async function showDefined(
   renderProvenance(container, link, citation, fresh);
 }
 
-/** Record that a file was imported, or made by the signed-in user. */
-function renderRecordOrigin(
-  container: HTMLElement,
-  link: OverleafLinkPublic,
-  citation: Citation,
-  target: string,
-  how: "imported" | "created",
-): HTMLElement {
-  const message = el("div", { class: "small" });
-  const fields = el("div", { class: "stack" });
-  const save = el("button", { class: "action", text: "Save" });
-  let read: () => Promise<Omit<
-    ToRecord,
-    "type" | "owner" | "project" | "path"
-  > | null>;
-  if (how === "imported") {
-    const source = el("select", {}, [
-      el("option", { value: "url", text: "Website" }),
-      el("option", { value: "doi", text: "DOI" }),
-      el("option", { value: "git", text: "Git repo" }),
-      el("option", { value: "project", text: "Calkit project" }),
-    ]);
-    const url = textInput({ placeholder: "https://example.org/figure.png" });
-    const doi = textInput({ placeholder: "10.5281/zenodo.1234567" });
-    const date = el("input", { type: "date" });
-    const retrieved = el("div", { class: "stack" }, [
-      el("label", { text: "Retrieved (optional)" }),
-      date,
-    ]);
-    const repoUrl = textInput({ placeholder: "https://github.com/owner/repo" });
-    const repoPath = textInput({ placeholder: "Path in the repo" });
-    const ref = textInput({ placeholder: "Branch or tag (optional)" });
-    // Another project, with its files to pick from once it's named
-    const projects = el("datalist", {
-      attrs: { id: `ck-import-projects-${Date.now()}` },
-    });
-    const otherProject = textInput({ placeholder: "owner/project" });
-    otherProject.setAttribute("list", projects.id);
-    void send({ type: "projects.list", minAccessLevel: "read", limit: 100 })
-      .then((page) =>
-        projects.append(
-          ...page.data.map((p) =>
-            el("option", { value: `${p.owner_account_name}/${p.name}` }),
-          ),
-        ),
-      )
-      .catch(() => undefined);
-    const pickerSlot = el("div");
-    let projectPath: HTMLInputElement | null = null;
-    const showPicker = () => {
-      const [owner, name, ...rest] = otherProject.value.trim().split("/");
-      clear(pickerSlot);
-      projectPath = null;
-      if (owner && name && !rest.length) {
-        const picker = renderPathPicker({
-          owner,
-          project: name,
-          placeholder: "Path in that project",
-        });
-        projectPath = picker.input;
-        pickerSlot.append(picker.element);
-      }
-    };
-    otherProject.addEventListener("input", showPicker);
-    const groups: Record<string, HTMLElement> = {
-      url: el("div", { class: "stack" }, [url]),
-      doi: el("div", { class: "stack" }, [doi]),
-      git: el("div", { class: "stack" }, [repoUrl, repoPath, ref]),
-      project: el("div", { class: "stack" }, [
-        otherProject,
-        projects,
-        pickerSlot,
-      ]),
-    };
-    const showSource = () => {
-      for (const [value, group] of Object.entries(groups)) {
-        group.style.display = value === source.value ? "" : "none";
-      }
-      retrieved.style.display = ["url", "doi"].includes(source.value)
-        ? ""
-        : "none";
-    };
-    source.addEventListener("change", showSource);
-    showSource();
-    fields.append(source, ...Object.values(groups), retrieved);
-    read = async () => {
-      const when = date.value || null;
-      switch (source.value) {
-        case "url":
-          return url.value.trim()
-            ? { importedFrom: { url: url.value.trim(), date: when } }
-            : null;
-        case "doi":
-          return doi.value.trim()
-            ? { importedFrom: { doi: doi.value.trim(), date: when } }
-            : null;
-        case "git":
-          if (!repoUrl.value.trim()) {
-            return null;
-          }
-          if (!repoPath.value.trim()) {
-            throw new Error("Say which file in the repo it is.");
-          }
-          return {
-            importedFrom: {
-              git_repo_url: repoUrl.value.trim(),
-              path: repoPath.value.trim(),
-              git_ref: ref.value.trim() || null,
-            },
-          };
-        default: {
-          const path = projectPath?.value.trim();
-          if (!otherProject.value.trim()) {
-            return null;
-          }
-          if (!projectPath) {
-            throw new Error("Name the project as owner/project.");
-          }
-          if (!path) {
-            throw new Error("Say which file in the project it is.");
-          }
-          return {
-            importedFrom: { project: otherProject.value.trim(), path },
-          };
-        }
-      }
-    };
-  } else {
-    const ai = textInput({ placeholder: "Ex: Claude Opus 5" });
-    const who = el("div", { class: "small" });
-    const user = send({ type: "auth.state" }).then((state) => state.user);
-    void user.then((u) => {
-      who.textContent = `Created by ${u?.full_name || u?.email || "you"}`;
-    });
-    fields.append(
-      who,
-      el("label", { text: "Made with generative AI (optional)" }),
-      ai,
-    );
-    read = async () => {
-      const u = await user;
-      if (!u) {
-        throw new Error("Sign in to say you made it.");
-      }
-      const tool = ai.value.trim();
-      return {
-        createdBy: [
-          {
-            email: u.email,
-            name: u.full_name ?? null,
-            ...(tool ? { with_ai: [tool] } : {}),
-          },
-        ],
-      };
-    };
-  }
-  save.addEventListener("click", async () => {
-    clear(message);
-    save.disabled = true;
-    try {
-      const origin = await read();
-      if (!origin) {
-        throw new Error("Say where it came from.");
-      }
-      message.append(loading("Saving"));
-      await send({
-        type: "project.recordOrigin",
-        owner: link.project_owner_name,
-        project: link.project_name,
-        path: target,
-        ...origin,
-      });
-      // One from a Git repo or project replaces the file on the hub, so
-      // Overleaf gets it too
-      const imported =
-        "importedFrom" in origin ? origin.importedFrom : undefined;
-      if (imported?.project || imported?.git_repo_url) {
-        clear(message).append(loading("Syncing"));
-        try {
-          await syncAfterHubChange(link);
-        } catch (e) {
-          await showDefined(container, link, citation);
-          container.append(
-            errorMessage(
-              `Saved, but not synced to Overleaf: ${
-                e instanceof Error ? e.message : String(e)
-              }. Update to try again.`,
-            ),
-          );
-          return;
-        }
-      }
-      await showDefined(container, link, citation);
-    } catch (e) {
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
-      save.disabled = false;
-    }
-  });
-  return el("div", { class: "stack", style: { marginTop: "6px" } }, [
-    el("div", { class: "small" }, [
-      document.createTextNode(how === "imported" ? "Where " : "Who made "),
-      el("span", { class: "name", text: target }),
-      document.createTextNode(how === "imported" ? " came from" : ""),
-    ]),
-    fields,
-    el("div", { class: "actions" }, [save]),
-    message,
-  ]);
-}
-
 type ToRecord = Extract<Request, { type: "project.recordOrigin" }>;
 
 /**
@@ -794,22 +584,30 @@ function renderDefineOrigin(
   onlyInOverleaf = false,
 ): HTMLElement {
   let synced = !onlyInOverleaf;
+  // Synced into the project first when only Overleaf has it, so what's
+  // recorded lands on the file itself
+  const prepare = async (): Promise<void> => {
+    if (synced) {
+      return;
+    }
+    await send({
+      type: "overleaf.sync",
+      owner: link.project_owner_name,
+      project: link.project_name,
+      path: link.path,
+    });
+    synced = true;
+    // Found again now that it's in the project, e.g., figs/fit as
+    // figs/fit.png
+    provenanceCache.clear();
+    target = (await citationProvenance(link, citation)).path;
+  };
   const open = (form: (body: HTMLElement) => HTMLElement) =>
     showInPanel(async (body) => {
       if (!synced) {
         body.append(loading("Syncing from Overleaf"));
         try {
-          await send({
-            type: "overleaf.sync",
-            owner: link.project_owner_name,
-            project: link.project_name,
-            path: link.path,
-          });
-          synced = true;
-          // Found again now that it's in the project, e.g., figs/fit as
-          // figs/fit.png, so what's recorded lands on the file itself
-          provenanceCache.clear();
-          target = (await citationProvenance(link, citation)).path;
+          await prepare();
         } catch (e) {
           clear(body).append(
             errorMessage(e instanceof Error ? e.message : String(e)),
@@ -820,6 +618,94 @@ function renderDefineOrigin(
       }
       body.append(form(body));
     });
+  // Created and imported take a click or a paste, right here
+  const inline = el("div", { class: "stack", style: { marginTop: "6px" } });
+  const fail = (e: unknown) =>
+    clear(inline).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+  const record = async (
+    origin: Pick<ToRecord, "importedFrom" | "createdBy">,
+    done: string,
+  ): Promise<void> => {
+    clear(inline).append(loading("Saving"));
+    try {
+      await prepare();
+      await send({
+        type: "project.recordOrigin",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        path: target,
+        ...origin,
+      });
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    // One from a Git repo or project replaces the file on the hub, so
+    // Overleaf gets it too
+    if (origin.importedFrom?.project || origin.importedFrom?.git_repo_url) {
+      clear(inline).append(loading("Syncing"));
+      try {
+        await syncAfterHubChange(link);
+      } catch (e) {
+        fail(
+          `Saved, but not synced to Overleaf: ${
+            e instanceof Error ? e.message : String(e)
+          }. Update to try again.`,
+        );
+        return;
+      }
+    }
+    provenanceCache.clear();
+    void checkCitations();
+    clear(inline).append(el("div", { class: "small dim", text: done }));
+  };
+  const showImport = () => {
+    const input = textInput({ placeholder: "DOI, URL, or owner/project/path" });
+    const hint = el("div", { class: "grow small dim" });
+    const save = el("button", { class: "action", text: "Save" });
+    const update = () => {
+      const source = getImportSource(input.value);
+      hint.textContent = source
+        ? IMPORT_SOURCE_TEXT[source.kind]
+        : input.value.trim()
+        ? "Not a DOI, URL, or owner/project/path"
+        : "";
+      save.disabled = !source;
+    };
+    save.addEventListener("click", () => {
+      const source = getImportSource(input.value);
+      if (source) {
+        void record(
+          { importedFrom: source.importedFrom },
+          `Imported from ${input.value.trim()}.`,
+        );
+      }
+    });
+    input.addEventListener("input", update);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !save.disabled) {
+        save.click();
+      }
+    });
+    update();
+    clear(inline).append(input, el("div", { class: "row" }, [hint, save]));
+    input.focus();
+  };
+  // Data is collected rather than created, e.g., in a lab
+  const createdText = isData(target) ? "Collected" : "Created";
+  const recordCreated = async () => {
+    const user = (await send({ type: "auth.state" })).user;
+    if (!user) {
+      fail("Sign in to say you made it.");
+      return;
+    }
+    await record(
+      { createdBy: [{ email: user.email, name: user.full_name ?? null }] },
+      `${createdText} by ${user.full_name || user.email}.`,
+    );
+  };
   const choices: [string, () => void][] = [
     [
       "Script",
@@ -833,13 +719,7 @@ function renderDefineOrigin(
           renderAddScript(body, link, citation, target, "notebook"),
         ),
     ],
-    [
-      "Imported",
-      () =>
-        open((body) =>
-          renderRecordOrigin(body, link, citation, target, "imported"),
-        ),
-    ],
+    ["Imported", showImport],
   ];
   // Something exported, e.g., a PNG, comes from a file a person made
   if (!canBeCreatedByPerson(target)) {
@@ -849,13 +729,7 @@ function renderDefineOrigin(
     ]);
   }
   if (canBeCreatedByPerson(target)) {
-    choices.push([
-      "Created",
-      () =>
-        open((body) =>
-          renderRecordOrigin(body, link, citation, target, "created"),
-        ),
-    ]);
+    choices.push([createdText, () => void recordCreated()]);
   }
   // What likely makes it, e.g., a notebook that writes it, read on this
   // machine, each opening its form filled in, to confirm
@@ -915,7 +789,10 @@ function renderDefineOrigin(
     el("div", {
       class: "small dim",
       style: { marginTop: "4px" },
-      text: "Define origin",
+      // Named when it's what the cited file is made from
+      text: citationCandidates(link.path, citation).includes(target)
+        ? "Define origin"
+        : `Define origin for ${target}`,
     }),
     el(
       "div",
@@ -931,7 +808,26 @@ function renderDefineOrigin(
         el("button", { class: "action secondary", text, onClick }),
       ),
     ),
+    inline,
   ]);
+}
+
+const IMPORT_SOURCE_TEXT: Record<ImportSource["kind"], string> = {
+  doi: "DOI",
+  git: "File in a Git repo",
+  project: "File in a Calkit project",
+  url: "Website",
+};
+
+/** Whether a path looks like data, e.g., a folder or a CSV file. */
+function isData(path: string): boolean {
+  const name = path.split("/").pop() ?? path;
+  return (
+    !name.includes(".") ||
+    /\.(csv|tsv|json|xlsx?|h5|hdf5|nc|parquet|mat|npy|npz|dat|zarr)$/i.test(
+      name,
+    )
+  );
 }
 
 /** How to run a stage that's never run, since Overleaf can't. */

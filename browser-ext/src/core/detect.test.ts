@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 
 import {
+  getImportSource,
   detectReference,
   getGithubPath,
   getGithubPullNumber,
@@ -264,5 +265,37 @@ describe("getGithubPullNumber", () => {
     expect(
       getGithubPullNumber("https://github.com/calkit/calkit/issues/12"),
     ).toBeNull();
+  });
+});
+
+describe("getImportSource", () => {
+  test("recognizes each kind of source from what's pasted", () => {
+    expect(getImportSource("  ")).toBeNull();
+    expect(getImportSource("https://doi.org/10.5281/Zenodo.123")).toEqual({
+      kind: "doi",
+      importedFrom: { doi: "10.5281/zenodo.123" },
+    });
+    expect(
+      getImportSource("https://github.com/a/b/blob/main/data/runs%201.csv"),
+    ).toEqual({
+      kind: "git",
+      importedFrom: {
+        git_repo_url: "https://github.com/a/b",
+        git_ref: "main",
+        path: "data/runs 1.csv",
+      },
+    });
+    // A repo itself names no file, so it's only a website
+    expect(getImportSource("https://github.com/a/b")?.kind).toBe("url");
+    expect(getImportSource("https://example.org/x.csv")).toEqual({
+      kind: "url",
+      importedFrom: { url: "https://example.org/x.csv" },
+    });
+    expect(getImportSource("alice/lab-data/data/runs.csv")).toEqual({
+      kind: "project",
+      importedFrom: { project: "alice/lab-data", path: "data/runs.csv" },
+    });
+    expect(getImportSource("alice/lab-data")).toBeNull();
+    expect(getImportSource("from the lab")).toBeNull();
   });
 });

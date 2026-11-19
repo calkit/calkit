@@ -81,7 +81,7 @@ import {
   railOpen,
   railPipeline,
   watchRail,
-  getComponentsWithoutOrigin,
+  getMissingOrigins,
   getLinkableTyped,
   ItemAt,
   setRail,
@@ -1687,7 +1687,7 @@ function renderStatus(
   let openOrigin: { key: string; element: HTMLElement } | null = null;
   const origins = el("div");
   drawPanelOrigins = () => {
-    const missing = getComponentsWithoutOrigin();
+    const missing = getMissingOrigins();
     const n = missing.length;
     clear(badge).append(
       n
@@ -1744,12 +1744,13 @@ function renderStatus(
     rows(
       "Missing origin",
       "var(--ck-danger)",
-      missing.map(({ item, citation, at }) => ({
+      missing.map(({ path, uses, item, at }) => ({
         item,
         at,
-        label: citation.key
-          ? `${citation.path} \u00b7 ${citation.key}`
-          : citation.path,
+        // What's missing one, and what it makes when that's something else
+        label: uses.some((use) => path.endsWith(use))
+          ? path
+          : `${path}, for ${uses.join(", ")}`,
       })),
     );
     // Typed numbers and tables the project has results for, which are
@@ -2859,7 +2860,7 @@ function mountLauncher(
   tone: LauncherTone = "idle",
   keep = false,
 ): void {
-  const missing = getComponentsWithoutOrigin().length;
+  const missing = getMissingOrigins().length;
   const state = `${currentProjectId}|${tone}|${missing}`;
   // Redrawn only for a change, since one under a click would swallow it
   const existing = document.getElementById(LAUNCHER_ID);
@@ -2936,7 +2937,7 @@ function launcherTone(): LauncherTone {
   if (activeRun()) {
     return "running";
   }
-  if (getComponentsWithoutOrigin().length) {
+  if (getMissingOrigins().length) {
     return "origins";
   }
   return lastSyncNeeded ? "attention" : "idle";

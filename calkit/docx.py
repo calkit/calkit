@@ -345,6 +345,20 @@ class Document:
         )
         return el.text if el is not None else None
 
+    def strip_app_version(self) -> None:
+        """Name the application that wrote the package without its version.
+
+        LibreOffice writes its version and platform there, so the same
+        content would make a different file on each machine.
+        """
+        data = self.parts.get("docProps/app.xml")
+        if data is not None:
+            self.parts["docProps/app.xml"] = re.sub(
+                rb"<Application>([^<]*?)/[^<]*</Application>",
+                rb"<Application>\1</Application>",
+                data,
+            )
+
     def set_identifier(self, value: str) -> None:
         core = _parse(self.parts["docProps/core.xml"])
         el = core.find(_tag(DC, "identifier"))

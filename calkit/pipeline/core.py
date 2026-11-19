@@ -2973,6 +2973,7 @@ def to_dvc(
     import calkit.latex
     import calkit.markdown
     import calkit.questions
+    from calkit.cli import warn
     from calkit.environments import (
         COMPOSITE_ENV_SEP,
         SWITCH_KIND,
@@ -3725,6 +3726,14 @@ def to_dvc(
                 for old, new in renames.items()
             }
         dvc_yaml["stages"] = written_stages
+        # A path a stage makes now isn't also added on its own, e.g., a
+        # figure saved with DVC before its stage was, which DVC would refuse
+        for overlap in calkit.dvc.get_stage_output_dvc_files(dvc_stages, wdir):
+            os.remove(os.path.join(wdir or ".", overlap["dvc_file"]))
+            warn(
+                f"Removed {overlap['dvc_file']}, since stage "
+                f"'{overlap['stage']}' makes {overlap['path']} now"
+            )
         dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
         # A project with no stages for DVC needs no dvc.yaml to say so
         if written_stages or os.path.isfile(dvc_yaml_fpath):

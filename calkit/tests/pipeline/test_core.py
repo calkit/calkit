@@ -563,6 +563,32 @@ def test_to_dvc_unignores_dvc_lock(tmp_dir):
     assert not repo.ignored("dvc.lock")
 
 
+def test_to_dvc_removes_stage_output_dvc_files(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "make": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo hi > fig.png",
+                    "outputs": ["fig.png"],
+                }
+            }
+        }
+    }
+    # A figure added with DVC by hand before the stage that makes it was
+    with open("fig.png.dvc", "w") as f:
+        f.write("outs:\n- path: fig.png\n")
+    with open("data.csv.dvc", "w") as f:
+        f.write("outs:\n- path: data.csv\n")
+    calkit.pipeline.to_dvc(ck_info=ck_info)
+    assert os.path.isfile("fig.png.dvc")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert not os.path.isfile("fig.png.dvc")
+    assert os.path.isfile("data.csv.dvc")
+
+
 def test_to_dvc_skips_no_op_writes(tmp_dir):
     # Compiling to DVC happens on every `calkit status` (which the VS Code
     # extension polls continuously). Rewriting an unchanged dvc.yaml churns Git

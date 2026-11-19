@@ -2084,6 +2084,35 @@ def get_too_large_text(paths: list[str]) -> str:
     )
 
 
+def get_stage_output_dvc_files(
+    dvc_stages: dict, wdir: str | None = None
+) -> list[dict]:
+    """The .dvc files, e.g., from adding a figure with DVC by hand, for paths
+    a pipeline stage makes now, each with the output's ``path``, its
+    ``dvc_file``, both relative to ``wdir``, and the ``stage``.
+
+    DVC refuses a pipeline with both, as overlapping outputs, and the stage
+    is what says how the path is made, so the .dvc file is the one to go.
+    Only checks whether files exist, so it's fast enough to run whenever the
+    pipeline is compiled.
+    """
+    base = wdir or "."
+    found = []
+    for name, stage in dvc_stages.items():
+        stage_wdir = stage.get("wdir") or ""
+        for out in stage.get("outs") or []:
+            path = next(iter(out)) if isinstance(out, dict) else out
+            if not isinstance(path, str) or "${" in path:
+                continue
+            path = posixpath.normpath(posixpath.join(stage_wdir, path))
+            dvc_file = path.rstrip("/") + ".dvc"
+            if os.path.isfile(os.path.join(base, dvc_file)):
+                found.append(
+                    {"path": path, "dvc_file": dvc_file, "stage": name}
+                )
+    return found
+
+
 def get_storage_problems(  # type: ignore[no-any-unimported]
     wdir: str | None = None,
     large_mb: float | None = LARGE_MB,
@@ -2112,6 +2141,10 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     - ``zipped``: stored zipped with DVC, but tracked by Git too.
     - ``large``: tracked by Git, and larger than ``large_mb``, which is only
       advice; None skips this check.
+    - ``stage-output-dvc-file``: made by a pipeline ``stage`` and tracked by
+      its own ``dvc_file`` too, e.g., added with DVC by hand before the
+      stage was, which belongs to the stage. DVC can't index a project like
+      that, so if there are any, they're all that's reported.
 
     Building DVC's index is most of the cost, and loading calkit.yaml much
     of the rest, so a ``dvc_repo`` that has built it, and ``ck_info``, can
@@ -2143,6 +2176,28 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
         return Path(os.path.relpath(path, base)).as_posix()
 
     problems: list[dict] = []
+    # Before DVC's index is built, which these stop
+    dvc_yaml_path = base / "dvc.yaml"
+    if dvc_yaml_path.is_file():
+        with open(dvc_yaml_path) as f:
+            dvc_stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+        for found in get_stage_output_dvc_files(dvc_stages, str(base)):
+            problems.append(
+                dict(
+                    path=found["path"],
+                    kind="stage-output-dvc-file",
+                    stage=found["stage"],
+                    dvc_file=found["dvc_file"],
+                    store_in=None,
+                    message=(
+                        f"{found['path']} is made by stage "
+                        f"'{found['stage']}', but {found['dvc_file']} tracks "
+                        "it too"
+                    ),
+                )
+            )
+        if problems:
+            return problems
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     # Cached by DVC, so not to be tracked by Git

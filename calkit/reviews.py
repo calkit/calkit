@@ -29,6 +29,7 @@ import os
 import posixpath
 import re
 from dataclasses import dataclass
+from pathlib import PurePath
 from typing import Any
 
 _ITEM_RE = re.compile(r"^(\d+)\.\s+(.*)$")
@@ -299,11 +300,12 @@ def to_dict(path: str, ordinal: int, comment: ReviewComment) -> dict[str, Any]:
 
 def review_path(pdf: str, ck_info: dict) -> str | None:
     """The first review file the publication at this path lists, if any."""
-    want = posixpath.normpath(pdf)
+    # As POSIX paths, so a Windows one written with backslashes matches
+    want = posixpath.normpath(PurePath(pdf).as_posix())
     for pub in ck_info.get("publications") or []:
         if not isinstance(pub, dict) or not pub.get("path"):
             continue
-        if posixpath.normpath(str(pub["path"])) != want:
+        if posixpath.normpath(PurePath(str(pub["path"])).as_posix()) != want:
             continue
         for review in pub.get("reviews") or []:
             if isinstance(review, dict) and review.get("path"):
@@ -329,6 +331,7 @@ def ensure_review(pdf: str, wdir: str | None = None) -> str:
     """
     import calkit
 
+    pdf = PurePath(pdf).as_posix()
     ck_info = calkit.load_calkit_info(wdir=wdir)
     path = review_path(pdf, ck_info)
     if path is None:
@@ -340,7 +343,10 @@ def ensure_review(pdf: str, wdir: str | None = None) -> str:
                 p
                 for p in pubs
                 if isinstance(p, dict)
-                and posixpath.normpath(str(p.get("path", ""))) == want
+                and posixpath.normpath(
+                    PurePath(str(p.get("path", ""))).as_posix()
+                )
+                == want
             ),
             None,
         )

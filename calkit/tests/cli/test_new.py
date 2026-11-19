@@ -2834,3 +2834,11 @@ def test_new_comment(tmp_dir):
         capture_output=True,
     )
     assert res.returncode != 0
+    # Where on the page needs the page, rather than being dropped
+    for args in [["-l", "5"], ["--highlight", "Reynolds"]]:
+        res = subprocess.run(
+            ["calkit", "new", "comment", "paper/manuscript.pdf", "-m", "A"]
+            + args,
+            capture_output=True,
+        )
+        assert res.returncode != 0, args

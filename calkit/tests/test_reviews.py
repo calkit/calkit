@@ -1,6 +1,6 @@
 """Tests for ``calkit.reviews``."""
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -148,7 +148,9 @@ lazily onto a third,
     assert out["messages"][0]["text"] == "Which length is it based on?"
 
 
-def test_a_publication_lists_its_review(tmp_dir: Path) -> None:
+def test_a_publication_lists_its_review(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_dir / "paper").mkdir()
     (tmp_dir / "paper" / "manuscript.pdf").write_bytes(b"%PDF")
     (tmp_dir / "calkit.yaml").write_text("name: review\n")
@@ -184,3 +186,12 @@ def test_a_publication_lists_its_review(tmp_dir: Path) -> None:
     # And the project's model reads it
     info = calkit.load_calkit_info_object()
     assert info.publications[0].reviews[0].path == "paper/review.md"
+    # A Windows path with backslashes finds the same publication and review
+    monkeypatch.setattr(reviews, "PurePath", PureWindowsPath)
+    assert reviews.ensure_review("paper\\manuscript.pdf") == "paper/review.md"
+    assert len(calkit.load_calkit_info()["publications"]) == 1
+    calkit.save_calkit_info(
+        {"publications": [{"path": "paper\\manuscript.pdf"}]}
+    )
+    assert reviews.ensure_review("paper/manuscript.pdf") == "paper/review.md"
+    assert len(calkit.load_calkit_info()["publications"]) == 1

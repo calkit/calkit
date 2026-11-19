@@ -1023,6 +1023,9 @@ def new_comment(
     if path.lower().endswith(".pdf"):
         import calkit.reviews
 
+        # The review file only says where a comment is about from its page
+        if page is None and (line is not None or highlight):
+            raise_error("--line and --highlight need --page for a PDF")
         review = calkit.reviews.ensure_review(path)
         comment = calkit.reviews.ReviewComment(
             text=text, page=page, line=line, quote=highlight or None

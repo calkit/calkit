@@ -173,7 +173,9 @@ export function canBeCreatedByPerson(path: string): boolean {
 
 /** Something wrong with what a command shows, as a lint message. */
 export interface CitationProblem {
-  severity: "error" | "warning";
+  /** ``link`` isn't a problem, but something the project has that could
+   * be linked, e.g., a result a typed number matches. */
+  severity: "error" | "warning" | "link";
   kind: "value" | "missing" | "origin" | "update" | "stale" | "typed";
   message: string;
   /** What it's about, e.g., data a figure is made from. */
@@ -713,19 +715,24 @@ export function roundedLike(number: TypedNumber, value: number): string {
     : fixed;
 }
 
-/** What's wrong with a typed number: the paper can't say where it's from. */
-export function typedNumberProblem(
+/**
+ * The result a typed number could be linked to, so it stays current, or
+ * null if none matches, which isn't marked, since plenty of numbers in a
+ * paper aren't the project's results.
+ */
+export function getTypedNumberLink(
   number: TypedNumber,
   values: ResultValue[],
-): CitationProblem {
+): CitationProblem | null {
   const [first] = typedNumberMatches(number, values).exact;
+  if (!first) {
+    return null;
+  }
   return {
-    severity: "warning",
+    severity: "link",
     kind: "typed",
-    message: first
-      ? `Typed in, though it matches ${first.key} in ${first.path}`
-      : "Typed in, and no result in the project matches it",
-    path: first?.path ?? "",
+    message: `Matches ${first.key} in ${first.path}`,
+    path: first.path,
   };
 }
 
@@ -776,18 +783,26 @@ export function typedTableMatches(
     .sort((a, b) => b.matched - a.matched);
 }
 
-/** What's wrong with a typed table: the paper can't say where it's from. */
-export function typedTableProblem(
+/**
+ * The table file a typed table could be linked to, or null if none
+ * matches, as for a typed number.
+ */
+export function getTypedTableLink(
   table: Pick<TypedTable, "numbers">,
   files: TableFile[],
-): CitationProblem {
+): CitationProblem | null {
   const [best] = typedTableMatches(table, files);
+  if (!best) {
+    return null;
+  }
   return {
-    severity: "warning",
+    severity: "link",
     kind: "typed",
-    message: best
-      ? `Typed in, though ${best.path} has a table like it`
-      : "Typed in, and no table in the project matches it",
-    path: best?.path ?? "",
+    message:
+      `Matches ${best.path}` +
+      (best.matched < table.numbers.length
+        ? `, ${best.matched} of ${table.numbers.length} numbers`
+        : ""),
+    path: best.path,
   };
 }

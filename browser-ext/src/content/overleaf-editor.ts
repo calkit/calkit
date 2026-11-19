@@ -75,7 +75,7 @@ export type ToEditor =
       calkit: "lint";
       type: "problems";
       version: number;
-      items: { index: number; severity: "error" | "warning" }[];
+      items: { index: number; severity: "error" | "warning" | "link" }[];
     }
   | { calkit: "lint"; type: "goto"; line: number; column: number }
   // Text selected, e.g., to comment on it, by line (from 1) and column
@@ -123,6 +123,8 @@ let tooltips = 0;
 // Whether the extension has checked the document, which it only does for
 // one linked to a Calkit project, so a tooltip would have something in it
 let checked = false;
+// The items the extension last marked, by index
+let marked = new Set<number>();
 // The editor last scanned, and how to mark problems in it
 let active: {
   view: View;
@@ -216,6 +218,7 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
       if (message.version !== version) {
         return;
       }
+      marked = new Set(message.items.map(({ index }) => index));
       const length = view.state.doc.length;
       const ranges = message.items.flatMap(({ index, severity }) => {
         const item = citations[index];
@@ -280,6 +283,10 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
         return null;
       }
       const item = citations[index];
+      // Something typed has nothing to say unless it could be linked
+      if ((item.typed || item.table) && !marked.has(index)) {
+        return null;
+      }
       return {
         pos: item.from,
         end: item.to,
@@ -303,6 +310,12 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
     },
     ".calkit-problem-warning": {
       textDecoration: "underline wavy #d69e2e",
+      textDecorationSkipInk: "none",
+      textUnderlineOffset: "3px",
+    },
+    // Something the project has that could be linked, not a problem
+    ".calkit-problem-link": {
+      textDecoration: "underline dotted #009688",
       textDecorationSkipInk: "none",
       textUnderlineOffset: "3px",
     },

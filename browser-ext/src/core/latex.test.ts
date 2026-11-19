@@ -16,9 +16,9 @@ import {
   tableFile,
   typedNumberCitation,
   typedNumberMatches,
-  typedNumberProblem,
+  getTypedNumberLink,
   typedTableMatches,
-  typedTableProblem,
+  getTypedTableLink,
   typedNumbersIn,
   typedNumbersInDocument,
   isIgnored,
@@ -596,12 +596,14 @@ describe("typedTableMatches", () => {
     expect(typedTableMatches(typed, files)).toEqual([
       { path: "results/deficit_table.tex", matched: 5 },
     ]);
-    expect(typedTableProblem(typed, files).message).toBe(
-      "Typed in, though results/deficit_table.tex has a table like it",
-    );
-    expect(typedTableProblem(typed, [other!]).message).toBe(
-      "Typed in, and no table in the project matches it",
-    );
+    // A link to offer, not a problem, and nothing where nothing matches
+    expect(getTypedTableLink(typed, files)).toEqual({
+      severity: "link",
+      kind: "typed",
+      message: `Matches results/deficit_table.tex, 5 of ${typed.numbers.length} numbers`,
+      path: "results/deficit_table.tex",
+    });
+    expect(getTypedTableLink(typed, [other!])).toBeNull();
   });
 });
 
@@ -664,15 +666,13 @@ describe("typedNumberMatches", () => {
       ",.1f",
     );
     expect(typedNumberCitation(number("of 4.7e-1"), mean).options).toBe(".1e");
-    expect(typedNumberProblem(number("was 0.47"), values)).toEqual({
-      severity: "warning",
+    expect(getTypedNumberLink(number("was 0.47"), values)).toEqual({
+      severity: "link",
       kind: "typed",
-      message: "Typed in, though it matches mean_deficit in results/wake.json",
+      message: "Matches mean_deficit in results/wake.json",
       path: "results/wake.json",
     });
-    expect(typedNumberProblem(number("was 0.48"), values).message).toBe(
-      "Typed in, and no result in the project matches it",
-    );
+    expect(getTypedNumberLink(number("was 0.48"), values)).toBeNull();
     expect(roundedLike(number("was 0.48"), 0.5030064751108918)).toBe("0.50");
     expect(roundedLike(number("of 1,234.5"), 12345.67)).toBe("12,345.7");
     expect(roundedLike(number("of 4.7e-1"), 0.4687)).toBe("4.7e-1");

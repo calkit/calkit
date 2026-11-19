@@ -30,9 +30,9 @@ import {
   tableFile,
   typedNumberCitation,
   typedNumberMatches,
-  typedNumberProblem,
+  getTypedNumberLink,
   typedTableMatches,
-  typedTableProblem,
+  getTypedTableLink,
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import {
@@ -2511,7 +2511,11 @@ function problemLine(problem: CitationProblem): HTMLElement {
     class: "small",
     style: {
       color:
-        problem.severity === "error" ? "var(--ck-danger)" : "var(--ck-warning)",
+        problem.severity === "error"
+          ? "var(--ck-danger)"
+          : problem.severity === "warning"
+          ? "var(--ck-warning)"
+          : "var(--ck-main)",
       fontWeight: "600",
     },
     text: problem.message,
@@ -2547,21 +2551,28 @@ async function checkCitations(): Promise<void> {
   const work = async () => {
     while (next < snapshot.items.length) {
       const i = next++;
-      const { citation, typed, table } = snapshot.items[i];
+      const item = snapshot.items[i];
       try {
-        found[i] = typed
-          ? [typedNumberProblem(typed, await projectValues(link))]
-          : table
-          ? [
-              typedTableProblem(
-                { numbers: table.numbers },
-                await projectTables(link),
-              ),
-            ]
-          : citationProblems(
-              citation,
-              await citationProvenance(link, citation),
-            );
+        // What's typed is only marked where the project has something it
+        // could be linked to
+        if (item.typed) {
+          const linkable = getTypedNumberLink(
+            item.typed,
+            await projectValues(link),
+          );
+          found[i] = linkable ? [linkable] : [];
+        } else if (item.table) {
+          const linkable = getTypedTableLink(
+            { numbers: item.table.numbers },
+            await projectTables(link),
+          );
+          found[i] = linkable ? [linkable] : [];
+        } else {
+          found[i] = citationProblems(
+            item.citation,
+            await citationProvenance(link, item.citation),
+          );
+        }
       } catch {
         found[i] = [];
       }
@@ -2585,7 +2596,9 @@ async function checkCitations(): Promise<void> {
               index,
               severity: problems.some((p) => p.severity === "error")
                 ? "error"
-                : "warning",
+                : problems.some((p) => p.severity === "warning")
+                ? "warning"
+                : "link",
             },
           ]
         : [],
@@ -2800,21 +2813,22 @@ function renderTyped(
       canWrite
         ? el("button", {
             class: "action secondary",
-            text: "Use",
+            text: "Link",
             onClick: () => void use(value),
           })
         : null,
     ]);
   };
+  const linkable = getTypedNumberLink(number, values);
   container.append(
-    el("div", { class: "name", text: `Typed-in number: ${number.text}` }),
-    problemLine(typedNumberProblem(number, values)),
+    el("div", { class: "name", text: number.text }),
+    ...(linkable ? [problemLine(linkable)] : []),
   );
   if (exact.length) {
     container.append(
       el("div", {
         class: "dim small",
-        text: "Show it from the results file instead, so it stays current:",
+        text: "Linked, it updates whenever the analysis does:",
       }),
       ...exact.slice(0, 5).map(row),
     );
@@ -2857,22 +2871,21 @@ function renderTypedTable(
   at: { version: number; index: number },
 ): void {
   const matches = typedTableMatches({ numbers }, tables);
+  const linkedTable = getTypedTableLink({ numbers }, tables);
   const canWrite = link.current_user_access !== "read";
   const message = el("div", { class: "small", style: { marginTop: "6px" } });
   container.append(
     el("div", {
       class: "name",
-      text: `Typed-in table: ${numbers.length} number${
-        numbers.length === 1 ? "" : "s"
-      }`,
+      text: `Table, ${numbers.length} number${numbers.length === 1 ? "" : "s"}`,
     }),
-    problemLine(typedTableProblem({ numbers }, tables)),
+    ...(linkedTable ? [problemLine(linkedTable)] : []),
   );
   if (matches.length) {
     container.append(
       el("div", {
         class: "dim small",
-        text: "Show it from the file its stage writes instead, so it stays current:",
+        text: "Linked, it updates whenever the analysis does:",
       }),
       ...matches.slice(0, 3).map(({ path, matched }) =>
         el("div", { class: "row" }, [
@@ -2890,7 +2903,7 @@ function renderTypedTable(
           canWrite
             ? el("button", {
                 class: "action secondary",
-                text: "Use",
+                text: "Link",
                 onClick: async () => {
                   const error = await replaceInEditor(
                     link,
@@ -5580,46 +5593,63 @@ function renderStatus(
         : syncBadge,
     );
     clear(origins);
-    if (!n) {
-      return;
-    }
-    origins.append(
-      el("div", {
-        class: "small",
-        style: { marginTop: "8px", fontWeight: "600" },
-        text: "Missing origin",
-      }),
-      ...missing.flatMap(({ item, citation, at }) => {
-        const key = citationText(citation);
-        const open = openOrigin?.key === key;
-        const row = el("div", { class: "small" }, [
-          el("a", {
-            text:
-              `${open ? "\u25be" : "\u25b8"} ` +
-              (citation.key
-                ? `${citation.path} \u00b7 ${citation.key}`
-                : citation.path),
-            style: { color: "var(--ck-danger)" },
-            onClick: (event) => {
-              event.preventDefault();
-              // Its card, as in the sidebar, with the ways to define it
-              if (open) {
-                openOrigin = null;
-              } else {
-                const element = el("div", {
-                  class: "muted-box",
-                  style: { marginTop: "4px" },
-                });
-                openOrigin = { key, element };
-                void fillCard(element, link, item, at);
-              }
-              drawPanelOrigins?.();
-            },
-          }),
-        ]);
-        return open && openOrigin ? [row, openOrigin.element] : [row];
-      }),
+    // Each row opens its card, as in the sidebar, e.g., with the ways to
+    // define an origin, or the result to link a typed number to
+    const rows = (
+      heading: string,
+      color: string,
+      list: { item: EditorItem; label: string; at: ItemAt }[],
+    ) => {
+      if (!list.length) {
+        return;
+      }
+      origins.append(
+        el("div", {
+          class: "small",
+          style: { marginTop: "8px", fontWeight: "600" },
+          text: heading,
+        }),
+        ...list.flatMap(({ item, label, at }) => {
+          const key = `${heading}:${at.index}:${label}`;
+          const open = openOrigin?.key === key;
+          const row = el("div", { class: "small" }, [
+            el("a", {
+              text: `${open ? "\u25be" : "\u25b8"} ${label}`,
+              style: { color },
+              onClick: (event) => {
+                event.preventDefault();
+                if (open) {
+                  openOrigin = null;
+                } else {
+                  const element = el("div", {
+                    class: "muted-box",
+                    style: { marginTop: "4px" },
+                  });
+                  openOrigin = { key, element };
+                  void fillCard(element, link, item, at);
+                }
+                drawPanelOrigins?.();
+              },
+            }),
+          ]);
+          return open && openOrigin ? [row, openOrigin.element] : [row];
+        }),
+      );
+    };
+    rows(
+      "Missing origin",
+      "var(--ck-danger)",
+      missing.map(({ item, citation, at }) => ({
+        item,
+        at,
+        label: citation.key
+          ? `${citation.path} \u00b7 ${citation.key}`
+          : citation.path,
+      })),
     );
+    // Typed numbers and tables the project has results for, which are
+    // worth linking but nothing's wrong with
+    rows("Can link", "var(--ck-main)", getLinkableTyped());
   };
   drawPanelOrigins();
   // What a sync would do, set aside while a run or sync makes it out of
@@ -7302,6 +7332,38 @@ function getComponentsWithoutOrigin(): {
   );
 }
 
+/**
+ * Typed numbers and tables the project has results for, which linking
+ * keeps current, with what each is labeled and where it is in the scan.
+ */
+function getLinkableTyped(): {
+  item: EditorItem;
+  label: string;
+  at: ItemAt;
+}[] {
+  const items = editorCitations?.items ?? [];
+  const version = editorCitations?.version ?? 0;
+  if (!currentLink || editorProblems?.version !== editorCitations?.version) {
+    return [];
+  }
+  return items.flatMap((item, index) =>
+    (item.typed || item.table) && editorProblems?.found[index]?.length
+      ? [
+          {
+            item,
+            label: item.typed
+              ? `${item.typed.text} (line ${item.line})`
+              : `Table (line ${item.line})`,
+            at: { version, index },
+          },
+        ]
+      : [],
+  );
+}
+
+/** Where an item is in one of the editor's scans. */
+type ItemAt = { version: number; index: number };
+
 // Redraws what the panel says of origins, while it's showing a status
 let drawPanelOrigins: (() => void) | null = null;
 
@@ -7396,6 +7458,7 @@ const RAIL_STYLES = `
   .twistie.warning { border-left-color: var(--ck-warning); }
   .twistie.error { border-left-color: var(--ck-danger); }
   .twistie.unknown { border-left-color: var(--ck-dim); }
+  .twistie.link { border-left-color: var(--ck-main); }
   .item .spinner { width: 8px; height: 8px; border-width: 1.5px;
     flex: none; }
   .card {
@@ -7611,6 +7674,10 @@ function drawRail(): void {
   const seen = new Map<string, number>();
   items.forEach((item, index) => {
     const problems = checked?.[index];
+    // Something typed is only listed where it could be linked
+    if ((item.typed || item.table) && !problems?.length) {
+      return;
+    }
     // What it shows, and which time, since its line moves with edits
     const text = item.citation
       ? citationText(item.citation)
@@ -7659,8 +7726,10 @@ function drawRail(): void {
                 ? "unknown"
                 : problems.some((p) => p.severity === "error")
                 ? "error"
-                : problems.length
+                : problems.some((p) => p.severity === "warning")
                 ? "warning"
+                : problems.length
+                ? "link"
                 : ""
             }${railCard?.key === key ? " open" : ""}`,
           }),

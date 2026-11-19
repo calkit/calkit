@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import posixpath
+import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -693,6 +695,9 @@ def get_stage_from_script_plan(
         )
         outputs.append(produces)
     included: dict[str, str] = {}
+    # The copy the document showed, e.g., one uploaded to Overleaf, which
+    # nothing needs once it shows the stage's output instead
+    replaced = None
     if shows is not None and produces is not None and produces != shows:
         included = get_included_texts(shows, produces)
         if not included:
@@ -700,6 +705,47 @@ def get_stage_from_script_plan(
                 f"No document includes '{shows}' to show it from "
                 f"'{produces}' instead"
             )
+        used_by_stages = any(
+            shows
+            in [
+                p["path"] if isinstance(p, dict) else p
+                for field in ("inputs", "outputs")
+                for p in s.get(field) or []
+                if isinstance(p, (str, dict))
+            ]
+            for s in [*stages.values(), stage]
+            if isinstance(s, dict)
+        )
+        repo = calkit.git.get_repo(wdir)
+        # Only a copy Git has, as is, can go, since that's what gets it back
+        saved = bool(repo.git.ls_files("--", shows).strip()) and not (
+            repo.git.status("--porcelain", "--", shows).strip()
+        )
+        # Anything else naming it, e.g., slides or a Markdown file that
+        # isn't one of the documents here, may still show it
+        named_in = repo.git.grep(
+            "-l", "-I", "-F", posixpath.basename(shows), with_exceptions=False
+        ).splitlines()
+        named_elsewhere = any(
+            p not in included and p != shows for p in named_in
+        )
+        if (
+            saved
+            and not named_elsewhere
+            and not used_by_stages
+            and shows not in json.dumps(ck_info, default=str)
+            and not any(
+                re.search(
+                    r"\\includegraphics[^{]*\{[^}]*"
+                    + re.escape(
+                        posixpath.splitext(posixpath.basename(shows))[0]
+                    ),
+                    text,
+                )
+                for text in included.values()
+            )
+        ):
+            replaced = shows
     from_dependencies = env.get("created_from_dependencies")
     return {
         "stage_name": stage_name,
@@ -721,4 +767,5 @@ def get_stage_from_script_plan(
         "external_inputs": detected.get("external_inputs") or [],
         "produces": produces,
         "included": included,
+        "replaced": replaced,
     }

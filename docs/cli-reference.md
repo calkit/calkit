@@ -4687,7 +4687,7 @@ Check the status of folders synced with Overleaf in a project.
 Usage:
 
 ```text
-calkit overleaf|ol status|st [PATHS...]
+calkit overleaf|ol status|st [OPTIONS] [PATHS...]
 ```
 
 Arguments:
@@ -4695,6 +4695,12 @@ Arguments:
 | Argument | Type      | Required | Default | Description                                                                                     |
 | -------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `paths`  | list[str] | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description                                                                                                                                     |
+| -------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Print what a sync of each folder would do as JSON, as the hub reports it, or an error with 'needs_login' when Overleaf credentials are missing. |
 
 <a id="subcommand-overleaf-ol-push"></a>
 

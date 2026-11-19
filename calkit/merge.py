@@ -379,6 +379,81 @@ def get_unmerged_paths(repo: git.Repo) -> list[str]:
     return sorted({p for p in out.split("\0") if p})
 
 
+def get_paths_with_markers(repo: git.Repo, paths: list[str]) -> list[str]:
+    """The paths, relative to the repo root, that still have conflict marks.
+
+    A missing file has none, since deleting it is one way to resolve it.
+    """
+    marked = []
+    for path in paths:
+        full_path = os.path.join(repo.working_dir, path)
+        if not os.path.isfile(full_path):
+            continue
+        with open(full_path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+        if any(line.startswith("<<<<<<<") for line in lines) and any(
+            line.startswith(">>>>>>>") for line in lines
+        ):
+            marked.append(path)
+    return marked
+
+
+def get_unmerged_kinds(repo: git.Repo, paths: list[str]) -> dict[str, str]:
+    """How each path Git left in conflict is resolved: "text" by combining
+    its marked parts, "binary" by keeping one side, since Git can't mark
+    one, or "deleted" by keeping or deleting a file one side deleted.
+    """
+    stages: dict[str, set[str]] = {}
+    for entry in repo.git.ls_files("-u", "-z").split("\0"):
+        if "\t" in entry:
+            meta, path = entry.split("\t", 1)
+            stages.setdefault(path, set()).add(meta.split()[2])
+    kinds = {}
+    for path in paths:
+        if not {"2", "3"} <= stages.get(path, set()):
+            kinds[path] = "deleted"
+            continue
+        try:
+            with open(os.path.join(repo.working_dir, path), "rb") as f:
+                kinds[path] = "binary" if b"\0" in f.read(8000) else "text"
+        except FileNotFoundError:
+            # Deleted to resolve it
+            kinds[path] = "text"
+    return kinds
+
+
+def get_unmerged_message(kinds: dict[str, str], finish: str) -> str:
+    """Say how to resolve each path left in conflict, by its kind from
+    ``get_unmerged_kinds``, then run ``finish``.
+    """
+
+    def names(kind: str) -> str:
+        return ", ".join(p for p, k in kinds.items() if k == kind)
+
+    parts = []
+    if names("text"):
+        parts.append(
+            f"Couldn't combine the changes to {names('text')}. Each has both "
+            "versions between '<<<<<<<' and '>>>>>>>' marks; keep what should "
+            "stay and delete the marks."
+        )
+    for path, kind in kinds.items():
+        if kind == "binary":
+            parts.append(
+                f"{path} changed on both sides and can't be combined; keep "
+                f"this machine's with 'git checkout --ours -- {path}' or the "
+                f"other with 'git checkout --theirs -- {path}', then "
+                f"'git add {path}'."
+            )
+        elif kind == "deleted":
+            parts.append(
+                f"{path} was deleted on one side and changed on the other; "
+                f"keep it with 'git add {path}' or delete it with "
+                f"'git rm {path}'."
+            )
+    return " ".join(parts + [f"Then run '{finish}'"])
+
+
 def is_merged_file(path: str) -> bool:
     """Whether Calkit merges this file, given relative to the repo root."""
     return posixpath.basename(path) == LOCK_FNAME or (

@@ -190,6 +190,12 @@ export function watchRail(): void {
       border-radius: 50%; background: #e5484d;
       box-shadow: 0 0 0 2px var(--bg-primary-themed, #fff);
     }
+    #${RAIL_TAB_ID} .calkit-rail-dot.busy {
+      box-sizing: border-box; background: var(--bg-primary-themed, #fff);
+      border: 2px solid #009688; border-top-color: transparent;
+      animation: calkit-rail-spin 0.8s linear infinite;
+    }
+    @keyframes calkit-rail-spin { to { transform: rotate(360deg); } }
   `;
   document.head.append(style);
   // One of Overleaf's own tabs brings its pane back. The one it thinks is
@@ -360,13 +366,28 @@ export type ItemAt = { version: number; index: number };
 export function markRailTab(): void {
   drawPanelOrigins?.();
   remountLauncher();
+  drawRailDot();
+}
+
+/**
+ * The Calkit tab's dot: spinning while the pipeline runs or the paper
+ * syncs, otherwise there while something here needs an origin defined.
+ */
+function drawRailDot(): void {
   const tab = document.getElementById(RAIL_TAB_ID);
   if (!tab) {
     return;
   }
+  const busy = currentLink
+    ? activeRun()
+      ? "running"
+      : syncing
+      ? "syncing"
+      : null
+    : null;
   const n = currentLink ? getOriginGaps().size : 0;
   let dot = tab.querySelector<HTMLElement>(".calkit-rail-dot");
-  if (!n) {
+  if (!busy && !n) {
     dot?.remove();
     tab.title = "Calkit";
     return;
@@ -375,9 +396,11 @@ export function markRailTab(): void {
     dot = el("span", { class: "calkit-rail-dot" });
     tab.append(dot);
   }
-  tab.title =
-    `Calkit: ${n} file${n === 1 ? "" : "s"} this document is made from ` +
-    `need${n === 1 ? "s" : ""} an origin defined`;
+  dot.classList.toggle("busy", Boolean(busy));
+  tab.title = busy
+    ? `Calkit: ${busy}`
+    : `Calkit: ${n} file${n === 1 ? "" : "s"} this document is made from ` +
+      `need${n === 1 ? "s" : ""} an origin defined`;
 }
 
 export function setRail(open: boolean): void {
@@ -570,6 +593,7 @@ export function drawRail(): void {
         )
       : el("div", { class: "item" }, parts);
   };
+  drawRailDot();
   if (!railPane) {
     return;
   }

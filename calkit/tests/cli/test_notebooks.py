@@ -284,12 +284,16 @@ def test_check_env_kernel_composed(
         out = subprocess.check_output(
             ["calkit", "nb", "check-kernel", "-e", "main", "--json"]
         )
-        kernel_name = json.loads(out)["kernel_name"]
+        result = json.loads(out)
+        kernel_name = result["kernel_name"]
         spec_fpath = os.path.join(
             "jupyter-data", "kernels", kernel_name.lower(), "kernel.json"
         )
         with open(spec_fpath) as f:
-            return kernel_name, json.load(f).get("env", {})
+            spec = json.load(f)
+        # The environment's Python, for an editor to tell it from others
+        assert result["python"] == spec["argv"][0]
+        return kernel_name, spec.get("env", {})
 
     monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
     monkeypatch.setenv("JUPYTER_DATA_DIR", os.path.abspath("jupyter-data"))

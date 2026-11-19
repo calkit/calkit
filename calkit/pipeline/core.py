@@ -2413,7 +2413,8 @@ def write_stage_from_script(
     """Write what ``get_stage_from_script_plan`` planned, as ``calkit xr``
     would: the stage and any new environment into ``ck_info``, which is
     left to the caller to write, and the environment's spec and the
-    documents changed to show the output, returning their paths.
+    documents changed to show the output, returning their paths, which
+    include the copy those documents showed before if it's deleted.
     """
     from calkit.models.pipeline import Pipeline
 
@@ -2444,6 +2445,16 @@ def write_stage_from_script(
                 newline = "\r\n" if b"\r\n" in f.read() else "\n"
         with open(full, "w", encoding="utf-8", newline=newline) as f:
             f.write(text)
+    # Nothing shows the copy the documents showed before, so it goes, and
+    # syncing deletes it from Overleaf too
+    replaced = plan.get("replaced")
+    if replaced:
+        replaced_path = os.path.realpath(os.path.join(wdir, replaced))
+        if replaced_path.startswith(root + os.sep) and os.path.isfile(
+            replaced_path
+        ):
+            os.remove(replaced_path)
+            texts[replaced] = ""
     if plan["environment_is_new"]:
         ck_info.setdefault("environments", {})[plan["environment"]] = plan[
             "env"

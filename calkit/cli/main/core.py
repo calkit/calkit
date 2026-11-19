@@ -43,6 +43,7 @@ from calkit.cli import (
     warn,
     warn_app_control,
 )
+from calkit.cli.browser_link import browser_link_app
 from calkit.cli.check import (
     check_app,
     check_conda_env,
@@ -97,6 +98,11 @@ app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(open_app, name="open", help="Open things.")
+app.add_typer(
+    browser_link_app,
+    name="browser-link",
+    help="Link the browser extension to Calkit on this machine.",
+)
 app.add_typer(
     export_app,
     name="export",
@@ -359,6 +365,7 @@ def init(
         repo.git.add(os.path.abspath("calkit.yaml"))
         if not no_commit and calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
+    calkit.record_project_path()
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
     # TODO: Add a sane LICENSE file?
@@ -486,6 +493,7 @@ def clone(
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")
     os.chdir(location)
+    calkit.record_project_path()
     # So Git merges dvc.lock and stage run records stage by stage
     calkit.merge.configure_driver()
     # Setup auth for any Calkit remotes
@@ -2373,7 +2381,7 @@ def push(
                 if asked_for_docker:
                     warn(
                         "No local image for Docker environment "
-                        f"'{env_name}' to push; run the pipeline first"
+                        f"'{env_name}' to push; run pipeline"
                     )
                 continue
             pushable[env_name] = dict(info, identity=identity)
@@ -2611,6 +2619,10 @@ def ignore(
 # one in user scripts), so it's bracketed by these and skipped when parsing.
 STAGE_OUTPUT_START = "--- calkit stage output ---"
 STAGE_OUTPUT_END = "--- end calkit stage output ---"
+MPL_FONTS_DOCS_URL = (
+    "https://docs.calkit.org/environments/"
+    "#using-tex-from-python-eg-for-matplotlib"
+)
 # The machine properties recorded for each stage run
 STAGE_RUN_SYSTEM_PROPERTIES = (
     "machine_id",
@@ -2754,6 +2766,36 @@ def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
             # to have run
             res.setdefault(current_stage_name, [])
     return {name: "\n".join(lines) for name, lines in res.items()}
+
+
+def _get_matplotlib_font_warnings_by_stage(
+    log_content: str,
+) -> dict[str, list[str]]:
+    """Return Matplotlib's messages about fonts each stage couldn't find,
+    one per font family, from a run log.
+
+    Matplotlib has no strict mode: it draws with another font and only logs
+    a warning, which reaches the stage's stderr unless the script
+    configures logging otherwise.
+    """
+    import re
+
+    pattern = re.compile(
+        r"findfont: (((?:Font|Generic) family) (.+?) not found.*)"
+    )
+    res: dict[str, list[str]] = {}
+    stdout_by_stage = _stage_stdout_from_log_content(log_content)
+    for stage_name, output in stdout_by_stage.items():
+        # By family, since Matplotlib can report one as 'X' and as ['X']
+        messages: dict[tuple[str, str], str] = {}
+        for message, kind, family in pattern.findall(output):
+            # Without the final period, since they're joined into a sentence
+            messages.setdefault(
+                (kind, family.strip("[]")), message.strip().rstrip(".")
+            )
+        if messages:
+            res[stage_name] = list(messages.values())
+    return res
 
 
 def _stage_run_info_from_log_content(
@@ -3394,6 +3436,17 @@ def run(
             ),
         ),
     ] = False,
+    skip: Annotated[
+        list[str],
+        typer.Option(
+            "--skip",
+            help=(
+                "Skip stage, keeping its outputs, e.g., a scheduled one in CI "
+                "for pull requests."
+            ),
+            shell_complete=complete_stage_names,
+        ),
+    ] = [],
 ) -> dict:
     """Check requirements and run the pipeline."""
     import contextlib
@@ -3459,6 +3512,12 @@ def run(
                 gated |= retried
         except Exception as e:
             raise_error(f"Failed to check stage requirements: {e}")
+        # Those skipped as requested needn't be able to run, nor be offered
+        # what they need to
+        for name in skip:
+            gated.pop(name, None)
+            errors.pop(name, None)
+            unmet_requirements.pop(name, None)
         for stage_name, reason in errors.items():
             warn(f"Stage '{stage_name}' can't run: {reason}")
         gate_errors.update(errors)
@@ -3502,6 +3561,9 @@ def run(
             with paused():
                 calkit.docker.ensure_ready(interactive=True)
             results = check(interactive=False)
+        except ValueError as e:
+            # E.g., an environment with a 'with' that can't be composed
+            raise_error(str(e))
         for env_name, result in results.items():
             qualified = calkit.qualify_with_project(sp, env_name)
             if verbose:
@@ -3567,7 +3629,9 @@ def run(
     calkit.set_env_vars(ck_info=ck_info)
     # Stages that can't run here are skipped, keeping their outputs, and
     # their environments aren't checked
-    gated_stages: dict[str, str] = {}
+    gated_stages: dict[str, str] = {
+        name: calkit.dvc.SKIP_REQUESTED for name in skip
+    }
     gate_errors: dict[str, str] = {}
     # Those skipped for requirements, with them, which are offered for each
     # one that would run, and those skipped for another's missing output
@@ -3656,10 +3720,17 @@ def run(
         # environments are checked, since an environment declared there
         # must be in calkit.yaml before it can be created or entered.
         try:
-            calkit.pipeline.sync_markdown(ck_info=ck_info)
+            markdown = calkit.pipeline.sync_markdown(ck_info=ck_info)
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Failed to read markdown stages: {e}")
+        # A misspelled stage to skip would otherwise run
+        known = set(ck_info.get("pipeline", {}).get("stages", {})) | set(
+            markdown.ck_info.get("pipeline", {}).get("stages", {})
+        )
+        if unknown := [name for name in skip if name not in known]:
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            raise_error(f"No stage to skip named: {', '.join(unknown)}")
         # Stages that can't run here are skipped, keeping their outputs,
         # and their environments aren't checked
         gate(gate_stage_names)
@@ -4026,7 +4097,9 @@ def run(
     # Inline subprojects (no .dvc/ dir) share the parent DVC project.
     # Tell DVC to discover all pipelines so their dvc.yaml files are included,
     # unless the user already specified targets that include dvc.yaml paths
-    # (translated from subproject shorthand) or --all-pipelines was passed.
+    # (translated from subproject shorthand), named stages to start from
+    # with --downstream, which all pipelines would run in full instead, or
+    # passed --all-pipelines.
     inline_subprojects = [
         sp
         for sp in subprojects
@@ -4040,6 +4113,7 @@ def run(
     if (
         inline_subprojects
         and not targets
+        and not downstream
         and not all_pipelines
         and not translated_targets_have_dvc_yaml
     ):
@@ -4181,6 +4255,14 @@ def run(
                 # emitted; it shares a line if the output had no final newline
                 log_f.write(STAGE_OUTPUT_END + "\n")
 
+    # DVC won't save an output Git tracks, e.g., a figure imported from
+    # Overleaf before its stage stored it with DVC
+    if dvc_stages and not dry:
+        for found in calkit.dvc.untrack_cached_stage_outputs(dvc_stages):
+            warn(
+                f"Stopped tracking {found['path']} with Git, since stage "
+                f"'{found['stage']}' stores it with DVC"
+            )
     dvc.stage.run._run = _patched_run
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s
@@ -4216,6 +4298,14 @@ def run(
     # nobody asked for it by name, or for every stage with --strict
     targeted = {t.split("@")[0] for t in targets or []}
     error_reasons = set(gate_errors.values())
+    # Skipped as requested, so not reported with those that can't run here
+    skipped_as_asked = [
+        addressing
+        for addressing, reason in skipped_stale.items()
+        if reason == calkit.dvc.SKIP_REQUESTED
+    ]
+    for addressing in skipped_as_asked:
+        del skipped_stale[addressing]
     for addressing, reason in skipped_stale.items():
         if (
             strict
@@ -4620,6 +4710,17 @@ def run(
                     warn(message)
         except Exception as e:
             warn(f"Couldn't check where the stages' outputs are stored: {e}")
+    # Matplotlib only logs a font it can't find, and draws with another
+    for stage_name, messages in _get_matplotlib_font_warnings_by_stage(
+        log_content
+    ).items():
+        warn(
+            f"Matplotlib in stage '{stage_name}' used a fallback font, "
+            "so its figures can look different on another machine: "
+            f"{'; '.join(messages)}; see {MPL_FONTS_DOCS_URL}"
+        )
+    for addressing in skipped_as_asked:
+        typer.echo(f"Skipped out-of-date stage '{addressing}' as requested")
     if failed:
         try:
             calkit.dvc.restore_output_ignores()
@@ -4925,6 +5026,10 @@ def run_in_env(
             calkit.ryaml.dump(ck_info, f)
     env_name = res.name
     env = res.env
+    try:
+        calkit.environments.get_guest_envs(env_name, env, envs)
+    except ValueError as e:
+        raise_error(str(e))
     if env.get("kind") == calkit.environments.SWITCH_KIND:
         from calkit.cli.scheduler import _gate_switch_machine_lock
 
@@ -4972,6 +5077,24 @@ def run_in_env(
             raise_error(f"Invalid --env-var '{item}'; write it as KEY=VALUE")
         extra_env_vars[key] = value
         os.environ[key] = value
+    # Environments composed into this one with 'with' put their programs on
+    # PATH for its command, which gets them rather than this process, since
+    # it may be a long-lived one, e.g., Jupyter's. What the project and
+    # --env-var set wins.
+    try:
+        run_env_vars = calkit.environments.get_composed_env_vars(
+            env_name,
+            env,
+            envs,
+            keep=[
+                *(ck_info.get("env_vars") or {}),
+                *dotenv.dotenv_values(".env"),
+                *extra_env_vars,
+            ],
+            verbose=verbose,
+        )
+    except (ValueError, RuntimeError, OSError) as e:
+        raise_error(str(e))
 
     def _with_system_env_setup(shell_cmd: str) -> list[str] | None:
         """Chain the setup commands before a stage's command.
@@ -5081,7 +5204,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, cwd=wdir)
+            subprocess.check_call(cmd, cwd=wdir, env=run_env_vars)
         except subprocess.CalledProcessError as e:
             warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in Conda environment")
@@ -5096,7 +5219,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, cwd=wdir)
+            subprocess.check_call(cmd, cwd=wdir, env=run_env_vars)
         except subprocess.CalledProcessError as e:
             warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in Pixi environment")
@@ -5106,7 +5229,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, cwd=wdir)
+            subprocess.check_call(cmd, cwd=wdir, env=run_env_vars)
         except subprocess.CalledProcessError as e:
             warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in uv environment")
@@ -5145,7 +5268,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, shell=True, cwd=wdir)
+            subprocess.check_call(cmd, shell=True, cwd=wdir, env=run_env_vars)
         except subprocess.CalledProcessError as e:
             warn_app_control(returncode=e.returncode)
             raise_error(f"Failed to run in {kind}")
@@ -5193,7 +5316,7 @@ def run_in_env(
             subprocess.check_call(
                 julia_cmd,
                 cwd=wdir,
-                env=os.environ.copy()
+                env=(run_env_vars or os.environ.copy())
                 | {"JULIA_LOAD_PATH": calkit.julia.load_path()},
             )
         except subprocess.CalledProcessError:
@@ -5290,10 +5413,16 @@ def run_in_env(
         if not env_dir:
             env_dir = "."
         abs_wdir = os.path.abspath(wdir) if wdir else os.getcwd()
-        env_vars = os.environ.copy()
+        env_vars = run_env_vars or os.environ.copy()
         env_vars["RENV_PROJECT"] = env_dir
-        # Check if the first argument is an R script
-        if cmd and cmd[0] == "Rscript" and len(cmd) > 1:
+        # Check if the first argument is an R script, rather than an option,
+        # e.g., -e
+        if (
+            cmd
+            and cmd[0] == "Rscript"
+            and len(cmd) > 1
+            and not cmd[1].startswith("-")
+        ):
             script_path = cmd[1]
             script_abspath = os.path.abspath(
                 os.path.join(abs_wdir, script_path)
@@ -5355,6 +5484,22 @@ def run_in_env(
             subprocess.check_call(nix_cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in Nix environment")
+    elif env["kind"] == "texlive":
+        from calkit.environments import texlive as env_texlive
+
+        # Checked even with --no-check, since that's what finds the
+        # environment, and it only reads the lock when the env is ready
+        try:
+            view_dir = env_texlive.check(env_name, env, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{env_name}': {e}")
+        save_env_check_cache()
+        status = env_texlive.run(view_dir, cmd, wdir=wdir, verbose=verbose)
+        if status:
+            raise_error(
+                "Failed to run in TeX Live environment: command exited "
+                f"with status {status}"
+            )
     elif env["kind"] == "matlab":
         if not no_check:
             check_matlab_env(
@@ -5386,7 +5531,7 @@ def run_in_env(
             # commands it runs, which is how a stage is told apart from
             # someone running 'calkit xenv' themselves
             "-it"
-            if sys.stdin.isatty() and not os.getenv("DVC_STAGE")
+            if calkit.core.is_tty() and not os.getenv("DVC_STAGE")
             else "-i",
             "--rm",
             "-w",

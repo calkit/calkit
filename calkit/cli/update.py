@@ -339,8 +339,12 @@ def update_vscode_config(
     for fname in calkit_resources.VSCODE_FNAMES:
         out_fpath = os.path.join(out_dir, fname)
         typer.echo(f"Writing to {out_fpath}")
+        if fname == "settings.json":
+            txt = calkit_resources.make_vscode_settings(wdir=wdir)
+        else:
+            txt = calkit_resources.read_text("vscode", fname)
         with open(out_fpath, "w", encoding="utf-8") as f:
-            f.write(calkit_resources.read_text("vscode", fname))
+            f.write(txt)
         repo.git.add(os.path.join(".vscode", fname))
     if not no_commit and repo.git.diff(["--staged", "--", ".vscode"]):
         repo.git.commit([".vscode", "-m", "Update VS Code config"])

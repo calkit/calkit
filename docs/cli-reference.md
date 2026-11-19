@@ -44,6 +44,7 @@
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`open`](#command-group-open)                    | Open things.                                                                                                 |
+| [`browser-link`](#command-group-browser-link)    | Link the browser extension to Calkit on this machine.                                                        |
 | [`export`](#command-group-export)                | Export data and artifacts from various applications.                                                         |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
@@ -374,6 +375,7 @@ Options:
 | `--no-push`              | boolean   | no       | False   | Do not push to Git and DVC after saving.                                                                                                     |
 | `--mock-scheduler`, `-K` | boolean   | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler.                                                 |
 | `--strict`               | boolean   | no       | False   | Fail if an out-of-date stage can't run on this machine rather than skipping it, e.g., in CI for a project whose stages should all run there. |
+| `--skip`                 | list[str] | no       |         | Skip stage, keeping its outputs, e.g., a scheduled one in CI for pull requests.                                                              |
 
 <a id="top-command-manual-step"></a>
 
@@ -879,6 +881,7 @@ Create a new Calkit object.
 | [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                                            |
 | [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml.                             |
 | [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                                             |
+| [`texlive-env`](#subcommand-new-create-texlive-env)                       | Create a new TeX Live environment, which builds LaTeX documents without Docker or a system TeX.   |
 | [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                                                         |
 | [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                                              |
 | [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                                            |
@@ -1279,9 +1282,9 @@ calkit new|create uv-env [OPTIONS] [PACKAGES...]
 
 Arguments:
 
-| Argument   | Type      | Required | Default | Description                             |
-| ---------- | --------- | -------- | ------- | --------------------------------------- |
-| `packages` | list[str] | no       |         | Packages to include in the environment. |
+| Argument   | Type      | Required | Default | Description                                                                      |
+| ---------- | --------- | -------- | ------- | -------------------------------------------------------------------------------- |
+| `packages` | list[str] | no       |         | Packages to include in the environment, e.g., 'pandas==2.2.3' to keep a version. |
 
 Options:
 
@@ -1290,6 +1293,7 @@ Options:
 | `--name`, `-n`   | str     | no       | main    | Environment name.                                      |
 | `--path`         | str     | no       |         | Environment file path. Must end with 'pyproject.toml'. |
 | `--python`, `-p` | str     | no       |         | Python version.                                        |
+| `--description`  | str     | no       |         | Description.                                           |
 | `--no-check`     | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`    | boolean | no       | False   | Do not commit changes.                                 |
 
@@ -1493,6 +1497,35 @@ Options:
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
 | `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
+
+<a id="subcommand-new-create-texlive-env"></a>
+
+#### `calkit new|create texlive-env`
+
+Create a new TeX Live environment, which builds LaTeX documents without Docker or a system TeX.
+
+Usage:
+
+```text
+calkit new|create texlive-env [OPTIONS] [PACKAGES...]
+```
+
+Arguments:
+
+| Argument   | Type      | Required | Default | Description                                                                                                 |
+| ---------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `packages` | list[str] | no       |         | TeX Live packages beyond the base set (pdfLaTeX, LuaLaTeX, latexmk); builds add what documents need anyway. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                             |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | str     | no       | tex     | Environment name.                                                                                       |
+| `--release`         | int     | no       |         | TeX Live release; defaults to the latest frozen one, written out so it only changes when you change it. |
+| `--description`     | str     | no       |         | Description.                                                                                            |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite an existing environment.                                                                      |
+| `--no-check`        | boolean | no       | False   | Don't lock and install it now.                                                                          |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                  |
 
 <a id="subcommand-new-create-nix-env"></a>
 
@@ -2850,10 +2883,11 @@ Options:
 
 Work with Microsoft Office.
 
-| Command                                                           | Description                                   |
-| ----------------------------------------------------------------- | --------------------------------------------- |
-| [`excel-chart-to-image`](#subcommand-office-excel-chart-to-image) | Extract a chart from Excel and save to image. |
-| [`word-to-pdf`](#subcommand-office-word-to-pdf)                   | Convert a Word document to PDF.               |
+| Command                                                           | Description                                            |
+| ----------------------------------------------------------------- | ------------------------------------------------------ |
+| [`excel-chart-to-image`](#subcommand-office-excel-chart-to-image) | Extract a chart from Excel and save to image.          |
+| [`word-to-pdf`](#subcommand-office-word-to-pdf)                   | Convert a Word document to PDF.                        |
+| [`update-pptx-figures`](#subcommand-office-update-pptx-figures)   | Put figures in place of pictures in a PowerPoint file. |
 
 <a id="subcommand-office-excel-chart-to-image"></a>
 
@@ -2905,6 +2939,32 @@ Options:
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
 
+<a id="subcommand-office-update-pptx-figures"></a>
+
+#### `calkit office update-pptx-figures`
+
+Put figures in place of pictures in a PowerPoint file.
+
+Usage:
+
+```text
+calkit office update-pptx-figures [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                |
+| -------- | ---- | -------- | ------- | -------------------------- |
+| `source` | str  | yes      |         | PowerPoint file to update. |
+
+Options:
+
+| Option           | Type      | Required | Default | Description                                                                                                                                   |
+| ---------------- | --------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--figure`, `-f` | list[str] | yes      |         | Slide, picture name in the selection pane, and figure, e.g., '3:Plot=figures/plot.png', or '3=figures/plot.png' for the slide's only picture. |
+| `--output`, `-o` | str       | no       |         | File to write (default: update in place).                                                                                                     |
+| `--dpi`          | int       | no       | 300     | Resolution of a PDF figure.                                                                                                                   |
+
 <a id="command-group-open"></a>
 
 ### `calkit open`
@@ -2921,7 +2981,7 @@ Open things.
 
 Open a project on this machine in its editor, from anywhere.
 
-Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor', or the one given with '--with'.
+Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, or wherever Calkit created or cloned it, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor', or the one given with '--with'. Editors built on VS Code, e.g., Cursor, VSCodium, Positron, or Antigravity, get Calkit's extension if they don't have it.
 
 Usage:
 
@@ -2939,9 +2999,65 @@ Options:
 
 | Option         | Type    | Required | Default | Description                                                                                                                         |
 | -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `--path`, `-p` | str     | no       |         | File in the project to open too, e.g., a notebook.                                                                                  |
 | `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                                                |
 | `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder.                              |
+| `--checkout`   | str     | no       |         | Checkout to open, e.g., one of its Git worktrees, rather than finding one.                                                          |
 | `--hub`        | str     | no       |         | Hub to clone it from if it isn't here, e.g., https://calkit.example.edu, or localhost for a development hub. Defaults to calkit.io. |
+
+<a id="command-group-browser-link"></a>
+
+### `calkit browser-link`
+
+Link the browser extension to Calkit on this machine.
+
+| Command                                           | Description                                                           |
+| ------------------------------------------------- | --------------------------------------------------------------------- |
+| [`install`](#subcommand-browser-link-install)     | Let the browser extension work with projects on this machine.         |
+| [`uninstall`](#subcommand-browser-link-uninstall) | Stop the browser extension working with projects on this machine.     |
+| [`status`](#subcommand-browser-link-status)       | Check whether the browser extension can reach Calkit on this machine. |
+
+<a id="subcommand-browser-link-install"></a>
+
+#### `calkit browser-link install`
+
+Let the browser extension work with projects on this machine.
+
+Usage:
+
+```text
+calkit browser-link install [OPTIONS]
+```
+
+Options:
+
+| Option           | Type      | Required | Default | Description                                                                         |
+| ---------------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--extension-id` | list[str] | no       |         | ID of another extension that may connect, e.g., one loaded unpacked in development. |
+
+<a id="subcommand-browser-link-uninstall"></a>
+
+#### `calkit browser-link uninstall`
+
+Stop the browser extension working with projects on this machine.
+
+Usage:
+
+```text
+calkit browser-link uninstall
+```
+
+<a id="subcommand-browser-link-status"></a>
+
+#### `calkit browser-link status`
+
+Check whether the browser extension can reach Calkit on this machine.
+
+Usage:
+
+```text
+calkit browser-link status
+```
 
 <a id="command-group-export"></a>
 
@@ -2949,10 +3065,11 @@ Options:
 
 Export data and artifacts from various applications.
 
-| Command                                   | Description                                 |
-| ----------------------------------------- | ------------------------------------------- |
-| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                |
-| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file. |
+| Command                                   | Description                                         |
+| ----------------------------------------- | --------------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                        |
+| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file.         |
+| [`pptx`](#subcommand-export-pptx)         | Export slides from a PowerPoint file to PDF or PNG. |
 
 <a id="subcommand-export-inkscape"></a>
 
@@ -3002,6 +3119,33 @@ Options:
 | Option           | Type | Required | Default | Description                             |
 | ---------------- | ---- | -------- | ------- | --------------------------------------- |
 | `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
+
+<a id="subcommand-export-pptx"></a>
+
+#### `calkit export pptx`
+
+Export slides from a PowerPoint file to PDF or PNG.
+
+Usage:
+
+```text
+calkit export pptx [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                     |
+| -------- | ---- | -------- | ------- | ------------------------------- |
+| `source` | str  | yes      |         | PowerPoint file to export from. |
+
+Options:
+
+| Option                | Type      | Required | Default | Description                                                                                                                          |
+| --------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--output`, `-o`      | list[str] | yes      |         | File to export to, after the slides it shows, e.g., '3=figures/setup.png' or '2,4-6=talk.pdf'; a PDF without them shows every slide. |
+| `--dpi`               | int       | no       |         | Resolution of a PNG (default 300).                                                                                                   |
+| `--trim`, `--no-trim` | boolean   | no       |         | Crop to what's drawn on each slide (default unless a PDF shows several).                                                             |
+| `--env`, `-e`         | str       | no       |         | Environment whose app exports them (default the system).                                                                             |
 
 <a id="command-group-update"></a>
 
@@ -3914,7 +4058,7 @@ Options:
 
 Check each stage in dvc.lock matches the recorded run that made it.
 
-A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone.
+A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone. Like DVC, it ignores the entries of stages no longer in the pipeline.
 
 Usage:
 
@@ -3968,7 +4112,7 @@ Options:
 
 Check that paths are tracked where they're declared to be stored.
 
-That is, nothing is tracked by both Git and DVC, no pipeline output stored in Git, or file in one, is ignored by it, and nothing in Git is too large for it. Large files are only reported. With --fix, the pipeline's declarations, or a file's .dvc file, decide where each path belongs, and the changes are staged. Files Git ignores in an output stored in Git are added in spite of the rule, unless they're in the output's 'ignore' list or too large.
+That is, nothing is tracked by both Git and DVC, no pipeline output has a .dvc file of its own too, no pipeline output stored in Git, or file in one, is ignored by it, and nothing in Git is too large for it. Large files are only reported. With --fix, the pipeline's declarations, or a file's .dvc file, decide where each path belongs, and the changes are staged. Files Git ignores in an output stored in Git are added in spite of the rule, unless they're in the output's 'ignore' list or too large.
 
 Usage:
 
@@ -4122,16 +4266,17 @@ calkit fix storage
 
 Work with LaTeX.
 
-| Command                                                  | Description                                                       |
-| -------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                     |
-| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.     |
-| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.           |
-| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands. |
-| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                     |
-| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.             |
-| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.        |
+| Command                                                  | Description                                                            |
+| -------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                          |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.          |
+| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.                |
+| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands.      |
+| [`warm-cache`](#subcommand-latex-tex-warm-cache)         | Download TeX Live's base packages and build its formats ahead of time. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                          |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.                  |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                     |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.             |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -4160,6 +4305,7 @@ Options:
 | `--output`, `-o` | list[str] | yes      |         | Output LaTeX file path(s).                                                                                                      |
 | `--command`      | str       | no       |         | Command name to use in LaTeX output.                                                                                            |
 | `--key`          | list[str] | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
+| `--format`       | list[str] | no       |         | Value to add, as NAME=FORMAT, e.g., 'pct={a:.1%}'. Repeatable.                                                                  |
 | `--format-json`  | str       | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
 
 <a id="subcommand-latex-tex-from-questions"></a>
@@ -4233,6 +4379,27 @@ Arguments:
 | ---------- | ---- | -------- | ------- | -------------------------------------- |
 | `tex_file` | str  | yes      |         | The .tex file whose components to map. |
 
+<a id="subcommand-latex-tex-warm-cache"></a>
+
+#### `calkit latex|tex warm-cache`
+
+Download TeX Live's base packages and build its formats ahead of time.
+
+For a machine or image without a project yet, e.g., a dev container, so a TeX Live environment's first build doesn't have to.
+
+Usage:
+
+```text
+calkit latex|tex warm-cache [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                         |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------- |
+| `--release`       | int     | no       |         | TeX Live release, e.g., 2025; defaults to Calkit's. |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                               |
+
 <a id="subcommand-latex-tex-build"></a>
 
 #### `calkit latex|tex build`
@@ -4255,17 +4422,18 @@ Arguments:
 
 Options:
 
-| Option               | Type      | Required | Default | Description                                                                                      |
-| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `--env`, `-e`        | str       | no       |         | Environment in which to run latexmk, if applicable.                                              |
-| `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running latexmk.                                     |
-| `--latexmk-rc`, `-r` | str       | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
-| `--output-dir`       | str       | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
-| `--aux-dir`          | str       | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
-| `--latexmk-arg`      | list[str] | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
-| `--no-synctex`       | boolean   | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
-| `--force`, `-f`      | boolean   | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
-| `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                            |
+| Option               | Type      | Required | Default | Description                                                                                                                                                                                                               |
+| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--env`, `-e`        | str       | no       |         | Environment in which to run latexmk, if applicable.                                                                                                                                                                       |
+| `--as-stage`         | boolean   | no       | False   | Build as the pipeline's latex stage for the document does (its environment, options, and working directory), or in the project's only TeX Live environment if no stage builds it. Other options are added to the stage's. |
+| `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running latexmk.                                                                                                                                                              |
+| `--latexmk-rc`, `-r` | str       | no       |         | Path to a latexmkrc file to use for compilation.                                                                                                                                                                          |
+| `--output-dir`       | str       | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir.                                                                                                                          |
+| `--aux-dir`          | str       | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.                                                                                                                           |
+| `--latexmk-arg`      | list[str] | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.                                                                                                                                       |
+| `--no-synctex`       | boolean   | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                                                                                                                                                    |
+| `--force`, `-f`      | boolean   | no       | False   | Force latexmk to recompile all files, even if they are up to date.                                                                                                                                                        |
+| `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                                                                                                                                                     |
 
 <a id="subcommand-latex-tex-diff"></a>
 

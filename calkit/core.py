@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import copy
 import csv
 import functools
 import glob
@@ -41,6 +42,18 @@ import ruamel.yaml
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
+# Folders in the home folder that macOS asks before a process reads, which
+# projects aren't kept in, e.g., Pictures, which has the Photos library
+MACOS_MEDIA_FOLDERS = (
+    "Applications",
+    "Library",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Public",
+)
+# Those macOS asks about where projects may be kept
+MACOS_PROTECTED_FOLDERS = ("Desktop", "Documents", "Downloads")
 
 
 class _FoldedPlainStr(str):
@@ -422,6 +435,77 @@ class _ThreadLocalYAMLProxy:
 
 ryaml = _ThreadLocalYAMLProxy()
 
+
+def set_yaml_item(mapping: dict, key: Any, value: Any) -> None:
+    """Set an item in a mapping loaded with ``ryaml``, keeping its layout.
+
+    ruamel.yaml attaches the blank lines and comments that follow a mapping
+    to its last item, however deeply nested, so a key appended after it
+    would land below them, e.g., below the blank line separating the mapping
+    from the next top-level key. The new last item takes them over instead.
+    """
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    def get_last_items(node: Any) -> list[tuple[Any, Any]]:
+        # The collection and key of each last item, outermost first
+        if isinstance(node, CommentedMap) and node:
+            last = next(reversed(node))
+        elif isinstance(node, CommentedSeq) and node:
+            last = len(node) - 1
+        else:
+            return []
+        return [(node, last)] + get_last_items(node[last])
+
+    def to_commented(node: Any) -> Any:
+        if isinstance(node, dict):
+            return CommentedMap((k, to_commented(v)) for k, v in node.items())
+        if isinstance(node, list):
+            return CommentedSeq(to_commented(v) for v in node)
+        return node
+
+    is_last = bool(mapping) and key == next(reversed(mapping))
+    # A scalar replacing a scalar keeps the item's comments as they are
+    if not isinstance(mapping, CommentedMap) or (
+        key in mapping
+        and (
+            not is_last
+            or (
+                not isinstance(mapping[key], (dict, list))
+                and not isinstance(value, (dict, list))
+            )
+        )
+    ):
+        mapping[key] = value
+        return
+    # Maps keep a trailing comment in slot 2 of an item, and sequences in 0
+    token = None
+    for node, k in reversed(get_last_items(mapping)):
+        slots = node.ca.items.get(k)
+        slot = 2 if isinstance(node, CommentedMap) else 0
+        if slots and slots[slot] is not None:
+            token = slots[slot]
+            slots[slot] = None
+            # A comment at the end of the item's own line stays with it
+            if token.value.startswith("#"):
+                eol, _, rest = token.value.partition("\n")
+                slots[slot] = copy.copy(token)
+                slots[slot].value = eol + "\n"
+                token = copy.copy(token)
+                token.value = "\n" + rest
+                if not rest:
+                    token = None
+            break
+    if token is None:
+        mapping[key] = value
+        return
+    mapping[key] = to_commented(value)
+    node, k = get_last_items(mapping)[-1]
+    if isinstance(node, CommentedMap):
+        node.ca.items[k] = [None, None, token, None]
+    else:
+        node.ca.items[k] = [token, None]
+
+
 try:
     # libyaml-backed loader, many times faster than the pure-Python one.
     # PyYAML ships prebuilt wheels with libyaml on every platform we target,
@@ -586,24 +670,124 @@ def echo(message: str) -> None:
     typer.echo(encode_safe(message))
 
 
-def find_project_dirs(relative=False, max_depth=3) -> list[str]:
-    """Find all Calkit project directories."""
+def get_project_paths_path() -> str:
+    """Where the folders projects were created or cloned into on this
+    machine are recorded.
+    """
+    return os.path.join(
+        get_user_home(), ".calkit", f"project-paths{get_env_suffix()}.json"
+    )
+
+
+def get_recorded_project_paths() -> list[str]:
+    """The folders projects were created or cloned into on this machine."""
+    try:
+        with open(get_project_paths_path()) as f:
+            paths = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(paths, list):
+        return []
+    return [p for p in paths if isinstance(p, str)]
+
+
+def write_json(path: str, data: Any, **kwargs: Any) -> None:
+    """Write JSON to a file all at once, so it's never read half written,
+    through a temporary file of its own, so writers don't share one.
+    """
+    import tempfile
+
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=folder, prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, **kwargs)
+        os.replace(tmp_path, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+        raise
+
+
+def record_project_path(wdir: str = ".") -> None:
+    """Remember where a project is on this machine, so it's found wherever
+    it is, e.g., by 'calkit open project' or the browser extension.
+    """
+    from filelock import FileLock
+
+    path = os.path.realpath(wdir)
+    if path in get_recorded_project_paths():
+        return
+    fpath = get_project_paths_path()
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    # Read again once it's ours, so another process's addition isn't lost
+    with FileLock(fpath + ".lock", timeout=60):
+        paths = get_recorded_project_paths()
+        if path in paths:
+            return
+        # Ones since moved or deleted are dropped while it's being written
+        paths = [
+            p for p in paths if os.path.isfile(os.path.join(p, "calkit.yaml"))
+        ]
+        write_json(fpath, paths + [path], indent=2)
+
+
+def find_project_dirs(
+    relative: bool = False, max_depth: int = 3, search_protected: bool = True
+) -> list[str]:
+    """Find all Calkit project directories, i.e., those up to
+    ``max_depth`` folders into the home folder, and, unless ``relative``,
+    those recorded when created, cloned, or found before.
+
+    On macOS, the home folder's media and system folders are never
+    searched, and, without ``search_protected``, nor are its Desktop,
+    Documents, and Downloads folders, since macOS asks before a process
+    reads any of them, e.g., one the browser starts; recorded projects in
+    them are still found.
+    """
     if relative:
         start = ""
     else:
         start = os.path.expanduser("~")
+    skipped = set()
+    if platform.system() == "Darwin" and not relative:
+        skipped |= set(MACOS_MEDIA_FOLDERS)
+        if not search_protected:
+            skipped |= set(MACOS_PROTECTED_FOLDERS)
+    try:
+        top_names = sorted(
+            entry.name
+            for entry in os.scandir(start or ".")
+            if not entry.name.startswith(".")
+            and entry.name not in skipped
+            and entry.is_dir()
+        )
+    except OSError:
+        top_names = []
     res = []
     for i in range(max_depth):
-        pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
-        res += glob.glob(pattern)
-        # Check GitHub documents for users who use GitHub Desktop
-        pattern = os.path.join(
-            start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
-        )
-        res += glob.glob(pattern)
+        for top_name in top_names:
+            top = os.path.join(glob.escape(start), glob.escape(top_name))
+            pattern = os.path.join(top, *["*"] * i, "calkit.yaml")
+            res += glob.glob(pattern)
+            # Check GitHub documents for users who use GitHub Desktop
+            pattern = os.path.join(
+                top, "GitHub", *["*"] * (i + 1), "calkit.yaml"
+            )
+            res += glob.glob(pattern)
+    if not relative:
+        res += [
+            os.path.join(p, "calkit.yaml")
+            for p in get_recorded_project_paths()
+        ]
     final_res = []
     for ck_fpath in res:
         path = os.path.dirname(ck_fpath)
+        if path in final_res or not os.path.isfile(ck_fpath):
+            continue
         # Make sure this path is a Git repo
         try:
             calkit.git.get_repo(path)
@@ -611,6 +795,77 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
             continue
         final_res.append(path)
     return final_res
+
+
+def get_project_checkouts(
+    name: str,
+    owner: str = "",
+    warn: Any = None,
+    search_protected: bool = True,
+) -> dict[str, str]:
+    """Find the checkouts of a project on this machine, by the owner and
+    name each says it has, returning each one's owner by its real path.
+
+    ``warn`` is called with why a project that can't be read was skipped.
+    ``search_protected`` is as for :func:`find_project_dirs`. Each found is
+    recorded, so it's found again without searching where it is.
+    """
+    found: dict[str, str] = {}
+    for path in find_project_dirs(search_protected=search_protected):
+        path = os.path.realpath(path)
+        if path in found:
+            continue
+        try:
+            # Most projects say their name, which rules them out without
+            # asking Git for a remote, or, for one written plainly on its
+            # own line, even parsing the file
+            with open(os.path.join(path, "calkit.yaml"), "rb") as f:
+                text = f.read()
+            match = re.search(
+                rb"^name:[ \t]*([\"']?)([\w.-]+)\1[ \t]*(?:#[^\r\n]*)?\r?$",
+                text,
+                flags=re.MULTILINE,
+            )
+            if match and match.group(2).decode() not in (
+                name,
+                "null",
+                "Null",
+                "NULL",
+                "~",
+            ):
+                continue
+            # One that says none takes it from its Git remote, so it's in
+            # the repo's config, unless that's elsewhere, as a worktree's is
+            git_config_path = os.path.join(path, ".git", "config")
+            if not re.search(
+                rb"^name[ \t]*:", text, flags=re.MULTILINE
+            ) and os.path.isfile(git_config_path):
+                with open(git_config_path, "rb") as f:
+                    if name.encode() not in f.read():
+                        continue
+            info = load_calkit_info(wdir=path, read_only=True)
+            declared = info.get("name") if isinstance(info, dict) else None
+            if declared is not None and declared != name:
+                continue
+            # A subproject without its own repo would look like its parent
+            repo = calkit.git.get_repo(path)
+            if os.path.realpath(str(repo.working_tree_dir)) != path:
+                continue
+            p_owner, p_name = detect_project_name(wdir=path).split("/", 1)
+        except ValueError:
+            # It names no owner, so it can't be the one asked for
+            continue
+        except Exception as e:
+            # E.g., a calkit.yaml left with merge conflict markers
+            if warn is not None:
+                warn(f"Skipping {path}, which can't be read: {e}")
+            continue
+        if p_name == name and owner in ("", p_owner):
+            found[path] = p_owner
+    for path in found:
+        with contextlib.suppress(Exception):
+            record_project_path(path)
+    return found
 
 
 def load_calkit_info(
@@ -799,6 +1054,21 @@ USER_HOME_ENV_VAR = "CALKIT_USER_HOME"
 # These are here rather than in calkit.config, which every command's update
 # check would otherwise import, with keyring and pydantic-settings, only to
 # find where its state is kept
+def get_calkit_cmd(module: str = "calkit") -> list[str]:
+    """The command that runs one of Calkit's modules with this Python,
+    without importing anything from the folder it runs in first, e.g., a
+    project's own ``queue.py``.
+    """
+    if sys.version_info >= (3, 11):
+        return [sys.executable, "-P", "-m", module]
+    return [
+        sys.executable,
+        "-c",
+        "import runpy, sys; sys.path.pop(0); "
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)",
+    ]
+
+
 def get_user_home() -> str:
     """The home directory Calkit keeps its own files in."""
     return os.environ.get(USER_HOME_ENV_VAR) or os.path.expanduser("~")
@@ -999,11 +1269,38 @@ def is_tty() -> bool:
     Stdout matters because the prompt needs to render; stdin matters because
     we need to read the user's answer. CI environments fail at least one
     and fall through to the abort-with-fix-command path.
+
+    On Windows, ``isatty`` is also true of the NUL device, which is what a
+    child given ``subprocess.DEVNULL`` reads, so only a stream with a console
+    mode counts there.
     """
-    try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError):
-        return False
+
+    def is_terminal(stream: Any) -> bool:
+        try:
+            if not stream.isatty():
+                return False
+        except (AttributeError, ValueError):
+            return False
+        if sys.platform != "win32":
+            return True
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        try:
+            handle = msvcrt.get_osfhandle(stream.fileno())
+        except (AttributeError, OSError, ValueError):
+            return False
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetConsoleMode.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetConsoleMode.restype = wintypes.BOOL
+        mode = wintypes.DWORD()
+        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+    return is_terminal(sys.stdin) and is_terminal(sys.stdout)
 
 
 def is_wsl() -> bool:
@@ -1106,6 +1403,13 @@ def check_dep_exists(
         from calkit.docx import find_soffice
 
         return find_soffice() is not None
+    # Apps Calkit exports with can be installed off the PATH, e.g., as a
+    # macOS app bundle
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if name.lower() in known:
+        return known[name.lower()].find_executable() is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -2044,6 +2348,11 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
 
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if dep_name.lower() in known:
+        return known[dep_name.lower()].version()
     # MATLAB has no '--version', and starts in full if passed one
     if dep_name == "matlab":
         cmd = [dep_name, "-batch", "disp(version)"]

@@ -702,6 +702,7 @@ class Environment(Model):
         "uv-venv",
         "renv",
         "switch",
+        "texlive",
     ] = Field(description="What kind of environment this is.")
     # Note: ``path`` is declared on the specific subclasses that need it (most
     # of them, required; optional for Docker) rather than here, so subclasses
@@ -730,7 +731,21 @@ class Environment(Model):
         return data
 
 
-class CondaEnvironment(Environment):
+class ComposableEnvironment(Environment):
+    """Base class for the kinds other environments can be composed into."""
+
+    with_: list[str] = Field(
+        default=[],
+        alias="with",
+        description=(
+            "Names of TeX Live environments whose programs this one's "
+            "commands also get, e.g., for Matplotlib's usetex. They come "
+            "after this environment's own on PATH and before the system's."
+        ),
+    )
+
+
+class CondaEnvironment(ComposableEnvironment):
     kind: Literal["conda"] = "conda"
     path: str = Field(description="Path to the Conda environment YAML file.")
     prefix: str | None = Field(
@@ -738,7 +753,7 @@ class CondaEnvironment(Environment):
     )
 
 
-class VenvEnvironment(Environment):
+class VenvEnvironment(ComposableEnvironment):
     kind: Literal["venv"] = "venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -757,12 +772,12 @@ class VenvEnvironment(Environment):
     )
 
 
-class UvEnvironment(Environment):
+class UvEnvironment(ComposableEnvironment):
     kind: Literal["uv"] = "uv"
     path: str = Field(description="Path to the uv project's pyproject.toml.")
 
 
-class UvVenvEnvironment(Environment):
+class UvVenvEnvironment(ComposableEnvironment):
     kind: Literal["uv-venv"] = "uv-venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -781,7 +796,7 @@ class UvVenvEnvironment(Environment):
     )
 
 
-class PixiEnvironment(Environment):
+class PixiEnvironment(ComposableEnvironment):
     kind: Literal["pixi"] = "pixi"
     path: str = Field(description="Path to the Pixi manifest file.")
     name: str | None = Field(
@@ -804,6 +819,41 @@ class NixEnvironment(Environment):
         description=(
             "Name of the dev shell to enter, passed as #<shell> to "
             "'nix develop'. Defaults to the flake's default dev shell."
+        ),
+    )
+
+
+class TexLiveEnvironment(Environment):
+    kind: Literal["texlive"] = "texlive"
+    release: int | None = Field(
+        default=None,
+        description=(
+            "TeX Live release, e.g., 2025, to install packages from. A "
+            "past release's repository is frozen, so its lock pins every "
+            "package for good. Defaults to the latest frozen release."
+        ),
+    )
+    packages: list[str] = Field(
+        default=[],
+        description=(
+            "TeX Live packages to install, beyond the base set every "
+            "TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). "
+            "What they depend on comes with them, and packages a build "
+            "finds missing are added to the lock, not here."
+        ),
+    )
+    platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "TeX Live platforms to lock for. Defaults to macOS, Windows, "
+            "and Linux on x86_64 and ARM."
+        ),
+    )
+    repository_url: str | None = Field(
+        default=None,
+        description=(
+            "TeX Live repository URL to install from instead of the one "
+            "for 'release', e.g., a local mirror."
         ),
     )
 
@@ -933,7 +983,7 @@ class DockerEnvironment(Environment):
         return self
 
 
-class REnvironment(Environment):
+class REnvironment(ComposableEnvironment):
     kind: Literal["renv"] = "renv"
     path: str = Field(
         description="Path to the project's DESCRIPTION file. The renv lock "
@@ -944,7 +994,7 @@ class REnvironment(Environment):
     )
 
 
-class JuliaEnvironment(Environment):
+class JuliaEnvironment(ComposableEnvironment):
     kind: Literal["julia"] = "julia"
     path: str = Field(description="Path to the Julia project's Project.toml.")
     julia: str = Field(description="Julia version to use.")
@@ -1377,6 +1427,7 @@ InlineEnvironment = Annotated[
     | UvEnvironment
     | UvVenvEnvironment
     | NixEnvironment
+    | TexLiveEnvironment
     | SystemEnvironment,
     Discriminator("kind"),
 ]
@@ -2329,6 +2380,7 @@ class ProjectInfo(Model):
             | UvEnvironment
             | UvVenvEnvironment
             | NixEnvironment
+            | TexLiveEnvironment
             | SystemEnvironment
             | SwitchEnvironment,
             Discriminator("kind"),

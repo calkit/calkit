@@ -368,6 +368,7 @@ def test_post_project_stage_from_script_or_notebook(
     assert set(data["dependencies"]) == {"matplotlib", "pandas"}
     assert data["inputs"] == ["data/raw.csv"]
     assert data["outputs"] == ["figures/fit.png"]
+    assert data["found_outputs"] == ["figures/fit.png"]
     # Nothing has the data the script reads
     assert data["missing_inputs"] == ["data/raw.csv"]
     # Nor does it have the runs, which are only on the author's laptop
@@ -436,6 +437,8 @@ def test_post_project_stage_from_script_or_notebook(
     assert resp.status_code == 200, resp.text
     assert resp.json()["produces"] == "paper/figures/drawn.png"
     assert "paper/figures/drawn.png" in resp.json()["outputs"]
+    # though nothing says the script writes it
+    assert "paper/figures/drawn.png" not in resp.json()["found_outputs"]
     assert resp.json()["included_in"] == []
     resp = post(
         script_path="scripts/old.py",
@@ -746,6 +749,31 @@ def test_post_project_pipeline_stage(
             outputs=["paper/figures/setup.png"],
         ).dvc_cmd
     )
+    # A slide is exported in Calkit's LibreOffice image, an environment
+    # added the first time and reused after
+    deck = "figures/src/deck.pptx"
+    for output, files in [
+        (
+            "paper/figures/deck-a.pdf",
+            [
+                {
+                    "path": deck,
+                    "content": base64.b64encode(b"pptx").decode(),
+                    "created_by_me": True,
+                }
+            ],
+        ),
+        ("paper/figures/deck-b.png", [{"path": deck}]),
+    ]:
+        resp = post(export_url, source=deck, output=output, files=files)
+        assert resp.status_code == 200, resp.text
+    info = ck_info()
+    for name in ["export-deck-a", "export-deck-b"]:
+        assert info["pipeline"]["stages"][name]["environment"] == "libreoffice"
+    assert info["environments"]["libreoffice"] == {
+        "kind": "docker",
+        "image": "ghcr.io/calkit/libreoffice:0.1.0",
+    }
     # Something made once isn't made twice
     resp = post(stage=stage)
     assert resp.status_code == 409, resp.text

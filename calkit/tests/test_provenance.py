@@ -1026,6 +1026,34 @@ def test_find_provenance_gaps():
                 "deps": ["summarize.py", "params.yaml", "data/loose.json"],
                 "outs": ["results/summary.json"],
             },
+            # Plots made one by one into a folder, which another copies
+            "plot": {
+                "cmd": "python plot.py",
+                "deps": ["plot.py", "data/measured.csv"],
+                "outs": ["plots/a.png"],
+            },
+            "plot-raw": {
+                "cmd": "python plot-raw.py",
+                "deps": ["plot-raw.py", "data/raw.csv"],
+                "outs": ["plots/b.png"],
+            },
+            "copy-plots": {
+                "cmd": "calkit map-paths",
+                "deps": ["plots"],
+                "outs": ["paper/plots"],
+            },
+            # Named like the folder above, but nothing writes into it
+            "copy-plot": {
+                "cmd": "calkit map-paths",
+                "deps": ["plot"],
+                "outs": ["paper/plot"],
+            },
+            # Writes into the folder it reads
+            "tidy": {
+                "cmd": "python tidy.py",
+                "deps": ["tidy.py", "inbox"],
+                "outs": ["inbox/tidy.csv"],
+            },
         }
     }
     # A run records its inputs, which is what's followed where it exists
@@ -1042,6 +1070,12 @@ def test_find_provenance_gaps():
         }
     }
     data = {".csv", ".json", ".png"}
+    # What's on disk in the folders stages write into, besides their outputs
+    listing = {
+        "plots": ["a.png", "b.png", "photo.png", "scan.png.dvc", ".gitignore"],
+        "plot": ["old.png"],
+        "inbox": ["tidy.csv", "dropped.csv"],
+    }
 
     def gaps(paths: list[str]) -> list[str]:
         return [
@@ -1052,8 +1086,11 @@ def test_find_provenance_gaps():
                 dvc_yaml=dvc_yaml,
                 dvc_lock=dvc_lock,
                 is_data=lambda p: (
-                    p.startswith("data/") or posixpath.splitext(p)[1] in data
+                    p.startswith("data/")
+                    or posixpath.splitext(p)[1] in data
+                    or p in listing
                 ),
+                listdir=lambda p: listing.get(p, []),
             )
         ]
 
@@ -1087,6 +1124,26 @@ def test_find_provenance_gaps():
     assert gaps(["data/box.csv", "data/laptop.csv"]) == [
         "data/box.csv is imported from somewhere that can't be checked",
         "data/laptop.csv is imported from somewhere that can't be checked",
+    ]
+    # A folder is followed back through the stages making what's in it,
+    # and what else is in it is a gap of its own, pulled or not
+    assert gaps(["paper/plots/a.png"]) == [
+        "origin not defined for data/raw.csv (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/b.png <- stage plot-raw "
+        "<- data/raw.csv)",
+        "origin not defined for plots/photo.png (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/photo.png)",
+        "origin not defined for plots/scan.png (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/scan.png)",
+    ]
+    # A folder nothing writes into is a gap as a whole
+    assert gaps(["paper/plot"]) == [
+        "origin not defined for plot (paper/plot <- stage copy-plot <- plot)"
+    ]
+    # A stage's own output doesn't account for the folder it reads
+    assert gaps(["inbox/tidy.csv"]) == [
+        "origin not defined for inbox/dropped.csv (inbox/tidy.csv "
+        "<- stage tidy <- inbox <- inbox/dropped.csv)"
     ]
     # A matrix stage that hasn't run produces nothing known yet
     assert gaps(["figures/sweep-1.png"]) == [
@@ -1133,3 +1190,287 @@ def test_is_data_path(tmp_path):
     assert is_data("pointers")
     assert is_data("store.zarr")
     assert is_data("nested")
+
+
+def test_get_import_info():
+    from calkit.provenance import get_import_info
+
+    # A bare string is read the way the calkit.yaml schema reads it
+    assert get_import_info(None) is None
+    assert get_import_info({"doi": "10.1/x"}) == {"doi": "10.1/x"}
+    assert get_import_info("https://doi.org/10.5281/zenodo.3960218") == {
+        "doi": "10.5281/zenodo.3960218"
+    }
+    assert get_import_info("https://example.com/data.csv") == {
+        "url": "https://example.com/data.csv"
+    }
+    assert get_import_info("a colleague's USB stick") == {
+        "description": "a colleague's USB stick"
+    }
+    # Links that aren't http(s) are dropped, since they're shown as links,
+    # but SSH clone URLs are kept
+    assert get_import_info(
+        {"url": "javascript:alert(1)", "date": "2026-01-02"}
+    ) == {"date": "2026-01-02"}
+    assert get_import_info(
+        {"git_repo_url": " JavaScript://github.com/%0Aalert(1)", "path": "a"}
+    ) == {"path": "a"}
+    assert get_import_info({"git_repo_url": "git@github.com:a/b"}) == {
+        "git_repo_url": "git@github.com:a/b"
+    }
+
+
+def test_get_path_provenance():
+    import json
+
+    from calkit.provenance import get_path_provenance
+
+    files = {
+        "results/metrics.json": json.dumps({"rmse": 0.12, "fit": {"b": 1.2}}),
+        "scripts/analyze.py": "",
+        "data/raw.csv": "",
+        "data/downloaded/a.csv": "",
+        "paper/drawn.svg": "",
+        "paper/figures/plot.png": "",
+        "figures/plot.png": "",
+    }
+    ck_info = {
+        "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
+        "datasets": [
+            {"path": "data/downloaded", "imported_from": "https://x.org/d"},
+        ],
+        "figures": [
+            {
+                "path": "paper/drawn.svg",
+                "created_by": {"name": "Ada", "with_ai": "Claude"},
+            },
+        ],
+        "pipeline": {
+            "stages": {
+                "analyze": {
+                    "kind": "python-script",
+                    "script_path": "scripts/analyze.py",
+                    "environment": "py",
+                    "outputs": ["results/metrics.json", "figures/plot.png"],
+                },
+                "copy-figs": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/plot.png",
+                            "dest": "paper/figures/plot.png",
+                        }
+                    ],
+                },
+            }
+        },
+    }
+    dvc_yaml = {
+        "stages": {
+            "analyze": {
+                "cmd": "python scripts/analyze.py",
+                "deps": [
+                    "scripts/analyze.py",
+                    "pyproject.toml",
+                    "data/raw.csv",
+                    "data/downloaded",
+                ],
+                "outs": ["results/metrics.json", "figures/plot.png"],
+            },
+            "copy-figs": {
+                "cmd": "calkit map-paths",
+                "deps": ["figures/plot.png"],
+                "outs": ["paper/figures/plot.png"],
+            },
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            name: {
+                "deps": [{"path": d} for d in stage["deps"]],
+                "outs": [{"path": o} for o in stage["outs"]],
+            }
+            for name, stage in dvc_yaml["stages"].items()
+        }
+    }
+
+    def get(path, key=None, statuses=None):
+        return get_path_provenance(
+            path,
+            key=key,
+            ck_info=ck_info,
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            stage_statuses=statuses
+            or {
+                "analyze": {"status": "up-to-date"},
+                "copy-figs": {"status": "up-to-date"},
+            },
+            is_file=lambda p: p in files,
+            is_dir=lambda p: p == "data/downloaded",
+            listdir=lambda p: ["a.csv"] if p == "data/downloaded" else [],
+            read_bytes=lambda p: files[p].encode(),
+        )
+
+    # A value in a results file, the stage making it, what to open to change
+    # it, and what it reads, but not its environment's spec, nor raw data
+    # with no origin that the gaps say
+    metrics = get("results/metrics.json", key="fit.b")
+    assert metrics["exists"] and metrics["value"] == 1.2
+    assert metrics["stage"] == "analyze"
+    assert metrics["stage_kind"] == "python-script"
+    assert metrics["source"] == "scripts/analyze.py"
+    assert metrics["inputs"] == ["data/raw.csv", "data/downloaded"]
+    assert metrics["stage_status"] == {"status": "up-to-date"}
+    assert [g["path"] for g in metrics["gaps"]] == ["data/raw.csv"]
+    assert get("results/metrics.json", key="nope")["value_error"] == (
+        "nope isn't in results/metrics.json"
+    )
+    # A copy is described by what made the original, and is stale if the
+    # copy is
+    copy = get(
+        "paper/figures/plot.png",
+        statuses={
+            "analyze": {"status": "up-to-date"},
+            "copy-figs": {"status": "stale"},
+        },
+    )
+    assert copy["copied_from"] == "figures/plot.png"
+    assert copy["copy_stage"] == "copy-figs" and copy["stage"] == "analyze"
+    assert copy["stale_reason"] == "pipeline"
+    # So is one whose stage has never run, so hasn't made it yet
+    not_run = get(
+        "results/metrics.json",
+        statuses={
+            "analyze": {"status": "not-run"},
+            "copy-figs": {"status": "up-to-date"},
+        },
+    )
+    assert not_run["stale_reason"] == "pipeline"
+    # What calkit.yaml says it came from, including for a folder it's in
+    drawn = get("paper/drawn.svg")
+    assert drawn["origin"] == "Created by Ada with Claude"
+    assert drawn["stage"] is None and drawn["gaps"] == []
+    imported = get("data/downloaded/a.csv")
+    assert imported["origin_url"] == "https://x.org/d"
+    assert imported["origin_path"] == "data/downloaded"
+    assert imported["input_to_stages"] == ["analyze"]
+    # Something nothing makes or records is a gap itself
+    assert [g["path"] for g in get("data/raw.csv")["gaps"]] == ["data/raw.csv"]
+    assert not get("missing.png")["exists"]
+
+
+def test_add_origin_and_add_creator():
+    import copy
+
+    from calkit.provenance import add_creator, add_origin
+
+    url = {"url": "https://x.org/a"}
+    person = {"name": "Pat", "email": "pat@example.com"}
+    ck_info: dict = {
+        "figures": [
+            {"path": "./figures/a.png", "title": "A"},
+            {"path": "figures/b.png", "stage": "plot"},
+        ]
+    }
+    # A declared figure saying nothing of where it came from gets it, in a
+    # copy
+    before = copy.deepcopy(ck_info)
+    ck_info, entry = add_origin(
+        ck_info, "figures/a.png", imported_from={"url": "https://x.org/a"}
+    )
+    assert entry["imported_from"] == {"url": "https://x.org/a"}
+    assert ck_info["figures"][0]["imported_from"] == entry["imported_from"]
+    assert "misc" not in ck_info
+    assert "imported_from" not in before["figures"][0]
+    # Anything else is a misc artifact
+    ck_info, _ = add_origin(
+        ck_info, "drawings/c.svg", created_by=[person], title="C"
+    )
+    assert ck_info["misc"] == [
+        {"path": "drawings/c.svg", "title": "C", "created_by": [person]}
+    ]
+    for path, kwargs, error in [
+        ("figures/b.png", {"imported_from": url}, "already declared"),
+        ("figures/a.png", {"imported_from": url}, "already declared"),
+        ("drawings/d.svg", {}, "who created it or where"),
+        ("figures/d.png", {"created_by": [person]}, "can't be the origin"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            add_origin(ck_info, path, **kwargs)
+    # Who made a file, unless something already says, matched however its
+    # path is written
+    ck_info["misc"].append({"path": "./drawings/f.psd"})
+    before = copy.deepcopy(ck_info)
+    ck_info = add_creator(
+        ck_info,
+        ["drawings/c.svg", "drawings/e.psd", "drawings/f.psd"],
+        {"email": "me@x.org"},
+    )
+    assert before["misc"][1] == {"path": "./drawings/f.psd"}
+    assert ck_info["misc"][0]["created_by"] == [person]
+    assert ck_info["misc"][1] == {
+        "path": "./drawings/f.psd",
+        "created_by": [{"email": "me@x.org"}],
+    }
+    assert ck_info["misc"][2] == {
+        "path": "drawings/e.psd",
+        "created_by": [{"email": "me@x.org"}],
+    }
+    assert len(ck_info["misc"]) == 3
+
+
+def test_get_origin_suggestions(tmp_path):
+    import json
+
+    from calkit.provenance import get_origin_suggestions
+
+    files = {
+        "plot.py": "import matplotlib.pyplot as plt\nplt.savefig('figures/a.png')\n",
+        "other.py": "import matplotlib.pyplot as plt\nplt.savefig('b.png')\n",
+        "figures/a.png": "png",
+        "paper/figures/a.png": "png",
+        "paper/figures/c.png": "drawn",
+        "drawings/c.pptx": "pptx",
+        "drawings/c.txt": "notes",
+    }
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "outputs": [],
+                "execution_count": None,
+                "source": [
+                    "import matplotlib.pyplot as plt\n",
+                    "plt.savefig('paper/figures/a.png')",
+                ],
+            }
+        ],
+        "metadata": {"kernelspec": {"name": "python3", "language": "python"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    files["fit.ipynb"] = json.dumps(notebook)
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    paths = sorted(files)
+    # What writes it first, then what writes the file it's a copy of
+    assert get_origin_suggestions(
+        "paper/figures/a.png", paths, wdir=str(tmp_path)
+    ) == [
+        {
+            "kind": "notebook",
+            "source": "fit.ipynb",
+            "writes": "paper/figures/a.png",
+        },
+        {"kind": "script", "source": "plot.py", "writes": "figures/a.png"},
+    ]
+    # A drawing of the same name it's exported from
+    assert get_origin_suggestions(
+        "paper/figures/c.png", paths, wdir=str(tmp_path)
+    ) == [{"kind": "exported", "source": "drawings/c.pptx"}]
+    # Nothing for what nothing writes or has the name of
+    assert get_origin_suggestions("x.png", paths, wdir=str(tmp_path)) == []

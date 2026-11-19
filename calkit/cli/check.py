@@ -412,16 +412,16 @@ def _echo_retyped(findings: list[dict]) -> None:
     calkit.echo(
         "\nEach of these is a number the project already computes, typed "
         "into the document. It is right today and wrong the next time that "
-        "stage runs. Reference the command the 'json-to-latex' stage "
-        "generates for that key instead."
+        "stage runs. Read it with \\ckvalue{<file>}{<key>} from the "
+        "calkit LaTeX package instead, or, where the document already uses "
+        "a 'json-to-latex' stage, with the command it generates."
         "\n\nWhat this does not catch: a value under two significant "
         "digits (0.5) or an integer under 100 (8), which would match too "
         "much ordinary prose to be worth reporting; a value the document "
         "rounds or reformats before typing, since it is compared as "
-        "written; and anything in a results file no 'json-to-latex' stage "
-        "reads, or in one whose stage names its 'keys' without naming "
-        "that value---the document has no command for it, so typing it "
-        "is what there is until the key is named."
+        "written; and anything in a results file the document doesn't "
+        "read with \\ckvalue and no 'json-to-latex' stage reads, or a "
+        "value a 'json-to-latex' stage leaves out of the 'keys' it names."
     )
 
 
@@ -513,6 +513,20 @@ def check_environment(
     if found is None:
         raise_error(f"Environment '{env_name}' does not exist")
     env = found
+    try:
+        guests = calkit.environments.get_guest_envs(env_name, env, envs)
+    except ValueError as e:
+        raise_error(str(e))
+    for guest_name, guest in guests:
+        check_environment(env_name=guest_name, verbose=verbose)
+        try:
+            added = calkit.environments.add_host_tex_packages(
+                env_name, env, guest_name, guest
+            )
+        except ValueError as e:
+            raise_error(str(e))
+        if added:
+            check_environment(env_name=guest_name, verbose=verbose)
     # Docker records its inputs in its lock, which rebuilds it already
     try:
         rebuild = force or (
@@ -558,6 +572,9 @@ def check_environment(
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--manifest-path", env["path"]]
+        # Without a name, pixi installs only the manifest's default env
+        if pixi_env_name := env.get("name"):
+            cmd += ["--environment", pixi_env_name]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -833,6 +850,13 @@ def check_environment(
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
+    elif env["kind"] == "texlive":
+        from calkit.environments import texlive as env_texlive
+
+        try:
+            env_texlive.check(env_name, env, rebuild=rebuild, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{env_name}': {e}")
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     calkit.environments.record_build_inputs(env_name, env)
@@ -1902,8 +1926,11 @@ def check_stage_runs() -> None:
     entry some other way, e.g., 'dvc commit' after an output was edited, an
     edit or merge of dvc.lock, or running it outside Calkit. This catches
     mistakes and shortcuts, not forgery, since a matching entry can be
-    written by anyone.
+    written by anyone. Like DVC, it ignores the entries of stages no longer
+    in the pipeline.
     """
+    from dvc.parsing import DataResolver
+
     # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
     # subproject's, against the record kept beside its dvc.lock: any other
     # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
@@ -1944,11 +1971,38 @@ def check_stage_runs() -> None:
     parent_runs = {
         k.replace("\\", "/"): v for k, v in stage_runs[None].items()
     }
+    # DVC keeps the dvc.lock entry of a stage removed from dvc.yaml, and
+    # ignores it, so these are skipped, named as DVC resolves them, e.g.,
+    # each foreach item. Nothing is skipped beside a dvc.yaml DVC can't read.
+    removed: dict[str | None, set[str]] = {}
+    try:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+    except Exception:
+        dvc_repo = None
+    for lock_dir in lock_dirs if dvc_repo is not None else []:
+        try:
+            fpath = os.path.join(lock_dir or ".", "dvc.yaml")
+            with open(fpath, encoding="utf-8") as f:
+                dvc_yaml = calkit.core._load_yaml_readonly(f)
+            resolver = DataResolver(
+                dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
+            )
+            removed[lock_dir] = {
+                name
+                for name in calkit.dvc.read_lock_stages(lock_dir)
+                if not resolver.has_key(name)
+            }
+        except Exception:
+            continue
+    if dvc_repo is not None:
+        dvc_repo.close()
     problems = []
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
         for lock_name, locked in sorted(lock_stages.items()):
-            if not isinstance(locked, dict):
+            if not isinstance(locked, dict) or lock_name in removed.get(
+                lock_dir, set()
+            ):
                 continue
             name = (
                 lock_name
@@ -2080,9 +2134,9 @@ def check_storage(
 ) -> None:
     """Check that paths are tracked where they're declared to be stored.
 
-    That is, nothing is tracked by both Git and DVC, no pipeline output
-    stored in Git, or file in one, is ignored by it, and nothing in Git is
-    too large for it.
+    That is, nothing is tracked by both Git and DVC, no pipeline output has
+    a .dvc file of its own too, no pipeline output stored in Git, or file
+    in one, is ignored by it, and nothing in Git is too large for it.
     Large files are only reported.
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
@@ -2118,7 +2172,14 @@ def check_storage(
     to_record = []
     for problem in problems:
         path = os.path.abspath(problem["path"])
-        if problem["kind"] == "excluded-tracked":
+        if problem["kind"] == "stage-output-dvc-file":
+            # The stage says how it's made, so its own .dvc file goes
+            dvc_file = problem["dvc_file"]
+            if repo.git.ls_files("--", dvc_file):
+                repo.git.rm("-q", "--", dvc_file)
+            elif os.path.isfile(dvc_file):
+                os.remove(dvc_file)
+        elif problem["kind"] == "excluded-tracked":
             # Left out of the output, so stored in neither, as declared
             calkit.dvc.untrack_files(repo, problem["files"])
         elif problem["store_in"] == "dvc":

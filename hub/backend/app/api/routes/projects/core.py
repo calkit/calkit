@@ -60,6 +60,7 @@ import calkit
 import calkit.core
 import calkit.detect
 import calkit.environments
+import calkit.environments.texlive
 import calkit.latex
 import calkit.pipeline
 import calkit.provenance
@@ -94,7 +95,6 @@ from app.core import (
     ryaml,
     title_from_path,
     utcnow,
-    web_url_or_none,
 )
 from app.dvc import (
     expand_dvc_lock_outs,
@@ -214,7 +214,6 @@ from calkit.models import ProjectStatus
 from calkit.models.core import Dataset as CkDataset
 from calkit.models.core import Figure as CkFigure
 from calkit.models.core import ImportedDataset as CkImportedDataset
-from calkit.models.core import MiscArtifact as CkMiscArtifact
 from calkit.models.io import InputsFromStageOutputs
 from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
@@ -3487,6 +3486,11 @@ def _discover_figures(
 
     for path in _tree_figure_paths(repo, ref):
         _maybe_add_figure(path)
+    # And images calkit.yaml says the origin of, wherever they are
+    for path in calkit.pipeline.get_figure_paths_with_origins(ck_info_full):
+        if path not in declared_paths:
+            figures.append({"path": path, "title": title_from_path(path)})
+            declared_paths.add(path)
     # Also auto-detect figures from DVC lock outs (files stored with DVC)
     for dvc_path, dvc_out in dvc_lock_outs.items():
         if dvc_out.get("type") == "dir":
@@ -5141,41 +5145,14 @@ def get_project_datasets(
             DatasetPublic.model_validate(
                 row,
                 update=dict(
-                    imported_from_info=_imported_from_info(imported),
+                    imported_from_info=calkit.provenance.get_import_info(
+                        imported
+                    ),
                     created_by=created if created else None,
                 ),
             )
         )
     return out
-
-
-def _imported_from_info(value: Any) -> dict[str, Any] | None:
-    """The structured origin, reading a bare string the way the calkit.yaml
-    schema does, so ``imported_from: https://doi.org/...`` is a DOI here too.
-    """
-    if isinstance(value, dict):
-        info = dict(value)
-    elif isinstance(value, str) and value.strip():
-        try:
-            info = calkit.provenance.source_from_location(value)
-        except ValueError:
-            return {"description": value}
-    else:
-        return None
-    # These are rendered as links, so drop any that aren't http(s), keeping
-    # SSH clone URLs, e.g., git@github.com:owner/repo, which calkit accepts
-    if "url" in info and web_url_or_none(info["url"]) is None:
-        del info["url"]
-    repo_url = info.get("git_repo_url")
-    if repo_url is not None and not (
-        web_url_or_none(repo_url)
-        or (
-            isinstance(repo_url, str)
-            and re.fullmatch(r"(ssh://|[\w.-]+@[\w.-]+:)\S+", repo_url)
-        )
-    ):
-        del info["git_repo_url"]
-    return info
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")
@@ -6565,6 +6542,120 @@ def post_project_latex_components(
     )
 
 
+def _fetch_import(
+    imported_from: dict[str, Any],
+    wdir: str,
+    path: str,
+    current_user: User,
+    session: Session,
+) -> dict[str, Any] | None:
+    """Bring in the latest of a file imported from a Git repo or another
+    project, returning what to record in ``.calkit/imports.json``.
+
+    None for any other source, e.g., a DOI, which is recorded as given,
+    since it names a record rather than a file that can move.
+    """
+    # Written only where it stays in the project, e.g., not through a
+    # tracked symlink, and only once what's fetched passes its checks, so a
+    # rejected import leaves the file and its lock as they were
+    dest = os.path.join(wdir, path)
+    if os.path.islink(dest) or not _inside(wdir, dest):
+        raise HTTPException(422, f"'{path}' leads outside the project")
+    too_big = HTTPException(
+        413,
+        f"'{path}' is too big to import here; use 'calkit import path' "
+        "instead",
+    )
+    if imported_from.get("project"):
+        try:
+            src_owner, src_name = (
+                str(imported_from["project"]).strip("/").split("/", 1)
+            )
+        except ValueError:
+            raise HTTPException(422, "Project should be given as owner/name")
+        src_path = _normalize_artifact_file_path(
+            str(imported_from.get("path") or "")
+        )
+        if not src_path:
+            raise HTTPException(422, "Name the file in that project")
+        src_project = app.projects.get_project(
+            session=session,
+            owner_name=src_owner,
+            project_name=src_name,
+            current_user=current_user,
+            min_access_level="read",
+        )
+        # No TTL, so an update gets what's there now
+        src_repo = get_repo(
+            project=src_project,
+            user=current_user,
+            session=session,
+            ttl=None,
+            read_only=True,
+        )
+        rev = src_repo.head.commit.hexsha
+        source = {
+            "kind": "calkit",
+            "project": f"{src_owner}/{src_name}",
+            "path": src_path,
+            "git_repo_url": src_project.git_repo_url,
+        }
+        tree = get_repo_tree_for_ref(src_repo, rev)
+        # From Git or DVC storage, including a DVC file that project
+        # imported in turn, whose bytes are in its source's storage
+        try:
+            content = app.projects.read_project_file(
+                project=src_project,
+                tree=tree,
+                path=src_path,
+                max_bytes=calkit.core.DVC_SIZE_THRESH_BYTES - 1,
+                session=session,
+                current_user=current_user,
+            )
+        except HTTPException as e:
+            if e.status_code == 413:
+                raise too_big
+            if e.status_code == 404:
+                raise HTTPException(
+                    404, f"'{src_path}' isn't a file in {src_owner}/{src_name}"
+                )
+            raise
+    elif imported_from.get("git_repo_url"):
+        if not imported_from.get("path"):
+            raise HTTPException(422, "Name the file in that repo")
+        source = {
+            "kind": "git",
+            "repo_url": str(imported_from["git_repo_url"]),
+            "path": str(imported_from["path"]),
+            "ref": imported_from.get("git_ref"),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            rev = app.imports.fetch_git_path(
+                str(imported_from["git_repo_url"]),
+                imported_from.get("git_ref"),
+                str(imported_from["path"]),
+                tmp,
+                "fetched",
+            )
+            fetched = os.path.join(tmp, "fetched")
+            if os.path.isdir(fetched):
+                raise HTTPException(
+                    422, "Name a file in that repo, not a folder"
+                )
+            if os.path.getsize(fetched) >= calkit.core.DVC_SIZE_THRESH_BYTES:
+                raise too_big
+            with open(fetched, "rb") as f:
+                content = f.read()
+    else:
+        return None
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, "wb") as f:
+        f.write(content)
+    return calkit.provenance.get_finished_lock(
+        {"source": source, "git_rev": rev}, dest
+    )
+
+
 class MiscArtifactPost(BaseModel):
     """A path to attribute, either to whoever made it here or to where it
     came from, for a file that isn't a figure, dataset, or publication.
@@ -6596,7 +6687,9 @@ def post_project_misc(
 
     The path has to exist in the project and not already be declared as a
     figure, dataset, publication, or misc artifact, since those carry the
-    same attribution and are edited as what they are.
+    same attribution and are edited as what they are. One imported from a
+    Git repo or another project is fetched from there instead, so it can
+    be updated later.
     """
     path = _normalize_artifact_file_path(req.path)
     project = app.projects.get_project(
@@ -6606,101 +6699,139 @@ def post_project_misc(
         current_user=current_user,
         min_access_level="write",
     )
-    if req.created_by is None and req.imported_from is None:
-        raise HTTPException(
-            422,
-            "A misc artifact must say who created it or where it was "
-            "imported from",
-        )
-    if req.created_by is not None and not (
-        calkit.provenance.can_be_created_by_person(path)
-    ):
-        raise HTTPException(
-            422,
-            f"A person can't be the origin of '{path}', since something "
-            "else exports that format; add the stage that makes it, or "
-            "record where it was imported from",
-        )
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
     ck_info = get_ck_info_from_repo(repo)
-    # A declared artifact that doesn't say where it came from yet, or only
-    # describes where it was imported from, gets the origin added to its
-    # own entry
-    declared = None
-    for section, label in [
-        ("figures", "figure"),
-        ("datasets", "dataset"),
-        ("publications", "publication"),
-        ("misc", "misc artifact"),
-    ]:
-        for existing in ck_info.get(section) or []:
-            if isinstance(existing, dict) and (
-                normalize_artifact_path(str(existing.get("path") or ""))
-                == path
-            ):
-                imported_from = existing.get("imported_from")
-                if (
-                    section == "publications"
-                    or any(
-                        existing.get(k) is not None
-                        for k in ("created_by", "stage")
-                    )
-                    or calkit.provenance.import_is_checkable(imported_from)
-                ):
-                    raise HTTPException(
-                        400,
-                        f"'{path}' is already declared as a {label}; edit "
-                        "that entry instead",
-                    )
-                declared = existing
-    # Whether tracked by Git or DVC, the path has to be here to attribute
+    try:
+        ck_info, entry = calkit.provenance.add_origin(
+            ck_info,
+            path,
+            created_by=(
+                [p.model_dump(exclude_none=True) for p in req.created_by]
+                if req.created_by is not None
+                else None
+            ),
+            imported_from=req.imported_from,
+            title=req.title,
+            description=req.description,
+        )
+    except calkit.provenance.AlreadyDeclaredError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    # Whether tracked by Git or DVC, the path has to be here to attribute,
+    # unless it's fetched
     wdir = str(repo.working_dir)
-    if not os.path.exists(os.path.join(wdir, path)) and not os.path.isfile(
-        os.path.join(wdir, path + ".dvc")
+    fetched = req.imported_from is not None and any(
+        req.imported_from.get(k) for k in ("project", "git_repo_url")
+    )
+    if fetched and os.path.isfile(os.path.join(wdir, path + ".dvc")):
+        raise HTTPException(
+            409, f"'{path}' is tracked by DVC; import it with the CLI"
+        )
+    if (
+        not fetched
+        and not os.path.exists(os.path.join(wdir, path))
+        and not os.path.isfile(os.path.join(wdir, path + ".dvc"))
     ):
         tree = get_repo_tree_for_ref(repo, None)
         if path not in app.projects.dvc_outputs_from_tree(
             project=project, tree=tree
         ):
             raise HTTPException(404, f"'{path}' does not exist in the project")
-    entry: dict[str, Any] = {"path": path}
-    if req.title:
-        entry["title"] = req.title
-    if req.description:
-        entry["description"] = req.description
-    if req.created_by is not None:
-        entry["created_by"] = [
-            person.model_dump(exclude_none=True) for person in req.created_by
-        ]
-    if req.imported_from is not None:
-        entry["imported_from"] = req.imported_from
-    # Validated against the model that owns calkit.yaml, which is where
-    # the rules live, e.g., made here or imported but not both, and at
-    # least one person named
-    try:
-        entry = CkMiscArtifact.model_validate(entry).model_dump(
-            exclude_none=True, mode="json"
+    to_add = ["calkit.yaml"]
+    if fetched:
+        lock = _fetch_import(
+            entry["imported_from"], wdir, path, current_user, session
         )
-    except ValidationError as e:
-        raise HTTPException(422, f"Invalid misc artifact: {e}")
-    if declared is not None:
-        for k in ("created_by", "imported_from"):
-            if k in entry:
-                declared[k] = entry[k]
-            else:
-                declared.pop(k, None)
-    else:
-        misc = ck_info.get("misc", [])
-        misc.append(entry)
-        ck_info["misc"] = misc
+        to_add += [
+            path,
+            calkit.provenance.write_import_lock(path, lock, wdir=wdir),
+        ]
     ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
-    repo.git.add("calkit.yaml")
+    repo.git.add(to_add)
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
     push_and_expire(project, repo)
     record_project_update(project, repo, session)
     return MiscArtifact.model_validate(entry)
+
+
+class ImportUpdatePost(BaseModel):
+    path: str
+
+
+class ImportUpdate(BaseModel):
+    path: str
+    # Whether the file itself changed, rather than only the commit it's
+    # recorded at
+    changed: bool
+    rev: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/imports/update")
+def post_project_import_update(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    req: ImportUpdatePost,
+) -> ImportUpdate:
+    """Bring in the latest of a file imported from a Git repo or another
+    project, like ``calkit sync import``.
+    """
+    path = _normalize_artifact_file_path(req.path)
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    found = calkit.provenance.find_artifact(get_ck_info_from_repo(repo), path)
+    imported_from = (
+        calkit.provenance.get_import_info(found[1].get("imported_from"))
+        if (found)
+        else None
+    )
+    if not imported_from or not any(
+        imported_from.get(k) for k in ("project", "git_repo_url")
+    ):
+        raise HTTPException(
+            422,
+            f"'{path}' isn't imported from a Git repo or another project, "
+            "so there's nothing to update it from",
+        )
+    if os.path.isfile(os.path.join(wdir, path + ".dvc")):
+        raise HTTPException(
+            409, f"'{path}' is tracked by DVC; update it with the CLI"
+        )
+    dest = os.path.join(wdir, path)
+    before = calkit.provenance.hash_path(dest)
+    previous = calkit.provenance.read_import_locks(wdir=wdir).get(path)
+    if calkit.provenance.local_edit(dest, previous):
+        raise HTTPException(
+            409,
+            f"'{path}' has changed since it was imported, and updating it "
+            "would discard that",
+        )
+    lock = _fetch_import(imported_from, wdir, path, current_user, session)
+    lock_path = calkit.provenance.write_import_lock(path, lock, wdir=wdir)
+    changed = calkit.provenance.hash_path(dest) != before
+    repo.git.add([path, lock_path])
+    if repo.git.diff("--cached", "--name-only", "--", path, lock_path):
+        repo.git.commit(
+            [path, lock_path, "-m", f"Update {path} from its source"]
+        )
+        push_and_expire(project, repo)
+        record_project_update(project, repo, session)
+    return ImportUpdate(
+        path=path, changed=changed, rev=calkit.provenance.get_locked_rev(lock)
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/presentations")
@@ -7218,27 +7349,18 @@ async def post_project_overleaf_publication(
     # is either a TeX Live image or Calkit's own
     envs = ck_info.get("environments", {})
     env_name = environment_name
-
-    def is_tex_image(image: str) -> bool:
-        return "texlive" in image or "calkit/latex" in image
-
     if not env_name:
         for en, e in envs.items():
-            if e.get("kind") == "docker" and is_tex_image(e.get("image", "")):
+            if calkit.latex.is_latex_env(e):
                 env_name = en
                 logger.info(f"Detected TeX Live env '{en}'")
                 break
     elif env_name and env_name in envs:
         env = envs[env_name]
-        if env.get("kind") != "docker" and not is_tex_image(
-            env.get("image", "")
-        ):
+        if not calkit.latex.is_latex_env(env):
             raise HTTPException(
                 400,
-                (
-                    f"Environment {env_name} exists, "
-                    "but is not a TeXLive Docker environment"
-                ),
+                f"Environment {env_name} exists, but is not a TeX Live one",
             )
     if not env_name:
         env_name = "tex"
@@ -7246,7 +7368,7 @@ async def post_project_overleaf_publication(
         while env_name in envs:
             env_name = f"tex-{n}"
             n += 1
-        env = dict(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
+        env = dict(calkit.environments.texlive.DEFAULT_ENVIRONMENT)
         envs[env_name] = env
         ck_info["environments"] = envs
     # Determine mode: link vs zip
@@ -8249,7 +8371,7 @@ def _load_ck_stage_map(stage_yaml: str) -> Any:
     return stage_map
 
 
-STAGE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+STAGE_NAME_RE = calkit.pipeline.STAGE_NAME_RE
 
 
 def _validate_ck_stage(stage_map: Any, stage_name: str) -> CkStage:

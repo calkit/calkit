@@ -22,12 +22,14 @@ from calkit.environments import get_env_lock_fpath
 from calkit.models.pipeline import LatexStage, Pipeline
 from calkit.pipeline import (
     StaleStage,
+    collapse_dvc_stages,
+    stages_are_similar,
+)
+from calkit.pipeline.core import (
     _ensure_latex_aux_gitignore,
     _expand_dep_excluding_subprojects,
     _status_target_matches,
     _warn_on_latexmkrc_out_dir_mismatch,
-    collapse_dvc_stages,
-    stages_are_similar,
 )
 
 
@@ -559,6 +561,32 @@ def test_to_dvc_unignores_dvc_lock(tmp_dir):
     assert repo.ignored("dvc.lock")
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     assert not repo.ignored("dvc.lock")
+
+
+def test_to_dvc_removes_stage_output_dvc_files(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "make": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo hi > fig.png",
+                    "outputs": ["fig.png"],
+                }
+            }
+        }
+    }
+    # A figure added with DVC by hand before the stage that makes it was
+    with open("fig.png.dvc", "w") as f:
+        f.write("outs:\n- path: fig.png\n")
+    with open("data.csv.dvc", "w") as f:
+        f.write("outs:\n- path: data.csv\n")
+    calkit.pipeline.to_dvc(ck_info=ck_info)
+    assert os.path.isfile("fig.png.dvc")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert not os.path.isfile("fig.png.dvc")
+    assert os.path.isfile("data.csv.dvc")
 
 
 def test_to_dvc_skips_no_op_writes(tmp_dir):
@@ -2824,7 +2852,7 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
     }
     # ``../figs`` in the subproject is the external dep; after normalization
     # it becomes a parent-relative path.  No dep should tree-overlap any out.
-    from calkit.pipeline import _paths_overlap
+    from calkit.pipeline.core import _paths_overlap
 
     for dep in wrapper2_deps:
         for out in wrapper2_out_paths:
@@ -3510,7 +3538,7 @@ def test_revision_key(tmp_dir):
         commit(path, name)
         os.chdir(path)
         try:
-            key = calkit.pipeline._revision_key(None, ["paper/"])
+            key = calkit.pipeline.core._revision_key(None, ["paper/"])
             assert key is not None
             keys[name] = key("HEAD")
         finally:
@@ -3521,7 +3549,7 @@ def test_revision_key(tmp_dir):
     one = os.path.join(tmp_dir, "one")
     os.chdir(one)
     try:
-        key = calkit.pipeline._revision_key(None, ["paper/"])
+        key = calkit.pipeline.core._revision_key(None, ["paper/"])
         assert key is not None
         with open("other.txt", "w") as f:
             f.write("unrelated")
@@ -5116,7 +5144,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     )
     assert gated == {} and errors == {}
     # An export needs its app installed where it runs
-    from calkit.export import GIMP, INKSCAPE
+    from calkit.export import GIMP, INKSCAPE, LIBREOFFICE, POWERPOINT
 
     ck_info["pipeline"]["stages"]["drawn"] = {
         "kind": "inkscape-export",
@@ -5128,14 +5156,25 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         "source_path": "made/photo.xcf",
         "outputs": ["made/photo.png"],
     }
+    ck_info["pipeline"]["stages"]["slide"] = {
+        "kind": "pptx-export",
+        "source_path": "made/setup.pptx",
+        "outputs": [{"path": "made/setup.pdf", "slide": 1}],
+    }
     monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
     monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
+    monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-no-soffice"])
+    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-no-powerpoint"])
     gated, errors = calkit.pipeline.get_gated_stages(
-        ck_info, stage_names=["drawn", "photo"], interactive=False
+        ck_info, stage_names=["drawn", "photo", "slide"], interactive=False
     )
     assert gated == {
         "drawn": "needs Inkscape installed to export made/drawn.svg",
         "photo": "needs GIMP installed to export made/photo.xcf",
+        "slide": (
+            "needs LibreOffice or PowerPoint installed to export "
+            "made/setup.pptx"
+        ),
     }
     monkeypatch.setattr(INKSCAPE, "executables", [sys.executable])
     gated, errors = calkit.pipeline.get_gated_stages(
@@ -5536,3 +5575,254 @@ def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
         ]
         == "up to date"
     )
+
+
+def test_composed_env_locks_are_stage_deps(tmp_dir):
+    import calkit
+
+    with open("pyproject.toml", "w") as f:
+        f.write(
+            '[project]\nname = "p"\nversion = "0"\n'
+            'requires-python = ">=3.10"\ndependencies = []\n'
+        )
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {
+                "tex": {"kind": "texlive"},
+                "py": {
+                    "kind": "uv",
+                    "path": "pyproject.toml",
+                    "with": ["tex"],
+                },
+            },
+            "pipeline": {
+                "stages": {
+                    "fig": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "py",
+                        "outputs": ["a.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert "uv.lock" in stages["fig"]["deps"]
+    assert ".calkit/env-locks/tex.json" in stages["fig"]["deps"]
+    # As are those of the environments a switch picks from
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {
+                "tex": {"kind": "texlive"},
+                "py": {
+                    "kind": "uv",
+                    "path": "pyproject.toml",
+                    "with": ["tex"],
+                },
+                "sw": {"kind": "switch", "switch": [{"use": "py"}]},
+            },
+            "pipeline": {
+                "stages": {
+                    "fig": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "sw",
+                        "outputs": ["a.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert ".calkit/env-locks/tex.json" in stages["fig"]["deps"]
+    # One that can't be composed is reported
+    with pytest.raises(ValueError, match="isn't defined"):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {
+                    "py": {
+                        "kind": "uv",
+                        "path": "pyproject.toml",
+                        "with": ["x"],
+                    }
+                },
+                "pipeline": {
+                    "stages": {
+                        "fig": {
+                            "kind": "shell-command",
+                            "command": "echo a",
+                            "environment": "py",
+                        },
+                    }
+                },
+            },
+            write=False,
+        )
+
+
+def test_get_figure_paths_with_origins(tmp_dir):
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "_system",
+                    "outputs": [
+                        "plot.png",
+                        {"path": "results/r.json"},
+                        "frames/frame-{n}.png",
+                    ],
+                },
+                "export": {
+                    "kind": "manual-step",
+                    "message": "Export it",
+                    "outputs": [{"path": "paper/exported.png"}],
+                },
+                "paper": {
+                    "kind": "latex",
+                    "target_path": "paper/main.tex",
+                    "outputs": ["paper/main.pdf"],
+                },
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "plot.png",
+                            "dest": "paper/plot.png",
+                        }
+                    ],
+                },
+            }
+        },
+        "publications": [{"path": "paper/main.pdf"}],
+        "misc": [
+            {"path": "paper/drawn.png", "created_by": [{"name": "Pat"}]},
+            {"path": "paper/plot.png", "created_by": [{"name": "Pat"}]},
+            {"path": "notes.png"},
+            {"path": "data/runs", "created_by": [{"name": "Pat"}]},
+        ],
+    }
+    assert calkit.pipeline.get_figure_paths_with_origins(ck_info) == [
+        "plot.png",
+        "paper/exported.png",
+        "paper/drawn.png",
+    ]
+    # Listed among the project's figures, after those detected by folder
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("figures")
+    for path in ["figures/a.png", "plot.png", "notes.png"]:
+        with open(path, "w") as f:
+            f.write("png")
+    listed = calkit.pipeline.list_artifacts("figures", ck_info=ck_info)
+    assert [f["path"] for f in listed] == [
+        "figures/a.png",
+        "plot.png",
+        "paper/exported.png",
+        "paper/drawn.png",
+    ]
+
+
+def test_get_lock_stage_for_output():
+    from calkit.pipeline import get_lock_stage_for_output
+
+    dvc_lock = {
+        "stages": {
+            "train": {"outs": [{"path": "model.pkl", "md5": "def"}]},
+            "plot": {"outs": [{"path": "figures", "md5": "abc123.dir"}]},
+            "file": {"outs": [{"path": "figures/test.png", "md5": "f"}]},
+        }
+    }
+    # An output itself, or a folder it's in, with an exact match winning
+    assert get_lock_stage_for_output("model.pkl", dvc_lock) == "train"
+    assert get_lock_stage_for_output("figures/sub/a.png", dvc_lock) == "plot"
+    assert get_lock_stage_for_output("figures/test.png", dvc_lock) == "file"
+    assert get_lock_stage_for_output("other/x.png", dvc_lock) is None
+    # dvc.lock keeps entries that are no longer stages, e.g., a bare name
+    # from before a stage became a matrix, which only count with nothing
+    # current producing the path
+    dvc_lock = {
+        "stages": {
+            "plot": {"outs": [{"path": "figures/a.png"}]},
+            "plot@_arg00-9": {"outs": [{"path": "figures/a.png"}]},
+            "plot@_arg00": {"outs": [{"path": "figures/a.png"}]},
+            "render": {"outs": [{"path": "figures/sub"}]},
+            "render@_arg00": {"outs": [{"path": "figures/sub"}]},
+            "orphan": {"outs": [{"path": "figures/gone.png"}]},
+        }
+    }
+    current = {"plot@_arg00", "render@_arg00"}
+    for path, stage in [
+        ("figures/a.png", "plot@_arg00"),
+        ("figures/sub/deep.png", "render@_arg00"),
+        ("figures/gone.png", "orphan"),
+    ]:
+        assert (
+            get_lock_stage_for_output(path, dvc_lock, valid_stages=current)
+            == stage
+        )
+
+
+def test_get_stage_to_add():
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "fit": {
+                    "kind": "python-script",
+                    "script_path": "fit.py",
+                    "environment": "_system",
+                    "outputs": ["results/fit.json"],
+                },
+            }
+        }
+    }
+    stage = {
+        "kind": "manual-step",
+        "message": "Export it",
+        "outputs": ["./figures/Setup Diagram.png"],
+    }
+    # Named after its first output, with one in Git kept there
+    name, added = calkit.pipeline.get_stage_to_add(
+        stage, ck_info, is_tracked=lambda path: True
+    )
+    assert name == "setup-diagram"
+    assert added["outputs"] == [
+        {"path": "figures/Setup Diagram.png", "storage": "git"}
+    ]
+    # So does one given as a mapping, e.g., a slide's, unless it says
+    slides = {
+        "kind": "pptx-export",
+        "source_path": "figures/setup.pptx",
+        "outputs": [{"path": "paper/setup.png", "slide": 1}],
+    }
+    _, added = calkit.pipeline.get_stage_to_add(
+        slides, ck_info, is_tracked=lambda path: True
+    )
+    assert added["outputs"] == [
+        {"path": "paper/setup.png", "slide": 1, "storage": "git"}
+    ]
+    _, added = calkit.pipeline.get_stage_to_add(
+        slides
+        | {
+            "outputs": [
+                {"path": "paper/setup.png", "slide": 1, "storage": "dvc"}
+            ]
+        },
+        ck_info,
+        is_tracked=lambda path: True,
+    )
+    assert added["outputs"][0]["storage"] == "dvc"
+    # A taken name gets a number
+    name, _ = calkit.pipeline.get_stage_to_add(stage, ck_info, name="fit")
+    assert name == "fit-2"
+    for bad, error in [
+        ({"outputs": ["results/fit.json"]}, "made by stage 'fit'"),
+        ({"outputs": ["../x.png"]}, "Invalid output path"),
+        ({"kind": "nope"}, "Invalid stage"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            calkit.pipeline.get_stage_to_add(stage | bad, ck_info)
+    with pytest.raises(ValueError, match="Invalid stage name"):
+        calkit.pipeline.get_stage_to_add(stage, ck_info, name="-x")

@@ -1,6 +1,8 @@
 """Tests for ``calkit.models.pipeline``."""
 
 import json
+import subprocess
+import sys
 
 import pytest
 from pydantic import ValidationError
@@ -21,6 +23,7 @@ from calkit.models.pipeline import (
     MatlabCommandStage,
     MatlabScriptStage,
     Pipeline,
+    PptxExportStage,
     PythonScriptStage,
     QuartoStage,
     ReferencesCheckStage,
@@ -28,6 +31,7 @@ from calkit.models.pipeline import (
     StageIteration,
     WordToPdfStage,
     quote_arg,
+    quote_literal_arg,
 )
 
 
@@ -162,6 +166,44 @@ def test_appexportstage():
     assert s.to_dvc()["cmd"] == (
         "calkit export gimp figures/src/photo.xcf -o paper/photo.tif"
     )
+    slide = PptxExportStage.model_validate(
+        dict(
+            source_path="figures/src/lab setup.pptx",
+            outputs=[{"path": "paper/setup.pdf", "slide": 2}],
+        )
+    )
+    assert slide.to_dvc()["cmd"] == (
+        "calkit export pptx 'figures/src/lab setup.pptx' -o 2=paper/setup.pdf"
+    )
+    # A file per slide, each its own output, a PDF of several, and the
+    # environment that says which app exports them
+    slides = PptxExportStage.model_validate(
+        dict(
+            source_path="setup.pptx",
+            outputs=[
+                {"path": "figs/panel a.png", "slide": 5, "storage": "git"},
+                {"path": "figs/b.png", "slide": 3},
+                {"path": "figs/both.pdf", "slide": [7, 3, 7]},
+            ],
+            dpi=150,
+            trim=False,
+            environment="libreoffice",
+        )
+    )
+    sd = slides.to_dvc()
+    assert sd["cmd"] == (
+        "calkit export pptx setup.pptx -o '5=figs/panel a.png' "
+        "-o 3=figs/b.png -o 7,3=figs/both.pdf --dpi 150 --no-trim "
+        "--env libreoffice"
+    )
+    assert sd["outs"] == [
+        {"figs/panel a.png": {"cache": False, "persist": False}},
+        {"figs/b.png": {"cache": True, "persist": False}},
+        {"figs/both.pdf": {"cache": True, "persist": False}},
+    ]
+    # Every slide into one PDF
+    deck = PptxExportStage(source_path="talk.pptx", outputs=["talk.pdf"])
+    assert deck.to_dvc()["cmd"] == "calkit export pptx talk.pptx -o talk.pdf"
     # What an app doesn't export from, or to, is refused, as is a stage
     # with other than one output
     for model, bad, error in [
@@ -170,12 +212,34 @@ def test_appexportstage():
         (InkscapeExportStage, dict(outputs=[]), "exactly one output"),
         (GimpExportStage, dict(source_path="a.svg"), "from an XCF"),
         (GimpExportStage, dict(source_path="a.xcf", dpi=72), "dpi"),
+        (PptxExportStage, dict(source_path="a.key"), "PowerPoint file"),
+        (
+            PptxExportStage,
+            dict(
+                source_path="a.pptx", outputs=[{"path": "a.pdf", "slide": 0}]
+            ),
+            "numbered from 1",
+        ),
+        (
+            PptxExportStage,
+            dict(
+                source_path="a.pptx",
+                outputs=[{"path": "a.png", "slide": [1, 2]}],
+            ),
+            "'a.png' can show one slide",
+        ),
+        (PptxExportStage, dict(source_path="a.pptx"), "can show one slide"),
+        (
+            PptxExportStage,
+            dict(source_path="a.pptx", outputs=[]),
+            "at least one output",
+        ),
     ]:
         with pytest.raises(ValidationError, match=error):
             model(**{"source_path": "a.svg", "outputs": ["a.png"], **bad})
 
 
-def test_latexstage():
+def test_latexstage(tmp_path):
     s = LatexStage(
         name="something", environment="tex", target_path="my-paper.tex"
     )
@@ -305,6 +369,32 @@ def test_latexstage():
         target_path="my paper.tex",
     )
     assert "'my paper.tex'" in s.dvc_cmd
+    # The deps of a document loading calkit.sty come in the same order on a
+    # fresh clone as after its component copies are written beside it
+    (tmp_path / "paper").mkdir()
+    (tmp_path / "paper" / "main.tex").write_text(
+        "\\documentclass{article}\n\\usepackage{calkit}\n"
+        "\\begin{document}\n\\bibliography{references}\n"
+        "\\end{document}\n"
+    )
+    (tmp_path / "paper" / "references.bib").write_text("")
+    all_deps = []
+    for write_files in [False, True, False]:
+        s = LatexStage(
+            name="paper", environment="tex", target_path="paper/main.tex"
+        )
+        s.preprocess(
+            str(tmp_path), is_output=lambda p: False, write_files=write_files
+        )
+        all_deps.append(s.dvc_deps)
+    assert (tmp_path / "paper" / "calkit.sty").is_file()
+    expected = [
+        "paper/main.tex",
+        "paper/references.bib",
+        "paper/calkit.sty",
+        "paper/_calkit/values.tex",
+    ]
+    assert all_deps == [expected] * 3
 
 
 def test_quartostage():
@@ -781,11 +871,62 @@ def test_jsontolatexstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        "calkit latex from-json 'data/results.json' 'more.json' "
-        "--output 'paper/results.tex' --output 'paper/results2.tex' "
-        "--command theresults --format-json "
-        '\'{"result1": "{value1:.2f}", "result2": "{value2}"}\''
+        "calkit latex from-json data/results.json more.json "
+        "--output paper/results.tex --output paper/results2.tex "
+        '--command theresults --format "result1={value1:.2f}" '
+        '--format "result2={value2}"'
     )
+    # Each arg reaches the program unchanged through the shell DVC uses,
+    # which is cmd.exe on Windows
+    s2 = JsonToLatexStage(
+        name="json2latex",
+        inputs=["my results/a(1).json", "b&c.json"],
+        outputs=["paper/results.tex"],
+        keys=["cases.a;b"],
+        format={
+            "pct": "{a * 100:.1f} %",
+            "padded": "{x:>10}|{y:^8}",
+            "escaped": "{a:.1f}\\%",
+        },
+    )
+    script = "import sys, json; print(json.dumps(sys.argv[1:]))"
+    cmd = s2.to_dvc()["cmd"].replace(
+        "calkit latex from-json",
+        f'{quote_literal_arg(sys.executable)} -c "{script}"',
+    )
+    out = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True, check=True
+    )
+    assert json.loads(out.stdout) == [
+        "my results/a(1).json",
+        "b&c.json",
+        "--output",
+        "paper/results.tex",
+        "--key",
+        "cases.a;b",
+        "--format",
+        "pct={a * 100:.1f} %",
+        "--format",
+        "padded={x:>10}|{y:^8}",
+        "--format",
+        "escaped={a:.1f}\\%",
+    ]
+    # What one shell or the other would change is refused, not passed on
+    for kwargs in [
+        dict(keys=["$HOME"]),
+        dict(format={"q": 'say "{a}"'}),
+        dict(inputs=["a`b`.json"]),
+        dict(inputs=["a\\\\b.json"]),
+    ]:
+        with pytest.raises(ValidationError):
+            JsonToLatexStage.model_validate(
+                {
+                    "name": "j",
+                    "inputs": ["a.json"],
+                    "outputs": ["out.tex"],
+                    **kwargs,
+                }
+            )
     dvc_outs = s.dvc_outs
     assert {
         "paper/results.tex": {"cache": False, "persist": False}
@@ -1182,8 +1323,7 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
         }
     )
     cmd = stage.dvc_cmd
-    assert "'a.json'" in cmd
-    assert "'b.json'" in cmd
+    assert cmd.startswith("calkit latex from-json a.json b.json --output")
     assert "PathInput" not in cmd
     assert "from_stage_outputs" not in cmd
     # A schedule's period file is a dependency, but not data to read
@@ -1197,7 +1337,7 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
     period_file = ".calkit/local/current-periods/1-day-utc.txt"
     assert period_file in stage.to_dvc()["deps"]
     assert "current-periods" not in stage.dvc_cmd
-    assert "'a.json'" in stage.dvc_cmd
+    assert " a.json " in stage.dvc_cmd
 
 
 def test_system_env_can_wrap_a_runtime():

@@ -69,3 +69,39 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         reason = get_missing_reason(tool)
         if reason is not None:
             pytest.skip(reason)
+
+
+@pytest.fixture(scope="session")
+def texlive_user_home(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A Calkit home whose TeX Live store is shared by the tests that build
+    TeX Live environments, so packages download and formats build once per
+    worker. Mark such tests with ``xdist_group("texlive")`` to share it.
+    ``CALKIT_TEST_TEXLIVE_HOME`` names one to keep between runs, as CI
+    does, so the archive is asked only for packages it doesn't have yet.
+
+    Skips if TeX Live's historic archive can't be reached and nothing's
+    been downloaded from it yet.
+    """
+    import requests
+
+    from calkit.environments import texlive
+
+    home = os.environ.get("CALKIT_TEST_TEXLIVE_HOME")
+    if home:
+        os.makedirs(home, exist_ok=True)
+    else:
+        home = str(tmp_path_factory.mktemp("texlive-home"))
+    # Downloaded from before, so it needn't be reachable now
+    tlpdb_dir = os.path.join(home, ".calkit", "texlive", "tlpdb")
+    if os.path.isdir(tlpdb_dir) and os.listdir(tlpdb_dir):
+        return home
+    url = texlive.FROZEN_REPOSITORY_TEMPLATE.format(
+        release=texlive.DEFAULT_RELEASE
+    )
+    try:
+        requests.head(
+            url + "/tlpkg/texlive.tlpdb.xz", timeout=30
+        ).raise_for_status()
+    except requests.RequestException as e:
+        pytest.skip(f"TeX Live's archive can't be reached: {e}")
+    return home

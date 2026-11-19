@@ -2,7 +2,8 @@ name: Run pipeline
 
 # Calkit's own pipeline computes claims in its docs, e.g., the LaTeX image's
 # size, so a pull request that makes one stale gets it rerun and committed
-# back, e.g., the one pinning a newly published image
+# back, e.g., the one pinning a newly published image. The stages that
+# collect data once a day are skipped, since update-data.yml runs them.
 on:
   pull_request:
   workflow_dispatch:
@@ -70,3 +71,8 @@ jobs:
         with:
           # Its Docker environments only pull public images
           login_ghcr: "false"
+          # Those update-data.yml runs, which the Makefile's pr target skips
+          # too; what depends on them still runs, from their last results
+          run_args: >-
+            --skip find-calkit-projects --skip find-calkit-papers
+            --skip traction

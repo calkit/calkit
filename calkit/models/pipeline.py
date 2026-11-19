@@ -35,6 +35,7 @@ from calkit.models.io import (
     PathInput,
     PathOutput,
     ScheduleInput,
+    SlideOutput,
 )
 from calkit.models.iteration import (
     DateRangeIteration,
@@ -84,6 +85,33 @@ def quote_arg(arg: str) -> str:
         return arg
     # Doubled, so a trailing backslash doesn't escape the closing quote
     body = arg.rstrip("\\")
+    return '"' + body + "\\" * 2 * (len(arg) - len(body)) + '"'
+
+
+def quote_literal_arg(arg: str) -> str:
+    """An arg as one word that sh and cmd.exe, which DVC runs stage commands
+    with on Windows, both pass through unchanged, so the command is the same
+    on every platform.
+
+    Double quotes protect everything else in both, so an arg with a
+    character one of them still acts on there is refused rather than
+    passed changed.
+    """
+    if arg and re.fullmatch(r"[\w@%+=:,./-]+", arg):
+        return arg
+    for char in ['"', "$", "`", "\n"]:
+        if char in arg:
+            raise ValueError(
+                f"{arg!r} can't be passed to a shell unchanged on every "
+                f"platform, since it contains {char!r}"
+            )
+    # Trailing backslashes are doubled, which both read back as one each
+    body = arg.rstrip("\\")
+    if "\\\\" in body:
+        raise ValueError(
+            f"{arg!r} can't be passed to a shell unchanged on every "
+            "platform, since it contains consecutive backslashes"
+        )
     return '"' + body + "\\" * 2 * (len(arg) - len(body)) + '"'
 
 
@@ -441,6 +469,7 @@ class Stage(Model):
         "manual-step",
         "inkscape-export",
         "gimp-export",
+        "pptx-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -1614,34 +1643,42 @@ class LatexStage(Stage):
             out_base = target
         return Path(os.path.normpath(out_base)).with_suffix(".pdf").as_posix()
 
-    @property
-    def dvc_cmd(self) -> str:
-        # Quote user-controlled paths/args so spaces or shell metacharacters in
-        # them don't corrupt the compiled DVC command.
-        cmd = (
-            f"calkit latex build -e {shlex.quote(self.environment)} --no-check"
-        )
+    def make_build_args(self) -> list[str]:
+        """Options for ``calkit latex build`` beyond the environment and
+        target, so a build outside the pipeline, e.g., an editor's, can
+        match the stage's.
+        """
+        args = []
         if self.latexmkrc_path is not None:
-            cmd += f" -r {shlex.quote(self.latexmkrc_path)}"
+            args += ["-r", self.latexmkrc_path]
         else:
             # Only drive latexmk's output/aux directories when the user has not
             # supplied a latexmkrc; a CLI -outdir would override the rc's
             # $out_dir. With a latexmkrc, it stays authoritative (and the
             # output_dir drift lint in calkit.pipeline covers mismatches).
             if self.output_dir is not None:
-                cmd += f" --output-dir {shlex.quote(self.output_dir)}"
+                args += ["--output-dir", self.output_dir]
             if self.aux_dir is not None:
-                cmd += f" --aux-dir {shlex.quote(self.aux_dir)}"
+                args += ["--aux-dir", self.aux_dir]
         if self.verbose:
-            cmd += " --verbose"
+            args.append("--verbose")
         if self.force:
-            cmd += " -f"
+            args.append("-f")
         if not self.synctex:
-            cmd += " --no-synctex"
+            args.append("--no-synctex")
         for arg in self.latexmk_args:
-            cmd += f" --latexmk-arg {shlex.quote(arg)}"
-        cmd += f" {shlex.quote(self.target_path)}"
-        return cmd
+            args += ["--latexmk-arg", arg]
+        return args
+
+    @property
+    def dvc_cmd(self) -> str:
+        # Quote user-controlled paths/args so spaces or shell metacharacters in
+        # them don't corrupt the compiled DVC command.
+        return "calkit latex build " + shlex.join(
+            ["-e", self.environment, "--no-check"]
+            + self.make_build_args()
+            + [self.target_path]
+        )
 
     # Project paths the document's components depend on, the files among
     # them it reads copies of, and whether it loads calkit.sty, set by
@@ -1709,8 +1746,13 @@ class LatexStage(Stage):
             ):
                 copied.append(rel)
         # What it includes plainly, e.g., with \includegraphics, is as much
-        # an input, e.g., a figure a stage exports
+        # an input, e.g., a figure a stage exports, except the component
+        # copies, which come after, so the order doesn't depend on whether
+        # they've been written yet
         wdir = self.wdir or ""
+        doc_dir = posixpath.dirname(self.target_path)
+        style_path = posixpath.join(doc_dir, calkit.latex.STYLE_FNAME)
+        copies_dir = posixpath.join(doc_dir, calkit.latex.COMPONENTS_DIR)
         for rel in calkit.latex.detect_inputs(
             self.target_path,
             wdir=os.path.join(project_dir or "", wdir),
@@ -1721,6 +1763,10 @@ class LatexStage(Stage):
                 else lambda p: is_exact_output(posixpath.join(wdir, p))
             ),
         ):
+            if self._loads_calkit and (
+                rel == style_path or rel.startswith(copies_dir + "/")
+            ):
+                continue
             paths.append(posixpath.normpath(posixpath.join(wdir, rel)))
         self._component_paths = list(dict.fromkeys(paths))
         self._copied_paths = list(dict.fromkeys(copied))
@@ -1862,21 +1908,28 @@ class JsonToLatexStage(Stage):
         # Only the declared paths, since what's generated for the stage, e.g.,
         # its setup or schedule period file, isn't data
         for input_path in self.input_paths:
-            cmd += f" '{input_path}'"
+            cmd += f" {quote_literal_arg(input_path)}"
         for out in self.outputs:
             if isinstance(out, str):
                 out_path = out
             elif isinstance(out, PathOutput):
                 out_path = out.path
-            cmd += f" --output '{out_path}'"
+            cmd += f" --output {quote_literal_arg(out_path)}"
         if self.command_name is not None:
-            cmd += f" --command {self.command_name}"
+            cmd += f" --command {quote_literal_arg(self.command_name)}"
         for key in self.keys:
-            cmd += f" --key {shlex.quote(key)}"
-        if self.format is not None:
-            fmt_json = json.dumps(self.format)
-            cmd += f" --format-json '{fmt_json}'"
+            cmd += f" --key {quote_literal_arg(key)}"
+        # One arg per format rather than JSON, whose quotes neither shell's
+        # quoting can carry unchanged on both
+        for name, fmt in (self.format or {}).items():
+            cmd += f" --format {quote_literal_arg(f'{name}={fmt}')}"
         return cmd
+
+    @model_validator(mode="after")
+    def check_args_quotable(self) -> "JsonToLatexStage":
+        # So calkit.yaml says why, rather than the pipeline failing to compile
+        self.dvc_cmd
+        return self
 
     @property
     def dvc_outs(self) -> list[str | dict]:
@@ -2751,6 +2804,121 @@ class GimpExportStage(AppExportStage):
         )
 
 
+class PptxExportStage(AppExportStage):
+    """Figures exported from slides in a PowerPoint file, e.g., PDFs or
+    PNGs, each cropped to what's drawn on it.
+
+    Its environment says which app exports them: LibreOffice in a Docker
+    environment, e.g., one with the ``ghcr.io/calkit/libreoffice`` image,
+    or the app a system environment requires, PowerPoint or LibreOffice.
+    ``_system`` takes whichever is installed, so it can export differently
+    from machine to machine.
+    """
+
+    kind: Literal["pptx-export"] = "pptx-export"
+    source_path: RelativeChildPathString = Field(
+        description="The PowerPoint file to export from."
+    )
+    outputs: list[str | SlideOutput] = Field(  # type: ignore[assignment]
+        default=[],
+        description="Files to export, each with the slide it shows, e.g., "
+        "{path: figures/setup.png, slide: 3}. A PDF without one shows "
+        "every slide.",
+    )
+    dpi: int | None = Field(
+        default=None, description="Resolution of an exported PNG."
+    )
+    trim: bool | None = Field(
+        default=None,
+        description="Crop each slide to what's drawn on it, which it does "
+        "unless a PDF shows several.",
+    )
+
+    @property
+    def slide_outputs(self) -> list[tuple[list[int] | None, str]]:
+        """Each output's slides, or ``None`` for every one, and its path."""
+        outs: list[tuple[list[int] | None, str]] = []
+        for out in self.outputs:
+            if isinstance(out, str) or out.slide is None:
+                outs.append((None, out if isinstance(out, str) else out.path))
+            else:
+                slides = (
+                    [out.slide] if isinstance(out.slide, int) else out.slide
+                )
+                outs.append((list(dict.fromkeys(slides)), out.path))
+        return outs
+
+    @model_validator(mode="after")
+    def _check_one_output(self) -> "PptxExportStage":
+        if not self.outputs:
+            raise ValueError("A slide export has at least one output")
+        return self
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "PptxExportStage":
+        from calkit.export import LIBREOFFICE
+
+        for slides, path in self.slide_outputs:
+            LIBREOFFICE.check(self.source_path, path)
+            if slides is not None and (not slides or min(slides) < 1):
+                raise ValueError("Slides are numbered from 1")
+            if (
+                slides is None or len(slides) != 1
+            ) and not path.lower().endswith(".pdf"):
+                raise ValueError(
+                    f"'{path}' can show one slide, so give it a 'slide'"
+                )
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = ""
+        # A system environment can be another machine, so the command runs
+        # there; any other is where the app runs, which the command reads
+        if self._system_env is not None:
+            if self.inner_environment != self.outer_environment:
+                raise ValueError(
+                    "Slides are exported by the app one environment "
+                    f"provides, not '{self.environment}'"
+                )
+            cmd = self.xenv_cmd + " "
+        cmd += f"calkit export pptx {shlex.quote(self.source_path)}"
+        for slides, path in self.slide_outputs:
+            spec = (
+                path
+                if slides is None
+                else f"{','.join(map(str, slides))}={path}"
+            )
+            cmd += f" -o {shlex.quote(spec)}"
+        if self.dpi is not None:
+            cmd += f" --dpi {self.dpi}"
+        if self.trim is not None:
+            cmd += " --trim" if self.trim else " --no-trim"
+        if self.environment != "_system":
+            cmd += f" --env {shlex.quote(self.environment)}"
+        return cmd
+
+    def run_properties(self) -> dict[str, Any]:
+        # Which app exported it, and its version, from the environment
+        import calkit
+        from calkit.export import (
+            get_slide_exporter,
+            get_slide_exporter_version,
+        )
+
+        exporter, docker_env = get_slide_exporter(
+            self.environment,
+            ck_info=None
+            if self.environment == "_system"
+            else calkit.load_calkit_info(),
+        )
+        return {
+            f"{exporter.name}_version": get_slide_exporter_version(
+                exporter, docker_env
+            )
+        }
+
+
 class MarimoHtmlWasmStage(Stage):
     """A stage that exports a marimo notebook to a WebAssembly app.
 
@@ -3163,6 +3331,7 @@ class Pipeline(Model):
                 | ManualStepStage
                 | InkscapeExportStage
                 | GimpExportStage
+                | PptxExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

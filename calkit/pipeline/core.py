@@ -1086,10 +1086,12 @@ def get_gated_stages(
     checked: dict[str, str | None] = {}
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
-    # The app each export kind needs
+    # The apps that can export each kind
     from calkit.export import exporters
 
-    apps = {e.kind: e for e in exporters()}
+    apps: dict[str, list] = {}
+    for exporter in exporters():
+        apps.setdefault(exporter.kind, []).append(exporter)
 
     def check(key: Any, func: Any) -> tuple[str | None, bool]:
         """Memoize a check, returning its problem and whether it's an error."""
@@ -1282,12 +1284,17 @@ def get_gated_stages(
         if not manual and stage.get("kind") == "manual-step":
             gated[name] = f"needs a manual step: {stage.get('message')}"
             continue
-        if stage.get("kind") in apps:
-            exporter = apps[stage["kind"]]
-            if exporter.find_executable() is None:
+        # An environment other than the system's says what it needs itself
+        if (
+            stage.get("kind") in apps
+            and str(stage.get("environment") or "_system") == "_system"
+        ):
+            candidates = apps[stage["kind"]]
+            if all(e.find_executable() is None for e in candidates):
                 source = stage.get("source_path")
                 gated[name] = (
-                    f"needs {exporter.app} installed to export {source}"
+                    f"needs {' or '.join(e.app for e in candidates)} "
+                    f"installed to export {source}"
                 )
                 continue
         env_names = str(stage.get("environment") or "_system").split(
@@ -2081,6 +2088,62 @@ def get_map_paths_outputs(stage: dict) -> list[str]:
     ]
 
 
+def get_figure_paths_with_origins(ck_info: dict) -> list[str]:
+    """Images calkit.yaml says the origin of, wherever they are: those a
+    stage makes, and those recorded under ``misc`` as imported or created
+    by someone, e.g., a figure exported into a paper's folder. Documents,
+    e.g., a paper's own PDF, aren't figures, nor are copies a ``map-paths``
+    stage makes, or the files a stage's iterations write, which only its
+    runs name.
+    """
+    import calkit.detect
+
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    documents = {
+        str(entry.get("path"))
+        for section in ("publications", "presentations")
+        for entry in ck_info.get(section) or []
+        if isinstance(entry, dict)
+    }
+    copies = [
+        out
+        for stage in stages.values()
+        if isinstance(stage, dict)
+        for out in get_map_paths_outputs(stage)
+    ]
+    candidates: list[object] = []
+    for stage in stages.values():
+        if not isinstance(stage, dict) or stage.get("kind") == "latex":
+            continue
+        for out in stage.get("outputs") or []:
+            candidates.append(
+                out.get("path") if isinstance(out, dict) else out
+            )
+    candidates += [
+        entry.get("path")
+        for entry in ck_info.get("misc") or []
+        if isinstance(entry, dict)
+        and (entry.get("created_by") or entry.get("imported_from"))
+    ]
+    paths: list[str] = []
+    for path in candidates:
+        if not isinstance(path, str) or "{" in path:
+            continue
+        path = posixpath.normpath(path)
+        if (
+            posixpath.splitext(path)[1].lower()
+            in calkit.detect.FIGURE_EXTENSIONS
+            and not any(part.startswith(".") for part in path.split("/"))
+            and path not in documents
+            and not any(
+                path == copy or path.startswith(copy + "/") for copy in copies
+            )
+            and path not in paths
+        ):
+            paths.append(path)
+    return paths
+
+
 def get_map_paths_source(stage: dict, path: str) -> str | None:
     """Where a ``map-paths`` stage copied ``path`` from, both relative to the
     project, so a copy can be followed back to whatever made the original.
@@ -2104,6 +2167,138 @@ def get_map_paths_source(stage: dict, path: str) -> str | None:
         if mapping.kind.startswith("dir-") and target.startswith(out + "/"):
             return posixpath.join(src, target[len(out) + 1 :])
     return None
+
+
+def get_lock_stage_for_output(
+    path: str, dvc_lock: dict, valid_stages: set[str] | None = None
+) -> str | None:
+    """The stage in ``dvc.lock`` that produces ``path``: one that outputs it,
+    or else a folder it's in.
+
+    ``valid_stages`` limits matching to stages in the current pipeline, since
+    dvc.lock keeps entries that no longer are, e.g., a bare name left from
+    before a stage became a matrix, or expansions from an older matrix,
+    which have no status. Those are still used as a last resort, since
+    naming the stage that most likely produced a file beats naming none.
+    """
+    # Whether each is an exact match and a current stage
+    matches: list[tuple[bool, bool, str]] = []
+    for stage_name, stage in (dvc_lock.get("stages") or {}).items():
+        is_valid = valid_stages is None or stage_name in valid_stages
+        for out in (stage or {}).get("outs") or []:
+            out_path = out.get("path") if isinstance(out, dict) else None
+            if not out_path:
+                continue
+            if out_path == path:
+                if is_valid:
+                    return str(stage_name)
+                matches.append((True, False, stage_name))
+            elif path.startswith(out_path.rstrip("/") + "/"):
+                matches.append((False, is_valid, stage_name))
+    if not matches:
+        return None
+    matches.sort(key=lambda m: (not m[0], not m[1]))
+    return matches[0][2]
+
+
+def get_expansion_names(base: str, yaml_stage: dict) -> set[str] | None:
+    """The ``base@...`` stage names DVC generates for a matrix/foreach stage.
+
+    Mirrors DVC's naming: each matrix combination is named by joining its
+    values with ``-``; a scalar value contributes ``str(value)`` while a
+    list/dict value contributes ``{key}{index}`` (so a ``{_arg0: [..dicts..]}``
+    matrix yields ``base@_arg00``, ``base@_arg01``, ...). Returns None when the
+    expansion can't be determined statically (e.g. ``foreach: ${var}``).
+    """
+    matrix = yaml_stage.get("matrix")
+    if isinstance(matrix, dict):
+        keys = list(matrix.keys())
+        value_lists = []
+        for k in keys:
+            v = matrix[k]
+            if not isinstance(v, list):
+                return None
+            value_lists.append(v)
+        names: set[str] = set()
+        for combo in itertools.product(
+            *(range(len(vl)) for vl in value_lists)
+        ):
+            comps = []
+            for j, k in enumerate(keys):
+                val = value_lists[j][combo[j]]
+                if isinstance(val, (dict, list)):
+                    comps.append(f"{k}{combo[j]}")
+                else:
+                    comps.append(str(val))
+            names.add(f"{base}@{'-'.join(comps)}")
+        return names
+    foreach = yaml_stage.get("foreach")
+    if isinstance(foreach, list):
+        return {
+            f"{base}@{v if not isinstance(v, (dict, list)) else i}"
+            for i, v in enumerate(foreach)
+        }
+    if isinstance(foreach, dict):
+        return {f"{base}@{k}" for k in foreach}
+    return None
+
+
+def get_current_expansions(
+    yaml_stages: dict, lock_stages: dict
+) -> dict[str, set[str]]:
+    """Map each matrix/foreach base to the set of ``@`` stage names the current
+    pipeline produces.
+
+    Lets the staleness check drop leftover ``base@...`` lock entries -- old
+    matrix combinations (or an older naming scheme) whose objects were later
+    gc'd, which would otherwise be wrongly flagged stale. Only bases whose
+    computed names actually appear in the lock are returned, so a naming
+    mismatch (e.g. a DVC version change) never causes us to hide a real stage.
+    """
+    lock_names = set(lock_stages)
+    result: dict[str, set[str]] = {}
+    for base, st in yaml_stages.items():
+        if not isinstance(st, dict) or base.startswith("_"):
+            continue
+        if "matrix" not in st and "foreach" not in st:
+            continue
+        names = get_expansion_names(base, st)
+        if names and (names & lock_names):
+            result[base] = names
+    return result
+
+
+def get_live_lock_stages(lock_stages: dict, yaml_stages: dict) -> dict:
+    """The lock entries that are stages of the current pipeline.
+
+    dvc.lock accumulates entries that no longer correspond to anything
+    runnable: stages renamed or removed from dvc.yaml, a bare ``name`` left
+    from before that stage became a matrix, and expansions of matrix
+    combinations that have since changed. dvc/calkit status ignore all of
+    them, so the hub and the provenance a local checkout gives do too.
+    """
+    current_expansions = get_current_expansions(yaml_stages, lock_stages)
+    live: dict = {}
+    for stage_name, lock_stage in lock_stages.items():
+        base = stage_name.split("@")[0]
+        if base.startswith("_"):
+            continue
+        yaml_stage = yaml_stages.get(base)
+        if yaml_stage is None:
+            continue
+        if (
+            isinstance(yaml_stage, dict)
+            and ("matrix" in yaml_stage or "foreach" in yaml_stage)
+            and "@" not in stage_name
+        ):
+            continue
+        if (
+            base in current_expansions
+            and stage_name not in current_expansions[base]
+        ):
+            continue
+        live[stage_name] = lock_stage
+    return live
 
 
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
@@ -2142,6 +2337,122 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
             ):
                 containing = (len(out), str(name))
     return containing[1] if containing else None
+
+
+# What a stage can be named in calkit.yaml
+STAGE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+
+class OutputTakenError(ValueError):
+    """An output another stage already makes."""
+
+
+def get_stage_to_add(
+    stage: dict,
+    ck_info: dict,
+    name: str | None = None,
+    is_tracked: Callable[[str], bool] = lambda path: False,
+) -> tuple[str, dict]:
+    """The name and stage to add to the pipeline for ``stage``, as written
+    in calkit.yaml, checked against the models.
+
+    A taken name gets a number appended; without one, it's named after its
+    first output. An output another stage already makes is refused, and
+    one already in Git, as ``is_tracked`` says, stays there.
+    """
+    from calkit.models.pipeline import Pipeline
+
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    stage = dict(stage)
+    outputs = []
+    for out in stage.get("outputs") or []:
+        raw_path = out["path"] if isinstance(out, dict) else str(out)
+        path = posixpath.normpath(raw_path.replace("\\", "/"))
+        if posixpath.isabs(path) or path == ".." or path.startswith("../"):
+            raise ValueError(f"Invalid output path: {raw_path!r}")
+        producer = get_stage_for_output(path, ck_info)
+        if producer is not None:
+            raise OutputTakenError(f"'{path}' is made by stage '{producer}'")
+        # One in Git stays there, whether given as a path or a mapping,
+        # e.g., a slide's, unless it says where it's stored
+        if not isinstance(out, dict):
+            out = (
+                {"path": path, "storage": "git"} if is_tracked(path) else path
+            )
+        elif "storage" not in out and is_tracked(path):
+            out = out | {"path": path, "storage": "git"}
+        outputs.append(out)
+    if outputs:
+        stage["outputs"] = outputs
+    first = outputs[0] if outputs else None
+    first_path = first["path"] if isinstance(first, dict) else first
+    stem = posixpath.splitext(posixpath.basename(first_path or ""))[0]
+    base_name = name or (
+        re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-") or "figure"
+        if first_path
+        else "stage"
+    )
+    if not STAGE_NAME_RE.fullmatch(base_name or ""):
+        raise ValueError(f"Invalid stage name: {name!r}")
+    stage_name = base_name
+    n = 2
+    while stage_name in stages:
+        stage_name = f"{base_name}-{n}"
+        n += 1
+    # Validated as a one-stage pipeline, for the dispatch on kind
+    try:
+        Pipeline.model_validate({"stages": {stage_name: stage}})
+    except Exception as e:
+        raise ValueError(f"Invalid stage: {e}")
+    return stage_name, stage
+
+
+def write_stage_from_script(
+    plan: dict, ck_info: dict, wdir: str = "."
+) -> list[str]:
+    """Write what ``get_stage_from_script_plan`` planned, as ``calkit xr``
+    would: the stage and any new environment into ``ck_info``, which is
+    left to the caller to write, and the environment's spec and the
+    documents changed to show the output, returning their paths.
+    """
+    from calkit.models.pipeline import Pipeline
+
+    stage_name = plan["stage_name"]
+    # Validated as a one-stage pipeline, for the dispatch on kind
+    try:
+        Pipeline.model_validate({"stages": {stage_name: plan["stage"]}})
+    except Exception as e:
+        raise ValueError(f"Invalid stage: {e}")
+    texts = dict(plan["included"])
+    if plan["environment_spec_path"] and (
+        plan["environment_spec_content"] is not None
+    ):
+        texts[plan["environment_spec_path"]] = plan["environment_spec_content"]
+    # Nothing is written through a symlink that leads out of the project
+    root = os.path.realpath(wdir)
+    for path in texts:
+        real = os.path.realpath(os.path.join(wdir, path))
+        if not real.startswith(root + os.sep):
+            raise ValueError(f"'{path}' leads outside the project")
+    for path, text in texts.items():
+        full = os.path.join(wdir, path)
+        os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+        # Keeping the file's line endings, whatever this system's are
+        newline = "\n"
+        if os.path.isfile(full):
+            with open(full, "rb") as f:
+                newline = "\r\n" if b"\r\n" in f.read() else "\n"
+        with open(full, "w", encoding="utf-8", newline=newline) as f:
+            f.write(text)
+    if plan["environment_is_new"]:
+        ck_info.setdefault("environments", {})[plan["environment"]] = plan[
+            "env"
+        ]
+    pipeline = ck_info.setdefault("pipeline", {})
+    stages = pipeline.get("stages") or {}
+    stages[stage_name] = plan["stage"]
+    pipeline["stages"] = stages
+    return list(texts)
 
 
 def get_output_storage_map(
@@ -2662,6 +2973,7 @@ def to_dvc(
     import calkit.latex
     import calkit.markdown
     import calkit.questions
+    from calkit.cli import warn
     from calkit.environments import (
         COMPOSITE_ENV_SEP,
         SWITCH_KIND,
@@ -2669,11 +2981,32 @@ def to_dvc(
         get_env_input_env_vars,
         get_env_input_paths,
         get_env_lock_fpath,
+        get_guest_envs,
         get_switch_options,
         resolve_env_var,
         write_switch_env_lock,
     )
     from calkit.models.io import EnvVarInput, ScheduleInput
+
+    def get_guest_names(env_name: str) -> list[str]:
+        # Those of the environments a switch picks from too, since a stage
+        # depends on every option's
+        env = environments.get(env_name)
+        if not isinstance(env, dict):
+            return []
+        names = [
+            name for name, _ in get_guest_envs(env_name, env, environments)
+        ]
+        if env.get("kind") == SWITCH_KIND:
+            for option in get_switch_options(env_name, environments):
+                option_env = get_env(option, environments) or {}
+                names += [
+                    name
+                    for name, _ in get_guest_envs(
+                        option, option_env, environments
+                    )
+                ]
+        return list(dict.fromkeys(names))
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -2883,6 +3216,11 @@ def to_dvc(
         used_envs.update(stage.environment_names)
     env_lock_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
+    # Environments composed into one are part of it, so their locks are
+    # inputs to its stages too
+    guest_names = {name: get_guest_names(name) for name in sorted(used_envs)}
+    for names in guest_names.values():
+        used_envs.update(names)
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
@@ -2938,6 +3276,11 @@ def to_dvc(
             ):
                 if source_path not in env_lock_fpaths[env_name]:
                     env_lock_fpaths[env_name].append(source_path)
+    for host_name, names in guest_names.items():
+        for name in names:
+            for lock_path in env_lock_fpaths.get(name, []):
+                if lock_path not in env_lock_fpaths.setdefault(host_name, []):
+                    env_lock_fpaths[host_name].append(lock_path)
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Convert legacy sbatch stages to shell-script + scheduler and rename
     # old `slurm:` stage fields to `scheduler:`, updating calkit.yaml
@@ -2985,6 +3328,8 @@ def to_dvc(
                     names += get_env_input_env_vars(
                         get_env(option, environments) or {}
                     )
+            for guest_name in get_guest_names(env_name):
+                names += get_env_input_env_vars(environments[guest_name])
         stage._env_var_names = sorted(set(names))
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
@@ -3381,6 +3726,14 @@ def to_dvc(
                 for old, new in renames.items()
             }
         dvc_yaml["stages"] = written_stages
+        # A path a stage makes now isn't also added on its own, e.g., a
+        # figure saved with DVC before its stage was, which DVC would refuse
+        for overlap in calkit.dvc.get_stage_output_dvc_files(dvc_stages, wdir):
+            os.remove(os.path.join(wdir or ".", overlap["dvc_file"]))
+            warn(
+                f"Removed {overlap['dvc_file']}, since stage "
+                f"'{overlap['stage']}' makes {overlap['path']} now"
+            )
         dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
         # A project with no stages for DVC needs no dvc.yaml to say so
         if written_stages or os.path.isfile(dvc_yaml_fpath):
@@ -3777,7 +4130,10 @@ def list_artifacts(
         found = calkit.detect.detect_project_artifacts(
             wdir=wdir, ck_info=ck_info
         )
-        for path in found.get(kind, []):
+        found_paths = found.get(kind, [])
+        if kind == "figures":
+            found_paths = found_paths + get_figure_paths_with_origins(ck_info)
+        for path in found_paths:
             if path not in listed:
                 entries.append({"path": path, "detected": True})
                 listed.add(path)

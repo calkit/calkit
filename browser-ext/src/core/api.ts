@@ -1,3 +1,7 @@
+/**
+ * Requests to a hub's API with the signed-in session, renewing its token
+ * before it expires.
+ */
 import type { Hub } from "./hubs";
 import { getCredentials, getCurrentHub, setCredentials } from "./storage";
 

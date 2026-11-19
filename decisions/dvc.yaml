@@ -87,3 +87,52 @@ stages:
     frozen: true
     desc: Automatically generated from the 'time-cli-build' stage in
       calkit.yaml. Changes made here will be overwritten.
+  time-texlive-env:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-texlive-env.py
+      --out=results/texlive-env.json
+    deps:
+      - scripts/time-texlive-env.py
+      - ../calkit/environments/texlive.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/texlive-env.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-texlive-env' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  check-mpl-texlive:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/check-mpl-texlive.py
+      --out=results/mpl-texlive.json
+    deps:
+      - scripts/check-mpl-texlive.py
+      - ../calkit/environments/texlive.py
+      - .calkit/env-locks/mpl-tex.json
+      - .calkit/env-locks/mpl-fonts.json
+      - ../calkit/environments/core.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/mpl-texlive.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'check-mpl-texlive' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  time-latex-build:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-latex-build.py
+      --out=results/latex-build.json
+    deps:
+      - scripts/time-latex-build.py
+      - ../calkit/cli/latex.py
+      - ../calkit/latex.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/latex-build.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-latex-build' stage in
+      calkit.yaml. Changes made here will be overwritten.

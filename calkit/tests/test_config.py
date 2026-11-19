@@ -652,3 +652,13 @@ def test_get_user_author(monkeypatch):
         "orcid": "0000-0002-1825-0097",
     }
     assert config.get_user_author(git_fallback=False)["first_name"] is None
+
+
+def test_read_project_env(tmp_dir, monkeypatch):
+    var = "CALKIT" + config.get_env_suffix(sep="_") + "_DEFAULT_EDITOR"
+    monkeypatch.delenv(var, raising=False)
+    with open(".env", "w") as f:
+        f.write(f"{var}=from-project\n")
+    assert config.read().default_editor == "from-project"
+    # A process working in projects reads only the machine's settings
+    assert config.read(project_env=False).default_editor != "from-project"

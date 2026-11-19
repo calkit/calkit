@@ -1,3 +1,7 @@
+/**
+ * The service worker: signs in, calls hubs and this machine, and answers
+ * requests from content scripts and pages.
+ */
 import { ApiError, NotSignedInError, request } from "../core/api";
 import {
   announceAuthChange,
@@ -6,6 +10,14 @@ import {
   signOut,
 } from "../core/auth";
 import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
+import {
+  askLocal,
+  forgetLocalStatus,
+  getLocalStatus,
+  getLocalSynctexText,
+  LocalError,
+  type LocalJob,
+} from "../core/local";
 import {
   isLoopbackHost,
   resolveHubByWebUrl,
@@ -27,6 +39,7 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  ImportUpdate,
   PipelineRun,
   ProjectPipeline,
   PipelineRuns,
@@ -140,6 +153,79 @@ async function readCalkitYaml(githubRepo: string): Promise<CalkitYamlInfo> {
   return { present: true, hubUrl: hubUrlFromCalkitYaml(await resp.text()) };
 }
 
+// How long whether a project is on this machine is trusted, so each of
+// a page's requests doesn't ask again
+const LOCAL_CHECKOUT_TTL_MS = 30_000;
+const JOB_POLL_MS = 2_000;
+
+interface LocalCheckout {
+  connected: boolean;
+  path: string | null;
+  paths: string[];
+}
+
+const localCheckouts = new Map<
+  string,
+  { at: number; checkout: Promise<LocalCheckout> }
+>();
+
+/**
+ * The checkout of a project on this machine that answers for it instead
+ * of the hub, if the extension is connected to Calkit here and it's
+ * checked out.
+ */
+function getLocalCheckout(project: string): Promise<LocalCheckout> {
+  const cached = localCheckouts.get(project);
+  if (cached && Date.now() - cached.at < LOCAL_CHECKOUT_TTL_MS) {
+    return cached.checkout;
+  }
+  const checkout = (async () => {
+    const status = await getLocalStatus();
+    if (!status.version) {
+      return { connected: false, path: null, paths: [] };
+    }
+    try {
+      const found = await askLocal<{ path: string | null; paths: string[] }>({
+        type: "checkouts.get",
+        project,
+      });
+      return { connected: true, ...found };
+    } catch {
+      return { connected: true, path: null, paths: [] };
+    }
+  })();
+  localCheckouts.set(project, { at: Date.now(), checkout });
+  return checkout;
+}
+
+/** Wait for a job Calkit here started to finish, failing if it did. */
+async function waitForJob(job: LocalJob): Promise<LocalJob> {
+  while (job.status === "queued" || job.status === "running") {
+    await new Promise((resolve) => setTimeout(resolve, JOB_POLL_MS));
+    job = await askLocal<LocalJob>({ type: "job.get", job_id: job.id });
+  }
+  if (job.status === "failed") {
+    throw new LocalError(job.error ?? "It failed", job.error_status);
+  }
+  return job;
+}
+
+function toPipelineRun(job: LocalJob): PipelineRun {
+  return {
+    id: job.id,
+    location: "local",
+    status: job.status,
+    created: job.created,
+    started: job.started,
+    finished: job.finished,
+    git_rev: job.git_rev,
+    branch: job.branch,
+    error: job.error,
+    output: job.output,
+    progress: job.progress ?? null,
+  };
+}
+
 /** The hub a message names, or the configured one. */
 function hubFor(message: { hubUrl?: string }): Hub | undefined {
   return message.hubUrl ? resolveHubByWebUrl(message.hubUrl) : undefined;
@@ -246,11 +332,30 @@ async function handle(
           hub: hubFor(message),
         },
       );
-    case "project.contentPaths":
+    case "project.contentPaths": {
+      // As they are on this machine, when it's here, including files not
+      // saved yet, e.g., a script just written
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<string[]>({
+          type: "project.contentPaths",
+          project: local,
+        });
+      }
       return request<string[]>(
         `${projectPath(message.owner, message.project)}/contents-paths`,
       );
+    }
     case "project.figures": {
+      // As they are on this machine, when it's here, including ones not
+      // pushed yet
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<FiguresPage>({
+          type: "project.figures",
+          project: local,
+        });
+      }
       // The hub pages at most 100 figures, so gather paths and titles only
       const items: FiguresPage["items"] = [];
       let total = 0;
@@ -278,12 +383,44 @@ async function handle(
       return request<Result[]>(
         `${projectPath(message.owner, message.project)}/results`,
       );
-    case "project.provenance":
+    case "project.provenance": {
+      // As it is on this machine, when it's here, including what isn't
+      // pushed yet
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<Provenance>({
+          type: "project.provenance",
+          project: local,
+          path: message.path,
+          key: message.key,
+        });
+      }
       return request<Provenance>(
         `${projectPath(message.owner, message.project)}/provenance`,
         { query: { path: message.path, key: message.key } },
       );
-    case "project.stageFromScriptOrNotebook":
+    }
+    case "project.stageFromScriptOrNotebook": {
+      // Made from the script on this machine, and committed there, when
+      // the project's here
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        // Reading the script can take as long as calkit xr allows it, and
+        // a save reads it again before committing
+        return askLocal<StageFromScriptOrNotebookResponse>(
+          {
+            type: "project.stageFromScriptOrNotebook",
+            project: local,
+            scriptPath: message.scriptPath,
+            content: message.content,
+            shows: message.shows,
+            produces: message.produces,
+            data: message.data ?? [],
+            save: message.save ?? false,
+          },
+          5 * 60 * 1000,
+        );
+      }
       return request<StageFromScriptOrNotebookResponse>(
         `${projectPath(message.owner, message.project)}` +
           "/pipeline/stages/from-script-or-notebook",
@@ -299,7 +436,19 @@ async function handle(
           },
         },
       );
-    case "project.recordOrigin":
+    }
+    case "project.recordOrigin": {
+      // Recorded and committed on this machine when the project's here
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<{ path: string }>({
+          type: "project.recordOrigin",
+          project: local,
+          path: message.path,
+          importedFrom: message.importedFrom,
+          createdBy: message.createdBy,
+        });
+      }
       // Recorded as a misc artifact, which the hub only takes for a path
       // nothing else declares
       return request<{ path: string }>(
@@ -314,20 +463,83 @@ async function handle(
           },
         },
       );
-    case "project.pipeline":
+    }
+    case "project.updateImport":
+      return request<ImportUpdate>(
+        `${projectPath(message.owner, message.project)}/imports/update`,
+        { method: "POST", body: { path: message.path } },
+      );
+    case "project.pipeline": {
+      // As it is on this machine, when it's here, rather than as pushed
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        return askLocal<ProjectPipeline>({ type: "project.pipeline", project });
+      }
       return request<ProjectPipeline>(
         `${projectPath(message.owner, message.project)}/pipeline`,
       );
-    case "project.pipelineRuns":
+    }
+    case "project.pipelineRuns": {
+      // Run on this machine when it's here, rather than on GitHub Actions
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        const jobs = await askLocal<LocalJob[]>({
+          type: "jobs.list",
+          project,
+          kind: "run",
+        });
+        const active = jobs.some(
+          (j) => j.status === "queued" || j.status === "running",
+        );
+        return {
+          runs: jobs.map(toPipelineRun),
+          total: jobs.length,
+          github_workflow: null,
+          can_start: !active,
+          cannot_start_reason: active
+            ? "The pipeline is already running on this machine"
+            : null,
+        } satisfies PipelineRuns;
+      }
       return request<PipelineRuns>(
         `${projectPath(message.owner, message.project)}/pipeline/runs`,
       );
-    case "project.startPipelineRun":
+    }
+    case "project.pipelineRunLog":
+      // Only runs on this machine keep a log here; GitHub has the others'
+      return askLocal<{ log: string }>({
+        type: "job.log",
+        job_id: message.runId,
+      });
+    case "project.startPipelineRun": {
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        return toPipelineRun(
+          await askLocal<LocalJob>({
+            type: "job.start",
+            kind: "run",
+            project,
+            sync: message.sync ?? true,
+          }),
+        );
+      }
       return request<PipelineRun>(
         `${projectPath(message.owner, message.project)}/pipeline/runs`,
         { method: "POST", body: { location: "github-actions" } },
       );
-    case "project.addExportStage":
+    }
+    case "project.addExportStage": {
+      const local = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(local)).path) {
+        return askLocal<ExportStage>({
+          type: "project.addExportStage",
+          project: local,
+          source: message.source,
+          output: message.output,
+          app: message.app || null,
+          files: message.files ?? [],
+        });
+      }
       return request<ExportStage>(
         `${projectPath(message.owner, message.project)}/pipeline/stages/export`,
         {
@@ -340,14 +552,29 @@ async function handle(
           },
         },
       );
+    }
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });
     case "content.dataUrl":
       // The viewer page shows PDFs and notebooks too, which run
       // larger than an inline preview ever would
       return fetchDataUrl(message.url, { maxBytes: MAX_VIEWER_BYTES });
-    case "overleaf.lookup":
-      return request<OverleafLookup>(
+    case "overleaf.lookup": {
+      // Calkit here knows its checkouts' Overleaf projects without the hub
+      if ((await getLocalStatus()).version) {
+        try {
+          const found = await askLocal<OverleafLookup>({
+            type: "overleaf.lookup",
+            overleaf_project_id: message.overleafProjectId,
+          });
+          if (found.links.length) {
+            return found;
+          }
+        } catch {
+          // The hub may know it
+        }
+      }
+      const lookup = await request<OverleafLookup>(
         `/user/overleaf-syncs/${encodeURIComponent(message.overleafProjectId)}`,
         {
           query: {
@@ -356,7 +583,41 @@ async function handle(
           },
         },
       );
-    case "overleaf.status":
+      // One the hub knows may be checked out here, e.g., without its
+      // Overleaf link pulled yet
+      await Promise.all(
+        lookup.links.map(async (link) => {
+          link.local_path = (
+            await getLocalCheckout(
+              `${link.project_owner_name}/${link.project_name}`,
+            )
+          ).path;
+        }),
+      );
+      return lookup;
+    }
+    case "overleaf.status": {
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        const local = await askLocal<OverleafSyncStatus[]>({
+          type: "overleaf.status",
+          project,
+          overleaf_project_id: message.overleafProjectId,
+          path: message.path,
+          pull: message.pull ?? true,
+          overleaf_files: message.overleafFiles,
+          overleaf_texts: message.overleafTexts,
+        }).catch((e) => {
+          if (/isn't synced with Overleaf/.test(String(e?.message ?? e))) {
+            return null;
+          }
+          throw e;
+        });
+        // Unless the checkout here hasn't pulled a link the hub knows of
+        if (local?.length) {
+          return local;
+        }
+      }
       return request<OverleafSyncStatus[]>(
         `${projectPath(message.owner, message.project)}/overleaf-syncs/status`,
         {
@@ -366,11 +627,26 @@ async function handle(
           },
         },
       );
-    case "overleaf.sync":
+    }
+    case "overleaf.sync": {
+      // With 'calkit overleaf sync' in the checkout here
+      const project = `${message.owner}/${message.project}`;
+      if ((await getLocalCheckout(project)).path) {
+        const job = await waitForJob(
+          await askLocal<LocalJob>({
+            type: "job.start",
+            kind: "sync",
+            project,
+            path: message.path,
+          }),
+        );
+        return job.result as unknown as OverleafSyncResponse;
+      }
       return request<OverleafSyncResponse>(
         `${projectPath(message.owner, message.project)}/overleaf-syncs`,
         { method: "POST", body: { path: message.path } },
       );
+    }
     case "overleaf.setToken": {
       const saved = await request<{ message: string }>("/user/overleaf-token", {
         method: "PUT",
@@ -494,8 +770,160 @@ async function handle(
           body: { path: message.path, notes: message.notes },
         },
       );
+    case "local.status":
+      return getLocalStatus();
+    case "local.openProject":
+      return askLocal({
+        type: "project.open",
+        project: message.project,
+        path: message.path,
+      });
+    case "local.projectStatus":
+      return askLocal({ type: "project.status", project: message.project });
+    case "local.publicationSource":
+      return askLocal({
+        type: "publication.source",
+        project: message.project,
+        folder: message.folder,
+        path: message.path,
+      });
+    case "local.chooseFolder":
+      // However long someone takes to choose
+      return askLocal(
+        { type: "folder.choose", prompt: message.prompt },
+        30 * 60 * 1000,
+      );
+    case "local.publicationSynctex":
+      return getLocalSynctexText(message.project, message.folder);
+    case "local.openOptions":
+      await chrome.runtime.openOptionsPage();
+      return null;
+    case "local.installEditor":
+      await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "install-editor",
+          project: message.project,
+        }),
+      );
+      // So it's known to be installed now
+      forgetLocalStatus();
+      return null;
+    case "local.checkout":
+      return getLocalCheckout(message.project);
+    case "local.chooseCheckout": {
+      const chosen = await askLocal<{ path: string; paths: string[] }>({
+        type: "checkouts.choose",
+        project: message.project,
+        path: message.path,
+      });
+      localCheckouts.delete(message.project);
+      return chosen;
+    }
+    case "project.moveExternalData":
+      return askLocal({
+        type: "project.moveExternalData",
+        project: `${message.owner}/${message.project}`,
+        scriptPath: message.scriptPath,
+        external: message.external,
+        dest: message.dest,
+      });
+    case "project.originSuggestions": {
+      // Read from the scripts on this machine, when the project's here
+      const local = `${message.owner}/${message.project}`;
+      if (!(await getLocalCheckout(local)).path) {
+        return [];
+      }
+      return askLocal({
+        type: "project.originSuggestions",
+        project: local,
+        path: message.path,
+      });
+    }
+    case "local.save":
+      await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "save",
+          project: message.project,
+        }),
+      );
+      return null;
+    case "local.createProject": {
+      const job = await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "create",
+          project: `${message.owner}/${message.name}`,
+          location: message.folder,
+          hub: message.hubUrl,
+          title: message.title,
+          overleafProjectUrl: message.overleafProjectUrl,
+          path: message.path,
+          docKind: message.kind,
+          isPublic: message.isPublic,
+        }),
+      );
+      const made = job.result as { path: string; project: string };
+      localCheckouts.delete(made.project);
+      return made;
+    }
+    case "local.clone": {
+      const job = await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "clone",
+          project: message.project,
+          location: message.location,
+        }),
+      );
+      // Found from now on, so the hub stops answering for it
+      localCheckouts.delete(message.project);
+      return { path: (job.result as { path: string }).path };
+    }
   }
 }
+
+// Installing, updating, or reloading the extension cuts off the scripts in
+// tabs already open, e.g., Overleaf, or never put them there, so new ones
+// are put in rather than leaving those tabs needing a refresh
+chrome.runtime.onInstalled.addListener((details) => {
+  // A Chrome update leaves the extension, and so its scripts, running
+  if (details.reason !== "install" && details.reason !== "update") {
+    return;
+  }
+  void (async () => {
+    for (const script of chrome.runtime.getManifest().content_scripts ?? []) {
+      // Scripts in the page's own world don't depend on the extension, so
+      // after a reload or update they're still running, but after the
+      // first install they were never put in
+      const main = (script as { world?: string }).world === "MAIN";
+      if ((main && details.reason !== "install") || !script.js) {
+        continue;
+      }
+      for (const tab of await chrome.tabs.query({ url: script.matches })) {
+        if (tab.id !== undefined) {
+          await chrome.scripting
+            .executeScript({
+              target: { tabId: tab.id },
+              files: script.js,
+              world: main ? "MAIN" : "ISOLATED",
+            })
+            .catch(() => undefined);
+        }
+      }
+    }
+  })();
+});
+
+// Back from the reload the options page asks for once the extension may
+// reach Calkit on this machine
+void chrome.storage.local.get("reopenOptions").then(({ reopenOptions }) => {
+  if (reopenOptions) {
+    void chrome.storage.local.remove("reopenOptions");
+    void chrome.runtime.openOptionsPage();
+  }
+});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Only this extension's own pages and content scripts may drive the API.
@@ -514,7 +942,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         notSignedIn: e instanceof NotSignedInError,
         // Carried across so a surface can tell a hub that lacks an endpoint
         // from one that answered with a real error
-        status: e instanceof ApiError ? e.status : undefined,
+        status:
+          e instanceof ApiError || e instanceof LocalError
+            ? e.status
+            : undefined,
       } as Envelope<unknown>);
     });
   // Keep the message channel open for the async response above

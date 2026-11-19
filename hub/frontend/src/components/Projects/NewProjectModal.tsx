@@ -540,7 +540,7 @@ function NewProjectForm({
       {!isExisting ? (
         <FormControl mb={6}>
           <Checkbox {...register("is_public")} colorScheme="teal">
-            Make it public
+            Make public
           </Checkbox>
         </FormControl>
       ) : null}

@@ -31,6 +31,7 @@ from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
     STAGE_OUTPUT_START,
     STAGE_RUNS_FPATH,
+    _get_matplotlib_font_warnings_by_stage,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
     _prune_run_logs,
@@ -1997,6 +1998,35 @@ def test_run_downstream(tmp_dir):
     )
     assert os.path.exists("a.txt")
     assert os.path.exists("b.txt")
+    # An inline subproject's pipeline doesn't run in full alongside
+    os.makedirs("sub")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "other": {
+                            "kind": "shell-command",
+                            "command": "echo other > other.txt",
+                            "environment": "_system",
+                            "outputs": [
+                                {"path": "other.txt", "storage": "git"}
+                            ],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f) or {}
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(
+        ["calkit", "run", "--downstream", "stage-a", "--force"]
+    )
+    assert not os.path.exists("sub/other.txt")
 
 
 def test_stage_run_info_from_log_content():
@@ -3121,6 +3151,25 @@ def test_run_captures_stage_logs(tmp_dir):
     stage_info = _read_only_run_info()["stages"]["test_stage"]
     assert stage_info["status"] == "completed"
     assert stage_info["end_time"] >= stage_info["start_time"]
+    assert "fallback font" not in res.stdout
+    # A font Matplotlib couldn't find is reported once the run is done,
+    # whether or not the stage failed
+    for exit_code in [0, 1]:
+        with open("stage_script.py", "w") as f:
+            f.write(
+                "import logging, sys\n"
+                "log = logging.getLogger('matplotlib.font_manager')\n"
+                "for _ in range(3):\n"
+                "    log.warning(\"findfont: Font family 'Arial' not "
+                'found.")\n'
+                f"sys.exit({exit_code})\n"
+            )
+        res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+        assert res.returncode == exit_code
+        warning = res.stdout.split("Matplotlib in stage 'test_stage'")[-1]
+        assert warning.startswith(" used a fallback font")
+        assert warning.count("Font family 'Arial' not found") == 1
+        assert "not found; see https://docs.calkit.org/" in warning
 
 
 def test_run_captures_stage_logs_failure(tmp_dir):
@@ -3289,6 +3338,50 @@ def test_stage_stdout_from_log_content():
     # A skipped stage produced no output this run, so it must not be
     # listed---its block should keep what it has
     assert "other" not in res
+
+
+def test_get_matplotlib_font_warnings_by_stage() -> None:
+    log = "\n".join(
+        [
+            "2025-01-01T00:00:00 - INFO - Running stage 'plot':",
+            STAGE_OUTPUT_START,
+            # Logged once per text drawn, and reported once
+            "findfont: Font family 'Arial' not found.",
+            "findfont: Font family 'Arial' not found.",
+            "findfont: Generic family 'sans-serif' not found because none "
+            "of the following families were found: Arial, Helvetica",
+            # A script's own logging format, and Matplotlib's other
+            # message, reported once per family whichever form says it
+            "WARNING:matplotlib.font_manager:findfont: Font family "
+            "['Arial'] not found. Falling back to DejaVu Sans.",
+            "findfont: Font family ['Times New Roman'] not found. Falling "
+            "back to DejaVu Sans.",
+            "findfont: Font family 'Times New Roman' not found.",
+            # Papermill's progress bar can share the line
+            "Executing:   0%|   | 0/1 [00:00<?, ?cell/s]findfont: Font "
+            "family 'CMU Serif' not found.",
+            "findfont: score(FontEntry(name='DejaVu Sans')) = 0.05",
+            STAGE_OUTPUT_END,
+            "2025-01-01T00:00:01 - INFO - Running stage 'clean':",
+            STAGE_OUTPUT_START,
+            "Font family 'Arial' not found, but not from Matplotlib",
+            STAGE_OUTPUT_END,
+            # Matplotlib's messages from DVC itself aren't a stage's
+            "2025-01-01T00:00:02 - WARNING - findfont: Font family 'X' "
+            "not found.",
+        ]
+    )
+    assert _get_matplotlib_font_warnings_by_stage(log) == {
+        "plot": [
+            "Font family 'Arial' not found",
+            "Generic family 'sans-serif' not found because none of the "
+            "following families were found: Arial, Helvetica",
+            "Font family ['Times New Roman'] not found. Falling back to "
+            "DejaVu Sans",
+            "Font family 'CMU Serif' not found",
+        ]
+    }
+    assert _get_matplotlib_font_warnings_by_stage("") == {}
 
 
 def test_run_refuses_outside_a_project(tmp_dir):
@@ -3834,6 +3927,69 @@ def test_xenv_env_var(tmp_dir):
     assert "KEY=VALUE" in proc.stderr
 
 
+@pytest.mark.xdist_group("texlive")
+def test_xenv_composed_env(tmp_dir, texlive_user_home, monkeypatch):
+    from calkit.cli.main import run_in_env
+    from calkit.environments import texlive
+
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    monkeypatch.delenv("FONTCONFIG_FILE", raising=False)
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "tex": {"kind": "texlive"},
+        "py": {"kind": "uv-venv", "path": "requirements.txt", "with": ["tex"]},
+    }
+    calkit.save_calkit_info(ck_info)
+    view_dir = texlive.check("tex", ck_info["environments"]["tex"])
+    bin_dir = os.path.join(view_dir, "bin", texlive.get_platform())
+    show = (
+        "import os, shutil; print(shutil.which('kpsewhich')); "
+        "print(os.environ['MPLCONFIGDIR']); "
+        "print(os.environ['PATH'].split(os.pathsep).index(os.path.dirname("
+        "shutil.which('python'))))"
+    )
+
+    def run(*args: str) -> list[str]:
+        return subprocess.check_output(
+            ["calkit", "xenv", "-n", "py", *args, "--", "python", "-c", show],
+            text=True,
+        ).splitlines()[-3:]
+
+    # The command gets the guest's programs after the host's own, and
+    # Matplotlib a config directory of its own
+    kpsewhich, mplconfigdir, python_index = run()
+    assert os.path.dirname(kpsewhich) == bin_dir
+    assert mplconfigdir.startswith(
+        os.path.join(texlive_user_home, ".calkit", "composed")
+    )
+    assert python_index == "0"
+    # This process isn't changed, which matters in a long-lived one, e.g.,
+    # Jupyter's server
+    path = os.environ["PATH"]
+    run_in_env(cmd=["python", "-c", "pass"], env_name="py")
+    assert os.environ["PATH"] == path
+    assert "FONTCONFIG_FILE" not in os.environ
+    # What the project and --env-var set wins
+    ck_info["env_vars"] = {"MPLCONFIGDIR": "from-project"}
+    calkit.save_calkit_info(ck_info)
+    assert run()[1] == "from-project"
+    assert run("--env-var", "MPLCONFIGDIR=from-cli")[1] == "from-cli"
+    # One that can't be composed is said so
+    ck_info["environments"]["py"]["with"] = ["nope"]
+    calkit.save_calkit_info(ck_info)
+    proc = subprocess.run(
+        ["calkit", "xenv", "-n", "py", "--", "python", "-c", "pass"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "Environment 'py' has 'nope' in 'with'" in proc.stderr
+    assert "Environment 'py': Environment" not in proc.stderr
+
+
 def test_add_says_why_git_refused(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     with open(".gitignore", "w") as f:
@@ -4143,6 +4299,81 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
         assert f.read().split() == ["second", "second"]
 
 
+def test_run_skip(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    period_file = ".calkit/local/current-periods/1-day-utc.txt"
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": f"cat {period_file} > data.txt",
+                    "environment": "_system",
+                    "inputs": [{"kind": "schedule", "period": "1 day"}],
+                    "outputs": [{"path": "data.txt", "storage": "git"}],
+                },
+                "use": {
+                    "kind": "shell-command",
+                    "command": "cat data.txt > result.txt",
+                    "environment": "_system",
+                    "inputs": ["data.txt"],
+                    "outputs": [{"path": "result.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ) | {"CALKIT_NOW": "2026-10-20T08:00:00Z"}
+    subprocess.check_call(["calkit", "run"], env=env)
+    # The next day, a skipped stage keeps its output, what depends on it
+    # still runs from that, and even --strict doesn't fail on it
+    env["CALKIT_NOW"] = "2026-10-21T08:00:00Z"
+    ck_info["pipeline"]["stages"]["use"]["command"] = (
+        "cat data.txt data.txt > result.txt"
+    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open(STAGE_RUNS_FPATH) as f:
+        fetch_run = json.load(f)["fetch"]
+    res = subprocess.run(
+        ["calkit", "run", "--skip", "fetch", "--strict"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "Skipped out-of-date stage 'fetch' as requested" in res.stdout
+    assert "successfully" in res.stdout
+    assert "can't run" not in res.stdout + res.stderr
+    with open("data.txt") as f:
+        assert f.read().strip() == "2026-10-20"
+    with open("result.txt") as f:
+        assert f.read().split() == ["2026-10-20", "2026-10-20"]
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f)["fetch"] == fetch_run
+    runs = sorted(os.listdir(os.path.join(".calkit", "local", "runs")))
+    with open(os.path.join(".calkit", "local", "runs", runs[-1])) as f:
+        run_info = json.load(f)
+    assert run_info["stages"]["fetch"]["status"] == "skipped"
+    assert "fetch" not in run_info.get("gated", {})
+    # It stays out of date, so a run without the skip catches it up
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "fetch" in out
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("result.txt") as f:
+        assert f.read().split() == ["2026-10-21", "2026-10-21"]
+    # A stage that isn't there is an error rather than nothing skipped
+    res = subprocess.run(
+        ["calkit", "run", "--skip", "fetchh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "No stage to skip named: fetchh" in res.stdout + res.stderr
+
+
 def test_run_offers_requirements_of_stages_that_would_run(
     tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4257,6 +4488,16 @@ def test_run_offers_requirements_of_stages_that_would_run(
         res = runner.invoke(calkit_app, args, input="\n")
         assert res.exit_code != 0
         assert "'fetch' is out of date and couldn't run" in res.output
+    # Nor is anything asked for stages skipped by name, which stay skipped
+    res = runner.invoke(
+        calkit_app,
+        ["run", "--skip", "fetch", "--skip", "fetch2"],
+        input="third\n",
+    )
+    assert res.exit_code == 0, res.output
+    assert "Missing env var" not in res.output
+    with open("data.txt") as f:
+        assert f.read().strip() == "second"
     # Without a terminal nothing is asked
     monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
     res = runner.invoke(calkit_app, ["run"], input="third\n")
@@ -4862,3 +5103,32 @@ def test_clone(monkeypatch):
     assert "doesn't match" in result.output and not hubs
     result = clone("a/b/c/d")
     assert "HUB/OWNER/NAME" in result.output and not hubs
+
+
+def test_run_untracks_git_tracked_outputs(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # A figure imported, e.g., from Overleaf, before a stage made it
+    with open("fig.txt", "w") as f:
+        f.write("imported\n")
+    subprocess.check_call(["git", "add", "fig.txt"])
+    subprocess.check_call(["git", "commit", "-qm", "Import figure"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo made > fig.txt",
+                "outputs": ["fig.txt"],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    result = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Stopped tracking fig.txt with Git" in result.stdout + result.stderr
+    assert not subprocess.check_output(
+        ["git", "ls-files", "--", "fig.txt"], text=True
+    ).strip()
+    with open("fig.txt") as f:
+        assert f.read() == "made\n"

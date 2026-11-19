@@ -100,8 +100,9 @@ def get_set_upstream_args(
     ``push.autoSetupRemote`` is on, so the first push of a project, e.g.,
     right after connecting it to a hub, would fail. Returns nothing when
     the branch already tracks one, ``push_args`` say what or where to
-    push, Git pushes to a remote other than the one it pulls from, or
-    there's no obvious remote to choose.
+    push, Git pushes to a remote other than the one it pulls from, the
+    remote's push refspecs say what to push, or there's no obvious remote
+    to choose.
     """
 
     def get_config(key: str) -> str:
@@ -153,6 +154,10 @@ def get_set_upstream_args(
     elif len(remote_names) == 1:
         remote = remote_names[0]
     else:
+        return []
+    # Git pushes what the remote's push refspecs say, which naming the
+    # branch would override
+    if get_config(f"remote.{remote}.push"):
         return []
     return ["--set-upstream", remote, branch.name]
 

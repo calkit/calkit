@@ -1799,6 +1799,34 @@ def test_check_switch_env(tmp_dir):
         assert set(json.load(f)["machine_locks"]) == {"a"}
 
 
+def test_check_pixi_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("env")
+    with open("env/pixi.toml", "w") as f:
+        f.write(
+            "[workspace]\n"
+            'name = "test"\n'
+            'channels = ["conda-forge"]\n'
+            'platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]\n'
+            "[feature.extra.dependencies]\n"
+            "[environments]\n"
+            'named = ["extra"]\n'
+        )
+    env = {"kind": "pixi", "path": "env/pixi.toml"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"px": env}}, f)
+    # Without a name, pixi installs the manifest's default env
+    subprocess.check_call(["calkit", "check", "env", "-n", "px"])
+    assert os.listdir("env/.pixi/envs") == ["default"]
+    # With one, it installs that env, as stages run it
+    shutil.rmtree("env/.pixi")
+    env["name"] = "named"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"px": env}}, f)
+    subprocess.check_call(["calkit", "check", "env", "-n", "px"])
+    assert os.listdir("env/.pixi/envs") == ["named"]
+
+
 def test_check_stage_runs(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {
@@ -1931,6 +1959,49 @@ def test_check_stage_runs(tmp_dir):
     res = subprocess.run(check, capture_output=True, text=True)
     assert "Stage 'tools/dvc.yaml:t' has changed in dvc.lock" in res.stdout
     subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:t"])
+    # Like DVC, it ignores the entries of stages no longer in the pipeline,
+    # each foreach item by its own name, and still checks the rest
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "t": {"cmd": "echo t > t.txt", "outs": ["t.txt"]},
+                    "f": {
+                        "foreach": ["x", "y"],
+                        "do": {"cmd": "echo ${item} > ${item}.txt"},
+                    },
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(check)
+    with open(os.path.join("tools", "dvc.yaml")) as f:
+        tools_dvc_yaml = calkit.ryaml.load(f)
+    tools_dvc_yaml["stages"]["f"]["foreach"] = ["x"]
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(tools_dvc_yaml, f)
+    ck_info["pipeline"]["stages"].pop("b")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "status"])
+    assert "b" in calkit.dvc.read_lock_stages()
+    assert "f@y" in calkit.dvc.read_lock_stages("tools")
+    stage_runs = calkit.read_stage_runs()
+    del stage_runs["b"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    tools_runs = calkit.read_stage_runs("tools")
+    del tools_runs["f@x"], tools_runs["f@y"]
+    with open(os.path.join("tools", calkit.STAGE_RUNS_FPATH), "w") as f:
+        json.dump(tools_runs, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Stage 'tools/dvc.yaml:f@x' has no recorded run" in res.stdout
+    assert "f@y" not in res.stdout
+    assert "'b'" not in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:f@x"])
+    subprocess.check_call(check)
     # One inside a DVC repo of its own isn't, since its wrapper stage runs
     # it without recording its stages
     os.makedirs(os.path.join("iso", ".dvc"))
@@ -2246,3 +2317,25 @@ def test_check_references(tmp_dir):
     )
     assert result.returncode != 0
     assert "ghost" in result.stdout + result.stderr
+
+
+def test_check_storage_stage_output_dvc_file(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("fig.png", "w") as f:
+        f.write("old")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "fig.png"])
+    subprocess.check_call(["git", "commit", "-qm", "Add figure"])
+    # A stage that makes it now, in a dvc.yaml compiled elsewhere
+    with open("dvc.yaml", "w") as f:
+        f.write("stages:\n  plot:\n    cmd: x\n    outs:\n    - fig.png\n")
+    result = subprocess.run(
+        ["calkit", "check", "storage"], capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "made by stage 'plot'" in result.stderr + result.stdout
+    subprocess.check_call(["calkit", "check", "storage", "--fix"])
+    assert not os.path.isfile("fig.png.dvc")
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).split()
+    assert "fig.png.dvc" in staged

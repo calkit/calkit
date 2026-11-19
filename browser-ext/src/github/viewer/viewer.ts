@@ -1,10 +1,6 @@
-import { send } from "../core/messages";
-import { clear, el, errorMessage, loading } from "../core/ui";
-
-const app = document.getElementById("app") as HTMLElement;
-
 /**
- * A page for looking at a DVC-tracked artifact.
+ * A page for looking at a DVC-tracked artifact, on its own or as one side of
+ * a pull request's diff.
  *
  * This exists because the panel can't do it. A panel lives in the host
  * page's DOM, so that page's content security policy decides what it may
@@ -12,6 +8,11 @@ const app = document.getElementById("app") as HTMLElement;
  * needs. An extension page carries its own policy, so the artifact can
  * simply be rendered.
  */
+import { send } from "../../core/messages";
+import { clear, el, errorMessage, loading } from "../../core/ui";
+
+const app = document.getElementById("app") as HTMLElement;
+
 type Kind = "image" | "pdf" | "html" | "text" | "plotly" | "other";
 
 function kindFor(path: string): Kind {

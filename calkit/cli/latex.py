@@ -1816,7 +1816,8 @@ def diff(
             )
             if not os.path.isfile(side):
                 raise_error(f"{tex_file} does not exist at {ref}")
-            sides[name] = side
+            # POSIX, since latexdiff may run in a Linux container
+            sides[name] = Path(side).as_posix()
         # The working tree already has its DVC-tracked files, if pulled
         head_root = checkouts.get("head", ".")
         context: list[str] = []
@@ -1844,7 +1845,7 @@ def diff(
         if "head" not in checkouts:
             shutil.rmtree(working_copy, ignore_errors=True)
             copy_working_sources(working_copy)
-            sides["head"] = os.path.join(working_copy, tex_file)
+            sides["head"] = Path(working_copy, tex_file).as_posix()
             prepared.append(working_copy)
         for root in prepared:
             break_verbatim_params(root)
@@ -2161,7 +2162,7 @@ def _build_diff(
         # User pass-through args come last so they can override Calkit's
         # defaults
         latexmk_cmd += latexmk_args
-        latexmk_cmd.append(diff_tex_fpath)
+        latexmk_cmd.append(Path(diff_tex_fpath).as_posix())
         tex_env_vars = _tex_env_vars(
             calkit.latex.get_source_date_epoch(tex_file_fpath)
         )

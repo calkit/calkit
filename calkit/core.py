@@ -1290,6 +1290,38 @@ def is_wsl() -> bool:
         return False
 
 
+def is_terminal(stream: Any) -> bool:
+    """True when a stream is a terminal.
+
+    On Windows, ``isatty`` is also true of the NUL device, which is what a
+    child given ``subprocess.DEVNULL`` reads, so only a stream with a console
+    mode counts there.
+    """
+    try:
+        if not stream.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetConsoleMode.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    mode = wintypes.DWORD()
+    return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
 def is_mintty(stream: Any) -> bool:
     """True when a stream is a Git Bash or Cygwin (mintty) terminal.
 

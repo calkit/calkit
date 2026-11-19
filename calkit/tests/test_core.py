@@ -208,6 +208,18 @@ def test_is_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
             assert calkit.core.is_wsl() is expected, (version, container)
 
 
+def test_is_terminal() -> None:
+    from unittest import mock
+
+    # Windows says the NUL device is a TTY, which isn't a terminal
+    with open(os.devnull) as f:
+        assert not calkit.core.is_terminal(f)
+    assert not calkit.core.is_terminal(object())
+    assert not calkit.core.is_terminal(mock.Mock(isatty=lambda: False))
+    if sys.platform != "win32":
+        assert calkit.core.is_terminal(mock.Mock(isatty=lambda: True))
+
+
 def test_is_mintty() -> None:
     import sys
 

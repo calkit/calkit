@@ -953,7 +953,7 @@ def _commit(message: str) -> None:
     )
 
 
-def test_latex_diff_setup(tmp_dir):
+def test_latex_diff_setup(tmp_dir, monkeypatch):
     # Everything up to running latexdiff itself, which needs TeX Live and
     # so can't run in CI: which revision gets compared, and that the
     # worktree it checks out is always cleaned up
@@ -1039,6 +1039,25 @@ def test_latex_diff_setup(tmp_dir):
     )
     assert result.returncode != 0
     assert "does not exist" in result.stderr
+    # latexdiff gets POSIX paths, since it may run in a Linux container,
+    # whose shell would drop a Windows path's backslashes
+    from calkit.cli import latex as cli_latex
+
+    tex_cmds: list[list[str]] = []
+
+    def tex_cmd(cmd: list[str], **kwargs: object) -> list[str]:
+        tex_cmds.append(cmd)
+        raise RuntimeError("stop before running latexdiff")
+
+    monkeypatch.setattr(cli_latex, "_tex_cmd", tex_cmd)
+    monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
+    with pytest.raises(RuntimeError):
+        cli_latex.diff("paper/main.tex", from_ref=base_sha)
+    sides = tex_cmds[0][-2:]
+    assert sides[0].endswith("/base/paper/main.tex"), sides
+    assert sides[1].endswith("/working/paper/main.tex"), sides
+    assert not any("\\" in side for side in sides), sides
+    assert not os.listdir(DIFF_TMP_DIR)
 
 
 @pytest.mark.skipif(

@@ -464,6 +464,7 @@ export function activate(context: vscode.ExtensionContext): void {
         ? getDocumentStages(workspaceRoot, file)
         : currentCalkitConfig?.pipeline?.stages ?? {};
     },
+    getPublications: () => currentCalkitConfig?.publications ?? [],
     getNonce,
     promptUpgrade: (message) =>
       void promptCalkitInstallOrUpgrade({

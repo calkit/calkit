@@ -4933,7 +4933,14 @@ def add_comment(
     from calkit.cli.new import new_comment
 
     new_comment(
-        tex_path, line, text, highlight, occ, author, email, as_json=as_json
+        tex_path,
+        text=text,
+        line=line,
+        highlight=highlight,
+        occ=occ,
+        author=author,
+        email=email,
+        as_json=as_json,
     )
 
 

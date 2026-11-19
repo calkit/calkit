@@ -798,6 +798,15 @@ async function handle(
       localCheckouts.delete(message.project);
       return chosen;
     }
+    case "local.save":
+      await waitForJob(
+        await askLocal<LocalJob>({
+          type: "job.start",
+          kind: "save",
+          project: message.project,
+        }),
+      );
+      return null;
     case "local.createProject": {
       const job = await waitForJob(
         await askLocal<LocalJob>({

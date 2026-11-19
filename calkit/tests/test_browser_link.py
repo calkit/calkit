@@ -681,6 +681,12 @@ def test_start_job(tmp_path, monkeypatch):
         record = json.load(f)
     with open(job_path, "w") as f:
         json.dump(record | {"status": "succeeded"}, f)
+    # Saving everything, which waits its turn like a run or sync
+    saving = start_job({"kind": "save", "project": "me/proj"})
+    assert saving["cmd"] == calkit_cmd + ["save", "-a", "-M"]
+    with pytest.raises(ValueError, match="already saving"):
+        start_job({"kind": "save", "project": "me/proj"})
+    os.remove(calkit.browser_link.get_job_path(saving["id"]))
     run_only = start_job({"kind": "run", "project": "me/proj", "sync": False})
     assert run_only["cmd"] == calkit_cmd + ["run"]
     os.remove(calkit.browser_link.get_job_path(run_only["id"]))

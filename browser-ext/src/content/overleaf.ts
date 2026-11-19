@@ -2001,13 +2001,42 @@ function renderLocalChanges(
     }
     for (const checkout of checkouts) {
       const lines: HTMLElement[] = [];
-      if (checkout.n_unsaved_files) {
+      // Saved from here, so nobody has to leave Overleaf to back it up, in
+      // the checkout the panel uses, which is this one if it's the only one
+      if (checkout.n_unsaved_files && !(localPath || checkouts.length === 1)) {
         lines.push(
           el("div", {
             class: "small",
             text: plural(checkout.n_unsaved_files, "unsaved file"),
             title: checkout.unsaved_files.join("\n"),
           }),
+        );
+      } else if (checkout.n_unsaved_files) {
+        const message = el("div", { class: "small" });
+        const save = el("button", { text: "Save" });
+        save.addEventListener("click", async () => {
+          save.disabled = true;
+          clear(message).append(loading("Saving"));
+          try {
+            await send({ type: "local.save", project });
+            reload();
+          } catch (e) {
+            save.disabled = false;
+            clear(message).append(
+              errorMessage(e instanceof Error ? e.message : String(e)),
+            );
+          }
+        });
+        lines.push(
+          el("div", { class: "row" }, [
+            el("div", {
+              class: "grow small",
+              text: plural(checkout.n_unsaved_files, "unsaved file"),
+              title: checkout.unsaved_files.join("\n"),
+            }),
+            save,
+          ]),
+          message,
         );
       }
       if (checkout.commits_ahead) {

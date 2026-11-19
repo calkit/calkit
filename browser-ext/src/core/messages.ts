@@ -309,6 +309,12 @@ export type Request =
       kind: string;
       hubUrl: string;
     }
+  | {
+      /** Everything in a project's checkout here saved, as 'calkit save -a'. */
+      type: "local.save";
+      /** As "owner/name". */
+      project: string;
+    }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */
   | { type: "local.installEditor"; project: string }
@@ -380,6 +386,7 @@ export interface ResponseMap {
   "local.publicationSource": { path: string; text: string };
   "local.publicationSynctex": string | null;
   "local.chooseFolder": { path: string | null; empty: boolean };
+  "local.save": null;
   "local.createProject": { path: string; project: string };
   "local.openOptions": null;
   "local.installEditor": null;

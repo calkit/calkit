@@ -68,9 +68,9 @@ LOOKUP_RESCAN_SECONDS = 600
 FILE_GIT_MAX_BYTES = 1_000_000
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
-JOB_KINDS = ("run", "sync", "clone", "create", "install-editor")
+JOB_KINDS = ("run", "sync", "save", "clone", "create", "install-editor")
 # Those that change a checkout, so only one at a time works on each
-CHECKOUT_JOB_KINDS = ("run", "sync")
+CHECKOUT_JOB_KINDS = ("run", "sync", "save")
 # A job that hasn't started by then never will, e.g., its process died first
 JOB_START_SECONDS = 60
 # A GitHub owner or repo name, so neither is read as an option or a URL
@@ -1312,7 +1312,8 @@ def start_job(msg: dict) -> dict:
     """Start a job for a project, in a process of its own: running its
     pipeline, then saving and syncing with Overleaf unless ``sync`` is
     false, as ``calkit run --save --overleaf`` does, syncing a
-    folder with Overleaf, cloning it to a ``location``, or creating it on a
+    folder with Overleaf, saving everything, as ``calkit save -a`` does,
+    cloning it to a ``location``, or creating it on a
     ``hub`` from a folder here at ``location``, with an Overleaf project
     imported into it, returning its record.
 
@@ -1402,6 +1403,10 @@ def start_job(msg: dict) -> dict:
             cmd = calkit_cmd + ["run"]
             if msg.get("sync", True):
                 cmd += ["--save", "--overleaf"]
+        elif kind == "save":
+            # Everything, as 'calkit save -a' sorts it: big files to DVC,
+            # junk ignored
+            cmd = calkit_cmd + ["save", "-a", "-M"]
         else:
             folder = msg.get("path")
             if not isinstance(folder, str):
@@ -1415,9 +1420,11 @@ def start_job(msg: dict) -> dict:
                 and job["status"] in ("queued", "running")
             ):
                 raise ValueError(
-                    "The pipeline is already running here"
-                    if job["kind"] == "run"
-                    else "It's already syncing with Overleaf here"
+                    {
+                        "run": "The pipeline is already running here",
+                        "sync": "It's already syncing with Overleaf here",
+                        "save": "It's already saving here",
+                    }[job["kind"]]
                 )
     job_id = uuid.uuid4().hex
     repo_info: dict[str, Any] = {"git_rev": None, "branch": None}

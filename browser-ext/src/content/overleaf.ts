@@ -911,19 +911,17 @@ function renderDefineOrigin(
         ),
     ]);
   }
-  return el(
-    "div",
-    {
-      class: "actions",
-      style: { alignItems: "center", flexWrap: "wrap", marginTop: "4px" },
-    },
-    [
-      el("span", { class: "small dim", text: "Define origin:" }),
-      ...choices.map(([text, onClick]) =>
+  // The label on its own line, so the buttons stay in a row under it
+  return el("div", { style: { marginTop: "4px" } }, [
+    el("div", { class: "small dim", text: "Define origin" }),
+    el(
+      "div",
+      { class: "actions", style: { flexWrap: "wrap", marginTop: "4px" } },
+      choices.map(([text, onClick]) =>
         el("button", { class: "action secondary", text, onClick }),
       ),
-    ],
-  );
+    ),
+  ]);
 }
 
 /** How to run a stage that's never run, since Overleaf can't. */

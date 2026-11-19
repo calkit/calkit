@@ -8,26 +8,44 @@
  * talk with window messages: this side says what the document cites and
  * where, and the other says what's wrong and fills the hover tooltips.
  */
-import { type Citation, citationsIn } from "../core/latex";
+import {
+  type Citation,
+  type TypedNumber,
+  citationsIn,
+  typedNumbersInDocument,
+} from "../core/latex";
 import { type EditContext, isEditCurrent } from "../core/review";
 
-/** A command showing project content, and where it is in the document. */
-export interface EditorCitation {
+/**
+ * A command showing project content, or a number or table typed in that
+ * looks like a result, and where it is in the document.
+ */
+export type EditorItem = {
   from: number;
   to: number;
   /** 1-based, as Overleaf numbers lines. */
   line: number;
   column: number;
-  citation: Citation;
-}
+} & (
+  | { citation: Citation; typed?: undefined; table?: undefined }
+  | { typed: TypedNumber; citation?: undefined; table?: undefined }
+  | {
+      /** The table's numbers, and where its \\begin command ends, which
+       * is all that's marked, though hovering anywhere in it shows why. */
+      table: { numbers: TypedNumber[]; markTo: number };
+      citation?: undefined;
+      typed?: undefined;
+    }
+);
 
 export type FromEditor =
   | {
       calkit: "editor";
       type: "citations";
       version: number;
-      items: EditorCitation[];
+      items: EditorItem[];
     }
+  | { calkit: "editor"; type: "replacedItem"; id: string; error?: string }
   | {
       calkit: "editor";
       type: "tooltip";
@@ -57,7 +75,7 @@ export type ToEditor =
       calkit: "lint";
       type: "problems";
       version: number;
-      items: { index: number; severity: "error" | "warning" }[];
+      items: { index: number; severity: "error" | "warning" | "link" }[];
     }
   | { calkit: "lint"; type: "goto"; line: number; column: number }
   // Text selected, e.g., to comment on it, by line (from 1) and column
@@ -80,17 +98,33 @@ export type ToEditor =
       reqId: number;
       line: number;
       insert: string[];
-    } & EditContext);
+    } & EditContext)
+  | {
+      calkit: "lint";
+      type: "replaceItem";
+      /** Echoed in the reply. */
+      id: string;
+      version: number;
+      index: number;
+      text: string;
+      /** Add \\usepackage{calkit} to the preamble if it isn't there. */
+      usePackage: boolean;
+      /** Add the text to the end of the item's line instead, e.g., a
+       * comment saying its numbers aren't results. */
+      endOfLine?: boolean;
+    };
 
 // CodeMirror comes from Overleaf's bundle at runtime, so it's untyped here
 type View = any;
 
 let version = 0;
-let citations: EditorCitation[] = [];
+let citations: EditorItem[] = [];
 let tooltips = 0;
 // Whether the extension has checked the document, which it only does for
 // one linked to a Calkit project, so a tooltip would have something in it
 let checked = false;
+// The items the extension last marked, by index
+let marked = new Set<number>();
 // The editor last scanned, and how to mark problems in it
 let active: {
   view: View;
@@ -105,7 +139,35 @@ function post(message: Without<FromEditor>): void {
 
 function scan(view: View): void {
   const doc = view.state.doc;
-  const items: EditorCitation[] = [];
+  const items: EditorItem[] = [];
+  const lines: string[] = [];
+  for (let n = 1; n <= doc.lines; n++) {
+    lines.push(doc.line(n).text);
+  }
+  const typed = typedNumbersInDocument(lines);
+  for (const table of typed.tables) {
+    const from = doc.line(table.start.line + 1).from + table.start.column;
+    items.push({
+      from,
+      to: doc.line(table.end.line + 1).from + table.end.column,
+      line: table.start.line + 1,
+      column: table.start.column,
+      table: {
+        numbers: table.numbers,
+        markTo: from + `\\begin{${table.env}}`.length,
+      },
+    });
+  }
+  for (const { line: i, match } of typed.numbers) {
+    const line = doc.line(i + 1);
+    items.push({
+      from: line.from + match.start,
+      to: line.from + match.end,
+      line: i + 1,
+      column: match.start,
+      typed: match.number,
+    });
+  }
   for (let n = 1; n <= doc.lines; n++) {
     const line = doc.line(n);
     if (!line.text.includes("\\")) {
@@ -122,7 +184,7 @@ function scan(view: View): void {
     }
   }
   version++;
-  citations = items;
+  citations = items.sort((a, b) => a.from - b.from);
   post({ type: "citations", version, items });
 }
 
@@ -156,6 +218,7 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
       if (message.version !== version) {
         return;
       }
+      marked = new Set(message.items.map(({ index }) => index));
       const length = view.state.doc.length;
       const ranges = message.items.flatMap(({ index, severity }) => {
         const item = citations[index];
@@ -163,7 +226,7 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
           ? [
               Decoration.mark({
                 class: `calkit-problem calkit-problem-${severity}`,
-              }).range(item.from, item.to),
+              }).range(item.from, item.table?.markTo ?? item.to),
             ]
           : [];
       });
@@ -176,11 +239,21 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
         if (update.docChanged) {
           // Kept where they are until the next scan, so marks and hovers
           // in the meantime land on the right text
-          citations = citations.map((item) => ({
-            ...item,
-            from: update.changes.mapPos(item.from),
-            to: update.changes.mapPos(item.to, 1),
-          }));
+          citations = citations.map((item): EditorItem => {
+            const from = update.changes.mapPos(item.from);
+            const to = update.changes.mapPos(item.to, 1);
+            return item.table
+              ? {
+                  ...item,
+                  from,
+                  to,
+                  table: {
+                    ...item.table,
+                    markTo: update.changes.mapPos(item.table.markTo, 1),
+                  },
+                }
+              : { ...item, from, to };
+          });
           active = { view, mark };
           clearTimeout(timer);
           timer = setTimeout(() => scan(view), 500);
@@ -196,13 +269,24 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
   });
   const tooltip = hoverTooltip(
     (_view: View, pos: number) => {
-      const index = citations.findIndex(
-        (item) => pos >= item.from && pos <= item.to,
-      );
+      // The innermost, e.g., a \\ckvalue in a typed table
+      let index = -1;
+      for (const [i, item] of citations.entries()) {
+        const inner =
+          index < 0 ||
+          item.to - item.from < citations[index].to - citations[index].from;
+        if (pos >= item.from && pos <= item.to && inner) {
+          index = i;
+        }
+      }
       if (index < 0 || !checked) {
         return null;
       }
       const item = citations[index];
+      // Something typed has nothing to say unless it could be linked
+      if ((item.typed || item.table) && !marked.has(index)) {
+        return null;
+      }
       return {
         pos: item.from,
         end: item.to,
@@ -226,6 +310,12 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
     },
     ".calkit-problem-warning": {
       textDecoration: "underline wavy #d69e2e",
+      textDecorationSkipInk: "none",
+      textUnderlineOffset: "3px",
+    },
+    // Something the project has that could be linked, not a problem
+    ".calkit-problem-link": {
+      textDecoration: "underline dotted #009688",
       textDecorationSkipInk: "none",
       textUnderlineOffset: "3px",
     },
@@ -360,6 +450,8 @@ window.addEventListener("message", (event) => {
       }),
     });
     active.view.focus();
+  } else if (message.type === "replaceItem") {
+    replaceItem(message);
   } else if (message.type === "goto" && active) {
     const doc = active.view.state.doc;
     if (message.line < 1 || message.line > doc.lines) {
@@ -376,6 +468,42 @@ window.addEventListener("message", (event) => {
     active.view.focus();
   }
 });
+
+/**
+ * Swap a typed number or table for what the extension says shows it
+ * instead, e.g., a \\ckvalue, or mark its line as not results, as one
+ * edit, so it's one step in Overleaf's history.
+ */
+function replaceItem(message: ToEditor & { type: "replaceItem" }): void {
+  const item = citations[message.index];
+  const view = active?.view;
+  const fail = (error: string) =>
+    post({ type: "replacedItem", id: message.id, error });
+  const changed = "The document changed; hover over it again";
+  if (!view || message.version !== version || !(item?.typed || item?.table)) {
+    return fail(changed);
+  }
+  const doc = view.state.doc;
+  const now = doc.sliceString(item.from, item.to);
+  if (item.typed ? now !== item.typed.text : !now.startsWith("\\begin")) {
+    return fail(changed);
+  }
+  const end = doc.lineAt(item.from).to;
+  const changes = message.endOfLine
+    ? [{ from: end, to: end, insert: message.text }]
+    : [{ from: item.from, to: item.to, insert: message.text }];
+  const text = doc.toString();
+  const body = text.search(/^[^%\n]*\\begin\s*\{document\}/m);
+  const loaded =
+    /^[^%\n]*\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bcalkit\b[^}]*\}/m.test(
+      text,
+    );
+  if (message.usePackage && body >= 0 && !loaded) {
+    changes.push({ from: body, to: body, insert: "\\usepackage{calkit}\n" });
+  }
+  view.dispatch({ changes, userEvent: "input" });
+  post({ type: "replacedItem", id: message.id });
+}
 
 // Asks an editor that's already open to take the extension above
 window.dispatchEvent(new Event("editor:extension-loaded"));

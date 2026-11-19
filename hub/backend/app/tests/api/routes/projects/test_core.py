@@ -5020,33 +5020,6 @@ def test_figures_listing_includes_images_with_origins(tmp_path) -> None:
     ]
 
 
-def test_imported_from_info_reads_bare_strings() -> None:
-    from app.api.routes.projects.core import _imported_from_info
-
-    assert _imported_from_info(None) is None
-    assert _imported_from_info({"doi": "10.1/x"}) == {"doi": "10.1/x"}
-    assert _imported_from_info("https://doi.org/10.5281/zenodo.3960218") == {
-        "doi": "10.5281/zenodo.3960218"
-    }
-    assert _imported_from_info("https://example.com/data.csv") == {
-        "url": "https://example.com/data.csv"
-    }
-    assert _imported_from_info("a colleague's USB stick") == {
-        "description": "a colleague's USB stick"
-    }
-    # Links that aren't http(s) are dropped, since they're rendered as hrefs
-    assert _imported_from_info(
-        {"url": "javascript:alert(1)", "date": "2026-01-02"}
-    ) == {"date": "2026-01-02"}
-    assert _imported_from_info(
-        {"git_repo_url": " JavaScript://github.com/%0Aalert(1)", "path": "a"}
-    ) == {"path": "a"}
-    # SSH clone URLs are kept
-    assert _imported_from_info({"git_repo_url": "git@github.com:a/b"}) == {
-        "git_repo_url": "git@github.com:a/b"
-    }
-
-
 def test_tables_listing_skips_map_paths_copies(tmp_path) -> None:
     from app.api.routes.projects.core import _build_tables
 

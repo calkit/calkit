@@ -390,6 +390,9 @@ class StageFromScriptOrNotebookResponse(BaseModel):
     dependencies: list[str] = []
     inputs: list[str] = []
     outputs: list[str] = []
+    # Those found by reading the script, or already declared by its stage,
+    # rather than only added because a document shows them
+    found_outputs: list[str] = []
     # Inputs that aren't in the project and that no stage produces
     missing_inputs: list[str] = []
     # Data read from outside the project, e.g., a synced Box folder, as the
@@ -633,6 +636,7 @@ def post_project_stage_from_script_or_notebook(
         dependencies=plan["dependencies"],
         inputs=plan["inputs"],
         outputs=plan["outputs"],
+        found_outputs=plan["found_outputs"],
         missing_inputs=plan["missing_inputs"],
         external_inputs=plan["external_inputs"],
         rewritten=rewritten,
@@ -810,6 +814,13 @@ def post_project_pipeline_stage(
         raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(422, str(e))
+    # Slides are exported in Calkit's LibreOffice image unless the stage
+    # says otherwise, so they export the same anywhere, GitHub included
+    if stage.get("kind") == "pptx-export" and not stage.get("environment"):
+        env_name, env = calkit.export.get_slide_environment(ck_info)
+        stage["environment"] = env_name
+        if env is not None:
+            ck_info.setdefault("environments", {})[env_name] = env
     # Files are all checked before any is written
     uploads: list[tuple[str, bytes]] = []
     created: list[str] = []

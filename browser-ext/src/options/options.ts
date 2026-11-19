@@ -1,3 +1,7 @@
+/**
+ * The options page: which hubs to use, signing in to them, and connecting to
+ * this machine.
+ */
 import { onAuthChange, send } from "../core/messages";
 import type { ProjectPublic } from "../core/types";
 import { clear, el, errorMessage, loading, textInput } from "../core/ui";

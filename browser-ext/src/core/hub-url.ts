@@ -1,3 +1,4 @@
+/** The current hub's web URL, for links content scripts draw. */
 import { send } from "./messages";
 
 let cached: string | null = null;

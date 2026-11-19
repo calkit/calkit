@@ -904,7 +904,12 @@ def test_docx_round_trip(
     assert "Edited this equation" not in methods
     # Without Word, TeX4ht and LibreOffice make the copy from the source,
     # leaving nothing beside it, and it anchors and merges the same way
-    if shutil.which("make4ht") and calkit.docx.find_soffice():
+    soffice = calkit.docx.find_soffice()
+    if (
+        shutil.which("make4ht")
+        and soffice
+        and calkit.docx.libreoffice_has_math(soffice)
+    ):
         # A figure for TeX4ht to convert: a blank one-page PDF
         objs = [
             b"<< /Type /Catalog /Pages 2 0 R >>",

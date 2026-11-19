@@ -1403,6 +1403,13 @@ def check_dep_exists(
         from calkit.docx import find_soffice
 
         return find_soffice() is not None
+    # Apps Calkit exports with can be installed off the PATH, e.g., as a
+    # macOS app bundle
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if name.lower() in known:
+        return known[name.lower()].find_executable() is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -2341,6 +2348,11 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
 
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if dep_name.lower() in known:
+        return known[dep_name.lower()].version()
     # MATLAB has no '--version', and starts in full if passed one
     if dep_name == "matlab":
         cmd = [dep_name, "-batch", "disp(version)"]

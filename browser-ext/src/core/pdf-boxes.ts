@@ -214,6 +214,19 @@ export function placePdfBoxes(
         right: `calc(100% - ${margin - 6 - n * 20}px)`,
         top: `${top + Math.min(placed.height * scale, 16) / 2 - 8}px`,
       });
+      // Its message opens leftward, which can go past what's shown of the
+      // page, e.g., behind Overleaf's editor, so it's moved back in
+      tag.addEventListener("mouseenter", () => {
+        const scroller = page.closest(".pdfViewer")?.parentElement;
+        const shown = Math.max(scroller?.getBoundingClientRect().left ?? 0, 0);
+        const over = shown + 4 - tag.getBoundingClientRect().left;
+        if (over > 0) {
+          tag.style.transform = `translateX(${over}px)`;
+        }
+      });
+      tag.addEventListener("mouseleave", () => {
+        tag.style.transform = "";
+      });
       page.append(outline, tag);
     }
   }

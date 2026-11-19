@@ -1360,9 +1360,10 @@ function drawRuns(): void {
     const staleShown = editorProblems?.found.some((problems) =>
       problems.some((p) => p.kind === "stale"),
     );
-    // On this machine, running is part of syncing, below
+    // On this machine, the panel's own sync runs it, but a card, e.g., the
+    // hover card, offers it for what it shows
     if (
-      link.local_path ||
+      (link.local_path && !offer) ||
       (!offer && !staleShown && latest?.status !== "failed")
     ) {
       continue;
@@ -1375,7 +1376,9 @@ function drawRuns(): void {
       title: !canWrite(link)
         ? "You need write access to this project to run it"
         : runs.cannot_start_reason ??
-          "Run pipeline on GitHub Actions and sync its outputs here",
+          (link.local_path
+            ? "Run pipeline on this machine, save, and sync"
+            : "Run pipeline on GitHub Actions and sync its outputs here"),
       onClick: () => void startRun(link),
     });
     box.append(
@@ -5084,7 +5087,8 @@ function renderStatus(
   const stale = [...status.files_to_push, ...status.files_to_delete].some(
     (f) => f.stage_status && f.stage_status.status !== "up-to-date",
   );
-  body.append(renderRuns(link, stale));
+  // On this machine, the panel's actions below have it
+  body.append(renderRuns(link, stale && !link.local_path));
   const syncButton = el("button", {
     class: "action",
     text: "Sync now",

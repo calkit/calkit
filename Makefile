@@ -138,7 +138,7 @@ test-jlab-ui: ## Run the JupyterLab UI integration tests.
 .PHONY: browser-ext
 browser-ext: ## Build the browser extension and package it as a ZIP.
 	@echo "🚀 Building the browser extension"
-	@cd browser-ext && npm ci && npm run build
+	@cd browser-ext && npm ci --no-audit --no-fund && npm run build
 	@echo "📦 Packaging the browser extension ZIP"
 	@mkdir -p browser-ext/zip
 # Packaged from a staged copy, never from dist: dist is what gets loaded

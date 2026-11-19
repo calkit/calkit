@@ -22,7 +22,7 @@
   },
   "options_page": "options.html",
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "worker.js",
     "type": "module"
   },
   "permissions": ["storage", "tabs", "scripting", "activeTab", "cookies"],
@@ -106,11 +106,7 @@
     },
     {
       "resources": ["viewer.html"],
-      "matches": [
-        "https://github.com/*",
-        "https://www.overleaf.com/*",
-        "https://overleaf.com/*"
-      ]
+      "matches": ["https://github.com/*"]
     }
   ]
 }

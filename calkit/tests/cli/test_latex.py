@@ -663,7 +663,8 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
     assert "TeX Live is ready" in out
     # Converting it from the source gets TeX4ht without locking it, since
     # it isn't part of the pipeline
-    if calkit.docx.find_soffice():
+    soffice = calkit.docx.find_soffice()
+    if soffice and calkit.docx.libreoffice_has_math(soffice):
         with open(".calkit/env-locks/tex.json") as f:
             lock = json.load(f)
         subprocess.check_call(

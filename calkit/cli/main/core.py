@@ -4327,6 +4327,14 @@ def run(
                 # emitted; it shares a line if the output had no final newline
                 log_f.write(STAGE_OUTPUT_END + "\n")
 
+    # DVC won't save an output Git tracks, e.g., a figure imported from
+    # Overleaf before its stage stored it with DVC
+    if dvc_stages and not dry:
+        for found in calkit.dvc.untrack_cached_stage_outputs(dvc_stages):
+            warn(
+                f"Stopped tracking {found['path']} with Git, since stage "
+                f"'{found['stage']}' stores it with DVC"
+            )
     dvc.stage.run._run = _patched_run
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s

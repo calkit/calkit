@@ -1338,6 +1338,64 @@ def test_ensure_writable_site_cache(tmp_path, monkeypatch):
         (shared / "repo").chmod(0o755)
 
 
+def test_get_stage_output_dvc_files(tmp_dir):
+    for path in ["fig.png.dvc", "sub/plot.png.dvc", "results.dvc"]:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w") as f:
+            f.write("outs:\n- path: x\n")
+    stages = {
+        "plot": {"cmd": "x", "outs": ["fig.png", {"other.png": {}}]},
+        "nested": {"cmd": "x", "wdir": "sub", "outs": [{"plot.png": {}}]},
+        "folder": {"cmd": "x", "outs": ["results/"]},
+        "iterated": {"cmd": "x", "outs": ["${item}.png"]},
+    }
+    # Paths a stage makes with a .dvc file of their own, wherever it runs
+    assert calkit.dvc.get_stage_output_dvc_files(stages) == [
+        {"path": "fig.png", "dvc_file": "fig.png.dvc", "stage": "plot"},
+        {
+            "path": "sub/plot.png",
+            "dvc_file": "sub/plot.png.dvc",
+            "stage": "nested",
+        },
+        {"path": "results", "dvc_file": "results.dvc", "stage": "folder"},
+    ]
+    # Reported on their own by the storage check, since DVC can't index the
+    # project with them
+    subprocess.check_call(["git", "init", "-q"])
+    with open("dvc.yaml", "w") as f:
+        f.write("stages:\n  plot:\n    cmd: x\n    outs:\n    - fig.png\n")
+    [problem] = calkit.dvc.get_storage_problems(large_mb=None, ck_info={})
+    assert problem["kind"] == "stage-output-dvc-file"
+    assert problem["dvc_file"] == "fig.png.dvc"
+    assert problem["stage"] == "plot"
+
+
+def test_untrack_cached_stage_outputs(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("figs")
+    for path in ["fig.png", "kept.png", "figs/a.png", "other.txt"]:
+        with open(path, "w") as f:
+            f.write("x")
+    subprocess.check_call(["git", "add", "-A"])
+    stages = {
+        "plot": {
+            "cmd": "x",
+            "outs": ["fig.png", {"kept.png": {"cache": False}}],
+        },
+        "folder": {"cmd": "x", "outs": ["figs/"]},
+    }
+    # Only what DVC caches, a file or a folder, and not what's kept in Git
+    found = calkit.dvc.untrack_cached_stage_outputs(stages)
+    assert found == [
+        {"path": "fig.png", "stage": "plot"},
+        {"path": "figs", "stage": "folder"},
+    ]
+    tracked = subprocess.check_output(["git", "ls-files"], text=True).split()
+    assert tracked == ["kept.png", "other.txt"]
+    assert os.path.isfile("fig.png") and os.path.isfile("figs/a.png")
+    assert calkit.dvc.untrack_cached_stage_outputs(stages) == []
+
+
 def test_running_processes_in_project_below_dvc_root(tmp_dir):
     import json
     import time

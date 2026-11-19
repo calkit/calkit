@@ -563,6 +563,32 @@ def test_to_dvc_unignores_dvc_lock(tmp_dir):
     assert not repo.ignored("dvc.lock")
 
 
+def test_to_dvc_removes_stage_output_dvc_files(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "make": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo hi > fig.png",
+                    "outputs": ["fig.png"],
+                }
+            }
+        }
+    }
+    # A figure added with DVC by hand before the stage that makes it was
+    with open("fig.png.dvc", "w") as f:
+        f.write("outs:\n- path: fig.png\n")
+    with open("data.csv.dvc", "w") as f:
+        f.write("outs:\n- path: data.csv\n")
+    calkit.pipeline.to_dvc(ck_info=ck_info)
+    assert os.path.isfile("fig.png.dvc")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert not os.path.isfile("fig.png.dvc")
+    assert os.path.isfile("data.csv.dvc")
+
+
 def test_to_dvc_skips_no_op_writes(tmp_dir):
     # Compiling to DVC happens on every `calkit status` (which the VS Code
     # extension polls continuously). Rewriting an unchanged dvc.yaml churns Git
@@ -5118,7 +5144,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     )
     assert gated == {} and errors == {}
     # An export needs its app installed where it runs
-    from calkit.export import GIMP, INKSCAPE
+    from calkit.export import GIMP, INKSCAPE, LIBREOFFICE, POWERPOINT
 
     ck_info["pipeline"]["stages"]["drawn"] = {
         "kind": "inkscape-export",
@@ -5130,14 +5156,25 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         "source_path": "made/photo.xcf",
         "outputs": ["made/photo.png"],
     }
+    ck_info["pipeline"]["stages"]["slide"] = {
+        "kind": "pptx-export",
+        "source_path": "made/setup.pptx",
+        "outputs": [{"path": "made/setup.pdf", "slide": 1}],
+    }
     monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
     monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
+    monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-no-soffice"])
+    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-no-powerpoint"])
     gated, errors = calkit.pipeline.get_gated_stages(
-        ck_info, stage_names=["drawn", "photo"], interactive=False
+        ck_info, stage_names=["drawn", "photo", "slide"], interactive=False
     )
     assert gated == {
         "drawn": "needs Inkscape installed to export made/drawn.svg",
         "photo": "needs GIMP installed to export made/photo.xcf",
+        "slide": (
+            "needs LibreOffice or PowerPoint installed to export "
+            "made/setup.pptx"
+        ),
     }
     monkeypatch.setattr(INKSCAPE, "executables", [sys.executable])
     gated, errors = calkit.pipeline.get_gated_stages(
@@ -5688,6 +5725,46 @@ def test_get_figure_paths_with_origins(tmp_dir):
     ]
 
 
+def test_get_lock_stage_for_output():
+    from calkit.pipeline import get_lock_stage_for_output
+
+    dvc_lock = {
+        "stages": {
+            "train": {"outs": [{"path": "model.pkl", "md5": "def"}]},
+            "plot": {"outs": [{"path": "figures", "md5": "abc123.dir"}]},
+            "file": {"outs": [{"path": "figures/test.png", "md5": "f"}]},
+        }
+    }
+    # An output itself, or a folder it's in, with an exact match winning
+    assert get_lock_stage_for_output("model.pkl", dvc_lock) == "train"
+    assert get_lock_stage_for_output("figures/sub/a.png", dvc_lock) == "plot"
+    assert get_lock_stage_for_output("figures/test.png", dvc_lock) == "file"
+    assert get_lock_stage_for_output("other/x.png", dvc_lock) is None
+    # dvc.lock keeps entries that are no longer stages, e.g., a bare name
+    # from before a stage became a matrix, which only count with nothing
+    # current producing the path
+    dvc_lock = {
+        "stages": {
+            "plot": {"outs": [{"path": "figures/a.png"}]},
+            "plot@_arg00-9": {"outs": [{"path": "figures/a.png"}]},
+            "plot@_arg00": {"outs": [{"path": "figures/a.png"}]},
+            "render": {"outs": [{"path": "figures/sub"}]},
+            "render@_arg00": {"outs": [{"path": "figures/sub"}]},
+            "orphan": {"outs": [{"path": "figures/gone.png"}]},
+        }
+    }
+    current = {"plot@_arg00", "render@_arg00"}
+    for path, stage in [
+        ("figures/a.png", "plot@_arg00"),
+        ("figures/sub/deep.png", "render@_arg00"),
+        ("figures/gone.png", "orphan"),
+    ]:
+        assert (
+            get_lock_stage_for_output(path, dvc_lock, valid_stages=current)
+            == stage
+        )
+
+
 def test_get_stage_to_add():
     ck_info = {
         "pipeline": {
@@ -5714,6 +5791,29 @@ def test_get_stage_to_add():
     assert added["outputs"] == [
         {"path": "figures/Setup Diagram.png", "storage": "git"}
     ]
+    # So does one given as a mapping, e.g., a slide's, unless it says
+    slides = {
+        "kind": "pptx-export",
+        "source_path": "figures/setup.pptx",
+        "outputs": [{"path": "paper/setup.png", "slide": 1}],
+    }
+    _, added = calkit.pipeline.get_stage_to_add(
+        slides, ck_info, is_tracked=lambda path: True
+    )
+    assert added["outputs"] == [
+        {"path": "paper/setup.png", "slide": 1, "storage": "git"}
+    ]
+    _, added = calkit.pipeline.get_stage_to_add(
+        slides
+        | {
+            "outputs": [
+                {"path": "paper/setup.png", "slide": 1, "storage": "dvc"}
+            ]
+        },
+        ck_info,
+        is_tracked=lambda path: True,
+    )
+    assert added["outputs"][0]["storage"] == "dvc"
     # A taken name gets a number
     name, _ = calkit.pipeline.get_stage_to_add(stage, ck_info, name="fit")
     assert name == "fit-2"

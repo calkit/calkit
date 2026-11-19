@@ -1,3 +1,7 @@
+/**
+ * The requests content scripts and pages send the service worker, what each
+ * returns, and how they're sent.
+ */
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
 import type { CheckoutStatus, LocalStatus } from "./local";
@@ -10,6 +14,7 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  ImportUpdate,
   PipelineRun,
   ProjectPipeline,
   PipelineRuns,
@@ -172,6 +177,12 @@ export type Request =
       sync?: boolean;
     }
   | {
+      type: "project.updateImport";
+      owner: string;
+      project: string;
+      path: string;
+    }
+  | {
       type: "project.addExportStage";
       owner: string;
       project: string;
@@ -279,6 +290,62 @@ export type Request =
       /** As Overleaf names it. */
       path: string;
     }
+  | {
+      /** The SyncTeX of the PDF a synced folder builds to on this machine. */
+      type: "local.publicationSynctex";
+      /** As "owner/name". */
+      project: string;
+      folder: string;
+    }
+  | {
+      /** A folder chosen in this machine's own dialog. */
+      type: "local.chooseFolder";
+      prompt: string;
+    }
+  | {
+      /**
+       * A folder on this machine made a project on a hub, with an Overleaf
+       * project imported into it.
+       */
+      type: "local.createProject";
+      /** Who'll own it, for the job until the hub names it. */
+      owner: string;
+      name: string;
+      title: string;
+      isPublic: boolean;
+      folder: string;
+      overleafProjectUrl: string;
+      /** The document's folder in the project. */
+      path: string;
+      kind: string;
+      hubUrl: string;
+    }
+  | {
+      /** Everything in a project's checkout here saved, as 'calkit save -a'. */
+      type: "local.save";
+      /** As "owner/name". */
+      project: string;
+    }
+  | {
+      /**
+       * Copy data a script reads from outside the project into it, on this
+       * machine, pointing the script at the copy.
+       */
+      type: "project.moveExternalData";
+      owner: string;
+      project: string;
+      scriptPath: string;
+      /** As the script names it. */
+      external: string;
+      dest: string;
+    }
+  | {
+      /** What likely makes a file with no origin, for someone to confirm. */
+      type: "project.originSuggestions";
+      owner: string;
+      project: string;
+      path: string;
+    }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */
   | { type: "local.installEditor"; project: string }
@@ -323,6 +390,7 @@ export interface ResponseMap {
   "project.provenance": Provenance;
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
+  "project.updateImport": ImportUpdate;
   "project.addExportStage": ExportStage;
   "project.pipeline": ProjectPipeline;
   "project.pipelineRuns": PipelineRuns;
@@ -348,6 +416,17 @@ export interface ResponseMap {
   "local.openProject": Record<string, never>;
   "local.projectStatus": { checkouts: CheckoutStatus[] };
   "local.publicationSource": { path: string; text: string };
+  "local.publicationSynctex": string | null;
+  "local.chooseFolder": { path: string | null; empty: boolean };
+  "local.save": null;
+  "project.moveExternalData": { path: string; script_path: string };
+  "project.originSuggestions": {
+    kind: "script" | "notebook" | "exported";
+    source: string;
+    /** What a script or notebook writes that matched. */
+    writes?: string;
+  }[];
+  "local.createProject": { path: string; project: string };
   "local.openOptions": null;
   "local.installEditor": null;
   /**

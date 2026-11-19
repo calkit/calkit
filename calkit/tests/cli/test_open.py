@@ -69,6 +69,20 @@ def test_open_project(tmp_path, monkeypatch):
         return real_call(cmd, *args, **kwargs)
 
     monkeypatch.setattr("subprocess.call", call)
+    # Editors built on VS Code list their extensions, which have Calkit's
+    # unless a test says otherwise
+    extensions_listed = ["ms-python.python", "Calkit.calkit-vscode"]
+    real_run = subprocess.run
+
+    def run_(cmd, *args, **kwargs):
+        if cmd[0].startswith("/fake/bin/"):
+            assert cmd[1:] == ["--list-extensions"], cmd
+            return subprocess.CompletedProcess(
+                cmd, 0, "\n".join(extensions_listed), ""
+            )
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr("subprocess.run", run_)
     main = home / "calkit" / "proj"
     make_project(str(main), "me", "proj")
     # A subproject in its repo, which names no project of its own and so
@@ -90,6 +104,12 @@ def test_open_project(tmp_path, monkeypatch):
         result = run(*args)
         assert result.exit_code == 0, result.output
         assert opened == [["/fake/bin/code", os.path.realpath(main)]]
+    # Unless the checkout to open is given
+    result = run("me/proj", "--checkout", str(worktree))
+    assert result.exit_code == 0, result.output
+    assert opened == [["/fake/bin/code", os.path.realpath(worktree)]]
+    result = run("me/proj", "--checkout", str(home))
+    assert result.exit_code != 0 and "isn't a Calkit project" in result.output
     # Another owner's project of the same name needs the owner given
     make_project(str(home / "dev" / "proj"), "them", "proj")
     # A checkout that can't be read is skipped rather than stopping the
@@ -106,6 +126,30 @@ def test_open_project(tmp_path, monkeypatch):
     assert opened == [
         ["/fake/bin/code", os.path.realpath(home / "dev" / "proj")]
     ]
+    # A file in it opens with it, if it's there and in the project
+    (main / "fit.ipynb").write_text("{}")
+    result = run("me/proj", "--path", "fit.ipynb")
+    assert result.exit_code == 0, result.output
+    real_main = os.path.realpath(main)
+    fit_path = os.path.join(real_main, "fit.ipynb")
+    assert opened == [["/fake/bin/code", real_main, fit_path]]
+    for path in ["nope.py", "../x"]:
+        result = run("me/proj", "--path", path)
+        assert result.exit_code != 0 and "isn't in" in result.output
+    # JupyterLab opens the file from the project's folder
+    result = run("me/proj", "--path", "fit.ipynb", "--with", "jupyterlab")
+    assert result.exit_code == 0, result.output
+    assert opened == [["/fake/bin/jupyter", "lab", fit_path]]
+    # One outside the folders searched is found once it's recorded, as
+    # creating or cloning it does
+    far = tmp_path / "elsewhere" / "a" / "b" / "far"
+    make_project(str(far), "me", "far")
+    result = run("me/far")
+    assert result.exit_code != 0
+    calkit.record_project_path(str(far))
+    result = run("me/far")
+    assert result.exit_code == 0, result.output
+    assert opened == [["/fake/bin/code", os.path.realpath(far)]]
     # A missing project needs an owner to be cloned, and asks first
     result = run("new-proj")
     assert result.exit_code != 0
@@ -115,10 +159,10 @@ def test_open_project(tmp_path, monkeypatch):
     assert "--yes" in result.output
     cloned = []
 
-    def fake_clone(url, location):
+    def fake_clone(url, location, hub=None):
         # The real clone moves into the repo, whose '.env' isn't trusted to
         # pick what runs
-        cloned.append((url, location))
+        cloned.append((url, location) + ((hub,) if hub else ()))
         make_project(location, "me", "new-proj")
         with open(os.path.join(location, ".env"), "w") as f:
             f.write("CALKIT_DEFAULT_EDITOR=cursor --evil\n")
@@ -137,6 +181,15 @@ def test_open_project(tmp_path, monkeypatch):
     assert cloned[-1] == (
         "calkit.example.edu/me/hub-proj",
         os.path.join(str(home), "calkit", "hub-proj"),
+    )
+    os.chdir(tmp_path)
+    # Or from one given as an option, whose project URL it looks up
+    result = run("me/local-proj", "--hub", "localhost", "--yes")
+    assert result.exit_code == 0, result.output
+    assert cloned[-1] == (
+        "me/local-proj",
+        os.path.join(str(home), "calkit", "local-proj"),
+        "localhost",
     )
     os.chdir(tmp_path)
     result = run("a/b/c/d")
@@ -160,6 +213,18 @@ def test_open_project(tmp_path, monkeypatch):
         result = run("me/new-proj")
         assert result.exit_code == 0, result.output
         assert opened == [[*cmd, new_path]]
+    # One built on VS Code, known by name, gets Calkit's extension first if
+    # it doesn't have it
+    extensions_listed.pop()
+    result = run("me/new-proj", "--with", "cursor")
+    assert result.exit_code == 0, result.output
+    assert opened == [
+        ["/fake/bin/cursor", "--install-extension", "calkit.calkit-vscode"],
+        ["/fake/bin/cursor", new_path],
+    ]
+    result = run("me/new-proj", "--with", "jupyterlab")
+    assert opened == [["/fake/bin/jupyter", "lab", new_path]]
+    extensions_listed.append("Calkit.calkit-vscode")
     monkeypatch.setattr(calkit.config, "read", read_settings)
     # Without VS Code, and no terminal to ask in, the folder opens instead
     editors.clear()

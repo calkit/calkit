@@ -275,9 +275,12 @@ Keys above whose type is a named object, like `Figure`, hold the properties desc
 
 #### `RangeIteration`
 
-| Parameter | Type                 | Required | Default | Description                                |
-| --------- | -------------------- | -------- | ------- | ------------------------------------------ |
-| `range`   | RangeIterationParams | yes      |         | Bounds of the range over which to iterate. |
+| Parameter | Type             | Required | Default | Description                                    |
+| --------- | ---------------- | -------- | ------- | ---------------------------------------------- |
+| `kind`    | Literal['range'] | yes      |         | A range of numbers.                            |
+| `start`   | int \| float     | yes      |         | First value in the range, which is included.   |
+| `stop`    | int \| float     | yes      |         | Value at which to stop, which is not included. |
+| `step`    | int \| float     | no       | 1       | Amount by which to increment each value.       |
 
 #### `Figure`
 
@@ -540,14 +543,6 @@ Configuration for syncing a directory with an Overleaf project.
 | `sync_paths` | list[str] \| None | no       | null    | Paths synced in both directions with Overleaf.    |
 | `push_paths` | list[str] \| None | no       | null    | Paths only pushed to Overleaf, never pulled back. |
 
-#### `RangeIterationParams`
-
-| Parameter | Type         | Required | Default | Description                                    |
-| --------- | ------------ | -------- | ------- | ---------------------------------------------- |
-| `start`   | int \| float | yes      |         | First value in the range, which is included.   |
-| `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
-| `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
-
 #### `_Person`
 
 A person credited with producing something in the project.
@@ -565,14 +560,15 @@ vanishing and leaving the author thinking they recorded it.
 
 #### `_ImportedFromProject`
 
-| Parameter      | Type              | Required | Default | Description                                                                                      |
-| -------------- | ----------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `project`      | str               | yes      |         |                                                                                                  |
-| `path`         | str \| None       | no       | null    |                                                                                                  |
-| `date`         | date \| None      | no       | null    | When the data was downloaded.                                                                    |
-| `git_rev`      | str \| None       | no       | null    | Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to. |
-| `filter_paths` | list[str] \| None | no       | null    |                                                                                                  |
-| `description`  | str \| None       | no       | null    | Where it came from, in words, for whatever the other fields can't say.                           |
+| Parameter      | Type              | Required | Default | Description                                                                                                                                                                                    |
+| -------------- | ----------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`      | str               | yes      |         |                                                                                                                                                                                                |
+| `path`         | str \| None       | no       | null    |                                                                                                                                                                                                |
+| `git_ref`      | str \| None       | no       | null    | Branch, tag, or commit to follow when refreshing this. Optional: an entry that names none follows the project's default branch. The commit it resolves to is recorded in .calkit/imports.json. |
+| `date`         | date \| None      | no       | null    | When the data was downloaded.                                                                                                                                                                  |
+| `git_rev`      | str \| None       | no       | null    | Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to.                                                                                               |
+| `filter_paths` | list[str] \| None | no       | null    |                                                                                                                                                                                                |
+| `description`  | str \| None       | no       | null    | Where it came from, in words, for whatever the other fields can't say.                                                                                                                         |
 
 #### `_ImportedFromUrl`
 

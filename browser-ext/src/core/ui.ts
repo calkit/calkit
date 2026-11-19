@@ -1,3 +1,7 @@
+/**
+ * What the extension draws on pages is built from: elements, the panel,
+ * overlays, and shared styles.
+ */
 type Child = Node | string | null | undefined | false;
 
 interface ElementOptions {
@@ -234,6 +238,17 @@ button.secondary:hover:not(:disabled) {
   background: rgba(0, 150, 136, 0.12);
 }
 a { color: var(--ck-main); }
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ck-main);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+button.link:hover:not(:disabled) { text-decoration: underline; }
 input, select, textarea {
   width: 100%;
   padding: 5px 7px;
@@ -244,8 +259,28 @@ input, select, textarea {
   font-size: 12px;
   font-family: inherit;
 }
+input[type="radio"], input[type="checkbox"] { width: auto; margin: 0; }
 textarea { min-height: 70px; resize: vertical; }
+input[type="checkbox"] { width: auto; margin: 0; }
+label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: normal;
+  white-space: nowrap;
+  cursor: pointer;
+}
 label { display: block; font-size: 11px; font-weight: 600; margin: 6px 0 2px; }
+label.choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  margin: 2px 0;
+}
 .error { color: var(--ck-danger); }
 .stack { display: flex; flex-direction: column; gap: 6px; }
 .picks {
@@ -280,7 +315,16 @@ button.twisty {
   color: var(--ck-dim);
   cursor: pointer;
 }
-.actions { display: flex; gap: 6px; margin-top: 8px; }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+/* A message on its own line in a row of actions, once there is one */
+.actions .line-message { flex-basis: 100%; }
+.actions .line-message:empty { display: none; }
 .spinner {
   width: 12px;
   height: 12px;
@@ -323,6 +367,24 @@ button.twisty {
   flex-wrap: wrap;
 }
 .overlay .toolbar .spacer { flex: 1; }
+pre.log {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--ck-subtle-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.overlay pre.log {
+  flex: 1;
+  overflow: auto;
+  border-radius: 0;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+}
 .overlay .viewport {
   flex: 1;
   min-height: 0;

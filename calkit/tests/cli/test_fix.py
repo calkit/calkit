@@ -140,8 +140,10 @@ def test_fix_merge_conflicts(tmp_dir):
         )
     write("s.in", "s-base")
     commit("Project")
+    # Whatever Git named the first branch, since that's not always main
+    base = git("branch", "--show-current").stdout.strip()
     for branch in ["p", "q"]:
-        subprocess.check_call(["git", "checkout", "-q", "-b", branch, "main"])
+        subprocess.check_call(["git", "checkout", "-q", "-b", branch, base])
         write("s.in", f"s-{branch}")
         commit(branch)
     tips = {b: git("rev-parse", b).stdout.strip() for b in "pq"}

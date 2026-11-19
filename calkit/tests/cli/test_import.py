@@ -79,10 +79,28 @@ def test_import_and_update_a_path(tmp_dir):
     source = entries[0]["imported_from"]
     # A branch was named, so that is what calkit.yaml records -- the
     # commit it resolved to goes in the lock file
-    assert "rev" not in source
+    assert "git_rev" not in source
     assert source["git_ref"] == "main"
     assert source["path"] == "setups/setup.sh"
-    assert locked("scripts/setup.sh")["rev"] == first_rev
+    assert locked("scripts/setup.sh")["git_rev"] == first_rev
+    # The lock says where it came from too, so it stands on its own
+    assert {
+        k: v for k, v in locked("scripts/setup.sh").items() if k != "fetched"
+    } == {
+        "source": {
+            "kind": "git",
+            "repo_url": src,
+            "path": "setups/setup.sh",
+            "ref": "main",
+        },
+        "git_rev": first_rev,
+        "hash": locked("scripts/setup.sh")["hash"],
+    }
+    # Written source first, with its kind at the top, to read easily
+    with open(".calkit/imports.json") as f:
+        entry = json.load(f)["scripts/setup.sh"]
+    assert list(entry) == ["source", "git_rev", "hash", "fetched"]
+    assert list(entry["source"]) == ["kind", "repo_url", "path", "ref"]
     assert locked("scripts/setup.sh")["hash"].startswith("sha256:")
     # Importing over it again needs saying so
     res = subprocess.run(
@@ -144,7 +162,7 @@ def test_import_and_update_a_path(tmp_dir):
     )
     with open("scripts/setup.sh") as f:
         assert f.read() == "export FOO=2\n"
-    assert locked("scripts/setup.sh")["rev"] == second_rev
+    assert locked("scripts/setup.sh")["git_rev"] == second_rev
     # With no 'ref' recorded, refreshing takes the latest on the default
     # branch rather than re-reading the commit it last landed on
     ck_info = calkit.load_calkit_info()
@@ -159,7 +177,7 @@ def test_import_and_update_a_path(tmp_dir):
     )
     with open("scripts/setup.sh") as f:
         assert f.read() == "export FOO=3\n"
-    assert locked("scripts/setup.sh")["rev"] == third_rev
+    assert locked("scripts/setup.sh")["git_rev"] == third_rev
     # --git-ref changes what the entry follows, from now on rather than
     # just this once, so a later refresh stays on the tag
     src_repo.create_tag("v1", ref=second_rev)
@@ -179,7 +197,7 @@ def test_import_and_update_a_path(tmp_dir):
         assert f.read() == "export FOO=2\n"
     source = calkit.load_calkit_info()["misc"][0]["imported_from"]
     assert source["git_ref"] == "v1"
-    assert locked("scripts/setup.sh")["rev"] == second_rev
+    assert locked("scripts/setup.sh")["git_rev"] == second_rev
     subprocess.run(
         ["calkit", "sync", "import", "scripts/setup.sh", "--no-commit"],
         check=True,
@@ -386,3 +404,120 @@ def test_import_and_update_a_path(tmp_dir):
     )
     assert res.returncode != 0
     assert "Nothing recorded" in res.stdout + res.stderr
+
+
+def test_import_figure_from_a_hub_project(tmp_dir, monkeypatch):
+    import base64
+
+    import git as gitpy
+    from typer.testing import CliRunner
+
+    import calkit
+    from calkit.cli.main import app
+
+    runner = CliRunner()
+    calls = []
+
+    def get(path, params=None, **kwargs):
+        calls.append((path, params))
+        ref = (params or {}).get("ref")
+        return {
+            "content": base64.b64encode(f"png at {ref}".encode()).decode(),
+            "commit_sha": (ref or "head")[0] * 40,
+            "calkit_object": {
+                "kind": "figure",
+                "path": "figures/a.png",
+                "title": "Source title",
+                "description": "Source description",
+            },
+        }
+
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    monkeypatch.setattr(calkit.hub, "get", get)
+    gitpy.Repo.init(".")
+    with open("calkit.yaml", "w") as f:
+        f.write("name: blog\n")
+    # Linked as on the hub, pinned, and described as the source describes it
+    res = runner.invoke(
+        app,
+        [
+            "import",
+            "figure",
+            "calkit.io/o/p/figures/a.png",
+            "figures/p/a.png",
+            "--git-ref",
+            "b1",
+            "--no-commit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert calls[-1] == ("/projects/o/p/contents/figures/a.png", {"ref": "b1"})
+    with open("figures/p/a.png") as f:
+        assert f.read() == "png at b1"
+    entry = calkit.load_calkit_info()["figures"][0]
+    assert entry["title"] == "Source title"
+    assert entry["description"] == "Source description"
+    assert entry["imported_from"] == {
+        "project": "o/p",
+        "path": "figures/a.png",
+        "git_ref": "b1",
+    }
+    locks = calkit.provenance.read_import_locks()
+    assert locks["figures/p/a.png"]["git_rev"] == "b" * 40
+    # A title given here wins, and with no ref the commit is still locked
+    res = runner.invoke(
+        app,
+        [
+            "import",
+            "figure",
+            "o/p/figures/a.png",
+            "figures/p/b.png",
+            "--title",
+            "Mine",
+            "--no-commit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    entry = calkit.load_calkit_info()["figures"][1]
+    assert entry["title"] == "Mine"
+    assert "git_ref" not in entry["imported_from"]
+    locks = calkit.provenance.read_import_locks()
+    assert locks["figures/p/b.png"]["git_rev"] == "h" * 40
+    # Moving a project import to another ref is recorded for later refreshes
+    res = runner.invoke(
+        app,
+        [
+            "sync",
+            "import",
+            "figures/p/a.png",
+            "--git-ref",
+            "c2",
+            "--no-commit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    with open("figures/p/a.png") as f:
+        assert f.read() == "png at c2"
+    entry = calkit.load_calkit_info()["figures"][0]
+    assert entry["imported_from"]["git_ref"] == "c2"
+    locks = calkit.provenance.read_import_locks()
+    assert locks["figures/p/a.png"]["git_rev"] == "c" * 40
+    # Status says where each import stands, but only when asked, since it
+    # has to ask each source
+    import json
+
+    res = runner.invoke(app, ["status", "-c", "imports", "--json"])
+    assert res.exit_code == 0, res.output
+    statuses = {
+        s["path"]: s["status"] for s in json.loads(res.output)["imports"]
+    }
+    # Each source is still at the commit it was fetched at
+    assert statuses == {
+        "figures/p/a.png": "up-to-date",
+        "figures/p/b.png": "up-to-date",
+    }
+    res = runner.invoke(app, ["status", "-c", "imports"])
+    assert res.exit_code == 0, res.output
+    assert "figures/p/a.png: up to date, from o/p/figures/a.png" in res.output
+    res = runner.invoke(app, ["status", "-c", "git", "--json"])
+    assert "imports" not in json.loads(res.output)

@@ -43,6 +43,7 @@ import NewProjectModal from "../../components/Projects/NewProjectModal"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
 import type { StartPath } from "../../lib/onboarding"
+import { safeHref } from "../../lib/strings"
 
 const projectsSearchSchema = z.object({
   page: z.number().optional().catch(1),
@@ -157,7 +158,7 @@ function ProjectsTable() {
                     </Link>
                   </Td>
                   <Td isTruncated maxWidth="150px">
-                    <Link href={project.git_repo_url} isExternal>
+                    <Link href={safeHref(project.git_repo_url)} isExternal>
                       <ExternalLinkIcon mx="2px" /> {project.git_repo_url}
                     </Link>
                   </Td>

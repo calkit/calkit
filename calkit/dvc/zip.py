@@ -591,6 +591,28 @@ def _sync_one(
     return record
 
 
+def is_safe_mapped_path(path: str, wdir: str | None = None) -> bool:
+    """Whether a path from the zip path map stays in the project.
+
+    The map is committed, so a branch can name a path outside the project
+    or one through a link it committed, e.g., to somewhere in the user's
+    home folder, which syncing would then write to or delete.
+    """
+    root = os.path.abspath(wdir or ".")
+    full = os.path.normpath(os.path.join(root, path))
+    for base in dict.fromkeys([root, os.path.realpath(root)]):
+        if full.startswith(base + os.sep):
+            break
+    else:
+        return False
+    current = base
+    for part in Path(os.path.relpath(full, base)).parts:
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            return False
+    return True
+
+
 def sync_some(
     workspace_paths: list[str],
     direction: Literal["to-zip", "to-workspace", "both"] = "both",
@@ -600,6 +622,11 @@ def sync_some(
     for workspace_path in workspace_paths:
         norm = Path(workspace_path).as_posix()
         output_path = pm.get(norm)
+        if output_path is not None and not is_safe_mapped_path(output_path):
+            raise ValueError(
+                f"Zip path '{output_path}' is outside the project or goes "
+                "through a link"
+            )
         sync_one(
             workspace_path=norm, zip_path=output_path, direction=direction
         )
@@ -609,8 +636,20 @@ def sync_all(
     direction: Literal["to-zip", "to-workspace", "both"] = "both",
     wdir: str | None = None,
 ):
-    """Process all project zips."""
+    """Process all project zips, skipping any whose paths leave the
+    project.
+    """
     for workspace_path, zip_path in get_zip_path_map(wdir=wdir).items():
+        if not (
+            is_safe_mapped_path(workspace_path, wdir=wdir)
+            and is_safe_mapped_path(zip_path, wdir=wdir)
+        ):
+            typer.echo(
+                f"Warning: Not syncing '{workspace_path}', since it or its "
+                "zip is outside the project or goes through a link",
+                err=True,
+            )
+            continue
         sync_one(
             workspace_path=workspace_path,
             zip_path=zip_path,

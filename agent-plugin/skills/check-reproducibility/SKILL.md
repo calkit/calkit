@@ -49,7 +49,7 @@ Judgment, done here:
 3. **Every `retyped_values` finding is worth fixing.** Each is a number
    the pipeline already computes, typed into the document: right today and
    wrong the next time that stage runs. The finding names the results file
-   and key, so the fix is mechanical.
+   and key, so the fix is mechanical: `\ckvalue{<file>}{<key>}`.
 
 4. **`unattributed_numbers` is a list to read, not a list to fix.** Most
    numbers in a paper are not results. A quantity quoted from a reference
@@ -61,8 +61,16 @@ Judgment, done here:
    rewrite a sentence to make a check pass, and never invent a stage to
    compute a number somebody else measured.
 
+   A line ending in a `% calkit: ignore` comment, optionally with a reason,
+   e.g., `% calkit: ignore, from the pump's datasheet`, is left out of both
+   checks, as it is by the Overleaf extension. Add one only for a number the
+   user confirms isn't this project's result.
+
+   <!-- TODO: needs human review -->
+
    For a number that is this project's result, it must reach the page
-   through the pipeline rather than through the author's fingers:
+   through the pipeline rather than through the author's fingers. A stage
+   writes it to a results file:
 
    ```yaml
    pipeline:
@@ -72,29 +80,26 @@ Judgment, done here:
          environment: py
          script_path: scripts/compute-drag.py
          outputs: [results/drag.json]
-       drag-to-latex:
-         kind: json-to-latex
-         command_name: result
-         inputs: [results/drag.json]
-         outputs:
-           - path: paper/generated-drag.tex
-             storage: git
    ```
 
-   The script writes `{"DragCoefficient": 0.42}`. The document inputs the
-   generated file and refers to the value by key:
+   The script writes `{"DragCoefficient": 0.42}`. The document loads the
+   `calkit` LaTeX package and reads the value from that file by its path
+   in the project and its key:
 
    ```latex
-   \input{generated-drag}
+   \usepackage{calkit}
    ...
-   The drag coefficient is \result[DragCoefficient].
+   The drag coefficient is \ckvalue[.2f]{results/drag.json}{DragCoefficient}.
    ```
 
-   `json-to-latex` generates one _keyed_ command per file, named by
-   `command_name` (or the output file's stem), so the reference is
-   `\result[DragCoefficient]` --- not a separate macro per key. Never write
-   a raw `stages:` block with `cmd: calkit latex from-json`; the stage kind
-   is what keeps `calkit.yaml` the single source of truth.
+   The document's LaTeX stage depends on what it includes this way, so no
+   `json-to-latex` stage or added `inputs` are needed. A `retyped_values`
+   finding's `source` names the file and key to use. If the document
+   already uses commands a `json-to-latex` stage generates, e.g.,
+   `\result[DragCoefficient]`, they keep working, so referencing the
+   existing command is fine there too. Never define a macro that holds the
+   number, or edit a generated file by hand: either one is a typed value
+   with extra steps.
 
 5. **Run the pipeline** (`calkit run`) and check again. Do not run the
    script yourself and paste the number in: that is the failure this whole

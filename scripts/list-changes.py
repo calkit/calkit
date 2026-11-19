@@ -4,7 +4,7 @@
 The repo ships several products on independent release cadences, each with
 its own tag namespace and its own slice of the tree. Since a release is cut
 by tagging, "what's unreleased" is the commits touching a product's paths
-since its newest tag. Run with ``make changes``.
+since its newest tag. Run with ``make unreleased``.
 
 The product definitions mirror the ``if:`` conditions on the publish
 workflows in .github/workflows, which are what actually decide whether a
@@ -35,6 +35,7 @@ OTHER_PRODUCT_DIRS = [
     "browser-ext",
     "assistant",
     "images/latex",
+    "images/libreoffice",
 ]
 
 PRODUCTS = [
@@ -52,6 +53,11 @@ PRODUCTS = [
     Product(name="assistant", tag_glob="assistant/v*", paths=["assistant"]),
     Product(
         name="latex-image", tag_glob="latex-image/v*", paths=["images/latex"]
+    ),
+    Product(
+        name="libreoffice-image",
+        tag_glob="libreoffice-image/v*",
+        paths=["images/libreoffice"],
     ),
 ]
 
@@ -78,9 +84,12 @@ def latest_tag(glob: str) -> str | None:
 
 
 def main() -> int:
-    head = git("rev-parse", "--short", "HEAD")
-    branch = git("rev-parse", "--abbrev-ref", "HEAD")
-    print(f"Unreleased commits as of {head} ({branch})\n")
+    # We do trunk-based development, so we only want to know what's in
+    # origin/main that hasn't been released
+    git("fetch", "--quiet", "--tags", "origin", "main")
+    ref = "origin/main"
+    head = git("rev-parse", "--short", ref)
+    print(f"Unreleased commits as of {head} ({ref})\n")
     due = []
     for product in PRODUCTS:
         tag = latest_tag(product.tag_glob)
@@ -90,10 +99,10 @@ def main() -> int:
         print(heading)
         if tag is None:
             # Never released, so every commit touching it is unreleased
-            rev_range = "HEAD"
+            rev_range = head
             print(f"  Never released (no {product.tag_glob} tag)")
         else:
-            rev_range = f"{tag}..HEAD"
+            rev_range = f"{tag}..{head}"
             date = git("log", "-1", "--format=%ad", "--date=short", tag)
             print(f"  Last release: {tag} ({date})")
         log = git(

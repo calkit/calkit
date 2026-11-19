@@ -1,3 +1,4 @@
+/** Settings and per-hub credentials, kept in the extension's storage. */
 import { DEFAULT_HUB_NAME, getHub, type Hub } from "./hubs";
 
 export interface Credentials {

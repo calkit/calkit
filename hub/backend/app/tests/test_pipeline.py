@@ -9,9 +9,9 @@ from app.pipeline import (
     StageStatus,
     _precompute_storage_presence,
     calc_overall_pipeline_status,
+    color_mermaid_by_status,
     compute_stage_statuses,
     find_frozen_tainted_stages,
-    find_stage_for_path,
 )
 
 
@@ -576,22 +576,6 @@ def test_not_run_stage(tmp_path):
     assert calc_overall_pipeline_status(statuses) == "stale"
 
 
-def test_find_stage_for_path():
-    dvc_lock = {
-        "stages": {
-            "plot": {
-                "outs": [{"path": "figures/foo.png", "md5": "abc"}],
-            },
-            "train": {
-                "outs": [{"path": "model.pkl", "md5": "def"}],
-            },
-        }
-    }
-    assert find_stage_for_path("figures/foo.png", dvc_lock) == "plot"
-    assert find_stage_for_path("model.pkl", dvc_lock) == "train"
-    assert find_stage_for_path("missing", dvc_lock) is None
-
-
 def _simple_pipeline(script: str):
     dvc_yaml = {
         "stages": {
@@ -842,29 +826,6 @@ def test_declared_deps_and_outs_missing_from_lock(tmp_path):
     assert "frozen" in find_frozen_tainted_stages(dvc_yaml, dvc_lock, statuses)
 
 
-def test_find_stage_for_path_directory_output():
-    """Issue 622: a figure produced into a stage's output *directory* must map
-    back to that stage, not just on an exact out-path match."""
-    dvc_lock = {
-        "stages": {
-            "plot": {"outs": [{"path": "figures", "md5": "abc123.dir"}]},
-            "report": {"outs": [{"path": "results/sup.json", "md5": "x"}]},
-        }
-    }
-    assert find_stage_for_path("figures/test.png", dvc_lock) == "plot"
-    assert find_stage_for_path("figures/sub/deep.png", dvc_lock) == "plot"
-    assert find_stage_for_path("results/sup.json", dvc_lock) == "report"
-    assert find_stage_for_path("other/x.png", dvc_lock) is None
-    # An exact out-path match wins over a containing-directory match.
-    dvc_lock_both = {
-        "stages": {
-            "dir": {"outs": [{"path": "figures", "md5": "d.dir"}]},
-            "file": {"outs": [{"path": "figures/test.png", "md5": "f"}]},
-        }
-    }
-    assert find_stage_for_path("figures/test.png", dvc_lock_both) == "file"
-
-
 def test_without_cache_token_always_recomputes(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     script = "print('hi')\n"
@@ -989,48 +950,6 @@ def test_cached_missing_outputs_are_rechecked(tmp_path):
     )
     assert again["run"].status == "up-to-date"
     assert fs.find_calls == 0
-
-
-def test_find_stage_for_path_prefers_current_stages():
-    # dvc.lock keeps entries that are no longer real stages: a bare name left
-    # from before the stage became a matrix, and expansions from an older
-    # matrix shape. Staleness reporting drops both, so matching one pins a
-    # figure to a stage that can never have a status.
-    dvc_lock = {
-        "stages": {
-            "plot": {"outs": [{"path": "figures/a.png"}]},
-            "plot@_arg00-9": {"outs": [{"path": "figures/a.png"}]},
-            "plot@_arg00": {"outs": [{"path": "figures/a.png"}]},
-            "render": {"outs": [{"path": "figures/sub"}]},
-            "render@_arg00": {"outs": [{"path": "figures/sub"}]},
-            "orphan": {"outs": [{"path": "figures/gone.png"}]},
-        }
-    }
-    current = {"plot@_arg00", "render@_arg00"}
-    # An exact match on a current expansion wins over the stale bare entry and
-    # the stale expansion, whatever order they appear in.
-    assert (
-        find_stage_for_path("figures/a.png", dvc_lock, valid_stages=current)
-        == "plot@_arg00"
-    )
-    # Directory outs resolve the same way, including for nested paths.
-    assert (
-        find_stage_for_path(
-            "figures/sub/deep.png", dvc_lock, valid_stages=current
-        )
-        == "render@_arg00"
-    )
-    # With nothing current producing it, naming the stale stage still beats
-    # naming nothing.
-    assert (
-        find_stage_for_path("figures/gone.png", dvc_lock, valid_stages=current)
-        == "orphan"
-    )
-    assert (
-        find_stage_for_path("nope.png", dvc_lock, valid_stages=current) is None
-    )
-    # Omitting valid_stages keeps the old any-match behaviour.
-    assert find_stage_for_path("figures/a.png", dvc_lock) == "plot"
 
 
 def test_cleaned_notebook_dep_tracks_the_notebook(tmp_path):
@@ -1198,3 +1117,25 @@ def test_find_frozen_tainted_stages() -> None:
         )
         == set()
     )
+
+
+def test_color_mermaid_by_status() -> None:
+    # Labels are escaped as Mermaid entity codes, which are matched decoded
+    mermaid = "\n".join(
+        [
+            "flowchart TD",
+            '\tnode1["plot"]',
+            '\tnode2["say#34;hi#34;@1"]',
+            '\tnode3["other"]',
+        ]
+    )
+    colored = color_mermaid_by_status(
+        mermaid,
+        {
+            "plot": StageStatus(status="stale"),
+            'say"hi"@1': StageStatus(status="up-to-date"),
+        },
+    )
+    assert "\tclass node1 stale" in colored
+    assert "\tclass node2 up-to-date" in colored
+    assert "node3 " not in colored.split("classDef", 1)[1]

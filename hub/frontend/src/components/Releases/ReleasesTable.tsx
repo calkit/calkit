@@ -58,6 +58,7 @@ import {
   type ReleaseSort,
   type SortKey,
 } from "./releaseSort"
+import { safeHref } from "../../lib/strings"
 
 // Columns that read most naturally as descending on first click.
 const DESC_FIRST: Set<SortKey> = new Set(["date", "views", "comments"])
@@ -198,7 +199,7 @@ const ReleasesTable = ({
           ? "Released to GitHub"
           : "GitHub release already exists",
         description: (
-          <Link href={data.url} isExternal textDecoration="underline">
+          <Link href={safeHref(data.url)} isExternal textDecoration="underline">
             View the release on GitHub
           </Link>
         ),
@@ -407,7 +408,7 @@ const ReleasesTable = ({
                         return (
                           <Tooltip label="View release on GitHub">
                             <Link
-                              href={githubUrl}
+                              href={safeHref(githubUrl)}
                               isExternal
                               color="green.500"
                               display="inline-flex"

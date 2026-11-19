@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 
@@ -13,7 +13,27 @@ from calkit.cli import raise_error, warn
 open_app = typer.Typer(no_args_is_help=True)
 
 # Commands for the editors 'default_editor' can name
-EDITOR_COMMANDS = {"vscode": "code", "jupyterlab": "jupyter lab"}
+EDITOR_COMMANDS = {
+    "vscode": "code",
+    "cursor": "cursor",
+    "vscodium": "codium",
+    "positron": "positron",
+    "antigravity": "antigravity",
+    "windsurf": "windsurf",
+    "jupyterlab": "jupyter lab",
+}
+# Commands of editors built on VS Code, which take its extensions, from its
+# marketplace or Open VSX, both of which have Calkit's
+VSCODE_COMMANDS = {
+    "code",
+    "code-insiders",
+    "cursor",
+    "codium",
+    "positron",
+    "antigravity",
+    "windsurf",
+}
+CALKIT_EXTENSION_ID = "calkit.calkit-vscode"
 
 
 def split_command(command: str, windows: bool | None = None) -> list[str]:
@@ -46,6 +66,14 @@ def open_project(
             )
         ),
     ],
+    file_path: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            "-p",
+            help="File in the project to open too, e.g., a notebook.",
+        ),
+    ] = None,
     yes: Annotated[
         bool,
         typer.Option(
@@ -65,14 +93,37 @@ def open_project(
             ),
         ),
     ] = None,
+    checkout: Annotated[
+        str | None,
+        typer.Option(
+            "--checkout",
+            help=(
+                "Checkout to open, e.g., one of its Git worktrees, rather "
+                "than finding one."
+            ),
+        ),
+    ] = None,
+    hub: Annotated[
+        str | None,
+        typer.Option(
+            "--hub",
+            help=(
+                "Hub to clone it from if it isn't here, e.g., "
+                "https://calkit.example.edu, or localhost for a development "
+                "hub. Defaults to calkit.io."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Open a project on this machine in its editor, from anywhere.
 
     Looks for it among the Calkit projects in your home folder, e.g., in
-    ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't
-    there. The editor is the 'default_editor' setting, VS Code unless
-    set otherwise, e.g., with 'calkit config set default_editor cursor',
-    or the one given with '--with'.
+    ~/calkit or ~/dev, or wherever Calkit created or cloned it, and offers
+    to clone it into ~/calkit if it isn't there. The editor is the
+    'default_editor' setting, VS Code unless set otherwise, e.g., with
+    'calkit config set default_editor cursor', or the one given with
+    '--with'. Editors built on VS Code, e.g., Cursor, VSCodium, Positron,
+    or Antigravity, get Calkit's extension if they don't have it.
     """
     import shutil
     import subprocess
@@ -81,88 +132,77 @@ def open_project(
 
     # A hub only matters for cloning, since checkouts are found by owner and
     # name
-    hub, owner, name = ([""] * 2 + project.split("/"))[-3:]
-    if not name or project.count("/") > 2 or (hub and not owner):
+    named_hub, owner, name = ([""] * 2 + project.split("/"))[-3:]
+    if not name or project.count("/") > 2 or (named_hub and not owner):
         raise_error("Give the project as NAME, OWNER/NAME, or HUB/OWNER/NAME")
     # Read now, since cloning moves into the new repo, and a '.env' file
     # there must not get to choose what runs
     editor = with_editor or calkit.config.read().default_editor
     home = os.path.expanduser("~")
     default_path = os.path.join(home, "calkit", name)
-    # Find checkouts of it, by the owner and name each project says it has
-    found: dict[str, str] = {}
-    for path in calkit.find_project_dirs():
-        path = os.path.realpath(path)
-        try:
-            # Most projects say their name, which rules them out without
-            # asking Git for a remote
-            info = calkit.load_calkit_info(wdir=path, read_only=True)
-            declared = info.get("name") if isinstance(info, dict) else None
-            if declared is not None and declared != name:
-                continue
-            # A subproject without its own repo would look like its parent
-            repo = calkit.git.get_repo(path)
-            if os.path.realpath(str(repo.working_tree_dir)) != path:
-                continue
-            p_owner, p_name = calkit.detect_project_name(wdir=path).split(
-                "/", 1
-            )
-        except ValueError:
-            # It names no owner, so it can't be the one asked for
-            continue
-        except Exception as e:
-            # E.g., a calkit.yaml left with merge conflict markers
-            warn(f"Skipping {path}, which can't be read: {e}")
-            continue
-        if p_name == name and owner in ("", p_owner):
-            found[path] = p_owner
-    owners = sorted(set(found.values()))
-    if len(owners) > 1:
-        raise_error(
-            f"More than one project named '{name}' is on this machine; "
-            "give its owner, e.g., "
-            + ", ".join(f"'calkit open project {o}/{name}'" for o in owners)
-        )
-    paths = sorted(found)
-    # Clone it if it isn't here
-    if not paths:
-        if not owner:
+    if checkout is not None:
+        paths = [os.path.realpath(checkout)]
+        if not os.path.isfile(os.path.join(paths[0], "calkit.yaml")):
+            raise_error(f"{checkout} isn't a Calkit project")
+    else:
+        found = calkit.get_project_checkouts(name, owner=owner, warn=warn)
+        owners = sorted(set(found.values()))
+        if len(owners) > 1:
             raise_error(
-                f"No project named '{name}' is on this machine; give its "
-                f"owner to clone it, e.g., 'calkit open project OWNER/{name}'"
-            )
-        if os.path.exists(default_path):
-            raise_error(f"{default_path} exists, but isn't {owner}/{name}")
-        if not yes:
-            if not is_tty():
-                raise_error(
-                    f"{owner}/{name} isn't on this machine; rerun with --yes "
-                    f"to clone it into {default_path}"
+                f"More than one project named '{name}' is on this machine; "
+                "give its owner, e.g., "
+                + ", ".join(
+                    f"'calkit open project {o}/{name}'" for o in owners
                 )
-            if not typer.confirm(
-                f"{owner}/{name} isn't on this machine. Clone it into "
-                f"{default_path}?",
-                default=True,
-            ):
-                raise typer.Exit(1)
-        from calkit.cli.main.core import clone
-
-        clone(url=project, location=default_path)
-        paths = [default_path]
-    # With more than one checkout, e.g., Git worktrees, prefer the one in
-    # ~/calkit, then the main checkout, whose .git is a folder rather than a
-    # file pointing to it
-    if len(paths) > 1:
-        preferred = [
-            p for p in paths if p == os.path.realpath(default_path)
-        ] or [p for p in paths if os.path.isdir(os.path.join(p, ".git"))]
-        if len(preferred) != 1:
-            raise_error(
-                f"{owner or found[paths[0]]}/{name} is in more than one "
-                "place; open one with 'code PATH': " + ", ".join(paths)
             )
-        paths = preferred
+        paths = sorted(found)
+        # Clone it if it isn't here
+        if not paths:
+            if not owner:
+                raise_error(
+                    f"No project named '{name}' is on this machine; give its "
+                    f"owner to clone it, e.g., 'calkit open project OWNER/{name}'"
+                )
+            if os.path.exists(default_path):
+                raise_error(f"{default_path} exists, but isn't {owner}/{name}")
+            if not yes:
+                if not is_tty():
+                    raise_error(
+                        f"{owner}/{name} isn't on this machine; rerun with --yes "
+                        f"to clone it into {default_path}"
+                    )
+                if not typer.confirm(
+                    f"{owner}/{name} isn't on this machine. Clone it into "
+                    f"{default_path}?",
+                    default=True,
+                ):
+                    raise typer.Exit(1)
+            from calkit.cli.main.core import clone
+
+            clone(url=project, location=default_path, hub=hub)
+            paths = [default_path]
+        # With more than one checkout, e.g., Git worktrees, prefer the one in
+        # ~/calkit, then the main checkout, whose .git is a folder rather than a
+        # file pointing to it
+        if len(paths) > 1:
+            preferred = [
+                p for p in paths if p == os.path.realpath(default_path)
+            ] or [p for p in paths if os.path.isdir(os.path.join(p, ".git"))]
+            if len(preferred) != 1:
+                raise_error(
+                    f"{owner or found[paths[0]]}/{name} is in more than one "
+                    "place; open one with 'code PATH': " + ", ".join(paths)
+                )
+            paths = preferred
     path = paths[0]
+    extra_args = []
+    if file_path is not None:
+        full_path = os.path.realpath(os.path.join(path, file_path))
+        if os.path.commonpath([full_path, path]) != path:
+            raise_error(f"{file_path} isn't in the project")
+        if not os.path.isfile(full_path):
+            raise_error(f"{file_path} isn't in {path}")
+        extra_args = [full_path]
     # Open it in the configured editor, which is either one we know the
     # command for or a command itself
     cmd = split_command(EDITOR_COMMANDS.get(editor, editor))
@@ -177,8 +217,30 @@ def open_project(
         )
         typer.launch(path)
         return
+    # Calkit's extension is how the editor shows the project's pipeline
+    command_name = os.path.splitext(os.path.basename(cmd[0]))[0].lower()
+    if command_name in VSCODE_COMMANDS:
+        try:
+            listed = subprocess.run(
+                [exe, "--list-extensions"],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=60,
+            ).stdout
+        except (OSError, subprocess.SubprocessError) as e:
+            warn(f"Couldn't check for Calkit's extension in {editor}: {e}")
+            listed = CALKIT_EXTENSION_ID
+        if CALKIT_EXTENSION_ID not in listed.lower().split():
+            calkit.echo(f"Installing Calkit's extension in {editor}")
+            subprocess.call([exe, "--install-extension", CALKIT_EXTENSION_ID])
     calkit.echo(f"Opening {path} with {editor}")
-    subprocess.call([exe, *cmd[1:], path])
+    # JupyterLab opens a file in the folder it's started from, where an
+    # editor like VS Code takes the folder, then the file
+    if editor == "jupyterlab" and extra_args:
+        subprocess.call([exe, *cmd[1:], *extra_args], cwd=path)
+    else:
+        subprocess.call([exe, *cmd[1:], path, *extra_args])
 
 
 def find_or_install_vscode() -> str | None:
@@ -186,8 +248,6 @@ def find_or_install_vscode() -> str | None:
     install it, optionally with Calkit's recommended extensions and
     settings.
     """
-    import click
-
     from calkit import install
     from calkit.core import is_tty
 
@@ -218,7 +278,7 @@ def find_or_install_vscode() -> str | None:
         "4. Don't install it; open the folder\n"
         "Choose",
         default="1",
-        type=click.Choice(["1", "2", "3", "4"]),
+        type=Literal["1", "2", "3", "4"],
     )
     if choice == "3":
         typer.launch(download_url)

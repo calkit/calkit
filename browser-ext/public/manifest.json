@@ -22,10 +22,11 @@
   },
   "options_page": "options.html",
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "worker.js",
     "type": "module"
   },
   "permissions": ["storage", "tabs", "scripting", "activeTab", "cookies"],
+  "optional_permissions": ["nativeMessaging"],
   "host_permissions": [
     "https://api.calkit.io/*",
     "https://api.staging.calkit.io/*",
@@ -99,6 +100,10 @@
     }
   ],
   "web_accessible_resources": [
+    {
+      "resources": ["review.html"],
+      "matches": ["https://www.overleaf.com/*", "https://overleaf.com/*"]
+    },
     {
       "resources": ["viewer.html"],
       "matches": ["https://github.com/*"]

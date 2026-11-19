@@ -66,6 +66,7 @@ kinds:
 | `conda`   | `environment.yml`                       |
 | `pixi`    | `pixi.toml`                             |
 | `docker`  | (image name, no local spec file needed) |
+| `texlive` | (TeX Live packages, listed in the env)  |
 | `renv`    | `renv.lock`                             |
 | `julia`   | `Project.toml`                          |
 | `matlab`  | (no spec file)                          |
@@ -78,6 +79,12 @@ For Python, default to a `uv` project environment, created with
 `requires-python`. Use `uv-venv` only for a project that already has a
 `requirements.txt` it should keep.
 
+<!-- TODO: needs human review -->
+
+For LaTeX, default to a `texlive` environment, created with
+`calkit new texlive-env`, which needs no Docker. A build adds the packages
+a document needs to the environment's lock.
+
 Example environment definitions:
 
 ```yaml
@@ -86,9 +93,9 @@ environments:
     kind: uv
     path: pyproject.toml
 
-  texlive:
-    kind: docker
-    image: texlive/texlive:latest-full
+  tex:
+    kind: texlive
+    release: 2025
 
   r-env:
     kind: renv
@@ -123,6 +130,24 @@ See the `calkit.yaml` schema for details.
 The most common stage kinds are `python-script`, `shell-script`, `shell-command`,
 `jupyter-notebook`.
 
+<!-- TODO: needs human review -->
+
+### LaTeX documents
+
+A document built by a `latex` stage includes pipeline outputs by their
+path in the project with the `calkit` package:
+
+```latex
+\usepackage{calkit}
+...
+The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
+\ckfigure[width=0.7\linewidth]{figures/plot.png}
+\cktable{tables/summary.tex}
+```
+
+The stage depends on everything included this way, so don't add
+`json-to-latex` or `map-paths` stages, or list those files in `inputs`.
+
 ### Outputs: Git vs. DVC storage
 
 By default, outputs are stored with DVC (large file storage). Use
@@ -136,6 +161,9 @@ outputs:
   - path: results/summary.txt
     storage: git
     delete_before_run: false # don't delete before re-running
+  - path: results/runs
+    storage: git
+    ignore: ["*.log"] # neither stored nor part of the output
 ```
 
 ### Declaring dependencies between stages

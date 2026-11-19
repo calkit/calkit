@@ -89,6 +89,7 @@ CONCURRENT_REQUEST_TYPES = (
     "publication.pdf",
     "publication.synctex",
     "publication.source",
+    "project.originSuggestions",
     "folder.choose",
     "job.get",
     "job.log",
@@ -198,6 +199,8 @@ def get_reply(msg: dict) -> dict:
     - ``publication.source``: a LaTeX file in a folder synced with
       Overleaf, as it is here, to map a line SyncTeX gives for a PDF built
       here to the same line in Overleaf's copy.
+    - ``project.originSuggestions``: what likely makes a file with no
+      origin, e.g., a notebook that writes it, for someone to confirm.
     - ``folder.choose``: a folder chosen in this machine's own dialog,
       e.g., one with an analysis to clone a project into, and whether it
       has anything in it.
@@ -382,6 +385,17 @@ def get_result(msg: dict) -> Any:
         if key is not None and not isinstance(key, str):
             raise ValueError("A key must be a string")
         result = get_provenance(paths[0], msg.get("path"), key)
+    elif kind == "project.originSuggestions":
+        from calkit.provenance import get_origin_suggestions
+
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        path = get_project_path(paths[0], msg.get("path"), "file")
+        result = get_origin_suggestions(
+            path, get_content_paths(paths[0]), wdir=paths[0]
+        )
     elif kind in ("publication.pdf", "publication.synctex"):
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)

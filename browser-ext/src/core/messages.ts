@@ -315,6 +315,13 @@ export type Request =
       /** As "owner/name". */
       project: string;
     }
+  | {
+      /** What likely makes a file with no origin, for someone to confirm. */
+      type: "project.originSuggestions";
+      owner: string;
+      project: string;
+      path: string;
+    }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */
   | { type: "local.installEditor"; project: string }
@@ -387,6 +394,12 @@ export interface ResponseMap {
   "local.publicationSynctex": string | null;
   "local.chooseFolder": { path: string | null; empty: boolean };
   "local.save": null;
+  "project.originSuggestions": {
+    kind: "script" | "notebook" | "exported";
+    source: string;
+    /** What a script or notebook writes that matched. */
+    writes?: string;
+  }[];
   "local.createProject": { path: string; project: string };
   "local.openOptions": null;
   "local.installEditor": null;

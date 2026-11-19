@@ -244,6 +244,7 @@ function renderAddScript(
   citation: Citation,
   shows: string,
   kind: "script" | "notebook",
+  suggested?: string,
 ): HTMLElement {
   const owner = link.project_owner_name;
   const project = link.project_name;
@@ -598,6 +599,11 @@ function renderAddScript(
       review.append(el("div", { class: "actions" }, [save]));
     }
   };
+  // A suggestion confirmed is read at once, to review before it's saved
+  if (suggested) {
+    path.value = suggested;
+    queueMicrotask(() => read.click());
+  }
   return el("div", { class: "stack", style: { marginTop: "6px" } }, [
     el("div", { class: "small" }, [
       document.createTextNode(`The ${kind} that makes `),
@@ -621,6 +627,7 @@ function renderExported(
   link: OverleafLinkPublic,
   citation: Citation,
   target: string,
+  suggested?: string,
 ): HTMLElement {
   const owner = link.project_owner_name;
   const project = link.project_name;
@@ -631,6 +638,7 @@ function renderExported(
     placeholder: "Or find in project",
     accept: (p) => p !== target && canBeCreatedByPerson(p),
   });
+  path.value = suggested ?? "";
   const appName = textInput({
     placeholder: "App it's exported with, e.g., Photoshop (optional)",
   });
@@ -911,10 +919,66 @@ function renderDefineOrigin(
         ),
     ]);
   }
+  // What likely makes it, e.g., a notebook that writes it, read on this
+  // machine, each opening its form filled in, to confirm
+  const suggestions = el("div");
+  void send({
+    type: "project.originSuggestions",
+    owner: link.project_owner_name,
+    project: link.project_name,
+    path: target,
+  })
+    .then((found) => {
+      if (!found.length) {
+        return;
+      }
+      suggestions.append(
+        el("div", { class: "small dim", text: "Suggested" }),
+        ...found.slice(0, 3).map((s) =>
+          el("div", { class: "row", style: { marginTop: "4px" } }, [
+            el("div", {
+              class: "grow small",
+              text:
+                s.kind === "exported"
+                  ? `Exported from ${s.source}`
+                  : `Made by ${s.source}` +
+                    (s.writes && s.writes !== target
+                      ? `, which saves ${s.writes}`
+                      : ""),
+            }),
+            el("button", {
+              class: "action",
+              text: "Confirm",
+              onClick: () =>
+                s.kind === "exported"
+                  ? open((body) =>
+                      renderExported(body, link, citation, target, s.source),
+                    )
+                  : open((body) =>
+                      renderAddScript(
+                        body,
+                        link,
+                        citation,
+                        target,
+                        s.kind === "notebook" ? "notebook" : "script",
+                        s.source,
+                      ),
+                    ),
+            }),
+          ]),
+        ),
+      );
+    })
+    .catch(() => {});
   // Two by two, everywhere, rather than one left over on a line of its own
   // where the row doesn't fit, e.g., in the panel
   return el("div", { style: { marginTop: "4px" } }, [
-    el("div", { class: "small dim", text: "Define origin" }),
+    suggestions,
+    el("div", {
+      class: "small dim",
+      style: { marginTop: "4px" },
+      text: "Define origin",
+    }),
     el(
       "div",
       {

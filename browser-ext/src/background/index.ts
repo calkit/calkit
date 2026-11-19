@@ -810,6 +810,18 @@ async function handle(
       localCheckouts.delete(message.project);
       return chosen;
     }
+    case "project.originSuggestions": {
+      // Read from the scripts on this machine, when the project's here
+      const local = `${message.owner}/${message.project}`;
+      if (!(await getLocalCheckout(local)).path) {
+        return [];
+      }
+      return askLocal({
+        type: "project.originSuggestions",
+        project: local,
+        path: message.path,
+      });
+    }
     case "local.save":
       await waitForJob(
         await askLocal<LocalJob>({

@@ -539,6 +539,129 @@ def add_creator(ck_info: dict, paths: list[str], person: dict) -> dict:
     return ck_info
 
 
+# Formats a figure is likely exported from, besides those the pipeline can
+# export itself, e.g., a Photoshop file
+DRAWING_EXTENSIONS = {
+    ".pptx",
+    ".pptm",
+    ".key",
+    ".odp",
+    ".odg",
+    ".svg",
+    ".psd",
+    ".xcf",
+    ".ai",
+    ".afdesign",
+    ".drawio",
+    ".fig",
+}
+# Scripts and notebooks read for what they write, at most this many, so
+# suggesting stays quick in a big project
+SUGGESTION_MAX_SCRIPTS = 200
+SUGGESTION_MAX_SCRIPT_BYTES = 1_000_000
+
+
+def get_origin_suggestions(
+    path: str, paths: list[str], wdir: str = "."
+) -> list[dict]:
+    """Guess where ``path`` comes from, for someone defining its origin to
+    confirm, best first, from the project's ``paths``: a script or notebook
+    that writes it, or a file with its name, e.g., the one a paper's copy
+    was copied from, and a file of the same name it's likely exported from,
+    e.g., a PowerPoint file.
+
+    Each has the ``kind`` of origin, ``script``, ``notebook``, or
+    ``exported``, its ``source``, and, for a script or notebook, what it
+    ``writes`` that matched. Scripts are read, not run, as ``calkit xr``
+    reads them.
+    """
+    import calkit.detect
+    import calkit.export
+
+    def is_same_file(a: str, b: str) -> bool:
+        try:
+            with open(os.path.join(wdir, a), "rb") as fa:
+                with open(os.path.join(wdir, b), "rb") as fb:
+                    return fa.read() == fb.read()
+        except OSError:
+            return False
+
+    def get_outputs(script: str) -> list[str]:
+        ext = posixpath.splitext(script)[1].lower()
+        full = os.path.join(wdir, script)
+        try:
+            if os.path.getsize(full) > SUGGESTION_MAX_SCRIPT_BYTES:
+                return []
+            if ext == ".ipynb":
+                io = calkit.detect.detect_jupyter_notebook_io(
+                    script, project_dir=wdir
+                )
+            elif ext == ".py":
+                io = calkit.detect.detect_python_script_io(
+                    script, project_dir=wdir
+                )
+            elif ext == ".r":
+                io = calkit.detect.detect_r_script_io(full)
+            elif ext == ".jl":
+                io = calkit.detect.detect_julia_script_io(full)
+            elif ext == ".sh":
+                io = calkit.detect.detect_shell_script_io(full)
+            else:
+                return []
+        except Exception:
+            return []
+        return [posixpath.normpath(o) for o in io.get("outputs") or []]
+
+    path = posixpath.normpath(path)
+    name = posixpath.basename(path)
+    stem = posixpath.splitext(name)[0].lower()
+    # Ranked, lower first: writes it, writes what it's a copy of, exported
+    # from a file of its name, writes a file of its name
+    found: list[tuple[int, dict]] = []
+    scripts = [
+        p
+        for p in paths
+        if posixpath.splitext(p)[1].lower()
+        in (".py", ".ipynb", ".r", ".jl", ".sh")
+    ][:SUGGESTION_MAX_SCRIPTS]
+    for script in scripts:
+        best = None
+        for out in get_outputs(script):
+            if out == path:
+                rank = 0
+            elif posixpath.basename(out) != name:
+                continue
+            elif is_same_file(out, path):
+                rank = 1
+            else:
+                rank = 3
+            if best is None or rank < best[0]:
+                best = (rank, out)
+        if best is not None:
+            found.append(
+                (
+                    best[0],
+                    {
+                        "kind": "notebook"
+                        if script.lower().endswith(".ipynb")
+                        else "script",
+                        "source": script,
+                        "writes": best[1],
+                    },
+                )
+            )
+    drawings = DRAWING_EXTENSIONS | {
+        ext for e in calkit.export.exporters() for ext in e.source_exts
+    }
+    if not can_be_created_by_person(path):
+        for p in paths:
+            base, ext = posixpath.splitext(posixpath.basename(p))
+            if p != path and ext.lower() in drawings and base.lower() == stem:
+                found.append((2, {"kind": "exported", "source": p}))
+    found.sort(key=lambda f: (f[0], f[1]["source"]))
+    return [s for _, s in found]
+
+
 def how_to_define_origin(path: str) -> str:
     """Say what defines the origin of ``path``, for a message."""
     if can_be_created_by_person(path):

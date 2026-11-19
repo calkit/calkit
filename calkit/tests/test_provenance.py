@@ -1419,3 +1419,58 @@ def test_add_origin_and_add_creator():
         "created_by": [{"email": "me@x.org"}],
     }
     assert len(ck_info["misc"]) == 3
+
+
+def test_get_origin_suggestions(tmp_path):
+    import json
+
+    from calkit.provenance import get_origin_suggestions
+
+    files = {
+        "plot.py": "import matplotlib.pyplot as plt\nplt.savefig('figures/a.png')\n",
+        "other.py": "import matplotlib.pyplot as plt\nplt.savefig('b.png')\n",
+        "figures/a.png": "png",
+        "paper/figures/a.png": "png",
+        "paper/figures/c.png": "drawn",
+        "drawings/c.pptx": "pptx",
+        "drawings/c.txt": "notes",
+    }
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "outputs": [],
+                "execution_count": None,
+                "source": [
+                    "import matplotlib.pyplot as plt\n",
+                    "plt.savefig('paper/figures/a.png')",
+                ],
+            }
+        ],
+        "metadata": {"kernelspec": {"name": "python3", "language": "python"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    files["fit.ipynb"] = json.dumps(notebook)
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    paths = sorted(files)
+    # What writes it first, then what writes the file it's a copy of
+    assert get_origin_suggestions(
+        "paper/figures/a.png", paths, wdir=str(tmp_path)
+    ) == [
+        {
+            "kind": "notebook",
+            "source": "fit.ipynb",
+            "writes": "paper/figures/a.png",
+        },
+        {"kind": "script", "source": "plot.py", "writes": "figures/a.png"},
+    ]
+    # A drawing of the same name it's exported from
+    assert get_origin_suggestions(
+        "paper/figures/c.png", paths, wdir=str(tmp_path)
+    ) == [{"kind": "exported", "source": "drawings/c.pptx"}]
+    # Nothing for what nothing writes or has the name of
+    assert get_origin_suggestions("x.png", paths, wdir=str(tmp_path)) == []

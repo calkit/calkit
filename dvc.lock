@@ -397,8 +397,8 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 537d8e72b1787f8a9f30a2e9df9095f6
-      size: 197312
+      md5: 679775b18eb50181fcbaa44d48769228
+      size: 198287
     - path: calkit/docx.py
       hash: md5
       md5: 7dc35095ff91d162dc5acef899a58c5c

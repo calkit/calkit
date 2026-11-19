@@ -1781,9 +1781,24 @@ def diff(
     # Per run, so diffs run at the same time, e.g., from the editor while
     # the pipeline runs, don't check out over each other
     run_dir = os.path.join(DIFF_TMP_DIR, str(os.getpid()))
-    # A run that was killed leaves its checkouts behind
+    # A run that was killed leaves its checkouts behind, and its build
+    # beside the working tree's document
     import psutil
 
+    doc_dir = os.path.dirname(tex_file) or "."
+    aux_prefix = f"{calkit.latex.DIFF_AUX_DIRNAME}-"
+    for name in os.listdir(doc_dir) if os.path.isdir(doc_dir) else []:
+        pid = name.removeprefix(aux_prefix)
+        if name.startswith(aux_prefix) and pid.isdigit():
+            if not psutil.pid_exists(int(pid)):
+                shutil.rmtree(os.path.join(doc_dir, name), ignore_errors=True)
+                # Only beside its aux directory, so a file of the user's
+                # with a name like it is left alone
+                stale_tex_path = os.path.join(
+                    doc_dir, f"{Path(tex_file).stem}-diff-{pid}.tex"
+                )
+                if os.path.isfile(stale_tex_path):
+                    os.remove(stale_tex_path)
     if os.path.isdir(DIFF_TMP_DIR):
         for name in os.listdir(DIFF_TMP_DIR):
             if name.isdigit() and not psutil.pid_exists(int(name)):
@@ -2044,8 +2059,11 @@ def _build_diff(
         inputs_digest = inputs.hexdigest()
         state_path = calkit.latex.diff_state_path(output)
         inputs_state_path = f"{state_path}.inputs"
+        # Not when the marked-up document is to be kept, since only
+        # latexdiff makes it
         if (
             not force
+            and not keep_tex
             and os.path.isfile(output)
             and _read(inputs_state_path) == inputs_digest
         ):
@@ -2236,10 +2254,6 @@ def _build_diff(
         calkit.latex.set_content_id(built)
         os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
         shutil.move(built, output)
-        # A checkout is removed afterwards, but the working tree's document
-        # directory is the user's, so nothing is left behind in it
-        if os.path.abspath(head_root) == os.path.abspath("."):
-            shutil.rmtree(aux_dir, ignore_errors=True)
         os.makedirs(os.path.dirname(state_path), exist_ok=True)
         Path(state_path).write_text(digest)
         Path(inputs_state_path).write_text(inputs_digest)
@@ -2264,6 +2278,11 @@ def _build_diff(
                     typer.echo(f"Kept {kept_fpath} for inspection")
         if os.path.isfile(diff_tex_fpath):
             os.remove(diff_tex_fpath)
+        # A checkout is removed afterwards, but the working tree's document
+        # directory is the user's, so nothing is left behind in it, even
+        # when the build fails
+        if os.path.abspath(head_root) == os.path.abspath("."):
+            shutil.rmtree(aux_dir, ignore_errors=True)
 
 
 @latex_app.command(name="to-docx")

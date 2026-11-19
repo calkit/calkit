@@ -1336,6 +1336,15 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert not os.path.exists(stubs / "latexmk-args.txt")
     # Known from what it's made of, so latexdiff doesn't run either
     assert not os.path.exists(stubs / "latexdiff-args.txt")
+    # Unless the marked-up document is to be kept, which only latexdiff
+    # makes, though the build it would make is still known
+    result = subprocess.run(
+        diff + ["--keep-tex"], capture_output=True, text=True, env=env
+    )
+    assert result.returncode == 0, result.stderr
+    assert os.path.exists(stubs / "latexdiff-args.txt")
+    assert not os.path.exists(stubs / "latexmk-args.txt")
+    assert os.path.isfile(working_output.removesuffix(".pdf") + "-diff.tex")
     with open("paper/.latexmkrc", "a") as f:
         f.write("$max_repeat = 5;\n")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
@@ -1389,6 +1398,25 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert "built despite the LaTeX errors" in result.stderr
     with open(stubs / "latexmk-args.txt") as f:
         assert "-f" in f.read().split()
+    # A failed build beside the working tree's document leaves nothing
+    # there, and what a killed one left is cleared away, but not a file of
+    # the user's named like it
+    os.makedirs("paper/calkit-latex-diff-aux-999999999")
+    for name in ["main-diff-999999999.tex", "main-diff-999999998.tex"]:
+        with open(f"paper/{name}", "w") as f:
+            f.write("left\n")
+    result = subprocess.run(
+        diff + ["--force"],
+        capture_output=True,
+        text=True,
+        env=env | {"FAIL": "1"},
+    )
+    assert result.returncode != 0
+    assert sorted(p for p in os.listdir("paper") if "-diff" in p) == [
+        "main-diff-999999998.tex",
+        "main-diff.tex",
+    ]
+    os.remove("paper/main-diff-999999998.tex")
     # Detection can't find another stage's uncached output at a revision
     os.remove(stubs / "setup.txt")
     bare = ["calkit", "latex", "diff", "paper/main.tex", "--from", "v1"]

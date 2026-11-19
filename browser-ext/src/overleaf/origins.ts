@@ -25,7 +25,7 @@ import {
   syncAfterHubChange,
   citationProvenance,
   linkKey,
-  syncOverleaf,
+  startRun,
   renderRuns,
   renderOpenLocally,
   showInPanel,
@@ -389,6 +389,9 @@ function renderAddScript(
       class: "action",
       text: "Add to pipeline",
     });
+    // A new stage hasn't run, so Overleaf can't sync until it has
+    const runAfter = el("input", { type: "checkbox" }) as HTMLInputElement;
+    runAfter.checked = true;
     save.addEventListener("click", async () => {
       if (!request) {
         return;
@@ -406,13 +409,12 @@ function renderAddScript(
           data: await dataRequest(true),
           save: true,
         });
-        // Brings the \ckfigure into the editor
-        if (saved.included_in.length) {
-          clear(message).append(loading("Syncing"));
-          await syncOverleaf(owner, project, link.path);
-        }
         await showDefined(container, link, citation);
-        container.append(renderRunIt(saved, link));
+        // Its run syncs after, which brings the \ckfigure into the editor
+        if (runAfter.checked) {
+          void startRun(link);
+        }
+        container.append(renderRunIt(saved, link, runAfter.checked));
       } catch (e) {
         fail(e);
         save.disabled = false;
@@ -420,7 +422,15 @@ function renderAddScript(
     });
     // Only a stage that makes what's shown defines its origin
     if (choices.length) {
-      review.append(el("div", { class: "actions" }, [save]));
+      review.append(
+        el("div", { class: "actions" }, [
+          save,
+          el("label", { class: "check" }, [
+            runAfter,
+            document.createTextNode("Run and sync"),
+          ]),
+        ]),
+      );
     }
   };
   // A suggestion confirmed is read at once, to review before it's saved
@@ -928,15 +938,19 @@ function renderDefineOrigin(
 function renderRunIt(
   saved: StageFromScriptOrNotebookResponse,
   link: OverleafLinkPublic,
+  running: boolean,
 ): HTMLElement {
-  if (link.local_path) {
+  const where = link.local_path ? "this machine" : "GitHub Actions";
+  if (link.local_path || running) {
     return el("div", { class: "muted-box", style: { marginTop: "6px" } }, [
       el("div", {
         class: "small",
-        text:
-          `Added stage ${saved.stage_name}. It hasn't run yet. Run it on ` +
-          "this machine, and its results come into this paper when it " +
-          "finishes:",
+        text: running
+          ? `Added stage ${saved.stage_name}. Running it on ${where}; ` +
+            "its results come into this paper when it finishes:"
+          : `Added stage ${saved.stage_name}. It hasn't run yet. Run it ` +
+            `on ${where}, and its results come into this paper when it ` +
+            "finishes:",
       }),
       renderRuns(link, true),
     ]);

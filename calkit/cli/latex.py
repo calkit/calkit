@@ -1786,19 +1786,31 @@ def diff(
     import psutil
 
     doc_dir = os.path.dirname(tex_file) or "."
+    doc_dir_names = os.listdir(doc_dir) if os.path.isdir(doc_dir) else []
     aux_prefix = f"{calkit.latex.DIFF_AUX_DIRNAME}-"
-    for name in os.listdir(doc_dir) if os.path.isdir(doc_dir) else []:
-        pid = name.removeprefix(aux_prefix)
-        if name.startswith(aux_prefix) and pid.isdigit():
-            if not psutil.pid_exists(int(pid)):
-                shutil.rmtree(os.path.join(doc_dir, name), ignore_errors=True)
-                # Only beside its aux directory, so a file of the user's
-                # with a name like it is left alone
-                stale_tex_path = os.path.join(
-                    doc_dir, f"{Path(tex_file).stem}-diff-{pid}.tex"
-                )
-                if os.path.isfile(stale_tex_path):
-                    os.remove(stale_tex_path)
+    for name in doc_dir_names:
+        pid_str = name.removeprefix(aux_prefix)
+        if (
+            pid_str == name
+            or not pid_str.isdigit()
+            or psutil.pid_exists(int(pid_str))
+        ):
+            continue
+        shutil.rmtree(os.path.join(doc_dir, name), ignore_errors=True)
+        # The marked-up document of whichever document it built, and only
+        # beside its aux directory, so a file of the user's named like one
+        # is left alone
+        suffix = f"-diff-{pid_str}.tex"
+        for other in doc_dir_names:
+            if (
+                other.endswith(suffix)
+                and other.removesuffix(suffix) + ".tex" in doc_dir_names
+            ):
+                try:
+                    os.remove(os.path.join(doc_dir, other))
+                except OSError:
+                    # E.g., on Windows, still open in a TeX the run left
+                    pass
     if os.path.isdir(DIFF_TMP_DIR):
         for name in os.listdir(DIFF_TMP_DIR):
             if name.isdigit() and not psutil.pid_exists(int(name)):
@@ -2002,6 +2014,7 @@ def _build_diff(
     # --flatten or macro expansion failure can be inspected.
     kept_stem = os.path.splitext(output)[0]
     kept_diff_fpath = f"{kept_stem}-diff.tex"
+    kept_log_fpath = f"{kept_stem}-diff.log"
     kept_old_fpath = f"{kept_stem}-old.tex"
     kept_new_fpath = f"{kept_stem}-new.tex"
     marked_up: bytes | None = None
@@ -2231,8 +2244,12 @@ def _build_diff(
                 if line.startswith("!"):
                     shown += log_lines[i : i + 3]
             excerpt = shown[:60] or log_lines[-20:]
+            # Not the aux directory's, which is removed afterwards
             if excerpt:
-                typer.echo(f"From {log_path.as_posix()}:", err=True)
+                typer.echo(
+                    f"From {kept_log_fpath}:" if keep_tex else "From the log:",
+                    err=True,
+                )
                 typer.echo("\n".join(excerpt), err=True)
             inspect = "" if keep_tex else "; rerun with --keep-tex to inspect"
             if not os.path.isfile(built):
@@ -2263,6 +2280,9 @@ def _build_diff(
             os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
             if marked_up is not None:
                 Path(kept_diff_fpath).write_bytes(marked_up)
+            built_log_path = os.path.join(aux_dir, f"{job}.log")
+            if os.path.isfile(built_log_path):
+                shutil.copy(built_log_path, kept_log_fpath)
             for src, kept_fpath in (
                 (base_tex_fpath, kept_old_fpath),
                 (head_tex_fpath, kept_new_fpath),
@@ -2273,6 +2293,7 @@ def _build_diff(
                 kept_old_fpath,
                 kept_new_fpath,
                 kept_diff_fpath,
+                kept_log_fpath,
             ):
                 if os.path.isfile(kept_fpath):
                     typer.echo(f"Kept {kept_fpath} for inspection")

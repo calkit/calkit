@@ -963,8 +963,21 @@ def test_latex_diff_setup(tmp_dir, monkeypatch):
     # Everything up to running latexdiff itself, which needs TeX Live and
     # so can't run in CI: which revision gets compared, and that the
     # worktree it checks out is always cleaned up
+    from calkit.cli import latex as cli_latex
     from calkit.cli.latex import DIFF_TMP_DIR
     from calkit.latex import default_base_ref, get_diff_path
+
+    tex_cmds: list[list[str]] = []
+    builds: list[dict] = []
+    build_diff = cli_latex._build_diff
+
+    def stop_at_tex_cmd(cmd: list[str], **kwargs: object) -> list[str]:
+        tex_cmds.append(cmd)
+        raise RuntimeError("stop before running latexdiff")
+
+    def record_build(**kwargs: object) -> None:
+        builds.append(kwargs)
+        build_diff(**kwargs)  # type: ignore[arg-type]
 
     subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
     os.makedirs("paper", exist_ok=True)
@@ -1047,22 +1060,7 @@ def test_latex_diff_setup(tmp_dir, monkeypatch):
     assert "does not exist" in result.stderr
     # latexdiff gets POSIX paths, since it may run in a Linux container,
     # whose shell would drop a Windows path's backslashes
-    from calkit.cli import latex as cli_latex
-
-    tex_cmds: list[list[str]] = []
-
-    def tex_cmd(cmd: list[str], **kwargs: object) -> list[str]:
-        tex_cmds.append(cmd)
-        raise RuntimeError("stop before running latexdiff")
-
-    build_diff = cli_latex._build_diff
-    builds: list[dict] = []
-
-    def record_build(**kwargs: object) -> None:
-        builds.append(kwargs)
-        build_diff(**kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(cli_latex, "_tex_cmd", tex_cmd)
+    monkeypatch.setattr(cli_latex, "_tex_cmd", stop_at_tex_cmd)
     monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
     monkeypatch.setattr(cli_latex, "_build_diff", record_build)
     # However the document is spelled, e.g., as tab completion writes it
@@ -1402,7 +1400,12 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     # there, and what a killed one left is cleared away, but not a file of
     # the user's named like it
     os.makedirs("paper/calkit-latex-diff-aux-999999999")
-    for name in ["main-diff-999999999.tex", "main-diff-999999998.tex"]:
+    for name in [
+        "main-diff-999999999.tex",
+        "main-diff-999999998.tex",
+        "other.tex",
+        "other-diff-999999999.tex",
+    ]:
         with open(f"paper/{name}", "w") as f:
             f.write("left\n")
     result = subprocess.run(
@@ -1416,7 +1419,21 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         "main-diff-999999998.tex",
         "main-diff.tex",
     ]
-    os.remove("paper/main-diff-999999998.tex")
+    # With --keep-tex, the log the errors came from is kept too, since the
+    # aux directory isn't
+    result = subprocess.run(
+        diff + ["--force", "--keep-tex"],
+        capture_output=True,
+        text=True,
+        env=env | {"FAIL": "1"},
+    )
+    assert result.returncode != 0
+    kept_log_path = working_output.removesuffix(".pdf") + "-diff.log"
+    assert f"From {kept_log_path}:" in result.stderr
+    with open(kept_log_path) as f:
+        assert "! Undefined control sequence." in f.read()
+    for name in ["main-diff-999999998.tex", "other.tex"]:
+        os.remove(f"paper/{name}")
     # Detection can't find another stage's uncached output at a revision
     os.remove(stubs / "setup.txt")
     bare = ["calkit", "latex", "diff", "paper/main.tex", "--from", "v1"]
@@ -1665,7 +1682,9 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
             out = "/work/.calkit/local/texmf\n"
             return subprocess.CompletedProcess(cmd, 0, stdout=out)
         if "latexmk" in cmd:
-            captured.append(kwargs.get("capture_output"))
+            captured.append(
+                (kwargs.get("capture_output"), kwargs.get("stdin"))
+            )
             return latexmk(cmd)
         if "search" in cmd:
             name = cmd[-1].lstrip("/")
@@ -1676,7 +1695,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
         # As a font's install does, failing on the map after the files land
         return subprocess.CompletedProcess(cmd, 1, stdout="")
 
-    captured: list[bool] = []
+    captured: list[tuple] = []
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: False)
     with open("calkit.yaml", "w") as f:
@@ -1723,10 +1742,11 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     assert build(environment=None) == 12
     assert not [c for c in calls if "tlmgr" in c]
     # Quiet keeps latexmk's output out of the way, for a caller that reports
-    # what went wrong from the log
+    # what went wrong from the log, and with no stdin, anything asking for
+    # input fails rather than waiting
     captured.clear()
     build(quiet=True, environment=None)
-    assert captured == [True]
+    assert captured == [(True, subprocess.DEVNULL)]
     # A TeX Live environment gets the engine latexmk will compile with,
     # which a log can't name, since it fails to start
     from calkit.environments import texlive as env_texlive

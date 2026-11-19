@@ -2700,31 +2700,40 @@ def _inject_markdown_stage_output(log_content: str) -> list[str]:
     return changed_stages
 
 
-def _inject_markdown_values() -> list[str]:
+def _inject_markdown_values() -> tuple[list[str], list[str]]:
     """Bring each Markdown file's value markers into line with its results.
 
     Done after every run rather than only for stages that ran: the
     results files are tracked outputs, so whatever they hold is what the
-    prose should say. Returns the paths of the files that changed.
+    prose should say. Returns the paths of the files that changed and an
+    error message for each that couldn't be parsed, which doesn't stop
+    the rest from being written.
     """
     import calkit.markdown
 
     ck_info = calkit.load_calkit_info()
     results = calkit.markdown.results_by_name(ck_info)
     changed_paths = []
-    for md_path in set(calkit.markdown.get_markdown_stages(ck_info).values()):
+    error_messages = []
+    for md_path in sorted(
+        set(calkit.markdown.get_markdown_stages(ck_info).values())
+    ):
         if not os.path.isfile(md_path):
             continue
         with open(md_path, encoding="utf-8") as f:
             text = f.read()
-        new_text, changed = calkit.markdown.set_values(
-            text, md_path, results=results
-        )
+        try:
+            new_text, changed = calkit.markdown.set_values(
+                text, md_path, results=results
+            )
+        except calkit.markdown.MarkdownParseError as e:
+            error_messages.append(str(e))
+            continue
         if changed:
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new_text)
             changed_paths.append(md_path)
-    return changed_paths
+    return changed_paths, error_messages
 
 
 def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
@@ -4054,9 +4063,14 @@ def run(
         if unknown:
             raise_error(f"No stage(s) named: {', '.join(unknown)}")
         try:
-            md_changed_paths = _inject_markdown_values()
+            md_changed_paths, md_value_errors = _inject_markdown_values()
         except Exception as e:
             raise_error(f"Failed to write values into markdown: {e}")
+        if md_value_errors:
+            raise_error(
+                "Failed to write values into markdown:\n  "
+                + "\n  ".join(md_value_errors)
+            )
         if not quiet:
             for md_path in md_changed_paths:
                 typer.echo(f"Updated values in {md_path}")
@@ -4413,9 +4427,16 @@ def run(
     # ...and bring any values the Markdown shows into line with the
     # results files the stages produced
     try:
-        _inject_markdown_values()
+        _, md_value_errors = _inject_markdown_values()
     except Exception as e:
-        warn(f"Failed to write values into markdown: {e}")
+        md_value_errors = [str(e)]
+    # Stale values in a document are a failure, not a warning
+    for message in md_value_errors:
+        typer.echo(
+            f"Failed to write values into markdown: {message}", err=True
+        )
+    if md_value_errors:
+        failed = True
     # Zip dvc-zip outputs for stages that actually ran
     if stage_run_info:
         from calkit.models.io import PathOutput

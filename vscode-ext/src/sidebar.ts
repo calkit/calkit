@@ -282,34 +282,7 @@ export class CalkitSidebarProvider
   // A row per folder synced with Overleaf, with what a sync would do
   private getOverleafItems(): SidebarItem[] {
     const state = this.overleafState;
-    if (state.error) {
-      const item = new SidebarItem(
-        state.needsLogin ? "Sign in to Overleaf" : "Couldn't check Overleaf",
-        vscode.TreeItemCollapsibleState.None,
-        "overleaf-error",
-      );
-      item.iconPath = new vscode.ThemeIcon("warning");
-      item.tooltip = state.error;
-      if (state.needsLogin) {
-        item.command = {
-          command: "calkit-vscode.overleafLogin",
-          title: "Sign in to Overleaf",
-        };
-      }
-      return [item];
-    }
-    if (!state.statuses) {
-      const item = new SidebarItem(
-        state.checking ? "Checking Overleaf" : "Not synced with Overleaf",
-        vscode.TreeItemCollapsibleState.None,
-        "empty",
-      );
-      item.iconPath = new vscode.ThemeIcon(
-        state.checking ? "sync~spin" : "info",
-      );
-      return [item];
-    }
-    return state.statuses
+    const rows = (state.statuses ?? [])
       .filter((status) => this.matchesFilter(status.path))
       .map((status) => {
         const row = getOverleafRow(status, state);
@@ -325,7 +298,7 @@ export class CalkitSidebarProvider
         item.contextValue = status.overleaf_url
           ? "overleaf-folder-url"
           : "overleaf-folder";
-        if (state.conflict) {
+        if (state.conflict === status.path) {
           item.command = {
             command: "calkit-vscode.resolveOverleafConflict",
             title: "Resolve",
@@ -333,6 +306,35 @@ export class CalkitSidebarProvider
         }
         return item;
       });
+    // What was last known stays shown under why it couldn't be checked
+    if (state.error) {
+      const item = new SidebarItem(
+        state.needsLogin ? "Sign in to Overleaf" : "Couldn't check Overleaf",
+        vscode.TreeItemCollapsibleState.None,
+        "overleaf-error",
+      );
+      item.iconPath = new vscode.ThemeIcon("warning");
+      item.tooltip = state.error;
+      if (state.needsLogin) {
+        item.command = {
+          command: "calkit-vscode.overleafLogin",
+          title: "Sign in to Overleaf",
+        };
+      }
+      return [item, ...rows];
+    }
+    if (!state.statuses) {
+      const item = new SidebarItem(
+        state.checking ? "Checking Overleaf" : "Not synced with Overleaf",
+        vscode.TreeItemCollapsibleState.None,
+        "empty",
+      );
+      item.iconPath = new vscode.ThemeIcon(
+        state.checking ? "sync~spin" : "info",
+      );
+      return [item];
+    }
+    return rows;
   }
 
   // Set each question's check, aligned with the merged questions. Kept

@@ -2031,6 +2031,7 @@ def save(
     if dry_run:
         typer.echo("Would commit" + ("" if no_push else " and push"))
         return
+    nothing_to_push = False
     try:
         any_dvc = commit(
             paths=paths,
@@ -2042,13 +2043,17 @@ def save(
     except typer.Exit as e:
         # Connecting commits on its own, which can leave nothing else to
         # commit, but the connection still has to be pushed, as do commits
-        # made before, e.g., merging in someone else's
-        if e.exit_code != 0 or no_push:
+        # made before, e.g., merging in someone else's, and Overleaf synced
+        if e.exit_code != 0:
             raise
-        if not connected and not calkit.git.get_n_unpushed_commits():
+        to_push = not no_push and (
+            connected or calkit.git.get_n_unpushed_commits() > 0
+        )
+        if not to_push and not sync_overleaf:
             raise
+        nothing_to_push = not to_push
         any_dvc = False
-    if not no_push:
+    if not no_push and not nothing_to_push:
         # Connecting gives data committed before this somewhere to go too.
         # Data with nowhere to go is offered storage by the push.
         push_dvc = any_dvc or connected
@@ -2453,22 +2458,15 @@ def push(
         git_cmd += calkit.git.get_set_upstream_args(
             calkit.git.get_repo(), git_args
         )
-        # Kept to tell a push the remote's new commits rejected from others
-        process = subprocess.run(
-            git_cmd + git_args, stderr=subprocess.PIPE, text=True
-        )
-        rejected = "[rejected]" in process.stderr and (
-            "fetch first" in process.stderr
-            or "non-fast-forward" in process.stderr
-        )
-        if not rejected:
-            sys.stderr.write(process.stderr)
+        # Its advice to pull is what happens next, if pushing is refused
+        git_cmd[1:1] = ["-c", "advice.pushUpdateRejected=false"]
+        process = subprocess.run(git_cmd + git_args)
         # Someone else's pushed first, e.g., from another machine or the
-        # hub, so theirs is merged in and this push tried again
-        if rejected and not git_args and merge_remote_changes():
-            process = subprocess.run(git_cmd, text=True)
-        elif rejected:
-            sys.stderr.write(process.stderr)
+        # hub, so theirs is merged in and this push tried again, as told by
+        # the remote having commits this machine doesn't, rather than by
+        # Git's message, which may not be in English
+        if process.returncode != 0 and not git_args and merge_remote_changes():
+            process = subprocess.run(git_cmd)
         if process.returncode != 0:
             raise_error("Git push failed")
     _tell_hub_we_pushed(sorted(selected), git_args)
@@ -2502,11 +2500,16 @@ def merge_remote_changes(commit_first: bool = False) -> bool:
     url = repo.remote(upstream.remote_name).url
     where = "GitHub" if "github.com" in url else upstream.remote_name
     if commit_first and repo.is_dirty(untracked_files=True):
-        save(
-            save_all=True,
-            message=f"Save work before merging changes from {where}",
-            no_push=True,
-        )
+        try:
+            save(
+                save_all=True,
+                message=f"Save work before merging changes from {where}",
+                no_push=True,
+            )
+        except typer.Exit as e:
+            # Nothing Git would stage, e.g., edits in a submodule
+            if e.exit_code != 0:
+                raise
     typer.echo(f"Merging changes from {where}")
     merge(branch=upstream.name, prefer="rerun")
     return True
@@ -3746,7 +3749,6 @@ def run(
             "pipeline to run here. Run 'calkit init' to make this a "
             "project, or change to the project directory."
         )
-    ck_info = calkit.load_calkit_info()
     # Ensure Git is initialized so DVC can be used.
     # Use search_parent_directories so running from a subproject folder
     # discovers the parent repo instead of triggering a new git init.
@@ -3761,6 +3763,16 @@ def run(
             raise_error("Failed to initialize Git repo")
     # So Git merges dvc.lock and stage run records stage by stage
     calkit.merge.configure_driver()
+    # What's been pushed from elsewhere comes in before anything reads the
+    # project, so the run includes it, e.g., a stage a coauthor added, and
+    # the save after can push
+    if (
+        not dry
+        and (save_after_run or save_message is not None)
+        and not no_push
+    ):
+        merge_remote_changes(commit_first=True)
+    ck_info = calkit.load_calkit_info()
     # Set env vars
     calkit.set_env_vars(ck_info=ck_info)
     # Stages that can't run here are skipped, keeping their outputs, and
@@ -3927,15 +3939,6 @@ def run(
                     )
                 finally:
                     os.chdir(prev_cwd)
-        # What's been pushed from elsewhere comes in first, so the run
-        # includes it and the save after can push
-        if (
-            not dry
-            and (save_after_run or save_message is not None)
-            and not no_push
-        ):
-            with paused():
-                merge_remote_changes(commit_first=True)
         # If specified, perform initial Overleaf sync. A stale pipeline is
         # expected here -- fixing it is what this command is about to do --
         # so the usual refusal to sync from one doesn't apply until
@@ -6182,20 +6185,20 @@ def merge(
         unmerged = result["unmerged"]
     else:
         unmerged = calkit.merge.get_unmerged_paths(repo)
-    # A file with no marks left is resolved, as 'git add' would say
+    kinds = calkit.merge.get_unmerged_kinds(repo, unmerged)
+    # A text file with no marks left is resolved, as 'git add' would say,
+    # but a binary one or one deleted on a side never had any
     if cont and unmerged:
         marked = calkit.merge.get_paths_with_markers(repo, unmerged)
-        resolved = [p for p in unmerged if p not in marked]
+        resolved = [
+            p for p in unmerged if kinds[p] == "text" and p not in marked
+        ]
         if resolved:
             repo.git.add("-A", "--", *resolved)
-        unmerged = marked
-    if unmerged:
+        kinds = {p: k for p, k in kinds.items() if p not in resolved}
+    if kinds:
         raise_error(
-            "Couldn't combine the changes to "
-            + ", ".join(unmerged)
-            + ". Each has both versions between '<<<<<<<' and '>>>>>>>' "
-            "marks. Keep what should stay, delete the marks, then run "
-            "'calkit merge --continue'"
+            calkit.merge.get_unmerged_message(kinds, "calkit merge --continue")
         )
     commit()
 

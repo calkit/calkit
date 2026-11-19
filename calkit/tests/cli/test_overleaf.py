@@ -2262,6 +2262,10 @@ def test_get_status_json(tmp_dir, monkeypatch):
     import calkit.browser_link
     import calkit.cli.overleaf
 
+    def get_no_auth():
+        print("Error: No overleaf_token set; run 'calkit overleaf login'")
+        raise typer.Exit(1)
+
     tex = "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n"
     os.makedirs("paper")
     Path("paper/main.tex").write_text(tex)
@@ -2304,11 +2308,6 @@ def test_get_status_json(tmp_dir, monkeypatch):
     res = runner.invoke(overleaf_app, ["status", "--json", "paper/main.tex"])
     assert json.loads(res.output)["statuses"] == [status]
     # Without credentials it says so, for an editor to ask for them
-
-    def get_no_auth():
-        print("Error: No overleaf_token set; run 'calkit overleaf login'")
-        raise typer.Exit(1)
-
     monkeypatch.setattr(calkit.browser_link, "_overleaf_auth", None)
     monkeypatch.setattr(calkit.browser_link, "PULL_FRESH_SECONDS", 0)
     monkeypatch.setattr(calkit.cli.overleaf, "_get_overleaf_auth", get_no_auth)

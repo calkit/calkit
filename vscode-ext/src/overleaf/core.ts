@@ -100,7 +100,8 @@ export interface OverleafState {
   checking: boolean;
   error?: string;
   needsLogin?: boolean;
-  conflict?: boolean;
+  // The synced folder whose sync stopped on a file changed in both places
+  conflict?: string;
 }
 
 /** How a synced folder's row shows it: a codicon, short text, and tooltip. */
@@ -118,7 +119,7 @@ export function getOverleafRow(
 ): OverleafRow {
   const plural = (n: number, word: string) =>
     `${n} ${word}${n === 1 ? "" : "s"}`;
-  if (state.conflict) {
+  if (state.conflict === status.path) {
     return {
       icon: "warning",
       description: "conflict",
@@ -216,4 +217,22 @@ export function getCommitMessageSuggestion(
   const [{ path, status }] = changes;
   const added = status === "??" || status.includes("A");
   return `${added ? "Add" : "Update"} ${path}`;
+}
+
+/**
+ * Quote an argument so bash, zsh, fish, and PowerShell all read it as one,
+ * as it is, e.g., a commit message with `$` or a path with spaces, using a
+ * typographic apostrophe for one that can't go in either kind of quote.
+ */
+export function quoteShellArg(arg: string): string {
+  if (/^[\w@%+=:,./-]+$/.test(arg)) {
+    return arg;
+  }
+  if (!arg.includes("'")) {
+    return `'${arg}'`;
+  }
+  if (!/["$`!\\]/.test(arg)) {
+    return `"${arg}"`;
+  }
+  return `'${arg.replace(/'/g, "\u2019")}'`;
 }

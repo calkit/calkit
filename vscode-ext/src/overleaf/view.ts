@@ -16,6 +16,7 @@ import {
   getCommitMessageSuggestion,
   getContinueArgs,
   parseOverleafStatus,
+  quoteShellArg,
   type Clash,
   type OverleafState,
 } from "./core";
@@ -23,12 +24,17 @@ import {
 const SIDEBAR_VIEW_ID = "calkit-sidebar";
 
 let running = false;
+// Terminals with a command running, which typing into would interrupt
+const busyTerminals = new Set<vscode.Terminal>();
 let provider: CalkitSidebarProvider | undefined;
 let state: OverleafState = { checking: false };
 // The workspace whose folders are checked, while it syncs with Overleaf
 let syncedRoot: string | undefined;
 let checkTimer: ReturnType<typeof setInterval> | undefined;
 let lastChecked = 0;
+// Longer than this, asking Overleaf has hung, and later checks shouldn't
+// wait on it
+const STATUS_TIMEOUT_MS = 120_000;
 /**
  * Whether Run and Save also syncs with Overleaf, when the project syncs
  * with it.
@@ -39,15 +45,11 @@ function isAutoSyncOn(): boolean {
     .get<boolean>("overleaf.autoSync", true);
 }
 
-/** Quote an argument for a shell, if it needs it. */
-function quoteArg(arg: string): string {
-  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`;
-}
-
 /**
  * Run Calkit commands in turn in the terminal Run Pipeline uses, so they
- * show there and it stays usable after, for whether they all worked, or
- * nothing if the shell can't say, in which case they're typed in together.
+ * show there and it stays usable after, or a new one if something's
+ * running in it, for whether they all worked, or nothing if the shell
+ * can't say, in which case only the first is typed in.
  */
 async function runInTerminal(
   root: string,
@@ -55,13 +57,28 @@ async function runInTerminal(
 ): Promise<boolean | undefined> {
   const name = "calkit: run";
   const terminal =
-    vscode.window.terminals.find((t) => t.name === name && !t.exitStatus) ??
-    vscode.window.createTerminal({ name, cwd: root });
+    vscode.window.terminals.find(
+      (t) => t.name === name && !t.exitStatus && !busyTerminals.has(t),
+    ) ?? vscode.window.createTerminal({ name, cwd: root });
   terminal.show();
+  // Ends early if the terminal is closed, e.g., to stop a run
+  const untilClosed = <T>(promise: Promise<T>): Promise<T | undefined> =>
+    new Promise((resolve) => {
+      const closed = vscode.window.onDidCloseTerminal((t) => {
+        if (t === terminal) {
+          closed.dispose();
+          resolve(undefined);
+        }
+      });
+      void promise.then((value) => {
+        closed.dispose();
+        resolve(value);
+      });
+    });
   const integration =
     terminal.shellIntegration ??
-    (await new Promise<vscode.TerminalShellIntegration | undefined>(
-      (resolve) => {
+    (await untilClosed(
+      new Promise<vscode.TerminalShellIntegration | undefined>((resolve) => {
         const timeout = setTimeout(() => {
           changed.dispose();
           resolve(undefined);
@@ -75,28 +92,30 @@ async function runInTerminal(
             }
           },
         );
-      },
+      }),
     ));
   // From the project, wherever the terminal has been since
-  const commands = steps.map((step) => ["-C", root, ...step]);
+  const commandLines = steps.map((step) =>
+    ["calkit", "-C", root, ...step].map(quoteShellArg).join(" "),
+  );
   if (!integration) {
-    terminal.sendText(
-      commands
-        .map((args) => ["calkit", ...args].map(quoteArg).join(" "))
-        .join(" && "),
-    );
+    // Without knowing how one went, the next isn't chained on, since
+    // shells chain differently, e.g., Windows PowerShell has no &&
+    terminal.sendText(commandLines[0]);
     return undefined;
   }
-  for (const args of commands) {
-    const execution = integration.executeCommand("calkit", args);
-    const code = await new Promise<number | undefined>((resolve) => {
-      const ended = vscode.window.onDidEndTerminalShellExecution((e) => {
-        if (e.execution === execution) {
-          ended.dispose();
-          resolve(e.exitCode);
-        }
-      });
-    });
+  for (const commandLine of commandLines) {
+    const execution = integration.executeCommand(commandLine);
+    const code = await untilClosed(
+      new Promise<number | undefined>((resolve) => {
+        const ended = vscode.window.onDidEndTerminalShellExecution((e) => {
+          if (e.execution === execution) {
+            ended.dispose();
+            resolve(e.exitCode);
+          }
+        });
+      }),
+    );
     if (code === undefined) {
       return undefined;
     }
@@ -113,12 +132,13 @@ function getOutput(
   root: string,
   args: string[],
   allowFailure = false,
+  timeout = 0,
 ): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       command,
       args,
-      { cwd: root, maxBuffer: 16 * 1024 * 1024 },
+      { cwd: root, maxBuffer: 16 * 1024 * 1024, timeout },
       (error, stdout) => resolve(error && !allowFailure ? null : stdout),
     );
   });
@@ -129,6 +149,21 @@ function hasOverleafConflict(repoRoot: string): boolean {
   return fs.existsSync(
     path.join(repoRoot, ".calkit", "overleaf", "CONFLICT.json"),
   );
+}
+
+/** The synced folder whose sync with Overleaf stopped on a conflict. */
+function getOverleafConflictFolder(repoRoot: string): string | undefined {
+  try {
+    const info = JSON.parse(
+      fs.readFileSync(
+        path.join(repoRoot, ".calkit", "overleaf", "CONFLICT.json"),
+        "utf-8",
+      ),
+    );
+    return typeof info.wdir === "string" ? info.wdir : ".";
+  } catch {
+    return undefined;
+  }
 }
 
 /** What a run or sync stopped on, if it was a file changed in two places. */
@@ -240,6 +275,11 @@ async function runSteps(
   }
 }
 
+/** Run the pipeline in the terminal Run and Save uses. */
+export function runPipeline(root: string): Promise<void> {
+  return runSteps(root, [["run"]], []);
+}
+
 /** A commit message for the one file changed, if only one has. */
 export async function suggestCommitMessage(
   root: string,
@@ -254,17 +294,24 @@ export async function suggestCommitMessage(
 }
 
 /**
- * Run the pipeline and save with a message, as Save asks for one, syncing
- * with Overleaf too if the project syncs with it and that's on.
+ * Run the pipeline and save, with a message for the one file changed, or
+ * one asked for if that's on, syncing with Overleaf too if the project
+ * syncs with it and that's on.
  */
 export async function runAndSave(root: string): Promise<void> {
   const sync = syncedRoot === root && isAutoSyncOn();
-  const message = await vscode.window.showInputBox({
-    title: sync ? "Calkit: Run, Save, and Sync" : "Calkit: Run and Save",
-    prompt: "Commit message for saving your work",
-    value: (await suggestCommitMessage(root)) ?? "Run pipeline",
-    ignoreFocusOut: true,
-  });
+  const suggested = (await suggestCommitMessage(root)) ?? "Run pipeline";
+  const ask = vscode.workspace
+    .getConfiguration("calkit")
+    .get<boolean>("runAndSave.askForMessage", false);
+  const message = ask
+    ? await vscode.window.showInputBox({
+        title: sync ? "Calkit: Run, Save, and Sync" : "Calkit: Run and Save",
+        prompt: "Commit message for saving your work",
+        value: suggested,
+        ignoreFocusOut: true,
+      })
+    : suggested;
   // Cancelled (Escape) returns undefined; an empty message is not allowed
   if (message === undefined) {
     return;
@@ -295,8 +342,11 @@ export async function checkOverleaf(): Promise<void> {
     root,
     ["overleaf", "status", "--json"],
     true,
+    STATUS_TIMEOUT_MS,
   );
+  // Another workspace's folders are checked now, if any
   if (root !== syncedRoot) {
+    state = { ...state, checking: false };
     return;
   }
   const checked = parseOverleafStatus(stdout ?? "");
@@ -309,7 +359,7 @@ export async function checkOverleaf(): Promise<void> {
     statuses:
       checked.statuses ?? (checked.needsLogin ? undefined : state.statuses),
     error: checked.statuses ? undefined : checked.error,
-    conflict: repoRoot ? hasOverleafConflict(repoRoot) : false,
+    conflict: repoRoot ? getOverleafConflictFolder(repoRoot) : undefined,
   };
   provider.setOverleafState(state);
 }
@@ -379,6 +429,15 @@ export function registerOverleaf(
     };
   context.subscriptions.push(
     { dispose: () => checkTimer && clearInterval(checkTimer) },
+    vscode.window.onDidStartTerminalShellExecution((e) =>
+      busyTerminals.add(e.terminal),
+    ),
+    vscode.window.onDidEndTerminalShellExecution((e) =>
+      busyTerminals.delete(e.terminal),
+    ),
+    vscode.window.onDidCloseTerminal((terminal) =>
+      busyTerminals.delete(terminal),
+    ),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("calkit.overleaf.checkInterval")) {
         schedule();

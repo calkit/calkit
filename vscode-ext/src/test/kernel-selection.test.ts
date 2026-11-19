@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getKernelMatchRank,
+  getPythonEnvDir,
   kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
   type EnvKind,
@@ -113,5 +114,31 @@ test("getKernelMatchRank prefers the kernel registered for the environment", () 
   assert.equal(
     getKernelMatchRank({ id: "x/other", label: "Other" }, name, display),
     0,
+  );
+});
+
+test("getKernelMatchRank knows the environment by its Python", () => {
+  const venv = "/Users/me/dye-fading/.calkit/envs/py/.venv";
+  assert.equal(getPythonEnvDir(`${venv}/bin/python`), venv);
+  assert.equal(
+    getPythonEnvDir("C:\\proj\\.venv\\Scripts\\python.exe"),
+    "C:/proj/.venv",
+  );
+  assert.equal(getPythonEnvDir("C:\\envs\\py\\python.exe"), "C:/envs/py");
+  const envController = {
+    id: `ms-toolsai.jupyter/.undefined.-xfrozen_modules=off.${venv}/python.${venv}/python.-xfrozen_modules=off#-m#ipykernel_launcher`,
+    label: "test-dye-2-py (Python 3.14.0)",
+  };
+  const projectVenv = {
+    id: "ms-toolsai.jupyter/.jvsc74a57bd0f4./Users/me/dye-fading/.venv/python./Users/me/dye-fading/.venv/python.-m#ipykernel_launcher",
+    label: "test-dye-2 (Python 3.14.0)",
+  };
+  assert.equal(
+    getKernelMatchRank(envController, "test-dye-2.py", "test-dye-2: py", venv),
+    5,
+  );
+  assert.equal(
+    getKernelMatchRank(projectVenv, "test-dye-2.py", "test-dye-2: py", venv),
+    1,
   );
 });

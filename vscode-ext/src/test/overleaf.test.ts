@@ -8,6 +8,7 @@ import {
   getOverleafRow,
   isSyncedWithOverleaf,
   parseOverleafStatus,
+  quoteShellArg,
 } from "../overleaf/core";
 
 test("isSyncedWithOverleaf reads calkit.yaml and the sync info", () => {
@@ -129,8 +130,13 @@ test("getOverleafRow says what a sync would do", () => {
   );
   assert.equal(getOverleafRow(both, { checking: true }).icon, "sync~spin");
   assert.equal(
-    getOverleafRow(status, { checking: false, conflict: true }).description,
+    getOverleafRow(status, { checking: false, conflict: "paper" }).description,
     "conflict",
+  );
+  // Only for the folder whose sync stopped on it
+  assert.equal(
+    getOverleafRow(status, { checking: false, conflict: "slides" }).description,
+    "in sync",
   );
 });
 
@@ -165,4 +171,14 @@ test("getCommitMessageSuggestion names the one file changed", () => {
   assert.equal(getCommitMessageSuggestion("R  b.py\0a.py\0"), "Update b.py");
   assert.equal(getCommitMessageSuggestion(" M a.py\0 M b.py\0"), undefined);
   assert.equal(getCommitMessageSuggestion(""), undefined);
+});
+
+test("quoteShellArg keeps an argument whole in common shells", () => {
+  assert.equal(quoteShellArg("run"), "run");
+  assert.equal(quoteShellArg("/Users/me/my proj"), "'/Users/me/my proj'");
+  assert.equal(quoteShellArg("Fit $k$ again"), "'Fit $k$ again'");
+  assert.equal(quoteShellArg("Fix Pete's figure"), '"Fix Pete\'s figure"');
+  assert.equal(quoteShellArg("Fix 'decay' plot"), "\"Fix 'decay' plot\"");
+  assert.equal(quoteShellArg("Fit Pete's $k$"), "'Fit Pete\u2019s $k$'");
+  assert.equal(quoteShellArg("C:\\Users\\me"), "'C:\\Users\\me'");
 });

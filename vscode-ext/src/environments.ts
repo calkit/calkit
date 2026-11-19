@@ -479,16 +479,42 @@ export interface KernelController {
 }
 
 /**
+ * The folder an environment's Python is in, e.g., `.venv` for
+ * `.venv/bin/python`, which an editor's kernel controllers are named by.
+ */
+export function getPythonEnvDir(pythonPath: string): string {
+  const parts = pythonPath.replace(/\\/g, "/").split("/");
+  parts.pop();
+  // A conda environment on Windows has its Python at the top
+  if (
+    ["bin", "scripts"].includes((parts[parts.length - 1] ?? "").toLowerCase())
+  ) {
+    parts.pop();
+  }
+  return parts.join("/");
+}
+
+/**
  * How well a kernel controller matches the kernel registered for an
- * environment, from 4, its id, to 1, its name with punctuation dropped,
- * or 0 for not at all. A loose match can be another environment whose
- * name starts the same, e.g., "proj (Python 3.14)" for "proj: py".
+ * environment, from 5, its Python, given ``envDir``, the folder it's in, to
+ * 1, its name with punctuation dropped, or 0 for not at all. A loose match
+ * can be another environment whose name starts the same, e.g.,
+ * "proj (Python 3.14)" for "proj: py".
  */
 export function getKernelMatchRank(
   kernel: KernelController,
   kernelName?: string,
   displayName?: string,
+  envDir?: string,
 ): number {
+  if (envDir) {
+    const dir = envDir.replace(/\\/g, "/").toLowerCase();
+    if (
+      (kernel.id ?? "").replace(/\\/g, "/").toLowerCase().includes(`${dir}/`)
+    ) {
+      return 5;
+    }
+  }
   const name = (kernelName ?? "").toLowerCase();
   const display = (displayName ?? "").toLowerCase();
   const id = (kernel.id ?? "").toLowerCase();

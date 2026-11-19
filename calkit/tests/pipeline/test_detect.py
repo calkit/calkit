@@ -86,6 +86,12 @@ def test_get_stage_from_script_plan(tmp_path):
     )
     # The copy uploaded to Overleaf, which the document shows now
     (tmp_path / "paper" / "figures" / "fit.png").write_bytes(b"png")
+    subprocess.check_call(["git", "add", "-A"], cwd=tmp_path)
+    subprocess.check_call(
+        ["git", "-c", "user.name=a", "-c", "user.email=a@b.c", "commit"]
+        + ["-qm", "Init"],
+        cwd=tmp_path,
+    )
     detected = {
         "environment": {
             "name": "py",
@@ -133,6 +139,31 @@ def test_get_stage_from_script_plan(tmp_path):
         shows="paper/figures/fit.png",
     )
     assert kept["replaced"] is None
+    # Nor if it has changes Git doesn't have, or another file names it
+    for change in ["edit", "mention"]:
+        if change == "edit":
+            (tmp_path / "paper" / "figures" / "fit.png").write_bytes(b"new")
+        else:
+            (tmp_path / "slides.md").write_text("![](paper/figures/fit.png)\n")
+            subprocess.check_call(["git", "add", "slides.md"], cwd=tmp_path)
+        assert (
+            get_stage_from_script_plan(
+                "scripts/plot.py",
+                detected,
+                ck_info,
+                wdir=str(tmp_path),
+                shows="paper/figures/fit.png",
+            )["replaced"]
+            is None
+        )
+        subprocess.check_call(
+            ["git", "checkout", "-q", "HEAD", "--", "paper"], cwd=tmp_path
+        )
+        subprocess.check_call(
+            ["git", "rm", "-q", "--cached", "--ignore-unmatch", "slides.md"],
+            cwd=tmp_path,
+        )
+        (tmp_path / "slides.md").unlink(missing_ok=True)
     # Only what isn't here, made, or uploaded with it is missing
     assert plan["missing_inputs"] == ["data/new.csv"]
     assert plan["external_inputs"] == ["/Users/me/runs"]

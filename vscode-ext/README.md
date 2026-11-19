@@ -146,6 +146,9 @@ pipeline:
 - `calkit.overleaf.checkInterval`: How often, in seconds, to check folders
   synced with Overleaf while VS Code has focus (default 120; 0 turns it
   off).
+- `calkit.runAndSave.askForMessage`: Ask for a commit message when running and
+  saving from the sidebar (off by default, using one that names the one file
+  changed, or "Run pipeline").
 - `calkit.overleaf.autoSync`: Sync with Overleaf too when running and saving
   from the sidebar, in a project that syncs with Overleaf (on by default;
   toggled per project with **Auto-sync Overleaf on run+save** in the

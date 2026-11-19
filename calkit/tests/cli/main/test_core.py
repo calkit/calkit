@@ -4922,6 +4922,31 @@ def test_merge(tmp_dir):
     assert res.returncode == 0, res.stdout + res.stderr
     assert len(git.Repo().head.commit.parents) == 2
     assert not git.Repo().is_dirty()
+    # A binary file, and one deleted on a side, never had marks, so they
+    # aren't taken as resolved, and are named with how to resolve them
+    subprocess.check_call(["git", "checkout", "-qb", "binary"])
+    with open("fig.png", "wb") as f:
+        f.write(b"\x89PNG\0theirs")
+    os.remove("notes.txt")
+    commit("Theirs again")
+    subprocess.check_call(["git", "checkout", "-q", "-"])
+    with open("fig.png", "wb") as f:
+        f.write(b"\x89PNG\0ours")
+    write("notes.txt", "notes changed")
+    commit("Ours again")
+    res = merge("binary")
+    assert res.returncode != 0
+    assert "fig.png changed on both sides" in res.stderr
+    assert "notes.txt was deleted on one side" in res.stderr
+    res = merge("--continue")
+    assert res.returncode != 0
+    assert "fig.png changed on both sides" in res.stderr
+    subprocess.check_call(["git", "checkout", "--theirs", "--", "fig.png"])
+    subprocess.check_call(["git", "add", "fig.png", "notes.txt"])
+    res = merge("--continue")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("fig.png", "rb") as f:
+        assert f.read() == b"\x89PNG\0theirs"
 
 
 def test_save_merges_remote_changes(tmp_dir, tmp_path_factory):
@@ -5001,6 +5026,31 @@ def test_save_merges_remote_changes(tmp_dir, tmp_path_factory):
     assert "Save work before merging changes from origin" in messages
     assert git.Repo(bare).commit(branch) == git.Repo().head.commit
     assert calkit_cmd("check", "stage-runs").returncode == 0
+    # A stage added elsewhere is merged before the pipeline's read, so it
+    # runs too
+    stage_b = {
+        "kind": "shell-command",
+        "command": "cat a.in > b.txt",
+        "environment": "_system",
+        "inputs": ["a.in"],
+        "outputs": [{"path": "b.txt", "storage": "git"}],
+    }
+    cwd = os.getcwd()
+    os.chdir(other)
+    try:
+        subprocess.check_call(["git", "pull", "-q", "--no-rebase"])
+        other_info = calkit.load_calkit_info()
+        other_info["pipeline"]["stages"]["b"] = stage_b
+        calkit.save_calkit_info(other_info)
+        subprocess.check_call(["git", "commit", "-qam", "Add stage b"])
+        subprocess.check_call(["git", "push", "-q"])
+    finally:
+        os.chdir(cwd)
+    res = calkit_cmd("run", "--save", "-m", "Run with b")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("b.txt") as f:
+        assert f.read() == "2\n"
+    assert git.Repo(bare).commit(branch) == git.Repo().head.commit
     # The same line edited on both sides stops, naming the file
     push_from_other("paper.tex", "Intro from elsewhere")
     write("paper.tex", "Intro from here")

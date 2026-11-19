@@ -1052,13 +1052,15 @@ def sync(
         if resolve:
             import calkit.merge
 
-            # Committed with its marks in, a conflict would reach Overleaf
+            # Committed with its marks in, a conflict would reach Overleaf,
+            # including from a folder that's the whole project
+            folder = posixpath.normpath(wdir)
             marked = calkit.merge.get_paths_with_markers(
                 repo,
                 [
                     p
                     for p in calkit.merge.get_unmerged_paths(repo)
-                    if p.startswith(wdir.rstrip("/") + "/")
+                    if folder == "." or p.startswith(folder + "/")
                 ],
             )
             if marked:

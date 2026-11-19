@@ -1080,6 +1080,11 @@
           "default": true,
           "scope": "resource",
           "description": "Sync with Overleaf too when running and saving from the Calkit sidebar, in a project that syncs with Overleaf."
+        },
+        "calkit.runAndSave.askForMessage": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ask for a commit message when running and saving from the Calkit sidebar. Otherwise the message names the one file changed, e.g., 'Update fit_rates.ipynb', or is 'Run pipeline'."
         }
       }
     }

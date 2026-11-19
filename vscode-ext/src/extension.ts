@@ -28,6 +28,7 @@ import {
   type EnvKind,
   type SlurmLaunchOptions,
   getKernelMatchRank,
+  getPythonEnvDir,
   type KernelController,
 } from "./environments";
 import {
@@ -77,6 +78,7 @@ import { isSyncedWithOverleaf } from "./overleaf/core";
 import {
   checkOverleaf,
   registerOverleaf,
+  runPipeline,
   setOverleafSynced,
   suggestCommitMessage,
 } from "./overleaf/view";
@@ -1226,12 +1228,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RUN_PIPELINE, () => {
       const workspaceRoot = getWorkspaceRoot();
-      if (!workspaceRoot) {
-        return;
+      if (workspaceRoot) {
+        // Through the runner Run and Save uses, so neither interrupts the
+        // other in the terminal they share
+        void runPipeline(workspaceRoot);
       }
-      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
-      terminal.show();
-      terminal.sendText("calkit run");
     }),
   );
 
@@ -8024,6 +8025,10 @@ async function registerAndSelectKernel(
       }
 
       log(`Kernel selection failed or unconfirmed`);
+      // Picked again when it's showing, e.g., after switching back to it
+      if (!getNotebookEditorForUri(expectedNotebookUri)) {
+        return undefined;
+      }
       void vscode.window.showWarningMessage(
         `Kernel '${kernelName}' was registered but auto-selection timed out. It should appear in the notebook kernel picker (top-right).`,
       );
@@ -8320,7 +8325,12 @@ function scoreKernelCandidate(
   // environment before another one whose name starts the same
   score +=
     1000 *
-    getKernelMatchRank(kernel, preferredKernelName, preferredDisplayName);
+    getKernelMatchRank(
+      kernel,
+      preferredKernelName,
+      preferredDisplayName,
+      kernelEnvDirs.get((preferredKernelName ?? "").toLowerCase()),
+    );
 
   if (languageHint.length > 0) {
     if (
@@ -8353,7 +8363,14 @@ function kernelMatchesPreference(
   kernelName?: string,
   displayName?: string,
 ): boolean {
-  return getKernelMatchRank(kernel, kernelName, displayName) > 0;
+  return (
+    getKernelMatchRank(
+      kernel,
+      kernelName,
+      displayName,
+      kernelEnvDirs.get((kernelName ?? "").toLowerCase()),
+    ) > 0
+  );
 }
 
 function getNotebookLanguageHint(editor: vscode.NotebookEditor): string {
@@ -8457,13 +8474,19 @@ async function trySelectKernelViaNotebookApi(
           k,
           normalizedKernel,
           normalizedDisplay,
+          kernelEnvDirs.get(normalizedKernel),
         );
         if (k.id && kRank > rank) {
           candidate = k;
           rank = kRank;
         }
       }
-      if (candidate?.id && (rank > 1 || attempt === 9)) {
+      // A loose match may be another environment named alike, so it's
+      // never taken
+      if (rank < 2) {
+        candidate = undefined;
+      }
+      if (candidate?.id) {
         break;
       }
 
@@ -8688,6 +8711,10 @@ async function getExpectedKernelSpecForEnvironment(
   return undefined;
 }
 
+// The folder each registered kernel's environment is in, by kernel name in
+// lowercase, which picks its controller out from others named alike
+const kernelEnvDirs = new Map<string, string>();
+
 function parseCheckKernelJson(
   stdout: string,
 ): { kernelName: string; displayName?: string } | undefined {
@@ -8705,6 +8732,12 @@ function parseCheckKernelJson(
       typeof result.display_name === "string" && result.display_name.length > 0
         ? result.display_name
         : undefined;
+    if (typeof result.python === "string" && result.python) {
+      kernelEnvDirs.set(
+        kernelName.toLowerCase(),
+        getPythonEnvDir(result.python),
+      );
+    }
     return { kernelName, displayName };
   } catch {
     return undefined;

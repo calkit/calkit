@@ -210,7 +210,6 @@ async function runSteps(
   root: string,
   steps: string[][],
   after: string[][],
-  done?: string,
 ): Promise<void> {
   if (running) {
     void vscode.window.showInformationMessage("Already running");
@@ -227,14 +226,8 @@ async function runSteps(
     running = false;
     void checkOverleaf();
   }
-  // The shell couldn't say how it went, which the terminal shows
-  if (ok === undefined) {
-    return;
-  }
-  if (ok) {
-    if (done) {
-      void vscode.window.showInformationMessage(done);
-    }
+  // The terminal and sidebar show it worked, and the shell may not say
+  if (ok !== false) {
     return;
   }
   const found = await findClash(root);
@@ -285,12 +278,7 @@ export async function runAndSave(root: string): Promise<void> {
   const steps = [
     ["run", "--save", "-m", message.trim(), ...(sync ? ["--overleaf"] : [])],
   ];
-  await runSteps(
-    root,
-    steps,
-    steps,
-    sync ? "Ran, saved, and synced" : "Ran and saved",
-  );
+  await runSteps(root, steps, steps);
 }
 
 /** Ask Calkit what a sync of each folder would do, and show it. */
@@ -432,7 +420,7 @@ export function registerOverleaf(
         if (item?.nodeKind.startsWith("overleaf-folder") && item.nodeId) {
           args.push(item.nodeId);
         }
-        return runSteps(root, [args], [], "Synced with Overleaf");
+        return runSteps(root, [args], []);
       }),
     ),
     vscode.commands.registerCommand("calkit-vscode.refreshOverleaf", () =>
@@ -493,7 +481,6 @@ export function registerOverleaf(
           root,
           [["overleaf", "import", url.trim(), folder.trim()]],
           [],
-          `Imported into ${folder.trim()}`,
         );
       }),
     ),

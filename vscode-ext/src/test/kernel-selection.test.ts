@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getKernelMatchRank,
   kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
   type EnvKind,
@@ -85,4 +86,32 @@ test("all standalone registration-kind envs produce candidates with no outer env
     assert.ok(c, `expected standalone candidate for kind '${kind}'`);
     assert.equal(c.outerSlurmEnvironment, undefined);
   }
+});
+
+test("getKernelMatchRank prefers the kernel registered for the environment", () => {
+  const name = "test-dye-2.py";
+  const display = "test-dye-2: py";
+  // The project's own .venv, whose name starts the same
+  const projectVenv = {
+    id: "ms-toolsai.jupyter/.jvsc74a57bd0f4./Users/me/dye-fading/.venv/python./Users/me/dye-fading/.venv/python.-m#ipykernel_launcher",
+    label: "test-dye-2 (Python 3.14.0)",
+  };
+  const registered = {
+    id: "ms-toolsai.jupyter/.jvsc74a57bd0a1./Users/me/Library/Jupyter/kernels/test-dye-2.py",
+    label: "test-dye-2: py",
+  };
+  assert.equal(getKernelMatchRank(projectVenv, name, display), 1);
+  assert.equal(getKernelMatchRank(registered, name, display), 4);
+  assert.equal(
+    getKernelMatchRank({ id: "x/abc", label: display }, name, display),
+    3,
+  );
+  assert.equal(
+    getKernelMatchRank({ id: `ms-toolsai.jupyter/${name}` }, name, display),
+    4,
+  );
+  assert.equal(
+    getKernelMatchRank({ id: "x/other", label: "Other" }, name, display),
+    0,
+  );
 });

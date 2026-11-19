@@ -27,6 +27,8 @@ import {
   type CalkitEnvironment,
   type EnvKind,
   type SlurmLaunchOptions,
+  getKernelMatchRank,
+  type KernelController,
 } from "./environments";
 import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
@@ -8305,11 +8307,11 @@ function scoreKernelCandidate(
     score += 50;
   }
 
-  if (
-    kernelMatchesPreference(kernel, preferredKernelName, preferredDisplayName)
-  ) {
-    score += 1000;
-  }
+  // A closer match comes first, e.g., the kernel registered for the
+  // environment before another one whose name starts the same
+  score +=
+    1000 *
+    getKernelMatchRank(kernel, preferredKernelName, preferredDisplayName);
 
   if (languageHint.length > 0) {
     if (
@@ -8338,38 +8340,11 @@ function scoreKernelCandidate(
 }
 
 function kernelMatchesPreference(
-  kernel: {
-    id?: string;
-    label?: string;
-    description?: string;
-    detail?: string;
-  },
+  kernel: KernelController,
   kernelName?: string,
   displayName?: string,
 ): boolean {
-  const normalizedKernel = (kernelName ?? "").toLowerCase();
-  const normalizedDisplay = (displayName ?? "").toLowerCase();
-  const id = (kernel.id ?? "").toLowerCase();
-  const label = (kernel.label ?? "").toLowerCase();
-  const desc = (kernel.description ?? "").toLowerCase();
-  const detail = (kernel.detail ?? "").toLowerCase();
-  const idCompact = id.replace(/[^a-z0-9]/g, "");
-  const kernelCompact = normalizedKernel.replace(/[^a-z0-9]/g, "");
-  const displayCompact = normalizedDisplay.replace(/[^a-z0-9]/g, "");
-
-  return (
-    (normalizedKernel.length > 0 && id.endsWith(`/${normalizedKernel}`)) ||
-    (normalizedKernel.length > 0 && id === normalizedKernel) ||
-    (normalizedKernel.length > 0 && id.includes(normalizedKernel)) ||
-    (kernelCompact.length > 0 && idCompact.includes(kernelCompact)) ||
-    (normalizedDisplay.length > 0 && label === normalizedDisplay) ||
-    (normalizedDisplay.length > 0 && label.includes(normalizedDisplay)) ||
-    (normalizedDisplay.length > 0 && desc.includes(normalizedDisplay)) ||
-    (normalizedDisplay.length > 0 && detail.includes(normalizedDisplay)) ||
-    (displayCompact.length > 0 &&
-      label.replace(/[^a-z0-9]/g, "").includes(displayCompact)) ||
-    (normalizedKernel.length > 0 && label.includes(normalizedKernel))
-  );
+  return getKernelMatchRank(kernel, kernelName, displayName) > 0;
 }
 
 function getNotebookLanguageHint(editor: vscode.NotebookEditor): string {
@@ -8464,11 +8439,22 @@ async function trySelectKernelViaNotebookApi(
 
       log(`Resolved ${resolved.length} kernels (attempt ${attempt + 1}/10)`);
 
-      candidate = resolved.find((k) =>
-        kernelMatchesPreference(k, normalizedKernel, normalizedDisplay),
-      );
-
-      if (candidate?.id) {
+      // The closest match, waiting for Jupyter to list the kernel just
+      // registered rather than settling for a loose match to another
+      let rank = 0;
+      candidate = undefined;
+      for (const k of resolved) {
+        const kRank = getKernelMatchRank(
+          k,
+          normalizedKernel,
+          normalizedDisplay,
+        );
+        if (k.id && kRank > rank) {
+          candidate = k;
+          rank = kRank;
+        }
+      }
+      if (candidate?.id && (rank > 1 || attempt === 9)) {
         break;
       }
 

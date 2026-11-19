@@ -469,3 +469,53 @@ export function parsePixiPackages(
     ]),
   };
 }
+
+/** A notebook kernel controller as VS Code lists it. */
+export interface KernelController {
+  id?: string;
+  label?: string;
+  description?: string;
+  detail?: string;
+}
+
+/**
+ * How well a kernel controller matches the kernel registered for an
+ * environment, from 4, its id, to 1, its name with punctuation dropped,
+ * or 0 for not at all. A loose match can be another environment whose
+ * name starts the same, e.g., "proj (Python 3.14)" for "proj: py".
+ */
+export function getKernelMatchRank(
+  kernel: KernelController,
+  kernelName?: string,
+  displayName?: string,
+): number {
+  const name = (kernelName ?? "").toLowerCase();
+  const display = (displayName ?? "").toLowerCase();
+  const id = (kernel.id ?? "").toLowerCase();
+  const label = (kernel.label ?? "").toLowerCase();
+  const desc = (kernel.description ?? "").toLowerCase();
+  const detail = (kernel.detail ?? "").toLowerCase();
+  const compact = (text: string) => text.replace(/[^a-z0-9]/g, "");
+  if (name && (id === name || id.endsWith(`/${name}`))) {
+    return 4;
+  }
+  if (display && label === display) {
+    return 3;
+  }
+  if (
+    (name && (id.includes(name) || label.includes(name))) ||
+    (display &&
+      (label.includes(display) ||
+        desc.includes(display) ||
+        detail.includes(display)))
+  ) {
+    return 2;
+  }
+  if (
+    (compact(name) && compact(id).includes(compact(name))) ||
+    (compact(display) && compact(label).includes(compact(display)))
+  ) {
+    return 1;
+  }
+  return 0;
+}

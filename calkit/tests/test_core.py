@@ -209,7 +209,8 @@ def test_is_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_is_tty(monkeypatch: pytest.MonkeyPatch) -> None:
-    tty = mock.Mock(isatty=lambda: True)
+    # Not a console on Windows, where its descriptor is checked too
+    tty = mock.Mock(isatty=lambda: True, fileno=lambda: -1)
     # Windows says the NUL device is a TTY, which isn't a terminal
     with open(os.devnull) as f:
         for stdin, stdout in [(f, tty), (tty, f)]:

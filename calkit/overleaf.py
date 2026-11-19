@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -1966,10 +1967,9 @@ def sync(
                 "merge conflict" in process.stdout.lower()
                 or "merge conflict" in process.stderr.lower()
             ):
-                msg = ""
-                for line in process.stdout.split("\n"):
-                    if "merge conflict" in line.lower():
-                        msg += line + "\n"
+                conflicted = re.findall(
+                    r"Merge conflict in (.+)", process.stdout
+                )
                 # Save a file to track this merge conflict, with a commit
                 # the next pull keeps, since a rebuilt one isn't
                 c = overleaf_repo.git.rev_parse(
@@ -1985,8 +1985,11 @@ def sync(
                         f,
                     )
                 raise RuntimeError(
-                    f"{msg}Edit the file(s) and then call:\n\n"
-                    "    calkit overleaf sync --resolve"
+                    (", ".join(conflicted) or "Some files")
+                    + " changed on Overleaf and on this machine. Each has "
+                    "both versions between '<<<<<<<' and '>>>>>>>' marks. "
+                    "Keep what should stay, delete the marks, then run "
+                    "'calkit overleaf sync --resolve'"
                 )
             elif process.returncode != 0:
                 with staged_changes_set_aside(main_repo):

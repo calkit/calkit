@@ -120,24 +120,38 @@ def test_overleaf(tmp_dir):
     res = subprocess.run(
         ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
         capture_output=True,
+        text=True,
     )
     assert res.returncode != 0
+    assert (
+        "ol-project/main.tex changed on Overleaf and on this machine"
+        in res.stdout + res.stderr
+    )
     with open("ol-project/main.tex") as f:
         txt = f.read()
     assert ">>>>>>>" in txt
-    # Now let's resolve the commit without actually editing the file
-    res = subprocess.run(
-        [
-            "calkit",
-            "overleaf",
-            "sync",
-            "--allow-stale",
-            "--no-build",
-            "--resolve",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    resolve_cmd = [
+        "calkit",
+        "overleaf",
+        "sync",
+        "--allow-stale",
+        "--no-build",
+        "--resolve",
+    ]
+    # Resolving with the marks still in would send them to Overleaf
+    res = subprocess.run(resolve_cmd, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "ol-project/main.tex still has" in res.stdout + res.stderr
+    with open("ol-project/main.tex", "w") as f:
+        f.write(
+            "\n".join(
+                line
+                for line in txt.splitlines()
+                if not line.startswith(("<<<<<<<", "=======", ">>>>>>>"))
+            )
+            + "\n"
+        )
+    res = subprocess.run(resolve_cmd, capture_output=True, text=True)
     assert res.returncode == 0, res.stderr
     assert "Syncing ol-project" in res.stdout
     assert "other" not in res.stdout

@@ -71,6 +71,8 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
+import { isSyncedWithOverleaf } from "./overleaf/core";
+import { runSaveSync } from "./overleaf/view";
 import {
   documentStagePdf,
   documentStageSource,
@@ -138,6 +140,7 @@ const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
 const COMMAND_PDF_GO_TO_SOURCE_TO_SIDE = "calkit-vscode.pdfGoToSourceToSide";
 const COMMAND_TOGGLE_PDF_SOURCE = "calkit-vscode.togglePdfSource";
 const COMMAND_SAVE = "calkit-vscode.save";
+const COMMAND_RUN_SAVE_SYNC = "calkit-vscode.runSaveSync";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
 const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
@@ -1250,6 +1253,15 @@ export function activate(context: vscode.ExtensionContext): void {
       const terminal = getOrCreateTerminal("calkit: save", workspaceRoot);
       terminal.show();
       terminal.sendText(`calkit save -a -m ${shQuote(trimmed)}`);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_RUN_SAVE_SYNC, () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (workspaceRoot) {
+        void runSaveSync(workspaceRoot);
+      }
     }),
   );
 
@@ -2692,6 +2704,17 @@ async function refreshPipelineOutputContext(
     "setContext",
     "calkit-vscode.hasProject",
     calkitYamlExists,
+  );
+  void vscode.commands.executeCommand(
+    "setContext",
+    "calkit-vscode.syncsWithOverleaf",
+    calkitYamlExists &&
+      isSyncedWithOverleaf(
+        calkitConfig,
+        await fileExists(
+          path.join(workspaceRoot, ".calkit", "overleaf-sync.json"),
+        ),
+      ),
   );
   const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([

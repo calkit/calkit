@@ -4903,6 +4903,115 @@ def test_merge(tmp_dir):
         check_environments=False, clean_notebooks=False
     )
     assert [n.split("@")[0] for n in status.stale_stage_names] == ["a"]
+    # A file someone wrote that changed on both sides is theirs to combine,
+    # and is staged once its marks are gone
+    subprocess.check_call(["git", "checkout", "-qb", "notes"])
+    write("notes.txt", "notes theirs")
+    commit("Notes theirs")
+    subprocess.check_call(["git", "checkout", "-q", "-"])
+    write("notes.txt", "notes ours")
+    commit("Notes ours")
+    res = merge("notes")
+    assert res.returncode != 0
+    assert "Couldn't combine the changes to notes.txt" in res.stderr
+    res = merge("--continue")
+    assert res.returncode != 0
+    assert "notes.txt" in res.stderr
+    write("notes.txt", "notes both")
+    res = merge("--continue")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert len(git.Repo().head.commit.parents) == 2
+    assert not git.Repo().is_dirty()
+
+
+def test_save_merges_remote_changes(tmp_dir, tmp_path_factory):
+    def write(path: str, text: str) -> None:
+        with open(path, "w") as f:
+            f.write(text + "\n")
+
+    def calkit_cmd(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", *args],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+
+    def push_from_other(path: str, text: str, run: bool = False) -> None:
+        cwd = os.getcwd()
+        os.chdir(other)
+        try:
+            subprocess.check_call(["git", "pull", "-q", "--no-rebase"])
+            write(path, text)
+            if run:
+                subprocess.check_call(["calkit", "run"])
+            subprocess.check_call(["git", "add", "-A"])
+            subprocess.check_call(["git", "commit", "-qm", f"Edit {path}"])
+            subprocess.check_call(["git", "push", "-q"])
+        finally:
+            os.chdir(cwd)
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "a": {
+                "kind": "shell-command",
+                "command": "cat a.in > a.txt",
+                "environment": "_system",
+                "inputs": ["a.in"],
+                "outputs": [{"path": "a.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    write("a.in", "1")
+    write("paper.tex", "Intro")
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-qm", "Base"])
+    bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
+    subprocess.check_call(["git", "init", "-q", "--bare", bare])
+    subprocess.check_call(["git", "remote", "add", "origin", bare])
+    branch = git.Repo().active_branch.name
+    subprocess.check_call(["git", "push", "-q", "-u", "origin", branch])
+    other = str(tmp_path_factory.mktemp("other") / "repo")
+    subprocess.check_call(["git", "clone", "-q", bare, other])
+    # A push someone made first is merged in, then this one goes too
+    push_from_other("notes.txt", "From elsewhere")
+    write("paper.tex", "Intro here")
+    res = calkit_cmd("save", "-am", "Edit paper")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "Merging changes from origin" in res.stdout
+    remote_head = git.Repo(bare).commit(branch)
+    assert remote_head.hexsha == git.Repo().head.commit.hexsha
+    assert len(remote_head.parents) == 2
+    assert os.path.isfile("notes.txt")
+    # Running and saving brings it in first, with work in progress saved,
+    # so the run includes it
+    push_from_other("a.in", "2", run=True)
+    write("paper.tex", "Intro here and there")
+    res = calkit_cmd("run", "--save", "-m", "Run")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("a.txt") as f:
+        assert f.read() == "2\n"
+    messages = [
+        str(c.message).strip() for c in git.Repo().iter_commits(max_count=4)
+    ]
+    assert "Save work before merging changes from origin" in messages
+    assert git.Repo(bare).commit(branch) == git.Repo().head.commit
+    assert calkit_cmd("check", "stage-runs").returncode == 0
+    # The same line edited on both sides stops, naming the file
+    push_from_other("paper.tex", "Intro from elsewhere")
+    write("paper.tex", "Intro from here")
+    res = calkit_cmd("save", "-am", "Edit paper again")
+    assert res.returncode != 0
+    assert "Couldn't combine the changes to paper.tex" in res.stderr
+    write("paper.tex", "Intro from both")
+    res = calkit_cmd("merge", "--continue")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert calkit_cmd("push").returncode == 0
+    assert git.Repo(bare).commit(branch) == git.Repo().head.commit
 
 
 def test_manual_step(tmp_dir, monkeypatch, capsys):

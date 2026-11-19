@@ -379,6 +379,25 @@ def get_unmerged_paths(repo: git.Repo) -> list[str]:
     return sorted({p for p in out.split("\0") if p})
 
 
+def get_paths_with_markers(repo: git.Repo, paths: list[str]) -> list[str]:
+    """The paths, relative to the repo root, that still have conflict marks.
+
+    A missing file has none, since deleting it is one way to resolve it.
+    """
+    marked = []
+    for path in paths:
+        full_path = os.path.join(repo.working_dir, path)
+        if not os.path.isfile(full_path):
+            continue
+        with open(full_path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+        if any(line.startswith("<<<<<<<") for line in lines) and any(
+            line.startswith(">>>>>>>") for line in lines
+        ):
+            marked.append(path)
+    return marked
+
+
 def is_merged_file(path: str) -> bool:
     """Whether Calkit merges this file, given relative to the repo root."""
     return posixpath.basename(path) == LOCK_FNAME or (

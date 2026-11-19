@@ -54,6 +54,11 @@
         }
       ]
     },
+    "taskDefinitions": [
+      {
+        "type": "calkit"
+      }
+    ],
     "views": {
       "calkit": [
         {
@@ -244,6 +249,13 @@
         "icon": "$(save)"
       },
       {
+        "command": "calkit-vscode.runSaveSync",
+        "title": "Run, Save, and Sync with Overleaf",
+        "category": "Calkit",
+        "icon": "$(sync)",
+        "enablement": "calkit-vscode.syncsWithOverleaf"
+      },
+      {
         "command": "calkit-vscode.viewStage",
         "title": "View Stage",
         "category": "Calkit",
@@ -418,9 +430,14 @@
     "menus": {
       "view/title": [
         {
+          "command": "calkit-vscode.runSaveSync",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject && calkit-vscode.syncsWithOverleaf",
+          "group": "navigation@0"
+        },
+        {
           "command": "calkit-vscode.save",
           "when": "view == calkit-sidebar && calkit-vscode.hasProject",
-          "group": "navigation@0"
+          "group": "navigation@1"
         },
         {
           "command": "calkit-vscode.manageSections",

@@ -1050,6 +1050,24 @@ def sync(
         )
         wdir = synced_folder
         if resolve:
+            import calkit.merge
+
+            # Committed with its marks in, a conflict would reach Overleaf
+            marked = calkit.merge.get_paths_with_markers(
+                repo,
+                [
+                    p
+                    for p in calkit.merge.get_unmerged_paths(repo)
+                    if p.startswith(wdir.rstrip("/") + "/")
+                ],
+            )
+            if marked:
+                raise_error(
+                    f"{', '.join(marked)} still "
+                    f"{'has' if len(marked) == 1 else 'have'} '<<<<<<<' and "
+                    "'>>>>>>>' marks. Keep what should stay and delete the "
+                    "marks first"
+                )
             repo.git.add(wdir)
             if repo.git.diff(["--staged", wdir]):
                 repo.git.commit(

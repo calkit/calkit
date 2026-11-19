@@ -333,14 +333,22 @@ export async function getLocalSynctex(
   project: string,
   folder: string,
 ): Promise<Synctex | null> {
+  const text = await getLocalSynctexText(project, folder);
+  return text === null ? null : parseSynctex(text);
+}
+
+/** The text of that SyncTeX file, uncompressed, or null. */
+export async function getLocalSynctexText(
+  project: string,
+  folder: string,
+): Promise<string | null> {
   try {
     const { parts } = await getLocalPdf(project, folder, "publication.synctex");
-    const text = await new Response(
+    return await new Response(
       new Blob(parts as BlobPart[])
         .stream()
         .pipeThrough(new DecompressionStream("gzip")),
     ).text();
-    return parseSynctex(text);
   } catch {
     return null;
   }

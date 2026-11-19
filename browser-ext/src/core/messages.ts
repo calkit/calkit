@@ -279,6 +279,13 @@ export type Request =
       /** As Overleaf names it. */
       path: string;
     }
+  | {
+      /** The SyncTeX of the PDF a synced folder builds to on this machine. */
+      type: "local.publicationSynctex";
+      /** As "owner/name". */
+      project: string;
+      folder: string;
+    }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */
   | { type: "local.installEditor"; project: string }
@@ -348,6 +355,7 @@ export interface ResponseMap {
   "local.openProject": Record<string, never>;
   "local.projectStatus": { checkouts: CheckoutStatus[] };
   "local.publicationSource": { path: string; text: string };
+  "local.publicationSynctex": string | null;
   "local.openOptions": null;
   "local.installEditor": null;
   /**

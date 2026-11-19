@@ -10,6 +10,7 @@ import {
   askLocal,
   forgetLocalStatus,
   getLocalStatus,
+  getLocalSynctexText,
   LocalError,
   type LocalJob,
 } from "../core/local";
@@ -764,6 +765,8 @@ async function handle(
         folder: message.folder,
         path: message.path,
       });
+    case "local.publicationSynctex":
+      return getLocalSynctexText(message.project, message.folder);
     case "local.openOptions":
       await chrome.runtime.openOptionsPage();
       return null;

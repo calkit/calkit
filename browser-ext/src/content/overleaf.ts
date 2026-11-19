@@ -79,7 +79,10 @@ import {
   findInSource,
   lineMap,
   paragraphLines,
+  parseSynctex,
+  synctexForward,
   synctexInputFile,
+  synctexTag,
 } from "../../../vscode-ext/src/latex/core";
 import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
 
@@ -2421,6 +2424,72 @@ function synctex(
   return cached;
 }
 
+// The SyncTeX of the PDF from this machine, read once for each time it's
+// shown
+let localSynctexText: {
+  pdf: NonNullable<typeof localPdf>;
+  text: Promise<string | null>;
+} | null = null;
+
+/**
+ * Where lines of an Overleaf file landed in the PDF built on this machine,
+ * as Overleaf says for its own, mapped from Overleaf's copy of the file to
+ * this machine's, which may differ, e.g., by comments not synced here yet.
+ */
+async function getLocalBoxes(
+  pdf: NonNullable<typeof localPdf>,
+  file: string,
+): Promise<(line: number, column: number) => SynctexBox[]> {
+  const project = `${pdf.link.project_owner_name}/${pdf.link.project_name}`;
+  if (localSynctexText?.pdf !== pdf) {
+    localSynctexText = {
+      pdf,
+      text: send({
+        type: "local.publicationSynctex",
+        project,
+        folder: pdf.path,
+      }).catch(() => null),
+    };
+  }
+  const [text, built, current] = await Promise.all([
+    localSynctexText.text,
+    send({
+      type: "local.publicationSource",
+      project,
+      folder: pdf.path,
+      path: file,
+    }).catch(() => null),
+    readEditor(),
+  ]);
+  const s = text ? parseSynctex(text) : null;
+  const tag = s ? synctexTag(s, file) : undefined;
+  if (!s || tag === undefined) {
+    return () => [];
+  }
+  const map =
+    built && current !== null
+      ? lineMap(built.text.split("\n"), current.split("\n"))
+      : null;
+  return (line, column) => {
+    const builtLine = map ? map.toBefore(line) : line;
+    // A box made on that line, e.g., a figure's, or else where the next
+    // line with text landed
+    const made = s.boxes.filter((b) => b.tag === tag && b.line === builtLine);
+    const rects = made.length
+      ? made
+      : [synctexForward(s, tag, builtLine)].filter((r) => r !== undefined);
+    return rects.map((r) => ({
+      page: r.page,
+      h: r.x,
+      v: r.y + r.height,
+      width: r.width,
+      height: r.height,
+      line,
+      column,
+    }));
+  };
+}
+
 /** Find where each error in the open document lands in the PDF. */
 async function drawPdfBoxes(): Promise<void> {
   const build = pdfBuild;
@@ -2608,7 +2677,7 @@ function watchPdf(): void {
   let lookups = 0;
   let tips = 0;
   let landed: {
-    build: PdfBuild;
+    build: PdfBuild | NonNullable<typeof localPdf>;
     snapshot: NonNullable<typeof editorCitations>;
     file: string;
     boxes: Promise<{ index: number; box: SynctexBox }[]>;
@@ -2620,7 +2689,9 @@ function watchPdf(): void {
     shown = null;
   };
   const citationAt = async (page: number, h: number, v: number) => {
-    const build = pdfBuild;
+    // Over the PDF from this machine, it's what that was built with
+    const local = review?.local ? localPdf : null;
+    const build = local ?? pdfBuild;
     const projectId = currentProjectId;
     const snapshot = editorCitations;
     const file = openDocPath();
@@ -2637,17 +2708,15 @@ function watchPdf(): void {
       // about what moved
       const boxes = (async () => {
         const found: { index: number; box: SynctexBox }[] = [];
+        const boxesAt = local
+          ? await getLocalBoxes(local, file)
+          : (line: number, column: number) =>
+              synctex(projectId, build as PdfBuild, file, line, column);
         for (const [index, item] of snapshot.items.entries()) {
           if (!item.citation) {
             continue;
           }
-          for (const box of await synctex(
-            projectId,
-            build,
-            file,
-            item.line,
-            item.column,
-          )) {
+          for (const box of await boxesAt(item.line, item.column)) {
             found.push({ index, box });
           }
         }
@@ -4515,7 +4584,7 @@ async function onReviewMessage(message: FromReview): Promise<void> {
         const frame = r.frame.getBoundingClientRect();
         const point = message.point;
         pdfPointer(
-          point && !r.local
+          point
             ? {
                 page: point.page,
                 h: point.x,

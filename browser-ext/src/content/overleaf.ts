@@ -1993,7 +1993,7 @@ function renderLocalChanges(
         lines.push(
           el("div", {
             class: "small",
-            text: `${plural(checkout.n_unsaved_files, "file")} not saved`,
+            text: plural(checkout.n_unsaved_files, "unsaved file"),
             title: checkout.unsaved_files.join("\n"),
           }),
         );
@@ -2002,9 +2002,7 @@ function renderLocalChanges(
         lines.push(
           el("div", {
             class: "small",
-            text:
-              `${plural(checkout.commits_ahead, "saved change")} not ` +
-              "pushed to GitHub",
+            text: plural(checkout.commits_ahead, "unpushed change"),
           }),
         );
       }
@@ -4930,14 +4928,13 @@ function renderStatus(
   );
   body.append(renderLocalChanges(project, reload, link.local_path));
   body.append(busy, details);
-  if (status.in_sync) {
+  // On this machine, the badge says it
+  if (status.in_sync && !local) {
     details.append(
       el("div", {
         class: "dim small",
         style: { paddingTop: "6px" },
-        text: local
-          ? "Overleaf has everything from this machine."
-          : "Everything here matches the Calkit project.",
+        text: "Everything here matches the Calkit project.",
       }),
     );
   }

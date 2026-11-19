@@ -1,5 +1,6 @@
 """Tests for ``calkit.cli.latex.``"""
 
+import base64
 import gzip
 import json
 import os
@@ -151,6 +152,24 @@ def test_from_json(tmp_dir):
     )
     assert out.returncode != 0
     assert "NAME=FORMAT" in out.stderr
+    # Or base64-encoded, as stages pass one a shell would change
+    encoded = base64.b64encode(b'"{result4}" costs $5').decode()
+    subprocess.run(
+        ["calkit", "latex", "from-json", "test2.json", "-o", "r.tex"]
+        + ["--format-base64", f"price={encoded}"],
+        check=True,
+    )
+    with open("r.tex") as f:
+        assert get_value(f.read(), "price") == '"hello" costs \\$5'
+    out = subprocess.run(
+        ["calkit", "latex", "from-json", "test2.json", "-o", "r.tex"]
+        + ["--format-base64", "price=not base64"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert out.returncode != 0
+    assert "not valid base64" in out.stderr
 
 
 def test_from_json_keys(tmp_dir):

@@ -4890,8 +4890,7 @@ function mountPdfSwitch(): void {
 
 /**
  * Where the panel's answers come from: the checkout on this machine, or
- * the hub, with, from the hub, a way to work on the project without
- * installing anything.
+ * the hub.
  */
 function renderWhere(link: OverleafLinkPublic): HTMLElement {
   if (link.local_path) {
@@ -4901,22 +4900,10 @@ function renderWhere(link: OverleafLinkPublic): HTMLElement {
       renderOpenLocally(linkKey(link), undefined, true, link.local_path),
     ]);
   }
-  return el("div", { class: "dim small" }, [
-    document.createTextNode(`Via ${new URL(hubWebUrl).host}`),
-    ...(link.github_repo_url
-      ? [
-          document.createTextNode(" \u00b7 "),
-          el("a", {
-            text: "Open in Codespaces",
-            href: `https://codespaces.new${
-              new URL(link.github_repo_url).pathname
-            }?quickstart=1`,
-            title: "Work on the project in a GitHub Codespace",
-            attrs: { target: "_blank" },
-          }),
-        ]
-      : []),
-  ]);
+  return el("div", {
+    class: "dim small",
+    text: `Via ${new URL(hubWebUrl).host}`,
+  });
 }
 
 /** Where a run of the pipeline happens, as a sentence would say it. */

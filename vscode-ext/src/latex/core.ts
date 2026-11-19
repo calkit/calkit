@@ -147,6 +147,60 @@ export function latexStageSource(
   )?.source;
 }
 
+// The latex stage that builds `texFile`, if one does, and the directory its
+// build runs in, which for a subproject's is its own, though its target is
+// relative to the root.
+export function findLatexStage(
+  stages: Record<string, unknown>,
+  texFile: string,
+): { name: string; wdir: string } | undefined {
+  for (const [name, raw] of Object.entries(stages)) {
+    const stage = raw as DocumentStageFields & { subproject_wdir?: string };
+    if (
+      stage?.kind === "latex" &&
+      typeof stage.target_path === "string" &&
+      path.posix.join(stage.wdir ?? "", stage.target_path) === texFile
+    ) {
+      return { name, wdir: stage.subproject_wdir ?? stage.wdir ?? "" };
+    }
+  }
+  return undefined;
+}
+
+// How to preview a latex stage's document without running the pipeline:
+// the build the pipeline compiled for it (its dvc.yaml `cmd`), run from
+// `dir`, its working directory, and checking the environment first, since
+// no `calkit run` did. Undefined if the stage isn't compiled to one.
+export function latexPreviewCommand(
+  cmd: unknown,
+  dir: string,
+): string | undefined {
+  const prefix = "calkit latex build ";
+  if (typeof cmd !== "string" || !cmd.startsWith(prefix)) {
+    return undefined;
+  }
+  const quoted = `'${dir.replace(/'/g, `'\\''`)}'`;
+  const args = cmd.slice(prefix.length).replace(/(^| )--no-check(?= )/, "");
+  return `calkit -C ${quoted} latex build ${args.trim()}`;
+}
+
+// Whether LaTeX Workshop builds each document as its stage does, as
+// `calkit update vscode-config` sets it up to for a project with a TeX Live
+// environment, given its `latex.tools` setting.
+export function latexWorkshopBuildsWithCalkit(tools: unknown): boolean {
+  return (
+    Array.isArray(tools) &&
+    tools.some((raw) => {
+      const tool = raw as { command?: unknown; args?: unknown };
+      return (
+        tool?.command === "calkit" &&
+        Array.isArray(tool.args) &&
+        tool.args.includes("--as-stage")
+      );
+    })
+  );
+}
+
 // The PDF any stage builds from a document, LaTeX or Markdown.
 export function documentStagePdf(
   stages: Record<string, unknown>,

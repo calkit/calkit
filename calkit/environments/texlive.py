@@ -1273,6 +1273,29 @@ def check(
     return view_dir
 
 
+def warm(env: dict, verbose: bool = False) -> str:
+    """Install and assemble an environment from its spec alone, without a
+    project or a lock written anywhere, and return its directory.
+
+    Fills the store ahead of time, e.g., in a dev container image, so a
+    project's first build reuses the packages and formats rather than
+    downloading and building them.
+    """
+    lock = create_lock(env)
+    platform = get_platform()
+    if platform not in lock["platforms"]:
+        raise ValueError(f"TeX Live environments aren't locked for {platform}")
+    view_dir = get_view_dir(lock, platform)
+    if not os.path.isfile(os.path.join(view_dir, COMPLETE_MARKER)):
+        install_packages(
+            get_platform_packages(lock, platform),
+            lock["repository_url"],
+            verbose=verbose,
+        )
+        assemble_view(lock, platform, verbose=verbose)
+    return view_dir
+
+
 def get_run_cmd(cmd: list[str], env_vars: dict) -> list[str]:
     """Return a command with its program looked up on an environment's PATH.
 

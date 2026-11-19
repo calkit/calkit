@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import posixpath
 import re
 import stat
 from typing import Any
@@ -88,6 +89,127 @@ def render_devcontainer_spec() -> dict:
     return spec
 
 
+def get_latex_workshop_settings(
+    settings: dict, projects: list[tuple[str, dict]]
+) -> dict:
+    """Return VS Code settings with LaTeX Workshop building a project's
+    documents the way its pipeline does.
+
+    ``projects`` are ``(path, ck_info)`` for the project and each of its
+    subprojects, as ``calkit.core.iter_projects`` yields them. The bundled
+    settings build in Calkit's LaTeX Docker image, which a project keeps
+    unless a LaTeX stage in it or a subproject uses a TeX Live environment,
+    or a switch that can pick one, or it has no LaTeX stages and only one
+    TeX Live environment. Then one recipe builds every document with
+    ``calkit latex build --as-stage``, which finds the stage for the
+    document LaTeX Workshop builds, so each builds in its stage's
+    environment, Docker or not, with its options. A recipe per stage would
+    have LaTeX Workshop pick one on save by its position or last use, not
+    by the document. Builds are verbose, with errors named by file and
+    line, since that's how LaTeX Workshop finds them in TeX's output.
+    """
+    from calkit.environments import SWITCH_KIND
+    from calkit.models.pipeline import LatexStage
+
+    def uses_texlive(env: Any, envs: dict) -> bool:
+        if not isinstance(env, dict):
+            return False
+        if env.get("kind") == "texlive":
+            return True
+        if env.get("kind") != SWITCH_KIND:
+            return False
+        # A switch's options may be named or defined in place
+        for option in env.get("switch") or []:
+            use = option.get("use") if isinstance(option, dict) else None
+            if isinstance(use, str):
+                use = envs.get(use)
+            if isinstance(use, dict) and use.get("kind") == "texlive":
+                return True
+        return False
+
+    uses_stages = False
+    n_texlive_envs = 0
+    # Where each stage puts its PDF, relative to the root, if not beside
+    # the document
+    out_dirs: set[str | None] = set()
+    for path, ck_info in projects:
+        envs = ck_info.get("environments") or {}
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        n_texlive_envs += sum(
+            isinstance(env, dict) and env.get("kind") == "texlive"
+            for env in envs.values()
+        )
+        for name, stage in stages.items():
+            if not isinstance(stage, dict) or stage.get("kind") != "latex":
+                continue
+            try:
+                s = LatexStage.model_validate(stage | {"name": name})
+            except ValueError:
+                continue
+            if s.environment is not None and uses_texlive(
+                envs.get(s.environment), envs
+            ):
+                uses_stages = True
+            if s.latexmkrc_path is None and s.output_dir is not None:
+                pdf_path = posixpath.join(path, s.wdir or "", s.pdf_path)
+                out_dirs.add(posixpath.dirname(posixpath.normpath(pdf_path)))
+            else:
+                out_dirs.add(None)
+    if not (uses_stages or (not out_dirs and n_texlive_envs == 1)):
+        return settings
+    settings = dict(settings)
+    settings.pop("latex-workshop.docker.image.latex", None)
+    settings["latex-workshop.docker.enabled"] = False
+    # A magic comment, e.g., % !TEX program = xelatex, would bypass the
+    # recipe and run the machine's TeX
+    settings["latex-workshop.latex.build.enableMagicComments"] = False
+    settings["latex-workshop.latex.tools"] = [
+        {
+            "name": "Calkit",
+            "command": "calkit",
+            "args": [
+                "latex",
+                "build",
+                "--as-stage",
+                "--verbose",
+                "--latexmk-arg",
+                "-file-line-error",
+                "%DOC_EXT%",
+            ],
+            "cwd": "%WORKSPACE_FOLDER%",
+        }
+    ]
+    settings["latex-workshop.latex.recipes"] = [
+        {"name": "Calkit", "tools": ["Calkit"]}
+    ]
+    # Over a default a user may have set by name
+    settings["latex-workshop.latex.recipe.default"] = "first"
+    # LaTeX Workshop finds every document's PDF, and its SyncTeX, in one
+    # place, so it's where the stages' output_dir puts them if they all
+    # agree, and otherwise beside each document
+    out_dir = out_dirs.pop() if len(out_dirs) == 1 else None
+    if out_dir is not None:
+        out_dir = posixpath.normpath(out_dir)
+        settings["latex-workshop.latex.outDir"] = "%WORKSPACE_FOLDER%" + (
+            f"/{out_dir}" if out_dir != "." else ""
+        )
+    return settings
+
+
+def make_vscode_settings(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> str:
+    """Return the VS Code settings for a project, as JSON text."""
+    from calkit.core import iter_projects
+
+    settings = load_json("vscode", "settings.json")
+    projects = list(iter_projects(wdir=wdir, ck_info=ck_info))
+    return (
+        json.dumps(get_latex_workshop_settings(settings, projects), indent=2)
+        + "\n"
+    )
+
+
 def make_devcontainer_spec(
     ck_info: dict | None = None, wdir: str | None = None
 ) -> str:
@@ -95,7 +217,7 @@ def make_devcontainer_spec(
 
     Julia is only installed for a project with a Julia environment, in it
     or a subproject, since installing it slows down creating every
-    Codespace.
+    Codespace. LaTeX Workshop builds as ``make_vscode_settings`` sets it to.
     """
     from calkit.core import iter_projects
 
@@ -111,7 +233,11 @@ def make_devcontainer_spec(
         return env.get("kind") == "julia" or any(map(uses_julia, options))
 
     spec = load_json("devcontainer", DEVCONTAINER_FNAME)
-    projects = iter_projects(wdir=wdir, ck_info=ck_info)
+    projects = list(iter_projects(wdir=wdir, ck_info=ck_info))
+    vscode = spec["customizations"]["vscode"]
+    vscode["settings"] = get_latex_workshop_settings(
+        vscode["settings"], projects
+    )
     if not any(
         uses_julia(env)
         for _, info in projects
@@ -123,7 +249,6 @@ def make_devcontainer_spec(
                 "ghcr.io/julialang/devcontainer-features/julia:"
             ):
                 del features[key]
-        vscode = spec["customizations"]["vscode"]
         vscode["extensions"] = [
             e
             for e in vscode["extensions"]

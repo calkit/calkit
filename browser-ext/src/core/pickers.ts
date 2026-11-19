@@ -380,7 +380,11 @@ export function renderPathPicker(options: {
       );
       return;
     }
-    const { dirs, files } = listDir(paths, dir);
+    // Hidden ones, e.g., .calkit/, are Calkit's or Git's, not for picking
+    const { dirs, files } = listDir(
+      paths.filter((path) => !/(^|\/)\./.test(path)),
+      dir,
+    );
     if (dir) {
       const up = dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "";
       results.append(pick(`← ${dir}/`, () => browse(up), "Up a folder"));
@@ -407,6 +411,9 @@ export function renderPathPicker(options: {
     }
   };
   const browse = (to: string) => {
+    // Redrawing removes the folder clicked, and with it focus, which would
+    // close the list, so the list holds it instead
+    results.focus({ preventScroll: true });
     dir = to;
     typed = false;
     void render();

@@ -2093,13 +2093,13 @@ function renderClone(project: string, reload: () => void): HTMLElement {
   });
   // A folder with the analysis in it already becomes the project's, with
   // the project's files around its own
-  const select = el("button", { text: "Select folder" });
+  const select = el("button", { text: "Select analysis folder" });
   select.addEventListener("click", async () => {
     clear(message);
     try {
       const chosen = await send({
         type: "local.chooseFolder",
-        prompt: `Select a folder for ${name}`,
+        prompt: `Select analysis folder for ${name}`,
       });
       if (chosen.path) {
         location.value = chosen.path;
@@ -2137,9 +2137,8 @@ function renderClone(project: string, reload: () => void): HTMLElement {
     el("div", {
       class: "small",
       text:
-        "This project isn't on this machine. Clone it into a new folder, " +
-        "or select one with your analysis in it, to run, save, and sync " +
-        "from here:",
+        "This project isn't on this machine. Clone it to run, save, and " +
+        "sync from here:",
     }),
     el("div", { class: "row", style: { marginTop: "6px" } }, [
       location,

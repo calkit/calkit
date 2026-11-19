@@ -911,16 +911,30 @@ function renderDefineOrigin(
         ),
     ]);
   }
-  // The label on its own line, so the buttons stay in a row under it
+  // A row where they fit, e.g., in the hover card, else two by two, rather
+  // than one left over on a line of its own
+  const style = document.createElement("style");
+  style.textContent = `
+    .calkit-origin-choices { container-type: inline-size; margin-top: 4px; }
+    .calkit-origin-choices > div { display: grid; gap: 6px;
+      grid-template-columns: repeat(2, 1fr); }
+    @container (min-width: 340px) {
+      .calkit-origin-choices > div { grid-template-columns: repeat(4, auto);
+        justify-content: start; }
+    }
+  `;
   return el("div", { style: { marginTop: "4px" } }, [
+    style,
     el("div", { class: "small dim", text: "Define origin" }),
-    el(
-      "div",
-      { class: "actions", style: { flexWrap: "wrap", marginTop: "4px" } },
-      choices.map(([text, onClick]) =>
-        el("button", { class: "action secondary", text, onClick }),
+    el("div", { class: "calkit-origin-choices" }, [
+      el(
+        "div",
+        {},
+        choices.map(([text, onClick]) =>
+          el("button", { class: "action secondary", text, onClick }),
+        ),
       ),
-    ),
+    ]),
   ]);
 }
 

@@ -28,7 +28,7 @@ export default defineConfig({
         options: resolve(__dirname, "options.html"),
         viewer: resolve(__dirname, "viewer.html"),
         review: resolve(__dirname, "review.html"),
-        background: resolve(__dirname, "src/background/index.ts"),
+        worker: resolve(__dirname, "src/worker/index.ts"),
       },
       output: {
         entryFileNames: "[name].js",

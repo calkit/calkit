@@ -22,7 +22,7 @@
   },
   "options_page": "options.html",
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "worker.js",
     "type": "module"
   },
   "permissions": ["storage", "tabs", "scripting", "activeTab", "cookies"],

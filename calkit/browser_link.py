@@ -1334,7 +1334,8 @@ def start_job(msg: dict) -> dict:
     elif kind == "create":
         # A folder here, e.g., the analysis a paper on Overleaf is written
         # from, made a project on the hub, signing in first if need be,
-        # with the paper imported into it and pushed
+        # with the paper imported into it, and everything saved, so it's
+        # all in version control and backed up from the start
         location = msg.get("location")
         if not isinstance(location, str) or not location:
             raise ValueError("A folder is needed")
@@ -1376,7 +1377,7 @@ def start_job(msg: dict) -> dict:
             + (["--public"] if msg.get("isPublic") else []),
             calkit_cmd
             + ["overleaf", "import", overleaf_url, path, "--kind", doc_kind],
-            calkit_cmd + ["push", "git"],
+            calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
         ]
     elif kind == "clone":
         location = msg.get("location") or os.path.join(
@@ -1758,10 +1759,12 @@ def commit_change(
 
     ``write`` writes any files, returning their paths, and may add to
     ``ck_info``, which is written as calkit.yaml after it, and the pipeline
-    compiled, unless ``compile_pipeline`` is false. Refused if calkit.yaml,
-    dvc.yaml, or ``checked`` have unsaved changes, which would be swept up
-    or overwritten; ``also_commit`` are committed even so, e.g., a new
-    script. If any of it fails, files it changed are put back and files
+    compiled into dvc.yaml, which is committed too, unless
+    ``compile_pipeline`` is false. Refused if calkit.yaml or ``checked``
+    have unsaved changes, which would be swept up or overwritten, but not
+    dvc.yaml, which is only ever compiled from calkit.yaml, e.g., by
+    checking the pipeline's status; ``also_commit`` are committed even so,
+    e.g., a new script. If any of it fails, files it changed are put back and files
     that appeared while it ran are deleted. Nothing's pushed; a run and
     sync does that.
     """
@@ -1770,7 +1773,7 @@ def commit_change(
 
     repo = calkit.git.get_repo(wdir)
     changed_before = get_changed_paths(repo)
-    for path in ["calkit.yaml", "dvc.yaml", *checked]:
+    for path in ["calkit.yaml", *checked]:
         if path in changed_before:
             raise ValueError(
                 f"{path} has changes that aren't saved; save or discard "
@@ -1788,6 +1791,12 @@ def commit_change(
             (get_changed_paths(repo) - changed_before)
             | set(written)
             | {"calkit.yaml"}
+            | (
+                {"dvc.yaml"}
+                if compile_pipeline
+                and os.path.isfile(os.path.join(wdir, "dvc.yaml"))
+                else set()
+            )
             | (set(also_commit) & changed_before)
         )
         repo.git.add("--", *commit_paths)

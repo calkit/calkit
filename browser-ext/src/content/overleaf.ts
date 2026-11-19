@@ -5491,10 +5491,10 @@ async function renderAttachForm(
     const folder = doc.folder();
     if (analysisFolder) {
       where.textContent =
-        `Calkit will make ${analysisFolder} a project, with a ` +
-        `${isPublic.checked ? "public" : "private"} repo, ${githubName}/` +
-        `${nameInput.value.trim() || "..."}, and this document's files in ` +
-        `${folder}/, kept in sync with Overleaf.`;
+        `Calkit will make ${analysisFolder} a project and save everything ` +
+        `in it to a ${isPublic.checked ? "public" : "private"} repo, ` +
+        `${githubName}/${nameInput.value.trim() || "..."}, with this ` +
+        `document's files in ${folder}/, kept in sync with Overleaf.`;
       return;
     }
     where.textContent = existsOnGithub.checked

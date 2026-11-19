@@ -685,7 +685,7 @@ def test_start_job(tmp_path, monkeypatch):
     assert run_only["cmd"] == calkit_cmd + ["run"]
     os.remove(calkit.browser_link.get_job_path(run_only["id"]))
     # A project made from a folder here, signing in first, then importing
-    # the paper and pushing
+    # the paper and saving everything
     analysis = home / "calkit" / "analysis"
     analysis.mkdir()
     (analysis / "fit.py").write_text("")
@@ -712,7 +712,7 @@ def test_start_job(tmp_path, monkeypatch):
         calkit_cmd
         + ["overleaf", "import", "https://www.overleaf.com/project/abc123"]
         + ["paper", "--kind", "journal-article"],
-        calkit_cmd + ["push", "git"],
+        calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
     ]
     os.remove(calkit.browser_link.get_job_path(creating["id"]))
     for bad, error in [
@@ -1323,8 +1323,12 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     ]:
         with pytest.raises(ValueError, match=error):
             add_export_stage(str(project), msg | bad)
+    # A dvc.yaml left unsaved, e.g., compiled by checking the pipeline's
+    # status, is compiled again and saved with it, not refused
+    (project / "dvc.yaml").write_text("# Stale\n")
     res = add_export_stage(str(project), msg)
     assert res["saved"] and res["name"] == "export-setup"
+    assert "Stale" not in (project / "dvc.yaml").read_text()
     ck_info = calkit.load_calkit_info(wdir=str(project))
     assert ck_info["pipeline"]["stages"]["export-setup"]["kind"] == (
         "manual-step"

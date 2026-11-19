@@ -624,6 +624,8 @@ def get_stage_from_script_plan(
         o["path"] if isinstance(o, dict) else o
         for o in stage.get("outputs") or []
     ]
+    # What reading it found, before what a document shows is added
+    found_outputs = list(outputs)
     # Env vars, schedules, and other stages' outputs aren't paths
     inputs = [
         i if isinstance(i, str) else i["path"]
@@ -714,6 +716,7 @@ def get_stage_from_script_plan(
         "dependencies": env.get("dependencies") or [],
         "inputs": inputs,
         "outputs": outputs,
+        "found_outputs": found_outputs,
         "missing_inputs": missing,
         "external_inputs": detected.get("external_inputs") or [],
         "produces": produces,

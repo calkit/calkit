@@ -767,7 +767,7 @@ def get_status(
             # the full status would just error out (and would mutate files
             # like dvc.yaml or notebooks mid-run). Report the running stage
             # from the run log instead.
-            running_status = _get_running_pipeline_status()
+            running_status = _get_running_pipeline_status(ck_info=ck_info)
         if running_status is None and (
             "pipeline" in categories or "dvc" in categories
         ):
@@ -3059,18 +3059,47 @@ def _stage_target_from_cmd(cmd: str) -> str | None:
     return targets[-1] if targets else None
 
 
-def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
+def _get_iteration_item_counts(ck_info: dict) -> dict[str, int]:
+    """How many items each iterated stage has, by stage name."""
+    from calkit.pipeline import get_iteration_items
+
+    counts = {}
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage in stages.items():
+        if not isinstance(stage, dict) or not stage.get("iterate_over"):
+            continue
+        try:
+            items = get_iteration_items(stage, ck_info.get("parameters"))
+        except Exception:
+            # A count is only a nicety, so a stage it can't be worked out
+            # for is shown without one
+            continue
+        if items:
+            counts[name] = len(items)
+    return counts
+
+
+def _get_running_pipeline_status(
+    wdir: str = ".", ck_info: dict | None = None
+) -> dict | None:
     """Return live pipeline run progress, or ``None`` if no run is running.
 
     A run is in progress when a live process holds DVC's rwlock. The most
     recent run log is then parsed to report which stages have finished and
     which is currently running. Concurrently-run scheduler items execute in
     their own processes before the run log exists, so their stage names are
-    also recovered from the lock's command strings.
+    also recovered from the lock's command strings. Each iterated stage's
+    item count is included, so its progress can be shown as a fraction.
     """
     processes = calkit.dvc.get_running_pipeline_processes(wdir)
     if not processes:
         return None
+    if ck_info is None:
+        try:
+            ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+        except Exception:
+            ck_info = {}
+    item_counts = _get_iteration_item_counts(ck_info)
     # Stage targets in the lock commands identify concurrently-run scheduler
     # items (an iterate_over sweep). These run in their own processes during a
     # prepass, before the current run's log exists, so the latest log on disk
@@ -3087,6 +3116,7 @@ def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
             "processes": processes,
             "stages": {},
             "running_stages": concurrent_stages,
+            "item_counts": item_counts,
         }
     content = _get_latest_run_log_content(wdir)
     stages = (
@@ -3102,34 +3132,76 @@ def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
         "processes": processes,
         "stages": stages,
         "running_stages": running_stages,
+        "item_counts": item_counts,
     }
 
 
 def _print_running_pipeline_status(running_status: dict) -> None:
-    """Print a human-readable summary of an in-progress pipeline run."""
+    """Print a human-readable summary of an in-progress pipeline run.
+
+    An iterated stage is shown once, with how many of its items have
+    finished, rather than item by item, which for a big sweep would bury
+    the rest of the pipeline.
+    """
+
+    def group_stage_items(names: list[str]) -> dict[str, list[str]]:
+        """Stage names grouped by the stage they're an item of, in order."""
+        groups: dict[str, list[str]] = {}
+        for name in names:
+            groups.setdefault(name.partition("@")[0], []).append(name)
+        return groups
+
+    def get_progress(stage: str, items: list[str]) -> str | None:
+        """How many of an iterated stage's items have finished."""
+        if all("@" not in item for item in items):
+            return None
+        done = len(finished_groups.get(stage, []))
+        total = item_counts.get(stage)
+        return f"{done}/{total}" if total else f"{done} done"
+
     processes = running_status["processes"]
     pids = ", ".join(str(p["pid"]) for p in processes)
     typer.echo(f"Run in progress (PID {pids})")
     stages = running_status["stages"]
+    item_counts = running_status.get("item_counts") or {}
     finished = [
         name
         for name, info in stages.items()
         if info.get("status") in ("completed", "skipped")
     ]
     running_stages = running_status["running_stages"]
-    if finished:
-        typer.echo(f"        completed: {', '.join(finished)}")
+    finished_groups = group_stage_items(finished)
+    running_groups = group_stage_items(running_stages)
+    # A stage with items still running is shown as running
+    completed = []
+    for stage, items in finished_groups.items():
+        if stage in running_groups:
+            continue
+        fraction = get_progress(stage, items)
+        completed.append(
+            stage if fraction is None else f"{stage} ({fraction})"
+        )
+    if completed:
+        typer.echo(f"        completed: {', '.join(completed)}")
     if running_stages:
-        for name in running_stages:
-            start = stages.get(name, {}).get("start_time")
-            label = typer.style(name, fg="green")
-            if start:
-                typer.echo(
-                    f"        running:   {label} "
-                    f"({_format_run_elapsed(start)})"
-                )
-            else:
-                typer.echo(f"        running:   {label}")
+        for stage, items in running_groups.items():
+            details = []
+            fraction = get_progress(stage, items)
+            if fraction is not None:
+                details.append(fraction)
+            if len(items) > 1:
+                details.append(f"{len(items)} running")
+            starts = [
+                stages[item]["start_time"]
+                for item in items
+                if stages.get(item, {}).get("start_time")
+            ]
+            if starts:
+                details.append(_format_run_elapsed(max(starts)))
+            text = typer.style(stage, fg="green")
+            if details:
+                text += f" ({', '.join(details)})"
+            typer.echo(f"        running:   {text}")
     elif not finished:
         typer.echo("        starting up...")
 
@@ -4255,6 +4327,14 @@ def run(
                 # emitted; it shares a line if the output had no final newline
                 log_f.write(STAGE_OUTPUT_END + "\n")
 
+    # DVC won't save an output Git tracks, e.g., a figure imported from
+    # Overleaf before its stage stored it with DVC
+    if dvc_stages and not dry:
+        for found in calkit.dvc.untrack_cached_stage_outputs(dvc_stages):
+            warn(
+                f"Stopped tracking {found['path']} with Git, since stage "
+                f"'{found['stage']}' stores it with DVC"
+            )
     dvc.stage.run._run = _patched_run
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s
@@ -5523,7 +5603,7 @@ def run_in_env(
             # commands it runs, which is how a stage is told apart from
             # someone running 'calkit xenv' themselves
             "-it"
-            if sys.stdin.isatty() and not os.getenv("DVC_STAGE")
+            if calkit.core.is_tty() and not os.getenv("DVC_STAGE")
             else "-i",
             "--rm",
             "-w",

@@ -2134,9 +2134,9 @@ def check_storage(
 ) -> None:
     """Check that paths are tracked where they're declared to be stored.
 
-    That is, nothing is tracked by both Git and DVC, no pipeline output
-    stored in Git, or file in one, is ignored by it, and nothing in Git is
-    too large for it.
+    That is, nothing is tracked by both Git and DVC, no pipeline output has
+    a .dvc file of its own too, no pipeline output stored in Git, or file
+    in one, is ignored by it, and nothing in Git is too large for it.
     Large files are only reported.
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
@@ -2172,7 +2172,14 @@ def check_storage(
     to_record = []
     for problem in problems:
         path = os.path.abspath(problem["path"])
-        if problem["kind"] == "excluded-tracked":
+        if problem["kind"] == "stage-output-dvc-file":
+            # The stage says how it's made, so its own .dvc file goes
+            dvc_file = problem["dvc_file"]
+            if repo.git.ls_files("--", dvc_file):
+                repo.git.rm("-q", "--", dvc_file)
+            elif os.path.isfile(dvc_file):
+                os.remove(dvc_file)
+        elif problem["kind"] == "excluded-tracked":
             # Left out of the output, so stored in neither, as declared
             calkit.dvc.untrack_files(repo, problem["files"])
         elif problem["store_in"] == "dvc":

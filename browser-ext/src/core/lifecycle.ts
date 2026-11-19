@@ -1,3 +1,7 @@
+/**
+ * Running a content script: following navigation, and shutting down once the
+ * extension reloads.
+ */
 import { isExtensionAlive, onAuthChange, onUrlChange } from "./messages";
 
 /**

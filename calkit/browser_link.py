@@ -63,14 +63,24 @@ PULL_FRESH_SECONDS = 10
 # How often an Overleaf project no checkout here syncs with is looked for
 # again, since that searches the home folder too
 LOOKUP_RESCAN_SECONDS = 600
+# How long a pipeline's status is reused for the provenance of figures
+PIPELINE_REUSE_SECONDS = 10
 # A file bigger than this is stored with DVC rather than in Git, as the
 # hub stores an upload
 FILE_GIT_MAX_BYTES = 1_000_000
 # What a job, e.g., a pipeline run, can do, as the command it runs in the
 # project's checkout, so nothing else can be run through one
-JOB_KINDS = ("run", "sync", "clone", "install-editor", "detect")
+JOB_KINDS = (
+    "run",
+    "sync",
+    "save",
+    "clone",
+    "create",
+    "install-editor",
+    "detect",
+)
 # Those that change a checkout, so only one at a time works on each
-CHECKOUT_JOB_KINDS = ("run", "sync")
+CHECKOUT_JOB_KINDS = ("run", "sync", "save")
 # A job that hasn't started by then never will, e.g., its process died first
 JOB_START_SECONDS = 60
 # Reading a script for a stage, as the hub allows it
@@ -89,6 +99,8 @@ CONCURRENT_REQUEST_TYPES = (
     "publication.pdf",
     "publication.synctex",
     "publication.source",
+    "project.originSuggestions",
+    "folder.choose",
     "job.get",
     "job.log",
     "jobs.list",
@@ -98,6 +110,8 @@ MAX_JOBS_KEPT = 20
 # How much of a PDF goes in each message, which base64 makes a third
 # bigger, keeping it well under the browser's limit
 PDF_CHUNK_BYTES = 600_000
+# A results file bigger than this isn't read for a value, as on the hub
+MAX_VALUE_FILE_BYTES = 10 * 1024 * 1024
 # The most of a LaTeX file read for the extension, which no paper's comes near
 SOURCE_MAX_BYTES = 1_000_000
 OVERLEAF_AUTH_MISSING = (
@@ -186,12 +200,20 @@ def get_reply(msg: dict) -> dict:
       Overleaf project, shaped as the hub's lookup is.
     - ``overleaf.status``: what a sync of a project's checkout would do,
       after pulling from Overleaf, shaped as the hub's status is.
+    - ``project.figures``, ``project.pipeline``, and ``project.provenance``:
+      a checkout's figures, pipeline, and where a path in it, or a value in
+      a results file, came from, shaped as the hub's are.
     - ``publication.pdf``: part of the PDF a folder synced with Overleaf
       builds to, from ``offset``, with how fresh it is, so it can be shown
       in place of Overleaf's.
     - ``publication.source``: a LaTeX file in a folder synced with
       Overleaf, as it is here, to map a line SyncTeX gives for a PDF built
       here to the same line in Overleaf's copy.
+    - ``project.originSuggestions``: what likely makes a file with no
+      origin, e.g., a notebook that writes it, for someone to confirm.
+    - ``folder.choose``: a folder chosen in this machine's own dialog,
+      e.g., one with an analysis to clone a project into, and whether it
+      has anything in it.
     - ``job.start``, ``job.get``, and ``jobs.list``: run something that
       takes a while, i.e., a pipeline run, an Overleaf sync, or a clone, in
       a process of its own, which outlives the host, and check on it.
@@ -349,6 +371,12 @@ def get_result(msg: dict) -> Any:
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this machine")
         result = add_stage_from_script(paths[0], msg)
+    elif kind == "project.moveExternalData":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        result = move_external_data(paths[0], msg)
     elif kind in ("project.recordOrigin", "project.addExportStage"):
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
@@ -364,6 +392,26 @@ def get_result(msg: dict) -> Any:
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_pipeline(paths[0])
+    elif kind == "project.provenance":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        key = msg.get("key")
+        if key is not None and not isinstance(key, str):
+            raise ValueError("A key must be a string")
+        result = get_provenance(paths[0], msg.get("path"), key)
+    elif kind == "project.originSuggestions":
+        from calkit.provenance import get_origin_suggestions
+
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        path = get_project_path(paths[0], msg.get("path"), "file")
+        result = get_origin_suggestions(
+            path, get_content_paths(paths[0]), wdir=paths[0]
+        )
     elif kind in ("publication.pdf", "publication.synctex"):
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
@@ -386,6 +434,8 @@ def get_result(msg: dict) -> Any:
         result = get_source_text(
             paths[0], str(msg.get("folder")), str(msg.get("path"))
         )
+    elif kind == "folder.choose":
+        result = choose_folder(str(msg.get("prompt") or "Select a folder"))
     elif kind == "job.start":
         result = start_job(msg)
     elif kind == "job.get":
@@ -442,6 +492,58 @@ def check_clone_location(location: str) -> None:
             f"Can't clone to {location}; choose a folder in your home folder"
             ", e.g., ~/calkit"
         )
+
+
+def choose_folder(prompt: str) -> dict:
+    """Ask for a folder in this machine's own dialog, starting in the home
+    folder, giving its ``path``, or None if none was chosen, and whether
+    it's ``empty``.
+    """
+    import subprocess
+    import sys
+
+    home = calkit.get_user_home()
+    env = os.environ | {"CALKIT_PROMPT": prompt, "CALKIT_HOME": home}
+    if sys.platform == "darwin":
+        # In front of the browser, rather than behind it
+        cmd = [
+            "osascript",
+            "-e",
+            "activate",
+            "-e",
+            "POSIX path of (choose folder with prompt (system attribute "
+            '"CALKIT_PROMPT") default location POSIX file (system attribute '
+            '"CALKIT_HOME"))',
+        ]
+    elif sys.platform == "win32":
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-STA",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "$d.Description = $env:CALKIT_PROMPT; "
+            "$d.SelectedPath = $env:CALKIT_HOME; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }",
+        ]
+    else:
+        cmd = [
+            "zenity",
+            "--file-selection",
+            "--directory",
+            f"--title={prompt}",
+            f"--filename={home}/",
+        ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    except FileNotFoundError:
+        raise ValueError("This machine has no folder dialog; type the path")
+    path = res.stdout.strip() if res.returncode == 0 else ""
+    if not path:
+        return {"path": None, "empty": True}
+    path = os.path.normpath(path)
+    return {"path": path, "empty": not os.listdir(path)}
 
 
 class OverleafAuthMissing(Exception):
@@ -1256,8 +1358,13 @@ def start_job(msg: dict) -> dict:
     """Start a job for a project, in a process of its own: running its
     pipeline, then saving and syncing with Overleaf unless ``sync`` is
     false, as ``calkit run --save --overleaf`` does, syncing a
-    folder with Overleaf, or cloning it to a ``location``, returning its
-    record.
+    folder with Overleaf, saving everything, as ``calkit save -a`` does,
+    cloning it to a ``location``, or creating it on a
+    ``hub`` from a folder here at ``location``, with an Overleaf project
+    imported into it, returning its record.
+
+    A job runs ``cmd``, then each of ``then`` in turn, stopping at the
+    first that fails.
     """
     import uuid
     from datetime import datetime, timezone
@@ -1271,6 +1378,54 @@ def start_job(msg: dict) -> dict:
         # VS Code, the only editor Calkit installs, for opening the project
         wdir = calkit.get_user_home()
         cmd = calkit_cmd + ["install", "code", "--yes"]
+    elif kind == "create":
+        # A folder here, e.g., the analysis a paper on Overleaf is written
+        # from, made a project on the hub, signing in first if need be,
+        # with the paper imported into it, and everything saved, so it's
+        # all in version control and backed up from the start
+        location = msg.get("location")
+        if not isinstance(location, str) or not location:
+            raise ValueError("A folder is needed")
+        location = os.path.abspath(os.path.expanduser(location))
+        check_clone_location(location)
+        if not os.path.isdir(location):
+            raise ValueError(f"{location} isn't a folder")
+        if os.path.exists(os.path.join(location, ".git")):
+            raise ValueError(f"{location} is already a Git repo")
+        hub = msg.get("hub")
+        title = msg.get("title")
+        overleaf_url = msg.get("overleafProjectUrl")
+        path = msg.get("path")
+        doc_kind = msg.get("docKind")
+        if not isinstance(hub, str) or not re.fullmatch(
+            r"https?://[\w.:-]+/?", hub
+        ):
+            raise ValueError("A hub URL is needed")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("A title is needed")
+        if not isinstance(overleaf_url, str) or not re.fullmatch(
+            r"https://www\.overleaf\.com/project/[0-9a-f]+", overleaf_url
+        ):
+            raise ValueError("An Overleaf project URL is needed")
+        if not isinstance(path, str) or not re.fullmatch(
+            r"[\w-]+(/[\w-]+)*", path
+        ):
+            raise ValueError("A folder for the document is needed")
+        if not isinstance(doc_kind, str) or not re.fullmatch(
+            r"[a-z-]+", doc_kind
+        ):
+            raise ValueError("A kind of document is needed")
+        wdir = location
+        cmd = calkit_cmd + ["hub", "login", "--hub", hub]
+        then = [
+            calkit_cmd
+            + ["new", "project", ".", "--hub", hub, "--name", name]
+            + ["--title", title.strip()]
+            + (["--public"] if msg.get("isPublic") else []),
+            calkit_cmd
+            + ["overleaf", "import", overleaf_url, path, "--kind", doc_kind],
+            calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
+        ]
     elif kind == "clone":
         location = msg.get("location") or os.path.join(
             calkit.get_user_home(), "calkit", name
@@ -1294,6 +1449,10 @@ def start_job(msg: dict) -> dict:
             cmd = calkit_cmd + ["run"]
             if msg.get("sync", True):
                 cmd += ["--save", "--overleaf"]
+        elif kind == "save":
+            # Everything, as 'calkit save -a' sorts it: big files to DVC,
+            # junk ignored
+            cmd = calkit_cmd + ["save", "-a", "-m", "Save from Overleaf"]
         elif kind == "detect":
             # What a stage made from a script would be, which can take a
             # while to read, e.g., a notebook
@@ -1312,13 +1471,15 @@ def start_job(msg: dict) -> dict:
                 and job["status"] in ("queued", "running")
             ):
                 raise ValueError(
-                    "The pipeline is already running here"
-                    if job["kind"] == "run"
-                    else "It's already syncing with Overleaf here"
+                    {
+                        "run": "The pipeline is already running here",
+                        "sync": "It's already syncing with Overleaf here",
+                        "save": "It's already saving here",
+                    }[job["kind"]]
                 )
     job_id = uuid.uuid4().hex
     repo_info: dict[str, Any] = {"git_rev": None, "branch": None}
-    if kind not in ("clone", "install-editor"):
+    if kind not in ("clone", "create", "install-editor"):
         from calkit.git import get_repo
 
         repo = get_repo(wdir)
@@ -1331,7 +1492,7 @@ def start_job(msg: dict) -> dict:
         "kind": kind,
         "project": f"{owner}/{name}",
         "wdir": wdir,
-        "location": cmd[-1] if kind == "clone" else None,
+        "location": location if kind in ("clone", "create") else None,
         # For a detect, when it was read, so a change since is noticed
         "script_path": cmd[-1] if kind == "detect" else None,
         "script_stat": (
@@ -1340,6 +1501,7 @@ def start_job(msg: dict) -> dict:
             else None
         ),
         "cmd": cmd,
+        "then": then if kind == "create" else [],
         "status": "queued",
         "created": datetime.now(timezone.utc).isoformat(),
         "started": None,
@@ -1462,35 +1624,39 @@ def run_job(job_id: str) -> None:
             job["log_path"] = get_run_log_path(job["wdir"], job["started"])
 
     try:
-        proc = subprocess.Popen(
-            job["cmd"],
-            cwd=job["wdir"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            env=os.environ | {"PYTHONUNBUFFERED": "1"},
-            text=True,
-            errors="replace",
-        )
-        reader = threading.Thread(target=read_output, args=(proc.stdout,))
-        reader.start()
         started = time.monotonic()
-        while True:
-            try:
-                returncode = proc.wait(timeout=JOB_SAVE_SECONDS)
+        for cmd in [job["cmd"], *job.get("then", [])]:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=job["wdir"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                env=os.environ | {"PYTHONUNBUFFERED": "1"},
+                text=True,
+                errors="replace",
+            )
+            reader = threading.Thread(target=read_output, args=(proc.stdout,))
+            reader.start()
+            while True:
+                try:
+                    returncode = proc.wait(timeout=JOB_SAVE_SECONDS)
+                    break
+                except subprocess.TimeoutExpired:
+                    if (
+                        job["kind"] == "detect"
+                        and time.monotonic() - started > DETECT_JOB_SECONDS
+                    ):
+                        proc.kill()
+                        tail.append(
+                            f"Error: Reading '{job['script_path']}' took "
+                            "too long"
+                        )
+                    update(job)
+                    save(job)
+            reader.join()
+            if returncode != 0:
                 break
-            except subprocess.TimeoutExpired:
-                if (
-                    job["kind"] == "detect"
-                    and time.monotonic() - started > DETECT_JOB_SECONDS
-                ):
-                    proc.kill()
-                    tail.append(
-                        f"Error: Reading '{job['script_path']}' took too long"
-                    )
-                update(job)
-                save(job)
-        reader.join()
     except OSError as e:
         tail.append(str(e))
         returncode = 1
@@ -1515,13 +1681,19 @@ def run_job(job_id: str) -> None:
             }
     else:
         job["status"] = "succeeded"
-        if job["kind"] == "clone":
-            job["result"] = {"path": job["location"]}
+        if job["kind"] in ("clone", "create"):
+            project = job["project"]
+            # As the hub named a new one, which is only known now
+            if job["kind"] == "create":
+                ck_info = calkit.load_calkit_info(wdir=job["location"])
+                if ck_info.get("owner") and ck_info.get("name"):
+                    project = f"{ck_info['owner']}/{ck_info['name']}"
+            job["result"] = {"path": job["location"], "project": project}
             calkit.record_project_path(job["location"])
             # So it's found, rather than none being, until that's looked
             # into again
             set_checkouts_found(
-                get_checkouts_key(*job["project"].split("/", 1)), None
+                get_checkouts_key(*project.split("/", 1)), None
             )
         elif job["kind"] == "detect":
             import calkit.pipeline.detect
@@ -1589,6 +1761,33 @@ def get_figures(wdir: str) -> dict:
         if isinstance(figure.get("path"), str)
     ]
     return {"items": items, "total": len(items)}
+
+
+def get_stage_status(stale: list, has_run: bool) -> dict:
+    """A stage's status, as the hub gives it, from DVC's stale entries for
+    it, i.e., one per iteration that's out of date.
+    """
+    if not has_run:
+        state = "not-run"
+    elif not stale:
+        state = "up-to-date"
+    elif all(s.always_run for s in stale):
+        state = "always-run"
+    else:
+        state = "stale"
+    return {
+        "status": state,
+        "modified_command": any(s.modified_command for s in stale),
+        "modified_inputs": list(
+            dict.fromkeys(p for s in stale for p in s.modified_inputs)
+        ),
+        "modified_outputs": list(
+            dict.fromkeys(p for s in stale for p in s.modified_outputs)
+        ),
+        "missing_outputs": list(
+            dict.fromkeys(p for s in stale for p in s.stale_outputs)
+        ),
+    }
 
 
 def get_content_paths(wdir: str) -> list[str]:
@@ -1681,10 +1880,12 @@ def commit_change(
 
     ``write`` writes any files, returning their paths, and may add to
     ``ck_info``, which is written as calkit.yaml after it, and the pipeline
-    compiled, unless ``compile_pipeline`` is false. Refused if calkit.yaml,
-    dvc.yaml, or ``checked`` have unsaved changes, which would be swept up
-    or overwritten; ``also_commit`` are committed even so, e.g., a new
-    script. If any of it fails, files it changed are put back and files
+    compiled into dvc.yaml, which is committed too, unless
+    ``compile_pipeline`` is false. Refused if calkit.yaml or ``checked``
+    have unsaved changes, which would be swept up or overwritten, but not
+    dvc.yaml, which is only ever compiled from calkit.yaml, e.g., by
+    checking the pipeline's status; ``also_commit`` are committed even so,
+    e.g., a new script. If any of it fails, files it changed are put back and files
     that appeared while it ran are deleted. Nothing's pushed; a run and
     sync does that.
     """
@@ -1693,7 +1894,7 @@ def commit_change(
 
     repo = calkit.git.get_repo(wdir)
     changed_before = get_changed_paths(repo)
-    for path in ["calkit.yaml", "dvc.yaml", *checked]:
+    for path in ["calkit.yaml", *checked]:
         if path in changed_before:
             raise ValueError(
                 f"{path} has changes that aren't saved; save or discard "
@@ -1711,6 +1912,12 @@ def commit_change(
             (get_changed_paths(repo) - changed_before)
             | set(written)
             | {"calkit.yaml"}
+            | (
+                {"dvc.yaml"}
+                if compile_pipeline
+                and os.path.isfile(os.path.join(wdir, "dvc.yaml"))
+                else set()
+            )
             | (set(also_commit) & changed_before)
         )
         repo.git.add("--", *commit_paths)
@@ -1865,6 +2072,84 @@ def add_stage_from_script(wdir: str, msg: dict) -> dict:
     return result
 
 
+def move_external_data(wdir: str, msg: dict) -> dict:
+    """Copy data a script reads from outside the project into it, point
+    the script at the copy, and commit both, so its stage can run anywhere.
+
+    The original is left where it was, since something else may read it.
+    """
+    import posixpath
+    import shutil
+
+    import calkit.detect
+
+    script_path = get_project_path(wdir, msg.get("scriptPath"), "script")
+    external = msg.get("external")
+    if not isinstance(external, str) or not external.strip():
+        raise ValueError("Say which data to move")
+    dest = get_project_path(wdir, msg.get("dest"), "data")
+    # What a script names is relative to where it runs: a notebook's folder,
+    # or else the project
+    run_dir = (
+        posixpath.dirname(script_path)
+        if script_path.lower().endswith(".ipynb")
+        else "."
+    )
+    source = os.path.normpath(
+        os.path.join(wdir, run_dir, os.path.expanduser(external))
+    )
+    if not os.path.exists(source):
+        raise ValueError(f"'{external}' isn't on this machine")
+    full_dest = os.path.join(wdir, dest)
+    if os.path.lexists(full_dest) or is_dvc_tracked(wdir, dest):
+        raise ValueError(
+            f"'{dest}' is already in the project; pick another place for it"
+        )
+    full_script = os.path.join(wdir, script_path)
+    with open(full_script, encoding="utf-8", newline="") as f:
+        original = f.read()
+    text, found = calkit.detect.rewrite_paths(
+        original, {external: posixpath.relpath(dest, run_dir)}
+    )
+    if not found:
+        raise ValueError(
+            f"Couldn't find '{external}' written out in {script_path}; "
+            "change it there by hand"
+        )
+    os.makedirs(os.path.dirname(full_dest) or wdir, exist_ok=True)
+    if os.path.isdir(source):
+        shutil.copytree(source, full_dest)
+    else:
+        shutil.copy2(source, full_dest)
+    with open(full_script, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    # Git or DVC, by what it is, as 'calkit add' decides
+    res = subprocess.run(
+        get_calkit_cmd()
+        + [
+            "add",
+            dest,
+            script_path,
+            "-m",
+            f"Move {external} into the project as {dest}",
+        ],
+        cwd=wdir,
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        if os.path.isdir(full_dest):
+            shutil.rmtree(full_dest)
+        elif os.path.exists(full_dest):
+            os.remove(full_dest)
+        with open(full_script, "w", encoding="utf-8", newline="") as f:
+            f.write(original)
+        raise ValueError(
+            (res.stderr or res.stdout).strip() or f"Couldn't add {dest}"
+        )
+    return {"path": dest, "script_path": script_path}
+
+
 def record_origin(wdir: str, msg: dict) -> dict:
     """Record who made a file in a checkout or where it was imported from,
     as the hub records a misc artifact, committed here.
@@ -1930,8 +2215,9 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
     app = msg.get("app") or None
     exporter = calkit.export.exporter_for(source, output, app=app)
     stage = calkit.export.export_stage(source, output, app=app)
+    name = calkit.export.export_stage_name(output)
     out = {
-        "name": calkit.export.export_stage_name(output),
+        "name": name,
         "stage": stage,
         "exported_by": exporter.app if exporter else None,
         "saved": False,
@@ -1969,9 +2255,16 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
     stage_name, stage = calkit.pipeline.get_stage_to_add(
         stage,
         ck_info,
-        name=out["name"],
+        name=name,
         is_tracked=lambda p: bool(repo.git.ls_files("--", p).strip()),
     )
+    # Slides are exported with PowerPoint or LibreOffice if either is
+    # installed here, else in Calkit's LibreOffice image, as on the hub
+    if stage.get("kind") == "pptx-export" and not stage.get("environment"):
+        env_name, env = calkit.export.get_local_slide_environment(ck_info)
+        stage["environment"] = env_name
+        if env is not None:
+            ck_info.setdefault("environments", {})[env_name] = env
     created = [path for path, by_me in files if by_me]
     if created:
         # Whoever commits here, as Git knows them
@@ -2064,42 +2357,48 @@ def get_pipeline(wdir: str) -> dict:
             quiet_environment_checks=True,
         )
         dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
-        # One run per iteration is recorded as 'name@item', so each is
-        # counted toward its stage
-        lock_stages = {n.split("@")[0] for n in calkit.dvc.read_lock_stages()}
+        lock_stages = calkit.dvc.read_lock_stages()
+        frozen_bases = calkit.pipeline.frozen_tainted_stage_names(
+            ck_info=ck_info, wdir="."
+        )
     finally:
         os.chdir(prev_wdir)
     stage_statuses = {}
+    # One run per iteration is recorded as 'name@item', so each is counted
+    # toward its stage
+    locked_bases = {n.split("@")[0] for n in lock_stages}
     for name in ck_stages:
         stale = [
             s
             for key, s in status.stale_stages.items()
             if key.split("@")[0] == name
         ]
-        if name not in lock_stages:
-            state = "not-run"
-        elif not stale:
-            state = "up-to-date"
-        elif all(s.always_run for s in stale):
-            state = "always-run"
-        else:
-            state = "stale"
-        stage_statuses[name] = {
-            "status": state,
-            "modified_command": any(s.modified_command for s in stale),
-            "modified_inputs": list(
-                dict.fromkeys(p for s in stale for p in s.modified_inputs)
-            ),
-            "modified_outputs": list(
-                dict.fromkeys(p for s in stale for p in s.modified_outputs)
-            ),
-            "missing_outputs": list(
-                dict.fromkeys(p for s in stale for p in s.stale_outputs)
-            ),
-        }
+        stage_statuses[name] = get_stage_status(
+            stale, has_run=name in locked_bases
+        )
+    # Keyed as the hub keys them, i.e., by each current entry in dvc.lock,
+    # with stages never run under their own names
+    live_lock_stages = calkit.pipeline.get_live_lock_stages(
+        lock_stages,
+        {n: s for n, s in dvc_stages.items() if isinstance(s, dict)},
+    )
+    lock_stage_statuses = {
+        name: get_stage_status([], has_run=False)
+        for name in dvc_stages
+        if not name.startswith("_") and name not in locked_bases
+    }
+    for name in live_lock_stages:
+        stale_stage = status.stale_stages.get(name)
+        lock_stage_statuses[name] = get_stage_status(
+            [stale_stage] if stale_stage is not None else [], has_run=True
+        )
     return {
         "ck_stages": ck_stages,
         "stage_statuses": stage_statuses,
+        "lock_stage_statuses": lock_stage_statuses,
+        "frozen": sorted(
+            n for n in live_lock_stages if n.split("@")[0] in frozen_bases
+        ),
         "status": "stale" if status.is_stale else "up-to-date",
         "error": "; ".join(status.errors) or None,
         "dvc_stages": {
@@ -2108,6 +2407,136 @@ def get_pipeline(wdir: str) -> dict:
             if isinstance(stage, dict)
         },
     }
+
+
+# Each checkout's pipeline, as last read for provenance, with when and the
+# modification times of the files it was read from
+_recent_pipelines: dict[str, tuple[float, list[float], dict]] = {}
+
+
+def get_recent_pipeline(wdir: str) -> dict:
+    """``get_pipeline``'s answer, reused for ``PIPELINE_REUSE_SECONDS``
+    while calkit.yaml, dvc.yaml, and dvc.lock are unchanged, since a
+    figure's provenance is asked for once for each file it could be, and
+    each check of the pipeline's status takes a while.
+    """
+    import time
+
+    stamp = [
+        os.path.getmtime(p) if os.path.isfile(p) else 0.0
+        for p in (
+            os.path.join(wdir, name)
+            for name in ("calkit.yaml", "dvc.yaml", "dvc.lock")
+        )
+    ]
+    recent = _recent_pipelines.get(wdir)
+    if (
+        recent is not None
+        and time.time() - recent[0] < PIPELINE_REUSE_SECONDS
+        and recent[1] == stamp
+    ):
+        return recent[2]
+    pipeline = get_pipeline(wdir)
+    _recent_pipelines[wdir] = (time.time(), stamp, pipeline)
+    return pipeline
+
+
+def get_provenance(wdir: str, path: Any, key: str | None = None) -> dict:
+    """Where a path in a checkout, or one value in a results file, came
+    from, as the hub's provenance says it, from the checkout as it is,
+    including what isn't saved yet.
+    """
+    import posixpath
+
+    import calkit.dvc
+    import calkit.provenance
+
+    def get_full_path(p: str) -> str | None:
+        # None for one a symlink takes outside the project
+        full_path = os.path.join(wdir, *p.split("/"))
+        real_path = os.path.realpath(full_path)
+        if real_path != root and not real_path.startswith(root + os.sep):
+            return None
+        return full_path
+
+    def read_bytes(p: str) -> bytes:
+        full_path = get_full_path(p)
+        if full_path is None:
+            raise ValueError(f"{p} isn't in the project")
+        if os.path.getsize(full_path) > MAX_VALUE_FILE_BYTES:
+            raise ValueError(f"{p} is too big to read")
+        with open(full_path, "rb") as f:
+            return f.read()
+
+    def listdir(p: str) -> list[str]:
+        full_path = get_full_path(p)
+        return os.listdir(full_path) if full_path is not None else []
+
+    def is_file(p: str) -> bool:
+        full_path = get_full_path(p)
+        return full_path is not None and os.path.isfile(full_path)
+
+    def is_dir(p: str) -> bool:
+        full_path = get_full_path(p)
+        return full_path is not None and os.path.isdir(full_path)
+
+    def get_dir_relpaths(md5: str) -> set[str] | None:
+        # What a folder output holds, from its manifest in the DVC cache, if
+        # it's there
+        manifest_path = os.path.join(
+            wdir, ".dvc", "cache", "files", "md5", md5[:2], md5[2:]
+        )
+        try:
+            with open(manifest_path) as f:
+                entries = json.load(f)
+            return {e["relpath"] for e in entries}
+        except Exception:
+            return None
+
+    def is_dvc_output(p: str) -> bool:
+        # E.g., a file in a folder a stage makes that isn't pulled here
+        for out in lock_outs:
+            out_path = out["path"].rstrip("/")
+            if not p.startswith(out_path + "/"):
+                continue
+            md5 = out.get("md5") or out.get("hash") or ""
+            relpaths = get_dir_relpaths(md5) if md5.endswith(".dir") else None
+            if relpaths is None or p[len(out_path) + 1 :] in relpaths:
+                return True
+        return False
+
+    if not isinstance(path, str):
+        raise ValueError("A path must be a string")
+    path = posixpath.normpath(path.strip().replace("\\", "/"))
+    if (
+        path in (".", "..")
+        or path.startswith(("/", "../"))
+        or re.match(r"^[A-Za-z]:", path)
+    ):
+        raise ValueError(f"{path} isn't a path in the project")
+    root = os.path.realpath(wdir)
+    pipeline = get_recent_pipeline(wdir)
+    dvc_lock = {"stages": calkit.dvc.read_lock_stages(wdir=wdir)}
+    lock_outs = [
+        out
+        for stage in dvc_lock["stages"].values()
+        for out in (stage or {}).get("outs") or []
+        if isinstance(out, dict) and isinstance(out.get("path"), str)
+    ]
+    return calkit.provenance.get_path_provenance(
+        path,
+        key=key,
+        ck_info=calkit.load_calkit_info(wdir=wdir, read_only=True),
+        dvc_yaml={"stages": pipeline["dvc_stages"]},
+        dvc_lock=dvc_lock,
+        stage_statuses=pipeline["lock_stage_statuses"],
+        frozen=set(pipeline["frozen"]),
+        is_file=is_file,
+        is_dir=is_dir,
+        listdir=listdir,
+        read_bytes=read_bytes,
+        is_dvc_output=is_dvc_output,
+    )
 
 
 def get_checkout_status(wdir: str) -> dict:

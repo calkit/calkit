@@ -2317,3 +2317,25 @@ def test_check_references(tmp_dir):
     )
     assert result.returncode != 0
     assert "ghost" in result.stdout + result.stderr
+
+
+def test_check_storage_stage_output_dvc_file(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("fig.png", "w") as f:
+        f.write("old")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "fig.png"])
+    subprocess.check_call(["git", "commit", "-qm", "Add figure"])
+    # A stage that makes it now, in a dvc.yaml compiled elsewhere
+    with open("dvc.yaml", "w") as f:
+        f.write("stages:\n  plot:\n    cmd: x\n    outs:\n    - fig.png\n")
+    result = subprocess.run(
+        ["calkit", "check", "storage"], capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "made by stage 'plot'" in result.stderr + result.stdout
+    subprocess.check_call(["calkit", "check", "storage", "--fix"])
+    assert not os.path.isfile("fig.png.dvc")
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).split()
+    assert "fig.png.dvc" in staged

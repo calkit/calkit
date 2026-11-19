@@ -19,15 +19,15 @@ import {
   type Synctex,
   synctexReverse,
   type TextRange,
-} from "../../../vscode-ext/src/latex/core";
-import { getLocalPdf, getLocalSynctex } from "../core/local";
-import { type PdfBox, placePdfBoxes } from "../core/pdf-boxes";
+} from "../../../../vscode-ext/src/latex/pdf";
+import { getLocalPdf, getLocalSynctex } from "../../core/local";
+import { type PdfBox, placePdfBoxes } from "../../core/pdf-boxes";
 import type {
   FromReview,
   PdfRect,
   ReviewThread,
   ToReview,
-} from "../core/review";
+} from "../../core/review";
 
 type Thread = ReviewThread & { unplaced?: boolean };
 type Without<T> = T extends unknown ? Omit<T, "calkit"> : never;

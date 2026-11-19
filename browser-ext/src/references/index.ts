@@ -1,3 +1,7 @@
+/**
+ * Content script for publisher and preprint pages, which adds the paper on
+ * screen to a project's references.
+ */
 import {
   detectReference,
   suggestCitationKey,

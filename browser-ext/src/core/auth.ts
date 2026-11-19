@@ -1,3 +1,7 @@
+/**
+ * Signing in and out of a hub with its device flow, and telling the rest of
+ * the extension when that changes.
+ */
 import { NotSignedInError, request } from "./api";
 import type { Hub } from "./hubs";
 import type { AuthChanged } from "./messages";

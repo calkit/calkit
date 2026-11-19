@@ -5,9 +5,9 @@ import { promisify } from "node:util";
 import * as zlib from "node:zlib";
 import * as vscode from "vscode";
 
+import { documentStageSource } from "./core";
 import {
   LIGATURES,
-  documentStageSource,
   findInSource,
   findText,
   lineMap,
@@ -21,7 +21,7 @@ import {
   type PdfRect,
   type Synctex,
   type TexThread,
-} from "./core";
+} from "./pdf";
 
 const execFileAsync = promisify(execFile);
 

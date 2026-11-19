@@ -1,3 +1,4 @@
+/** The toolbar popup: what the active tab is, and what Calkit can do there. */
 import { getGithubRepo, getOverleafProjectId } from "../core/detect";
 import { projectUrl } from "../core/hub-url";
 import { onAuthChange, RequestFailed, send } from "../core/messages";

@@ -845,7 +845,25 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     :func:`_rwlock_holder_is_live`), so neither dead PIDs nor reused ones are
     reported. An empty list means no pipeline run is currently in progress.
     """
-    rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
+
+    def is_in_project(path: str) -> bool:
+        # Only this project's run, not another one sharing the repo's lock
+        path = os.path.normcase(os.path.abspath(os.path.join(root, path)))
+        try:
+            return os.path.commonpath([project_dir, path]) == project_dir
+        except ValueError:
+            # On another drive
+            return False
+
+    project_dir = os.path.normcase(os.path.abspath(wdir or "."))
+    # A project in a subdirectory of a DVC repo shares the repo's lock
+    root = project_dir
+    while not os.path.isdir(os.path.join(root, ".dvc")):
+        parent = os.path.dirname(root)
+        if parent == root:
+            return []
+        root = parent
+    rwlock_path = os.path.join(root, ".dvc", "tmp", "rwlock")
     if not os.path.isfile(rwlock_path):
         return []
     try:
@@ -856,10 +874,12 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     # The rwlock format is
     # {"write": {path: {pid, cmd}}, "read": {path: [{pid, cmd}]}}
     by_pid: dict[int, str] = {}
-    for info in lock.get("write", {}).values():
-        if isinstance(info, dict) and "pid" in info:
+    for path, info in lock.get("write", {}).items():
+        if isinstance(info, dict) and "pid" in info and is_in_project(path):
             by_pid[info["pid"]] = info.get("cmd", "")
-    for infos in lock.get("read", {}).values():
+    for path, infos in lock.get("read", {}).items():
+        if not is_in_project(path):
+            continue
         for info in infos or []:
             if isinstance(info, dict) and "pid" in info:
                 by_pid[info["pid"]] = info.get("cmd", "")
@@ -2084,6 +2104,89 @@ def get_too_large_text(paths: list[str]) -> str:
     )
 
 
+def get_stage_output_dvc_files(
+    dvc_stages: dict, wdir: str | None = None
+) -> list[dict]:
+    """The .dvc files, e.g., from adding a figure with DVC by hand, for paths
+    a pipeline stage makes now, each with the output's ``path``, its
+    ``dvc_file``, both relative to ``wdir``, and the ``stage``.
+
+    DVC refuses a pipeline with both, as overlapping outputs, and the stage
+    is what says how the path is made, so the .dvc file is the one to go.
+    Only checks whether files exist, so it's fast enough to run whenever the
+    pipeline is compiled.
+    """
+    base = wdir or "."
+    found = []
+    for name, stage in dvc_stages.items():
+        stage_wdir = stage.get("wdir") or ""
+        for out in stage.get("outs") or []:
+            path = next(iter(out)) if isinstance(out, dict) else out
+            if not isinstance(path, str) or "${" in path:
+                continue
+            path = posixpath.normpath(posixpath.join(stage_wdir, path))
+            dvc_file = path.rstrip("/") + ".dvc"
+            if os.path.isfile(os.path.join(base, dvc_file)):
+                found.append(
+                    {"path": path, "dvc_file": dvc_file, "stage": name}
+                )
+    return found
+
+
+def untrack_cached_stage_outputs(
+    dvc_stages: dict, wdir: str | None = None
+) -> list[dict]:
+    """Stop Git tracking what a stage stores with DVC, e.g., a figure
+    imported from Overleaf before its stage was, which DVC refuses to save
+    as an output, returning each one's ``path`` and ``stage``.
+
+    The stage says where it's stored, as ``calkit check storage --fix``
+    takes it to. The files stay as they are, and DVC ignores them in Git
+    when it saves them. One ``git ls-files``, so fast enough to run before
+    every run.
+    """
+    import calkit.git
+
+    outs: dict[str, str] = {}
+    for name, stage in dvc_stages.items():
+        stage_wdir = stage.get("wdir") or ""
+        for out in stage.get("outs") or []:
+            if isinstance(out, dict):
+                path, opts = next(iter(out.items()))
+                if (opts or {}).get("cache") is False:
+                    continue
+            else:
+                path = out
+            if not isinstance(path, str) or "${" in path:
+                continue
+            path = posixpath.normpath(posixpath.join(stage_wdir, path))
+            outs[path.rstrip("/")] = name
+    if not outs:
+        return []
+    repo = calkit.git.get_repo(wdir)
+    root = Path(repo.working_dir).resolve()
+    base = Path(wdir or ".").resolve()
+    tracked = set()
+    paths = list(outs)
+    for i in range(0, len(paths), 100):
+        listed = repo.git.ls_files(
+            "-z", "--", *[str(base / p) for p in paths[i : i + 100]]
+        )
+        tracked |= {
+            Path(os.path.relpath(root / p, base)).as_posix()
+            for p in listed.split("\0")
+            if p
+        }
+    untracked = [
+        {"path": path, "stage": name}
+        for path, name in outs.items()
+        if path in tracked or any(t.startswith(path + "/") for t in tracked)
+    ]
+    for found in untracked:
+        repo.git.rm("-r", "-q", "--cached", "--", str(base / found["path"]))
+    return untracked
+
+
 def get_storage_problems(  # type: ignore[no-any-unimported]
     wdir: str | None = None,
     large_mb: float | None = LARGE_MB,
@@ -2112,6 +2215,10 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     - ``zipped``: stored zipped with DVC, but tracked by Git too.
     - ``large``: tracked by Git, and larger than ``large_mb``, which is only
       advice; None skips this check.
+    - ``stage-output-dvc-file``: made by a pipeline ``stage`` and tracked by
+      its own ``dvc_file`` too, e.g., added with DVC by hand before the
+      stage was, which belongs to the stage. DVC can't index a project like
+      that, so if there are any, they're all that's reported.
 
     Building DVC's index is most of the cost, and loading calkit.yaml much
     of the rest, so a ``dvc_repo`` that has built it, and ``ck_info``, can
@@ -2143,6 +2250,28 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
         return Path(os.path.relpath(path, base)).as_posix()
 
     problems: list[dict] = []
+    # Before DVC's index is built, which these stop
+    dvc_yaml_path = base / "dvc.yaml"
+    if dvc_yaml_path.is_file():
+        with open(dvc_yaml_path) as f:
+            dvc_stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+        for found in get_stage_output_dvc_files(dvc_stages, str(base)):
+            problems.append(
+                dict(
+                    path=found["path"],
+                    kind="stage-output-dvc-file",
+                    stage=found["stage"],
+                    dvc_file=found["dvc_file"],
+                    store_in=None,
+                    message=(
+                        f"{found['path']} is made by stage "
+                        f"'{found['stage']}', but {found['dvc_file']} tracks "
+                        "it too"
+                    ),
+                )
+            )
+        if problems:
+            return problems
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     # Cached by DVC, so not to be tracked by Git

@@ -1269,11 +1269,38 @@ def is_tty() -> bool:
     Stdout matters because the prompt needs to render; stdin matters because
     we need to read the user's answer. CI environments fail at least one
     and fall through to the abort-with-fix-command path.
+
+    On Windows, ``isatty`` is also true of the NUL device, which is what a
+    child given ``subprocess.DEVNULL`` reads, so only a stream with a console
+    mode counts there.
     """
-    try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError):
-        return False
+
+    def is_terminal(stream: Any) -> bool:
+        try:
+            if not stream.isatty():
+                return False
+        except (AttributeError, ValueError):
+            return False
+        if sys.platform != "win32":
+            return True
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        try:
+            handle = msvcrt.get_osfhandle(stream.fileno())
+        except (AttributeError, OSError, ValueError):
+            return False
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetConsoleMode.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetConsoleMode.restype = wintypes.BOOL
+        mode = wintypes.DWORD()
+        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+    return is_terminal(sys.stdin) and is_terminal(sys.stdout)
 
 
 def is_wsl() -> bool:
@@ -1376,6 +1403,13 @@ def check_dep_exists(
         from calkit.docx import find_soffice
 
         return find_soffice() is not None
+    # Apps Calkit exports with can be installed off the PATH, e.g., as a
+    # macOS app bundle
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if name.lower() in known:
+        return known[name.lower()].find_executable() is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -2314,6 +2348,11 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
 
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if dep_name.lower() in known:
+        return known[dep_name.lower()].version()
     # MATLAB has no '--version', and starts in full if passed one
     if dep_name == "matlab":
         cmd = [dep_name, "-batch", "disp(version)"]

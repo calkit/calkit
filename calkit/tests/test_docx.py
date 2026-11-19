@@ -437,13 +437,32 @@ def test_docx_round_trip(
     Path("calkit.yaml").write_text("", encoding="utf-8")
     first = calkit.docx.Document("paper/main-for-review.docx").read_original()
     assert first is not None
-    # Exported again for a reproducible build, it makes the same file
+    # Exported again for a reproducible build, it makes the same file, even
+    # converted by another version of LibreOffice, which writes its own
     monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
     exports = []
-    for _ in range(2):
+    for version in ("26.8.1.1$MacOSX_AARCH64", "26.8.2.2$Linux_X86_64"):
+
+        def convert(pdf: str, out: str, version: str = version) -> None:
+            converted = calkit.docx.Document(
+                str(FIXTURES / "word-import.docx")
+            )
+            converted.parts["docProps/app.xml"] = converted.parts[
+                "docProps/app.xml"
+            ].replace(
+                b"Microsoft Office Word",
+                f"LibreOffice/{version} LibreOffice_project/abc".encode(),
+            )
+            converted.save(out)
+
+        monkeypatch.setattr(calkit.docx, "pdf_to_docx", convert)
         calkit.cli.latex.to_docx("paper/main.pdf", engine="word", force=True)
         exports.append(Path("paper/main-for-review.docx").read_bytes())
     assert exports[0] == exports[1]
+    app = calkit.docx.Document("paper/main-for-review.docx").parts[
+        "docProps/app.xml"
+    ]
+    assert b"<Application>LibreOffice</Application>" in app
     # Failing after the conversion, it leaves the last export, not the bare
     # conversion, and nothing beside it
     with pytest.MonkeyPatch.context() as mp:
@@ -885,7 +904,12 @@ def test_docx_round_trip(
     assert "Edited this equation" not in methods
     # Without Word, TeX4ht and LibreOffice make the copy from the source,
     # leaving nothing beside it, and it anchors and merges the same way
-    if shutil.which("make4ht") and calkit.docx.find_soffice():
+    soffice = calkit.docx.find_soffice()
+    if (
+        shutil.which("make4ht")
+        and soffice
+        and calkit.docx.libreoffice_has_math(soffice)
+    ):
         # A figure for TeX4ht to convert: a blank one-page PDF
         objs = [
             b"<< /Type /Catalog /Pages 2 0 R >>",

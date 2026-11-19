@@ -4304,13 +4304,14 @@ Arguments:
 
 Options:
 
-| Option           | Type      | Required | Default | Description                                                                                                                     |
-| ---------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o` | list[str] | yes      |         | Output LaTeX file path(s).                                                                                                      |
-| `--command`      | str       | no       |         | Command name to use in LaTeX output.                                                                                            |
-| `--key`          | list[str] | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
-| `--format`       | list[str] | no       |         | Value to add, as NAME=FORMAT, e.g., 'pct={a:.1%}'. Repeatable.                                                                  |
-| `--format-json`  | str       | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
+| Option            | Type      | Required | Default | Description                                                                                                                     |
+| ----------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`  | list[str] | yes      |         | Output LaTeX file path(s).                                                                                                      |
+| `--command`       | str       | no       |         | Command name to use in LaTeX output.                                                                                            |
+| `--key`           | list[str] | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
+| `--format`        | list[str] | no       |         | Value to add, as NAME=FORMAT, e.g., 'pct={a:.1%}'. Repeatable.                                                                  |
+| `--format-base64` | list[str] | no       |         | Like --format, with FORMAT base64-encoded, for one a shell would change, e.g., with '$'. Repeatable.                            |
+| `--format-json`   | str       | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
 
 <a id="subcommand-latex-tex-from-questions"></a>
 

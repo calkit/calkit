@@ -4906,8 +4906,10 @@ function renderStatus(
           ? `${figures.length} figure${figures.length === 1 ? "" : "s"} to sync`
           : "out of sync",
       });
-  // Components with no origin outrank being in sync, and are listed
+  // Components with no origin outrank being in sync, and are listed, each
+  // opening its card
   const badge = el("span");
+  let openOrigin: { key: string; element: HTMLElement } | null = null;
   const origins = el("div");
   drawPanelOrigins = () => {
     const missing = getComponentsWithoutOrigin();
@@ -4930,20 +4932,36 @@ function renderStatus(
         style: { marginTop: "8px", fontWeight: "600" },
         text: "Missing origin",
       }),
-      ...missing.map((item) =>
-        el("div", { class: "small" }, [
+      ...missing.flatMap((item) => {
+        const key = citationText(item.citation);
+        const open = openOrigin?.key === key;
+        const row = el("div", { class: "small" }, [
           el("a", {
-            text: item.citation.key
-              ? `${item.citation.path} \u00b7 ${item.citation.key}`
-              : item.citation.path,
+            text:
+              `${open ? "\u25be" : "\u25b8"} ` +
+              (item.citation.key
+                ? `${item.citation.path} \u00b7 ${item.citation.key}`
+                : item.citation.path),
             style: { color: "var(--ck-danger)" },
             onClick: (event) => {
               event.preventDefault();
-              showInRail(item.citation);
+              // Its card, as in the sidebar, with the ways to define it
+              if (open) {
+                openOrigin = null;
+              } else {
+                const element = el("div", {
+                  class: "muted-box",
+                  style: { marginTop: "4px" },
+                });
+                openOrigin = { key, element };
+                void fillCard(element, link, item);
+              }
+              drawPanelOrigins?.();
             },
           }),
-        ]),
-      ),
+        ]);
+        return open && openOrigin ? [row, openOrigin.element] : [row];
+      }),
     );
   };
   drawPanelOrigins();

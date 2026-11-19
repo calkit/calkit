@@ -416,6 +416,16 @@
         "category": "Calkit"
       },
       {
+        "command": "calkit-vscode.enableAutoSyncOverleaf",
+        "title": "Auto-sync Overleaf",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.disableAutoSyncOverleaf",
+        "title": "✓ Auto-sync Overleaf",
+        "category": "Calkit"
+      },
+      {
         "command": "calkit-vscode.openCalkitYaml",
         "title": "Open calkit.yaml",
         "category": "Calkit",
@@ -467,6 +477,11 @@
     "menus": {
       "view/title": [
         {
+          "command": "calkit-vscode.runPipeline",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject",
+          "group": "navigation@0"
+        },
+        {
           "command": "calkit-vscode.runSaveSync",
           "when": "view == calkit-sidebar && calkit-vscode.hasProject && calkit-vscode.syncsWithOverleaf",
           "group": "navigation@0"
@@ -509,6 +524,16 @@
         {
           "command": "calkit-vscode.disableAutoRefresh",
           "when": "view == calkit-sidebar && calkit-vscode.autoRefreshStatus",
+          "group": "1_options"
+        },
+        {
+          "command": "calkit-vscode.enableAutoSyncOverleaf",
+          "when": "view == calkit-sidebar && calkit-vscode.syncsWithOverleaf && !calkit-vscode.autoSyncOverleaf",
+          "group": "1_options"
+        },
+        {
+          "command": "calkit-vscode.disableAutoSyncOverleaf",
+          "when": "view == calkit-sidebar && calkit-vscode.syncsWithOverleaf && calkit-vscode.autoSyncOverleaf",
           "group": "1_options"
         }
       ],
@@ -1043,6 +1068,12 @@
           "default": 120,
           "minimum": 0,
           "description": "How often, in seconds, to check folders synced with Overleaf for changes while VS Code has focus. 0 turns it off."
+        },
+        "calkit.overleaf.autoSync": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Sync folders with Overleaf in the background when a check finds changes on either side, saving and pushing what's synced. A file changed in both places still asks what to keep."
         }
       }
     }

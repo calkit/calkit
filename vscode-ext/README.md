@@ -145,6 +145,9 @@ pipeline:
 - `calkit.overleaf.checkInterval`: How often, in seconds, to check folders
   synced with Overleaf while VS Code has focus (default 120; 0 turns it
   off).
+- `calkit.overleaf.autoSync`: Sync folders with Overleaf in the background
+  when a check finds changes on either side (off by default; toggled per
+  project with **Auto-sync Overleaf** in the sidebar's menu).
 
 ## Commands
 

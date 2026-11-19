@@ -13,6 +13,7 @@ import {
   getClash,
   getClashMessage,
   getContinueArgs,
+  getOverleafRow,
   parseOverleafStatus,
   type Clash,
   type OverleafState,
@@ -28,6 +29,81 @@ let state: OverleafState = { checking: false };
 let syncedRoot: string | undefined;
 let checkTimer: ReturnType<typeof setInterval> | undefined;
 let lastChecked = 0;
+// What the last sync in the background stopped on, said only once
+let lastAutoSyncError: string | undefined;
+let log: (message: string) => void = () => undefined;
+
+/** Whether folders that need a sync are synced in the background. */
+function isAutoSyncOn(): boolean {
+  return vscode.workspace
+    .getConfiguration("calkit")
+    .get<boolean>("overleaf.autoSync", false);
+}
+
+/** Run a Calkit command out of sight, for its exit code and output. */
+function runCalkitQuietly(
+  root: string,
+  args: string[],
+): Promise<{ code: number; output: string }> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      "calkit",
+      args,
+      { cwd: root, maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout, stderr) =>
+        resolve({
+          code: error ? (typeof error.code === "number" ? error.code : 1) : 0,
+          output: `${stdout}${stderr}`,
+        }),
+    );
+    // Nobody's there to answer a question
+    child.stdin?.end();
+  });
+}
+
+/**
+ * Sync with Overleaf in the background, offering to resolve a file that
+ * changed in both places, and saying once why it stopped otherwise.
+ */
+async function autoSync(root: string): Promise<void> {
+  running = true;
+  state = { ...state, checking: true };
+  provider?.setOverleafState(state);
+  let result: { code: number; output: string };
+  try {
+    result = await runCalkitQuietly(root, ["overleaf", "sync"]);
+  } finally {
+    running = false;
+    state = { ...state, checking: false };
+  }
+  log(`Auto-sync with Overleaf:\n${result.output}`);
+  await checkOverleaf(false);
+  if (result.code === 0) {
+    lastAutoSyncError = undefined;
+    return;
+  }
+  const found = await findClash(root);
+  if (found) {
+    await offerToResolve(root, found, []);
+    return;
+  }
+  const lines = result.output
+    .split("\n")
+    .map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trim())
+    .filter(Boolean);
+  const error = (lines[lines.length - 1] ?? "").replace(/^Error: /, "");
+  if (error === lastAutoSyncError) {
+    return;
+  }
+  lastAutoSyncError = error;
+  const choice = await vscode.window.showWarningMessage(
+    `Auto-sync with Overleaf stopped: ${error}`,
+    "Run, Save, and Sync",
+  );
+  if (choice) {
+    await runSaveSync(root);
+  }
+}
 
 /** Run a Calkit command as a task, so its output shows, for its exit code. */
 async function runCalkitTask(
@@ -222,8 +298,11 @@ export function runSaveSync(root: string): Promise<void> {
   );
 }
 
-/** Ask Calkit what a sync of each folder would do, and show it. */
-export async function checkOverleaf(): Promise<void> {
+/**
+ * Ask Calkit what a sync of each folder would do, and show it, syncing in
+ * the background if that's on and ``allowAutoSync``.
+ */
+export async function checkOverleaf(allowAutoSync = true): Promise<void> {
   const root = syncedRoot;
   if (!root || !provider || state.checking) {
     return;
@@ -253,6 +332,15 @@ export async function checkOverleaf(): Promise<void> {
     conflict: repoRoot ? hasOverleafConflict(repoRoot) : false,
   };
   provider.setOverleafState(state);
+  if (
+    allowAutoSync &&
+    isAutoSyncOn() &&
+    !running &&
+    !state.conflict &&
+    state.statuses?.some((status) => getOverleafRow(status, state).needsSync)
+  ) {
+    await autoSync(root);
+  }
 }
 
 /**
@@ -278,8 +366,27 @@ export function registerOverleaf(
   context: vscode.ExtensionContext,
   sidebarProvider: CalkitSidebarProvider,
   getWorkspaceRoot: () => string | undefined,
+  logMessage: (message: string) => void,
 ): void {
   provider = sidebarProvider;
+  log = logMessage;
+  const showAutoSync = () =>
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit-vscode.autoSyncOverleaf",
+      isAutoSyncOn(),
+    );
+  void showAutoSync();
+  const setAutoSync = async (on: boolean) => {
+    // Only for this project, since it saves and pushes on its own
+    await vscode.workspace
+      .getConfiguration("calkit")
+      .update("overleaf.autoSync", on, vscode.ConfigurationTarget.Workspace);
+    lastAutoSyncError = undefined;
+    if (on) {
+      void checkOverleaf();
+    }
+  };
   const getInterval = () =>
     vscode.workspace
       .getConfiguration("calkit")
@@ -313,6 +420,9 @@ export function registerOverleaf(
       if (e.affectsConfiguration("calkit.overleaf.checkInterval")) {
         schedule();
       }
+      if (e.affectsConfiguration("calkit.overleaf.autoSync")) {
+        void showAutoSync();
+      }
     }),
     vscode.window.onDidChangeWindowState((windowState) => {
       const seconds = getInterval();
@@ -324,6 +434,14 @@ export function registerOverleaf(
         void checkOverleaf();
       }
     }),
+    vscode.commands.registerCommand(
+      "calkit-vscode.enableAutoSyncOverleaf",
+      () => setAutoSync(true),
+    ),
+    vscode.commands.registerCommand(
+      "calkit-vscode.disableAutoSyncOverleaf",
+      () => setAutoSync(false),
+    ),
     vscode.commands.registerCommand(
       "calkit-vscode.runSaveSync",
       withRoot((root) => runSaveSync(root)),

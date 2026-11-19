@@ -2373,10 +2373,14 @@ def get_stage_to_add(
         producer = get_stage_for_output(path, ck_info)
         if producer is not None:
             raise OutputTakenError(f"'{path}' is made by stage '{producer}'")
+        # One in Git stays there, whether given as a path or a mapping,
+        # e.g., a slide's, unless it says where it's stored
         if not isinstance(out, dict):
             out = (
                 {"path": path, "storage": "git"} if is_tracked(path) else path
             )
+        elif "storage" not in out and is_tracked(path):
+            out = out | {"path": path, "storage": "git"}
         outputs.append(out)
     if outputs:
         stage["outputs"] = outputs

@@ -2070,10 +2070,10 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
         name=name,
         is_tracked=lambda p: bool(repo.git.ls_files("--", p).strip()),
     )
-    # Slides are exported in Calkit's LibreOffice image unless the stage
-    # says otherwise, as the hub does, so they export the same anywhere
+    # Slides are exported with PowerPoint or LibreOffice if either is
+    # installed here, else in Calkit's LibreOffice image, as on the hub
     if stage.get("kind") == "pptx-export" and not stage.get("environment"):
-        env_name, env = calkit.export.get_slide_environment(ck_info)
+        env_name, env = calkit.export.get_local_slide_environment(ck_info)
         stage["environment"] = env_name
         if env is not None:
             ck_info.setdefault("environments", {})[env_name] = env

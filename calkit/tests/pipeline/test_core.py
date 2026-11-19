@@ -5765,6 +5765,29 @@ def test_get_stage_to_add():
     assert added["outputs"] == [
         {"path": "figures/Setup Diagram.png", "storage": "git"}
     ]
+    # So does one given as a mapping, e.g., a slide's, unless it says
+    slides = {
+        "kind": "pptx-export",
+        "source_path": "figures/setup.pptx",
+        "outputs": [{"path": "paper/setup.png", "slide": 1}],
+    }
+    _, added = calkit.pipeline.get_stage_to_add(
+        slides, ck_info, is_tracked=lambda path: True
+    )
+    assert added["outputs"] == [
+        {"path": "paper/setup.png", "slide": 1, "storage": "git"}
+    ]
+    _, added = calkit.pipeline.get_stage_to_add(
+        slides
+        | {
+            "outputs": [
+                {"path": "paper/setup.png", "slide": 1, "storage": "dvc"}
+            ]
+        },
+        ck_info,
+        is_tracked=lambda path: True,
+    )
+    assert added["outputs"][0]["storage"] == "dvc"
     # A taken name gets a number
     name, _ = calkit.pipeline.get_stage_to_add(stage, ck_info, name="fit")
     assert name == "fit-2"

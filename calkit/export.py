@@ -169,6 +169,33 @@ def exporters() -> list[Exporter]:
     return [INKSCAPE, GIMP, LIBREOFFICE, POWERPOINT]
 
 
+def get_local_slide_environment(ck_info: dict) -> tuple[str, dict | None]:
+    """The environment a slide is exported in when its stage is added on
+    this machine, and what to add to the project for it, if it isn't there
+    yet: one requiring PowerPoint, or else LibreOffice, whichever's
+    installed here, so nothing has to be set up first, and otherwise
+    Calkit's LibreOffice image, as on the hub.
+    """
+    envs = ck_info.get("environments") or {}
+    for exporter in (POWERPOINT, LIBREOFFICE):
+        if exporter.find_executable() is None:
+            continue
+        # One the project already has for it
+        for name, env in envs.items():
+            if (env or {}).get("kind") != "system":
+                continue
+            try:
+                if get_slide_exporter(name, ck_info=ck_info)[0] is exporter:
+                    return name, None
+            except ValueError:
+                continue
+        name, n = exporter.name, 2
+        while name in envs:
+            name, n = f"{exporter.name}-{n}", n + 1
+        return name, {"kind": "system", "requirements": [exporter.name]}
+    return get_slide_environment(ck_info)
+
+
 def get_slide_exporter(
     env_name: str = "_system", ck_info: dict | None = None
 ) -> tuple[Exporter, str | None]:

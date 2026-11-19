@@ -131,3 +131,40 @@ def test_get_slide_environment() -> None:
             calkit.export.get_slide_environment({"environments": envs})
             == expected
         )
+
+
+def test_get_local_slide_environment(monkeypatch) -> None:
+    def installed(*names: str) -> None:
+        monkeypatch.setattr(
+            calkit.export.Exporter,
+            "find_executable",
+            lambda self: f"/bin/{self.name}" if self.name in names else None,
+        )
+
+    # PowerPoint first, then LibreOffice, then Calkit's image in Docker
+    installed("powerpoint", "libreoffice")
+    assert calkit.export.get_local_slide_environment({}) == (
+        "powerpoint",
+        {"kind": "system", "requirements": ["powerpoint"]},
+    )
+    installed("libreoffice")
+    assert calkit.export.get_local_slide_environment({}) == (
+        "libreoffice",
+        {"kind": "system", "requirements": ["libreoffice"]},
+    )
+    installed()
+    name, env = calkit.export.get_local_slide_environment({})
+    assert env is not None and env["kind"] == "docker"
+    # One the project has already is used, and a taken name isn't
+    installed("powerpoint")
+    envs = {
+        "slides": {"kind": "system", "requirements": ["powerpoint"]},
+    }
+    assert calkit.export.get_local_slide_environment(
+        {"environments": envs}
+    ) == ("slides", None)
+    envs = {"powerpoint": {"kind": "uv", "path": "pyproject.toml"}}
+    assert (
+        calkit.export.get_local_slide_environment({"environments": envs})[0]
+        == "powerpoint-2"
+    )

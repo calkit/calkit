@@ -1467,7 +1467,12 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     # The same figure can't be exported twice
     with pytest.raises(ValueError, match="is made by stage 'export-setup'"):
         add_export_stage(str(project), msg)
-    # Slides export in Calkit's LibreOffice image, as on the hub
+    # Slides export with what's installed here, e.g., LibreOffice
+    monkeypatch.setattr(
+        calkit.export.Exporter,
+        "find_executable",
+        lambda self: "/bin/soffice" if self.name == "libreoffice" else None,
+    )
     (project / "drawings" / "setup.pptx").write_bytes(b"pptx")
     res = add_export_stage(
         str(project),
@@ -1479,8 +1484,10 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     )
     ck_info = calkit.load_calkit_info(wdir=str(project))
     env_name = ck_info["pipeline"]["stages"][res["name"]]["environment"]
-    assert ck_info["environments"][env_name]["kind"] == "docker"
-    assert "libreoffice" in ck_info["environments"][env_name]["image"]
+    assert ck_info["environments"][env_name] == {
+        "kind": "system",
+        "requirements": ["libreoffice"],
+    }
     # One too big for Git is stored with DVC
     (project / "drawings" / "big.psd").write_bytes(b"0" * 1_000_001)
     res = add_export_stage(

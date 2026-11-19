@@ -1406,7 +1406,7 @@ def start_job(msg: dict) -> dict:
         elif kind == "save":
             # Everything, as 'calkit save -a' sorts it: big files to DVC,
             # junk ignored
-            cmd = calkit_cmd + ["save", "-a", "-M"]
+            cmd = calkit_cmd + ["save", "-a", "-m", "Save from Overleaf"]
         else:
             folder = msg.get("path")
             if not isinstance(folder, str):

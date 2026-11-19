@@ -683,7 +683,12 @@ def test_start_job(tmp_path, monkeypatch):
         json.dump(record | {"status": "succeeded"}, f)
     # Saving everything, which waits its turn like a run or sync
     saving = start_job({"kind": "save", "project": "me/proj"})
-    assert saving["cmd"] == calkit_cmd + ["save", "-a", "-M"]
+    assert saving["cmd"] == calkit_cmd + [
+        "save",
+        "-a",
+        "-m",
+        "Save from Overleaf",
+    ]
     with pytest.raises(ValueError, match="already saving"):
         start_job({"kind": "save", "project": "me/proj"})
     os.remove(calkit.browser_link.get_job_path(saving["id"]))

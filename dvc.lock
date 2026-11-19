@@ -87,54 +87,6 @@ stages:
       hash: md5
       md5: 46896831ad260afebc87cd85a7ea159a
       size: 133600
-  one-pager/pdf:
-    cmd: calkit latex from-markdown docs/one-pager/main.md -o 
-      docs/one-pager/main.pdf -e tex --no-check --template 
-      docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua 
-      --pandoc-arg=--shift-heading-level-by=-1
-    deps:
-    - path: .calkit/env-locks/tex
-      hash: md5
-      md5: b2d28555a90965646645402d6964aa46.dir
-      size: 2832
-      nfiles: 2
-    - path: calkit.yaml
-      hash: md5
-      md5: 88b32dbae28ca457020146cb7ab49cf3
-      size: 13383
-    - path: docs/img/2027-budget.png
-      hash: md5
-      md5: 1078d8d6187e0e072d20f488176ff71e
-      size: 50208
-    - path: docs/img/pipeline.png
-      hash: md5
-      md5: 0c09798b4e2fd432f0ca5f0edefb5b38
-      size: 50359
-    - path: docs/one-pager/main.md
-      hash: md5
-      md5: 64ed7669cdb236d557344ac9ddeb186e
-      size: 4743
-    - path: docs/one-pager/one-pager.lua
-      hash: md5
-      md5: 1102b36541da50fb365f4eb12351f882
-      size: 3327
-    - path: docs/one-pager/template.tex
-      hash: md5
-      md5: 5d31f5987fcef529f4b4b6348abc7ab8
-      size: 4553
-    - path: results/2027-budget.json
-      hash: md5
-      md5: 35eeb271dbd0ac856631b17035062793
-      size: 2007
-    - path: results/traction.json
-      hash: md5
-      md5: 996218412a619fae26e1b7023ade5026
-      size: 539
-    outs:
-    - path: docs/one-pager/main.pdf
-      hash: md5
-      md5: 59866a782794d2a10d3baec89394e1e7
-      size: 179601
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -306,6 +258,54 @@ stages:
       hash: md5
       md5: e26e6d8161aee299460812cd7efbaa0d
       size: 202869
+  one-pager/pdf:
+    cmd: calkit latex from-markdown docs/one-pager/main.md -o 
+      docs/one-pager/main.pdf -e tex --no-check --template 
+      docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua 
+      --pandoc-arg=--shift-heading-level-by=-1
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: b2d28555a90965646645402d6964aa46.dir
+      size: 2832
+      nfiles: 2
+    - path: calkit.yaml
+      hash: md5
+      md5: 88b32dbae28ca457020146cb7ab49cf3
+      size: 13383
+    - path: docs/img/2027-budget.png
+      hash: md5
+      md5: 1078d8d6187e0e072d20f488176ff71e
+      size: 50208
+    - path: docs/img/pipeline.png
+      hash: md5
+      md5: 0c09798b4e2fd432f0ca5f0edefb5b38
+      size: 50359
+    - path: docs/one-pager/main.md
+      hash: md5
+      md5: 64ed7669cdb236d557344ac9ddeb186e
+      size: 4743
+    - path: docs/one-pager/one-pager.lua
+      hash: md5
+      md5: 1102b36541da50fb365f4eb12351f882
+      size: 3327
+    - path: docs/one-pager/template.tex
+      hash: md5
+      md5: 5d31f5987fcef529f4b4b6348abc7ab8
+      size: 4553
+    - path: results/2027-budget.json
+      hash: md5
+      md5: 35eeb271dbd0ac856631b17035062793
+      size: 2007
+    - path: results/traction.json
+      hash: md5
+      md5: 996218412a619fae26e1b7023ade5026
+      size: 539
+    outs:
+    - path: docs/one-pager/main.pdf
+      hash: md5
+      md5: 59866a782794d2a10d3baec89394e1e7
+      size: 179601
   latex-word-round-trip:
     cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
       --engine=libreoffice

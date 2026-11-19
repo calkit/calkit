@@ -1394,3 +1394,36 @@ def test_untrack_cached_stage_outputs(tmp_dir):
     assert tracked == ["kept.png", "other.txt"]
     assert os.path.isfile("fig.png") and os.path.isfile("figs/a.png")
     assert calkit.dvc.untrack_cached_stage_outputs(stages) == []
+
+
+def test_running_processes_in_project_below_dvc_root(tmp_dir):
+    import json
+    import time
+
+    from calkit.dvc.core import _rwlock_holder_is_live
+
+    with open("holder.py", "w") as f:
+        f.write("import time\ntime.sleep(120)\n")
+    argv = [sys.executable, "holder.py"]
+    proc = subprocess.Popen(argv)
+    cmd = " ".join(argv)
+    try:
+        deadline = time.monotonic() + 10
+        while not _rwlock_holder_is_live(proc.pid, cmd):
+            assert time.monotonic() < deadline, "Lock holder never started"
+            time.sleep(0.05)
+        os.makedirs(os.path.join(".dvc", "tmp"))
+        os.makedirs(os.path.join("projects", "a"))
+        os.makedirs(os.path.join("projects", "b"))
+        out = os.path.abspath(os.path.join("projects", "a", "out.txt"))
+        with open(os.path.join(".dvc", "tmp", "rwlock"), "w") as f:
+            json.dump({"write": {out: {"pid": proc.pid, "cmd": cmd}}}, f)
+        holders = calkit.dvc.get_running_pipeline_processes("projects/a")
+        assert [h["pid"] for h in holders] == [proc.pid]
+        assert calkit.dvc.get_running_pipeline_processes("projects/b") == []
+        assert calkit.dvc.get_running_pipeline_processes() == [
+            {"pid": proc.pid, "cmd": cmd}
+        ]
+    finally:
+        proc.terminate()
+        proc.wait()

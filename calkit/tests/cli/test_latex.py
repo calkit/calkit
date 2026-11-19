@@ -585,6 +585,9 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
     with open("paper/main.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n"
+            # As a class testing for fonts does, which would otherwise
+            # leave an error waiting for an answer
+            "\\errorstopmode\\typeout{Mode \\the\\interactionmode}\n"
             "\\usepackage{amsmath}\n"
             "\\usepackage{siunitx} % \\usepackage{nonexistent}\n"
             "\\newcommand{\\tablepkg}{booktabs}\n"
@@ -596,6 +599,9 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
         ["calkit", "latex", "build", "-e", "tex", "paper/main.tex"]
     )
     assert os.path.isfile("paper/main.pdf")
+    # Still nonstop mode (1) after the document asks for error stop mode
+    with open("paper/main.log", encoding="utf-8", errors="replace") as f:
+        assert "Mode 1" in f.read()
     # What it was missing is recorded in the lock, and the spec stays as
     # written
     env = calkit.load_calkit_info()["environments"]["tex"]
@@ -954,12 +960,25 @@ def _commit(message: str) -> None:
     )
 
 
-def test_latex_diff_setup(tmp_dir):
+def test_latex_diff_setup(tmp_dir, monkeypatch):
     # Everything up to running latexdiff itself, which needs TeX Live and
     # so can't run in CI: which revision gets compared, and that the
     # worktree it checks out is always cleaned up
+    from calkit.cli import latex as cli_latex
     from calkit.cli.latex import DIFF_TMP_DIR
     from calkit.latex import default_base_ref, get_diff_path
+
+    tex_cmds: list[list[str]] = []
+    builds: list[dict] = []
+    build_diff = cli_latex._build_diff
+
+    def stop_at_tex_cmd(cmd: list[str], **kwargs: object) -> list[str]:
+        tex_cmds.append(cmd)
+        raise RuntimeError("stop before running latexdiff")
+
+    def record_build(**kwargs: object) -> None:
+        builds.append(kwargs)
+        build_diff(**kwargs)  # type: ignore[arg-type]
 
     subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
     os.makedirs("paper", exist_ok=True)
@@ -1040,6 +1059,25 @@ def test_latex_diff_setup(tmp_dir):
     )
     assert result.returncode != 0
     assert "does not exist" in result.stderr
+    # latexdiff gets POSIX paths, since it may run in a Linux container,
+    # whose shell would drop a Windows path's backslashes
+    monkeypatch.setattr(cli_latex, "_tex_cmd", stop_at_tex_cmd)
+    monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
+    monkeypatch.setattr(cli_latex, "_build_diff", record_build)
+    # However the document is spelled, e.g., as tab completion writes it
+    for tex_file in ["paper/main.tex", os.path.join(".", "paper", "main.tex")]:
+        tex_cmds.clear()
+        builds.clear()
+        with pytest.raises(RuntimeError):
+            cli_latex.diff(tex_file, from_ref=base_sha)
+        sides = tex_cmds[0][-2:]
+        assert sides[0].endswith("/base/paper/main.tex"), sides
+        assert sides[1].endswith("/working/paper/main.tex"), sides
+        assert not any("\\" in side for side in sides), sides
+        # Each side's root is what's left of it without the document, so
+        # its sources are found and hashed
+        assert builds[0]["tex_file_fpath"] == "paper/main.tex"
+        assert not os.listdir(DIFF_TMP_DIR)
 
 
 @pytest.mark.skipif(
@@ -1297,6 +1335,15 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert not os.path.exists(stubs / "latexmk-args.txt")
     # Known from what it's made of, so latexdiff doesn't run either
     assert not os.path.exists(stubs / "latexdiff-args.txt")
+    # Unless the marked-up document is to be kept, which only latexdiff
+    # makes, though the build it would make is still known
+    result = subprocess.run(
+        diff + ["--keep-tex"], capture_output=True, text=True, env=env
+    )
+    assert result.returncode == 0, result.stderr
+    assert os.path.exists(stubs / "latexdiff-args.txt")
+    assert not os.path.exists(stubs / "latexmk-args.txt")
+    assert os.path.isfile(working_output.removesuffix(".pdf") + "-diff.tex")
     with open("paper/.latexmkrc", "a") as f:
         f.write("$max_repeat = 5;\n")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
@@ -1350,6 +1397,44 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert "built despite the LaTeX errors" in result.stderr
     with open(stubs / "latexmk-args.txt") as f:
         assert "-f" in f.read().split()
+    # A failed build beside the working tree's document leaves nothing
+    # there, and what a killed one left is cleared away, but not a file of
+    # the user's named like it
+    os.makedirs("paper/calkit-latex-diff-aux-999999999")
+    for name in [
+        "main-diff-999999999.tex",
+        "main-diff-999999998.tex",
+        "other.tex",
+        "other-diff-999999999.tex",
+    ]:
+        with open(f"paper/{name}", "w") as f:
+            f.write("left\n")
+    result = subprocess.run(
+        diff + ["--force"],
+        capture_output=True,
+        text=True,
+        env=env | {"FAIL": "1"},
+    )
+    assert result.returncode != 0
+    assert sorted(p for p in os.listdir("paper") if "-diff" in p) == [
+        "main-diff-999999998.tex",
+        "main-diff.tex",
+    ]
+    # With --keep-tex, the log the errors came from is kept too, since the
+    # aux directory isn't
+    result = subprocess.run(
+        diff + ["--force", "--keep-tex"],
+        capture_output=True,
+        text=True,
+        env=env | {"FAIL": "1"},
+    )
+    assert result.returncode != 0
+    kept_log_path = working_output.removesuffix(".pdf") + "-diff.log"
+    assert f"From {kept_log_path}:" in result.stderr
+    with open(kept_log_path) as f:
+        assert "! Undefined control sequence." in f.read()
+    for name in ["main-diff-999999998.tex", "other.tex"]:
+        os.remove(f"paper/{name}")
     # Detection can't find another stage's uncached output at a revision
     os.remove(stubs / "setup.txt")
     bare = ["calkit", "latex", "diff", "paper/main.tex", "--from", "v1"]
@@ -1598,7 +1683,9 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
             out = "/work/.calkit/local/texmf\n"
             return subprocess.CompletedProcess(cmd, 0, stdout=out)
         if "latexmk" in cmd:
-            captured.append(kwargs.get("capture_output"))
+            captured.append(
+                (kwargs.get("capture_output"), kwargs.get("stdin"))
+            )
             return latexmk(cmd)
         if "search" in cmd:
             name = cmd[-1].lstrip("/")
@@ -1609,7 +1696,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
         # As a font's install does, failing on the map after the files land
         return subprocess.CompletedProcess(cmd, 1, stdout="")
 
-    captured: list[bool] = []
+    captured: list[tuple] = []
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: False)
     with open("calkit.yaml", "w") as f:
@@ -1656,10 +1743,11 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     assert build(environment=None) == 12
     assert not [c for c in calls if "tlmgr" in c]
     # Quiet keeps latexmk's output out of the way, for a caller that reports
-    # what went wrong from the log
+    # what went wrong from the log, and with no stdin, anything asking for
+    # input fails rather than waiting
     captured.clear()
     build(quiet=True, environment=None)
-    assert captured == [True]
+    assert captured == [(True, subprocess.DEVNULL)]
     # A TeX Live environment gets the engine latexmk will compile with,
     # which a log can't name, since it fails to start
     from calkit.environments import texlive as env_texlive

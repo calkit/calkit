@@ -76,32 +76,32 @@
     }
   },
   "latex-image-readme/sizes": {
-    "start_time": "2026-11-18T21:45:40.482000",
-    "end_time": "2026-11-18T21:45:49.602000",
-    "git_rev": "9a418054b441434260d17eaf3934c7563e9edfe3",
+    "start_time": "2026-11-19T03:51:11.487000",
+    "end_time": "2026-11-19T03:51:17.935000",
+    "git_rev": "c7ac8cea7c566df7f260dce1487c56b09e8f4c85",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:a5226cec83b16bbf5c0a87bd94e58a0487d7039edc6ba998a0848f8288be98dc",
-    "calkit_version": "0.52.1.dev21+g9a418054b",
-    "calkit_git_rev": "9a418054b441434260d17eaf3934c7563e9edfe3",
+    "dvc_lock_hash": "sha256:b54260c74c343310b89c1c8bd8a8c2b3f8e271eabb0f14895ed95f462223c5eb",
+    "calkit_version": "0.52.2.dev5+gc7ac8cea7",
+    "calkit_git_rev": "c7ac8cea7c566df7f260dce1487c56b09e8f4c85",
     "system": {
-      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
       "os": "Darwin",
       "os_version": "27.2.0",
       "machine": "arm64",
       "processor": "arm",
-      "cpu_count": 10,
-      "memory_gb": 64.0
+      "cpu_count": 14,
+      "memory_gb": 24.0
     }
   },
   "latex-word-round-trip": {
-    "start_time": "2026-11-19T00:35:00.304000",
-    "end_time": "2026-11-19T00:35:11.637000",
+    "start_time": "2026-11-19T05:46:11.299000",
+    "end_time": "2026-11-19T05:46:22.424000",
     "environment": "dev",
-    "git_rev": "b345360314aafc990c6416fc182b42385c4ee601",
-    "git_dirty": false,
-    "dvc_lock_hash": "sha256:3c64ba3ca272dbf94cceab3325ce095b50173cffec6b94309188daa96e6942a1",
-    "calkit_version": "0.52.1.dev17+gb34536031",
-    "calkit_git_rev": "b345360314aafc990c6416fc182b42385c4ee601",
+    "git_rev": "fd665932e58c882ad51e16488f28bcc5536f1ab1",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:4f782f529137dd78afce98285347327e95f819937fbbc285c40524a6b83ff4a4",
+    "calkit_version": "0.52.2.dev8+gfd665932e",
+    "calkit_git_rev": "fd665932e58c882ad51e16488f28bcc5536f1ab1",
     "system": {
       "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
       "os": "Darwin",

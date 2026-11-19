@@ -8,7 +8,6 @@ import json
 import os
 import posixpath
 import subprocess
-import sys
 from pathlib import Path
 
 import calkit
@@ -811,7 +810,7 @@ def run(
         # staircases down the screen. DVC sets DVC_STAGE for the
         # commands it runs, which is how a stage is told apart from
         # someone running 'calkit xenv' themselves
-        "-it" if sys.stdin.isatty() and not os.getenv("DVC_STAGE") else "-i",
+        "-it" if calkit.core.is_tty() and not os.getenv("DVC_STAGE") else "-i",
         "--rm",
         "-w",
         docker_wdir,

@@ -51,7 +51,17 @@ This runs on every call, so only very fast work belongs there, e.g.,
 skipping unchanged files by size and timestamp rather than reading them.
 Anything slow belongs in a stage.
 
-Agents should never make commits to Git unless asked to.
+<!-- TODO: needs human review -->
+
+Name PRs and commits for developers scanning the history: say which part
+changed and the outcome, or the symptom a fix removes, rather than how it
+works, e.g., "Allow defining figure origins on Overleaf through browser
+extension" or "Fix spurious warning for origin not being defined for
+something in a directory output".
+Name the mechanism only when someone would search for it, e.g.,
+"Use native messaging to connect browser extension to local machine".
+Use plain verbs, e.g., "Add", "Fix", "Allow", or "Speed up", drop articles,
+and cover the whole PR, not just its first change.
 
 Tests belong in the test module named after the module the exercised code
 lives in, e.g., tests for `calkit/cli/new.py` go in
@@ -74,8 +84,6 @@ kept inside functions to keep CLI startup fast.
 Put the imports a function always needs at its top, not partway through;
 only an import on a conditional path belongs where it's used.
 Module scope is fine for anything that won't slow CLI startup.
-
-For prose, only use one space after punctuation.
 
 Always put a comma after "i.e." and "e.g.".
 

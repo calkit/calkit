@@ -252,6 +252,9 @@ _tolerate_purged_rwlock_entries()
 # left behind by a crashed process on an NFS share, common on HPC clusters---is
 # still surfaced as an error the user can act on.
 DEFAULT_RUN_LOCK_TIMEOUT = 120.0
+# The reason ``skip_stages`` gets for a stage skipped by name, e.g., with
+# ``calkit run --skip``, rather than because it can't run here
+SKIP_REQUESTED = "skipped as requested"
 
 
 @contextlib.contextmanager
@@ -355,11 +358,17 @@ def skip_stages(
             )
             unchanged.append((self, kwargs.get("allow_missing", False)))
             return None
-        logging.getLogger("dvc").info(
-            "Stage '%s' can't run on this machine, skipping: %s",
-            self.addressing,
-            reason,
-        )
+        if reason == SKIP_REQUESTED:
+            logging.getLogger("dvc").info(
+                "Stage '%s' is out of date, skipping as requested",
+                self.addressing,
+            )
+        else:
+            logging.getLogger("dvc").info(
+                "Stage '%s' can't run on this machine, skipping: %s",
+                self.addressing,
+                reason,
+            )
         if skipped is not None:
             skipped[self.addressing] = reason
         return None

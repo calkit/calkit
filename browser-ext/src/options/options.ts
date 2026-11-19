@@ -46,9 +46,7 @@ async function renderAuth(container: HTMLElement): Promise<void> {
   const signIn = el("button", { class: "action", text: "Sign in" });
   signIn.addEventListener("click", async () => {
     signIn.disabled = true;
-    clear(message).append(
-      loading("Approve the request in the tab that just opened"),
-    );
+    clear(message).append(loading("Approve the request in the new tab"));
     try {
       await send({ type: "auth.signIn" });
       void render();
@@ -239,19 +237,19 @@ async function renderActiveProjectSection(
 }
 
 /**
- * Whether the extension can reach Calkit on this computer, which lets it
+ * Whether the extension can reach Calkit on this machine, which lets it
  * work with projects here, e.g., open a figure's script in an editor,
  * without going through a hub.
  */
 async function renderLocalSection(container: HTMLElement): Promise<void> {
-  clear(container).append(loading("Looking for Calkit on this computer"));
+  clear(container).append(loading("Looking for Calkit on this machine"));
   const status = await send({ type: "local.status" });
   clear(container);
   if (status.permitted && status.version) {
     container.append(
       el("div", {
         class: "small",
-        text: `Connected to Calkit ${status.version} on this computer.`,
+        text: `Connected to Calkit ${status.version} on this machine.`,
       }),
     );
     return;
@@ -285,7 +283,7 @@ async function renderLocalSection(container: HTMLElement): Promise<void> {
     el("div", {
       class: "dim small",
       text:
-        "Lets the extension work with projects on this computer, e.g., " +
+        "Lets the extension work with projects on this machine, e.g., " +
         "open the script that makes a figure in your editor. It talks to " +
         "Calkit here directly, not through a hub. Calkit needs to be " +
         "installed, which sets this up, or run 'calkit browser-link install'.",
@@ -308,14 +306,14 @@ async function render(): Promise<void> {
   const localContainer = el("div", { class: "stack" });
   const hubContainer = el("div", { class: "stack" });
   const projectContainer = el("div");
-  // This computer comes first, since working on projects here is the main
+  // This machine comes first, since working on projects here is the main
   // way to use the extension, and nothing waits on another section's hub
   // requests
   main.append(
     el("div", {
       class: "small",
       style: { fontWeight: "600" },
-      text: "This computer",
+      text: "This machine",
     }),
     localContainer,
     el("div", { style: { marginTop: "12px" } }, [hubContainer]),

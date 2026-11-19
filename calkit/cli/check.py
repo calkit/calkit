@@ -1926,8 +1926,11 @@ def check_stage_runs() -> None:
     entry some other way, e.g., 'dvc commit' after an output was edited, an
     edit or merge of dvc.lock, or running it outside Calkit. This catches
     mistakes and shortcuts, not forgery, since a matching entry can be
-    written by anyone.
+    written by anyone. Like DVC, it ignores the entries of stages no longer
+    in the pipeline.
     """
+    from dvc.parsing import DataResolver
+
     # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
     # subproject's, against the record kept beside its dvc.lock: any other
     # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
@@ -1968,11 +1971,38 @@ def check_stage_runs() -> None:
     parent_runs = {
         k.replace("\\", "/"): v for k, v in stage_runs[None].items()
     }
+    # DVC keeps the dvc.lock entry of a stage removed from dvc.yaml, and
+    # ignores it, so these are skipped, named as DVC resolves them, e.g.,
+    # each foreach item. Nothing is skipped beside a dvc.yaml DVC can't read.
+    removed: dict[str | None, set[str]] = {}
+    try:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+    except Exception:
+        dvc_repo = None
+    for lock_dir in lock_dirs if dvc_repo is not None else []:
+        try:
+            fpath = os.path.join(lock_dir or ".", "dvc.yaml")
+            with open(fpath, encoding="utf-8") as f:
+                dvc_yaml = calkit.core._load_yaml_readonly(f)
+            resolver = DataResolver(
+                dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
+            )
+            removed[lock_dir] = {
+                name
+                for name in calkit.dvc.read_lock_stages(lock_dir)
+                if not resolver.has_key(name)
+            }
+        except Exception:
+            continue
+    if dvc_repo is not None:
+        dvc_repo.close()
     problems = []
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
         for lock_name, locked in sorted(lock_stages.items()):
-            if not isinstance(locked, dict):
+            if not isinstance(locked, dict) or lock_name in removed.get(
+                lock_dir, set()
+            ):
                 continue
             name = (
                 lock_name

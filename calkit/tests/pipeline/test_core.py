@@ -5686,3 +5686,43 @@ def test_get_figure_paths_with_origins(tmp_dir):
         "paper/exported.png",
         "paper/drawn.png",
     ]
+
+
+def test_get_stage_to_add():
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "fit": {
+                    "kind": "python-script",
+                    "script_path": "fit.py",
+                    "environment": "_system",
+                    "outputs": ["results/fit.json"],
+                },
+            }
+        }
+    }
+    stage = {
+        "kind": "manual-step",
+        "message": "Export it",
+        "outputs": ["./figures/Setup Diagram.png"],
+    }
+    # Named after its first output, with one in Git kept there
+    name, added = calkit.pipeline.get_stage_to_add(
+        stage, ck_info, is_tracked=lambda path: True
+    )
+    assert name == "setup-diagram"
+    assert added["outputs"] == [
+        {"path": "figures/Setup Diagram.png", "storage": "git"}
+    ]
+    # A taken name gets a number
+    name, _ = calkit.pipeline.get_stage_to_add(stage, ck_info, name="fit")
+    assert name == "fit-2"
+    for bad, error in [
+        ({"outputs": ["results/fit.json"]}, "made by stage 'fit'"),
+        ({"outputs": ["../x.png"]}, "Invalid output path"),
+        ({"kind": "nope"}, "Invalid stage"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            calkit.pipeline.get_stage_to_add(stage | bad, ck_info)
+    with pytest.raises(ValueError, match="Invalid stage name"):
+        calkit.pipeline.get_stage_to_add(stage, ck_info, name="-x")

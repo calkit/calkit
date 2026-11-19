@@ -208,6 +208,24 @@ def test_is_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
             assert calkit.core.is_wsl() is expected, (version, container)
 
 
+def test_is_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Not a console on Windows, where its descriptor is checked too
+    tty = mock.Mock(isatty=lambda: True, fileno=lambda: -1)
+    # Windows says the NUL device is a TTY, which isn't a terminal
+    with open(os.devnull) as f:
+        for stdin, stdout in [(f, tty), (tty, f)]:
+            monkeypatch.setattr(sys, "stdin", stdin)
+            monkeypatch.setattr(sys, "stdout", stdout)
+            assert not calkit.core.is_tty()
+    for stdin in [None, object(), mock.Mock(isatty=lambda: False)]:
+        monkeypatch.setattr(sys, "stdin", stdin)
+        monkeypatch.setattr(sys, "stdout", tty)
+        assert not calkit.core.is_tty()
+    if sys.platform != "win32":
+        monkeypatch.setattr(sys, "stdin", tty)
+        assert calkit.core.is_tty()
+
+
 def test_is_mintty() -> None:
     import sys
 

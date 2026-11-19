@@ -128,7 +128,7 @@ codex plugin add calkit@calkit
 The `--sparse` options keep Codex from cloning the whole Calkit repo.
 You can also run `/plugins` in Codex and install it from the Calkit tab.
 Start a new session afterward.
-Type `$` to pick a skill like `calkit:create-pipeline` explicitly.
+Type `$` to select a skill like `calkit:create-pipeline` explicitly.
 
 Codex checks for updates when it starts and installs them automatically.
 To update by hand, run:

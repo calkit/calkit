@@ -959,7 +959,7 @@ function StageFromScriptForm({
               <Box key={external} mt={1}>
                 <Text color={chosen && rewritten ? "gray.500" : "orange.400"}>
                   {!chosen
-                    ? `Reads ${external}, which is outside the project, so it will only run on the computer it came from. Upload it to read it from the project instead:`
+                    ? `Reads ${external}, which is outside the project, so it will only run on the machine it came from. Upload it to read it from the project instead:`
                     : rewritten
                       ? `Reads ${external}, outside the project. ${files} will be uploaded to ${chosen.path}, and the script will read them from there.`
                       : `${files} will be uploaded to ${chosen.path}, but Calkit couldn't find where the script names ${external}; change it to read ${chosen.path}.`}

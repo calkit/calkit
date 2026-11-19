@@ -375,6 +375,7 @@ Options:
 | `--no-push`              | boolean   | no       | False   | Do not push to Git and DVC after saving.                                                                                                     |
 | `--mock-scheduler`, `-K` | boolean   | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler.                                                 |
 | `--strict`               | boolean   | no       | False   | Fail if an out-of-date stage can't run on this machine rather than skipping it, e.g., in CI for a project whose stages should all run there. |
+| `--skip`                 | list[str] | no       |         | Skip stage, keeping its outputs, e.g., a scheduled one in CI for pull requests.                                                              |
 
 <a id="top-command-manual-step"></a>
 
@@ -4002,7 +4003,7 @@ Options:
 
 Check each stage in dvc.lock matches the recorded run that made it.
 
-A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone.
+A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone. Like DVC, it ignores the entries of stages no longer in the pipeline.
 
 Usage:
 
@@ -4210,16 +4211,17 @@ calkit fix storage
 
 Work with LaTeX.
 
-| Command                                                  | Description                                                       |
-| -------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                     |
-| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.     |
-| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.           |
-| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands. |
-| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                     |
-| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.             |
-| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.        |
+| Command                                                  | Description                                                            |
+| -------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                          |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.          |
+| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.                |
+| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands.      |
+| [`warm-cache`](#subcommand-latex-tex-warm-cache)         | Download TeX Live's base packages and build its formats ahead of time. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                          |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.                  |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                     |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.             |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -4322,6 +4324,27 @@ Arguments:
 | ---------- | ---- | -------- | ------- | -------------------------------------- |
 | `tex_file` | str  | yes      |         | The .tex file whose components to map. |
 
+<a id="subcommand-latex-tex-warm-cache"></a>
+
+#### `calkit latex|tex warm-cache`
+
+Download TeX Live's base packages and build its formats ahead of time.
+
+For a machine or image without a project yet, e.g., a dev container, so a TeX Live environment's first build doesn't have to.
+
+Usage:
+
+```text
+calkit latex|tex warm-cache [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                         |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------- |
+| `--release`       | int     | no       |         | TeX Live release, e.g., 2025; defaults to Calkit's. |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                               |
+
 <a id="subcommand-latex-tex-build"></a>
 
 #### `calkit latex|tex build`
@@ -4344,17 +4367,18 @@ Arguments:
 
 Options:
 
-| Option               | Type      | Required | Default | Description                                                                                      |
-| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `--env`, `-e`        | str       | no       |         | Environment in which to run latexmk, if applicable.                                              |
-| `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running latexmk.                                     |
-| `--latexmk-rc`, `-r` | str       | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
-| `--output-dir`       | str       | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
-| `--aux-dir`          | str       | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
-| `--latexmk-arg`      | list[str] | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
-| `--no-synctex`       | boolean   | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
-| `--force`, `-f`      | boolean   | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
-| `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                            |
+| Option               | Type      | Required | Default | Description                                                                                                                                                                                                               |
+| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--env`, `-e`        | str       | no       |         | Environment in which to run latexmk, if applicable.                                                                                                                                                                       |
+| `--as-stage`         | boolean   | no       | False   | Build as the pipeline's latex stage for the document does (its environment, options, and working directory), or in the project's only TeX Live environment if no stage builds it. Other options are added to the stage's. |
+| `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running latexmk.                                                                                                                                                              |
+| `--latexmk-rc`, `-r` | str       | no       |         | Path to a latexmkrc file to use for compilation.                                                                                                                                                                          |
+| `--output-dir`       | str       | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir.                                                                                                                          |
+| `--aux-dir`          | str       | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.                                                                                                                           |
+| `--latexmk-arg`      | list[str] | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.                                                                                                                                       |
+| `--no-synctex`       | boolean   | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                                                                                                                                                    |
+| `--force`, `-f`      | boolean   | no       | False   | Force latexmk to recompile all files, even if they are up to date.                                                                                                                                                        |
+| `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                                                                                                                                                     |
 
 <a id="subcommand-latex-tex-diff"></a>
 

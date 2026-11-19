@@ -35,7 +35,7 @@ function kindFor(path: string): Kind {
 }
 
 /**
- * The PDF a folder synced with Overleaf builds to on this computer, read
+ * The PDF a folder synced with Overleaf builds to on this machine, read
  * from Calkit here a part at a time, since a message to or from it can't
  * be over 1 MB, with how fresh it is.
  */
@@ -66,7 +66,7 @@ async function renderLocalPdf(
       : `saved in ${first.commit_sha.slice(0, 7)}`
     : null;
   const notes = [
-    `Built on this computer ${built}`,
+    `Built on this machine ${built}`,
     saved,
     first.edited_since_built ? `${folder} has changed since` : null,
   ].filter(Boolean);

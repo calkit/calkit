@@ -38,44 +38,72 @@ function isAutoSyncOn(): boolean {
     .get<boolean>("overleaf.autoSync", true);
 }
 
-/** Run a Calkit command as a task, so its output shows, for its exit code. */
-async function runCalkitTask(
+/** Quote an argument for a shell, if it needs it. */
+function quoteArg(arg: string): string {
+  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Run Calkit commands in turn in the terminal Run Pipeline uses, so they
+ * show there and it stays usable after, for whether they all worked, or
+ * nothing if the shell can't say, in which case they're typed in together.
+ */
+async function runInTerminal(
   root: string,
-  args: string[],
-): Promise<number | undefined> {
-  const task = new vscode.Task(
-    { type: "calkit" },
-    vscode.TaskScope.Workspace,
-    `calkit ${args.join(" ")}`,
-    "calkit",
-    // The extension may have added where calkit is installed to PATH
-    new vscode.ProcessExecution("calkit", args, {
-      cwd: root,
-      env: { PATH: process.env.PATH ?? "" },
-    }),
-  );
-  task.presentationOptions = {
-    reveal: vscode.TaskRevealKind.Always,
-    panel: vscode.TaskPanelKind.Shared,
-    clear: true,
-  };
-  return new Promise((resolve) => {
-    const ended = vscode.tasks.onDidEndTaskProcess((e) => {
-      if (e.execution.task === task) {
-        ended.dispose();
-        resolve(e.exitCode);
-      }
+  steps: string[][],
+): Promise<boolean | undefined> {
+  const name = "calkit: run";
+  const terminal =
+    vscode.window.terminals.find((t) => t.name === name && !t.exitStatus) ??
+    vscode.window.createTerminal({ name, cwd: root });
+  terminal.show();
+  const integration =
+    terminal.shellIntegration ??
+    (await new Promise<vscode.TerminalShellIntegration | undefined>(
+      (resolve) => {
+        const timeout = setTimeout(() => {
+          changed.dispose();
+          resolve(undefined);
+        }, 3000);
+        const changed = vscode.window.onDidChangeTerminalShellIntegration(
+          (e) => {
+            if (e.terminal === terminal) {
+              clearTimeout(timeout);
+              changed.dispose();
+              resolve(e.shellIntegration);
+            }
+          },
+        );
+      },
+    ));
+  // From the project, wherever the terminal has been since
+  const commands = steps.map((step) => ["-C", root, ...step]);
+  if (!integration) {
+    terminal.sendText(
+      commands
+        .map((args) => ["calkit", ...args].map(quoteArg).join(" "))
+        .join(" && "),
+    );
+    return undefined;
+  }
+  for (const args of commands) {
+    const execution = integration.executeCommand("calkit", args);
+    const code = await new Promise<number | undefined>((resolve) => {
+      const ended = vscode.window.onDidEndTerminalShellExecution((e) => {
+        if (e.execution === execution) {
+          ended.dispose();
+          resolve(e.exitCode);
+        }
+      });
     });
-    vscode.tasks.executeTask(task).then(undefined, (error) => {
-      ended.dispose();
-      void vscode.window.showErrorMessage(
-        `Couldn't run calkit: ${
-          error instanceof Error ? error.message : error
-        }`,
-      );
-      resolve(undefined);
-    });
-  });
+    if (code === undefined) {
+      return undefined;
+    }
+    if (code !== 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** A command's output, or nothing if it failed. */
@@ -188,22 +216,19 @@ async function runSteps(
     return;
   }
   running = true;
-  let ok = false;
+  let ok: boolean | undefined;
   try {
     ok = await vscode.window.withProgress(
       { location: { viewId: SIDEBAR_VIEW_ID } },
-      async () => {
-        for (const step of steps) {
-          if ((await runCalkitTask(root, step)) !== 0) {
-            return false;
-          }
-        }
-        return true;
-      },
+      () => runInTerminal(root, steps),
     );
   } finally {
     running = false;
     void checkOverleaf();
+  }
+  // The shell couldn't say how it went, which the terminal shows
+  if (ok === undefined) {
+    return;
   }
   if (ok) {
     if (done) {

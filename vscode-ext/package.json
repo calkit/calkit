@@ -54,11 +54,6 @@
         }
       ]
     },
-    "taskDefinitions": [
-      {
-        "type": "calkit"
-      }
-    ],
     "views": {
       "calkit": [
         {

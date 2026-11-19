@@ -279,8 +279,8 @@ stages:
       size: 5
     - path: calkit/docx.py
       hash: md5
-      md5: b0a7560528427af7eb2c5ff896b82301
-      size: 97341
+      md5: 7dc35095ff91d162dc5acef899a58c5c
+      size: 97886
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: 6a04754199f6a394429ca0c07e4ecda6
@@ -291,8 +291,8 @@ stages:
       size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: f29fda0c0e1e9b177ed95a088edaee3d
-      size: 36443
+      md5: b42d272daf2d32f06a80341dd598fc8d
+      size: 36379
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: 53cbdd1fe8da4d6897b3b0856b749857
@@ -316,12 +316,12 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: bd657b4dfc8fdd7da2bb0d285aba823e
-      size: 196639
+      md5: 59bbc3b62ceb7349ff398a6c1c508867
+      size: 196671
     - path: calkit/docx.py
       hash: md5
-      md5: b0a7560528427af7eb2c5ff896b82301
-      size: 97341
+      md5: 7dc35095ff91d162dc5acef899a58c5c
+      size: 97886
     - path: calkit/latex.py
       hash: md5
       md5: 98c6df9156273050fa79791251e0f0d8
@@ -369,8 +369,8 @@ stages:
       size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: f29fda0c0e1e9b177ed95a088edaee3d
-      size: 36443
+      md5: b42d272daf2d32f06a80341dd598fc8d
+      size: 36379
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit

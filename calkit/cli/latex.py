@@ -4020,6 +4020,7 @@ def to_docx(
     # At random, so each export can be told apart, unless the build is asked
     # to be reproducible, in which case it comes from what was exported
     if os.environ.get("SOURCE_DATE_EPOCH"):
+        doc.strip_app_version()
         doc.save()
         export_id = str(
             uuid.uuid5(

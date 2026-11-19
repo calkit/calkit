@@ -63,6 +63,8 @@ PULL_FRESH_SECONDS = 10
 # How often an Overleaf project no checkout here syncs with is looked for
 # again, since that searches the home folder too
 LOOKUP_RESCAN_SECONDS = 600
+# How long a pipeline's status is reused for the provenance of figures
+PIPELINE_REUSE_SECONDS = 10
 # A file bigger than this is stored with DVC rather than in Git, as the
 # hub stores an upload
 FILE_GIT_MAX_BYTES = 1_000_000
@@ -97,6 +99,8 @@ MAX_JOBS_KEPT = 20
 # How much of a PDF goes in each message, which base64 makes a third
 # bigger, keeping it well under the browser's limit
 PDF_CHUNK_BYTES = 600_000
+# A results file bigger than this isn't read for a value, as on the hub
+MAX_VALUE_FILE_BYTES = 10 * 1024 * 1024
 # The most of a LaTeX file read for the extension, which no paper's comes near
 SOURCE_MAX_BYTES = 1_000_000
 OVERLEAF_AUTH_MISSING = (
@@ -185,6 +189,9 @@ def get_reply(msg: dict) -> dict:
       Overleaf project, shaped as the hub's lookup is.
     - ``overleaf.status``: what a sync of a project's checkout would do,
       after pulling from Overleaf, shaped as the hub's status is.
+    - ``project.figures``, ``project.pipeline``, and ``project.provenance``:
+      a checkout's figures, pipeline, and where a path in it, or a value in
+      a results file, came from, shaped as the hub's are.
     - ``publication.pdf``: part of the PDF a folder synced with Overleaf
       builds to, from ``offset``, with how fresh it is, so it can be shown
       in place of Overleaf's.
@@ -366,6 +373,15 @@ def get_result(msg: dict) -> Any:
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_pipeline(paths[0])
+    elif kind == "project.provenance":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        key = msg.get("key")
+        if key is not None and not isinstance(key, str):
+            raise ValueError("A key must be a string")
+        result = get_provenance(paths[0], msg.get("path"), key)
     elif kind in ("publication.pdf", "publication.synctex"):
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
@@ -1676,6 +1692,33 @@ def get_figures(wdir: str) -> dict:
     return {"items": items, "total": len(items)}
 
 
+def get_stage_status(stale: list, has_run: bool) -> dict:
+    """A stage's status, as the hub gives it, from DVC's stale entries for
+    it, i.e., one per iteration that's out of date.
+    """
+    if not has_run:
+        state = "not-run"
+    elif not stale:
+        state = "up-to-date"
+    elif all(s.always_run for s in stale):
+        state = "always-run"
+    else:
+        state = "stale"
+    return {
+        "status": state,
+        "modified_command": any(s.modified_command for s in stale),
+        "modified_inputs": list(
+            dict.fromkeys(p for s in stale for p in s.modified_inputs)
+        ),
+        "modified_outputs": list(
+            dict.fromkeys(p for s in stale for p in s.modified_outputs)
+        ),
+        "missing_outputs": list(
+            dict.fromkeys(p for s in stale for p in s.stale_outputs)
+        ),
+    }
+
+
 def get_content_paths(wdir: str) -> list[str]:
     """Every file in a checkout someone might pick, as the hub lists a
     project's: what Git tracks, and what the pipeline makes with DVC, by its
@@ -2126,42 +2169,48 @@ def get_pipeline(wdir: str) -> dict:
             quiet_environment_checks=True,
         )
         dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
-        # One run per iteration is recorded as 'name@item', so each is
-        # counted toward its stage
-        lock_stages = {n.split("@")[0] for n in calkit.dvc.read_lock_stages()}
+        lock_stages = calkit.dvc.read_lock_stages()
+        frozen_bases = calkit.pipeline.frozen_tainted_stage_names(
+            ck_info=ck_info, wdir="."
+        )
     finally:
         os.chdir(prev_wdir)
     stage_statuses = {}
+    # One run per iteration is recorded as 'name@item', so each is counted
+    # toward its stage
+    locked_bases = {n.split("@")[0] for n in lock_stages}
     for name in ck_stages:
         stale = [
             s
             for key, s in status.stale_stages.items()
             if key.split("@")[0] == name
         ]
-        if name not in lock_stages:
-            state = "not-run"
-        elif not stale:
-            state = "up-to-date"
-        elif all(s.always_run for s in stale):
-            state = "always-run"
-        else:
-            state = "stale"
-        stage_statuses[name] = {
-            "status": state,
-            "modified_command": any(s.modified_command for s in stale),
-            "modified_inputs": list(
-                dict.fromkeys(p for s in stale for p in s.modified_inputs)
-            ),
-            "modified_outputs": list(
-                dict.fromkeys(p for s in stale for p in s.modified_outputs)
-            ),
-            "missing_outputs": list(
-                dict.fromkeys(p for s in stale for p in s.stale_outputs)
-            ),
-        }
+        stage_statuses[name] = get_stage_status(
+            stale, has_run=name in locked_bases
+        )
+    # Keyed as the hub keys them, i.e., by each current entry in dvc.lock,
+    # with stages never run under their own names
+    live_lock_stages = calkit.pipeline.get_live_lock_stages(
+        lock_stages,
+        {n: s for n, s in dvc_stages.items() if isinstance(s, dict)},
+    )
+    lock_stage_statuses = {
+        name: get_stage_status([], has_run=False)
+        for name in dvc_stages
+        if not name.startswith("_") and name not in locked_bases
+    }
+    for name in live_lock_stages:
+        stale_stage = status.stale_stages.get(name)
+        lock_stage_statuses[name] = get_stage_status(
+            [stale_stage] if stale_stage is not None else [], has_run=True
+        )
     return {
         "ck_stages": ck_stages,
         "stage_statuses": stage_statuses,
+        "lock_stage_statuses": lock_stage_statuses,
+        "frozen": sorted(
+            n for n in live_lock_stages if n.split("@")[0] in frozen_bases
+        ),
         "status": "stale" if status.is_stale else "up-to-date",
         "error": "; ".join(status.errors) or None,
         "dvc_stages": {
@@ -2170,6 +2219,136 @@ def get_pipeline(wdir: str) -> dict:
             if isinstance(stage, dict)
         },
     }
+
+
+# Each checkout's pipeline, as last read for provenance, with when and the
+# modification times of the files it was read from
+_recent_pipelines: dict[str, tuple[float, list[float], dict]] = {}
+
+
+def get_recent_pipeline(wdir: str) -> dict:
+    """``get_pipeline``'s answer, reused for ``PIPELINE_REUSE_SECONDS``
+    while calkit.yaml, dvc.yaml, and dvc.lock are unchanged, since a
+    figure's provenance is asked for once for each file it could be, and
+    each check of the pipeline's status takes a while.
+    """
+    import time
+
+    stamp = [
+        os.path.getmtime(p) if os.path.isfile(p) else 0.0
+        for p in (
+            os.path.join(wdir, name)
+            for name in ("calkit.yaml", "dvc.yaml", "dvc.lock")
+        )
+    ]
+    recent = _recent_pipelines.get(wdir)
+    if (
+        recent is not None
+        and time.time() - recent[0] < PIPELINE_REUSE_SECONDS
+        and recent[1] == stamp
+    ):
+        return recent[2]
+    pipeline = get_pipeline(wdir)
+    _recent_pipelines[wdir] = (time.time(), stamp, pipeline)
+    return pipeline
+
+
+def get_provenance(wdir: str, path: Any, key: str | None = None) -> dict:
+    """Where a path in a checkout, or one value in a results file, came
+    from, as the hub's provenance says it, from the checkout as it is,
+    including what isn't saved yet.
+    """
+    import posixpath
+
+    import calkit.dvc
+    import calkit.provenance
+
+    def get_full_path(p: str) -> str | None:
+        # None for one a symlink takes outside the project
+        full_path = os.path.join(wdir, *p.split("/"))
+        real_path = os.path.realpath(full_path)
+        if real_path != root and not real_path.startswith(root + os.sep):
+            return None
+        return full_path
+
+    def read_bytes(p: str) -> bytes:
+        full_path = get_full_path(p)
+        if full_path is None:
+            raise ValueError(f"{p} isn't in the project")
+        if os.path.getsize(full_path) > MAX_VALUE_FILE_BYTES:
+            raise ValueError(f"{p} is too big to read")
+        with open(full_path, "rb") as f:
+            return f.read()
+
+    def listdir(p: str) -> list[str]:
+        full_path = get_full_path(p)
+        return os.listdir(full_path) if full_path is not None else []
+
+    def is_file(p: str) -> bool:
+        full_path = get_full_path(p)
+        return full_path is not None and os.path.isfile(full_path)
+
+    def is_dir(p: str) -> bool:
+        full_path = get_full_path(p)
+        return full_path is not None and os.path.isdir(full_path)
+
+    def get_dir_relpaths(md5: str) -> set[str] | None:
+        # What a folder output holds, from its manifest in the DVC cache, if
+        # it's there
+        manifest_path = os.path.join(
+            wdir, ".dvc", "cache", "files", "md5", md5[:2], md5[2:]
+        )
+        try:
+            with open(manifest_path) as f:
+                entries = json.load(f)
+            return {e["relpath"] for e in entries}
+        except Exception:
+            return None
+
+    def is_dvc_output(p: str) -> bool:
+        # E.g., a file in a folder a stage makes that isn't pulled here
+        for out in lock_outs:
+            out_path = out["path"].rstrip("/")
+            if not p.startswith(out_path + "/"):
+                continue
+            md5 = out.get("md5") or out.get("hash") or ""
+            relpaths = get_dir_relpaths(md5) if md5.endswith(".dir") else None
+            if relpaths is None or p[len(out_path) + 1 :] in relpaths:
+                return True
+        return False
+
+    if not isinstance(path, str):
+        raise ValueError("A path must be a string")
+    path = posixpath.normpath(path.strip().replace("\\", "/"))
+    if (
+        path in (".", "..")
+        or path.startswith(("/", "../"))
+        or re.match(r"^[A-Za-z]:", path)
+    ):
+        raise ValueError(f"{path} isn't a path in the project")
+    root = os.path.realpath(wdir)
+    pipeline = get_recent_pipeline(wdir)
+    dvc_lock = {"stages": calkit.dvc.read_lock_stages(wdir=wdir)}
+    lock_outs = [
+        out
+        for stage in dvc_lock["stages"].values()
+        for out in (stage or {}).get("outs") or []
+        if isinstance(out, dict) and isinstance(out.get("path"), str)
+    ]
+    return calkit.provenance.get_path_provenance(
+        path,
+        key=key,
+        ck_info=calkit.load_calkit_info(wdir=wdir, read_only=True),
+        dvc_yaml={"stages": pipeline["dvc_stages"]},
+        dvc_lock=dvc_lock,
+        stage_statuses=pipeline["lock_stage_statuses"],
+        frozen=set(pipeline["frozen"]),
+        is_file=is_file,
+        is_dir=is_dir,
+        listdir=listdir,
+        read_bytes=read_bytes,
+        is_dvc_output=is_dvc_output,
+    )
 
 
 def get_checkout_status(wdir: str) -> dict:

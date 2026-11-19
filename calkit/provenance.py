@@ -1107,6 +1107,46 @@ def default_dest_path(imported_from: dict) -> str:
     return ""
 
 
+def get_import_info(value: object) -> dict | None:
+    """Where an ``imported_from`` says something came from, structured, read
+    from a bare string the way the calkit.yaml schema does, e.g., a DOI
+    link, with any link that isn't safe to show as one dropped, e.g.,
+    ``javascript:``, but SSH clone URLs kept.
+    """
+    from urllib.parse import urlparse
+
+    def is_web_url(url: object) -> bool:
+        try:
+            return isinstance(url, str) and urlparse(url).scheme in (
+                "http",
+                "https",
+            )
+        except ValueError:
+            return False
+
+    if isinstance(value, dict):
+        info = dict(value)
+    elif isinstance(value, str) and value.strip():
+        try:
+            info = source_from_location(value)
+        except ValueError:
+            return {"description": value}
+    else:
+        return None
+    if "url" in info and not is_web_url(info["url"]):
+        del info["url"]
+    repo_url = info.get("git_repo_url")
+    if repo_url is not None and not (
+        is_web_url(repo_url)
+        or (
+            isinstance(repo_url, str)
+            and re.fullmatch(r"(ssh://|[\w.-]+@[\w.-]+:)\S+", repo_url)
+        )
+    ):
+        del info["git_repo_url"]
+    return info
+
+
 def describe_source(imported_from: dict) -> str:
     """Name where an artifact came from, for a message to a person."""
     if (git := git_source(imported_from)) is not None:
@@ -1704,3 +1744,352 @@ def find_project_provenance_gaps(
             else []
         ),
     )
+
+
+# A value bigger than this, e.g., a whole table exported as a key, is
+# described rather than sent
+MAX_VALUE_BYTES = 100_000
+RESULTS_EXTS = (".json", ".yaml", ".yml", ".toml")
+# The stage fields that name what someone edits to change its output
+SOURCE_FIELDS = ("script_path", "notebook_path", "target_path", "source_path")
+
+
+def get_path_provenance(
+    path: str,
+    ck_info: dict,
+    dvc_yaml: dict,
+    dvc_lock: dict,
+    stage_statuses: dict[str, dict],
+    is_file: Callable[[str], bool],
+    is_dir: Callable[[str], bool],
+    listdir: Callable[[str], list[str]],
+    read_bytes: Callable[[str], bytes],
+    is_dvc_output: Callable[[str], bool] = lambda path: False,
+    key: str | None = None,
+    frozen: set[str] | None = None,
+) -> dict:
+    """Where a project path, or one value in a results file, came from: the
+    value, the stage that produces it, what to open to change it, what it
+    reads, whether it's out of date, and what nothing accounts for.
+
+    Takes the project as functions, so a checkout on disk and one read out
+    of Git agree. ``stage_statuses`` are each stage's status, as the hub's
+    pipeline gives them, and ``frozen`` those frozen with outdated inputs.
+    ``read_bytes`` raises ``ValueError`` with why a file can't be read.
+    ``is_dvc_output`` says whether a path is inside a DVC-tracked output, for
+    one that's neither in the tree nor named by dvc.lock.
+    """
+    import json
+
+    import calkit.environments
+    import calkit.export
+    import calkit.pipeline
+    import calkit.questions
+
+    def get_stage(path: str) -> str | None:
+        # A declaration knows better than a path match, which knows better
+        # than the pipeline's outputs as written, which cover stages never
+        # run
+        declared = next(
+            (
+                artifact["stage"]
+                for kind in ("results", "figures", "tables", "datasets")
+                for artifact in ck_info.get(kind) or []
+                if isinstance(artifact, dict)
+                and artifact.get("path") == path
+                and artifact.get("stage")
+            ),
+            None,
+        )
+        return (
+            declared
+            or calkit.pipeline.get_lock_stage_for_output(
+                path, dvc_lock, valid_stages=set(stage_statuses)
+            )
+            or calkit.pipeline.get_stage_for_output(path, ck_info)
+        )
+
+    def get_ck_stage(stage: str) -> dict | None:
+        # A matrix stage's expansions share one definition
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        ck_stage = stages.get(stage.split("@")[0])
+        return ck_stage if isinstance(ck_stage, dict) else None
+
+    def get_value() -> tuple[object, str | None]:
+        try:
+            data = read_bytes(path)
+        except ValueError as e:
+            return None, str(e)
+        except Exception:
+            return None, f"{path} can't be read"
+        try:
+            parsed = calkit.questions.parse_evidence_text(
+                data.decode("utf-8", "replace"), path
+            )
+            value = (
+                parsed
+                if key is None
+                else calkit.questions.resolve_key(parsed, key)
+            )
+        except KeyError:
+            return None, f"{key} isn't in {path}"
+        except Exception as e:
+            return None, f"{path} can't be parsed: {e}"
+        # Plain JSON, since YAML loads into its own mapping types
+        encoded = json.dumps(value, default=str)
+        if len(encoded) > MAX_VALUE_BYTES:
+            return None, f"{key or path} is too big to show"
+        return json.loads(encoded), None
+
+    lock_stages = dvc_lock.get("stages") or {}
+    yaml_stages = dvc_yaml.get("stages") or {}
+    lock_outs = {
+        out.get("path")
+        for stage in lock_stages.values()
+        for out in (stage or {}).get("outs") or []
+        if isinstance(out, dict)
+    }
+    out: dict = {
+        "path": path,
+        "key": key,
+        "exists": (
+            is_file(path)
+            or is_dir(path)
+            or is_file(path + ".dvc")
+            or path in lock_outs
+            # E.g., a file inside a folder a stage outputs
+            or is_dvc_output(path)
+        ),
+        "value": None,
+        "value_error": None,
+        "stage": None,
+        "stage_kind": None,
+        "stage_app": None,
+        "source": None,
+        "command": None,
+        "message": None,
+        "inputs": [],
+        "input_to_stages": [],
+        "stage_status": None,
+        "stale_reason": None,
+        "copied_from": None,
+        "copy_stage": None,
+        "origin": None,
+        "origin_url": None,
+        "origin_path": None,
+        "gaps": [],
+    }
+    if key is not None or path.lower().endswith(RESULTS_EXTS):
+        out["value"], out["value_error"] = (
+            get_value()
+            if out["exists"]
+            else (None, f"{path} isn't in the project at this version")
+        )
+    stage = get_stage(path)
+    # A copy, e.g., a figure a map-paths stage put in the paper's folder, is
+    # described by what made the original, and is stale if the copy is
+    traced = path
+    copy_stale = False
+    for _ in range(10):
+        ck_stage = get_ck_stage(stage) if stage else None
+        src = (
+            calkit.pipeline.get_map_paths_source(ck_stage, traced)
+            if ck_stage is not None
+            else None
+        )
+        if stage is None or src is None:
+            break
+        copy_status = stage_statuses.get(stage)
+        copy_stale |= (copy_status or {}).get("status") == "stale"
+        out["copy_stage"] = out["copy_stage"] or stage
+        traced = src
+        stage = get_stage(src)
+    if traced != path:
+        out["copied_from"] = traced
+    if copy_stale:
+        out["stale_reason"] = "pipeline"
+    # Where calkit.yaml says it came from, if not from a stage, e.g., a
+    # download or a photo someone took: the path's own entry, else its
+    # closest folder's, whatever order calkit.yaml lists them in, and a
+    # person can't be the origin of an exported format like PNG
+    entry = max(
+        (
+            e
+            for items in ck_info.values()
+            if isinstance(items, list)
+            for e in items
+            if isinstance(e, dict)
+            and isinstance(e.get("path"), str)
+            and (
+                e.get("imported_from") is not None
+                or (
+                    e.get("created_by") is not None
+                    and can_be_created_by_person(traced)
+                )
+            )
+            and (
+                traced == posixpath.normpath(e["path"])
+                or traced.startswith(posixpath.normpath(e["path"]) + "/")
+            )
+        ),
+        key=lambda e: len(posixpath.normpath(e["path"])),
+        default=None,
+    )
+    if entry is not None:
+        entry_path = posixpath.normpath(entry["path"])
+        out["origin_path"] = entry_path if entry_path != traced else None
+        imported = get_import_info(entry.get("imported_from"))
+        created = entry.get("created_by")
+        if imported is not None:
+            if set(imported) <= {"description", "date"}:
+                out["origin"] = imported.get("description")
+            else:
+                out["origin"] = "Imported from " + describe_source(imported)
+            doi = imported.get("doi")
+            out["origin_url"] = (
+                imported.get("url")
+                or (f"https://doi.org/{doi}" if doi else None)
+                or imported.get("git_repo_url")
+            )
+        elif created is not None:
+            people = created if isinstance(created, list) else [created]
+            names = [
+                p.get("name") or p.get("email") or p.get("orcid") or "someone"
+                for p in people
+                if isinstance(p, dict)
+            ]
+            tools: list[str] = []
+            for p in people:
+                with_ai = p.get("with_ai") if isinstance(p, dict) else None
+                tools += (
+                    [with_ai] if isinstance(with_ai, str) else with_ai or []
+                )
+            out["origin"] = "Created by " + ", ".join(names)
+            if tools:
+                out["origin"] += " with " + ", ".join(dict.fromkeys(tools))
+    # What nothing accounts for, however far back the chain goes, trusting
+    # a stage calkit.yaml names for something dvc.yaml doesn't have yet
+    if out["exists"] or stage is not None:
+        out["gaps"] = [
+            {
+                "path": gap.path,
+                "steps": [
+                    {"path": step.path, "stage": step.stage}
+                    for step in gap.steps
+                ],
+                "unchecked": gap.unchecked,
+            }
+            for gap in find_provenance_gaps(
+                [path],
+                ck_info=ck_info,
+                dvc_yaml=dvc_yaml,
+                dvc_lock=dvc_lock,
+                is_data=lambda p: is_data_path(
+                    p, is_file=is_file, is_dir=is_dir, listdir=listdir
+                ),
+                listdir=lambda p: listdir(p) if is_dir(p) else [],
+            )
+            if get_stage(gap.path) is None
+        ]
+    # The stages that read it, or a folder it's in, as run if they have
+    # been, since an iterated stage's deps are only concrete in dvc.lock
+    stage_deps = {
+        name: (lock_stages.get(name) or {}).get("deps")
+        or (yaml_stages.get(name.split("@")[0]) or {}).get("deps")
+        or []
+        for name in list(lock_stages) + list(yaml_stages)
+    }
+    for name, deps in stage_deps.items():
+        base = name.split("@")[0]
+        dvc_wdir = (yaml_stages.get(base) or {}).get("wdir") or ""
+        for dep in deps:
+            dep = dep.get("path") if isinstance(dep, dict) else dep
+            if not isinstance(dep, str) or "${" in dep:
+                continue
+            dep = posixpath.normpath(posixpath.join(dvc_wdir, dep))
+            if path == dep or path.startswith(dep + "/"):
+                out["input_to_stages"].append(base)
+                break
+    out["input_to_stages"] = list(dict.fromkeys(out["input_to_stages"]))
+    if stage is None:
+        return out
+    out["stage"] = stage
+    status = stage_statuses.get(stage)
+    if status is not None:
+        out["stage_status"] = status
+        if status.get("status") == "stale":
+            out["stale_reason"] = "pipeline"
+        elif stage in (frozen or set()) and out["stale_reason"] is None:
+            out["stale_reason"] = "frozen"
+    base = stage.split("@")[0]
+    ck_stage = get_ck_stage(stage)
+    source = None
+    if ck_stage is not None:
+        out["stage_kind"] = ck_stage.get("kind")
+        apps = [
+            e for e in calkit.export.exporters() if e.kind == out["stage_kind"]
+        ]
+        out["stage_app"] = apps[0].app if len(apps) == 1 else None
+        # Slides are exported by whichever app the environment provides,
+        # which for the system's own depends on the machine
+        env_name = ck_stage.get("environment") or "_system"
+        if len(apps) > 1 and env_name != "_system":
+            try:
+                out["stage_app"] = calkit.export.get_slide_exporter(
+                    env_name, ck_info=ck_info
+                )[0].app
+            except ValueError:
+                pass
+        if out["stage_kind"] == "manual-step":
+            out["message"] = ck_stage.get("message")
+        wdir = ck_stage.get("wdir") or ""
+        field = next((f for f in SOURCE_FIELDS if ck_stage.get(f)), None)
+        if field is not None:
+            source = posixpath.normpath(posixpath.join(wdir, ck_stage[field]))
+            out["source"] = source
+        elif isinstance(ck_stage.get("command"), str):
+            out["command"] = ck_stage["command"]
+    # What DVC tracks it reading, from the run if there was one
+    lock_stage = lock_stages.get(stage) or {}
+    yaml_stage = yaml_stages.get(base) or {}
+    dvc_wdir = yaml_stage.get("wdir") or ""
+    deps = [
+        dep.get("path") if isinstance(dep, dict) else dep
+        for dep in lock_stage.get("deps") or yaml_stage.get("deps") or []
+    ]
+    # What its environments run with, e.g., a uv.lock, rather than what it
+    # reads
+    env_files = set()
+    envs = ck_info.get("environments") or {}
+    env_names = str((ck_stage or {}).get("environment") or "").split(
+        calkit.environments.COMPOSITE_ENV_SEP
+    )
+    for env_name in env_names:
+        env = envs.get(env_name)
+        if not isinstance(env, dict):
+            continue
+        lock = calkit.environments.get_env_lock_fpath(
+            env, env_name, for_dvc=True
+        )
+        if lock:
+            env_files.add(posixpath.normpath(lock))
+        if isinstance(env.get("path"), str):
+            spec = posixpath.normpath(env["path"])
+            env_files.add(spec)
+            env_files.add(
+                posixpath.join(posixpath.dirname(spec), ".python-version")
+            )
+    for dep in deps:
+        if not isinstance(dep, str):
+            continue
+        dep = posixpath.normpath(posixpath.join(dvc_wdir, dep))
+        # Calkit's own bookkeeping, e.g., environment locks, and the source
+        # shown on its own
+        if (
+            dep.startswith(".calkit/")
+            or dep in (source, "calkit.yaml")
+            or dep in env_files
+        ):
+            continue
+        out["inputs"].append(dep)
+    return out

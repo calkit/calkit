@@ -1129,6 +1129,119 @@ def test_get_pipeline(tmp_path):
     assert status["make-b"]["status"] == "up-to-date"
 
 
+def test_get_provenance(tmp_path, monkeypatch):
+    from calkit.browser_link import get_provenance
+
+    home = make_home(tmp_path, monkeypatch)
+    # Committing with no Git config in the home folder
+    for var in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{var}_NAME", "T")
+        monkeypatch.setenv(f"GIT_{var}_EMAIL", "t@example.com")
+    project = home / "calkit" / "proj"
+    project.mkdir(parents=True)
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    (project / "data.csv").write_text("x\n1\n")
+    stages = {
+        "summarize": {
+            "kind": "command",
+            "environment": "_system",
+            # The same in Windows' shell as in others
+            "command": (
+                f'"{sys.executable}" -c "import json; '
+                "json.dump({'n': 1}, open('results.json', 'w'))\""
+            ),
+            "inputs": ["data.csv"],
+            "outputs": ["results.json"],
+        },
+        "copy": {
+            "kind": "command",
+            "environment": "_system",
+            "command": (
+                f'"{sys.executable}" -c "'
+                "open('out-{n}.txt', 'w').write(open('in-{n}.txt').read())\""
+            ),
+            "inputs": ["in-{n}.txt"],
+            "outputs": ["out-{n}.txt"],
+            "iterate_over": [{"arg_name": "n", "values": ["x", "y"]}],
+        },
+        "draw": {
+            "kind": "command",
+            "environment": "_system",
+            "command": (
+                f'"{sys.executable}" -c "import os; '
+                "os.makedirs('figs', exist_ok=True); "
+                "open('figs/a.txt', 'w').write('a')\""
+            ),
+            "outputs": ["figs"],
+        },
+    }
+    for n in ["x", "y"]:
+        (project / f"in-{n}.txt").write_text(n)
+    with open(project / "calkit.yaml", "a") as f:
+        f.write("owner: me\nname: proj\n")
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    subprocess.check_call(["calkit", "run"], cwd=project)
+    # The pipeline's status is checked once for several asked for together
+    checks = []
+    real_get_status = calkit.pipeline.get_status
+
+    def get_status(*args, **kwargs):
+        checks.append(1)
+        return real_get_status(*args, **kwargs)
+
+    monkeypatch.setattr(calkit.pipeline, "get_status", get_status)
+    for path in ["results.png", "results.pdf"]:
+        assert not get_provenance(str(project), path)["exists"]
+    assert len(checks) == 1
+    # The stage that makes it here, its value, how fresh it is, and the
+    # data nothing records the origin of, as the hub says them
+    res = get_provenance(str(project), "results.json", key="n")
+    assert res["stage"] == "summarize" and res["value"] == 1
+    assert res["stage_status"]["status"] == "up-to-date"
+    assert res["inputs"] == ["data.csv"]
+    assert [g["path"] for g in res["gaps"]] == ["data.csv"]
+    assert get_reply(
+        {
+            "type": "project.provenance",
+            "project": "me/proj",
+            "path": "data.csv",
+        }
+    )["result"]["input_to_stages"] == ["summarize"]
+    # Each iteration has its own status, and an entry dvc.lock kept from
+    # before the stage was a matrix isn't taken for the current stage
+    (project / "in-y.txt").write_text("changed")
+    lock = calkit.ryaml.load((project / "dvc.lock").read_text())
+    lock["stages"] = {"copy": lock["stages"]["copy@x"], **lock["stages"]}
+    with open(project / "dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    res = get_provenance(str(project), "out-x.txt")
+    assert res["stage"] == "copy@x"
+    assert res["stage_status"]["status"] == "up-to-date"
+    res = get_provenance(str(project), "out-y.txt")
+    assert res["stage"] == "copy@y" and res["stale_reason"] == "pipeline"
+    # A file in a folder a stage makes is there when DVC has it, even if
+    # it isn't pulled, but not a name that folder doesn't have
+    (project / "figs" / "a.txt").unlink()
+    assert get_provenance(str(project), "figs/a.txt")["exists"]
+    assert not get_provenance(str(project), "figs/typo.txt")["exists"]
+    # Nothing a symlink takes outside the project is read
+    if sys.platform != "win32":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.json").write_text('{"n": 2}')
+        os.symlink(outside / "secret.json", project / "link.json")
+        os.symlink(outside, project / "ext")
+        for path in ["link.json", "ext/secret.json"]:
+            res = get_provenance(str(project), path, key="n")
+            assert res["value"] is None and not res["exists"]
+    # Only paths in the project
+    for path in ["../x", "/etc/passwd", 5]:
+        reply = get_reply(
+            {"type": "project.provenance", "project": "me/proj", "path": path}
+        )
+        assert not reply["ok"]
+
+
 def test_get_figures(tmp_path):
     from calkit.browser_link import get_figures
 

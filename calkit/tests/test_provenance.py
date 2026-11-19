@@ -1339,6 +1339,15 @@ def test_get_path_provenance():
     assert copy["copied_from"] == "figures/plot.png"
     assert copy["copy_stage"] == "copy-figs" and copy["stage"] == "analyze"
     assert copy["stale_reason"] == "pipeline"
+    # So is one whose stage has never run, so hasn't made it yet
+    not_run = get(
+        "results/metrics.json",
+        statuses={
+            "analyze": {"status": "not-run"},
+            "copy-figs": {"status": "up-to-date"},
+        },
+    )
+    assert not_run["stale_reason"] == "pipeline"
     # What calkit.yaml says it came from, including for a folder it's in
     drawn = get("paper/drawn.svg")
     assert drawn["origin"] == "Created by Ada with Claude"

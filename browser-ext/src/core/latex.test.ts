@@ -278,6 +278,7 @@ describe("citationProblems", () => {
         modified_inputs: ["a.csv", "b.csv", "c.csv", "d.csv"],
       }),
     ).toEqual(["Out of date: a.csv, b.csv and 2 more modified"]);
+    expect(stale({ ...status, status: "not-run" })).toEqual(["Not run yet"]);
     // Imported from somewhere only described, which is worth a warning
     expect(
       citationProblems(figure, {

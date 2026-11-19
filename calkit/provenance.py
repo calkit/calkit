@@ -2017,7 +2017,8 @@ def get_path_provenance(
     status = stage_statuses.get(stage)
     if status is not None:
         out["stage_status"] = status
-        if status.get("status") == "stale":
+        # One that's never run hasn't made what it's for yet either
+        if status.get("status") in ("stale", "not-run"):
             out["stale_reason"] = "pipeline"
         elif stage in (frozen or set()) and out["stale_reason"] is None:
             out["stale_reason"] = "frozen"

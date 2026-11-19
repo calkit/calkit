@@ -260,6 +260,9 @@ export function citationProblems(
           ? "Needs a manual step" +
             (modified ? ` (${modified})` : "") +
             (provenance.message ? `: ${provenance.message}` : "")
+          : // Its origin's defined, but nothing's made it from that yet
+          status?.status === "not-run"
+          ? "Not run yet"
           : "Out of date" + (modified ? `: ${modified}` : ""),
       path,
     });

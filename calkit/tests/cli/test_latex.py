@@ -1049,15 +1049,30 @@ def test_latex_diff_setup(tmp_dir, monkeypatch):
         tex_cmds.append(cmd)
         raise RuntimeError("stop before running latexdiff")
 
+    build_diff = cli_latex._build_diff
+    builds: list[dict] = []
+
+    def record_build(**kwargs: object) -> None:
+        builds.append(kwargs)
+        build_diff(**kwargs)  # type: ignore[arg-type]
+
     monkeypatch.setattr(cli_latex, "_tex_cmd", tex_cmd)
     monkeypatch.setattr(cli_latex, "_get_texlive_env", lambda *a, **kw: None)
-    with pytest.raises(RuntimeError):
-        cli_latex.diff("paper/main.tex", from_ref=base_sha)
-    sides = tex_cmds[0][-2:]
-    assert sides[0].endswith("/base/paper/main.tex"), sides
-    assert sides[1].endswith("/working/paper/main.tex"), sides
-    assert not any("\\" in side for side in sides), sides
-    assert not os.listdir(DIFF_TMP_DIR)
+    monkeypatch.setattr(cli_latex, "_build_diff", record_build)
+    # However the document is spelled, e.g., as tab completion writes it
+    for tex_file in ["paper/main.tex", os.path.join(".", "paper", "main.tex")]:
+        tex_cmds.clear()
+        builds.clear()
+        with pytest.raises(RuntimeError):
+            cli_latex.diff(tex_file, from_ref=base_sha)
+        sides = tex_cmds[0][-2:]
+        assert sides[0].endswith("/base/paper/main.tex"), sides
+        assert sides[1].endswith("/working/paper/main.tex"), sides
+        assert not any("\\" in side for side in sides), sides
+        # Each side's root is what's left of it without the document, so
+        # its sources are found and hashed
+        assert builds[0]["tex_file_fpath"] == "paper/main.tex"
+        assert not os.listdir(DIFF_TMP_DIR)
 
 
 @pytest.mark.skipif(

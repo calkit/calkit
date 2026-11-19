@@ -209,8 +209,6 @@ def test_is_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_is_terminal() -> None:
-    from unittest import mock
-
     # Windows says the NUL device is a TTY, which isn't a terminal
     with open(os.devnull) as f:
         assert not calkit.core.is_terminal(f)

@@ -1712,6 +1712,9 @@ def diff(
             if new_text != text:
                 source_path.write_text(new_text, encoding="utf-8")
 
+    # One spelling, e.g., without './' or Windows separators, since it's
+    # joined onto each side's root and sliced back off
+    tex_file = Path(os.path.normpath(tex_file)).as_posix()
     repo = calkit.git.get_repo()
     if repo.bare:
         raise_error("This is not a working Git repo")

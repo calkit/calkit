@@ -8,7 +8,6 @@ import { projectUrl } from "../core/hub-url";
 import {
   type Citation,
   canBeCreatedByPerson,
-  citationCandidates,
   citationProblems,
   getShownValue,
 } from "../core/latex";
@@ -50,7 +49,9 @@ export function valueText(value: unknown): string {
  * The hub reads the script the way `calkit xr --dry-run` does, without
  * running it, so the user sees the environment, inputs, and outputs before
  * anything is committed. Overleaf can't run it, so once it's saved the
- * panel says how to, on the user's own machine.
+ * panel says how to, on the user's own machine. Something upstream, e.g.,
+ * data a figure is made from, isn't in the document, so the stage has to
+ * write it where it is.
  */
 function renderAddScript(
   container: HTMLElement,
@@ -58,6 +59,7 @@ function renderAddScript(
   citation: Citation,
   shows: string,
   kind: "script" | "notebook",
+  upstream: boolean,
   suggested?: string,
 ): HTMLElement {
   const owner = link.project_owner_name;
@@ -372,12 +374,14 @@ function renderAddScript(
     }
     // Which output this is, when the script writes several or names it
     // differently from the paper
-    const choices = detected.outputs.map((output) => {
+    // Upstream, it's written where it is, even if Calkit didn't see the
+    // script write it there, which the warning below says
+    const choices = (upstream ? [shows] : detected.outputs).map((output) => {
       const radio = el("input", {
         type: "radio",
         attrs: { name: "ck-produces", value: output },
       });
-      radio.checked = output === detected.produces;
+      radio.checked = upstream || output === detected.produces;
       return { output, radio };
     });
     const citeNote = el("div", { class: "dim small" });
@@ -400,7 +404,11 @@ function renderAddScript(
             "Check that it does, or the stage will fail when it runs."
           : "";
     };
-    if (choices.length) {
+    if (upstream) {
+      // Nothing to choose
+      review.append(unseen);
+      updateNote();
+    } else if (choices.length) {
       review.append(
         el("div", { class: "small dim", text: `Which output is ${shows}?` }),
         ...choices.map(({ output, radio }) => {
@@ -617,6 +625,7 @@ function renderDefineOrigin(
   citation: Citation,
   target: string,
   onlyInOverleaf = false,
+  upstream = false,
 ): HTMLElement {
   let synced = !onlyInOverleaf;
   // Synced into the project first when only Overleaf has it, so what's
@@ -745,13 +754,15 @@ function renderDefineOrigin(
     [
       "Script",
       () =>
-        open((body) => renderAddScript(body, link, citation, target, "script")),
+        open((body) =>
+          renderAddScript(body, link, citation, target, "script", upstream),
+        ),
     ],
     [
       "Notebook",
       () =>
         open((body) =>
-          renderAddScript(body, link, citation, target, "notebook"),
+          renderAddScript(body, link, citation, target, "notebook", upstream),
         ),
     ],
     ["Imported", showImport],
@@ -808,6 +819,7 @@ function renderDefineOrigin(
                         citation,
                         target,
                         s.kind === "notebook" ? "notebook" : "script",
+                        upstream,
                         s.source,
                       ),
                     ),
@@ -825,9 +837,7 @@ function renderDefineOrigin(
       class: "small dim",
       style: { marginTop: "4px" },
       // Named when it's what the cited file is made from
-      text: citationCandidates(link.path, citation).includes(target)
-        ? "Define origin"
-        : `Define origin for ${target}`,
+      text: upstream ? `Define origin for ${target}` : "Define origin",
     }),
     el(
       "div",
@@ -1110,6 +1120,8 @@ export function renderProvenance(
             gap,
             // Only in Overleaf, so synced into the project first
             gap === provenance.path && !provenance.exists && !provenance.stage,
+            // E.g., data it's made from, rather than what the document shows
+            gap !== provenance.path && gap !== provenance.copied_from,
           ),
         );
       }

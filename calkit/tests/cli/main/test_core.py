@@ -5019,9 +5019,10 @@ def test_run_records_app_version(tmp_dir):
     assert system["os"] == platform.system()
 
 
-def test_clone(monkeypatch):
+def test_clone(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
+    real_check_call = subprocess.check_call
     cloned = []
     hubs = []
 
@@ -5103,3 +5104,47 @@ def test_clone(monkeypatch):
     assert "doesn't match" in result.output and not hubs
     result = clone("a/b/c/d")
     assert "HUB/OWNER/NAME" in result.output and not hubs
+    # Into a folder with an analysis in it, the project's files go around
+    # it, and its own are left to save
+    monkeypatch.setattr("subprocess.check_call", real_check_call)
+    monkeypatch.setenv(calkit.core.USER_HOME_ENV_VAR, str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path)
+    src = tmp_path / "src"
+    (src / "paper").mkdir(parents=True)
+    (src / "calkit.yaml").write_text("name: proj\n")
+    (src / "paper" / "main.tex").write_text("Hi\n")
+    subprocess.check_call(["git", "init", "-q", "-b", "trunk", str(src)])
+    subprocess.check_call(["git", "-C", str(src), "add", "-A"])
+    subprocess.check_call(["git", "-C", str(src), "commit", "-qm", "Init"])
+    subprocess.check_call(
+        ["git", "clone", "-q", "--bare", str(src), str(tmp_path / "proj.git")]
+    )
+    monkeypatch.setattr(
+        calkit.hub,
+        "get",
+        lambda path: {"git_repo_url": str(tmp_path / "proj")},
+    )
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    (analysis / "fit.py").write_text("print(1)\n")
+    args = ["clone", "me/proj", str(analysis), "--no-dvc-pull"]
+    result = CliRunner().invoke(calkit.cli.main.app, args)
+    assert result.exit_code == 0, result.output
+    repo = git.Repo(analysis)
+    assert repo.active_branch.name == "trunk"
+    assert repo.active_branch.tracking_branch().name == "origin/trunk"
+    assert (analysis / "paper" / "main.tex").read_text() == "Hi\n"
+    assert repo.untracked_files == ["fit.py"]
+    # Not into a repo, and not over files with the project's names, which
+    # leaves the folder as it was
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(calkit.cli.main.app, args)
+    assert "already a Git repo" in result.output
+    clash = tmp_path / "clash"
+    clash.mkdir()
+    (clash / "calkit.yaml").write_text("mine\n")
+    result = CliRunner().invoke(
+        calkit.cli.main.app, ["clone", "me/proj", str(clash), "--no-dvc-pull"]
+    )
+    assert "same names as the project's" in result.output
+    assert os.listdir(clash) == ["calkit.yaml"]

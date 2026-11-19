@@ -1277,8 +1277,10 @@ def start_job(msg: dict) -> dict:
             raise ValueError("A location must be a string")
         location = os.path.abspath(os.path.expanduser(location))
         check_clone_location(location)
-        if os.path.exists(location) and os.listdir(location):
-            raise ValueError(f"{location} is already there and isn't empty")
+        # A folder with files in it, e.g., the analysis, gets the project's
+        # files around them, but not if it's a repo already
+        if os.path.exists(os.path.join(location, ".git")):
+            raise ValueError(f"{location} is already a Git repo")
         wdir = os.path.dirname(location)
         os.makedirs(wdir, exist_ok=True)
         cmd = calkit_cmd + ["clone", f"{owner}/{name}", location]

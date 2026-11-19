@@ -2113,7 +2113,7 @@ function renderClone(project: string, reload: () => void): HTMLElement {
       class: "small",
       text:
         "This project isn't on this machine. Clone it to run, save, and " +
-        "sync from here:",
+        "sync from here, into a new folder or one with your analysis in it:",
     }),
     el("div", { class: "row", style: { marginTop: "6px" } }, [location, clone]),
     message,

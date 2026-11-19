@@ -386,7 +386,11 @@ def clone(
     location: Annotated[
         str | None,
         typer.Argument(
-            help="Location to clone to (default will be ./{repo_name})"
+            help=(
+                "Location to clone to (default will be ./{repo_name}). A "
+                "folder with files in it already, e.g., an analysis, gets "
+                "the project's files around them, leaving its own to save."
+            )
         ),
     ] = None,
     use_ssh: Annotated[
@@ -479,16 +483,74 @@ def clone(
             typer.echo("Cloning over SSH, which is set up for GitHub")
     if use_ssh and on_github:
         url = url.replace("https://github.com/", "git@github.com:")
-    # Git clone
-    cmd = ["git", "clone", url]
-    if not non_recursive:
-        cmd.append("--recursive")
-    if location is not None:
-        cmd.append(location)
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError:
-        raise_error("Failed to clone with Git")
+    # Into a folder with files in it, e.g., the analysis the project was
+    # made for, the project's files are checked out around them, and its
+    # own are left for someone to save
+    if (
+        location is not None
+        and os.path.isdir(location)
+        and os.listdir(location)
+    ):
+        if os.path.exists(os.path.join(location, ".git")):
+            raise_error(f"{location} is already a Git repo")
+        try:
+            subprocess.check_call(["git", "init", "-q"], cwd=location)
+            subprocess.check_call(
+                ["git", "remote", "add", "origin", url], cwd=location
+            )
+            subprocess.check_call(
+                ["git", "fetch", "-q", "origin"], cwd=location
+            )
+            head = subprocess.check_output(
+                ["git", "ls-remote", "--symref", "origin", "HEAD"],
+                cwd=location,
+                text=True,
+            )
+            branch = next(
+                (
+                    line.split()[1].removeprefix("refs/heads/")
+                    for line in head.splitlines()
+                    if line.startswith("ref:")
+                ),
+                None,
+            )
+            # Nothing to check out if the repo has no commits yet
+            if branch is not None:
+                subprocess.check_call(
+                    [
+                        "git",
+                        "checkout",
+                        "-q",
+                        "-b",
+                        branch,
+                        "--track",
+                        f"origin/{branch}",
+                    ],
+                    cwd=location,
+                )
+            if not non_recursive:
+                subprocess.check_call(
+                    ["git", "submodule", "update", "--init", "--recursive"],
+                    cwd=location,
+                )
+        except subprocess.CalledProcessError:
+            # Put back as it was, so trying again isn't refused
+            shutil.rmtree(os.path.join(location, ".git"), ignore_errors=True)
+            raise_error(
+                f"Failed to get the project's files into {location}; if Git "
+                "says files here have the same names as the project's, move "
+                "them, then try again"
+            )
+    else:
+        cmd = ["git", "clone", url]
+        if not non_recursive:
+            cmd.append("--recursive")
+        if location is not None:
+            cmd.append(location)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to clone with Git")
     if location is None:
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")

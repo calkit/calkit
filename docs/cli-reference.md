@@ -90,10 +90,10 @@ calkit clone [OPTIONS] URL [LOCATION]
 
 Arguments:
 
-| Argument   | Type | Required | Default | Description                                                                                                                   |
-| ---------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `url`      | str  | yes      |         | Project as OWNER/NAME, or HUB/OWNER/NAME for one on another hub, e.g., calkit.example.edu/someone/my-proj, or a Git repo URL. |
-| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name})                                                                          |
+| Argument   | Type | Required | Default | Description                                                                                                                                                                |
+| ---------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`      | str  | yes      |         | Project as OWNER/NAME, or HUB/OWNER/NAME for one on another hub, e.g., calkit.example.edu/someone/my-proj, or a Git repo URL.                                              |
+| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name}). A folder with files in it already, e.g., an analysis, gets the project's files around them, leaving its own to save. |
 
 Options:
 

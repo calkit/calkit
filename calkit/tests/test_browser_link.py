@@ -712,7 +712,7 @@ def test_start_job(tmp_path, monkeypatch):
         ({"kind": "run", "project": "me/gone"}, "isn't on this machine"),
         (
             {"kind": "clone", "project": "me/proj", "location": str(project)},
-            "isn't empty",
+            "already a Git repo",
         ),
         # Only to a folder of the user's own, not one config is read from
         (
@@ -727,6 +727,15 @@ def test_start_job(tmp_path, monkeypatch):
     ]:
         with pytest.raises(ValueError, match=error):
             start_job(msg)
+    # A folder with an analysis in it already gets the project around it
+    analysis = home / "calkit" / "analysis"
+    analysis.mkdir()
+    (analysis / "fit.py").write_text("")
+    cloning = start_job(
+        {"kind": "clone", "project": "me/x", "location": str(analysis)}
+    )
+    assert cloning["cmd"] == calkit_cmd + ["clone", "me/x", str(analysis)]
+    os.remove(calkit.browser_link.get_job_path(cloning["id"]))
     with pytest.raises(ValueError):
         get_job("../../etc/passwd")
     # Running it records how it went, with the error it ended with

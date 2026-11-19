@@ -1656,28 +1656,34 @@ function renderProvenance(
   for (const problem of problems) {
     container.append(problemLine(problem));
   }
-  // Defined in one place, since several components can be made from it
-  if (
-    problems.some((p) => p.kind === "origin") &&
-    link.current_user_access !== "read"
-  ) {
-    container.append(
-      el("div", { class: "small" }, [
-        el("a", {
-          text: named ? "Define it in the Calkit sidebar" : "Define it above",
-          onClick: (event) => {
-            event.preventDefault();
-            if (!railOpen) {
-              setRail(true);
-            }
-            // In the sidebar's shadow root
-            railPane?.body
-              .querySelector("#calkit-origin-needed")
-              ?.scrollIntoView({ block: "start", behavior: "smooth" });
-          },
-        }),
-      ]),
-    );
+  // Defined in the sidebar, under the component, for what it's made from
+  // with no origin, which is often the component's own file
+  const gapPaths = [
+    ...new Set(problems.filter((p) => p.kind === "origin").map((p) => p.path)),
+  ];
+  if (gapPaths.length && link.current_user_access !== "read") {
+    if (named) {
+      container.append(
+        el("div", { class: "small" }, [
+          el("a", {
+            text: "Define it in the Calkit sidebar",
+            onClick: (event) => {
+              event.preventDefault();
+              showInRail(citation);
+            },
+          }),
+        ]),
+      );
+    } else {
+      for (const gap of gapPaths) {
+        container.append(
+          gapPaths.length > 1
+            ? el("div", { class: "small", text: gap })
+            : el("span"),
+          renderDefineOrigin(link, citation, gap),
+        );
+      }
+    }
   }
   if (provenance.copied_from) {
     container.append(
@@ -4892,7 +4898,7 @@ function renderStatus(
   const project = `${link.project_owner_name}/${link.project_name}`;
   // Worked on here, so the hub's parts stay out of the way
   const local = Boolean(link.local_path);
-  const badge = status.in_sync
+  const syncBadge = status.in_sync
     ? el("span", { class: "badge ok", text: "in sync" })
     : el("span", {
         class: figures.length ? "badge danger" : "badge warn",
@@ -4900,6 +4906,47 @@ function renderStatus(
           ? `${figures.length} figure${figures.length === 1 ? "" : "s"} to sync`
           : "out of sync",
       });
+  // Components with no origin outrank being in sync, and are listed
+  const badge = el("span");
+  const origins = el("div");
+  drawPanelOrigins = () => {
+    const missing = getComponentsWithoutOrigin();
+    const n = missing.length;
+    clear(badge).append(
+      n
+        ? el("span", {
+            class: "badge danger",
+            text: `${n} missing origin${n === 1 ? "" : "s"}`,
+          })
+        : syncBadge,
+    );
+    clear(origins);
+    if (!n) {
+      return;
+    }
+    origins.append(
+      el("div", {
+        class: "small",
+        style: { marginTop: "8px", fontWeight: "600" },
+        text: "Missing origins",
+      }),
+      ...missing.map((item) =>
+        el("div", { class: "small" }, [
+          el("a", {
+            text: item.citation.key
+              ? `${item.citation.path} \u00b7 ${item.citation.key}`
+              : item.citation.path,
+            style: { color: "var(--ck-danger)" },
+            onClick: (event) => {
+              event.preventDefault();
+              showInRail(item.citation);
+            },
+          }),
+        ]),
+      ),
+    );
+  };
+  drawPanelOrigins();
   // What a sync would do, set aside while a run or sync makes it out of
   // date, with what's going on said instead
   const details = el("div");
@@ -4927,7 +4974,7 @@ function renderStatus(
     ]),
   );
   body.append(renderLocalChanges(project, reload, link.local_path));
-  body.append(busy, details);
+  body.append(origins, busy, details);
   // On this machine, the badge says it
   if (status.in_sync && !local) {
     details.append(
@@ -5990,7 +6037,8 @@ type LauncherTone =
   | "reconnect"
   | "unlinked"
   | "running"
-  | "syncing";
+  | "syncing"
+  | "origins";
 
 function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
   document.getElementById(LAUNCHER_ID)?.remove();
@@ -6018,7 +6066,9 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
     }
     button:hover { filter: brightness(1.1); }
     button.attention { background: #d69e2e; }
+    button.danger { background: #e5484d; }
   `;
+  const missing = getComponentsWithoutOrigin().length;
   const button = el("button", {
     text: {
       idle: "Calkit",
@@ -6027,8 +6077,14 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
       unlinked: "Calkit: not linked",
       running: "Calkit: running",
       syncing: "Calkit: syncing",
+      origins: `Calkit: ${missing} missing origin${missing === 1 ? "" : "s"}`,
     }[tone],
-    class: ["idle", "running", "syncing"].includes(tone) ? "" : "attention",
+    class:
+      tone === "origins"
+        ? "danger"
+        : ["idle", "running", "syncing"].includes(tone)
+        ? ""
+        : "attention",
   });
   button.addEventListener("click", onClick);
   root.append(style, button);
@@ -6054,6 +6110,9 @@ function launcherTone(): LauncherTone {
   }
   if (activeRun()) {
     return "running";
+  }
+  if (getComponentsWithoutOrigin().length) {
+    return "origins";
   }
   return lastSyncNeeded ? "attention" : "idle";
 }
@@ -6531,8 +6590,24 @@ function getOriginGaps(): Map<string, { citation: Citation; uses: string[] }> {
   return gaps;
 }
 
+/** The open document's components with no origin defined. */
+function getComponentsWithoutOrigin(): EditorCitation[] {
+  const items = editorCitations?.items ?? [];
+  if (!currentLink || editorProblems?.version !== editorCitations?.version) {
+    return [];
+  }
+  return items.filter(
+    (_, i) => editorProblems?.found[i]?.some((p) => p.kind === "origin"),
+  );
+}
+
+// Redraws what the panel says of origins, while it's showing a status
+let drawPanelOrigins: (() => void) | null = null;
+
 /** A dot on the Calkit tab while something here needs an origin defined. */
 function markRailTab(): void {
+  drawPanelOrigins?.();
+  remountLauncher();
   const tab = document.getElementById(RAIL_TAB_ID);
   if (!tab) {
     return;
@@ -6671,6 +6746,25 @@ async function refreshRailPipeline(link: OverleafLinkPublic): Promise<void> {
   drawRail();
 }
 
+/** Open the sidebar on a component's card, as clicking its row does. */
+function showInRail(citation: Citation): void {
+  const link = currentLink;
+  const items = editorCitations?.items ?? [];
+  const text = citationText(citation);
+  const item = items.find((i) => citationText(i.citation) === text);
+  if (!link || !item) {
+    return;
+  }
+  const element = el("div", { class: "card" });
+  railCard = { key: `${text}#1`, element };
+  void fillCard(element, link, item);
+  if (!railOpen) {
+    setRail(true);
+  }
+  drawRail();
+  element.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 function drawRail(): void {
   // One of the pipeline's runs, opening its log, or GitHub's page for it
   const renderRunItem = (link: OverleafLinkPublic, run: PipelineRun) => {
@@ -6790,40 +6884,6 @@ function drawRail(): void {
       message,
     );
   }
-  // Upstream of the components, so not in their list, but where Calkit
-  // can't tell where something came from
-  const gaps = getOriginGaps();
-  if (gaps.size) {
-    body.append(
-      el("h3", {
-        text: "Origin needed",
-        attrs: { id: "calkit-origin-needed" },
-      }),
-      el("div", {
-        class: "dim small",
-        text:
-          "Calkit can't tell where these came from. Components here are " +
-          "made from them.",
-      }),
-    );
-    for (const [path, gap] of gaps) {
-      body.append(
-        el("div", { class: "card" }, [
-          el("div", { class: "row small" }, [
-            el("span", { class: "dot error" }),
-            el("span", { class: "grow", text: path }),
-          ]),
-          el("div", {
-            class: "dim small",
-            text: `Used by ${gap.uses.join(", ")}`,
-          }),
-          link.current_user_access === "read"
-            ? null
-            : renderDefineOrigin(link, gap.citation, path),
-        ]),
-      );
-    }
-  }
   // Components the open document shows, each with what's wrong with it
   body.append(el("h3", { text: "Components" }));
   const items = editorCitations?.items ?? [];
@@ -6850,6 +6910,7 @@ function drawRail(): void {
     const label = item.citation.key
       ? `${item.citation.path} · ${item.citation.key}`
       : item.citation.path;
+    const failing = problems?.some((p) => p.severity === "error");
     body.append(
       el(
         "button",
@@ -6883,7 +6944,11 @@ function drawRail(): void {
                 : ""
             }${railCard?.key === key ? " open" : ""}`,
           }),
-          el("span", { class: "grow small", text: label }),
+          el("span", {
+            class: "grow small",
+            text: label,
+            style: failing ? { color: "var(--ck-danger)" } : {},
+          }),
           el("span", { class: "dim small", text: `${item.line}` }),
         ],
       ),

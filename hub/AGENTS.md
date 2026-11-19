@@ -216,7 +216,6 @@ divergence from that baseline noise.
 
 ## Misc rules
 
-- Git commits and pushes are for humans, not agents.
 - No blank lines in functions. This only covers blank lines we write, not ones
   the auto-formatter inserts, e.g., ruff-format adds one after an in-function
   import block. Don't delete those; `ruff format` will just put them back.

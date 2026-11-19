@@ -256,7 +256,7 @@ function renderAddScript(
   const { element: picker, input: path } = renderPathPicker({
     owner,
     project,
-    placeholder: "Or find it in the project",
+    placeholder: "Or find in project",
     accept: (p) => exts.some((ext) => p.toLowerCase().endsWith(ext)),
   });
   const read = el("button", { class: "action", text: `Read the ${kind}` });
@@ -628,7 +628,7 @@ function renderExported(
   const { element: picker, input: path } = renderPathPicker({
     owner,
     project,
-    placeholder: "Or find it in the project",
+    placeholder: "Or find in project",
     accept: (p) => p !== target && canBeCreatedByPerson(p),
   });
   const appName = textInput({
@@ -5387,7 +5387,7 @@ async function renderAttachForm(
   const publicField = el(
     "label",
     { class: "row", style: { fontWeight: "400" } },
-    [isPublic, el("div", { class: "grow small", text: "Make it public" })],
+    [isPublic, el("div", { class: "grow small", text: "Make public" })],
   );
   const repoInput = textInput({
     placeholder: "Start typing your GitHub repo name",
@@ -5399,7 +5399,7 @@ async function renderAttachForm(
     repoResults,
     el("div", { class: "dim small" }, [
       document.createTextNode("Only repos the Calkit app can access show. "),
-      el("a", { text: "Give it access to more", href: accountsUrl }),
+      el("a", { text: "Give access to more", href: accountsUrl }),
     ]),
   ]);
   const titleInput = textInput({
@@ -6682,7 +6682,7 @@ function drawRail(): void {
       el("div", { class: "actions" }, [
         el("button", {
           class: "action",
-          text: "Link it",
+          text: "Link",
           onClick: () => currentProjectId && openPanel(currentProjectId),
         }),
       ]),

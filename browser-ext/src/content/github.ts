@@ -1029,7 +1029,7 @@ async function openPanel(state: RepoState): Promise<void> {
           signIn,
           el("a", {
             class: "small",
-            text: "Open the hub",
+            text: "Open hub",
             href: state.hubWebUrl,
           }),
         ]),

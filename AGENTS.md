@@ -81,9 +81,10 @@ Always put a comma after "i.e." and "e.g.".
 Text people read in an app, e.g., labels, buttons, statuses, tooltips, and
 error messages, uses the fewest words that say it:
 
-- Drop articles and words the layout already implies, e.g., "Run pipeline"
-  rather than "Run the pipeline first", "Creating project" rather than
-  "Creating the project".
+- Drop articles, pronouns, and words the layout already implies, e.g.,
+  "Run pipeline" rather than "Run the pipeline first", "Creating project"
+  rather than "Creating the project", "Make public" rather than
+  "Make it public".
 - Put the adjective first, e.g., "unsaved changes" rather than
   "changes not saved".
 - Name the specific thing, or say the state plainly, rather than

@@ -390,6 +390,9 @@ class StageFromScriptOrNotebookResponse(BaseModel):
     dependencies: list[str] = []
     inputs: list[str] = []
     outputs: list[str] = []
+    # Those found by reading the script, or already declared by its stage,
+    # rather than only added because a document shows them
+    found_outputs: list[str] = []
     # Inputs that aren't in the project and that no stage produces
     missing_inputs: list[str] = []
     # Data read from outside the project, e.g., a synced Box folder, as the
@@ -633,6 +636,7 @@ def post_project_stage_from_script_or_notebook(
         dependencies=plan["dependencies"],
         inputs=plan["inputs"],
         outputs=plan["outputs"],
+        found_outputs=plan["found_outputs"],
         missing_inputs=plan["missing_inputs"],
         external_inputs=plan["external_inputs"],
         rewritten=rewritten,

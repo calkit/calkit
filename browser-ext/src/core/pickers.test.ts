@@ -62,11 +62,20 @@ describe("renderPathPicker", () => {
     await settle();
     // Hidden files and folders aren't offered
     expect(picks()).toEqual(["drawings/", "x.png"]);
+    // A click doesn't take focus from the input
+    const folder = element.querySelector<HTMLButtonElement>("button.pick")!;
+    const down = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+    });
+    folder.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    // and if something else gave the folder focus, opening it takes it back,
+    // since the folder's button is gone after, and focus with it would
+    // close the list
     await click("drawings/");
-    // Holding focus, since the folder clicked is gone, and focus with it
-    // would close the list
     const results = element.querySelector<HTMLElement>(".picks")!;
-    expect(document.activeElement).toBe(results);
+    expect(document.activeElement).toBe(input);
     expect(results.style.display).toBe("");
     expect(picks()).toEqual(["← drawings/", "old/", "setup.psd"]);
     await click("old/");

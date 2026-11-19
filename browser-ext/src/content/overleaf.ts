@@ -16,11 +16,23 @@ import {
 import {
   type Citation,
   type CitationProblem,
+  type ResultValue,
+  type TableFile,
+  type TypedNumber,
   canBeCreatedByPerson,
+  IGNORE_COMMENT,
   citationProblems,
   citationText,
   getShownValue,
   citationCandidates,
+  resultValues,
+  roundedLike,
+  tableFile,
+  typedNumberCitation,
+  typedNumberMatches,
+  typedNumberProblem,
+  typedTableMatches,
+  typedTableProblem,
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import {
@@ -84,7 +96,7 @@ import {
   synctexInputFile,
   synctexTag,
 } from "../../../vscode-ext/src/latex/core";
-import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
+import type { EditorItem, FromEditor, ToEditor } from "./overleaf-editor";
 
 const PANEL_ID = "calkit-overleaf-panel";
 const LAUNCHER_ID = "calkit-overleaf-launcher";
@@ -145,6 +157,9 @@ function observePage(
 }
 // The Calkit project this Overleaf project syncs with, once found
 let currentLink: OverleafLinkPublic | null = null;
+// Overleaf links whose project changed on the hub, e.g., with an import,
+// but whose sync failed, so a retry syncs even when nothing changes again
+const syncOwed = new Set<string>();
 // Kept for a minute, since the project changes under it, e.g., with a sync
 const provenanceCache = new Map<
   string,
@@ -174,6 +189,106 @@ function provenanceFor(
   provenance.catch(() => provenanceCache.delete(cacheKey));
   provenanceCache.set(cacheKey, { at: Date.now(), provenance });
   return provenance;
+}
+
+// Kept for a minute too, since checking a document asks for them each time
+// it changes
+const valuesCache = new Map<
+  string,
+  { at: number; values: Promise<ResultValue[]> }
+>();
+
+/**
+ * Every number in the project's results files, which a typed number may be
+ * a copy of.
+ */
+function projectValues(link: OverleafLinkPublic): Promise<ResultValue[]> {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const cacheKey = `${owner}/${project}`;
+  const cached = valuesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.values;
+  }
+  const values = (async () => {
+    const results = await send({ type: "project.results", owner, project });
+    const paths = [...new Set(results.map((result) => result.path))].filter(
+      (path) => /\.(json|ya?ml|toml)$/i.test(path),
+    );
+    const files = await Promise.all(
+      paths.map((path) => provenanceFor(link, path).catch(() => null)),
+    );
+    return files.flatMap((file, i) =>
+      file && !file.value_error ? resultValues(paths[i], file.value) : [],
+    );
+  })();
+  values.catch(() => valuesCache.delete(cacheKey));
+  valuesCache.set(cacheKey, { at: Date.now(), values });
+  return values;
+}
+
+const tablesCache = new Map<
+  string,
+  { at: number; tables: Promise<TableFile[]> }
+>();
+
+/** The tables stages write as TeX, which a typed table may be a copy of. */
+function projectTables(link: OverleafLinkPublic): Promise<TableFile[]> {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const cacheKey = `${owner}/${project}`;
+  const cached = tablesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.tables;
+  }
+  const tables = (async () => {
+    const listed = await send({ type: "project.tables", owner, project });
+    const paths = [...new Set(listed.map((table) => table.path))].filter(
+      (path) => /\.tex$/i.test(path),
+    );
+    const files = await Promise.all(
+      paths.map(async (path) => {
+        try {
+          const item = await send({
+            type: "project.contents",
+            owner,
+            project,
+            path,
+          });
+          if (!item.content) {
+            return null;
+          }
+          // Base64, as the hub sends every file
+          const bytes = Uint8Array.from(atob(item.content), (c) =>
+            c.charCodeAt(0),
+          );
+          return tableFile(path, new TextDecoder().decode(bytes));
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return files.filter((file): file is TableFile => file !== null);
+  })();
+  tables.catch(() => tablesCache.delete(cacheKey));
+  tablesCache.set(cacheKey, { at: Date.now(), tables });
+  return tables;
+}
+
+/**
+ * Sync after the hub changed the project, remembering until it works that
+ * a sync is owed, since the hub won't report the change again.
+ */
+async function syncAfterHubChange(link: OverleafLinkPublic): Promise<void> {
+  const key = `${linkKey(link)}:${link.path}`;
+  syncOwed.add(key);
+  await send({
+    type: "overleaf.sync",
+    owner: link.project_owner_name,
+    project: link.project_name,
+    path: link.path,
+  });
+  syncOwed.delete(key);
 }
 
 /**
@@ -532,6 +647,10 @@ function renderAddScript(
       return { output, radio };
     });
     const citeNote = el("div", { class: "dim small" });
+    const unseen = el("div", {
+      class: "small",
+      style: { color: "var(--ck-warning)" },
+    });
     const chosen = () => choices.find((c) => c.radio.checked)?.output;
     const updateNote = () => {
       const output = chosen();
@@ -539,18 +658,26 @@ function renderAddScript(
         output && output !== shows
           ? `The paper will show it from there, with \\ckfigure{${output}}.`
           : "";
+      // Static analysis can miss a path built at run time, so this warns
+      // rather than refuses
+      unseen.textContent =
+        output && !(detected.found_outputs ?? []).includes(output)
+          ? `Calkit didn't see ${request?.scriptPath} write ${output}. ` +
+            "Check that it does, or the stage will fail when it runs."
+          : "";
     };
     if (choices.length) {
       review.append(
         el("div", { class: "small dim", text: `Which output is ${shows}?` }),
         ...choices.map(({ output, radio }) => {
           radio.addEventListener("change", updateNote);
-          return el("label", { class: "small", style: { display: "block" } }, [
+          return el("label", { class: "choice" }, [
             radio,
-            document.createTextNode(` ${output}`),
+            el("span", { class: "name", text: output }),
           ]);
         }),
         citeNote,
+        unseen,
       );
       updateNote();
     } else {
@@ -749,63 +876,116 @@ function renderRecordOrigin(
     "type" | "owner" | "project" | "path"
   > | null>;
   if (how === "imported") {
-    const sources = [
-      ["url", "Website", "https://example.org/data/measurements.csv"],
-      ["doi", "DOI", "10.5281/zenodo.1234567"],
-      ["git", "Git repo", "https://github.com/owner/repo"],
-    ] as const;
-    let source: (typeof sources)[number][0] = "url";
-    const where = textInput({ placeholder: sources[0][2] });
-    const rev = textInput({ placeholder: "Commit or tag (optional)" });
-    const repoPath = textInput({ placeholder: "Path in the repo (optional)" });
-    const gitFields = el(
-      "div",
-      { class: "stack", style: { display: "none" } },
-      [rev, repoPath],
-    );
+    const source = el("select", {}, [
+      el("option", { value: "url", text: "Website" }),
+      el("option", { value: "doi", text: "DOI" }),
+      el("option", { value: "git", text: "Git repo" }),
+      el("option", { value: "project", text: "Calkit project" }),
+    ]);
+    const url = textInput({ placeholder: "https://example.org/figure.png" });
+    const doi = textInput({ placeholder: "10.5281/zenodo.1234567" });
     const date = el("input", { type: "date" });
-    const radios = sources.map(([value, text, placeholder]) => {
-      const radio = el("input", {
-        type: "radio",
-        attrs: { name: "ck-import-source", value },
-      });
-      radio.checked = value === source;
-      radio.addEventListener("change", () => {
-        source = value;
-        where.placeholder = placeholder;
-        gitFields.style.display = value === "git" ? "" : "none";
-      });
-      return el("label", { class: "small", style: { display: "inline" } }, [
-        radio,
-        document.createTextNode(` ${text}  `),
-      ]);
-    });
-    fields.append(
-      el("div", {}, radios),
-      where,
-      gitFields,
+    const retrieved = el("div", { class: "stack" }, [
       el("label", { text: "Retrieved (optional)" }),
       date,
-    );
-    read = async () => {
-      const value = where.value.trim();
-      if (!value) {
-        return null;
+    ]);
+    const repoUrl = textInput({ placeholder: "https://github.com/owner/repo" });
+    const repoPath = textInput({ placeholder: "Path in the repo" });
+    const ref = textInput({ placeholder: "Branch or tag (optional)" });
+    // Another project, with its files to pick from once it's named
+    const projects = el("datalist", {
+      attrs: { id: `ck-import-projects-${Date.now()}` },
+    });
+    const otherProject = textInput({ placeholder: "owner/project" });
+    otherProject.setAttribute("list", projects.id);
+    void send({ type: "projects.list", minAccessLevel: "read", limit: 100 })
+      .then((page) =>
+        projects.append(
+          ...page.data.map((p) =>
+            el("option", { value: `${p.owner_account_name}/${p.name}` }),
+          ),
+        ),
+      )
+      .catch(() => undefined);
+    const pickerSlot = el("div");
+    let projectPath: HTMLInputElement | null = null;
+    const showPicker = () => {
+      const [owner, name, ...rest] = otherProject.value.trim().split("/");
+      clear(pickerSlot);
+      projectPath = null;
+      if (owner && name && !rest.length) {
+        const picker = renderPathPicker({
+          owner,
+          project: name,
+          placeholder: "Path in that project",
+        });
+        projectPath = picker.input;
+        pickerSlot.append(picker.element);
       }
+    };
+    otherProject.addEventListener("input", showPicker);
+    const groups: Record<string, HTMLElement> = {
+      url: el("div", { class: "stack" }, [url]),
+      doi: el("div", { class: "stack" }, [doi]),
+      git: el("div", { class: "stack" }, [repoUrl, repoPath, ref]),
+      project: el("div", { class: "stack" }, [
+        otherProject,
+        projects,
+        pickerSlot,
+      ]),
+    };
+    const showSource = () => {
+      for (const [value, group] of Object.entries(groups)) {
+        group.style.display = value === source.value ? "" : "none";
+      }
+      retrieved.style.display = ["url", "doi"].includes(source.value)
+        ? ""
+        : "none";
+    };
+    source.addEventListener("change", showSource);
+    showSource();
+    fields.append(source, ...Object.values(groups), retrieved);
+    read = async () => {
       const when = date.value || null;
-      return {
-        importedFrom:
-          source === "url"
-            ? { url: value, date: when }
-            : source === "doi"
-            ? { doi: value, date: when }
-            : {
-                git_repo_url: value,
-                git_ref: rev.value.trim() || null,
-                path: repoPath.value.trim() || null,
-                date: when,
-              },
-      };
+      switch (source.value) {
+        case "url":
+          return url.value.trim()
+            ? { importedFrom: { url: url.value.trim(), date: when } }
+            : null;
+        case "doi":
+          return doi.value.trim()
+            ? { importedFrom: { doi: doi.value.trim(), date: when } }
+            : null;
+        case "git":
+          if (!repoUrl.value.trim()) {
+            return null;
+          }
+          if (!repoPath.value.trim()) {
+            throw new Error("Say which file in the repo it is.");
+          }
+          return {
+            importedFrom: {
+              git_repo_url: repoUrl.value.trim(),
+              path: repoPath.value.trim(),
+              git_ref: ref.value.trim() || null,
+            },
+          };
+        default: {
+          const path = projectPath?.value.trim();
+          if (!otherProject.value.trim()) {
+            return null;
+          }
+          if (!projectPath) {
+            throw new Error("Name the project as owner/project.");
+          }
+          if (!path) {
+            throw new Error("Say which file in the project it is.");
+          }
+          return {
+            importedFrom: { project: otherProject.value.trim(), path },
+          };
+        }
+      }
     };
   } else {
     const ai = textInput({ placeholder: "Ex: Claude Opus 5" });
@@ -852,6 +1032,26 @@ function renderRecordOrigin(
         path: target,
         ...origin,
       });
+      // One from a Git repo or project replaces the file on the hub, so
+      // Overleaf gets it too
+      const imported =
+        "importedFrom" in origin ? origin.importedFrom : undefined;
+      if (imported?.project || imported?.git_repo_url) {
+        clear(message).append(loading("Syncing"));
+        try {
+          await syncAfterHubChange(link);
+        } catch (e) {
+          await showDefined(container, link, citation);
+          container.append(
+            errorMessage(
+              `Saved, but not synced to Overleaf: ${
+                e instanceof Error ? e.message : String(e)
+              }. Update to try again.`,
+            ),
+          );
+          return;
+        }
+      }
       await showDefined(container, link, citation);
     } catch (e) {
       clear(message).append(
@@ -874,14 +1074,45 @@ function renderRecordOrigin(
 
 type ToRecord = Extract<Request, { type: "project.recordOrigin" }>;
 
-/** The ways to define where a file came from, each opening its form. */
+/**
+ * The ways to define where a file came from, each opening its form.
+ *
+ * A file only Overleaf has is synced into the project first, so what's
+ * recorded about it lands on the file itself.
+ */
 function renderDefineOrigin(
   link: OverleafLinkPublic,
   citation: Citation,
   target: string,
+  onlyInOverleaf = false,
 ): HTMLElement {
+  let synced = !onlyInOverleaf;
   const open = (form: (body: HTMLElement) => HTMLElement) =>
-    showInPanel((body) => body.append(form(body)));
+    showInPanel(async (body) => {
+      if (!synced) {
+        body.append(loading("Syncing from Overleaf"));
+        try {
+          await send({
+            type: "overleaf.sync",
+            owner: link.project_owner_name,
+            project: link.project_name,
+            path: link.path,
+          });
+          synced = true;
+          // Found again now that it's in the project, e.g., figs/fit as
+          // figs/fit.png, so what's recorded lands on the file itself
+          provenanceCache.clear();
+          target = (await citationProvenance(link, citation)).path;
+        } catch (e) {
+          clear(body).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+          return;
+        }
+        clear(body);
+      }
+      body.append(form(body));
+    });
   const choices: [string, () => void][] = [
     [
       "Script",
@@ -1753,7 +1984,13 @@ function renderProvenance(
           gapPaths.length > 1
             ? el("div", { class: "small", text: gap })
             : el("span"),
-          renderDefineOrigin(link, citation, gap),
+          renderDefineOrigin(
+            link,
+            citation,
+            gap,
+            // Only in Overleaf, so synced into the project first
+            gap === provenance.path && !provenance.exists && !provenance.stage,
+          ),
         );
       }
     }
@@ -1804,6 +2041,48 @@ function renderProvenance(
           : null,
       ]),
     );
+    if (provenance.updatable && link.current_user_access !== "read") {
+      const message = el("div", { class: "small" });
+      const update = el("button", {
+        class: "action secondary",
+        text: "Update",
+        style: { padding: "4px 8px" },
+      });
+      update.addEventListener("click", async () => {
+        update.disabled = true;
+        clear(message).append(loading("Updating"));
+        try {
+          const updated = await send({
+            type: "project.updateImport",
+            owner: link.project_owner_name,
+            project: link.project_name,
+            path: provenance.path,
+          });
+          if (
+            updated.changed ||
+            syncOwed.has(`${linkKey(link)}:${link.path}`)
+          ) {
+            clear(message).append(loading("Syncing"));
+            await syncAfterHubChange(link);
+            await showDefined(container, link, citation);
+          } else {
+            clear(message).append(
+              el("span", { class: "dim", text: "Already up to date" }),
+            );
+            update.disabled = false;
+          }
+        } catch (e) {
+          clear(message).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+          update.disabled = false;
+        }
+      });
+      container.append(
+        el("div", { class: "actions", style: { marginTop: "4px" } }, [update]),
+        message,
+      );
+    }
   } else if (provenance.stage) {
     container.append(
       el("div", { class: "row" }, [
@@ -2247,7 +2526,7 @@ let lastEditorVersion: number | null = null;
 
 // What the editor last said the open document shows, and what's wrong with
 // each, by its index there
-let editorCitations: { version: number; items: EditorCitation[] } | null = null;
+let editorCitations: { version: number; items: EditorItem[] } | null = null;
 let editorProblems: { version: number; found: CitationProblem[][] } | null =
   null;
 
@@ -2268,12 +2547,21 @@ async function checkCitations(): Promise<void> {
   const work = async () => {
     while (next < snapshot.items.length) {
       const i = next++;
-      const { citation } = snapshot.items[i];
+      const { citation, typed, table } = snapshot.items[i];
       try {
-        found[i] = citationProblems(
-          citation,
-          await citationProvenance(link, citation),
-        );
+        found[i] = typed
+          ? [typedNumberProblem(typed, await projectValues(link))]
+          : table
+          ? [
+              typedTableProblem(
+                { numbers: table.numbers },
+                await projectTables(link),
+              ),
+            ]
+          : citationProblems(
+              citation,
+              await citationProvenance(link, citation),
+            );
       } catch {
         found[i] = [];
       }
@@ -2345,7 +2633,7 @@ async function fillTooltip(
   style.textContent = STYLES + TOOLTIP_STYLES;
   const body = el("div", { class: "tip" });
   root.append(style, body);
-  await fillCard(body, link, item);
+  await fillCard(body, link, item, { version, index });
 }
 
 /**
@@ -2355,10 +2643,23 @@ async function fillTooltip(
 async function fillCard(
   body: HTMLElement,
   link: OverleafLinkPublic,
-  item: EditorCitation,
+  item: EditorItem,
+  at: { version: number; index: number },
 ): Promise<void> {
   clear(body).append(loading());
   try {
+    if (item.typed) {
+      const values = await projectValues(link);
+      clear(body);
+      renderTyped(body, link, item.typed, values, at);
+      return;
+    }
+    if (item.table) {
+      const tables = await projectTables(link);
+      clear(body);
+      renderTypedTable(body, link, item.table.numbers, tables, at);
+      return;
+    }
     const provenance = await citationProvenance(link, item.citation);
     clear(body);
     renderProvenance(body, link, item.citation, provenance, false);
@@ -2368,6 +2669,257 @@ async function fillCard(
       errorMessage(e instanceof Error ? e.message : String(e)),
     );
   }
+}
+
+// Replacements asked of the editor, by id, until it says how they went
+const replacing = new Map<string, (error: string | undefined) => void>();
+let replacements = 0;
+
+/**
+ * Have the editor swap something typed for what shows it instead, then
+ * sync, so it shows up. Says why if the editor couldn't.
+ *
+ * The edit closes the tooltip that asked for it, so a failed sync is shown
+ * in the panel.
+ */
+async function replaceInEditor(
+  link: OverleafLinkPublic,
+  at: { version: number; index: number },
+  text: string,
+  endOfLine = false,
+): Promise<string | undefined> {
+  const id = `replace-${++replacements}`;
+  const error = await new Promise<string | undefined>((resolve) => {
+    const timer = setTimeout(() => {
+      replacing.delete(id);
+      resolve("The editor didn't respond; reload the page and try again");
+    }, 5000);
+    replacing.set(id, (error) => {
+      clearTimeout(timer);
+      replacing.delete(id);
+      resolve(error);
+    });
+    toEditor({
+      type: "replaceItem",
+      id,
+      ...at,
+      text,
+      usePackage: !endOfLine,
+      endOfLine,
+    });
+  });
+  if (error) {
+    return error;
+  }
+  // Overleaf saves an edit a moment after it's made, and a sync started
+  // first would miss it
+  void new Promise((resolve) => setTimeout(resolve, 3000))
+    .then(() =>
+      send({
+        type: "overleaf.sync",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        path: link.path,
+      }),
+    )
+    .catch((e) =>
+      showInPanel((body) =>
+        body.append(errorMessage(e instanceof Error ? e.message : String(e))),
+      ),
+    );
+  return undefined;
+}
+
+/**
+ * A way to say a typed number or table isn't a result, e.g., one quoted
+ * from a datasheet, which marks its line with `% calkit: ignore`.
+ */
+function ignoreRow(
+  link: OverleafLinkPublic,
+  at: { version: number; index: number },
+  message: HTMLElement,
+  what: string,
+): HTMLElement {
+  return el("div", { class: "row", style: { marginTop: "6px" } }, [
+    el("div", {
+      class: "grow dim small",
+      text: `Not ${what}, e.g., quoted from somewhere else?`,
+    }),
+    el("button", {
+      class: "action secondary",
+      text: "Ignore",
+      onClick: async () => {
+        const error = await replaceInEditor(
+          link,
+          at,
+          ` ${IGNORE_COMMENT}`,
+          true,
+        );
+        if (error) {
+          clear(message).append(errorMessage(error));
+        }
+      },
+    }),
+  ]);
+}
+
+/**
+ * A typed number, what's wrong with it, and the results that could show
+ * it instead, which replace it with a \\ckvalue and sync.
+ */
+function renderTyped(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  number: TypedNumber,
+  values: ResultValue[],
+  at: { version: number; index: number },
+): void {
+  const { exact, close } = typedNumberMatches(number, values);
+  const canWrite = link.current_user_access !== "read";
+  const message = el("div", { class: "small", style: { marginTop: "6px" } });
+  const use = async (value: ResultValue) => {
+    const text = citationText(typedNumberCitation(number, value));
+    const error = await replaceInEditor(link, at, text);
+    if (error) {
+      clear(message).append(errorMessage(error));
+    }
+  };
+  const row = (value: ResultValue) => {
+    const reads = roundedLike(number, value.value);
+    return el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [
+        el("div", { class: "small", text: `${value.path}: ${value.key}` }),
+        el("div", {
+          class: "dim small",
+          text:
+            reads === number.text
+              ? String(value.value)
+              : `${value.value}, which would read ${reads}`,
+        }),
+      ]),
+      canWrite
+        ? el("button", {
+            class: "action secondary",
+            text: "Use",
+            onClick: () => void use(value),
+          })
+        : null,
+    ]);
+  };
+  container.append(
+    el("div", { class: "name", text: `Typed-in number: ${number.text}` }),
+    problemLine(typedNumberProblem(number, values)),
+  );
+  if (exact.length) {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text: "Show it from the results file instead, so it stays current:",
+      }),
+      ...exact.slice(0, 5).map(row),
+    );
+  } else {
+    if (close.length) {
+      container.append(
+        el("div", {
+          class: "dim small",
+          text: "The nearest results, if it's a mistyped or outdated copy:",
+        }),
+        ...close.map(row),
+      );
+    }
+    container.append(
+      el("div", {
+        class: "dim small",
+        style: { marginTop: "6px" },
+        text:
+          "If a script computes it but only prints it, have the script " +
+          "save it to a results file too, e.g., results.json, so the paper " +
+          "can show it from there.",
+      }),
+    );
+  }
+  if (canWrite) {
+    container.append(ignoreRow(link, at, message, "a result"));
+  }
+  container.append(message);
+}
+
+/**
+ * A typed table, what's wrong with it, and the table files that could show
+ * it instead, which replace it with a \\cktable and sync.
+ */
+function renderTypedTable(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  numbers: TypedNumber[],
+  tables: TableFile[],
+  at: { version: number; index: number },
+): void {
+  const matches = typedTableMatches({ numbers }, tables);
+  const canWrite = link.current_user_access !== "read";
+  const message = el("div", { class: "small", style: { marginTop: "6px" } });
+  container.append(
+    el("div", {
+      class: "name",
+      text: `Typed-in table: ${numbers.length} number${
+        numbers.length === 1 ? "" : "s"
+      }`,
+    }),
+    problemLine(typedTableProblem({ numbers }, tables)),
+  );
+  if (matches.length) {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text: "Show it from the file its stage writes instead, so it stays current:",
+      }),
+      ...matches.slice(0, 3).map(({ path, matched }) =>
+        el("div", { class: "row" }, [
+          el("div", { class: "grow" }, [
+            el("div", { class: "small", text: path }),
+            el("div", {
+              class: "dim small",
+              text:
+                matched === numbers.length
+                  ? `Has all ${matched} numbers`
+                  : `Has ${matched} of the ${numbers.length} numbers; ` +
+                    "the rest may be outdated",
+            }),
+          ]),
+          canWrite
+            ? el("button", {
+                class: "action secondary",
+                text: "Use",
+                onClick: async () => {
+                  const error = await replaceInEditor(
+                    link,
+                    at,
+                    citationText({ kind: "table", path, options: "" }),
+                  );
+                  if (error) {
+                    clear(message).append(errorMessage(error));
+                  }
+                },
+              })
+            : null,
+        ]),
+      ),
+    );
+  } else {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text:
+          "Have the script that computes it write the table as TeX, " +
+          "e.g., with pandas' to_latex, so the paper can show it from there.",
+      }),
+    );
+  }
+  if (canWrite) {
+    container.append(ignoreRow(link, at, message, "results"));
+  }
+  container.append(message);
 }
 
 /**
@@ -2448,6 +3000,8 @@ function watchEditor(): void {
     ) {
       editorReplies.get(message.reqId)?.(message);
       editorReplies.delete(message.reqId);
+    } else if (message.type === "replacedItem") {
+      replacing.get(message.id)?.(message.error);
     }
   };
   window.addEventListener("message", listener, { signal: watching.signal });
@@ -2615,7 +3169,8 @@ async function drawPdfBoxes(): Promise<void> {
   const boxes: PdfBox[] = [];
   for (const [index, item] of snapshot.items.entries()) {
     const error = problems.found[index]?.find((p) => p.severity === "error");
-    if (!error) {
+    // Only what the project shows, not what's typed, has errors to box
+    if (!error || !item.citation) {
       continue;
     }
     const found = await synctex(projectId, build, file, item.line, item.column);
@@ -5034,16 +5589,16 @@ function renderStatus(
         style: { marginTop: "8px", fontWeight: "600" },
         text: "Missing origin",
       }),
-      ...missing.flatMap((item) => {
-        const key = citationText(item.citation);
+      ...missing.flatMap(({ item, citation, at }) => {
+        const key = citationText(citation);
         const open = openOrigin?.key === key;
         const row = el("div", { class: "small" }, [
           el("a", {
             text:
               `${open ? "\u25be" : "\u25b8"} ` +
-              (item.citation.key
-                ? `${item.citation.path} \u00b7 ${item.citation.key}`
-                : item.citation.path),
+              (citation.key
+                ? `${citation.path} \u00b7 ${citation.key}`
+                : citation.path),
             style: { color: "var(--ck-danger)" },
             onClick: (event) => {
               event.preventDefault();
@@ -5056,7 +5611,7 @@ function renderStatus(
                   style: { marginTop: "4px" },
                 });
                 openOrigin = { key, element };
-                void fillCard(element, link, item);
+                void fillCard(element, link, item, at);
               }
               drawPanelOrigins?.();
             },
@@ -6273,7 +6828,7 @@ function openPanel(
 }
 
 /** Open the panel on something to do, e.g., a fix from a tooltip. */
-function showInPanel(fill: (body: HTMLElement) => void): void {
+function showInPanel(fill: (body: HTMLElement) => void | Promise<void>): void {
   const overleafProjectId = currentProjectId;
   if (!overleafProjectId) {
     return;
@@ -6289,7 +6844,7 @@ function showInPanel(fill: (body: HTMLElement) => void): void {
       }),
       content,
     );
-    fill(content);
+    void fill(content);
   });
 }
 
@@ -6725,14 +7280,25 @@ function getOriginGaps(): Map<string, { citation: Citation; uses: string[] }> {
   return gaps;
 }
 
-/** The open document's components with no origin defined. */
-function getComponentsWithoutOrigin(): EditorCitation[] {
+/**
+ * The open document's components with no origin defined, with where each
+ * is in the editor's scan, which its card needs.
+ */
+function getComponentsWithoutOrigin(): {
+  item: EditorItem;
+  citation: Citation;
+  at: { version: number; index: number };
+}[] {
   const items = editorCitations?.items ?? [];
+  const version = editorCitations?.version ?? 0;
   if (!currentLink || editorProblems?.version !== editorCitations?.version) {
     return [];
   }
-  return items.filter(
-    (_, i) => editorProblems?.found[i]?.some((p) => p.kind === "origin"),
+  return items.flatMap((item, index) =>
+    item.citation &&
+    editorProblems?.found[index]?.some((p) => p.kind === "origin")
+      ? [{ item, citation: item.citation, at: { version, index } }]
+      : [],
   );
 }
 
@@ -6886,13 +7452,18 @@ function showInRail(citation: Citation): void {
   const link = currentLink;
   const items = editorCitations?.items ?? [];
   const text = citationText(citation);
-  const item = items.find((i) => citationText(i.citation) === text);
-  if (!link || !item) {
+  const index = items.findIndex(
+    (i) => i.citation && citationText(i.citation) === text,
+  );
+  if (!link || index < 0) {
     return;
   }
   const element = el("div", { class: "card" });
   railCard = { key: `${text}#1`, element };
-  void fillCard(element, link, item);
+  void fillCard(element, link, items[index], {
+    version: editorCitations?.version ?? 0,
+    index,
+  });
   if (!railOpen) {
     setRail(true);
   }
@@ -6974,8 +7545,10 @@ function drawRail(): void {
   body.append(
     el("div", { class: "row project" }, [
       el("a", {
-        text: linkKey(link),
+        class: "small",
+        text: "Open in Calkit",
         href: base,
+        title: linkKey(link),
         attrs: { target: "_blank" },
       }),
       renderWhere(link),
@@ -7022,6 +7595,7 @@ function drawRail(): void {
   // Components the open document shows, each with what's wrong with it
   body.append(el("h3", { text: "Components" }));
   const items = editorCitations?.items ?? [];
+  const version = editorCitations?.version ?? 0;
   const checked =
     editorProblems && editorProblems.version === editorCitations?.version
       ? editorProblems.found
@@ -7038,13 +7612,21 @@ function drawRail(): void {
   items.forEach((item, index) => {
     const problems = checked?.[index];
     // What it shows, and which time, since its line moves with edits
-    const text = citationText(item.citation);
+    const text = item.citation
+      ? citationText(item.citation)
+      : item.typed
+      ? item.typed.text
+      : "table";
     const nth = (seen.get(text) ?? 0) + 1;
     seen.set(text, nth);
     const key = `${text}#${nth}`;
-    const label = item.citation.key
-      ? `${item.citation.path} · ${item.citation.key}`
-      : item.citation.path;
+    const label = item.citation
+      ? item.citation.key
+        ? `${item.citation.path} · ${item.citation.key}`
+        : item.citation.path
+      : item.typed
+      ? `Typed number ${item.typed.text}`
+      : "Typed table";
     const failing = problems?.some((p) => p.severity === "error");
     body.append(
       el(
@@ -7062,7 +7644,10 @@ function drawRail(): void {
             } else {
               const element = el("div", { class: "card" });
               railCard = { key, element };
-              void fillCard(element, link, item);
+              void fillCard(element, link, item, {
+                version,
+                index,
+              });
             }
             drawRail();
           },

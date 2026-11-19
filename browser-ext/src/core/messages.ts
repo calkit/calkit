@@ -10,6 +10,7 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  ImportUpdate,
   PipelineRun,
   ProjectPipeline,
   PipelineRuns,
@@ -170,6 +171,12 @@ export type Request =
       project: string;
       /** Whether to save and sync with Overleaf after, when run here. */
       sync?: boolean;
+    }
+  | {
+      type: "project.updateImport";
+      owner: string;
+      project: string;
+      path: string;
     }
   | {
       type: "project.addExportStage";
@@ -366,6 +373,7 @@ export interface ResponseMap {
   "project.provenance": Provenance;
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
+  "project.updateImport": ImportUpdate;
   "project.addExportStage": ExportStage;
   "project.pipeline": ProjectPipeline;
   "project.pipelineRuns": PipelineRuns;

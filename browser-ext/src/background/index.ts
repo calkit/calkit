@@ -35,6 +35,7 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  ImportUpdate,
   PipelineRun,
   ProjectPipeline,
   PipelineRuns,
@@ -459,6 +460,11 @@ async function handle(
         },
       );
     }
+    case "project.updateImport":
+      return request<ImportUpdate>(
+        `${projectPath(message.owner, message.project)}/imports/update`,
+        { method: "POST", body: { path: message.path } },
+      );
     case "project.pipeline": {
       // As it is on this machine, when it's here, rather than as pushed
       const project = `${message.owner}/${message.project}`;

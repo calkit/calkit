@@ -183,3 +183,37 @@ export function parseOverleafStatus(stdout: string): OverleafState {
     return { checking: false, error: "Couldn't check Overleaf" };
   }
 }
+
+/**
+ * A commit message for the one file changed, as `calkit save -M` would
+ * write it, e.g., "Update fit_rates.ipynb", from `git status --porcelain -z
+ * -uall`, or nothing if more than one changed. Ignore rules don't count,
+ * since saving touches them either way.
+ */
+export function getCommitMessageSuggestion(
+  porcelain: string,
+): string | undefined {
+  const entries = porcelain.split("\0");
+  const changes: { path: string; status: string }[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (entry.length < 4) {
+      continue;
+    }
+    const status = entry.slice(0, 2);
+    // A rename or copy is followed by where it came from
+    if (status[0] === "R" || status[0] === "C") {
+      i++;
+    }
+    const path = entry.slice(3);
+    if (path.split("/").pop() !== ".gitignore") {
+      changes.push({ path, status });
+    }
+  }
+  if (changes.length !== 1) {
+    return undefined;
+  }
+  const [{ path, status }] = changes;
+  const added = status === "??" || status.includes("A");
+  return `${added ? "Add" : "Update"} ${path}`;
+}

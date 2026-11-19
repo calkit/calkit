@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   getClash,
   getClashMessage,
+  getCommitMessageSuggestion,
   getContinueArgs,
   getOverleafRow,
   isSyncedWithOverleaf,
@@ -146,4 +147,22 @@ test("parseOverleafStatus reads statuses and errors", () => {
     parseOverleafStatus("Traceback").error,
     "Couldn't check Overleaf",
   );
+});
+
+test("getCommitMessageSuggestion names the one file changed", () => {
+  assert.equal(
+    getCommitMessageSuggestion(" M fit_rates.ipynb\0"),
+    "Update fit_rates.ipynb",
+  );
+  assert.equal(
+    getCommitMessageSuggestion("?? scripts/new.py\0 M .gitignore\0"),
+    "Add scripts/new.py",
+  );
+  assert.equal(
+    getCommitMessageSuggestion("A  data/raw.csv\0"),
+    "Add data/raw.csv",
+  );
+  assert.equal(getCommitMessageSuggestion("R  b.py\0a.py\0"), "Update b.py");
+  assert.equal(getCommitMessageSuggestion(" M a.py\0 M b.py\0"), undefined);
+  assert.equal(getCommitMessageSuggestion(""), undefined);
 });

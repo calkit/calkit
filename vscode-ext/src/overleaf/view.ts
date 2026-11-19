@@ -13,6 +13,7 @@ import type { CalkitSidebarProvider, SidebarItem } from "../sidebar";
 import {
   getClash,
   getClashMessage,
+  getCommitMessageSuggestion,
   getContinueArgs,
   parseOverleafStatus,
   type Clash,
@@ -246,6 +247,19 @@ async function runSteps(
   }
 }
 
+/** A commit message for the one file changed, if only one has. */
+export async function suggestCommitMessage(
+  root: string,
+): Promise<string | undefined> {
+  const porcelain = await getOutput("git", root, [
+    "status",
+    "--porcelain",
+    "-z",
+    "-uall",
+  ]);
+  return porcelain ? getCommitMessageSuggestion(porcelain) : undefined;
+}
+
 /**
  * Run the pipeline and save with a message, as Save asks for one, syncing
  * with Overleaf too if the project syncs with it and that's on.
@@ -255,7 +269,7 @@ export async function runAndSave(root: string): Promise<void> {
   const message = await vscode.window.showInputBox({
     title: sync ? "Calkit: Run, Save, and Sync" : "Calkit: Run and Save",
     prompt: "Commit message for saving your work",
-    value: "Run pipeline",
+    value: (await suggestCommitMessage(root)) ?? "Run pipeline",
     ignoreFocusOut: true,
   });
   // Cancelled (Escape) returns undefined; an empty message is not allowed

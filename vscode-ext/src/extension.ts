@@ -74,7 +74,11 @@ import {
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import { isSyncedWithOverleaf } from "./overleaf/core";
-import { registerOverleaf, setOverleafSynced } from "./overleaf/view";
+import {
+  registerOverleaf,
+  setOverleafSynced,
+  suggestCommitMessage,
+} from "./overleaf/view";
 import {
   documentStagePdf,
   documentStageSource,
@@ -1239,6 +1243,7 @@ export function activate(context: vscode.ExtensionContext): void {
         title: "Calkit: Save",
         prompt: "Commit message for saving your work",
         placeHolder: "e.g. Update analysis figures",
+        value: await suggestCommitMessage(workspaceRoot),
         ignoreFocusOut: true,
       });
       // Cancelled (Escape) returns undefined; an empty message is not allowed.

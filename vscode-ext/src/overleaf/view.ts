@@ -247,13 +247,31 @@ async function runSteps(
 }
 
 /**
- * Run the pipeline and save, syncing with Overleaf too if the project syncs
- * with it and that's on, in one step.
+ * Run the pipeline and save with a message, as Save asks for one, syncing
+ * with Overleaf too if the project syncs with it and that's on.
  */
-export function runAndSave(root: string): Promise<void> {
+export async function runAndSave(root: string): Promise<void> {
   const sync = syncedRoot === root && isAutoSyncOn();
-  const steps = [["run", "--save", ...(sync ? ["--overleaf"] : [])]];
-  return runSteps(
+  const message = await vscode.window.showInputBox({
+    title: sync ? "Calkit: Run, Save, and Sync" : "Calkit: Run and Save",
+    prompt: "Commit message for saving your work",
+    value: "Run pipeline",
+    ignoreFocusOut: true,
+  });
+  // Cancelled (Escape) returns undefined; an empty message is not allowed
+  if (message === undefined) {
+    return;
+  }
+  if (!message.trim()) {
+    void vscode.window.showErrorMessage(
+      "A commit message is required to save.",
+    );
+    return;
+  }
+  const steps = [
+    ["run", "--save", "-m", message.trim(), ...(sync ? ["--overleaf"] : [])],
+  ];
+  await runSteps(
     root,
     steps,
     steps,

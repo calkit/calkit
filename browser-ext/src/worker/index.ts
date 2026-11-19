@@ -1,3 +1,7 @@
+/**
+ * The service worker: signs in, calls hubs and this machine, and answers
+ * requests from content scripts and pages.
+ */
 import { ApiError, NotSignedInError, request } from "../core/api";
 import {
   announceAuthChange,

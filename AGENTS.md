@@ -62,6 +62,9 @@ a feature in one function over many different test functions.
 
 Do not write docstrings in test functions.
 
+Start every TypeScript module, other than tests, with a doc comment saying
+what it's for, even if it's one sentence.
+
 Do not put blank lines inside function bodies; separate logical sections with
 comments instead. This only applies to blank lines we write, not ones the
 formatter inserts, e.g., ruff-format adds one after an in-function import

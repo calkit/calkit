@@ -1,3 +1,7 @@
+/**
+ * The requests content scripts and pages send the service worker, what each
+ * returns, and how they're sent.
+ */
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
 import type { CheckoutStatus, LocalStatus } from "./local";

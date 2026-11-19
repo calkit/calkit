@@ -3,24 +3,26 @@ import test from "node:test";
 import {
   documentStagePdf,
   documentStageSource,
-  findInSource,
-  findText,
   findLatexStage,
   latexPreviewCommand,
   latexStagePdf,
   latexStageSource,
   latexWorkingDiffPath,
   latexWorkshopBuildsWithCalkit,
+  pipelineLatexDiffs,
+} from "../latex/core";
+import {
+  findInSource,
+  findText,
   lineMap,
   normalizeSelection,
   paragraphLines,
   parseSynctex,
-  pipelineLatexDiffs,
   synctexForward,
   synctexInputFile,
   synctexReverse,
   synctexTag,
-} from "../latex/core";
+} from "../latex/pdf";
 import { mergeSubprojectConfigs } from "../subprojects";
 
 test("latexWorkingDiffPath mirrors the CLI's working tree diff path", () => {

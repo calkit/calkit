@@ -1,3 +1,7 @@
+/**
+ * Reading a LaTeX document for what it shows from its project, e.g., \ckvalue
+ * and numbers typed in, and where its marked-up diffs are kept.
+ */
 import type { Provenance } from "./types";
 
 /**

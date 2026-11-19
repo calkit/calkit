@@ -33,7 +33,7 @@ import {
   synctexForward,
   synctexInputFile,
   synctexTag,
-} from "../../../vscode-ext/src/latex/core";
+} from "../../../vscode-ext/src/latex/pdf";
 import {
   currentProjectId,
   lastCheck,

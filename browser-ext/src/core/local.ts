@@ -1,4 +1,3 @@
-import { type Synctex, parseSynctex } from "../../../vscode-ext/src/latex/core";
 /**
  * Calkit on this machine, which the browser starts when the extension
  * connects to it, so the extension can work with projects here directly
@@ -7,6 +6,7 @@ import { type Synctex, parseSynctex } from "../../../vscode-ext/src/latex/core";
  * It needs the optional nativeMessaging permission, asked for from the
  * options page, and 'calkit browser-link install', which the installer runs.
  */
+import { type Synctex, parseSynctex } from "../../../vscode-ext/src/latex/pdf";
 
 import type { RunProgress } from "./types";
 

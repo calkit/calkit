@@ -1,9 +1,3 @@
-import { type LocalPdfChunk, getLocalPdf } from "../core/local";
-import { send } from "../core/messages";
-import { clear, el, errorMessage, loading } from "../core/ui";
-
-const app = document.getElementById("app") as HTMLElement;
-
 /**
  * A page for looking at a DVC-tracked artifact.
  *
@@ -13,6 +7,12 @@ const app = document.getElementById("app") as HTMLElement;
  * needs. An extension page carries its own policy, so the artifact can
  * simply be rendered.
  */
+import { type LocalPdfChunk, getLocalPdf } from "../core/local";
+import { send } from "../core/messages";
+import { clear, el, errorMessage, loading } from "../core/ui";
+
+const app = document.getElementById("app") as HTMLElement;
+
 type Kind = "image" | "pdf" | "html" | "text" | "plotly" | "other";
 
 function kindFor(path: string): Kind {

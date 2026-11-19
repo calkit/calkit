@@ -1,3 +1,7 @@
+/**
+ * What the extension draws on pages is built from: elements, the panel,
+ * overlays, and shared styles.
+ */
 type Child = Node | string | null | undefined | false;
 
 interface ElementOptions {

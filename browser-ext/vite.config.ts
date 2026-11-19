@@ -18,6 +18,9 @@ export default defineConfig({
     // weight that only shows up as a console error. The chunk still
     // loads normally when the entry imports it.
     modulePreload: false,
+    // pdf.js puts the review page's script over Vite's 500 kB default, which
+    // matters for a site's download, not a script loaded from the extension
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       // The pages live at the root so they're served from
       // chrome-extension://<id>/popup.html rather than a path under src/,

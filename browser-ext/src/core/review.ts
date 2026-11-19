@@ -19,7 +19,7 @@ import {
   type PdfRect,
   type TexThread,
   paragraphLines,
-} from "../../../vscode-ext/src/latex/core";
+} from "../../../vscode-ext/src/latex/pdf";
 
 import type { PdfBox } from "./pdf-boxes";
 

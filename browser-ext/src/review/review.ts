@@ -19,7 +19,7 @@ import {
   type Synctex,
   synctexReverse,
   type TextRange,
-} from "../../../vscode-ext/src/latex/core";
+} from "../../../vscode-ext/src/latex/pdf";
 import { getLocalPdf, getLocalSynctex } from "../core/local";
 import { type PdfBox, placePdfBoxes } from "../core/pdf-boxes";
 import type {

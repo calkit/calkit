@@ -1,3 +1,4 @@
+/** Pickers the panels share: hub, project, and a path in a project. */
 import { RequestFailed, send } from "./messages";
 import { clear, el, errorMessage, loading, textInput } from "./ui";
 

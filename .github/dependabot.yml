@@ -8,7 +8,8 @@ updates:
     commit-message:
       prefix: ⬆
   # Python
-  - package-ecosystem: "pip"
+  # The uv ecosystem updates uv.lock along with pyproject.toml
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "daily"

@@ -1,3 +1,7 @@
+/**
+ * Signing in and out of a hub with its device flow, and telling the rest of
+ * the extension when that changes.
+ */
 import { NotSignedInError, request } from "./api";
 import type { Hub } from "./hubs";
 import type { AuthChanged } from "./messages";
@@ -145,12 +149,13 @@ export async function signOut(): Promise<AuthState> {
 }
 
 /**
- * Tell every surface that the signed-in state changed.
+ * Tell every surface that the signed-in state changed, including which
+ * Overleaf credentials the hub holds.
  *
  * The surface that asked hears back anyway, but the popup closes as soon as
  * the sign-in tab opens, and a panel in another tab has no idea it happened.
  */
-async function announceAuthChange(): Promise<void> {
+export async function announceAuthChange(): Promise<void> {
   const message: AuthChanged = { type: "auth.changed" };
   // The popup and options page; rejects when neither is open
   chrome.runtime.sendMessage(message).catch(() => undefined);

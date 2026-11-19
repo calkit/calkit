@@ -15,7 +15,7 @@ import typer
 from typer.testing import CliRunner
 
 import calkit
-import calkit.latex
+import calkit.environments.texlive
 from calkit.cli.overleaf import (
     _extract_title_from_tex,
     _get_overleaf_auth,
@@ -92,8 +92,7 @@ def test_overleaf(tmp_dir):
     # Check the TeX environment and pipeline was created properly
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["tex"]
-    assert env["kind"] == "docker"
-    assert env["image"] == calkit.latex.DEFAULT_LATEX_IMAGE
+    assert env == calkit.environments.texlive.DEFAULT_ENVIRONMENT
     stage = ck_info["pipeline"]["stages"]["build-ol-project"]
     assert stage["kind"] == "latex"
     assert stage["environment"] == "tex"
@@ -1548,6 +1547,14 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "input")
+    # The first push must work without push.autoSetupRemote, which CI sets
+    # globally, and which no other config can turn back off
+    git_config = os.path.join(tempfile.mkdtemp(), "config")
+    open(git_config, "w").close()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", git_config)
+    for role in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Calkit Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@calkit.org")
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     remote = tempfile.mkdtemp()
@@ -2044,6 +2051,15 @@ def test_overleaf_credentials(monkeypatch):
 
     monkeypatch.setattr(calkit.overleaf, "get_repo", get_repo)
     monkeypatch.setattr(calkit.overleaf, "pull", pull)
+    # Nothing's saved to the hub until a test says so
+    hub_saved: dict = {}
+
+    def hub_get(path, **kwargs):
+        if path not in hub_saved:
+            raise RuntimeError("Not found")
+        return hub_saved[path]
+
+    monkeypatch.setattr(calkit.hub, "get", hub_get)
 
     class Terminal(io.StringIO):
         def isatty(self):
@@ -2071,6 +2087,19 @@ def test_overleaf_credentials(monkeypatch):
     with pytest.raises(typer.Exit):
         _get_pulled_overleaf_repo("abc", "expired")
     assert saved == ["fresh"]
+    # A newer token saved to the hub, e.g., from another computer, is used
+    # instead, without asking
+    hub_saved["/user/overleaf-token"] = {"access_token": "from-hub"}
+    tokens_tried.clear()
+    repo, token = _get_pulled_overleaf_repo("abc", "expired")
+    assert tokens_tried == ["expired", "from-hub"]
+    assert token == "from-hub" and saved == ["fresh", "from-hub"]
+    # But not the one just rejected
+    hub_saved["/user/overleaf-token"] = {"access_token": "expired"}
+    with pytest.raises(typer.Exit):
+        _get_pulled_overleaf_repo("abc", "expired")
+    del hub_saved["/user/overleaf-token"]
+    saved.remove("from-hub")
     # A rejected session should prompt for a new one the same way
     sessions_tried = []
 
@@ -2169,6 +2198,11 @@ def test_overleaf_credentials(monkeypatch):
     config.overleaf_session = None
     hub["/user/overleaf-token"] = {"access_token": "olp_hub"}
     assert _get_overleaf_auth() == config.overleaf_token == "olp_hub"
+    # A token on the hub comes before a session here too
+    config.overleaf_token = None
+    config.overleaf_session = "here"
+    assert _get_overleaf_auth() == "olp_hub"
+    config.overleaf_session = None
     # A rejected session is replaced by a newer one on the hub without
     # prompting or warning, but the same one again isn't retried, however
     # it's written
@@ -2190,7 +2224,9 @@ def test_overleaf_credentials(monkeypatch):
         _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))
     assert warnings == ["Session expired"]
     # A rejected Git token falls back to a browser session if there is one,
-    # since tokens stop working when Premium ends, and is forgotten
+    # since tokens stop working when Premium ends, and is forgotten, unless
+    # the hub has a newer token
+    del hub["/user/overleaf-token"]
     config.overleaf_token = calkit.config.KeyringOptionalSecret("expired")
     config.overleaf_session = calkit.config.KeyringOptionalSecret("fresh")
     tokens_tried.clear()
@@ -2201,3 +2237,8 @@ def test_overleaf_credentials(monkeypatch):
     assert sessions_tried == ["fresh"]
     assert config.overleaf_token is None
     assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    # Nor is the hub's copy of it tried first again
+    hub["/user/overleaf-token"] = {"access_token": "expired"}
+    assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    assert config.overleaf_token is None
+    del hub["/user/overleaf-token"]

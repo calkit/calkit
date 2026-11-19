@@ -2,8 +2,9 @@
 
 import os
 import time
+from collections.abc import Callable
 from functools import partial
-from typing import Literal
+from typing import Any, BinaryIO, Literal
 
 import dotenv
 import requests
@@ -12,7 +13,7 @@ from requests.exceptions import HTTPError
 import calkit
 
 ServiceName = Literal["zenodo", "caltechdata"]
-DEFAULT_SERVICE = "zenodo"
+DEFAULT_SERVICE: ServiceName = "zenodo"
 
 
 def get_token(service: ServiceName = DEFAULT_SERVICE) -> str:
@@ -81,7 +82,8 @@ def _request(
     path: str,
     params: dict | None = None,
     json: dict | list | None = None,
-    data: dict | bytes | None = None,
+    # A dict, bytes, or a file-like object to stream
+    data: Any = None,
     headers: dict | None = None,
     auth: bool = True,
     as_json: bool = True,
@@ -98,7 +100,12 @@ def _request(
     # e.g., leaving a draft record behind, so only repeat requests that are
     # safe to send twice
     max_attempts = 1 if kind == "post" else MAX_ATTEMPTS
+    # A file being streamed as the body has to be sent from the start again
+    # on each attempt, not from wherever the last one stopped reading it
+    start = data.tell() if hasattr(data, "seek") else None
     for attempt in range(1, max_attempts + 1):
+        if start is not None:
+            data.seek(start)
         try:
             resp = func(
                 get_base_url(service=service) + path,
@@ -149,6 +156,164 @@ patch = partial(_request, "patch")
 put = partial(_request, "put")
 delete = partial(_request, "delete")
 
+# A file sent as one request has to fit under the body size limit of every
+# proxy in front of the server, e.g., Cloudflare's in front of CaltechDATA, so
+# anything larger goes up in parts when the server supports it
+MULTIPART_PART_SIZE = 50 * 1024 * 1024
+# S3, which stores multipart uploads, accepts at most this many parts
+MULTIPART_MAX_PARTS = 10_000
+
+
+def get_part_size(size: int) -> int:
+    """Get the part size to use for a multipart upload of ``size`` bytes."""
+    min_size = -(-size // MULTIPART_MAX_PARTS)
+    if min_size <= MULTIPART_PART_SIZE:
+        return MULTIPART_PART_SIZE
+    # Round up to a whole MiB so parts stay tidy
+    mib = 1024 * 1024
+    return -(-min_size // mib) * mib
+
+
+class _ProgressReader:
+    """Wrap a file so reading it reports how far through it has got."""
+
+    def __init__(
+        self, f: BinaryIO, size: int, progress: Callable[[int], None]
+    ):
+        self._f = f
+        self._size = size
+        self._progress = progress
+
+    def __len__(self) -> int:
+        # Lets requests send a Content-Length rather than chunking the body
+        return self._size
+
+    def read(self, n: int = -1) -> bytes:
+        chunk = self._f.read(n)
+        self._progress(self._f.tell())
+        return chunk
+
+    def tell(self) -> int:
+        return self._f.tell()
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        pos = self._f.seek(offset, whence)
+        self._progress(pos)
+        return pos
+
+
+def _put_part(url: str, fpath: str, offset: int, length: int) -> None:
+    """Upload one part of a file to a presigned URL, retrying on failure."""
+    with open(fpath, "rb") as f:
+        f.seek(offset)
+        chunk = f.read(length)
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.put(url, data=chunk, timeout=get_timeout())
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt == MAX_ATTEMPTS:
+                raise
+            time.sleep(2**attempt)
+            continue
+        if resp.status_code < 400:
+            return
+        if resp.status_code in RETRY_STATUS_CODES and attempt < MAX_ATTEMPTS:
+            time.sleep(2**attempt)
+            continue
+        raise HTTPError(f"{resp.status_code}: {resp.text}")
+
+
+def upload_file(
+    record_id: str,
+    fpath: str,
+    key: str | None = None,
+    service: ServiceName = DEFAULT_SERVICE,
+    echo: Callable[[str], None] | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> None:
+    """Upload a file to a draft record and commit it.
+
+    Files larger than one part are uploaded in parts straight to the server's
+    storage when it supports multipart transfers, which keeps every request
+    under the body size limits of proxies in front of the API. Otherwise the
+    file is streamed from disk in a single request.
+
+    ``progress`` is called with the bytes sent so far and the file's size.
+    """
+    if key is None:
+        key = os.path.basename(fpath)
+    if echo is None:
+        echo = lambda msg: None  # noqa: E731
+    size = os.path.getsize(fpath)
+    if progress is None:
+        report = lambda done: None  # noqa: E731
+    else:
+        report = lambda done: progress(done, size)  # noqa: E731
+    files_path = f"/records/{record_id}/draft/files"
+    entry = None
+    if size > MULTIPART_PART_SIZE:
+        part_size = get_part_size(size)
+        n_parts = -(-size // part_size)
+        try:
+            resp = post(
+                files_path,
+                json=[
+                    {
+                        "key": key,
+                        "size": size,
+                        "transfer": {
+                            "type": "M",
+                            "parts": n_parts,
+                            "part_size": part_size,
+                        },
+                    }
+                ],
+                service=service,
+            )
+            entry = next(
+                (e for e in resp.get("entries", []) if e.get("key") == key),
+                None,
+            )
+        except HTTPError as e:
+            # A server without multipart support rejects the request
+            # outright, leaving nothing behind, so fall back to one request
+            if not str(e).startswith("4"):
+                raise
+            echo(f"Multipart upload not available ({e}); sending in one go")
+    transfer = (entry or {}).get("transfer", {})
+    if transfer.get("type") == "M":
+        parts = entry.get("links", {}).get("parts")  # type: ignore[union-attr]
+        if not parts:
+            raise ValueError(
+                f"{service} accepted a multipart upload of {key} "
+                "but returned no part URLs"
+            )
+        part_size = transfer["part_size"]
+        echo(
+            f"Uploading {key} in {len(parts)} parts of "
+            f"{part_size / 1e6:.0f} MB each"
+        )
+        done = 0
+        report(done)
+        for part in sorted(parts, key=lambda p: p["part"]):
+            offset = (part["part"] - 1) * part_size
+            length = min(part_size, size - offset)
+            _put_part(part["url"], fpath, offset, length)
+            done += length
+            report(done)
+    else:
+        if entry is None:
+            post(files_path, json=[{"key": key}], service=service)
+        with open(fpath, "rb") as f:
+            resp = put(
+                f"{files_path}/{key}/content",
+                headers={"Content-Type": "application/octet-stream"},
+                as_json=False,
+                service=service,
+                data=_ProgressReader(f, size, report),
+            )
+    post(f"{files_path}/{key}/commit", service=service)
+
 
 def extract_doi(record: dict) -> str | None:
     """Extract the DOI identifier from an InvenioRDM record or response.
@@ -182,3 +347,41 @@ def get_download_urls(
     for fname, url in zip(filenames, download_urls):
         urls[fname] = url
     return urls
+
+
+def upload_file_with_progress(
+    record_id: str,
+    fpath: str,
+    key: str | None = None,
+    service: ServiceName = DEFAULT_SERVICE,
+) -> None:
+    """Upload a file to a draft record, showing a progress bar."""
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        TextColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+
+    if key is None:
+        key = os.path.basename(fpath)
+    with Progress(
+        TextColumn("[bold]{task.description}"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+    ) as bar:
+        task = bar.add_task(f"Uploading {key}", total=os.path.getsize(fpath))
+        upload_file(
+            record_id,
+            fpath,
+            key=key,
+            service=service,
+            echo=bar.console.print,
+            progress=lambda done, total: bar.update(
+                task, completed=done, total=total
+            ),
+        )

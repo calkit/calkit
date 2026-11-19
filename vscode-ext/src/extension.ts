@@ -37,14 +37,17 @@ import type {
   CalkitInfo,
   DvcYaml,
   EnvDescription,
+  PipelineStage,
   StaleStageDetail,
 } from "./types";
 import { dvcStageOutputPaths } from "./pipeline/core";
 import {
   collectSubprojects,
+  findUndeclaredProjectDir,
   mergeSubprojectConfigs,
   mergeSubprojectDvcYaml,
   qualifyEnvDescriptions,
+  rebaseStages,
   splitQualifiedName,
   splitSubprojectPath,
   stageNameFromDvcAddress,
@@ -71,9 +74,12 @@ import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import {
   documentStagePdf,
   documentStageSource,
+  findLatexStage,
   latexStagePdf,
   latexStageSource,
+  latexPreviewCommand,
   latexWorkingDiffPath,
+  latexWorkshopBuildsWithCalkit,
   pipelineLatexDiffs,
   type PipelineLatexDiff,
 } from "./latex/core";
@@ -125,6 +131,7 @@ const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
 const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
 const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
+const COMMAND_PREVIEW_LATEX = "calkit-vscode.previewLatex";
 const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
 const COMMAND_SHOW_IN_PDF_TO_SIDE = "calkit-vscode.showInPdfToSide";
 const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
@@ -442,7 +449,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const pdfReview = new PdfReviewProvider(context, {
     getWorkspaceRoot,
-    getStages: () => currentCalkitConfig?.pipeline?.stages ?? {},
+    getStages: (file) => {
+      const workspaceRoot = getWorkspaceRoot();
+      return workspaceRoot
+        ? getDocumentStages(workspaceRoot, file)
+        : currentCalkitConfig?.pipeline?.stages ?? {};
+    },
     getPublications: () => currentCalkitConfig?.publications ?? [],
     getNonce,
     promptUpgrade: (message) =>
@@ -553,7 +565,7 @@ export function activate(context: vscode.ExtensionContext): void {
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
         const pdfFile = documentStagePdf(
-          currentCalkitConfig?.pipeline?.stages ?? {},
+          getDocumentStages(workspaceRoot, docFile),
           docFile,
         );
         if (!pdfFile) {
@@ -607,8 +619,14 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     // Not in an open PDF yet, so open the one its stage builds, or for a
-    // file it inputs, the only one there is
-    const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+    // file it inputs, the only one there is, in its own project if the root
+    // doesn't declare it
+    const stages = getDocumentStages(workspaceRoot, texFile);
+    const projectDir = findUndeclaredProjectDir(
+      texFile,
+      (d) => fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml")),
+      currentSubprojectDirs,
+    );
     const latexPdfs = Object.values(stages)
       .map((stage) => {
         const st = stage as {
@@ -623,7 +641,11 @@ export function activate(context: vscode.ExtensionContext): void {
             )
           : undefined;
       })
-      .filter((p): p is string => p !== undefined);
+      .filter(
+        (p): p is string =>
+          p !== undefined &&
+          (projectDir === undefined || p.startsWith(`${projectDir}/`)),
+      );
     const pdfFile =
       documentStagePdf(stages, texFile) ??
       (latexPdfs.length === 1 ? latexPdfs[0] : undefined);
@@ -683,7 +705,7 @@ export function activate(context: vscode.ExtensionContext): void {
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
         const sourceFile = documentStageSource(
-          currentCalkitConfig?.pipeline?.stages ?? {},
+          getDocumentStages(workspaceRoot, pdfFile),
           pdfFile,
         );
         if (!sourceFile) {
@@ -718,6 +740,80 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  // Build a latex stage's document by itself, i.e., without DVC or its
+  // upstream stages, with whatever their outputs are now. LaTeX Workshop
+  // builds it when Calkit set it up to, so it stays the one builder on save
+  // and of its viewer; otherwise this runs the stage's build in a terminal.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_PREVIEW_LATEX,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const texFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const latexStage = findLatexStage(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          texFile,
+        );
+        if (!latexStage) {
+          void vscode.window.showInformationMessage(
+            "No latex stage in the pipeline builds this document.",
+          );
+          return;
+        }
+        // Both would write the same PDF
+        if (runningStageNames.size > 0) {
+          void vscode.window.showInformationMessage(
+            "The pipeline is running; preview after it finishes.",
+          );
+          return;
+        }
+        const tools = vscode.workspace
+          .getConfiguration("latex-workshop", fileUri)
+          .get("latex.tools");
+        // Saving with LaTeX Workshop's command doesn't start its own build
+        // on save too
+        if (isLatexWorkshopInstalled()) {
+          await vscode.window.showTextDocument(fileUri);
+          await vscode.commands.executeCommand(
+            "latex-workshop.saveWithoutBuilding",
+          );
+          if (latexWorkshopBuildsWithCalkit(tools)) {
+            await vscode.commands.executeCommand("latex-workshop.build");
+            return;
+          }
+        } else {
+          await vscode.workspace.save(fileUri);
+        }
+        const cmd = latexPreviewCommand(
+          currentDvcYaml?.stages?.[latexStage.name]?.cmd,
+          path.join(workspaceRoot, latexStage.wdir),
+        );
+        if (!cmd) {
+          void vscode.window.showInformationMessage(
+            `Stage '${latexStage.name}' isn't compiled yet; run it once first.`,
+          );
+          return;
+        }
+        const pdfFile = latexStagePdf(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          texFile,
+        );
+        if (pdfFile && isLatexWorkshopInstalled()) {
+          ensurePdfRefreshWatcher(context, path.join(workspaceRoot, pdfFile));
+        }
+        const terminal = getOrCreateTerminal("calkit: preview", workspaceRoot);
+        terminal.show(true);
+        terminal.sendText(cmd);
       },
     ),
   );
@@ -984,7 +1080,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const picker = vscode.window.createQuickPick();
         picker.title = `Diff ${path.basename(texFile)} against...`;
-        picker.placeholder = "Pick or type a Git revision";
+        picker.placeholder = "Select or type a Git revision";
         picker.items = items;
         picker.onDidChangeValue((value) => {
           const typed = value.trim();
@@ -2575,6 +2671,7 @@ async function refreshPipelineOutputContext(
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
   currentSubprojectDirs = subprojectDirs;
+  undeclaredProjectStages.clear();
   currentQuestionOrigins = questionOrigins;
   currentArtifactOrigins = artifactOrigins;
   currentEnvDescriptions = envDescriptions;
@@ -4524,10 +4621,16 @@ async function findStageForFile(
   for (const [stageName, stage] of Object.entries(
     calkitConfig?.pipeline?.stages ?? {},
   )) {
+    // A root stage's paths are relative to its wdir; a subproject's were
+    // rebased onto the root, dropping it
+    const wdir = typeof stage.wdir === "string" ? stage.wdir : "";
+    const isFile = (p: unknown) =>
+      typeof p === "string" &&
+      path.posix.join(wdir, p.replace(/\\/g, "/")) === relPath;
     if (
-      stage.notebook_path === relPath ||
-      stage.script_path === relPath ||
-      stage.target_path === relPath ||
+      isFile(stage.notebook_path) ||
+      isFile(stage.script_path) ||
+      isFile(stage.target_path) ||
       pipelineStageOutputPaths(stage).includes(relPath)
     ) {
       return stageName;
@@ -4930,6 +5033,46 @@ async function selectCalkitEnvironment(
 
 function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+// Stages of projects inside the workspace the root doesn't declare, by
+// directory, cleared when the pipeline is reread, e.g., any calkit.yaml changes
+const undeclaredProjectStages = new Map<
+  string,
+  Record<string, PipelineStage>
+>();
+
+// The stages that may build a root-relative document into a PDF, which for
+// one in a project the root doesn't declare as a subproject, e.g., a Git
+// submodule, include that project's
+function getDocumentStages(
+  workspaceRoot: string,
+  relPath: string,
+): Record<string, unknown> {
+  const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+  const dir = findUndeclaredProjectDir(
+    relPath,
+    (d) => fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml")),
+    currentSubprojectDirs,
+  );
+  if (dir === undefined) {
+    return stages;
+  }
+  let cached = undeclaredProjectStages.get(dir);
+  if (cached === undefined) {
+    let config: CalkitInfo | undefined;
+    try {
+      config =
+        YAML.parse(
+          fs.readFileSync(path.join(workspaceRoot, dir, "calkit.yaml"), "utf8"),
+        ) ?? undefined;
+    } catch {
+      config = undefined;
+    }
+    cached = rebaseStages(dir, config?.pipeline?.stages);
+    undeclaredProjectStages.set(dir, cached);
+  }
+  return { ...stages, ...cached };
 }
 
 // The root's calkit.yaml and dvc.yaml with every subproject's folded in.
@@ -5376,7 +5519,7 @@ async function runCreateEnvironmentWizard(
 
     const kindPick = await vscode.window.showQuickPick(kindItems, {
       title: options?.title ?? "Create Calkit environment",
-      placeHolder: options?.placeHolder ?? "Pick environment kind",
+      placeHolder: options?.placeHolder ?? "Select environment kind",
     });
     if (!kindPick) {
       return undefined;
@@ -6432,7 +6575,7 @@ async function runCreateNotebookEnvironmentCreationFlow(
         ? {
             includeSlurm: false,
             title: `Create inner environment for ${outerSlurmEnvironment}`,
-            placeHolder: "Pick an environment kind to run inside SLURM",
+            placeHolder: "Select environment kind to run inside SLURM",
           }
         : undefined,
     );
@@ -8893,13 +9036,15 @@ async function refreshActiveFileBuildsPdfContext(
   document: vscode.TextDocument | undefined,
 ): Promise<void> {
   const workspaceRoot = getWorkspaceRoot();
+  const relPath =
+    workspaceRoot !== undefined && document !== undefined
+      ? path.relative(workspaceRoot, document.uri.fsPath).replace(/\\/g, "/")
+      : undefined;
   const buildsPdf =
     workspaceRoot !== undefined &&
-    document !== undefined &&
-    documentStagePdf(
-      currentCalkitConfig?.pipeline?.stages ?? {},
-      path.relative(workspaceRoot, document.uri.fsPath).replace(/\\/g, "/"),
-    ) !== undefined;
+    relPath !== undefined &&
+    documentStagePdf(getDocumentStages(workspaceRoot, relPath), relPath) !==
+      undefined;
   await vscode.commands.executeCommand(
     "setContext",
     "calkit.activeFileBuildsPdf",

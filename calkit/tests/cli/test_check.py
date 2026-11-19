@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import git
 import pytest
@@ -204,6 +205,195 @@ def test_check_env_vars(tmp_dir):
         )
 
 
+def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    subprocess.check_call(["calkit", "init"])
+
+    def env_var(name: str) -> dict:
+        return {"kind": "env-var", "name": name}
+
+    ck_info: dict = {
+        "requirements": [env_var("CK_PROJECT")],
+        "environments": {
+            "lab": {"kind": "system", "requirements": [env_var("CK_LAB")]},
+            "far": {
+                "kind": "system",
+                "host": "calkit-test.invalid",
+                "requirements": [env_var("CK_FAR")],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "a": {
+                    "kind": "shell-command",
+                    "command": "echo a > a.txt",
+                    "environment": "lab",
+                    "requirements": [env_var("CK_A")],
+                    "outputs": [{"path": "a.txt", "storage": "git"}],
+                },
+                "b": {
+                    "kind": "shell-command",
+                    "command": "echo b > b.txt",
+                    "environment": "_system",
+                    "requirements": [env_var("CK_B")],
+                    "outputs": [{"path": "b.txt", "storage": "git"}],
+                },
+                "remote": {
+                    "kind": "shell-command",
+                    "command": "echo r > r.txt",
+                    "environment": "far",
+                    "requirements": [env_var("CK_REMOTE")],
+                    "outputs": [{"path": "r.txt", "storage": "git"}],
+                    "frozen": True,
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CK_")} | {
+        "CK_PROJECT": "p"
+    }
+    every = env | {"CK_LAB": "l", "CK_A": "a", "CK_B": "b"}
+
+    def check(*args: str, env: dict = env) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "check", "reqs", *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            stdin=subprocess.DEVNULL,
+        )
+
+    # Every stage's and environment's are checked, except those of another
+    # machine, which are said to be checked there
+    res = check(env=every)
+    assert res.returncode == 0, res.stderr
+    assert "Not checking environment 'far' here" in res.stdout
+    assert "Not checking stage 'remote' here" in res.stdout
+    assert "CK_FAR" not in res.stdout + res.stderr
+    # Everything unmet is reported at once, by where it's declared
+    res = check()
+    assert res.returncode != 0
+    for problem in [
+        "environment 'lab': env-var 'CK_LAB' not found",
+        "stage 'a': env-var 'CK_A' not found",
+        "stage 'b': env-var 'CK_B' not found",
+    ]:
+        assert problem in res.stderr
+    res = check(env={k: v for k, v in every.items() if k != "CK_PROJECT"})
+    assert res.returncode != 0
+    assert "the project: env-var 'CK_PROJECT' not found" in res.stderr
+    # With --stale, only out-of-date stages' are, and their environments'
+    subprocess.check_call(["calkit", "run", "a", "b"], env=every)
+    res = check("--stale")
+    assert res.returncode == 0, res.stderr
+    ck_info["pipeline"]["stages"]["b"]["command"] = "echo b2 > b.txt"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check("--stale")
+    assert res.returncode != 0
+    assert "stage 'b': env-var 'CK_B' not found" in res.stderr
+    assert "CK_LAB" not in res.stderr
+    assert "CK_A" not in res.stderr
+    ck_info["pipeline"]["stages"]["a"]["command"] = "echo a2 > a.txt"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check("--stale", env=env | {"CK_B": "b"})
+    assert res.returncode != 0
+    assert "environment 'lab': env-var 'CK_LAB' not found" in res.stderr
+    assert "stage 'a': env-var 'CK_A' not found" in res.stderr
+    # A subproject's stages are checked too
+    os.makedirs("sub")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "s": {
+                            "kind": "shell-command",
+                            "command": "echo s > s.txt",
+                            "requirements": [env_var("CK_SUB")],
+                            "outputs": ["s.txt"],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check(env=every)
+    assert res.returncode != 0
+    assert "stage 'sub:s': env-var 'CK_SUB' not found" in res.stderr
+    assert check(env=every | {"CK_SUB": "s"}).returncode == 0
+    # Each unmet requirement of a declaration is reported, and a switch's
+    # option it doesn't pick here isn't checked
+    ck_info["pipeline"]["stages"]["b"]["requirements"].append(env_var("CK_B2"))
+    ck_info["environments"]["pick"] = {
+        "kind": "switch",
+        "switch": [
+            {
+                "when": [{"env_var_set": "CK_NOT_SET"}],
+                "use": {
+                    "kind": "system",
+                    "requirements": [env_var("CK_UNPICKED")],
+                },
+            },
+            {"use": "lab"},
+        ],
+    }
+    ck_info["pipeline"]["stages"]["a"]["environment"] = "pick"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check(env={k: v for k, v in every.items() if k != "CK_B"})
+    assert res.returncode != 0
+    assert (
+        "stage 'b': env-var 'CK_B' not found; env-var 'CK_B2' not found"
+    ) in res.stderr
+    assert "CK_UNPICKED" not in res.stdout + res.stderr
+    assert "CK_LAB" not in res.stderr
+    # A setup step is checked in each project that declares it
+    exists = (
+        f'"{sys.executable}" -c '
+        "\"import os, sys; sys.exit(not os.path.exists('ready'))\""
+    )
+    ready = {"kind": "setup", "name": "ready", "check_command": exists}
+    ck_info["requirements"].append(ready)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open(os.path.join("sub", "calkit.yaml")) as f:
+        sub_info = calkit.ryaml.load(f)
+    sub_info["requirements"] = [ready]
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    with open("ready", "w") as f:
+        f.write("")
+    every = every | {"CK_SUB": "s", "CK_B2": "b"}
+    res = check(env=every)
+    assert res.returncode != 0
+    assert "subproject 'sub': setup requirement 'ready'" in res.stderr
+    assert "the project:" not in res.stderr
+    with open(os.path.join("sub", "ready"), "w") as f:
+        f.write("")
+    assert check(env=every).returncode == 0, check(env=every).stderr
+    # With --stale, the projects' own are checked before what's out of date
+    # is, which checks environments that may need them
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app as calkit_app
+
+    def fail_status(*args: object, **kwargs: object) -> None:
+        raise AssertionError("status asked before project requirements")
+
+    monkeypatch.setattr(calkit.pipeline, "get_status", fail_status)
+    monkeypatch.delenv("CK_PROJECT", raising=False)
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs", "--stale"])
+    assert result.exit_code != 0
+    assert "the project: env-var 'CK_PROJECT' not found" in result.output
+
+
 @pytest.mark.skipif(
     shutil.which("julia") is None, reason="Julia not installed"
 )
@@ -310,6 +500,7 @@ def test_check_julia_env_repairs_stale_manifest(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env(tmp_dir):
     # First create a Dockerfile with a known base image
     with open("Dockerfile", "w") as f:
@@ -424,6 +615,7 @@ def test_check_docker_env(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_locks_every_platform(tmp_dir):
     from calkit.environments import get_docker_arch
 
@@ -520,6 +712,7 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
     def get_layers() -> list[str]:
         layers: list[str] = json.loads(
@@ -582,6 +775,7 @@ def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
     container = "calkit-test-registry"
     registry = "localhost:5678"
@@ -760,6 +954,7 @@ def test_push_does_not_reach_a_registry_with_nothing_to_send(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
     image = "calkit-unreachable-registry-test"
     subprocess.check_call(["calkit", "init"])
@@ -836,6 +1031,7 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_push_sends_docker_images_to_their_registry(tmp_dir):
     container = "calkit-test-registry-push"
     registry = "localhost:5679"
@@ -943,6 +1139,7 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_does_not_push(tmp_dir):
     with open("Dockerfile", "w") as f:
         f.write("FROM alpine:3.18\nRUN echo unpushed > /hi.txt\n")
@@ -1602,6 +1799,34 @@ def test_check_switch_env(tmp_dir):
         assert set(json.load(f)["machine_locks"]) == {"a"}
 
 
+def test_check_pixi_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("env")
+    with open("env/pixi.toml", "w") as f:
+        f.write(
+            "[workspace]\n"
+            'name = "test"\n'
+            'channels = ["conda-forge"]\n'
+            'platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]\n'
+            "[feature.extra.dependencies]\n"
+            "[environments]\n"
+            'named = ["extra"]\n'
+        )
+    env = {"kind": "pixi", "path": "env/pixi.toml"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"px": env}}, f)
+    # Without a name, pixi installs the manifest's default env
+    subprocess.check_call(["calkit", "check", "env", "-n", "px"])
+    assert os.listdir("env/.pixi/envs") == ["default"]
+    # With one, it installs that env, as stages run it
+    shutil.rmtree("env/.pixi")
+    env["name"] = "named"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"px": env}}, f)
+    subprocess.check_call(["calkit", "check", "env", "-n", "px"])
+    assert os.listdir("env/.pixi/envs") == ["named"]
+
+
 def test_check_stage_runs(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {
@@ -1734,6 +1959,49 @@ def test_check_stage_runs(tmp_dir):
     res = subprocess.run(check, capture_output=True, text=True)
     assert "Stage 'tools/dvc.yaml:t' has changed in dvc.lock" in res.stdout
     subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:t"])
+    # Like DVC, it ignores the entries of stages no longer in the pipeline,
+    # each foreach item by its own name, and still checks the rest
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "t": {"cmd": "echo t > t.txt", "outs": ["t.txt"]},
+                    "f": {
+                        "foreach": ["x", "y"],
+                        "do": {"cmd": "echo ${item} > ${item}.txt"},
+                    },
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(check)
+    with open(os.path.join("tools", "dvc.yaml")) as f:
+        tools_dvc_yaml = calkit.ryaml.load(f)
+    tools_dvc_yaml["stages"]["f"]["foreach"] = ["x"]
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(tools_dvc_yaml, f)
+    ck_info["pipeline"]["stages"].pop("b")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "status"])
+    assert "b" in calkit.dvc.read_lock_stages()
+    assert "f@y" in calkit.dvc.read_lock_stages("tools")
+    stage_runs = calkit.read_stage_runs()
+    del stage_runs["b"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    tools_runs = calkit.read_stage_runs("tools")
+    del tools_runs["f@x"], tools_runs["f@y"]
+    with open(os.path.join("tools", calkit.STAGE_RUNS_FPATH), "w") as f:
+        json.dump(tools_runs, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Stage 'tools/dvc.yaml:f@x' has no recorded run" in res.stdout
+    assert "f@y" not in res.stdout
+    assert "'b'" not in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:f@x"])
+    subprocess.check_call(check)
     # One inside a DVC repo of its own isn't, since its wrapper stage runs
     # it without recording its stages
     os.makedirs(os.path.join("iso", ".dvc"))
@@ -1944,6 +2212,67 @@ def test_check_storage(tmp_dir):
     assert result.returncode == 0, result.stderr
     assert "Run 'make'" in result.stdout
     assert not git("ls-files", "--", "out.txt").strip()
+    # An output ignored as a whole, with a file in it another rule ignores,
+    # is fixed in one pass
+    ck_info["pipeline"]["stages"]["whole"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "mkdir -p whole && echo w > whole/w.txt "
+        "&& echo l > whole/run.log",
+        "outputs": [{"path": "whole", "storage": "git"}],
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run", "whole"])
+    git("rm", "-r", "-q", "--cached", "whole")
+    with open(".gitignore", "a") as f:
+        f.write("\n/whole/\n*.log\n")
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "ignored"
+    assert sorted(problem["files"]) == ["whole/run.log", "whole/w.txt"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "whole").split() == [
+        "whole/run.log",
+        "whole/w.txt",
+    ]
+    result = check()
+    assert result.returncode == 0, result.stdout
+    # A directory tracked by both, with a file DVC leaves out of it that's
+    # only in Git, keeps that one in Git
+    git("commit", "-qm", "Fix")
+    with open(".dvcignore", "a") as f:
+        f.write("*.tmp\n")
+    ck_info["pipeline"]["stages"]["dir"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "mkdir -p dir && echo d > dir/d.csv && echo t > dir/t.tmp",
+        "outputs": ["dir"],
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run", "dir"])
+    git("add", "-f", "dir")
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "both"
+    assert problem["files"] == ["dir/d.csv"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "dir").split() == ["dir/t.tmp"]
+    result = check()
+    assert result.returncode == 0, result.stdout
+    # A file an output's 'ignore' leaves out, but Git still tracks, is
+    # removed from Git
+    ck_info["pipeline"]["stages"]["whole"]["outputs"][0]["ignore"] = ["*.log"]
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "status"], stdout=subprocess.DEVNULL)
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "excluded-tracked"
+    assert problem["files"] == ["whole/run.log"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "whole").split() == ["whole/w.txt"]
+    assert os.path.isfile("whole/run.log")
+    result = check()
+    assert result.returncode == 0, result.stdout
 
 
 def test_check_references(tmp_dir):
@@ -1968,6 +2297,13 @@ def test_check_references(tmp_dir):
     )
     with open("out.json") as f:
         assert json.load(f)["path"] == "main.tex"
+    # Responses can be recorded in a file of their own, as a stage does
+    subprocess.check_call(
+        ["calkit", "check", "refs", "main.tex", "--offline"]
+        + ["--responses", "checks/responses.json"]
+    )
+    with open("checks/responses.json") as f:
+        assert json.load(f) == {}
     # There's no default document to check
     result = subprocess.run(["calkit", "check", "refs"], capture_output=True)
     assert result.returncode != 0
@@ -1981,3 +2317,25 @@ def test_check_references(tmp_dir):
     )
     assert result.returncode != 0
     assert "ghost" in result.stdout + result.stderr
+
+
+def test_check_storage_stage_output_dvc_file(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("fig.png", "w") as f:
+        f.write("old")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "fig.png"])
+    subprocess.check_call(["git", "commit", "-qm", "Add figure"])
+    # A stage that makes it now, in a dvc.yaml compiled elsewhere
+    with open("dvc.yaml", "w") as f:
+        f.write("stages:\n  plot:\n    cmd: x\n    outs:\n    - fig.png\n")
+    result = subprocess.run(
+        ["calkit", "check", "storage"], capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "made by stage 'plot'" in result.stderr + result.stdout
+    subprocess.check_call(["calkit", "check", "storage", "--fix"])
+    assert not os.path.isfile("fig.png.dvc")
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).split()
+    assert "fig.png.dvc" in staged

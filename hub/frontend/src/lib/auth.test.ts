@@ -84,6 +84,11 @@ describe("getValidAccessToken", () => {
     )
 
     expect(tokenAbs).toBe(expiredAccessToken)
+    // Nor while signing out, which sends its refresh token instead
+    const tokenLogout = await getValidAccessToken(
+      "http://localhost:8000/logout",
+    )
+    expect(tokenLogout).toBe(expiredAccessToken)
     expect(refreshAccessTokenMock).not.toHaveBeenCalled()
   })
 

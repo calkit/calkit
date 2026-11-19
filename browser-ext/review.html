@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Calkit PDF review</title>
+  </head>
+  <body>
+    <div id="toolbar">
+      <button id="zoom-out" title="Zoom out">&minus;</button>
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="fit" title="Fit width">Fit</button>
+      <span id="page"></span>
+      <span class="spacer"></span>
+      <span id="status"></span>
+      <label title="Show resolved threads"
+        ><input type="checkbox" id="show-resolved" /> Resolved</label
+      >
+      <button
+        id="toggle-comments"
+        aria-pressed="true"
+        title="Show or hide comments"
+      >
+        Comments<span id="comment-count" class="badge" hidden></span>
+      </button>
+    </div>
+    <div id="main">
+      <div id="wrap">
+        <div id="viewerContainer" tabindex="-1">
+          <div id="viewer" class="pdfViewer"></div>
+        </div>
+        <div id="find" hidden>
+          <input
+            id="find-input"
+            type="text"
+            placeholder="Find"
+            spellcheck="false"
+            aria-label="Find"
+          />
+          <span id="find-count"></span>
+          <button
+            id="find-prev"
+            title="Previous match (Shift+Enter)"
+            aria-label="Previous match"
+          >
+            &uarr;
+          </button>
+          <button
+            id="find-next"
+            title="Next match (Enter)"
+            aria-label="Next match"
+          >
+            &darr;
+          </button>
+          <button id="find-close" title="Close (Escape)" aria-label="Close">
+            &times;
+          </button>
+        </div>
+        <div id="select-actions">
+          <button id="select-comment" class="primary">Comment</button>
+          <button id="select-source" title="Show this text in the editor">
+            Go to source
+          </button>
+        </div>
+      </div>
+      <div id="resizer"></div>
+      <aside id="side">
+        <div id="side-head">
+          Comments<button
+            id="close-panel"
+            title="Hide the comment threads, keeping them on the PDF"
+          >
+            &times;
+          </button>
+        </div>
+        <div id="panel"></div>
+      </aside>
+    </div>
+    <script type="module" src="./src/overleaf/review/review.ts"></script>
+  </body>
+</html>

@@ -289,26 +289,6 @@ function HelpContent({ userHasWriteAccess }: HelpContentProps) {
       </>
     )
   }
-  if (page === "local") {
-    return (
-      <>
-        <Text mb={mb}>
-          This page provides an interface for interacting with the project
-          working directory on your local machine. For this to work, the local
-          Calkit server must be running. To start one up, run{" "}
-          <Code>calkit local-server</Code> in a terminal after installing the{" "}
-          <Link
-            href="https://github.com/calkit/calkit"
-            variant="blue"
-            isExternal
-          >
-            Calkit Python package
-          </Link>
-          .
-        </Text>
-      </>
-    )
-  }
   // Default project home help content
   return (
     <>

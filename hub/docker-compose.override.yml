@@ -101,6 +101,10 @@ services:
       SMTP_HOST: "mailcatcher"
       SMTP_PORT: "1025"
       SMTP_TLS: "false"
+      # Mailcatcher doesn't do SMTP auth, so a login from .env would make
+      # every send fail
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
       EMAILS_FROM_EMAIL: "noreply@example.com"
       # The image bakes in whatever version it was built at, which goes
       # stale as you commit; this keeps /version tracking the working tree
@@ -163,6 +167,35 @@ services:
       - --reload-dir
       - ../../calkit
 
+  relay:
+    restart: "no"
+    ports:
+      - "8002:8002"
+    volumes:
+      - ../:/app
+      - /app/.venv
+    build:
+      context: ..
+      dockerfile: hub/backend/Dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+    environment:
+      RELAY_SECRET_KEY: ${RELAY_SECRET_KEY:?Variable not set}
+    command:
+      - uvicorn
+      - relay:app
+      - --reload
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - --ws-max-size
+      - "300000"
+      - --ws-max-queue
+      - "4"
+      - --ws-per-message-deflate
+      - "false"
+
   mailcatcher:
     image: schickling/mailcatcher
     ports:
@@ -189,7 +222,9 @@ services:
     # to build args. Setting them at runtime means editing .env and
     # restarting this service is enough, with no image rebuild.
     environment:
-      - VITE_API_URL=http://api.localhost
+      # Through Vite's proxy, so the API is on the same site as the app
+      - VITE_API_URL=http://localhost:5173/_api
+      - API_PROXY_TARGET=http://backend:8000
       # The in-browser LaTeX engine fetches missing TeX files from here on a
       # kpathsea miss (full TeX Live coverage + on-demand fonts). See texmf-proxy.
       - VITE_TEXMF_PROXY=http://localhost:8771

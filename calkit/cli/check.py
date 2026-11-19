@@ -9,7 +9,7 @@ import platform as _platform
 import re
 import shutil
 import subprocess
-from typing import Annotated, Callable
+from typing import Annotated, Any, Callable
 
 import dotenv
 import typer
@@ -412,16 +412,16 @@ def _echo_retyped(findings: list[dict]) -> None:
     calkit.echo(
         "\nEach of these is a number the project already computes, typed "
         "into the document. It is right today and wrong the next time that "
-        "stage runs. Reference the command the 'json-to-latex' stage "
-        "generates for that key instead."
+        "stage runs. Read it with \\ckvalue{<file>}{<key>} from the "
+        "calkit LaTeX package instead, or, where the document already uses "
+        "a 'json-to-latex' stage, with the command it generates."
         "\n\nWhat this does not catch: a value under two significant "
         "digits (0.5) or an integer under 100 (8), which would match too "
         "much ordinary prose to be worth reporting; a value the document "
         "rounds or reformats before typing, since it is compared as "
-        "written; and anything in a results file no 'json-to-latex' stage "
-        "reads, or in one whose stage names its 'keys' without naming "
-        "that value---the document has no command for it, so typing it "
-        "is what there is until the key is named."
+        "written; and anything in a results file the document doesn't "
+        "read with \\ckvalue and no 'json-to-latex' stage reads, or a "
+        "value a 'json-to-latex' stage leaves out of the 'keys' it names."
     )
 
 
@@ -513,6 +513,20 @@ def check_environment(
     if found is None:
         raise_error(f"Environment '{env_name}' does not exist")
     env = found
+    try:
+        guests = calkit.environments.get_guest_envs(env_name, env, envs)
+    except ValueError as e:
+        raise_error(str(e))
+    for guest_name, guest in guests:
+        check_environment(env_name=guest_name, verbose=verbose)
+        try:
+            added = calkit.environments.add_host_tex_packages(
+                env_name, env, guest_name, guest
+            )
+        except ValueError as e:
+            raise_error(str(e))
+        if added:
+            check_environment(env_name=guest_name, verbose=verbose)
     # Docker records its inputs in its lock, which rebuilds it already
     try:
         rebuild = force or (
@@ -558,6 +572,9 @@ def check_environment(
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--manifest-path", env["path"]]
+        # Without a name, pixi installs only the manifest's default env
+        if pixi_env_name := env.get("name"):
+            cmd += ["--environment", pixi_env_name]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -833,6 +850,13 @@ def check_environment(
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
+    elif env["kind"] == "texlive":
+        from calkit.environments import texlive as env_texlive
+
+        try:
+            env_texlive.check(env_name, env, rebuild=rebuild, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{env_name}': {e}")
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     calkit.environments.record_build_inputs(env_name, env)
@@ -1700,22 +1724,195 @@ def check_project_requirements(
             ),
         ),
     ] = False,
+    stale_only: Annotated[
+        bool,
+        typer.Option(
+            "--stale",
+            help=(
+                "Only check what 'calkit run' needs now: the project's "
+                "requirements, and those of out-of-date stages and their "
+                "environments."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Check that a project's system-level requirements are met.
+    """Check that this machine meets the project's requirements.
 
-    Subprojects' requirements are checked too, since the host has to meet
-    them for the project's pipeline to run.
+    That's the project's own, and those of every stage and environment, so
+    this says whether the whole project can run here. Subprojects' are
+    checked too. On a terminal, what's missing is offered, as by
+    'calkit run'. Those of an environment on another machine are checked
+    there, by 'calkit run'.
     """
+    import calkit.environments as envs_mod
+    import calkit.markdown
+
+    def check(where: str, **kwargs: Any) -> None:
+        """Check some requirements, noting what's wrong rather than
+        stopping, so everything is reported at once."""
+        if verbose:
+            typer.echo(f"Checking requirements of {where}")
+        try:
+            calkit.check_requirements(
+                use_cache=not no_cache, checked=checked, **kwargs
+            )
+        except Exception as e:
+            problems.append(f"{where}: {e}")
+
+    def add_env(
+        env_name: str, envs: dict, env_names: list[str], where: str
+    ) -> list[str]:
+        """Add an environment to check, and what it picks if a switch,
+        returning them."""
+        env = envs.get(env_name)
+        if not isinstance(env, dict):
+            return []
+        used = [env_name]
+        if env.get("kind") == envs_mod.SWITCH_KIND:
+            try:
+                picked = envs_mod.resolve_switch(env_name, envs)
+            except ValueError as e:
+                problems.append(f"{where}: {e}")
+                picked = None
+            if picked is not None:
+                used.append(picked)
+        env_names.extend(n for n in used if n not in env_names)
+        return used
+
     typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
         calkit.requirements.cache_clear()
-    for wdir, info in calkit.iter_projects():
-        try:
-            with calkit.in_project(wdir):
-                calkit.check_requirements(ck_info=info, use_cache=not no_cache)
-        except Exception as e:
-            raise_error(f"{calkit.describe_project(wdir)}{e}")
+    # Each requirement is checked once, however many declare it
+    checked: dict[str, str | None] = {}
+    problems: list[str] = []
+    projects = list(calkit.iter_projects())
+    # The projects' own first, since what's out of date can't be known
+    # until, e.g., the apps its environments are checked with are here
+    for wdir, info in projects:
+        with calkit.in_project(wdir):
+            check(
+                "the project" if wdir == "." else f"subproject '{wdir}'",
+                ck_info=info,
+            )
+    # Which stages are out of date is asked as 'calkit status' asks it,
+    # which doesn't check the environments of stages whose requirements
+    # aren't met, so nothing here can change the answer
+    stale: set[str] | None = None
+    if stale_only:
+        if problems:
+            raise_error(
+                "This machine doesn't meet these requirements:\n"
+                + "\n".join(f"  {p}" for p in problems)
+            )
+        status = calkit.pipeline.get_status()
+        if status.errors or status.failed_environment_checks:
+            raise_error(
+                "Failed to determine which stages are out of date: "
+                + "; ".join(
+                    status.errors
+                    + [
+                        f"environment '{e}' failed its check"
+                        for e in status.failed_environment_checks
+                    ]
+                )
+            )
+        stale = {name.split("@")[0] for name in status.stale_stage_names}
+    for wdir, info in projects:
+        with calkit.in_project(wdir):
+            try:
+                info = calkit.markdown.expand_ck_info(info).ck_info
+            except Exception as e:
+                problems.append(
+                    f"{calkit.describe_project(wdir)}failed to read markdown "
+                    f"stages: {e}"
+                )
+            envs = info.get("environments") or {}
+            stages = (info.get("pipeline") or {}).get("stages") or {}
+            # The environments to check, i.e., those the stages use, with
+            # what a switch picks here, and the stages, with any of their
+            # environments that's another machine
+            env_names: list[str] = []
+            remote_env_by_stage: dict[str, str | None] = {}
+            for name, stage in stages.items():
+                qualified = calkit.qualify_with_project(wdir, name)
+                if not isinstance(stage, dict) or (
+                    stale is not None and qualified not in stale
+                ):
+                    continue
+                used = []
+                for env_name in str(stage.get("environment") or "").split(
+                    envs_mod.COMPOSITE_ENV_SEP
+                ):
+                    used += add_env(
+                        env_name, envs, env_names, f"stage '{qualified}'"
+                    )
+                remote_env_names = [
+                    n
+                    for n in used
+                    if envs_mod.runs_elsewhere(envs_mod.get_env(n, envs) or {})
+                ]
+                remote_env_by_stage[name] = (
+                    remote_env_names[0] if remote_env_names else None
+                )
+            # Without --stale, those no stage uses too, except a switch's
+            # options it doesn't pick here, which nothing needs
+            if stale is None:
+                options: set[str] = set()
+                for env_name, env in envs.items():
+                    if (
+                        isinstance(env, dict)
+                        and env.get("kind") == envs_mod.SWITCH_KIND
+                    ):
+                        try:
+                            options.update(
+                                envs_mod.get_switch_options(env_name, envs)
+                            )
+                        except ValueError:
+                            # Said when what it picks is resolved
+                            pass
+                for env_name in envs:
+                    if env_name not in options:
+                        add_env(
+                            env_name,
+                            envs,
+                            env_names,
+                            "environment "
+                            f"'{calkit.qualify_with_project(wdir, env_name)}'",
+                        )
+            for env_name in env_names:
+                env = envs_mod.get_env(env_name, envs) or {}
+                if not env.get("requirements"):
+                    continue
+                where = (
+                    "environment "
+                    f"'{calkit.qualify_with_project(wdir, env_name)}'"
+                )
+                if envs_mod.runs_elsewhere(env):
+                    calkit.echo(
+                        f"Not checking {where} here, since it's another "
+                        "machine; 'calkit run' checks it there"
+                    )
+                    continue
+                check(where, requirements=env["requirements"])
+            for name, elsewhere in remote_env_by_stage.items():
+                stage_reqs = stages[name].get("requirements")
+                if not stage_reqs:
+                    continue
+                where = f"stage '{calkit.qualify_with_project(wdir, name)}'"
+                if elsewhere is not None:
+                    calkit.echo(
+                        f"Not checking {where} here, since it runs on "
+                        f"environment '{elsewhere}', which is another "
+                        "machine; 'calkit run' checks it there"
+                    )
+                    continue
+                check(where, requirements=stage_reqs)
+    if problems:
+        raise_error(
+            "This machine doesn't meet these requirements:\n"
+            + "\n".join(f"  {p}" for p in problems)
+        )
     message = "✅ All set!"
     calkit.echo(message)
 
@@ -1729,8 +1926,11 @@ def check_stage_runs() -> None:
     entry some other way, e.g., 'dvc commit' after an output was edited, an
     edit or merge of dvc.lock, or running it outside Calkit. This catches
     mistakes and shortcuts, not forgery, since a matching entry can be
-    written by anyone.
+    written by anyone. Like DVC, it ignores the entries of stages no longer
+    in the pipeline.
     """
+    from dvc.parsing import DataResolver
+
     # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
     # subproject's, against the record kept beside its dvc.lock: any other
     # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
@@ -1771,11 +1971,38 @@ def check_stage_runs() -> None:
     parent_runs = {
         k.replace("\\", "/"): v for k, v in stage_runs[None].items()
     }
+    # DVC keeps the dvc.lock entry of a stage removed from dvc.yaml, and
+    # ignores it, so these are skipped, named as DVC resolves them, e.g.,
+    # each foreach item. Nothing is skipped beside a dvc.yaml DVC can't read.
+    removed: dict[str | None, set[str]] = {}
+    try:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+    except Exception:
+        dvc_repo = None
+    for lock_dir in lock_dirs if dvc_repo is not None else []:
+        try:
+            fpath = os.path.join(lock_dir or ".", "dvc.yaml")
+            with open(fpath, encoding="utf-8") as f:
+                dvc_yaml = calkit.core._load_yaml_readonly(f)
+            resolver = DataResolver(
+                dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
+            )
+            removed[lock_dir] = {
+                name
+                for name in calkit.dvc.read_lock_stages(lock_dir)
+                if not resolver.has_key(name)
+            }
+        except Exception:
+            continue
+    if dvc_repo is not None:
+        dvc_repo.close()
     problems = []
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
         for lock_name, locked in sorted(lock_stages.items()):
-            if not isinstance(locked, dict):
+            if not isinstance(locked, dict) or lock_name in removed.get(
+                lock_dir, set()
+            ):
                 continue
             name = (
                 lock_name
@@ -1907,10 +2134,14 @@ def check_storage(
 ) -> None:
     """Check that paths are tracked where they're declared to be stored.
 
-    That is, nothing is tracked by both Git and DVC, no pipeline output
-    stored in Git is ignored by it, and nothing in Git is too large for it.
+    That is, nothing is tracked by both Git and DVC, no pipeline output has
+    a .dvc file of its own too, no pipeline output stored in Git, or file
+    in one, is ignored by it, and nothing in Git is too large for it.
+    Large files are only reported.
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
+    Files Git ignores in an output stored in Git are added in spite of the
+    rule, unless they're in the output's 'ignore' list or too large.
     """
     import calkit.dvc
     import calkit.git
@@ -1941,14 +2172,50 @@ def check_storage(
     to_record = []
     for problem in problems:
         path = os.path.abspath(problem["path"])
-        if problem["store_in"] == "dvc":
-            repo.git.rm("-r", "-q", "--cached", "--", path)
+        if problem["kind"] == "stage-output-dvc-file":
+            # The stage says how it's made, so its own .dvc file goes
+            dvc_file = problem["dvc_file"]
+            if repo.git.ls_files("--", dvc_file):
+                repo.git.rm("-q", "--", dvc_file)
+            elif os.path.isfile(dvc_file):
+                os.remove(dvc_file)
+        elif problem["kind"] == "excluded-tracked":
+            # Left out of the output, so stored in neither, as declared
+            calkit.dvc.untrack_files(repo, problem["files"])
+        elif problem["store_in"] == "dvc":
+            # Only those in both, if a directory has others only in Git
+            to_untrack = [
+                os.path.abspath(p) for p in problem.get("files", [])
+            ] or [path]
+            for i in range(0, len(to_untrack), 100):
+                repo.git.rm(
+                    "-r",
+                    "-q",
+                    "--cached",
+                    "--",
+                    *[f":(literal){p}" for p in to_untrack[i : i + 100]],
+                )
             calkit.git.ensure_path_is_ignored(repo, path)
             if problem["kind"] == "both":
                 to_record.append(problem)
         elif problem["store_in"] == "git":
-            calkit.git.ensure_path_is_not_ignored(repo, path)
-            repo.git.add("--", path)
+            too_large = []
+            if problem["kind"] == "ignored":
+                calkit.git.ensure_path_is_not_ignored(repo, path)
+                too_large = calkit.dvc.stage_git_outputs(repo, [path])
+            # Files in it Git ignores are added in spite of the rule, which
+            # for an output ignored as a whole can be one besides its own
+            too_large += calkit.dvc.force_add_ignored_files(
+                repo, problem.get("files", [])
+            )
+            if too_large:
+                warn(
+                    calkit.dvc.get_too_large_text(
+                        list(dict.fromkeys(too_large))
+                    )
+                )
+                unfixed.append(problem)
+                continue
         else:
             unfixed.append(problem)
             continue
@@ -2039,10 +2306,11 @@ def check_questions(
     Reports, worst first: evidence that isn't there (never run, never
     pushed, or pinned to a Git ref that doesn't exist); broken references
     (a key that doesn't resolve, a placeholder that names no evidence, a
-    label missing from the LaTeX); evidence the pipeline would rebuild;
-    and evidence from a frozen stage, or downstream of one, that no longer
-    matches dvc.lock, which won't be rerun, unless the citation pins a
-    git_ref. Subprojects' questions are checked too.
+    label missing from the LaTeX, lines a cited file no longer has);
+    evidence the pipeline would rebuild; and evidence from a frozen stage,
+    or downstream of one, that no longer matches dvc.lock, which won't be
+    rerun, unless the citation pins a git_ref. Subprojects' questions are
+    checked too.
 
     Evidence pinned with a git_ref is checked at that ref rather than in
     the working tree. Exits with an error if any answered question is
@@ -2108,6 +2376,15 @@ def check_references(
             help="Ignore cached answers and ask the services again.",
         ),
     ] = False,
+    responses: Annotated[
+        str | None,
+        typer.Option(
+            "--responses",
+            help="Reuse the services' responses from this file instead of "
+            "the local cache, and record there the ones this check used, "
+            "so it can be reproduced.",
+        ),
+    ] = None,
 ) -> None:
     """Check that the references a document cites are real.
 
@@ -2125,8 +2402,9 @@ def check_references(
     venue that registers no DOIs looks the same and is named as such.
 
     Answers are cached, so a rerun needs no network. A references-check
-    pipeline stage runs this with --output, so its report is an output
-    that goes stale when the document or a bibliography changes.
+    pipeline stage runs this with --output and --responses, so its report
+    is an output that goes stale when the document or a bibliography
+    changes, and the responses it was based on are kept with it.
 
     Exits with an error if a key resolves to no entry, a DOI isn't
     registered, or an entry contradicts the record it was found in. A
@@ -2138,7 +2416,11 @@ def check_references(
 
     try:
         check = _check_references(
-            path, wdir=wdir, offline=offline, refresh=refresh
+            path,
+            wdir=wdir,
+            offline=offline,
+            refresh=refresh,
+            responses_path=responses,
         )
     except (FileNotFoundError, ValueError) as e:
         raise_error(str(e))

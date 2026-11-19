@@ -40,6 +40,7 @@ export interface FigureEntry {
   path: string;
   stage?: string;
   imported_from?: unknown;
+  created_by?: unknown;
   [key: string]: unknown;
 }
 
@@ -62,11 +63,15 @@ export interface ArtifactEntry {
 
 // A question can be a plain string or, in the richer schema, an object with a
 // hypothesis, answer, and supporting evidence (figures or results). See the
-// Python `Question` model in calkit/models/core.py.
+// Python `Question` model in calkit/models/core.py. Evidence with no kind is
+// a plain file, optionally at some lines, unless it has a key or values,
+// which makes it a result.
 export interface QuestionEvidence {
-  kind?: string;
+  kind?: string | null;
   path?: string;
   key?: string;
+  values?: Record<string, string>;
+  lines?: number | string;
   explanation?: string;
   [key: string]: unknown;
 }
@@ -142,6 +147,8 @@ export interface CalkitInfo {
   questions?: (string | QuestionEntry)[];
   figures?: FigureEntry[];
   datasets?: DatasetEntry[];
+  // Anything else, which can record who created it or where it came from
+  misc?: ArtifactEntry[];
   results?: ArtifactEntry[];
   publications?: ArtifactEntry[];
   presentations?: ArtifactEntry[];

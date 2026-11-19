@@ -11,6 +11,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -217,6 +218,30 @@ COMPOSITE_ENV_SEP = ":"
 VALID_OUTER_ENV_KINDS = ["slurm", "pbs", "system"]
 # A switch can be an outer env too, when every option it picks from is one
 SWITCH_KIND = "switch"
+# Kinds that run a command on this machine with the environmental variables
+# they're given, so another environment's programs can be put on PATH for
+# it with ``with``
+COMPOSABLE_HOST_KINDS = [
+    "conda",
+    "julia",
+    "pixi",
+    "renv",
+    "uv",
+    "uv-venv",
+    "venv",
+]
+# Kinds that add programs without an interpreter to compete with a host's
+COMPOSABLE_GUEST_KINDS = ["texlive"]
+# What Matplotlib's usetex needs from TeX beyond the basics, whatever font
+# it's set to: the packages its preamble loads and the program it makes
+# PNGs with
+MATPLOTLIB_TEX_PACKAGES = [
+    "cm-super",
+    "dvipng",
+    "geometry",
+    "type1cm",
+    "underscore",
+]
 
 
 def host_is_local(host: str | None) -> bool:
@@ -404,6 +429,8 @@ def language_from_env(env: dict) -> str | None:
     if kind in ["conda", "pixi", "uv", "uv-venv", "venv"]:
         return "python"
     if kind == "docker" and "texlive" in env.get("image", "").lower():
+        return "latex"
+    if kind == "texlive":
         return "latex"
     return None
 
@@ -682,7 +709,9 @@ def get_env_lock_fpath(
             )
             if for_dvc:
                 lock_fpath = os.path.dirname(lock_fpath)
-    elif env_kind == "matlab":
+    elif env_kind in ("matlab", "texlive"):
+        # A TeX Live lock covers every platform it was locked for, so
+        # there's one
         lock_fpath += ".json"
     elif env_kind == "julia":
         env_path = env.get("path")
@@ -835,6 +864,208 @@ def env_can_be_outer(env_name: str, envs: dict) -> bool:
     if kind == SWITCH_KIND:
         return switch_is_outer(env_name, envs)
     return kind in VALID_OUTER_ENV_KINDS
+
+
+def get_guest_envs(
+    env_name: str, env: dict, envs: dict
+) -> list[tuple[str, dict]]:
+    """Return the environments composed into one with ``with``, in order.
+
+    Raises ``ValueError`` if the environment's kind can't have others
+    composed into it, or one it names doesn't exist or can't be composed.
+    """
+    names = env.get("with")
+    if not names:
+        return []
+    if not isinstance(names, list) or not all(
+        isinstance(n, str) for n in names
+    ):
+        raise ValueError(
+            f"Environment '{env_name}' has 'with: {names}'; write it as a "
+            "list of environment names"
+        )
+    kind = env.get("kind")
+    if kind not in COMPOSABLE_HOST_KINDS:
+        raise ValueError(
+            f"Environment '{env_name}' is of kind '{kind}', which can't have "
+            "others composed into it with 'with'; only "
+            f"{', '.join(COMPOSABLE_HOST_KINDS)} environments can"
+        )
+    guests = []
+    for name in dict.fromkeys(names):
+        guest = envs.get(name)
+        if guest is None:
+            raise ValueError(
+                f"Environment '{env_name}' has '{name}' in 'with', which "
+                "isn't defined"
+            )
+        if guest.get("kind") not in COMPOSABLE_GUEST_KINDS:
+            raise ValueError(
+                f"Environment '{env_name}' has '{name}' in 'with', which is "
+                f"of kind '{guest.get('kind')}'; only "
+                f"{', '.join(COMPOSABLE_GUEST_KINDS)} environments can be "
+                "composed into another"
+            )
+        if guest.get("with"):
+            raise ValueError(
+                f"Environment '{name}' is composed into '{env_name}', so it "
+                "can't have a 'with' of its own"
+            )
+        guests.append((name, guest))
+    # Each sets the fonts fontconfig finds, which only one can do
+    if sum(g["kind"] == "texlive" for _, g in guests) > 1:
+        raise ValueError(
+            f"Environment '{env_name}' has more than one TeX Live "
+            "environment in 'with'; put their packages in one"
+        )
+    return guests
+
+
+def add_host_tex_packages(
+    env_name: str, env: dict, guest_name: str, guest: dict
+) -> list[str]:
+    """Add what the programs in an environment need from a TeX Live one
+    composed into it to the TeX Live environment's lock, and return the
+    packages added.
+
+    Those programs only write their TeX when they run, so it can't be read
+    beforehand like a document's. Matplotlib's needs are mostly the same
+    whatever a script does, so they're added if the host's spec or lock
+    names it. The guest must be locked already.
+    """
+    from calkit.environments import texlive
+
+    fpaths = [env.get("path"), get_env_lock_fpath(env, env_name)]
+    uses_matplotlib = False
+    for fpath in fpaths:
+        if not fpath or not os.path.isfile(fpath):
+            continue
+        with open(fpath, encoding="utf-8", errors="replace") as f:
+            # Not matplotlib-inline, which Jupyter kernels bring along
+            if re.search(
+                r"(?<![\w.-])matplotlib(-base)?(?![\w.]|-[a-z])", f.read()
+            ):
+                uses_matplotlib = True
+                break
+    if not uses_matplotlib:
+        return []
+    lock = texlive.read_lock(texlive.get_lock_fpath(guest_name, guest)) or {}
+    if all(p in lock.get("packages", {}) for p in MATPLOTLIB_TEX_PACKAGES):
+        return []
+    added = texlive.add_packages(guest_name, guest, MATPLOTLIB_TEX_PACKAGES)
+    if added:
+        print(
+            f"Added Matplotlib's usetex packages to TeX Live environment "
+            f"'{guest_name}': {', '.join(added)}",
+            file=sys.stderr,
+        )
+    return added
+
+
+def get_composed_env_vars(
+    env_name: str,
+    env: dict,
+    envs: dict,
+    keep: list[str] | None = None,
+    verbose: bool = False,
+    env_vars: dict | None = None,
+) -> dict | None:
+    """Return the environmental variables an environment's commands get
+    with the environments in its ``with`` composed in, or None if it has
+    none. Those named in ``keep``, e.g., the project's own, keep their
+    values.
+
+    These are ``env_vars``, by default this process's, with each composed
+    in. Each is checked first, which is fast once it's ready. Fontconfig is
+    pointed at the system's fonts as well as the TeX Live environment's,
+    and Matplotlib, which keys its TeX output and font list caches by
+    neither the TeX nor the fonts it found, gets a config directory of its
+    own, both kept in a folder for the host and its guests.
+    """
+    from xml.sax.saxutils import escape
+
+    from calkit.environments import texlive
+
+    if env.get("kind") == SWITCH_KIND:
+        picked = resolve_switch(env_name, envs)
+        if picked is None:
+            return None
+        env_name, env = picked, get_env(picked, envs) or {}
+    guests = get_guest_envs(env_name, env, envs)
+    if not guests:
+        return None
+    env_vars = dict(os.environ if env_vars is None else env_vars)
+    view_dirs = []
+    for name, guest in guests:
+        try:
+            view_dir = texlive.check(name, guest, verbose=verbose)
+            if add_host_tex_packages(env_name, env, name, guest):
+                view_dir = texlive.check(name, guest, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise RuntimeError(f"Environment '{name}': {e}") from e
+        env_vars = texlive.get_run_env_vars(view_dir, env_vars=env_vars)
+        view_dirs.append(view_dir)
+    # The system's fontconfig configuration, which the host's programs would
+    # read without one of the guest's, wherever this machine keeps it
+    calkit_dir = os.path.join(calkit.get_user_home(), ".calkit")
+    prior = os.environ.get("FONTCONFIG_FILE", "")
+    if prior and not os.path.abspath(prior).startswith(calkit_dir):
+        system_confs = [prior]
+    else:
+        prefixes = ["/", "/opt/homebrew", "/usr/local"]
+        if os.environ.get("CONDA_PREFIX"):
+            prefixes.append(os.environ["CONDA_PREFIX"])
+        if env.get("kind") == "conda" and env.get("prefix"):
+            prefixes.append(os.path.abspath(env["prefix"]))
+        if env.get("kind") == "pixi" and env.get("path"):
+            prefixes.append(
+                os.path.join(
+                    os.path.dirname(os.path.abspath(env["path"])),
+                    ".pixi",
+                    "envs",
+                    env.get("name") or "default",
+                )
+            )
+        system_confs = [
+            os.path.join(p, "etc", "fonts", "fonts.conf") for p in prefixes
+        ]
+    key = hashlib.sha256(
+        "\n".join(
+            [os.path.abspath(env.get("path", env_name))]
+            + system_confs
+            + view_dirs
+        ).encode()
+    ).hexdigest()[:16]
+    composed_dir = os.path.join(calkit_dir, "composed", key)
+    fonts_conf_fpath = os.path.join(composed_dir, "fonts.conf")
+    if not os.path.isfile(fonts_conf_fpath):
+        includes = system_confs + [env_vars["FONTCONFIG_FILE"]]
+        os.makedirs(composed_dir, exist_ok=True)
+        tmp_fpath = f"{fonts_conf_fpath}.{os.getpid()}.tmp"
+        with open(tmp_fpath, "w", newline="\n") as f:
+            f.write(
+                "\n".join(
+                    [
+                        '<?xml version="1.0"?>',
+                        '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">',
+                        "<fontconfig>",
+                        *(
+                            '  <include ignore_missing="yes">'
+                            f"{escape(c.replace(os.sep, '/'))}</include>"
+                            for c in includes
+                        ),
+                        "</fontconfig>",
+                    ]
+                )
+                + "\n"
+            )
+        os.replace(tmp_fpath, fonts_conf_fpath)
+    env_vars["FONTCONFIG_FILE"] = fonts_conf_fpath
+    env_vars["MPLCONFIGDIR"] = os.path.join(composed_dir, "matplotlib")
+    for name in keep or []:
+        if name in os.environ:
+            env_vars[name] = os.environ[name]
+    return env_vars
 
 
 def get_env(name: str, envs: dict) -> dict | None:
@@ -1115,6 +1346,7 @@ def write_switch_env_lock(
             "nix",
             "pixi",
             "renv",
+            "texlive",
             "uv",
             "uv-venv",
             "venv",
@@ -2161,6 +2393,164 @@ def runs_elsewhere(env: dict) -> bool:
     return False
 
 
+def get_pipeline_env_names(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+    skip_stages: list[str] | None = None,
+) -> tuple[list[str], dict, dict[str, dict]]:
+    """Names of the environments the pipeline's stages use, the project info
+    with markdown stages expanded, which they're defined in, and the stages.
+    """
+    import calkit
+    import calkit.markdown
+    from calkit.pipeline import get_stage_items
+
+    @functools.cache
+    def outer_runs_elsewhere(env_name: str) -> bool:
+        env = envs.get(env_name) or {}
+        if env.get("kind") == SWITCH_KIND:
+            try:
+                picked = resolve_switch(env_name, envs)
+            except ValueError:
+                return False
+            env = (get_env(picked, envs) or {}) if picked else {}
+        return runs_elsewhere(env)
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    # Markdown stages carry no environment of their own; the stages their
+    # blocks declare do, so expand before looking for environments to check.
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    # A frozen stage never runs, so its environment isn't needed
+    stages = {
+        k: v
+        for k, v in stages.items()
+        if not (isinstance(v, dict) and v.get("frozen"))
+    }
+    # An item named runs in its own environment, not its siblings'
+    item_targets = {t for t in targets or [] if "@" in t}
+    stage_targets = set(targets or []) - item_targets
+    if targets:
+        # Split targets by "@" to handle sub-stages from iterations
+        targets = [t.split("@")[0] for t in targets]
+        # A target naming a markdown stage covers every stage its file
+        # declares, which are named '<stage>/<block>'
+        prefixes = [
+            t + calkit.markdown.STAGE_NAME_SEPARATOR
+            for t in targets
+            if t in md_stages
+        ]
+        # A latex stage's diffs run in its environment, whether they're
+        # named one at a time or all together
+        import calkit.latex
+
+        stages = {
+            k: v
+            for k, v in stages.items()
+            if k in targets
+            or any(k.startswith(p) for p in prefixes)
+            or k + calkit.latex.DIFFS_TARGET_SUFFIX in targets
+            or any(
+                name in targets
+                for name in calkit.latex.get_diff_stage_names(k, v)
+            )
+        }
+    # An iterated stage whose environment depends on its values uses each
+    # item's
+    items: dict[str, dict] = {}
+    for name, stage in stages.items():
+        stage_items = get_stage_items(
+            name, stage, params=ck_info.get("parameters")
+        )
+        named = {t for t in item_targets if t.startswith(name + "@")}
+        if named and name not in stage_targets:
+            stage_items = {
+                k: v for k, v in stage_items.items() if k in named
+            } or stage_items
+        items |= stage_items
+    # Stages that can't run here don't need their environments, so nor do
+    # those whose items are all skipped
+    skip = set(skip_stages or [])
+    stages = {
+        k: v
+        for k, v in items.items()
+        if k not in skip and k.split("@")[0] not in skip
+    }
+    envs = ck_info.get("environments", {})
+    # If any environments are composite environments, we need to split them
+    # up into their individual names in the list
+    split_envs = []
+    for stage in stages.values():
+        env_name = stage.get("environment")
+        if not env_name or str(env_name).startswith("_"):
+            continue
+        if env_name.count(COMPOSITE_ENV_SEP) == 1:
+            outer_env_name, sub_env_name = env_name.split(COMPOSITE_ENV_SEP)
+            split_envs.append(outer_env_name)
+            # An inner env is built where the stage runs, so one whose
+            # outer env is another machine is checked there, not here
+            if not (
+                stage.get("kind") in STAGE_KINDS_SENT_TO_OUTER_ENV
+                and outer_runs_elsewhere(outer_env_name)
+            ):
+                split_envs.append(sub_env_name)
+        else:
+            split_envs.append(env_name)
+    # Environments composed into one are checked with it
+    for env_name in list(split_envs):
+        env = envs.get(env_name)
+        if isinstance(env, dict):
+            for name, _ in get_guest_envs(env_name, env, envs):
+                split_envs.append(name)
+    return list(dict.fromkeys(split_envs)), ck_info, stages
+
+
+def get_cached_env_states(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+) -> dict[str, dict]:
+    """What's known about the pipeline's environments without checking them.
+
+    Checking an environment can build it, which runs whatever its spec says,
+    so this only reads the record of the last check: when it was, whether it
+    passed, and whether the spec, lock file, or prefix has changed since.
+    """
+    names, ck_info, _ = get_pipeline_env_names(
+        ck_info=ck_info, wdir=wdir, targets=targets
+    )
+    envs = ck_info.get("environments", {})
+    states: dict[str, dict] = {}
+    for env_name in sorted(names):
+        env = envs.get(env_name)
+        if env is None or env.get("kind") in KINDS_NO_CHECK:
+            continue
+        with get_cache_db() as db:
+            cached = db.get(make_cache_key(env_name=env_name, wdir=wdir))
+        if cached is None:
+            states[env_name] = {
+                "checked_at": None,
+                "success": None,
+                "changed": None,
+            }
+            continue
+        checked_at = cached.get("checked_at")
+        up_to_date = cacheable(env) and check_cache(
+            env_name=env_name, env=env, wdir=wdir, respect_ttl=False
+        )
+        states[env_name] = {
+            "checked_at": checked_at.isoformat() if checked_at else None,
+            "success": cached.get("success", False),
+            # Whether anything it was checked against has changed since,
+            # e.g., its spec or lock file
+            "changed": not up_to_date if cached.get("success") else None,
+        }
+    return states
+
+
 def check_all_in_pipeline(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -2191,19 +2581,7 @@ def check_all_in_pipeline(
     from collections.abc import Iterator
     from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
-    import calkit
     from calkit.cli.check import check_environment
-
-    @functools.cache
-    def outer_runs_elsewhere(env_name: str) -> bool:
-        env = envs.get(env_name) or {}
-        if env.get("kind") == SWITCH_KIND:
-            try:
-                picked = resolve_switch(env_name, envs)
-            except ValueError:
-                return False
-            env = (get_env(picked, envs) or {}) if picked else {}
-        return runs_elsewhere(env)
 
     def runs_docker_here(env_name: str) -> bool:
         # A Docker environment inside one that dispatches to another machine
@@ -2281,70 +2659,10 @@ def check_all_in_pipeline(
             "Can currently only run from current working directory"
         )
     res = {}
-    # First get a list of environments used in the pipeline
-    if ck_info is None:
-        ck_info = calkit.load_calkit_info(wdir=wdir)
-    # Markdown stages carry no environment of their own; the stages their
-    # blocks declare do, so expand before looking for environments to check.
-    import calkit.markdown
-
-    md_stages = calkit.markdown.get_markdown_stages(ck_info)
-    ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    # A frozen stage never runs, so its environment isn't needed
-    stages = {
-        k: v
-        for k, v in stages.items()
-        if not (isinstance(v, dict) and v.get("frozen"))
-    }
-    if targets:
-        # Split targets by "@" to handle sub-stages from iterations
-        targets = [t.split("@")[0] for t in targets]
-        # A target naming a markdown stage covers every stage its file
-        # declares, which are named '<stage>/<block>'
-        prefixes = [
-            t + calkit.markdown.STAGE_NAME_SEPARATOR
-            for t in targets
-            if t in md_stages
-        ]
-        # A latex stage's diffs run in its environment, whether they're
-        # named one at a time or all together
-        import calkit.latex
-
-        stages = {
-            k: v
-            for k, v in stages.items()
-            if k in targets
-            or any(k.startswith(p) for p in prefixes)
-            or k + calkit.latex.DIFFS_TARGET_SUFFIX in targets
-            or any(
-                name in targets
-                for name in calkit.latex.get_diff_stage_names(k, v)
-            )
-        }
-    # Stages that can't run here don't need their environments
-    stages = {k: v for k, v in stages.items() if k not in (skip_stages or [])}
+    envs_in_pipeline, ck_info, stages = get_pipeline_env_names(
+        ck_info=ck_info, wdir=wdir, targets=targets, skip_stages=skip_stages
+    )
     envs = ck_info.get("environments", {})
-    # If any environments are composite environments, we need to split them
-    # up into their individual names in the list
-    split_envs = []
-    for stage in stages.values():
-        env_name = stage.get("environment")
-        if not env_name or str(env_name).startswith("_"):
-            continue
-        if env_name.count(COMPOSITE_ENV_SEP) == 1:
-            outer_env_name, sub_env_name = env_name.split(COMPOSITE_ENV_SEP)
-            split_envs.append(outer_env_name)
-            # An inner env is built where the stage runs, so one whose
-            # outer env is another machine is checked there, not here
-            if not (
-                stage.get("kind") in STAGE_KINDS_SENT_TO_OUTER_ENV
-                and outer_runs_elsewhere(outer_env_name)
-            ):
-                split_envs.append(sub_env_name)
-        else:
-            split_envs.append(env_name)
-    envs_in_pipeline = list(dict.fromkeys(split_envs))
     # Checked regardless of the cache, since Docker can be stopped or
     # removed without anything in the project changing
     stage_envs = [
@@ -2547,18 +2865,20 @@ def env_from_name_or_path(
     if name_or_path is None and language is not None:
         # Look for a docker environment matching the language
         for env_name, env in envs.items():
+            if language.lower() == "latex" and env.get("kind") == "texlive":
+                return EnvDetectResult(name=env_name, env=env, exists=True)
             if env.get("kind") == "docker":
                 image = env.get("image", "").lower()
                 # Check if this looks like a language environment
                 if language.lower() in image or f"{language}mk" in image:
                     return EnvDetectResult(name=env_name, env=env, exists=True)
-        # Only create default docker environment for latex
+        # Only LaTeX gets a default environment created
         if language.lower() == "latex":
-            from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+            from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
             return EnvDetectResult(
                 name="latex",
-                env=dict(DEFAULT_LATEX_ENVIRONMENT),
+                env=dict(DEFAULT_ENVIRONMENT),
                 exists=False,
             )
         # For shell language, use _system environment
@@ -3551,7 +3871,7 @@ def detect_env_for_stage(
         "r": ["renv", "conda", "pixi"],
         "julia": ["julia"],
         "matlab": ["matlab"],
-        "latex": ["docker"],
+        "latex": ["docker", "texlive"],
         "shell": ["system"],
     }
     preferred_kinds = (
@@ -3990,6 +4310,15 @@ def relock(env_name: str, env: dict) -> None:
         else:
             old_locks[fpath] = None
     try:
+        if kind == "texlive":
+            from calkit.environments import texlive as env_texlive
+
+            # Rather than removing the lock, which would drop the packages
+            # builds added
+            typer.echo(f"Relocking environment '{env_name}'")
+            env_texlive.relock(env_name, env)
+            check_environment(env_name=env_name, verbose=True)
+            return
         if upgrade_cmd is not None:
             typer.echo(f"Running: {' '.join(upgrade_cmd)}")
             if subprocess.run(upgrade_cmd, cwd=env_dir).returncode != 0:

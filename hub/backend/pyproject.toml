@@ -24,7 +24,7 @@ dependencies = [
   "pyjwt<3.0.0,>=2.8.0",
   # Beyond template dependencies
   "s3fs==2026.4.0",
-  "python-slugify==8.0.4",
+  "python-slugify==9.1.3",
   "cryptography==43.0.0",
   "gitpython>=3.1.47",
   "ruamel-yaml==0.19.1",
@@ -80,7 +80,12 @@ calkit-python = { workspace = true }
 # tag a commit that is usually already built (staging deploys every push to
 # main), so `commit` alone would not catch it; `tags` is the one that does.
 [tool.uv]
-cache-keys = [{ git = { commit = true, tags = true } }]
+# Listing any key replaces uv's default of pyproject.toml, without which
+# an uncommitted dependency change is ignored
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
+]
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

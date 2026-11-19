@@ -169,8 +169,9 @@ title is compared with the stretch of the text most like each record's.
 checked.
 Its inputs are that document, the `.tex` files it inputs, and the
 bibliographies it names, or `calkit.yaml` and its collections if it names
-none, and its output is that document's report, by default under
-`.calkit/reference-checks`, or wherever the stage's `outputs` says.
+none, and its outputs are that document's report, by default under
+`.calkit/reference-checks`, or wherever the stage's `outputs` says, and
+the responses the report is based on, beside it.
 All of that is derived when the pipeline is compiled, so nothing else
 needs declaring: editing `paper/main.tex`, a `.tex` file it inputs, or a
 `.bib` file rechecks that document, and nothing else.
@@ -211,12 +212,26 @@ A key defined in more than one bibliography also gets an `also_in`, since
 which entry BibTeX uses then depends on the order the document names them
 in.
 
-A report carries no timestamp, so it's a function of the sources that
-produced it and can be checked for staleness like any other output.
-Answers from the services are cached under `.calkit/local`, which isn't
-tracked, so a rerun needs no network.
+<!-- TODO: needs human review -->
+
+A report carries no timestamp, and doesn't say whether the check ran
+offline, so it's a function of the sources and responses that produced it
+and can be checked for staleness like any other output.
+The services' answers change over time, so the stage records the
+responses its report is based on beside it, e.g.,
+`.calkit/reference-checks/paper/main.tex.responses.json`, stored with DVC
+since they can be large.
+They're kept between runs and reused, so rerunning the stage anywhere,
+e.g., in a fresh clone after `calkit dvc pull`, reproduces the report
+without a network and asks the services only about what's new.
+Each run keeps only the responses it used.
+To store them with Git instead, list an output at that path in the
+stage's `outputs`, with `storage: git` and `delete_before_run: false`.
+The command run by hand caches answers under `.calkit/local` instead,
+which isn't tracked, unless given `--responses` to record them in a file.
 Pass `offline: true` in the stage, or `--offline` to the command, to use
-only cached answers, e.g., where the pipeline runs without a network.
+only recorded or cached answers, e.g., where the pipeline runs without a
+network.
 
 <!-- prettier-ignore -->
 !!! note

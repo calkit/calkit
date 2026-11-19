@@ -39,7 +39,7 @@ import {
   type Table,
   type TableText,
 } from "../../client"
-import { decodeBase64Utf8 } from "../../lib/strings"
+import { decodeBase64Utf8, safeHref } from "../../lib/strings"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import { getLanguage } from "../Files/FileContent"
@@ -553,7 +553,7 @@ const DatasetViewer = ({
               </Text>
             ) : null}
             {item?.url ? (
-              <Link href={String(item.url)} isExternal download>
+              <Link href={safeHref(String(item.url))} isExternal download>
                 Download
               </Link>
             ) : null}
@@ -607,7 +607,7 @@ const DatasetViewer = ({
                   <>
                     {" "}
                     or{" "}
-                    <Link href={String(item.url)} isExternal download>
+                    <Link href={safeHref(String(item.url))} isExternal download>
                       download it
                     </Link>
                   </>

@@ -22,6 +22,8 @@ from calkit.conda import (
 )
 
 ENV_NAME = "main"
+# Calkit finds conda where installers put it, even when it's not on PATH
+CONDA = find_conda_exe() or "conda"
 
 # TODO: calkit conda env subprocess interactions need Windows debugging.
 # Conda on Windows uses .bat shims and PATH activation that interact poorly
@@ -194,8 +196,7 @@ def test_get_pip_dependency_list():
 
 
 def delete_env(name: str):
-    conda = find_conda_exe() or "conda"
-    subprocess.check_call([conda, "env", "remove", "-y", "-n", name])
+    subprocess.check_call([CONDA, "env", "remove", "-y", "-n", name])
 
 
 @pytest.fixture
@@ -273,7 +274,7 @@ def test_check_env_locks_every_platform(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
     subprocess.check_call(
         [
-            "conda",
+            CONDA,
             "run",
             "-n",
             conda_env_name,
@@ -305,7 +306,7 @@ def test_check_env_locks_every_platform(tmp_dir, conda_env_name):
     delete_env(conda_env_name)
     subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
     subprocess.check_call(
-        ["conda", "run", "-n", conda_env_name, "python", "-c", "import idna"]
+        [CONDA, "run", "-n", conda_env_name, "python", "-c", "import idna"]
     )
     assert spec_is_recorded()
     assert os.path.isfile(sibling)
@@ -574,7 +575,7 @@ def test_check_env(tmp_dir, conda_env_name):
     )
     subprocess.check_call(
         [
-            "conda",
+            CONDA,
             "run",
             "-n",
             conda_env_name,
@@ -645,8 +646,7 @@ def test_check_env(tmp_dir, conda_env_name):
 def conda_env_prefix():
     prefix = ".conda-envs/my-conda-env"
     yield prefix
-    conda = find_conda_exe() or "conda"
-    subprocess.check_call([conda, "env", "remove", "-y", "--prefix", prefix])
+    subprocess.check_call([CONDA, "env", "remove", "-y", "--prefix", prefix])
 
 
 @pytest.mark.xdist_group("conda")
@@ -847,7 +847,7 @@ fallback_version = "0+unknown"
     os.makedirs("subdir")
     subprocess.check_call(
         [
-            "conda",
+            CONDA,
             "run",
             "-n",
             conda_env_name,

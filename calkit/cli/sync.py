@@ -133,11 +133,12 @@ def _refresh_import(
             "import dataset' to refresh it"
         )
     if git_ref is not None:
-        git = git_source(imported_from)
-        if git is None:
+        if git_source(imported_from) is None and not imported_from.get(
+            "project"
+        ):
             return (
-                f"'{target}' was not imported from a Git repo, so there is "
-                "no ref to follow"
+                f"'{target}' was not imported from a Git repo or Calkit "
+                "project, so there is no ref to follow"
             )
         imported_from["git_ref"] = git_ref
     # A refresh overwrites, so a file edited since it was fetched would
@@ -212,7 +213,8 @@ def sync_import(
             "--git-ref",
             help=(
                 "Branch, tag, or commit to follow from now on, for a file "
-                "imported from a Git repo. Recorded, so later refreshes "
+                "imported from a Git repo or Calkit project. Recorded, so "
+                "later refreshes "
                 "keep using it."
             ),
         ),
@@ -254,7 +256,7 @@ def sync_import(
     written to '.calkit/imports.json' rather than to 'calkit.yaml', which
     keeps only what a person declared. To pin an import, write the commit
     hash as its 'ref'. An entry written before that split carries its
-    'rev' in 'calkit.yaml'; refreshing it moves that across, so nothing has
+    'git_rev' in 'calkit.yaml'; refreshing it moves that across, so nothing has
     to be migrated by hand.
 
     With '--all', every imported object is refreshed instead, whichever

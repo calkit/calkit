@@ -16,6 +16,7 @@ import {
   clearTokens,
   forceRefreshAccessToken,
   getAccessToken,
+  getRefreshToken,
   isAuthenticationError,
   popPostLoginRedirect,
   storeTokens,
@@ -25,6 +26,10 @@ import useCustomToast from "./useCustomToast"
 const isLoggedIn = () => {
   return getAccessToken() !== null
 }
+
+// Set once logging out starts, since an invalid session can ask on every
+// render until the page goes
+let loggingOut = false
 
 const useAuth = () => {
   const [error, setError] = useState<string | null>(null)
@@ -173,7 +178,17 @@ const useAuth = () => {
     },
   })
 
-  const logout = () => {
+  const logout = async () => {
+    if (loggingOut) return
+    loggingOut = true
+    // Ends the session on the API too, and clears the second factor's
+    // cookie, as far as it can; signing out here mustn't wait on it
+    try {
+      await LoginService.postLogout(
+        { body: { refresh_token: getRefreshToken() } },
+        { withCredentials: true, timeout: 5000 },
+      )
+    } catch {}
     clearTokens()
     mixpanel.reset()
     localStorage.removeItem("post_login_redirect")

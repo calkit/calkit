@@ -5,16 +5,15 @@ import { promisify } from "node:util";
 import * as zlib from "node:zlib";
 import * as vscode from "vscode";
 
+import { documentStageSource, reviewPath } from "./core";
 import {
   LIGATURES,
-  documentStageSource,
   findInSource,
   findText,
   lineMap,
   normalizeSelection,
   paragraphLines,
   parseSynctex,
-  reviewPath,
   synctexForward,
   synctexInputFile,
   synctexReverse,
@@ -22,7 +21,7 @@ import {
   type PdfRect,
   type Synctex,
   type TexThread,
-} from "./core";
+} from "./pdf";
 
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +32,8 @@ const VIEW_KEY = "calkit.pdfReview.view";
 
 export interface PdfReviewDeps {
   getWorkspaceRoot: () => string | undefined;
-  getStages: () => Record<string, unknown>;
+  // The stages that may build a root-relative document or PDF
+  getStages: (file: string) => Record<string, unknown>;
   // The project's publications, which can list reviews of a PDF
   getPublications: () => unknown[];
   getNonce: () => string;
@@ -182,7 +182,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     if (v.tex === undefined) {
       const stem = v.pdf.replace(/\.pdf$/i, "");
       v.tex =
-        documentStageSource(this.deps.getStages(), v.pdf) ??
+        documentStageSource(this.deps.getStages(v.pdf), v.pdf) ??
         (fs.existsSync(path.join(this.root(), `${stem}.tex`))
           ? `${stem}.tex`
           : undefined);

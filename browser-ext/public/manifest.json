@@ -106,11 +106,7 @@
     },
     {
       "resources": ["viewer.html"],
-      "matches": [
-        "https://github.com/*",
-        "https://www.overleaf.com/*",
-        "https://overleaf.com/*"
-      ]
+      "matches": ["https://github.com/*"]
     }
   ]
 }

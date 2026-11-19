@@ -1,5 +1,6 @@
 /**
- * A page for looking at a DVC-tracked artifact.
+ * A page for looking at a DVC-tracked artifact, on its own or as one side of
+ * a pull request's diff.
  *
  * This exists because the panel can't do it. A panel lives in the host
  * page's DOM, so that page's content security policy decides what it may
@@ -7,9 +8,8 @@
  * needs. An extension page carries its own policy, so the artifact can
  * simply be rendered.
  */
-import { type LocalPdfChunk, getLocalPdf } from "../core/local";
-import { send } from "../core/messages";
-import { clear, el, errorMessage, loading } from "../core/ui";
+import { send } from "../../core/messages";
+import { clear, el, errorMessage, loading } from "../../core/ui";
 
 const app = document.getElementById("app") as HTMLElement;
 
@@ -34,70 +34,8 @@ function kindFor(path: string): Kind {
   return "other";
 }
 
-/**
- * The PDF a folder synced with Overleaf builds to on this machine, read
- * from Calkit here a part at a time, since a message to or from it can't
- * be over 1 MB, with how fresh it is.
- */
-async function renderLocalPdf(
-  main: HTMLElement,
-  project: string,
-  folder: string,
-): Promise<void> {
-  const status = el("div", { class: "small" }, [loading("Reading the PDF")]);
-  main.append(status);
-  let parts: Uint8Array[];
-  let first: LocalPdfChunk;
-  try {
-    ({ parts, first } = await getLocalPdf(project, folder));
-  } catch (e) {
-    clear(status).append(
-      errorMessage(e instanceof Error ? e.message : String(e)),
-    );
-    return;
-  }
-  const built = new Date((first.built ?? 0) * 1000).toLocaleString([], {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-  const saved = first.commit_sha
-    ? first.changed_since_commit
-      ? "not saved since it was rebuilt"
-      : `saved in ${first.commit_sha.slice(0, 7)}`
-    : null;
-  const notes = [
-    `Built on this machine ${built}`,
-    saved,
-    first.edited_since_built ? `${folder} has changed since` : null,
-  ].filter(Boolean);
-  clear(status).append(
-    el("div", {
-      class: first.edited_since_built ? "small" : "dim small",
-      text: `${first.path}: ${notes.join("; ")}.`,
-    }),
-  );
-  const frame = el("iframe", {
-    style: {
-      width: "100%",
-      height: "calc(100vh - 48px)",
-      border: "none",
-    },
-  });
-  frame.src = URL.createObjectURL(
-    new Blob(parts as BlobPart[], { type: "application/pdf" }),
-  );
-  main.append(frame);
-}
-
 async function render(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
-  const localProject = params.get("localProject");
-  if (localProject) {
-    const main = el("main", { class: "stack" });
-    clear(app).append(main);
-    await renderLocalPdf(main, localProject, params.get("folder") ?? "");
-    return;
-  }
   const url = params.get("url");
   const path = params.get("path") ?? "artifact";
   const hubFileUrl = params.get("hubUrl");

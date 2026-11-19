@@ -157,8 +157,10 @@ src/overleaf/          Content script for Overleaf, one module per part of
                        the page (badge and panel in index.ts, sidebar,
                        pdf-viewer, origins, citations), plus editor.ts,
                        which runs in Overleaf's own world to mark problems
-                       in its editor
-src/github/            Content script for GitHub (pr, repo-home)
+                       in its editor, and review/, the page Overleaf's PDF
+                       pane shows for commenting on the PDF
+src/github/            Content script for GitHub (pr, repo-home), and
+                       viewer/, the page for a DVC-tracked artifact or diff
 src/references/        Content script for publisher and preprint pages
 src/core/              Shared by all of them: hub config, storage, API
                        client, page detection, UI

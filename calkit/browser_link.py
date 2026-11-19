@@ -1968,8 +1968,9 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
     app = msg.get("app") or None
     exporter = calkit.export.exporter_for(source, output, app=app)
     stage = calkit.export.export_stage(source, output, app=app)
+    name = calkit.export.export_stage_name(output)
     out = {
-        "name": calkit.export.export_stage_name(output),
+        "name": name,
         "stage": stage,
         "exported_by": exporter.app if exporter else None,
         "saved": False,
@@ -2007,7 +2008,7 @@ def add_export_stage(wdir: str, msg: dict) -> dict:
     stage_name, stage = calkit.pipeline.get_stage_to_add(
         stage,
         ck_info,
-        name=out["name"],
+        name=name,
         is_tracked=lambda p: bool(repo.git.ls_files("--", p).strip()),
     )
     # Slides are exported in Calkit's LibreOffice image unless the stage

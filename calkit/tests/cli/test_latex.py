@@ -161,15 +161,17 @@ def test_from_json(tmp_dir):
     )
     with open("r.tex") as f:
         assert get_value(f.read(), "price") == '"hello" costs \\$5'
-    out = subprocess.run(
-        ["calkit", "latex", "from-json", "test2.json", "-o", "r.tex"]
-        + ["--format-base64", "price=not base64"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert out.returncode != 0
-    assert "not valid base64" in out.stderr
+    # Invalid base64 is refused, including text that isn't ASCII
+    for encoded in ["not base64", "é"]:
+        out = subprocess.run(
+            ["calkit", "latex", "from-json", "test2.json", "-o", "r.tex"]
+            + ["--format-base64", f"price={encoded}"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert out.returncode != 0
+        assert "not valid base64" in out.stderr
 
 
 def test_from_json_keys(tmp_dir):

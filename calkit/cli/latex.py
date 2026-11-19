@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import binascii
 import glob
 import hashlib
 import json
@@ -115,7 +114,7 @@ def from_json(
             raise_error(f"Format '{fmt}' is not NAME=FORMAT")
         try:
             fmt_dict[name] = base64.b64decode(encoded, validate=True).decode()
-        except (binascii.Error, UnicodeDecodeError):
+        except ValueError:
             raise_error(f"Format for '{name}' is not valid base64")
     data = {}
     for input_fpath in input_fpaths:

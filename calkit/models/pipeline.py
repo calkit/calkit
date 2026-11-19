@@ -1922,6 +1922,12 @@ class JsonToLatexStage(Stage):
         # One arg per format rather than JSON, whose quotes neither shell's
         # quoting can carry unchanged on both
         for name, fmt in (self.format or {}).items():
+            # Checked alone, so an error names it rather than the whole arg
+            if not name or "=" in name:
+                raise ValueError(
+                    f"Format name {name!r} must be nonempty and without '='"
+                )
+            quote_literal_arg(name)
             try:
                 cmd += f" --format {quote_literal_arg(f'{name}={fmt}')}"
             except ValueError:

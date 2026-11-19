@@ -888,7 +888,7 @@ def test_jsontolatexstage():
             "pct": "{a * 100:.1f} %",
             "padded": "{x:>10}|{y:^8}",
             "escaped": "{a:.1f}\\%",
-            "cost": "{c:.2f} $/kWh",
+            "cost": "{c:.2f} $/kWh, €{d}",
             "quoted": 'say "{a}" `now`\\\\',
         },
     )
@@ -915,7 +915,7 @@ def test_jsontolatexstage():
         "--format",
         "escaped={a:.1f}\\%",
         "--format-base64",
-        "cost=" + base64.b64encode(b"{c:.2f} $/kWh").decode(),
+        "cost=" + base64.b64encode("{c:.2f} $/kWh, €{d}".encode()).decode(),
         "--format-base64",
         "quoted=" + base64.b64encode(b'say "{a}" `now`\\\\').decode(),
     ]
@@ -923,6 +923,8 @@ def test_jsontolatexstage():
     for kwargs in [
         dict(keys=["$HOME"]),
         dict(format={"$q": "{a}"}),
+        dict(format={"a=b": "{a} $"}),
+        dict(format={"": "{a}"}),
         dict(inputs=["a`b`.json"]),
         dict(inputs=["a\\\\b.json"]),
     ]:
@@ -935,6 +937,11 @@ def test_jsontolatexstage():
                     **kwargs,
                 }
             )
+    # A bad name is quoted alone, not in the encoded arg it would have joined
+    with pytest.raises(ValidationError, match=r"'\$q' can't"):
+        JsonToLatexStage(
+            name="j", inputs=["a.json"], outputs=["o.tex"], format={"$q": "$"}
+        )
     dvc_outs = s.dvc_outs
     assert {
         "paper/results.tex": {"cache": False, "persist": False}

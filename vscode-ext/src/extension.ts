@@ -82,6 +82,7 @@ import {
   setOverleafSynced,
   suggestCommitMessage,
 } from "./overleaf/view";
+import { registerCellOutputs } from "./cell-outputs/view";
 import {
   documentStagePdf,
   documentStageSource,
@@ -1941,6 +1942,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   sidebarProvider = new CalkitSidebarProvider();
   registerOverleaf(context, sidebarProvider, getWorkspaceRoot);
+  registerCellOutputs(context, getWorkspaceRoot);
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
     showCollapseAll: true,

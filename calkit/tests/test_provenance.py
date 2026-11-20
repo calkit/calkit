@@ -1233,6 +1233,10 @@ def test_get_path_provenance():
         "paper/drawn.svg": "",
         "paper/figures/plot.png": "",
         "figures/plot.png": "",
+        "nbs/fit.ipynb": "{}",
+        ".calkit/notebooks/outputs/nbs/fit/values.json": json.dumps(
+            {"k": 0.25}
+        ),
     }
     ck_info = {
         "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
@@ -1252,6 +1256,12 @@ def test_get_path_provenance():
                     "script_path": "scripts/analyze.py",
                     "environment": "py",
                     "outputs": ["results/metrics.json", "figures/plot.png"],
+                },
+                "fit": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "nbs/fit.ipynb",
+                    "environment": "py",
+                    "cell_outputs": [{"cell": "a", "value": "k"}],
                 },
                 "copy-figs": {
                     "kind": "map-paths",
@@ -1283,6 +1293,11 @@ def test_get_path_provenance():
                 "deps": ["figures/plot.png"],
                 "outs": ["paper/figures/plot.png"],
             },
+            "fit": {
+                "cmd": "calkit nb execute nbs/fit.ipynb",
+                "deps": [".calkit/notebooks/cleaned/nbs/fit.ipynb"],
+                "outs": [".calkit/notebooks/outputs/nbs/fit/values.json"],
+            },
         }
     }
     dvc_lock = {
@@ -1306,6 +1321,7 @@ def test_get_path_provenance():
             or {
                 "analyze": {"status": "up-to-date"},
                 "copy-figs": {"status": "up-to-date"},
+                "fit": {"status": "up-to-date"},
             },
             is_file=lambda p: p in files,
             is_dir=lambda p: p == "data/downloaded",
@@ -1327,6 +1343,10 @@ def test_get_path_provenance():
     assert get("results/metrics.json", key="nope")["value_error"] == (
         "nope isn't in results/metrics.json"
     )
+    # A value cited from a notebook is the one its cells saved
+    fit = get("nbs/fit.ipynb", key="k")
+    assert fit["value"] == 0.25
+    assert fit["stage"] == "fit"
     # A copy is described by what made the original, and is stale if the
     # copy is
     copy = get(

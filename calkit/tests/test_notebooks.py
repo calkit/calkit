@@ -390,3 +390,138 @@ def test_cell_output_marks():
         r"\ckvalue{.calkit/notebooks/outputs/fit-t-25/values.json}{k}"
     )
     assert described[0]["cell_index"] is None
+
+
+def test_find_printed_numbers():
+    assert calkit.notebooks.get_cell_variables(
+        "import numpy as np\n"
+        "fig, ax = plt.subplots()\n"
+        "k_25 = rates['25C']\n"
+        "for t in temps:\n"
+        "    x = 1\n"
+        "with open('f') as f:\n"
+        "    pass\n"
+        "print(f'k = {k_25:.3f}', np.mean(z))\n"
+        "%matplotlib inline\n"
+        "rates"
+    ) == ["k_25", "z", "rates", "f", "t", "ax", "fig"]
+    assert calkit.notebooks.get_cell_variables("x = (") == []
+    nb = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "id": "a",
+                "source": ["k = 0.0309\n", "print(k)"],
+                "outputs": [
+                    {
+                        "output_type": "stream",
+                        "text": ["0.0309\n", "run 2 at 25.0 C, 1e-3 off\n"],
+                    }
+                ],
+            },
+            {"cell_type": "markdown", "id": "b", "source": "0.5"},
+            {
+                "cell_type": "code",
+                "id": "c",
+                "source": "df",
+                "outputs": [
+                    {
+                        "output_type": "execute_result",
+                        "data": {"text/plain": "   T  k\n0  25  0.0309"},
+                    }
+                ],
+            },
+            {"cell_type": "code", "id": "d", "source": "x = 1", "outputs": []},
+            {"cell_type": "code", "source": "y", "outputs": []},
+        ]
+    }
+    assert calkit.notebooks.find_printed_numbers(nb) == [
+        {
+            "cell": "a",
+            "cell_index": 0,
+            "numbers": ["0.0309", "2", "25.0", "1e-3"],
+            "variables": ["k"],
+        },
+        {
+            "cell": "c",
+            "cell_index": 2,
+            "numbers": ["0", "25", "0.0309"],
+            "variables": ["df"],
+        },
+    ]
+
+
+def test_mark_cell_output(tmp_path):
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 4,
+        "metadata": {},
+        "cells": [
+            {"cell_type": "code", "source": "k = 1", "outputs": []},
+            {"cell_type": "code", "source": "fig = 2", "outputs": []},
+        ],
+    }
+    (tmp_path / "fit.ipynb").write_text(json.dumps(nb))
+    (tmp_path / "calkit.yaml").write_text(
+        "# The pipeline\n"
+        "pipeline:\n"
+        "  stages:\n"
+        "    fit:\n"
+        "      kind: jupyter-notebook\n"
+        "      notebook_path: fit.ipynb\n"
+        "      environment: py\n"
+    )
+    wdir = str(tmp_path)
+    # A cell named by position gets an ID, as do the rest
+    marked = calkit.notebooks.mark_cell_output(
+        "fit.ipynb", {"value": "k"}, cell_index=0, wdir=wdir
+    )
+    saved = json.loads((tmp_path / "fit.ipynb").read_text())
+    ids = calkit.notebooks.get_cell_ids(saved)
+    assert all(ids) and saved["nbformat_minor"] == 5
+    assert marked == {
+        "stage": "fit",
+        "output": {"cell": ids[0], "value": "k"},
+        "citation": r"\ckvalue{fit.ipynb}{k}",
+        "warning": None,
+    }
+    calkit.notebooks.mark_cell_output(
+        "fit.ipynb",
+        {"cell": ids[1], "figure": "f.pdf", "variable": "fig"},
+        wdir=wdir,
+    )
+    text = (tmp_path / "calkit.yaml").read_text()
+    assert text.startswith("# The pipeline\n")
+    listed = calkit.notebooks.list_cell_outputs("fit.ipynb", wdir=wdir)
+    assert [(m["kind"], m["cell_index"]) for m in listed] == [
+        ("value", 0),
+        ("figure", 1),
+    ]
+    for args, kwargs, message in [
+        ({"cell": "zz", "value": "k"}, {}, "has no cell zz"),
+        ({"value": "k"}, {"cell_index": 5}, "has 2 cells, not 6"),
+        ({"cell": ids[0], "value": "k"}, {"cell_index": 0}, "not both"),
+        ({"cell": ids[0], "value": "k"}, {"stage": "other"}, "doesn't run"),
+        ({"cell": ids[0]}, {}, "needs one of"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            calkit.notebooks.mark_cell_output(
+                "fit.ipynb", args, wdir=wdir, **kwargs
+            )
+    with pytest.raises(ValueError, match="isn't in the pipeline yet"):
+        calkit.notebooks.mark_cell_output(
+            "other.ipynb", {"value": "k"}, wdir=wdir
+        )
+    assert (
+        calkit.notebooks.unmark_cell_outputs(
+            "fit.ipynb", cell=ids[1], wdir=wdir
+        )
+        == 1
+    )
+    with pytest.raises(ValueError, match="Nothing like that"):
+        calkit.notebooks.unmark_cell_outputs("fit.ipynb", value="z", wdir=wdir)
+    assert (
+        calkit.notebooks.unmark_cell_outputs("fit.ipynb", value="k", wdir=wdir)
+        == 1
+    )
+    assert "cell_outputs" not in (tmp_path / "calkit.yaml").read_text()

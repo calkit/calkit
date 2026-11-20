@@ -6,6 +6,8 @@ import { renderFailure } from "../core/pickers";
 import {
   type Citation,
   type CitationProblem,
+  type PrintedMatch,
+  type PrintedNumbers,
   type ResultValue,
   type TableFile,
   type TypedNumber,
@@ -13,6 +15,7 @@ import {
   citationProblems,
   citationText,
   notebookOfValuesPath,
+  printedNumberMatches,
   roundedLike,
   typedNumberCitation,
   typedNumberMatches,
@@ -37,6 +40,7 @@ import {
   currentLink,
   provenanceFor,
   projectValues,
+  projectPrintedNumbers,
   projectTables,
   citationProvenance,
   linkKey,
@@ -233,9 +237,12 @@ export async function fillCard(
   clear(body).append(loading());
   try {
     if (item.typed) {
-      const values = await projectValues(link);
+      const [values, printed] = await Promise.all([
+        projectValues(link),
+        projectPrintedNumbers(link),
+      ]);
       clear(body);
-      renderTyped(body, link, item.typed, values, at);
+      renderTyped(body, link, item.typed, values, printed, at);
       return;
     }
     if (item.table) {
@@ -356,9 +363,13 @@ function renderTyped(
   link: OverleafLinkPublic,
   number: TypedNumber,
   values: ResultValue[],
+  printed: PrintedNumbers[],
   at: { version: number; index: number },
 ): void {
   const { exact, close } = typedNumberMatches(number, values);
+  const fromNotebooks = exact.length
+    ? []
+    : printedNumberMatches(number, printed);
   const canWrite = link.current_user_access !== "read";
   const message = el("div", { class: "small", style: { marginTop: "6px" } });
   const use = async (value: ResultValue) => {
@@ -390,6 +401,72 @@ function renderTyped(
         : null,
     ]);
   };
+  // A notebook's printed number becomes a value saved from the variable
+  // holding it, which the next run saves
+  const printedRow = (match: PrintedMatch) => {
+    const variable = el("select", { class: "grow" }) as HTMLSelectElement;
+    for (const name of match.variables) {
+      variable.append(el("option", { text: name, value: name }));
+    }
+    const other = el("input", {
+      class: "grow",
+      placeholder: "Variable",
+    }) as HTMLInputElement;
+    const choice = match.variables.length ? variable : other;
+    const useIt = el("button", {
+      class: "action secondary",
+      text: "Use this",
+    }) as HTMLButtonElement;
+    useIt.addEventListener("click", async () => {
+      const name = choice.value.trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        clear(message).append(errorMessage("Not a variable name"));
+        return;
+      }
+      useIt.disabled = true;
+      try {
+        await send({
+          type: "project.markCellOutput",
+          owner: link.project_owner_name,
+          project: link.project_name,
+          notebook: match.notebook,
+          stage: match.stage,
+          cell: match.cell,
+          value: name,
+        });
+        const text = citationText(
+          typedNumberCitation(number, {
+            path: match.notebook,
+            key: name,
+            value: Number(match.printed),
+          }),
+        );
+        const error = await replaceInEditor(link, at, text);
+        clear(message).append(
+          error
+            ? errorMessage(error)
+            : el("div", {
+                class: "small",
+                text: `Marked ${name}. Run and sync to show it.`,
+              }),
+        );
+      } catch (e) {
+        useIt.disabled = false;
+        clear(message).append(
+          errorMessage(e instanceof Error ? e.message : String(e)),
+        );
+      }
+    });
+    return el("div", { class: "stack", style: { marginTop: "4px" } }, [
+      el("div", {
+        class: "small",
+        text: `${match.notebook}, cell ${match.cell_index + 1}: ${
+          match.printed
+        }`,
+      }),
+      canWrite ? el("div", { class: "row" }, [choice, useIt]) : null,
+    ]);
+  };
   const linkable = getTypedNumberLink(number, values);
   container.append(
     el("div", { class: "name", text: number.text }),
@@ -413,16 +490,27 @@ function renderTyped(
         ...close.map(row),
       );
     }
-    container.append(
-      el("div", {
-        class: "dim small",
-        style: { marginTop: "6px" },
-        text:
-          "If a script computes it but only prints it, have the script " +
-          "save it to a results file too, e.g., results.json, so the paper " +
-          "can show it from there.",
-      }),
-    );
+    if (fromNotebooks.length) {
+      container.append(
+        el("div", {
+          class: "dim small",
+          style: { marginTop: "6px" },
+          text: "Printed by a notebook; link the variable it's in:",
+        }),
+        ...fromNotebooks.slice(0, 3).map(printedRow),
+      );
+    } else {
+      container.append(
+        el("div", {
+          class: "dim small",
+          style: { marginTop: "6px" },
+          text:
+            "If a notebook computes it, mark the variable as a value in " +
+            "VS Code. A script can save it to a results file, e.g., " +
+            "results.json.",
+        }),
+      );
+    }
   }
   if (canWrite) {
     container.append(ignoreRow(link, at, message, "a result"));

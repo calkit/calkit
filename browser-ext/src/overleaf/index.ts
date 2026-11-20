@@ -20,6 +20,7 @@ import {
 } from "../core/local";
 import {
   type Citation,
+  type PrintedNumbers,
   type ResultValue,
   type TableFile,
   citationCandidates,
@@ -221,6 +222,32 @@ export function projectValues(
   values.catch(() => valuesCache.delete(cacheKey));
   valuesCache.set(cacheKey, { at: Date.now(), values });
   return values;
+}
+
+const printedCache = new Map<
+  string,
+  { at: number; printed: Promise<PrintedNumbers[]> }
+>();
+
+/**
+ * Numbers the pipeline's notebooks printed, which a typed number may be a
+ * copy of, read on this machine, or none when the project isn't here.
+ */
+export function projectPrintedNumbers(
+  link: OverleafLinkPublic,
+): Promise<PrintedNumbers[]> {
+  const cacheKey = `${link.project_owner_name}/${link.project_name}`;
+  const cached = printedCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.printed;
+  }
+  const printed = send({
+    type: "project.printedNumbers",
+    owner: link.project_owner_name,
+    project: link.project_name,
+  }).catch(() => [] as PrintedNumbers[]);
+  printedCache.set(cacheKey, { at: Date.now(), printed });
+  return printed;
 }
 
 const tablesCache = new Map<

@@ -10,6 +10,8 @@ import {
   isDiffableDocument,
   notebookOfValuesPath,
   notebookValuesPath,
+  printedNumberMatches,
+  type PrintedNumbers,
   latexDiffPath,
   refDirName,
   getShownValue,
@@ -694,5 +696,48 @@ describe("typedNumberMatches", () => {
     expect(roundedLike(number("was 0.48"), 0.5030064751108918)).toBe("0.50");
     expect(roundedLike(number("of 1,234.5"), 12345.67)).toBe("12,345.7");
     expect(roundedLike(number("of 4.7e-1"), 0.4687)).toBe("4.7e-1");
+  });
+});
+
+describe("printedNumberMatches", () => {
+  const number = (line: string) => typedNumbersIn(line)[0].number;
+  const printed: PrintedNumbers[] = [
+    {
+      notebook: "fit.ipynb",
+      stage: "fit",
+      cell: "a",
+      cell_index: 0,
+      numbers: ["2", "0.0309", "0.031"],
+      variables: ["k_25", "rates"],
+    },
+    {
+      notebook: "other.ipynb",
+      stage: "other",
+      cell: "b",
+      cell_index: 3,
+      numbers: ["0.0616", "nan"],
+      variables: [],
+    },
+  ];
+
+  test("finds cells that printed what a typed number rounds from", () => {
+    expect(
+      printedNumberMatches(number("k was 0.031 per minute"), printed),
+    ).toEqual([
+      {
+        notebook: "fit.ipynb",
+        stage: "fit",
+        cell: "a",
+        cell_index: 0,
+        printed: "0.0309",
+        variables: ["k_25", "rates"],
+      },
+    ]);
+    expect(
+      printedNumberMatches(number("and 0.062 at 35"), printed).map(
+        (m) => m.cell,
+      ),
+    ).toEqual(["b"]);
+    expect(printedNumberMatches(number("or 0.5"), printed)).toEqual([]);
   });
 });

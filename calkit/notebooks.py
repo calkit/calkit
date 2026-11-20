@@ -722,6 +722,114 @@ def list_cell_outputs(
     return described
 
 
+def get_cell_variables(source: str) -> list[str]:
+    """Variables a cell prints or shows, since a printed number is likely
+    one of them, those assigned there first, then the rest it assigns at
+    its top level, last assigned first.
+    """
+    import ast
+
+    def get_shown(node: ast.AST) -> list[str]:
+        # Names whose values are shown, not functions called or modules
+        # whose attributes are, e.g., k but not np in print(np.mean(k))
+        skip = {
+            id(n.func) for n in ast.walk(node) if isinstance(n, ast.Call)
+        } | {
+            id(n.value) for n in ast.walk(node) if isinstance(n, ast.Attribute)
+        }
+        return [
+            n.id
+            for n in ast.walk(node)
+            if isinstance(n, ast.Name) and id(n) not in skip
+        ]
+
+    # IPython's magics and shell commands aren't Python
+    lines = [
+        "" if line.lstrip().startswith(("%", "!")) else line
+        for line in source.splitlines()
+    ]
+    try:
+        tree = ast.parse("\n".join(lines))
+    except SyntaxError:
+        return []
+    assigned: list[str] = []
+    shown: list[str] = []
+    for stmt in tree.body:
+        targets: list[ast.AST] = []
+        if isinstance(stmt, ast.Assign):
+            targets = list(stmt.targets)
+        elif isinstance(stmt, (ast.AnnAssign, ast.AugAssign)):
+            targets = [stmt.target]
+        elif isinstance(stmt, (ast.For, ast.AsyncFor)):
+            targets = [stmt.target]
+        elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+            targets = [i.optional_vars for i in stmt.items if i.optional_vars]
+        for target in targets:
+            for name in ast.walk(target):
+                if isinstance(name, ast.Name):
+                    if name.id in assigned:
+                        assigned.remove(name.id)
+                    assigned.append(name.id)
+        # What's printed or shown, e.g., print(k), or a cell ending in k
+        for node in ast.walk(stmt):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in ("print", "display")
+            ):
+                shown += get_shown(node)
+        if stmt is tree.body[-1] and isinstance(stmt, ast.Expr):
+            shown += get_shown(stmt)
+    names = list(reversed(assigned))
+    shown = list(dict.fromkeys(shown))
+    return list(
+        dict.fromkeys(
+            [n for n in names if n in shown]
+            + [n for n in shown if n not in names]
+            + names
+        )
+    )
+
+
+def find_printed_numbers(nb: dict) -> list[dict]:
+    """Numbers a notebook's code cells printed or showed, as text, from
+    their saved outputs, which a number typed into a document may have been
+    copied from, with each cell's ID and position, and the variables it
+    assigns, which one of them likely holds.
+    """
+    import re
+
+    number = re.compile(
+        r"(?<![\w.])[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])"
+    )
+    found = []
+    for i, cell in enumerate(nb.get("cells", [])):
+        if cell.get("cell_type") != "code" or not cell.get("id"):
+            continue
+        texts = []
+        for out in cell.get("outputs", []):
+            if out.get("output_type") == "stream":
+                texts.append(out.get("text", ""))
+            elif "text/plain" in (out.get("data") or {}):
+                texts.append(out["data"]["text/plain"])
+        text = "".join("".join(t) if isinstance(t, list) else t for t in texts)
+        numbers = list(dict.fromkeys(m.group() for m in number.finditer(text)))
+        if not numbers:
+            continue
+        source = cell.get("source", "")
+        found.append(
+            {
+                "cell": cell["id"],
+                "cell_index": i,
+                "numbers": numbers,
+                "variables": get_cell_variables(
+                    "".join(source) if isinstance(source, list) else source
+                ),
+            }
+        )
+    return found
+
+
 # How much of a file to read when deciding whether it's a marimo notebook.
 # marimo writes its header at the top, but a project's own license banner or
 # module docstring comes first, so leave room for one.

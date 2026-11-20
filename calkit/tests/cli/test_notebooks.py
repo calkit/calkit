@@ -562,6 +562,7 @@ def test_cell_outputs(tmp_dir):
         "stage": "fit",
         "output": {"cell": ids[0], "value": "k_25"},
         "citation": r"\ckvalue{fit.ipynb}{k_25}",
+        "warning": None,
     }
     for args in [
         ["--cell", ids[0], "--value", "rates"],

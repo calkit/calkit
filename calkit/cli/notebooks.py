@@ -1006,38 +1006,6 @@ def _pyodide_provided_packages() -> set[str]:
     }
 
 
-def _get_notebook_stage(ck_info: dict, path: str, stage: str | None) -> str:
-    """The stage running a notebook, which must be in the pipeline for its
-    cells' outputs to be saved, or the one named, if it runs it.
-    """
-    names = calkit.notebooks.find_notebook_stages(ck_info, path)
-    if stage is not None:
-        if stage not in names:
-            raise_error(f"Stage '{stage}' doesn't run {path}")
-        return stage
-    if not names:
-        raise_error(
-            f"{path} isn't in the pipeline yet; add it first, e.g., with "
-            f"'calkit xr {path}'"
-        )
-    if len(names) > 1:
-        raise_error(
-            f"{path} is run by stages {', '.join(names)}; name one with "
-            "--stage"
-        )
-    return names[0]
-
-
-def _read_notebook(path: str) -> dict:
-    try:
-        with open(path, encoding="utf-8") as f:
-            nb: dict = json.load(f)
-        return nb
-    except (OSError, json.JSONDecodeError) as e:
-        raise_error(f"Can't read {path}: {e}")
-        raise
-
-
 @notebooks_app.command("mark")
 def mark_cell_output(
     path: Annotated[str, typer.Argument(help="Path to the notebook.")],
@@ -1098,80 +1066,36 @@ def mark_cell_output(
     """Mark a value, figure, or table a notebook's cell makes, to be saved
     whenever the pipeline runs it.
     """
-    from pydantic import ValidationError
-
-    from calkit.models.pipeline import JupyterNotebookStage, NotebookCellOutput
-
-    def get_message(e: ValidationError) -> str:
-        return "; ".join(
-            str(err["msg"]).removeprefix("Value error, ") for err in e.errors()
-        )
-
-    path = Path(path).as_posix()
-    if cell is not None and cell_index is not None:
-        raise_error("Give --cell or --cell-index, not both")
-    ck_info = calkit.load_calkit_info()
-    name = _get_notebook_stage(ck_info, path, stage)
-    nb = _read_notebook(path)
-    if cell_index is not None:
-        n_cells = len(nb.get("cells", []))
-        if not 0 <= cell_index < n_cells:
-            raise_error(f"{path} has {n_cells} cells, not {cell_index + 1}")
-        if calkit.notebooks.ensure_cell_ids(nb):
-            with open(path, "w", encoding="utf-8", newline="\n") as f:
-                json.dump(nb, f, indent=1)
-                f.write("\n")
-        cell = calkit.notebooks.get_cell_ids(nb)[cell_index]
-    elif cell is not None and cell not in calkit.notebooks.get_cell_ids(nb):
-        raise_error(f"{path} has no cell {cell}")
-    if calkit.notebooks.has_ordinal_cell_ids(nb) and not json_output:
-        warn(
-            f"{path}'s cell IDs count up from 0, as nbstripout writes them "
-            "without --keep-id, so they change when cells are added; "
-            "install it with --keep-id so marks stay on their cells"
-        )
-    fields = {
-        "cell": cell,
-        "value": value,
-        "figure": figure,
-        "table": table,
-        "variable": variable,
-        "format": number_format,
-    }
     try:
-        output = NotebookCellOutput.model_validate(
-            {k: v for k, v in fields.items() if v is not None}
+        marked = calkit.notebooks.mark_cell_output(
+            path,
+            {
+                "cell": cell,
+                "value": value,
+                "figure": figure,
+                "table": table,
+                "variable": variable,
+                "format": number_format,
+            },
+            stage=stage,
+            cell_index=cell_index,
         )
-    except ValidationError as e:
-        raise_error(get_message(e))
+    except ValueError as e:
+        raise_error(str(e))
         raise
-    stage_dict = ck_info["pipeline"]["stages"][name]
-    new = output.model_dump(exclude_none=True)
-    outputs = calkit.notebooks.with_cell_output(
-        [dict(o) for o in stage_dict.get("cell_outputs") or []], new
-    )
-    try:
-        JupyterNotebookStage.model_validate(
-            dict(stage_dict) | {"cell_outputs": outputs}
-        )
-    except ValidationError as e:
-        raise_error(get_message(e))
-    stage_dict["cell_outputs"] = outputs
-    calkit.save_calkit_info(ck_info)
-    citation = calkit.notebooks.get_cell_output_citation(
-        new, path, stage_dict.get("parameters") or None
-    )
     if json_output:
-        typer.echo(
-            json.dumps({"stage": name, "output": new, "citation": citation})
-        )
+        typer.echo(json.dumps(marked))
         return
-    target = value or figure or table
+    if marked["warning"]:
+        warn(marked["warning"])
     typer.echo(
-        f"Marked {target} to be saved from {path} when stage '{name}' runs"
+        f"Marked {value or figure or table} to be saved from {path} when "
+        f"stage '{marked['stage']}' runs"
     )
-    if citation:
-        typer.echo(f"Once it's run, show it in a document with {citation}")
+    if marked["citation"]:
+        typer.echo(
+            f"Once it's run, show it in a document with {marked['citation']}"
+        )
 
 
 @notebooks_app.command("unmark")
@@ -1202,26 +1126,15 @@ def unmark_cell_output(
     ] = None,
 ) -> None:
     """Stop saving a value, figure, or table from a notebook's cell."""
-    path = Path(path).as_posix()
-    if not any((value, figure, table, cell)):
-        raise_error("Give --value, --figure, --table, or --cell")
-    ck_info = calkit.load_calkit_info()
-    name = _get_notebook_stage(ck_info, path, stage)
-    stage_dict = ck_info["pipeline"]["stages"][name]
-    before = [dict(o) for o in stage_dict.get("cell_outputs") or []]
-    after = calkit.notebooks.without_cell_outputs(
-        before, value=value, path=figure or table, cell=cell
-    )
-    if len(after) == len(before):
-        raise_error(f"Nothing like that is marked in {path}")
-    if after:
-        stage_dict["cell_outputs"] = after
-    else:
-        del stage_dict["cell_outputs"]
-    calkit.save_calkit_info(ck_info)
+    try:
+        n = calkit.notebooks.unmark_cell_outputs(
+            path, value=value, path=figure or table, cell=cell, stage=stage
+        )
+    except ValueError as e:
+        raise_error(str(e))
+        raise
     typer.echo(
-        f"Stopped saving {len(before) - len(after)} cell output"
-        f"{'s' if len(before) - len(after) != 1 else ''} from {path}"
+        f"Stopped saving {n} cell output{'s' if n != 1 else ''} from {path}"
     )
 
 
@@ -1235,23 +1148,7 @@ def list_cell_outputs(
     """List the values, figures, and tables marked in a notebook's cells,
     and how a document shows each.
     """
-    path = Path(path).as_posix()
-    ck_info = calkit.load_calkit_info(read_only=True)
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    nb = _read_notebook(path) if os.path.isfile(path) else None
-    described = []
-    for name in calkit.notebooks.find_notebook_stages(ck_info, path):
-        stage = stages[name]
-        values = None
-        values_path = calkit.notebooks.get_notebook_values_path(
-            path, parameters=stage.get("parameters") or None
-        )
-        if os.path.isfile(values_path):
-            with open(values_path, encoding="utf-8") as f:
-                values = json.load(f)
-        described += calkit.notebooks.describe_cell_outputs(
-            name, stage, nb, values=values
-        )
+    described = calkit.notebooks.list_cell_outputs(path)
     if json_output:
         typer.echo(json.dumps(described))
         return

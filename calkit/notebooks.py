@@ -535,6 +535,193 @@ def describe_cell_outputs(
     return described
 
 
+def get_notebook_stage(
+    ck_info: dict, notebook_path: str, stage: str | None = None
+) -> str:
+    """The stage running a notebook, which must be in the pipeline for its
+    cells' outputs to be saved, or the one named, if it runs it.
+
+    Raises a ``ValueError`` saying what to do if there isn't one, or there
+    are several.
+    """
+    names = find_notebook_stages(ck_info, notebook_path)
+    if stage is not None:
+        if stage not in names:
+            raise ValueError(f"Stage '{stage}' doesn't run {notebook_path}")
+        return stage
+    if not names:
+        raise ValueError(
+            f"{notebook_path} isn't in the pipeline yet; add it first, e.g., "
+            f"with 'calkit xr {notebook_path}'"
+        )
+    if len(names) > 1:
+        raise ValueError(
+            f"{notebook_path} is run by stages {', '.join(names)}; name one"
+        )
+    return names[0]
+
+
+def mark_cell_output(
+    notebook_path: str,
+    output: dict,
+    stage: str | None = None,
+    cell_index: int | None = None,
+    wdir: str | None = None,
+) -> dict:
+    """Mark a value, figure, or table a notebook's cell makes, in the stage
+    running it in ``calkit.yaml``, to be saved whenever the pipeline runs
+    it, replacing a mark saving the same thing.
+
+    ``output`` is as ``NotebookCellOutput`` takes it. A cell named by
+    ``cell_index`` instead of its ID gets one written into the notebook,
+    with the rest of its cells, if they have none. Returns the stage, the
+    output as saved, how a document cites it, and a warning, if any.
+    Raises a ``ValueError`` saying what's wrong.
+    """
+    from pydantic import ValidationError
+
+    import calkit
+    from calkit.models.pipeline import JupyterNotebookStage, NotebookCellOutput
+
+    def get_message(e: ValidationError) -> str:
+        return "; ".join(
+            str(err["msg"]).removeprefix("Value error, ") for err in e.errors()
+        )
+
+    notebook_path = Path(notebook_path).as_posix()
+    fpath = os.path.join(wdir or ".", notebook_path)
+    output = {k: v for k, v in output.items() if v is not None}
+    if cell_index is not None and output.get("cell") is not None:
+        raise ValueError("Name the cell by its ID or position, not both")
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    name = get_notebook_stage(ck_info, notebook_path, stage)
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            nb = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        raise ValueError(f"Can't read {notebook_path}: {e}")
+    if cell_index is not None:
+        n_cells = len(nb.get("cells", []))
+        if not 0 <= cell_index < n_cells:
+            raise ValueError(
+                f"{notebook_path} has {n_cells} cells, not {cell_index + 1}"
+            )
+        if ensure_cell_ids(nb):
+            with open(fpath, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(nb, f, indent=1)
+                f.write("\n")
+        output["cell"] = get_cell_ids(nb)[cell_index]
+    elif output.get("cell") is not None and output["cell"] not in get_cell_ids(
+        nb
+    ):
+        raise ValueError(f"{notebook_path} has no cell {output['cell']}")
+    try:
+        new = NotebookCellOutput.model_validate(output).model_dump(
+            exclude_none=True
+        )
+    except ValidationError as e:
+        raise ValueError(get_message(e))
+    stage_dict = ck_info["pipeline"]["stages"][name]
+    outputs = with_cell_output(
+        [dict(o) for o in stage_dict.get("cell_outputs") or []], new
+    )
+    try:
+        JupyterNotebookStage.model_validate(
+            dict(stage_dict) | {"cell_outputs": outputs}
+        )
+    except ValidationError as e:
+        raise ValueError(get_message(e))
+    stage_dict["cell_outputs"] = outputs
+    calkit.save_calkit_info(ck_info, wdir=wdir)
+    warning = (
+        f"{notebook_path}'s cell IDs count up from 0, as nbstripout writes "
+        "them without --keep-id, so they change when cells are added; "
+        "install it with --keep-id so marks stay on their cells"
+        if has_ordinal_cell_ids(nb)
+        else None
+    )
+    return {
+        "stage": name,
+        "output": new,
+        "citation": get_cell_output_citation(
+            new, notebook_path, stage_dict.get("parameters") or None
+        ),
+        "warning": warning,
+    }
+
+
+def unmark_cell_outputs(
+    notebook_path: str,
+    value: str | None = None,
+    path: str | None = None,
+    cell: str | None = None,
+    stage: str | None = None,
+    wdir: str | None = None,
+) -> int:
+    """Stop saving a value, a figure or table at a path, or everything
+    saved after a cell, from a notebook, in ``calkit.yaml``.
+
+    Returns how many marks were removed. Raises a ``ValueError`` if none
+    match.
+    """
+    import calkit
+
+    notebook_path = Path(notebook_path).as_posix()
+    if not any((value, path, cell)):
+        raise ValueError("Name a value, a figure or table's path, or a cell")
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    name = get_notebook_stage(ck_info, notebook_path, stage)
+    stage_dict = ck_info["pipeline"]["stages"][name]
+    before = [dict(o) for o in stage_dict.get("cell_outputs") or []]
+    after = without_cell_outputs(before, value=value, path=path, cell=cell)
+    if len(after) == len(before):
+        raise ValueError(f"Nothing like that is marked in {notebook_path}")
+    if after:
+        stage_dict["cell_outputs"] = after
+    else:
+        del stage_dict["cell_outputs"]
+    calkit.save_calkit_info(ck_info, wdir=wdir)
+    return len(before) - len(after)
+
+
+def list_cell_outputs(
+    notebook_path: str, wdir: str | None = None
+) -> list[dict]:
+    """What a notebook's cells are marked to make, from each stage running
+    it, as ``describe_cell_outputs`` gives them, with the values the last
+    run saved.
+    """
+    import calkit
+
+    notebook_path = Path(notebook_path).as_posix()
+    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    nb = None
+    try:
+        with open(
+            os.path.join(wdir or ".", notebook_path), encoding="utf-8"
+        ) as f:
+            nb = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        pass
+    described = []
+    for name in find_notebook_stages(ck_info, notebook_path):
+        stage = stages[name]
+        values = None
+        values_path = get_notebook_values_path(
+            notebook_path, parameters=stage.get("parameters") or None
+        )
+        try:
+            with open(
+                os.path.join(wdir or ".", values_path), encoding="utf-8"
+            ) as f:
+                values = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            pass
+        described += describe_cell_outputs(name, stage, nb, values=values)
+    return described
+
+
 # How much of a file to read when deciding whether it's a marimo notebook.
 # marimo writes its header at the top, but a project's own license banner or
 # module docstring comes first, so leave room for one.

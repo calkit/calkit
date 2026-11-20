@@ -204,7 +204,7 @@ def test_write_table(tmp_dir):
         ],
     }
     calkit.tables.write_table("tables/rates.tex", table, ".3f")
-    with open("tables/rates.tex") as f:
+    with open("tables/rates.tex", encoding="utf-8") as f:
         tex = f.read()
     # Numbers right, text left, with booktabs' rules or plain lines
     assert r"\begin{tabular}{rrl}" in tex

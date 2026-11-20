@@ -2,6 +2,7 @@
 
 import base64
 import json
+import os
 import re
 import subprocess
 import sys
@@ -570,7 +571,7 @@ def test_jupyternotebookstage():
         (figure, "Give the path to save the figure to"),
         (figure | {"path": "f.gif"}, "not '.gif'"),
         ({"kind": "figure", "path": "f.png"}, "Name the cell"),
-        (figure | {"path": "/abs/f.png"}, "relative"),
+        (figure | {"path": os.path.abspath("f.png")}, "relative"),
         (figure | {"path": "f,g.png"}, "comma"),
         (figure | {"path": "f.png", "format": ".2f"}, "only applies"),
         (table | {"variable": None, "path": "t.tex"}, "Name the variable"),

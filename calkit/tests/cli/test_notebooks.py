@@ -636,7 +636,7 @@ def test_cell_outputs(tmp_dir):
         assert f.read(4) == b"%PDF"
     with open("figures/shown.png", "rb") as f:
         assert f.read(4) == b"\x89PNG"
-    with open("tables/rates.tex") as f:
+    with open("tables/rates.tex", encoding="utf-8") as f:
         assert r"25 & 0.0309 \\" in f.read()
     for path in ["fit.ipynb", ".calkit/notebooks/executed/fit.ipynb"]:
         with open(path) as f:

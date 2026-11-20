@@ -228,11 +228,17 @@ def test_install_cli_command(monkeypatch):
         assert result.exit_code == 0
         m_install.assert_called_once_with("pixi")
         m_prompt.assert_not_called()
-    # Node's package is called nodejs, but node is the binary it provides
-    with mock.patch("calkit.install.install", return_value=True) as m_install:
-        result = runner.invoke(calkit_app, ["install", "nodejs", "--yes"])
-        assert result.exit_code == 0
-        m_install.assert_called_once_with("node")
+    # Apps are installed by the binary they provide, e.g., node for nodejs
+    for alias, app in [("nodejs", "node"), ("vscode", "code")]:
+        with (
+            mock.patch("calkit.install.sys.platform", "win32"),
+            mock.patch(
+                "calkit.install.install", return_value=True
+            ) as m_install,
+        ):
+            result = runner.invoke(calkit_app, ["install", alias, "--yes"])
+            assert result.exit_code == 0, result.output
+            m_install.assert_called_once_with(app)
     # Default path delegates to ``prompt_and_install``; a False return
     # value surfaces as a non-zero exit.
     with mock.patch(

@@ -354,7 +354,7 @@ Apps currently in the registry:
 | `git`                | Homebrew on macOS, `winget` on Windows                                                             |
 | `docker`             | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows                             |
 | `colima`             | Homebrew on macOS, with the Docker CLI unless one is already installed                             |
-| `code`               | Homebrew cask on macOS, `winget` on Windows                                                        |
+| `code`               | VS Code's own download on macOS, `winget` on Windows; also `calkit install vscode`                 |
 | `R`, `Rscript`       | Homebrew cask on macOS, `winget` on Windows                                                        |
 | `node`, `npm`, `npx` | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                        |
 | `claude`             | upstream script; then adds Calkit's plugin                                                         |

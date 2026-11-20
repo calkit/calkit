@@ -378,7 +378,7 @@ INSTALLERS["npm"] = _NODE_INSTALLER
 INSTALLERS["npx"] = _NODE_INSTALLER
 # Names an app goes by that aren't a binary it provides, which is what an
 # install is checked for afterward
-NAME_ALIASES = {"nodejs": "node"}
+NAME_ALIASES = {"nodejs": "node", "vscode": "code"}
 
 
 # Apps that are known to be unsupported on a given platform, mapped to the

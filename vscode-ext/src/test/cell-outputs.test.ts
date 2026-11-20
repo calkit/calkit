@@ -98,8 +98,21 @@ test("getAssignedNames finds what a cell leaves, last first", () => {
         "fig = plt.figure()",
       ].join("\n"),
     ),
-    ["fig", "f", "n", "b", "a", "t", "rates", "ax"],
+    ["fig", "f", "n", "b", "a", "rates", "ax", "temps", "t"],
   );
+  // A loop goes through something more worth saving than its variables
+  assert.deepEqual(
+    getAssignedNames(
+      "for temp, k in rates.items():\n    print(f'{temp}: {k}')",
+    ),
+    ["rates", "k", "temp"],
+  );
+  assert.deepEqual(getAssignedNames("for t, k in zip(temps, ks):"), [
+    "temps",
+    "ks",
+    "k",
+    "t",
+  ]);
   assert.deepEqual(getAssignedNames(""), []);
 });
 

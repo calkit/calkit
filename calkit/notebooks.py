@@ -724,8 +724,10 @@ def list_cell_outputs(
 
 def get_cell_variables(source: str) -> list[str]:
     """Variables a cell prints or shows, since a printed number is likely
-    one of them, those assigned there first, then the rest it assigns at
-    its top level, last assigned first.
+    one of them, those assigned there first, then what a loop printing
+    them goes through, then the rest it assigns at its top level, last
+    assigned first, with loop variables last, since they only hold the last
+    item.
     """
     import ast
 
@@ -743,6 +745,19 @@ def get_cell_variables(source: str) -> list[str]:
             if isinstance(n, ast.Name) and id(n) not in skip
         ]
 
+    def get_names(node: ast.AST) -> list[str]:
+        return [n.id for n in ast.walk(node) if isinstance(n, ast.Name)]
+
+    def prints(node: ast.AST) -> list[str]:
+        return [
+            name
+            for n in ast.walk(node)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id in ("print", "display")
+            for name in get_shown(n)
+        ]
+
     # IPython's magics and shell commands aren't Python
     lines = [
         "" if line.lstrip().startswith(("%", "!")) else line
@@ -753,40 +768,49 @@ def get_cell_variables(source: str) -> list[str]:
     except SyntaxError:
         return []
     assigned: list[str] = []
+    looped: list[str] = []
     shown: list[str] = []
+    iterated: list[str] = []
     for stmt in tree.body:
         targets: list[ast.AST] = []
         if isinstance(stmt, ast.Assign):
             targets = list(stmt.targets)
         elif isinstance(stmt, (ast.AnnAssign, ast.AugAssign)):
             targets = [stmt.target]
-        elif isinstance(stmt, (ast.For, ast.AsyncFor)):
-            targets = [stmt.target]
         elif isinstance(stmt, (ast.With, ast.AsyncWith)):
             targets = [i.optional_vars for i in stmt.items if i.optional_vars]
+        elif isinstance(stmt, (ast.For, ast.AsyncFor)):
+            looped += get_names(stmt.target)
+            if prints(stmt):
+                # What's gone through, e.g., rates in rates.items() or
+                # zip(temps, rates), but not the functions called
+                called = {
+                    id(n.func)
+                    for n in ast.walk(stmt.iter)
+                    if isinstance(n, ast.Call)
+                }
+                iterated += [
+                    n.id
+                    for n in ast.walk(stmt.iter)
+                    if isinstance(n, ast.Name) and id(n) not in called
+                ]
         for target in targets:
-            for name in ast.walk(target):
-                if isinstance(name, ast.Name):
-                    if name.id in assigned:
-                        assigned.remove(name.id)
-                    assigned.append(name.id)
-        # What's printed or shown, e.g., print(k), or a cell ending in k
-        for node in ast.walk(stmt):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in ("print", "display")
-            ):
-                shown += get_shown(node)
+            for name in get_names(target):
+                if name in assigned:
+                    assigned.remove(name)
+                assigned.append(name)
+        shown += prints(stmt)
         if stmt is tree.body[-1] and isinstance(stmt, ast.Expr):
             shown += get_shown(stmt)
     names = list(reversed(assigned))
-    shown = list(dict.fromkeys(shown))
+    loop_names = set(looped) - set(assigned)
     return list(
         dict.fromkeys(
             [n for n in names if n in shown]
-            + [n for n in shown if n not in names]
+            + [n for n in shown if n not in names and n not in loop_names]
+            + [n for n in iterated if n not in loop_names]
             + names
+            + list(reversed(looped))
         )
     )
 

@@ -404,7 +404,15 @@ def test_find_printed_numbers():
         "print(f'k = {k_25:.3f}', np.mean(z))\n"
         "%matplotlib inline\n"
         "rates"
-    ) == ["k_25", "z", "rates", "f", "t", "ax", "fig"]
+    ) == ["k_25", "z", "rates", "f", "ax", "fig", "t"]
+    # A loop printing what it goes through points to that, not to its loop
+    # variables, which only hold the last item
+    assert calkit.notebooks.get_cell_variables(
+        "for temp, k in rates.items():\n    print(f'{temp} C: k = {k:.4f}')"
+    ) == ["rates", "k", "temp"]
+    assert calkit.notebooks.get_cell_variables(
+        "rates = {}\nfor f in files:\n    rates[f] = fit(f)\nfig = plot()"
+    ) == ["fig", "rates", "f"]
     assert calkit.notebooks.get_cell_variables("x = (") == []
     nb = {
         "cells": [

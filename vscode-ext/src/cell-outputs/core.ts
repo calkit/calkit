@@ -102,11 +102,15 @@ export function getMarkLabel(mark: CellOutputMark): {
 /**
  * Names a cell assigns at its top level, last first, since a cell's result
  * is usually what it assigns last, e.g., `fig, ax = plt.subplots()` gives
- * `fig` and `ax`.
+ * `fig` and `ax`, then what its loops go through, e.g., `rates` in
+ * `for t, k in rates.items()`, then loop variables, which only hold the
+ * last item.
  */
 export function getAssignedNames(source: string): string[] {
-  const names: string[] = [];
-  const add = (name: string) => {
+  const assigned: string[] = [];
+  const iterated: string[] = [];
+  const looped: string[] = [];
+  const add = (names: string[], name: string) => {
     const i = names.indexOf(name);
     if (i >= 0) {
       names.splice(i, 1);
@@ -114,6 +118,13 @@ export function getAssignedNames(source: string): string[] {
     names.push(name);
   };
   const identifier = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  const addEach = (names: string[], text: string) => {
+    for (const part of text.replace(/[()*]/g, "").split(",")) {
+      if (identifier.test(part.trim())) {
+        add(names, part.trim());
+      }
+    }
+  };
   for (const line of source.split(/\r?\n/)) {
     // Only the top level, since a value inside a function or loop isn't
     // what the cell leaves
@@ -125,25 +136,32 @@ export function getAssignedNames(source: string): string[] {
         line,
       );
     if (assign) {
-      for (const part of assign[1].replace(/[()*]/g, "").split(",")) {
-        const name = part.trim();
-        if (identifier.test(name)) {
-          add(name);
+      addEach(assigned, assign[1]);
+      continue;
+    }
+    const loop = /^for\s+(.+?)\s+in\s+(.+?):?\s*$/.exec(line);
+    if (loop) {
+      addEach(looped, loop[1]);
+      // What's gone through, but not the functions called on it
+      for (const m of loop[2].matchAll(/[A-Za-z_][A-Za-z0-9_]*(?![\w(])/g)) {
+        const before = loop[2][(m.index ?? 0) - 1];
+        if (before !== ".") {
+          add(iterated, m[0]);
         }
       }
       continue;
     }
-    const loop = /^for\s+(.+?)\s+in\b/.exec(line);
     const withAs = /^with\b.*\bas\s+([A-Za-z_][A-Za-z0-9_]*)\s*:/.exec(line);
-    for (const part of (loop?.[1] ?? withAs?.[1] ?? "")
-      .replace(/[()]/g, "")
-      .split(",")) {
-      if (identifier.test(part.trim())) {
-        add(part.trim());
-      }
+    if (withAs) {
+      add(assigned, withAs[1]);
     }
   }
-  return names.reverse();
+  const names = [
+    ...assigned.reverse(),
+    ...iterated.filter((n) => !looped.includes(n)),
+    ...looped.reverse(),
+  ];
+  return [...new Set(names)];
 }
 
 /**

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -82,6 +83,9 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
     import os
 
     def to_data(value, what, strict=True):
+        # NaN and infinity aren't JSON, so they're saved as nulls
+        if isinstance(value, float) and value - value != 0:
+            return None
         if value is None or isinstance(value, (bool, int, float, str)):
             return value
         if isinstance(value, dict):
@@ -93,7 +97,7 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
             if callable(getattr(value, method, None)):
                 return to_data(getattr(value, method)(), what, strict)
         try:
-            return float(value)
+            return to_data(float(value), what, strict)
         except (TypeError, ValueError):
             pass
         if not strict:
@@ -420,8 +424,49 @@ def find_notebook_stages(ck_info: dict, notebook_path: str) -> list[str]:
         for name, stage in stages.items()
         if isinstance(stage, dict)
         and stage.get("kind") == "jupyter-notebook"
-        and Path(str(stage.get("notebook_path", ""))).as_posix() == path
+        and get_stage_notebook_path(stage) == path
     ]
+
+
+def get_stage_notebook_path(stage: dict) -> str:
+    """The notebook a stage runs, relative to the project rather than its
+    ``wdir``.
+    """
+    return posixpath.normpath(
+        posixpath.join(
+            stage.get("wdir") or "",
+            Path(str(stage.get("notebook_path", ""))).as_posix(),
+        )
+    )
+
+
+def get_stage_values_path(stage: dict, ck_info: dict | None = None) -> str:
+    """Where a notebook stage saves the values its cells make, relative to
+    the project: in its ``wdir``, named for the parameters it runs with,
+    as resolved from the project's in ``ck_info``.
+    """
+    from calkit.models.iteration import expand_project_parameters
+    from calkit.models.pipeline import get_resolved_notebook_parameters
+
+    params = stage.get("parameters") or None
+    if params:
+        params = get_resolved_notebook_parameters(
+            params,
+            expand_project_parameters((ck_info or {}).get("parameters") or {}),
+        )
+    values_path = get_notebook_values_path(
+        Path(str(stage.get("notebook_path", ""))).as_posix(), params
+    )
+    return posixpath.normpath(
+        posixpath.join(stage.get("wdir") or "", values_path)
+    )
+
+
+def get_normalized_output_path(path: str) -> str:
+    """A figure or table's path with forward slashes, as a document cites
+    it, since TeX reads a backslash as a command.
+    """
+    return posixpath.normpath(path.replace("\\", "/"))
 
 
 def get_cell_output_target(output: dict) -> tuple[str, str]:
@@ -430,11 +475,12 @@ def get_cell_output_target(output: dict) -> tuple[str, str]:
     value's variable, or a figure or table's path.
     """
     kind = str(output.get("kind"))
-    target = output.get("variable") if kind == "value" else output.get("path")
-    return kind, str(target)
+    if kind == "value":
+        return kind, str(output.get("variable"))
+    return kind, get_normalized_output_path(str(output.get("path")))
 
 
-def with_cell_output(outputs: list[dict], new: dict) -> list[dict]:
+def get_cell_outputs_with(outputs: list[dict], new: dict) -> list[dict]:
     """A stage's cell outputs with one added, replacing one that saves the
     same thing, e.g., when a value is marked again on another cell, or a
     figure or table saved to the same path.
@@ -458,7 +504,7 @@ def with_cell_output(outputs: list[dict], new: dict) -> list[dict]:
     return out
 
 
-def without_cell_outputs(
+def get_cell_outputs_without(
     outputs: list[dict],
     value: str | None = None,
     path: str | None = None,
@@ -476,30 +522,39 @@ def without_cell_outputs(
                 and o.get("kind") == "value"
                 and o.get("variable") == value
             )
-            or (path is not None and o.get("path") == path)
+            or (
+                path is not None
+                and get_normalized_output_path(str(o.get("path")))
+                == get_normalized_output_path(path)
+            )
             or (cell_id is not None and o.get("cell_id") == cell_id)
         )
     ]
 
 
 def get_cell_output_citation(
-    output: dict, notebook_path: str, parameters: dict | None = None
+    output: dict, stage: dict, ck_info: dict | None = None
 ) -> str | None:
     """The calkit.sty command a document shows a cell output with, or None
     for a table that isn't LaTeX, which needs a stage to typeset it.
+
+    A value is cited by its notebook, unless the stage's parameters or
+    ``wdir`` put its values file somewhere else, which is then cited.
     """
     kind = output.get("kind")
     if kind == "value":
-        source = (
-            get_notebook_values_path(notebook_path, parameters)
-            if parameters
-            else Path(notebook_path).as_posix()
-        )
+        notebook_path = get_stage_notebook_path(stage)
+        source = get_stage_values_path(stage, ck_info)
+        if source == get_notebook_values_path(notebook_path):
+            source = notebook_path
         return f"\\ckvalue{{{source}}}{{{output['variable']}}}"
+    path = posixpath.normpath(
+        posixpath.join(stage.get("wdir") or "", str(output.get("path")))
+    )
     if kind == "figure":
-        return f"\\ckfigure{{{output['path']}}}"
-    if kind == "table" and str(output.get("path")).lower().endswith(".tex"):
-        return f"\\cktable{{{output['path']}}}"
+        return f"\\ckfigure{{{path}}}"
+    if kind == "table" and path.lower().endswith(".tex"):
+        return f"\\cktable{{{path}}}"
     return None
 
 
@@ -508,13 +563,13 @@ def describe_cell_outputs(
     stage: dict,
     nb: dict | None,
     values: dict | None = None,
+    ck_info: dict | None = None,
 ) -> list[dict]:
     """A stage's cell outputs as editors show them: what each saves, the
     cell it's after and that cell's position, how a document cites it, and
     for a value, what the last run saved, from ``values``.
     """
     ids = get_cell_ids(nb) if nb is not None else []
-    params = stage.get("parameters") or None
     described = []
     for output in stage.get("cell_outputs") or []:
         cell_id = output.get("cell_id")
@@ -526,9 +581,7 @@ def describe_cell_outputs(
             "variable": output.get("variable"),
             "path": output.get("path"),
             "format": output.get("format"),
-            "citation": get_cell_output_citation(
-                output, stage["notebook_path"], params
-            ),
+            "citation": get_cell_output_citation(output, stage, ck_info),
         }
         name = output.get("variable")
         if item["kind"] == "value" and values is not None and name in values:
@@ -609,8 +662,9 @@ def mark_cell_output(
                 f"{notebook_path} has {n_cells} cells, not {cell_index + 1}"
             )
         if ensure_cell_ids(nb):
+            # As Jupyter writes it, so only the IDs change
             with open(fpath, "w", encoding="utf-8", newline="\n") as f:
-                json.dump(nb, f, indent=1)
+                json.dump(nb, f, indent=1, sort_keys=True, ensure_ascii=False)
                 f.write("\n")
         output["cell_id"] = get_cell_ids(nb)[cell_index]
     elif output.get("cell_id") is not None and output[
@@ -624,7 +678,7 @@ def mark_cell_output(
     except ValidationError as e:
         raise ValueError(get_message(e))
     stage_dict = ck_info["pipeline"]["stages"][name]
-    outputs = with_cell_output(
+    outputs = get_cell_outputs_with(
         [dict(o) for o in stage_dict.get("cell_outputs") or []], new
     )
     try:
@@ -645,9 +699,7 @@ def mark_cell_output(
     return {
         "stage": name,
         "output": new,
-        "citation": get_cell_output_citation(
-            new, notebook_path, stage_dict.get("parameters") or None
-        ),
+        "citation": get_cell_output_citation(new, stage_dict, ck_info),
         "warning": warning,
     }
 
@@ -675,7 +727,7 @@ def unmark_cell_outputs(
     name = get_notebook_stage(ck_info, notebook_path, stage)
     stage_dict = ck_info["pipeline"]["stages"][name]
     before = [dict(o) for o in stage_dict.get("cell_outputs") or []]
-    after = without_cell_outputs(
+    after = get_cell_outputs_without(
         before, value=value, path=path, cell_id=cell_id
     )
     if len(after) == len(before):
@@ -712,9 +764,7 @@ def list_cell_outputs(
     for name in find_notebook_stages(ck_info, notebook_path):
         stage = stages[name]
         values = None
-        values_path = get_notebook_values_path(
-            notebook_path, parameters=stage.get("parameters") or None
-        )
+        values_path = get_stage_values_path(stage, ck_info)
         try:
             with open(
                 os.path.join(wdir or ".", values_path), encoding="utf-8"
@@ -722,7 +772,9 @@ def list_cell_outputs(
                 values = json.load(f)
         except (OSError, json.JSONDecodeError):
             pass
-        described += describe_cell_outputs(name, stage, nb, values=values)
+        described += describe_cell_outputs(
+            name, stage, nb, values=values, ck_info=ck_info
+        )
     return described
 
 

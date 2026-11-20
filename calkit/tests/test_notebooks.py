@@ -224,7 +224,7 @@ def test_capture_cells():
     save = namespace["_calkit_save_cell_outputs"]
     namespace.update(
         k=0.25,
-        rates={"25C": 0.031, 35: (1, 2)},
+        rates={"25C": 0.031, 35: (1, 2), "45C": float("nan")},
         rows=[{"T": 25, "k": 0.031}, {"T": 35, "k": 0.062}],
         cols={"T": [25, 35], "k": [0.031, 0.062]},
         grid=[["T", "k"], [25, 0.031]],
@@ -248,7 +248,7 @@ def test_capture_cells():
         with open(values) as f:
             assert json.load(f) == {
                 "k": 0.25,
-                "rates": {"25C": 0.031, "35": [1, 2]},
+                "rates": {"25C": 0.031, "35": [1, 2], "45C": None},
             }
         expected = {
             "columns": ["T", "k"],
@@ -345,7 +345,7 @@ def test_cell_output_marks():
     # Marking something again moves it, and a path takes over from another
     # output saved to it
     moved = value | {"cell_id": "c"}
-    marked = calkit.notebooks.with_cell_output(outputs, moved)
+    marked = calkit.notebooks.get_cell_outputs_with(outputs, moved)
     assert marked == [moved, figure, table]
     replacing = {
         "kind": "figure",
@@ -353,11 +353,11 @@ def test_cell_output_marks():
         "variable": "fig",
         "path": "t.tex",
     }
-    marked = calkit.notebooks.with_cell_output(outputs, replacing)
+    marked = calkit.notebooks.get_cell_outputs_with(outputs, replacing)
     assert marked == [value, figure, replacing]
     added = {"kind": "value", "variable": "j"}
-    assert calkit.notebooks.with_cell_output(outputs, added)[-1] == added
-    without = calkit.notebooks.without_cell_outputs
+    assert calkit.notebooks.get_cell_outputs_with(outputs, added)[-1] == added
+    without = calkit.notebooks.get_cell_outputs_without
     assert without(outputs, value="k") == [figure, table]
     assert without(outputs, value="df") == outputs
     assert without(outputs, path="t.tex") == [value, figure]
@@ -405,6 +405,29 @@ def test_cell_output_marks():
         r"\ckvalue{.calkit/notebooks/outputs/fit-t-25/values.json}{k}"
     )
     assert described[0]["cell_index"] is None
+    # Including one the project's parameters fill in, as the pipeline does
+    stage["parameters"] = {"t": "{temp}"}
+    described = calkit.notebooks.describe_cell_outputs(
+        "fit", stage, None, ck_info={"parameters": {"temp": 35}}
+    )
+    assert described[0]["citation"] == (
+        r"\ckvalue{.calkit/notebooks/outputs/fit-t-35/values.json}{k}"
+    )
+    # A stage's wdir is part of every path cited, and of the notebook's
+    in_sub = {"kind": "jupyter-notebook", "wdir": "sub"} | {
+        k: v for k, v in stage.items() if k != "parameters"
+    }
+    assert calkit.notebooks.find_notebook_stages(
+        {"pipeline": {"stages": {"sub": in_sub}}}, "sub/fit.ipynb"
+    ) == ["sub"]
+    assert calkit.notebooks.get_stage_values_path(in_sub) == (
+        "sub/.calkit/notebooks/outputs/fit/values.json"
+    )
+    described = calkit.notebooks.describe_cell_outputs("sub", in_sub, None)
+    assert [d["citation"] for d in described[:2]] == [
+        r"\ckvalue{sub/.calkit/notebooks/outputs/fit/values.json}{k}",
+        r"\ckfigure{sub/f.png}",
+    ]
 
 
 def test_find_printed_numbers():
@@ -480,11 +503,11 @@ def test_mark_cell_output(tmp_path):
         "nbformat_minor": 4,
         "metadata": {},
         "cells": [
-            {"cell_type": "code", "source": "k = 1", "outputs": []},
+            {"cell_type": "code", "source": "k = 1  # μs", "outputs": []},
             {"cell_type": "code", "source": "fig = 2", "outputs": []},
         ],
     }
-    (tmp_path / "fit.ipynb").write_text(json.dumps(nb))
+    (tmp_path / "fit.ipynb").write_text(json.dumps(nb), encoding="utf-8")
     (tmp_path / "calkit.yaml").write_text(
         "# The pipeline\n"
         "pipeline:\n"
@@ -500,7 +523,9 @@ def test_mark_cell_output(tmp_path):
     marked = calkit.notebooks.mark_cell_output(
         "fit.ipynb", value, cell_index=0, wdir=wdir
     )
-    saved = json.loads((tmp_path / "fit.ipynb").read_text())
+    text = (tmp_path / "fit.ipynb").read_text(encoding="utf-8")
+    assert "# μs" in text
+    saved = json.loads(text)
     ids = calkit.notebooks.get_cell_ids(saved)
     assert all(ids) and saved["nbformat_minor"] == 5
     assert marked == {

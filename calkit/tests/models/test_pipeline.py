@@ -557,6 +557,11 @@ def test_jupyternotebookstage():
     )
     assert [o.path for o in s.cell_output_paths] == ["f.png"]
     assert {"f.png": {"cache": False}} in s.to_dvc()["outs"]
+    # Paths are kept as a document cites them
+    typed = NotebookCellOutput(
+        kind="figure", cell_id="a", path=r".\figs\fit.pdf"
+    )
+    assert typed.path == "figs/fit.pdf"
     # What can't be saved
     figure = {"kind": "figure", "cell_id": "a"}
     table = {"kind": "table", "cell_id": "a", "variable": "d"}
@@ -573,6 +578,8 @@ def test_jupyternotebookstage():
         ({"kind": "figure", "path": "f.png"}, "Name the cell"),
         (figure | {"path": os.path.abspath("f.png")}, "relative"),
         (figure | {"path": "f,g.png"}, "comma"),
+        (figure | {"path": "$HOME/f.png"}, "can't include $"),
+        (table | {"path": "t.tex", "format": '">8'}, "can't include \""),
         (figure | {"path": "f.png", "format": ".2f"}, "only applies"),
         (table | {"variable": None, "path": "t.tex"}, "Name the variable"),
         (table | {"path": "t.xlsx"}, "not '.xlsx'"),

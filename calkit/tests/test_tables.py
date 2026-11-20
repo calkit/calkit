@@ -214,7 +214,7 @@ def test_write_table(tmp_dir):
     assert r"35 & $-$0.062 &  \\" in tex
     assert r"45 & 0.000 & 1, 2 \\" in tex
     calkit.tables.write_table("rates.csv", table)
-    with open("rates.csv") as f:
+    with open("rates.csv", encoding="utf-8") as f:
         assert f.read().splitlines() == [
             "T (°C),k_obs,note",
             "25,0.030912,50% & up",
@@ -222,7 +222,7 @@ def test_write_table(tmp_dir):
             '45,1.5e-05,"1, 2"',
         ]
     calkit.tables.write_table("rates.md", table)
-    with open("rates.md") as f:
+    with open("rates.md", encoding="utf-8") as f:
         assert f.read().splitlines()[:3] == [
             "| T (°C) | k_obs | note |",
             "|---|---|---|",
@@ -231,7 +231,7 @@ def test_write_table(tmp_dir):
     # An index is the first column, named for the index
     indexed = table | {"index": ["a", "b", "c"], "index_name": "run"}
     calkit.tables.write_table("rates.json", indexed)
-    with open("rates.json") as f:
+    with open("rates.json", encoding="utf-8") as f:
         records = json.load(f)
     assert records[0] == {
         "run": "a",
@@ -240,7 +240,18 @@ def test_write_table(tmp_dir):
         "note": "50% & up",
     }
     calkit.tables.write_table("indexed.tex", indexed)
-    with open("indexed.tex") as f:
+    with open("indexed.tex", encoding="utf-8") as f:
         assert r"run & T (°C) & k\_obs & note \\" in f.read()
+    # Formatted numbers are escaped too
+    calkit.tables.write_table(
+        "pct.tex", {"columns": ["f"], "data": [[0.123]]}, ".1%"
+    )
+    calkit.tables.write_table(
+        "big.tex", {"columns": ["n"], "data": [[-1234.5]]}, "_.1f"
+    )
+    with open("pct.tex", encoding="utf-8") as f:
+        assert r"12.3\% \\" in f.read()
+    with open("big.tex", encoding="utf-8") as f:
+        assert r"$-$1\_234.5 \\" in f.read()
     with pytest.raises(ValueError, match="'.xlsx'"):
         calkit.tables.write_table("rates.xlsx", table)

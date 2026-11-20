@@ -1834,10 +1834,13 @@ def get_printed_numbers(wdir: str) -> list[dict]:
             or not isinstance(stage.get("notebook_path"), str)
         ):
             continue
-        notebook = stage["notebook_path"]
+        notebook = calkit.notebooks.get_stage_notebook_path(stage)
+        executed = calkit.notebooks.get_executed_notebook_path(
+            stage["notebook_path"], "notebook"
+        )
         for path in (
             notebook,
-            calkit.notebooks.get_executed_notebook_path(notebook, "notebook"),
+            os.path.join(stage.get("wdir") or "", executed),
         ):
             fpath = os.path.join(wdir, path)
             try:

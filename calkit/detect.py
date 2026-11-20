@@ -2692,7 +2692,9 @@ def _pipeline_output_paths(
             )
             if isinstance(out, str) and out
         ]
-        outs += get_map_paths_outputs(stage) + get_cell_output_paths(stage)
+        outs += get_map_paths_outputs(stage) + get_cell_output_paths(
+            stage, ck_info
+        )
         for out in outs:
             full = root / out
             if full.is_file():

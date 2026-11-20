@@ -2515,6 +2515,13 @@ class NotebookCellOutput(Model):
     )
     model_config = ConfigDict(extra="forbid")
 
+    @field_validator("path")
+    @classmethod
+    def normalize_path(cls, path: str | None) -> str | None:
+        from calkit.notebooks import get_normalized_output_path
+
+        return None if path is None else get_normalized_output_path(path)
+
     @model_validator(mode="after")
     def check_kind(self) -> "NotebookCellOutput":
         from calkit.notebooks import (
@@ -2542,6 +2549,11 @@ class NotebookCellOutput(Model):
         check_path_relative_and_child_of_cwd(self.path)
         if "," in self.path:
             raise ValueError(f"'{self.path}' can't include a comma")
+        # The shell running the stage's command would expand these
+        for text in (self.path, self.format or ""):
+            unsafe = [c for c in '"$`%' if c in text]
+            if unsafe:
+                raise ValueError(f"'{text}' can't include {unsafe[0]}")
         ext = os.path.splitext(self.path)[1].lower()
         if self.kind == "figure":
             if self.variable is None and self.cell_id is None:
@@ -2618,6 +2630,32 @@ class NotebookCellOutput(Model):
         return cls.model_validate(fields)
 
 
+def get_resolved_notebook_parameters(parameters: dict, params: dict) -> dict:
+    """A notebook stage's parameters as the pipeline runs it with them:
+    ``{name}`` replaced by the project's parameter, and ranges expanded.
+    """
+    updated_params = {}
+    for k, v in parameters.items():
+        # If we have something like {var_name} in v, replace it with the
+        # value from params
+        if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
+            var_name = v[1:-1]
+            if var_name in params:
+                updated_params[k] = params[var_name]
+            else:
+                updated_params[k] = v
+        else:
+            updated_params[k] = v
+        # Try parsing as a RangeIteration and expanding
+        try:
+            updated_params[k] = RangeIteration.model_validate(
+                updated_params[k]
+            ).values
+        except ValidationError:
+            pass
+    return updated_params
+
+
 class JupyterNotebookStage(Stage):
     """A stage that runs a Jupyter notebook.
 
@@ -2682,26 +2720,9 @@ class JupyterNotebookStage(Stage):
         This needs to happen before writing a DVC stage, so we can properly
         create JSON for the notebook.
         """
-        updated_params = {}
-        for k, v in self.parameters.items():
-            # If we have something like {var_name} in v, replace it with the
-            # value from params
-            if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
-                var_name = v[1:-1]
-                if var_name in params:
-                    updated_params[k] = params[var_name]
-                else:
-                    updated_params[k] = v
-            else:
-                updated_params[k] = v
-            # Try parsing as a RangeIteration and expanding
-            try:
-                updated_params[k] = RangeIteration.model_validate(
-                    updated_params[k]
-                ).values
-            except ValidationError:
-                pass
-        self.parameters = updated_params
+        self.parameters = get_resolved_notebook_parameters(
+            self.parameters, params
+        )
 
     @property
     def cleaned_notebook_path(self) -> str:

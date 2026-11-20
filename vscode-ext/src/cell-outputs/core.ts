@@ -103,7 +103,7 @@ export function getMarkLabel(mark: CellOutputMark): {
  * is usually what it assigns last, e.g., `fig, ax = plt.subplots()` gives
  * `fig` and `ax`, then what its loops go through, e.g., `rates` in
  * `for t, k in rates.items()`, then loop variables, which only hold the
- * last item.
+ * last item. JupyterLab's extension suggests the same.
  */
 export function getAssignedNames(source: string): string[] {
   const assigned: string[] = [];

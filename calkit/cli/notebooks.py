@@ -552,6 +552,28 @@ def execute_notebook(
         """
         return Path(os.path.relpath(p, notebook_dir or ".")).as_posix()
 
+    def strip_failed_capture_cells() -> str | None:
+        """Take the cells added to save cell outputs out of the executed
+        notebook of a failed run, returning why one couldn't be saved, if
+        that's why it failed.
+        """
+        if not outputs or not os.path.isfile(fpath_out_exec):
+            return None
+        with open(fpath_out_exec, encoding="utf-8") as f:
+            failed_nb = json.load(f)
+        reasons = [
+            str(out.get("evalue")).removeprefix("Calkit: ")
+            for cell in failed_nb.get("cells") or []
+            for out in cell.get("outputs") or []
+            if out.get("output_type") == "error"
+            and str(out.get("evalue")).startswith("Calkit: ")
+        ]
+        with open(fpath_out_exec, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(
+                calkit.notebooks.remove_capture_cells(failed_nb), f, indent=1
+            )
+        return reasons[0] if reasons else None
+
     def save_cell_outputs() -> None:
         """Take the cells added to save cell outputs out of the executed
         notebook, and save what they couldn't, from scratch, where they
@@ -832,12 +854,18 @@ def execute_notebook(
                     json.dumps(parsed_params).encode()
                 ).decode()
                 pm_cmd += ["-b", params_b64]
-            run_in_env(
-                pm_cmd,
-                env_name=env_name,
-                no_check=no_check,
-                verbose=verbose,
-            )
+            try:
+                run_in_env(
+                    pm_cmd,
+                    env_name=env_name,
+                    no_check=no_check,
+                    verbose=verbose,
+                )
+            except (typer.Exit, SystemExit, subprocess.CalledProcessError):
+                reason = strip_failed_capture_cells()
+                if reason is not None:
+                    raise_error(reason)
+                raise
         elif language.lower() in ["python", "julia", "r"]:
             # The kernel inherits this process's environmental variables, so
             # it gets the programs of environments composed into its own while
@@ -868,20 +896,12 @@ def execute_notebook(
                     parameters=parsed_params,
                     cwd=notebook_dir,
                 )
-            except papermill.PapermillExecutionError as e:
+            except papermill.PapermillExecutionError:
                 # A cell output that couldn't be saved says why, without the
                 # traceback through Calkit's own cell
-                if outputs and str(e.evalue).startswith("Calkit: "):
-                    if os.path.isfile(fpath_out_exec):
-                        with open(fpath_out_exec, encoding="utf-8") as f:
-                            failed_nb = calkit.notebooks.remove_capture_cells(
-                                json.load(f)
-                            )
-                        with open(
-                            fpath_out_exec, "w", encoding="utf-8", newline="\n"
-                        ) as f:
-                            json.dump(failed_nb, f, indent=1)
-                    raise_error(str(e.evalue).removeprefix("Calkit: "))
+                reason = strip_failed_capture_cells()
+                if reason is not None:
+                    raise_error(reason)
                 raise
             finally:
                 os.environ.clear()
@@ -1114,7 +1134,7 @@ def unmark_cell_output(
 ) -> None:
     """Stop saving a value, figure, or table from a notebook's cell."""
     try:
-        n = calkit.notebooks.unmark_cell_outputs(
+        n_removed = calkit.notebooks.unmark_cell_outputs(
             path,
             value=variable,
             path=output_path,
@@ -1124,9 +1144,8 @@ def unmark_cell_output(
     except ValueError as e:
         raise_error(str(e))
         raise
-    typer.echo(
-        f"Stopped saving {n} cell output{'s' if n != 1 else ''} from {path}"
-    )
+    plural = "s" if n_removed != 1 else ""
+    typer.echo(f"Stopped saving {n_removed} cell output{plural} from {path}")
 
 
 @notebooks_app.command("outputs")

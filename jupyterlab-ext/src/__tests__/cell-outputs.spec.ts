@@ -90,7 +90,19 @@ describe("cell outputs", () => {
           "fig = plt.figure()",
         ].join("\n"),
       ),
-    ).toEqual(["fig", "f", "n", "b", "a", "t", "rates", "ax"]);
+    ).toEqual(["fig", "f", "n", "b", "a", "rates", "ax", "temps", "t"]);
+    // A loop goes through something more worth saving than its variables
+    expect(
+      getAssignedNames(
+        "for temp, k in rates.items():\n    print(f'{temp}: {k}')",
+      ),
+    ).toEqual(["rates", "k", "temp"]);
+    expect(getAssignedNames("for t, k in zip(temps, ks):")).toEqual([
+      "temps",
+      "ks",
+      "k",
+      "t",
+    ]);
     expect(getAssignedNames("")).toEqual([]);
     const names = ["k", "ax", "fig", "summary_df", "rates"];
     expect(rankNamesForKind(names, "figure")).toEqual([

@@ -331,13 +331,11 @@ def get_latex_table(table: dict, number_format: str | None = None) -> str:
         )
 
     def cell_tex(value: Any) -> str:
-        text = format_table_cell(value, number_format)
+        text = escape(format_table_cell(value, number_format))
         # A minus sign rather than a hyphen
         if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return (
-                text.replace("-", "$-$", 1) if text.startswith("-") else text
-            )
-        return escape(text)
+            return f"$-${text[1:]}" if text.startswith("-") else text
+        return text
 
     columns = list(table.get("columns") or [])
     rows = [list(r) for r in table.get("data") or []]

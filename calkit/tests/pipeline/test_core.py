@@ -5743,6 +5743,11 @@ def test_get_figure_paths_with_origins(tmp_dir):
     assert by_output["nbs/.calkit/notebooks/outputs/fit/values.json"] == [
         "fit"
     ]
+    # Named for the parameters the pipeline fills in from the project's
+    templated = fit | {"parameters": {"t": "{temp}"}}
+    assert calkit.pipeline.get_cell_output_paths(
+        templated, {"parameters": {"temp": 25}}
+    )[0] == ("nbs/.calkit/notebooks/outputs/fit-t-25/values.json")
     assert (
         calkit.pipeline.get_cell_output_paths(
             ck_info["pipeline"]["stages"]["plot"]

@@ -154,9 +154,43 @@ what it reads, what it saves, and an environment with the packages it
 imports, so it runs the same way on any computer. Look in `calkit.yaml` to
 see what it recorded.
 
+<!-- TODO: needs human review -->
+
 The notebook printed the rate constants, and the paper has one typed in. A
-printed number has nothing to point back to, so have the notebook save
-them to a results file instead. Add a cell at the end:
+printed number has nothing to point back to, so tell Calkit to save the
+variable holding them whenever the notebook runs, without changing its
+code. In VS Code, open `fit_rates.ipynb`, click **Mark as Value, Figure, or
+Table** in the toolbar of the cell that fits the rates, choose **Value**,
+then `rates`, which maps each temperature to its rate constant. The cell
+gets a label saying `rates` is saved after it. Then run everything that's
+out of date, save the project, and sync the paper, all at once:
+
+```sh
+calkit run --save --overleaf
+```
+
+or click **Run and Save** at the top of the Calkit sidebar in VS Code,
+which syncs the paper too once it's connected to Overleaf. The label now
+shows what was saved.
+
+On Overleaf, hover over the typed rate constant. Calkit finds the rate in
+`rates` that matches it, and offers to use it instead:
+
+```latex
+% Before
+At 25~$^\circ$C, the rate constant was 0.031~min$^{-1}$.
+% After
+At 25~$^\circ$C, the rate constant was
+\ckvalue[.3f]{fit_rates.ipynb}{rates.25}~min$^{-1}$.
+```
+
+You can start from Overleaf too: before anything's marked, the card says
+`fit_rates.ipynb` printed the number, and **Use this** marks the variable
+for you.
+
+If you'd rather the notebook write its results itself, e.g., to share them
+as a file, add a cell that saves them, and cite the file instead, e.g.,
+`\ckvalue[.3f]{results/rates.json}{25}`:
 
 ```python
 import json
@@ -165,32 +199,10 @@ with open("results/rates.json", "w") as f:
     json.dump(rates, f, indent=2)
 ```
 
-Here `rates` maps each temperature to its rate constant, e.g.,
-`{"25C": 0.0309, "35C": 0.0616}`. Then run everything that's out of date,
-save the project, and sync the paper, all at once:
-
-```sh
-calkit run --save --overleaf
-```
-
-or click **Run and Save** at the top of the Calkit sidebar in VS Code,
-which syncs the paper too once it's connected to Overleaf.
-
-On Overleaf, hover over the typed rate constant. Calkit finds the value in
-`results/rates.json` that matches it, and offers to use it instead:
-
-```latex
-% Before
-At 25~$^\circ$C, the rate constant was 0.031~min$^{-1}$.
-% After
-At 25~$^\circ$C, the rate constant was
-\ckvalue[.3f]{results/rates.json}{25C}~min$^{-1}$.
-```
-
 `\ckvalue` comes from `calkit.sty`, which Calkit adds to your Overleaf
 project along with a `\usepackage{calkit}` line in the preamble. It reads
-the number from the results file every time the paper compiles, so it
-can't be mistyped or left behind when the results change.
+the number from what the pipeline saved every time the paper compiles, so
+it can't be mistyped or left behind when the results change.
 
 <!-- TODO: needs human review -->
 
@@ -198,8 +210,8 @@ If you've put numbers into a paper from code before, it was probably with
 a script that writes a `\newcommand` for each one into a `.tex` file the
 paper inputs, which means writing that script, rounding every number in
 it, and making up a name for each without digits, e.g.,
-`\RateTwentyFiveC`. With `\ckvalue`, the notebook saves its results as
-they are, and the paper says which file and key, and how to format it,
+`\RateTwentyFiveC`. With `\ckvalue`, the notebook's variables are saved as
+they are, and the paper says which notebook and key, and how to format it,
 where the number goes.
 
 A number that isn't a result, e.g., one you're quoting from another paper,
@@ -263,8 +275,8 @@ stale. Fixing that takes judgment, which is a good job for an AI agent with
 Calkit's skills. In VS Code, start your agent and ask it, e.g.:
 
 > Add arrhenius.ipynb to the pipeline. It should read the rate constants
-> from results/rates.json and the temperature log from the project, and
-> save the activation energy in kJ/mol to a results file.
+> fit_rates.ipynb saves and the temperature log from the project, and save
+> the activation energy in kJ/mol as a value.
 
 The agent copies the temperature log into the project, changes the notebook
 to read the rate constants `fit_rates.ipynb` saves, records it in the
@@ -297,8 +309,7 @@ The decay plot's card on Overleaf, with the "Open in VS Code" button. -->
 Now a bigger change. Say the fits should only use the first 30 minutes of
 each run. In `fit_rates.ipynb`, keep only those rows before fitting, e.g.,
 `df = df[df.time_min <= 30]`, and run, save, and sync again. The decay
-plot, the rate constants in `results/rates.json`, the Arrhenius fit that
-reads them, and the activation energy all change, and so does every
+plot, the rate constants in `rates`, the Arrhenius fit that reads them, and the activation energy all change, and so does every
 `\ckvalue` in the paper that shows one of them. By hand, that's rerunning
 two notebooks in the right order, uploading two figures, and finding and
 retyping every number that moved.

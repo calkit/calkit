@@ -1049,6 +1049,8 @@ Options:
 
 Start a review comment thread above a paragraph of a LaTeX or Markdown document, printing its ID.
 
+A comment on a PDF is added to the publication's review file instead, as a numbered item saying where it's about, e.g., Page 3, line 120 ("quoted text"), in a section like Major comments, so it can be pasted into a journal's review form. The review file is listed in calkit.yaml and made beside the PDF if there isn't one.
+
 Usage:
 
 ```text
@@ -1057,21 +1059,23 @@ calkit new|create comment [OPTIONS] PATH
 
 Arguments:
 
-| Argument | Type | Required | Default | Description         |
-| -------- | ---- | -------- | ------- | ------------------- |
-| `path`   | str  | yes      |         | File to comment in. |
+| Argument | Type | Required | Default | Description                                                         |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------- |
+| `path`   | str  | yes      |         | File to comment in, or a PDF, whose comments go in its review file. |
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                            |
-| -------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--line`, `-l` | int     | yes      |         | A line in, or just above, the paragraph to comment on. |
-| `--text`, `-m` | str     | yes      |         | The comment.                                           |
-| `--highlight`  | str     | no       |         | Rendered text in the paragraph it's about.             |
-| `--occ`        | int     | no       | 0       | Which occurrence of the highlight text, from 0.        |
-| `--author`     | str     | no       |         | Defaults to Git's user.name.                           |
-| `--email`      | str     | no       |         | Defaults to Git's user.email.                          |
-| `--json`       | boolean | no       | False   | Output the thread as JSON.                             |
+| Option         | Type    | Required | Default | Description                                                                                                          |
+| -------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `--text`, `-m` | str     | yes      |         | The comment.                                                                                                         |
+| `--line`, `-l` | int     | no       |         | A line in, or just above, the paragraph to comment on; for a PDF, the line number printed in its margin, if any.     |
+| `--page`       | int     | no       |         | For a PDF, the page it's about.                                                                                      |
+| `--highlight`  | str     | no       |         | Rendered text in the paragraph it's about.                                                                           |
+| `--section`    | str     | no       |         | For a PDF, the review's comments section to add it to (e.g., major or minor), made if missing; defaults to the last. |
+| `--occ`        | int     | no       | 0       | Which occurrence of the highlight text, from 0.                                                                      |
+| `--author`     | str     | no       |         | Defaults to Git's user.name.                                                                                         |
+| `--email`      | str     | no       |         | Defaults to Git's user.email.                                                                                        |
+| `--json`       | boolean | no       | False   | Output the thread as JSON.                                                                                           |
 
 <a id="subcommand-new-create-notebook-nb"></a>
 
@@ -1814,10 +1818,10 @@ Options:
 
 Delete a Calkit object.
 
-| Command                                      | Description                                     |
-| -------------------------------------------- | ----------------------------------------------- |
-| [`question`](#subcommand-delete-rm-question) | Remove a question by its 1-based index.         |
-| [`comment`](#subcommand-delete-rm-comment)   | Delete a review comment thread and its replies. |
+| Command                                      | Description                                                                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| [`question`](#subcommand-delete-rm-question) | Remove a question by its 1-based index.                                                                               |
+| [`comment`](#subcommand-delete-rm-comment)   | Delete a review comment thread and its replies, or for a PDF, the numbered comment in its review file with this --id. |
 
 <a id="subcommand-delete-rm-question"></a>
 
@@ -1841,7 +1845,7 @@ Arguments:
 
 #### `calkit delete|rm comment`
 
-Delete a review comment thread and its replies.
+Delete a review comment thread and its replies, or for a PDF, the numbered comment in its review file with this --id.
 
 Usage:
 
@@ -2194,9 +2198,9 @@ calkit list|ls comments [OPTIONS] [PATH]
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                                                                                                          |
-| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `path`   | str  | no       |         | Document to list threads from, including files it inputs. Defaults to every document the pipeline builds into a PDF. |
+| Argument | Type | Required | Default | Description                                                                                                                                                        |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `path`   | str  | no       |         | Document to list threads from, including files it inputs, or a PDF, to list its review file's comments. Defaults to every document the pipeline builds into a PDF. |
 
 Options:
 
@@ -4300,13 +4304,14 @@ Arguments:
 
 Options:
 
-| Option           | Type      | Required | Default | Description                                                                                                                     |
-| ---------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o` | list[str] | yes      |         | Output LaTeX file path(s).                                                                                                      |
-| `--command`      | str       | no       |         | Command name to use in LaTeX output.                                                                                            |
-| `--key`          | list[str] | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
-| `--format`       | list[str] | no       |         | Value to add, as NAME=FORMAT, e.g., 'pct={a:.1%}'. Repeatable.                                                                  |
-| `--format-json`  | str       | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
+| Option            | Type      | Required | Default | Description                                                                                                                     |
+| ----------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`  | list[str] | yes      |         | Output LaTeX file path(s).                                                                                                      |
+| `--command`       | str       | no       |         | Command name to use in LaTeX output.                                                                                            |
+| `--key`           | list[str] | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
+| `--format`        | list[str] | no       |         | Value to add, as NAME=FORMAT, e.g., 'pct={a:.1%}'. Repeatable.                                                                  |
+| `--format-base64` | list[str] | no       |         | Like --format, with FORMAT base64-encoded, for one a shell would change, e.g., with '$'. Repeatable.                            |
+| `--format-json`   | str       | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
 
 <a id="subcommand-latex-tex-from-questions"></a>
 
@@ -4682,7 +4687,7 @@ Check the status of folders synced with Overleaf in a project.
 Usage:
 
 ```text
-calkit overleaf|ol status|st [PATHS...]
+calkit overleaf|ol status|st [OPTIONS] [PATHS...]
 ```
 
 Arguments:
@@ -4690,6 +4695,12 @@ Arguments:
 | Argument | Type      | Required | Default | Description                                                                                     |
 | -------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `paths`  | list[str] | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description                                                                                                                                     |
+| -------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Print what a sync of each folder would do as JSON, as the hub reports it, or an error with 'needs_login' when Overleaf credentials are missing. |
 
 <a id="subcommand-overleaf-ol-push"></a>
 

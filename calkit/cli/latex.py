@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import glob
 import hashlib
 import json
@@ -59,6 +60,16 @@ def from_json(
             ),
         ),
     ] = None,
+    base64_formats: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--format-base64",
+            help=(
+                "Like --format, with FORMAT base64-encoded, for one a shell "
+                "would change, e.g., with '$'. Repeatable."
+            ),
+        ),
+    ] = None,
     fmt_json: Annotated[
         str | None,
         typer.Option(
@@ -97,6 +108,14 @@ def from_json(
         if not sep or not name:
             raise_error(f"Format '{fmt}' is not NAME=FORMAT")
         fmt_dict[name] = fmt_string
+    for fmt in base64_formats or []:
+        name, sep, encoded = fmt.partition("=")
+        if not sep or not name:
+            raise_error(f"Format '{fmt}' is not NAME=FORMAT")
+        try:
+            fmt_dict[name] = base64.b64decode(encoded, validate=True).decode()
+        except ValueError:
+            raise_error(f"Format for '{name}' is not valid base64")
     data = {}
     for input_fpath in input_fpaths:
         if not os.path.isfile(input_fpath):
@@ -4933,7 +4952,14 @@ def add_comment(
     from calkit.cli.new import new_comment
 
     new_comment(
-        tex_path, line, text, highlight, occ, author, email, as_json=as_json
+        tex_path,
+        text=text,
+        line=line,
+        highlight=highlight,
+        occ=occ,
+        author=author,
+        email=email,
+        as_json=as_json,
     )
 
 

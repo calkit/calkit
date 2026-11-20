@@ -84,6 +84,14 @@ def test_get_stage_from_script_plan(tmp_path):
         "\\documentclass{article}\n\\begin{document}\n"
         "\\includegraphics{figures/fit.png}\n\\end{document}\n"
     )
+    # The copy uploaded to Overleaf, which the document shows now
+    (tmp_path / "paper" / "figures" / "fit.png").write_bytes(b"png")
+    subprocess.check_call(["git", "add", "-A"], cwd=tmp_path)
+    subprocess.check_call(
+        ["git", "-c", "user.name=a", "-c", "user.email=a@b.c", "commit"]
+        + ["-qm", "Init"],
+        cwd=tmp_path,
+    )
     detected = {
         "environment": {
             "name": "py",
@@ -120,6 +128,42 @@ def test_get_stage_from_script_plan(tmp_path):
     assert plan["produces"] == "figures/fit.png"
     assert list(plan["included"]) == ["paper/paper.tex"]
     assert "\\ckfigure{figures/fit.png}" in plan["included"]["paper/paper.tex"]
+    # Nothing needs the copy once the document shows the stage's output,
+    # unless calkit.yaml says something about it
+    assert plan["replaced"] == "paper/figures/fit.png"
+    kept = get_stage_from_script_plan(
+        "scripts/plot.py",
+        detected,
+        ck_info | {"figures": [{"path": "paper/figures/fit.png"}]},
+        wdir=str(tmp_path),
+        shows="paper/figures/fit.png",
+    )
+    assert kept["replaced"] is None
+    # Nor if it has changes Git doesn't have, or another file names it
+    for change in ["edit", "mention"]:
+        if change == "edit":
+            (tmp_path / "paper" / "figures" / "fit.png").write_bytes(b"new")
+        else:
+            (tmp_path / "slides.md").write_text("![](paper/figures/fit.png)\n")
+            subprocess.check_call(["git", "add", "slides.md"], cwd=tmp_path)
+        assert (
+            get_stage_from_script_plan(
+                "scripts/plot.py",
+                detected,
+                ck_info,
+                wdir=str(tmp_path),
+                shows="paper/figures/fit.png",
+            )["replaced"]
+            is None
+        )
+        subprocess.check_call(
+            ["git", "checkout", "-q", "HEAD", "--", "paper"], cwd=tmp_path
+        )
+        subprocess.check_call(
+            ["git", "rm", "-q", "--cached", "--ignore-unmatch", "slides.md"],
+            cwd=tmp_path,
+        )
+        (tmp_path / "slides.md").unlink(missing_ok=True)
     # Only what isn't here, made, or uploaded with it is missing
     assert plan["missing_inputs"] == ["data/new.csv"]
     assert plan["external_inputs"] == ["/Users/me/runs"]
@@ -143,6 +187,7 @@ def test_get_stage_from_script_plan(tmp_path):
         shows="paper/figures/drawn.png",
     )
     assert plan_here["produces"] == "paper/figures/drawn.png"
+    assert plan_here["replaced"] is None
     assert "paper/figures/drawn.png" in plan_here["outputs"]
     assert not plan_here["included"]
     # A stage already running it keeps what it declares
@@ -178,7 +223,12 @@ def test_get_stage_from_script_plan(tmp_path):
     assert merged["stage"]["environment"] == "main"
     # Written: the stage, the environment, its spec, and the document
     written = write_stage_from_script(plan, ck_info, wdir=str(tmp_path))
-    assert sorted(written) == ["paper/paper.tex", "pyproject.toml"]
+    assert sorted(written) == [
+        "paper/figures/fit.png",
+        "paper/paper.tex",
+        "pyproject.toml",
+    ]
+    assert not (tmp_path / "paper" / "figures" / "fit.png").exists()
     assert ck_info["pipeline"]["stages"]["plot"] == plan["stage"]
     assert ck_info["environments"]["py"] == detected["environment"]["env"]
     assert (tmp_path / "pyproject.toml").read_text().startswith("[project]")

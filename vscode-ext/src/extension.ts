@@ -27,6 +27,9 @@ import {
   type CalkitEnvironment,
   type EnvKind,
   type SlurmLaunchOptions,
+  getKernelMatchRank,
+  getPythonEnvDir,
+  type KernelController,
 } from "./environments";
 import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
@@ -71,6 +74,14 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
+import { isSyncedWithOverleaf } from "./overleaf/core";
+import {
+  checkOverleaf,
+  registerOverleaf,
+  runPipeline,
+  setOverleafSynced,
+  suggestCommitMessage,
+} from "./overleaf/view";
 import {
   documentStagePdf,
   documentStageSource,
@@ -155,6 +166,7 @@ const SIDEBAR_SECTIONS: { id: string; label: string }[] = [
   { id: "figures", label: "Figures" },
   { id: "datasets", label: "Datasets" },
   { id: "publications", label: "Publications" },
+  { id: "overleaf", label: "Overleaf" },
   { id: "presentations", label: "Presentations" },
   { id: "results", label: "Results" },
 ];
@@ -455,6 +467,7 @@ export function activate(context: vscode.ExtensionContext): void {
         ? getDocumentStages(workspaceRoot, file)
         : currentCalkitConfig?.pipeline?.stages ?? {};
     },
+    getPublications: () => currentCalkitConfig?.publications ?? [],
     getNonce,
     promptUpgrade: (message) =>
       void promptCalkitInstallOrUpgrade({
@@ -1215,12 +1228,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RUN_PIPELINE, () => {
       const workspaceRoot = getWorkspaceRoot();
-      if (!workspaceRoot) {
-        return;
+      if (workspaceRoot) {
+        // Through the runner Run and Save uses, so neither interrupts the
+        // other in the terminal they share
+        void runPipeline(workspaceRoot);
       }
-      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
-      terminal.show();
-      terminal.sendText("calkit run");
     }),
   );
 
@@ -1234,6 +1246,7 @@ export function activate(context: vscode.ExtensionContext): void {
         title: "Calkit: Save",
         prompt: "Commit message for saving your work",
         placeHolder: "e.g. Update analysis figures",
+        value: await suggestCommitMessage(workspaceRoot),
         ignoreFocusOut: true,
       });
       // Cancelled (Escape) returns undefined; an empty message is not allowed.
@@ -1743,8 +1756,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, async () => {
       // refreshPipelineOutputContext already re-scans detected files; force the
-      // staleness check too, since the user explicitly asked to refresh.
+      // staleness check too, since the user explicitly asked to refresh, and
+      // ask Overleaf what's changed there
       void refreshPipelineOutputContext(context, true);
+      void checkOverleaf();
     }),
   );
 
@@ -1925,6 +1940,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   sidebarProvider = new CalkitSidebarProvider();
+  registerOverleaf(context, sidebarProvider, getWorkspaceRoot);
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
     showCollapseAll: true,
@@ -2693,6 +2709,20 @@ async function refreshPipelineOutputContext(
     "calkit-vscode.hasProject",
     calkitYamlExists,
   );
+  const syncsWithOverleaf =
+    calkitYamlExists &&
+    isSyncedWithOverleaf(
+      calkitConfig,
+      await fileExists(
+        path.join(workspaceRoot, ".calkit", "overleaf-sync.json"),
+      ),
+    );
+  void vscode.commands.executeCommand(
+    "setContext",
+    "calkit-vscode.syncsWithOverleaf",
+    syncsWithOverleaf,
+  );
+  setOverleafSynced(workspaceRoot, syncsWithOverleaf);
   const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([
     ...pipelineOutputUris,
@@ -7995,6 +8025,10 @@ async function registerAndSelectKernel(
       }
 
       log(`Kernel selection failed or unconfirmed`);
+      // Picked again when it's showing, e.g., after switching back to it
+      if (!getNotebookEditorForUri(expectedNotebookUri)) {
+        return undefined;
+      }
       void vscode.window.showWarningMessage(
         `Kernel '${kernelName}' was registered but auto-selection timed out. It should appear in the notebook kernel picker (top-right).`,
       );
@@ -8287,11 +8321,16 @@ function scoreKernelCandidate(
     score += 50;
   }
 
-  if (
-    kernelMatchesPreference(kernel, preferredKernelName, preferredDisplayName)
-  ) {
-    score += 1000;
-  }
+  // A closer match comes first, e.g., the kernel registered for the
+  // environment before another one whose name starts the same
+  score +=
+    1000 *
+    getKernelMatchRank(
+      kernel,
+      preferredKernelName,
+      preferredDisplayName,
+      kernelEnvDirs.get((preferredKernelName ?? "").toLowerCase()),
+    );
 
   if (languageHint.length > 0) {
     if (
@@ -8320,37 +8359,17 @@ function scoreKernelCandidate(
 }
 
 function kernelMatchesPreference(
-  kernel: {
-    id?: string;
-    label?: string;
-    description?: string;
-    detail?: string;
-  },
+  kernel: KernelController,
   kernelName?: string,
   displayName?: string,
 ): boolean {
-  const normalizedKernel = (kernelName ?? "").toLowerCase();
-  const normalizedDisplay = (displayName ?? "").toLowerCase();
-  const id = (kernel.id ?? "").toLowerCase();
-  const label = (kernel.label ?? "").toLowerCase();
-  const desc = (kernel.description ?? "").toLowerCase();
-  const detail = (kernel.detail ?? "").toLowerCase();
-  const idCompact = id.replace(/[^a-z0-9]/g, "");
-  const kernelCompact = normalizedKernel.replace(/[^a-z0-9]/g, "");
-  const displayCompact = normalizedDisplay.replace(/[^a-z0-9]/g, "");
-
   return (
-    (normalizedKernel.length > 0 && id.endsWith(`/${normalizedKernel}`)) ||
-    (normalizedKernel.length > 0 && id === normalizedKernel) ||
-    (normalizedKernel.length > 0 && id.includes(normalizedKernel)) ||
-    (kernelCompact.length > 0 && idCompact.includes(kernelCompact)) ||
-    (normalizedDisplay.length > 0 && label === normalizedDisplay) ||
-    (normalizedDisplay.length > 0 && label.includes(normalizedDisplay)) ||
-    (normalizedDisplay.length > 0 && desc.includes(normalizedDisplay)) ||
-    (normalizedDisplay.length > 0 && detail.includes(normalizedDisplay)) ||
-    (displayCompact.length > 0 &&
-      label.replace(/[^a-z0-9]/g, "").includes(displayCompact)) ||
-    (normalizedKernel.length > 0 && label.includes(normalizedKernel))
+    getKernelMatchRank(
+      kernel,
+      kernelName,
+      displayName,
+      kernelEnvDirs.get((kernelName ?? "").toLowerCase()),
+    ) > 0
   );
 }
 
@@ -8446,10 +8465,27 @@ async function trySelectKernelViaNotebookApi(
 
       log(`Resolved ${resolved.length} kernels (attempt ${attempt + 1}/10)`);
 
-      candidate = resolved.find((k) =>
-        kernelMatchesPreference(k, normalizedKernel, normalizedDisplay),
-      );
-
+      // The closest match, waiting for Jupyter to list the kernel just
+      // registered rather than settling for a loose match to another
+      let rank = 0;
+      candidate = undefined;
+      for (const k of resolved) {
+        const kRank = getKernelMatchRank(
+          k,
+          normalizedKernel,
+          normalizedDisplay,
+          kernelEnvDirs.get(normalizedKernel),
+        );
+        if (k.id && kRank > rank) {
+          candidate = k;
+          rank = kRank;
+        }
+      }
+      // A loose match may be another environment named alike, so it's
+      // never taken
+      if (rank < 2) {
+        candidate = undefined;
+      }
       if (candidate?.id) {
         break;
       }
@@ -8675,6 +8711,10 @@ async function getExpectedKernelSpecForEnvironment(
   return undefined;
 }
 
+// The folder each registered kernel's environment is in, by kernel name in
+// lowercase, which picks its controller out from others named alike
+const kernelEnvDirs = new Map<string, string>();
+
 function parseCheckKernelJson(
   stdout: string,
 ): { kernelName: string; displayName?: string } | undefined {
@@ -8692,6 +8732,12 @@ function parseCheckKernelJson(
       typeof result.display_name === "string" && result.display_name.length > 0
         ? result.display_name
         : undefined;
+    if (typeof result.python === "string" && result.python) {
+      kernelEnvDirs.set(
+        kernelName.toLowerCase(),
+        getPythonEnvDir(result.python),
+      );
+    }
     return { kernelName, displayName };
   } catch {
     return undefined;

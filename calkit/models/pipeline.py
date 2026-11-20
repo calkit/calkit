@@ -1922,7 +1922,19 @@ class JsonToLatexStage(Stage):
         # One arg per format rather than JSON, whose quotes neither shell's
         # quoting can carry unchanged on both
         for name, fmt in (self.format or {}).items():
-            cmd += f" --format {quote_literal_arg(f'{name}={fmt}')}"
+            # Checked alone, so an error names it rather than the whole arg
+            if not name or "=" in name:
+                raise ValueError(
+                    f"Format name {name!r} must be nonempty and without '='"
+                )
+            quote_literal_arg(name)
+            try:
+                cmd += f" --format {quote_literal_arg(f'{name}={fmt}')}"
+            except ValueError:
+                # Encoded, since a shell would change it, e.g., '$' in '$/kWh'
+                encoded = base64.b64encode(fmt.encode()).decode()
+                arg = quote_literal_arg(f"{name}={encoded}")
+                cmd += f" --format-base64 {arg}"
         return cmd
 
     @model_validator(mode="after")

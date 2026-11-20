@@ -306,8 +306,9 @@ def list_comments(
     path: Annotated[
         str | None,
         typer.Argument(
-            help="Document to list threads from, including files it inputs. "
-            "Defaults to every document the pipeline builds into a PDF."
+            help="Document to list threads from, including files it inputs, "
+            "or a PDF, to list its review file's comments. Defaults to every "
+            "document the pipeline builds into a PDF."
         ),
     ] = None,
     unresolved: Annotated[
@@ -325,6 +326,28 @@ def list_comments(
 
     if path is not None and not os.path.isfile(path):
         raise_error(f"{path} does not exist")
+    # A PDF's comments are in its review file, if it has one
+    if path is not None and path.lower().endswith(".pdf"):
+        import calkit.reviews
+
+        review = calkit.reviews.review_path(path, calkit.load_calkit_info())
+        comments = []
+        if review is not None and os.path.isfile(review):
+            with open(review, encoding="utf-8") as f:
+                parsed = calkit.reviews.parse(f.read().split("\n"))
+            comments = [
+                calkit.reviews.to_dict(review, i, c)
+                for i, c in enumerate(parsed, 1)
+            ]
+        if as_json:
+            echo_json(comments)
+            return
+        for c in comments:
+            typer.echo(f"{c['path']}:{c['line']} [{c['id']}]")
+            if c["highlight"]:
+                typer.echo(f'  On "{c["highlight"]["text"]}"')
+            typer.echo(f"  {c['messages'][0]['text']}")
+        return
     docs = (
         [path]
         if path is not None

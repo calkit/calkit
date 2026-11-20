@@ -2,7 +2,9 @@
  * Mapping between a LaTeX PDF and its source, with SyncTeX or by matching
  * text. No Node or vscode imports, so the browser extension uses it too.
  */
-// A comment thread as `calkit list comments --json` reports it.
+// A comment thread as `calkit list comments --json` reports it. A comment
+// in a review file has `review` set, says where in the PDF it's about, and
+// has no replies or resolved state.
 export interface TexThread {
   id: string | null;
   path: string;
@@ -18,6 +20,13 @@ export interface TexThread {
     date: string | null;
     text: string;
   }[];
+  review?: boolean;
+  // A review comment's number in its section, and the section's heading
+  number?: number;
+  section?: string | null;
+  page?: number | null;
+  pdf_line?: number | null;
+  pdf_end_line?: number | null;
 }
 
 // A region of a PDF page in points from its top-left corner, as SyncTeX

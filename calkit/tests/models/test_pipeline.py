@@ -1,5 +1,6 @@
 """Tests for ``calkit.models.pipeline``."""
 
+import base64
 import json
 import subprocess
 import sys
@@ -887,6 +888,8 @@ def test_jsontolatexstage():
             "pct": "{a * 100:.1f} %",
             "padded": "{x:>10}|{y:^8}",
             "escaped": "{a:.1f}\\%",
+            "cost": "{c:.2f} $/kWh, €{d}",
+            "quoted": 'say "{a}" `now`\\\\',
         },
     )
     script = "import sys, json; print(json.dumps(sys.argv[1:]))"
@@ -894,6 +897,7 @@ def test_jsontolatexstage():
         "calkit latex from-json",
         f'{quote_literal_arg(sys.executable)} -c "{script}"',
     )
+    assert "$" not in cmd
     out = subprocess.run(
         cmd, shell=True, capture_output=True, text=True, check=True
     )
@@ -910,11 +914,17 @@ def test_jsontolatexstage():
         "padded={x:>10}|{y:^8}",
         "--format",
         "escaped={a:.1f}\\%",
+        "--format-base64",
+        "cost=" + base64.b64encode("{c:.2f} $/kWh, €{d}".encode()).decode(),
+        "--format-base64",
+        "quoted=" + base64.b64encode(b'say "{a}" `now`\\\\').decode(),
     ]
     # What one shell or the other would change is refused, not passed on
     for kwargs in [
         dict(keys=["$HOME"]),
-        dict(format={"q": 'say "{a}"'}),
+        dict(format={"$q": "{a}"}),
+        dict(format={"a=b": "{a} $"}),
+        dict(format={"": "{a}"}),
         dict(inputs=["a`b`.json"]),
         dict(inputs=["a\\\\b.json"]),
     ]:
@@ -927,6 +937,11 @@ def test_jsontolatexstage():
                     **kwargs,
                 }
             )
+    # A bad name is quoted alone, not in the encoded arg it would have joined
+    with pytest.raises(ValidationError, match=r"'\$q' can't"):
+        JsonToLatexStage(
+            name="j", inputs=["a.json"], outputs=["o.tex"], format={"$q": "$"}
+        )
     dvc_outs = s.dvc_outs
     assert {
         "paper/results.tex": {"cache": False, "persist": False}

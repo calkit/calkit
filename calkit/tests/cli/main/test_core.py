@@ -14,6 +14,7 @@ from pathlib import Path
 from pprint import pprint
 from unittest.mock import Mock, patch
 
+import click
 import dvc.repo
 import git
 import pytest
@@ -31,9 +32,11 @@ from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
     STAGE_OUTPUT_START,
     STAGE_RUNS_FPATH,
+    _get_iteration_item_counts,
     _get_matplotlib_font_warnings_by_stage,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
+    _print_running_pipeline_status,
     _prune_run_logs,
     _run_dvc_repro,
     _stage_run_info_from_log_content,
@@ -2316,6 +2319,57 @@ def test_running_status_names_concurrent_sweep_items(tmp_dir):
         for p in holders:
             p.terminate()
             p.wait()
+
+
+def test_get_iteration_item_counts():
+    ck_info = {
+        "parameters": {"seeds": [1, 2]},
+        "pipeline": {
+            "stages": {
+                "plain": {"kind": "shell-command", "command": "echo"},
+                "sweep": {
+                    "kind": "shell-command",
+                    "command": "echo {month} {seed}",
+                    "iterate_over": [
+                        {"arg_name": "month", "values": ["a", "b", "c"]},
+                        {"arg_name": "seed", "values": [1, 2]},
+                    ],
+                },
+            }
+        },
+    }
+    assert _get_iteration_item_counts(ck_info) == {"sweep": 6}
+
+
+def test_print_running_pipeline_status_groups_items(capsys):
+    start = calkit.utcnow(remove_tz=True).isoformat()
+    done = {"status": "completed", "start_time": start, "end_time": start}
+    stages = {f"fetch@{m:02d}": done for m in range(1, 13)}
+    stages["prep"] = done
+    stages |= {"model@a": done, "model@b": {"start_time": start}}
+    _print_running_pipeline_status(
+        {
+            "processes": [{"pid": 1}],
+            "stages": stages,
+            "running_stages": ["model@b"],
+            "item_counts": {"fetch": 14, "model": 3},
+        }
+    )
+    out = click.unstyle(capsys.readouterr().out)
+    assert "completed: fetch (12/14), prep\n" in out
+    assert "running:   model (1/3, " in out
+    assert "fetch@" not in out and "model@" not in out
+    # Concurrent items of a sweep, before the run log knows of them
+    _print_running_pipeline_status(
+        {
+            "processes": [{"pid": 1}, {"pid": 2}],
+            "stages": {},
+            "running_stages": ["sweep@1", "sweep@3"],
+            "item_counts": {"sweep": 4},
+        }
+    )
+    out = click.unstyle(capsys.readouterr().out)
+    assert "running:   sweep (0/4, 2 running)\n" in out
 
 
 def test_status_reports_running_pipeline(tmp_dir):
@@ -4849,6 +4903,165 @@ def test_merge(tmp_dir):
         check_environments=False, clean_notebooks=False
     )
     assert [n.split("@")[0] for n in status.stale_stage_names] == ["a"]
+    # A file someone wrote that changed on both sides is theirs to combine,
+    # and is staged once its marks are gone
+    subprocess.check_call(["git", "checkout", "-qb", "notes"])
+    write("notes.txt", "notes theirs")
+    commit("Notes theirs")
+    subprocess.check_call(["git", "checkout", "-q", "-"])
+    write("notes.txt", "notes ours")
+    commit("Notes ours")
+    res = merge("notes")
+    assert res.returncode != 0
+    assert "Couldn't combine the changes to notes.txt" in res.stderr
+    res = merge("--continue")
+    assert res.returncode != 0
+    assert "notes.txt" in res.stderr
+    write("notes.txt", "notes both")
+    res = merge("--continue")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert len(git.Repo().head.commit.parents) == 2
+    assert not git.Repo().is_dirty()
+    # A binary file, and one deleted on a side, never had marks, so they
+    # aren't taken as resolved, and are named with how to resolve them
+    subprocess.check_call(["git", "checkout", "-qb", "binary"])
+    with open("fig.png", "wb") as f:
+        f.write(b"\x89PNG\0theirs")
+    os.remove("notes.txt")
+    commit("Theirs again")
+    subprocess.check_call(["git", "checkout", "-q", "-"])
+    with open("fig.png", "wb") as f:
+        f.write(b"\x89PNG\0ours")
+    write("notes.txt", "notes changed")
+    commit("Ours again")
+    res = merge("binary")
+    assert res.returncode != 0
+    assert "fig.png changed on both sides" in res.stderr
+    assert "notes.txt was deleted on one side" in res.stderr
+    res = merge("--continue")
+    assert res.returncode != 0
+    assert "fig.png changed on both sides" in res.stderr
+    subprocess.check_call(["git", "checkout", "--theirs", "--", "fig.png"])
+    subprocess.check_call(["git", "add", "fig.png", "notes.txt"])
+    res = merge("--continue")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("fig.png", "rb") as f:
+        assert f.read() == b"\x89PNG\0theirs"
+
+
+def test_save_merges_remote_changes(tmp_dir, tmp_path_factory):
+    def write(path: str, text: str) -> None:
+        with open(path, "w") as f:
+            f.write(text + "\n")
+
+    def calkit_cmd(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", *args],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+
+    def push_from_other(path: str, text: str, run: bool = False) -> None:
+        cwd = os.getcwd()
+        os.chdir(other)
+        try:
+            subprocess.check_call(["git", "pull", "-q", "--no-rebase"])
+            write(path, text)
+            if run:
+                subprocess.check_call(["calkit", "run"])
+            subprocess.check_call(["git", "add", "-A"])
+            subprocess.check_call(["git", "commit", "-qm", f"Edit {path}"])
+            subprocess.check_call(["git", "push", "-q"])
+        finally:
+            os.chdir(cwd)
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "a": {
+                "kind": "shell-command",
+                "command": "cat a.in > a.txt",
+                "environment": "_system",
+                "inputs": ["a.in"],
+                "outputs": [{"path": "a.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    write("a.in", "1")
+    write("paper.tex", "Intro")
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-qm", "Base"])
+    bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
+    subprocess.check_call(["git", "init", "-q", "--bare", bare])
+    subprocess.check_call(["git", "remote", "add", "origin", bare])
+    branch = git.Repo().active_branch.name
+    subprocess.check_call(["git", "push", "-q", "-u", "origin", branch])
+    other = str(tmp_path_factory.mktemp("other") / "repo")
+    subprocess.check_call(["git", "clone", "-q", bare, other])
+    # A push someone made first is merged in, then this one goes too
+    push_from_other("notes.txt", "From elsewhere")
+    write("paper.tex", "Intro here")
+    res = calkit_cmd("save", "-am", "Edit paper")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "Merging changes from origin" in res.stdout
+    remote_head = git.Repo(bare).commit(branch)
+    assert remote_head.hexsha == git.Repo().head.commit.hexsha
+    assert len(remote_head.parents) == 2
+    assert os.path.isfile("notes.txt")
+    # Running and saving brings it in first, with work in progress saved,
+    # so the run includes it
+    push_from_other("a.in", "2", run=True)
+    write("paper.tex", "Intro here and there")
+    res = calkit_cmd("run", "--save", "-m", "Run")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("a.txt") as f:
+        assert f.read() == "2\n"
+    messages = [
+        str(c.message).strip() for c in git.Repo().iter_commits(max_count=4)
+    ]
+    assert "Save work before merging changes from origin" in messages
+    assert git.Repo(bare).commit(branch) == git.Repo().head.commit
+    assert calkit_cmd("check", "stage-runs").returncode == 0
+    # A stage added elsewhere is merged before the pipeline's read, so it
+    # runs too
+    stage_b = {
+        "kind": "shell-command",
+        "command": "cat a.in > b.txt",
+        "environment": "_system",
+        "inputs": ["a.in"],
+        "outputs": [{"path": "b.txt", "storage": "git"}],
+    }
+    cwd = os.getcwd()
+    os.chdir(other)
+    try:
+        subprocess.check_call(["git", "pull", "-q", "--no-rebase"])
+        other_info = calkit.load_calkit_info()
+        other_info["pipeline"]["stages"]["b"] = stage_b
+        calkit.save_calkit_info(other_info)
+        subprocess.check_call(["git", "commit", "-qam", "Add stage b"])
+        subprocess.check_call(["git", "push", "-q"])
+    finally:
+        os.chdir(cwd)
+    res = calkit_cmd("run", "--save", "-m", "Run with b")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("b.txt") as f:
+        assert f.read() == "2\n"
+    assert git.Repo(bare).commit(branch) == git.Repo().head.commit
+    # The same line edited on both sides stops, naming the file
+    push_from_other("paper.tex", "Intro from elsewhere")
+    write("paper.tex", "Intro from here")
+    res = calkit_cmd("save", "-am", "Edit paper again")
+    assert res.returncode != 0
+    assert "Couldn't combine the changes to paper.tex" in res.stderr
+    write("paper.tex", "Intro from both")
+    res = calkit_cmd("merge", "--continue")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert calkit_cmd("push").returncode == 0
+    assert git.Repo(bare).commit(branch) == git.Repo().head.commit
 
 
 def test_manual_step(tmp_dir, monkeypatch, capsys):
@@ -5103,6 +5316,50 @@ def test_clone(monkeypatch):
     assert "doesn't match" in result.output and not hubs
     result = clone("a/b/c/d")
     assert "HUB/OWNER/NAME" in result.output and not hubs
+
+
+def test_run_fails_naming_every_markdown_whose_values_cant_be_written(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("r.json", "w") as f:
+        json.dump({"v": 7}, f)
+    doc = (
+        "```sh calkit stage name={name} environment=_system "
+        "outputs=[{{path: {name}.txt, storage: git}}]\n"
+        "echo {name} > {name}.txt\n"
+        "```\n"
+        "\n"
+        "<!-- calkit values path=r.json -->\n"
+        "\n"
+        "The value is <!-- calkit value key=v -->0<!-- /calkit value -->.\n"
+    )
+    # Sorted first, so this is the one that used to abort the whole pass
+    with open("a-bad.md", "w") as f:
+        f.write(doc.format(name="bad"))
+    with open("b-good.md", "w") as f:
+        f.write(doc.format(name="good") + "\n<!-- /calkit values -->\n")
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "bad-doc": {"kind": "markdown", "target_path": "a-bad.md"},
+                "good-doc": {"kind": "markdown", "target_path": "b-good.md"},
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "run"], capture_output=True, text=True, check=False
+    )
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, out
+    assert "a-bad.md:5" in out, out
+    assert "is not ended" in out, out
+    # The stages themselves ran, and the document that parses was still
+    # brought into line with the results file
+    with open("good.txt") as f:
+        assert f.read().strip() == "good"
+    with open("b-good.md") as f:
+        assert "-->7<!-- /calkit value -->" in f.read()
 
 
 def test_run_untracks_git_tracked_outputs(tmp_dir):

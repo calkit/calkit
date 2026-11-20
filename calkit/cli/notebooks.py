@@ -418,6 +418,22 @@ def check_env_kernel(
             "kernel_name": kernel_name,
             "display_name": display_name,
         }
+        # The environment's Python, which an editor's list of kernels names
+        # it by, so it can be told from another environment named alike
+        if language == "python":
+            from jupyter_core.paths import jupyter_data_dir
+
+            spec_fpath = os.path.join(
+                jupyter_data_dir(),
+                "kernels",
+                kernel_name.lower(),
+                "kernel.json",
+            )
+            if os.path.isfile(spec_fpath):
+                with open(spec_fpath, encoding="utf-8") as f:
+                    argv = json.load(f).get("argv") or []
+                if argv:
+                    result["python"] = argv[0]
         typer.echo(json.dumps(result))
     return kernel_name, display_name
 

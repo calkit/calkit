@@ -767,7 +767,7 @@ def get_status(
             # the full status would just error out (and would mutate files
             # like dvc.yaml or notebooks mid-run). Report the running stage
             # from the run log instead.
-            running_status = _get_running_pipeline_status()
+            running_status = _get_running_pipeline_status(ck_info=ck_info)
         if running_status is None and (
             "pipeline" in categories or "dvc" in categories
         ):
@@ -2031,6 +2031,7 @@ def save(
     if dry_run:
         typer.echo("Would commit" + ("" if no_push else " and push"))
         return
+    nothing_to_push = False
     try:
         any_dvc = commit(
             paths=paths,
@@ -2041,11 +2042,18 @@ def save(
         )
     except typer.Exit as e:
         # Connecting commits on its own, which can leave nothing else to
-        # commit, but the connection still has to be pushed
-        if not connected or e.exit_code != 0:
+        # commit, but the connection still has to be pushed, as do commits
+        # made before, e.g., merging in someone else's, and Overleaf synced
+        if e.exit_code != 0:
             raise
+        to_push = not no_push and (
+            connected or calkit.git.get_n_unpushed_commits() > 0
+        )
+        if not to_push and not sync_overleaf:
+            raise
+        nothing_to_push = not to_push
         any_dvc = False
-    if not no_push:
+    if not no_push and not nothing_to_push:
         # Connecting gives data committed before this somewhere to go too.
         # Data with nowhere to go is offered storage by the push.
         push_dvc = any_dvc or connected
@@ -2436,25 +2444,75 @@ def push(
             raise_error(msg)
     if "git" in selected:
         typer.echo("Pushing to Git remote")
-        try:
-            git_cmd = ["git", "push"]
-            if not no_recursive and "--recurse-submodules" not in git_args:
-                git_cmd.append("--recurse-submodules=on-demand")
-            # A plain `git push` leaves tags behind, so annotated tags end
-            # up only on the machine that made them
-            if not {
-                "--follow-tags",
-                "--no-follow-tags",
-                "--tags",
-            }.intersection(git_args):
-                git_cmd.append("--follow-tags")
-            git_cmd += calkit.git.get_set_upstream_args(
-                calkit.git.get_repo(), git_args
-            )
-            subprocess.check_call(git_cmd + git_args)
-        except subprocess.CalledProcessError:
+        git_cmd = ["git", "push"]
+        if not no_recursive and "--recurse-submodules" not in git_args:
+            git_cmd.append("--recurse-submodules=on-demand")
+        # A plain `git push` leaves tags behind, so annotated tags end
+        # up only on the machine that made them
+        if not {
+            "--follow-tags",
+            "--no-follow-tags",
+            "--tags",
+        }.intersection(git_args):
+            git_cmd.append("--follow-tags")
+        git_cmd += calkit.git.get_set_upstream_args(
+            calkit.git.get_repo(), git_args
+        )
+        # Its advice to pull is what happens next, if pushing is refused
+        git_cmd[1:1] = ["-c", "advice.pushUpdateRejected=false"]
+        process = subprocess.run(git_cmd + git_args)
+        # Someone else's pushed first, e.g., from another machine or the
+        # hub, so theirs is merged in and this push tried again, as told by
+        # the remote having commits this machine doesn't, rather than by
+        # Git's message, which may not be in English
+        if process.returncode != 0 and not git_args and merge_remote_changes():
+            process = subprocess.run(git_cmd)
+        if process.returncode != 0:
             raise_error("Git push failed")
     _tell_hub_we_pushed(sorted(selected), git_args)
+
+
+def merge_remote_changes(commit_first: bool = False) -> bool:
+    """Merge in what the branch's remote has that this machine doesn't.
+
+    A stage that ran on both sides is left to rerun. A conflict in a file
+    someone wrote stops here, saying how to finish. With ``commit_first``,
+    changes on this machine are saved first, since Git won't merge over
+    them. True if anything was merged.
+    """
+    repo = calkit.git.get_repo()
+    if repo.head.is_detached:
+        return False
+    upstream = repo.active_branch.tracking_branch()
+    if upstream is None:
+        return False
+    fetched = subprocess.run(
+        ["git", "fetch", "--quiet", upstream.remote_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if fetched.returncode != 0:
+        warn(f"Couldn't check for changes on {upstream.remote_name}")
+        return False
+    if repo.git.rev_list("--count", f"HEAD..{upstream.name}") == "0":
+        return False
+    url = repo.remote(upstream.remote_name).url
+    where = "GitHub" if "github.com" in url else upstream.remote_name
+    if commit_first and repo.is_dirty(untracked_files=True):
+        try:
+            save(
+                save_all=True,
+                message=f"Save work before merging changes from {where}",
+                no_push=True,
+            )
+        except typer.Exit as e:
+            # Nothing Git would stage, e.g., edits in a submodule
+            if e.exit_code != 0:
+                raise
+    typer.echo(f"Merging changes from {where}")
+    merge(branch=upstream.name, prefer="rerun")
+    return True
 
 
 def _offer_to_connect() -> bool:
@@ -2700,31 +2758,40 @@ def _inject_markdown_stage_output(log_content: str) -> list[str]:
     return changed_stages
 
 
-def _inject_markdown_values() -> list[str]:
+def _inject_markdown_values() -> tuple[list[str], list[str]]:
     """Bring each Markdown file's value markers into line with its results.
 
     Done after every run rather than only for stages that ran: the
     results files are tracked outputs, so whatever they hold is what the
-    prose should say. Returns the paths of the files that changed.
+    prose should say. Returns the paths of the files that changed and an
+    error message for each that couldn't be parsed, which doesn't stop
+    the rest from being written.
     """
     import calkit.markdown
 
     ck_info = calkit.load_calkit_info()
     results = calkit.markdown.results_by_name(ck_info)
     changed_paths = []
-    for md_path in set(calkit.markdown.get_markdown_stages(ck_info).values()):
+    error_messages = []
+    for md_path in sorted(
+        set(calkit.markdown.get_markdown_stages(ck_info).values())
+    ):
         if not os.path.isfile(md_path):
             continue
         with open(md_path, encoding="utf-8") as f:
             text = f.read()
-        new_text, changed = calkit.markdown.set_values(
-            text, md_path, results=results
-        )
+        try:
+            new_text, changed = calkit.markdown.set_values(
+                text, md_path, results=results
+            )
+        except calkit.markdown.MarkdownParseError as e:
+            error_messages.append(str(e))
+            continue
         if changed:
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new_text)
             changed_paths.append(md_path)
-    return changed_paths
+    return changed_paths, error_messages
 
 
 def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
@@ -3059,18 +3126,47 @@ def _stage_target_from_cmd(cmd: str) -> str | None:
     return targets[-1] if targets else None
 
 
-def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
+def _get_iteration_item_counts(ck_info: dict) -> dict[str, int]:
+    """How many items each iterated stage has, by stage name."""
+    from calkit.pipeline import get_iteration_items
+
+    counts = {}
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage in stages.items():
+        if not isinstance(stage, dict) or not stage.get("iterate_over"):
+            continue
+        try:
+            items = get_iteration_items(stage, ck_info.get("parameters"))
+        except Exception:
+            # A count is only a nicety, so a stage it can't be worked out
+            # for is shown without one
+            continue
+        if items:
+            counts[name] = len(items)
+    return counts
+
+
+def _get_running_pipeline_status(
+    wdir: str = ".", ck_info: dict | None = None
+) -> dict | None:
     """Return live pipeline run progress, or ``None`` if no run is running.
 
     A run is in progress when a live process holds DVC's rwlock. The most
     recent run log is then parsed to report which stages have finished and
     which is currently running. Concurrently-run scheduler items execute in
     their own processes before the run log exists, so their stage names are
-    also recovered from the lock's command strings.
+    also recovered from the lock's command strings. Each iterated stage's
+    item count is included, so its progress can be shown as a fraction.
     """
     processes = calkit.dvc.get_running_pipeline_processes(wdir)
     if not processes:
         return None
+    if ck_info is None:
+        try:
+            ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+        except Exception:
+            ck_info = {}
+    item_counts = _get_iteration_item_counts(ck_info)
     # Stage targets in the lock commands identify concurrently-run scheduler
     # items (an iterate_over sweep). These run in their own processes during a
     # prepass, before the current run's log exists, so the latest log on disk
@@ -3087,6 +3183,7 @@ def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
             "processes": processes,
             "stages": {},
             "running_stages": concurrent_stages,
+            "item_counts": item_counts,
         }
     content = _get_latest_run_log_content(wdir)
     stages = (
@@ -3102,34 +3199,76 @@ def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
         "processes": processes,
         "stages": stages,
         "running_stages": running_stages,
+        "item_counts": item_counts,
     }
 
 
 def _print_running_pipeline_status(running_status: dict) -> None:
-    """Print a human-readable summary of an in-progress pipeline run."""
+    """Print a human-readable summary of an in-progress pipeline run.
+
+    An iterated stage is shown once, with how many of its items have
+    finished, rather than item by item, which for a big sweep would bury
+    the rest of the pipeline.
+    """
+
+    def group_stage_items(names: list[str]) -> dict[str, list[str]]:
+        """Stage names grouped by the stage they're an item of, in order."""
+        groups: dict[str, list[str]] = {}
+        for name in names:
+            groups.setdefault(name.partition("@")[0], []).append(name)
+        return groups
+
+    def get_progress(stage: str, items: list[str]) -> str | None:
+        """How many of an iterated stage's items have finished."""
+        if all("@" not in item for item in items):
+            return None
+        done = len(finished_groups.get(stage, []))
+        total = item_counts.get(stage)
+        return f"{done}/{total}" if total else f"{done} done"
+
     processes = running_status["processes"]
     pids = ", ".join(str(p["pid"]) for p in processes)
     typer.echo(f"Run in progress (PID {pids})")
     stages = running_status["stages"]
+    item_counts = running_status.get("item_counts") or {}
     finished = [
         name
         for name, info in stages.items()
         if info.get("status") in ("completed", "skipped")
     ]
     running_stages = running_status["running_stages"]
-    if finished:
-        typer.echo(f"        completed: {', '.join(finished)}")
+    finished_groups = group_stage_items(finished)
+    running_groups = group_stage_items(running_stages)
+    # A stage with items still running is shown as running
+    completed = []
+    for stage, items in finished_groups.items():
+        if stage in running_groups:
+            continue
+        fraction = get_progress(stage, items)
+        completed.append(
+            stage if fraction is None else f"{stage} ({fraction})"
+        )
+    if completed:
+        typer.echo(f"        completed: {', '.join(completed)}")
     if running_stages:
-        for name in running_stages:
-            start = stages.get(name, {}).get("start_time")
-            label = typer.style(name, fg="green")
-            if start:
-                typer.echo(
-                    f"        running:   {label} "
-                    f"({_format_run_elapsed(start)})"
-                )
-            else:
-                typer.echo(f"        running:   {label}")
+        for stage, items in running_groups.items():
+            details = []
+            fraction = get_progress(stage, items)
+            if fraction is not None:
+                details.append(fraction)
+            if len(items) > 1:
+                details.append(f"{len(items)} running")
+            starts = [
+                stages[item]["start_time"]
+                for item in items
+                if stages.get(item, {}).get("start_time")
+            ]
+            if starts:
+                details.append(_format_run_elapsed(max(starts)))
+            text = typer.style(stage, fg="green")
+            if details:
+                text += f" ({', '.join(details)})"
+            typer.echo(f"        running:   {text}")
     elif not finished:
         typer.echo("        starting up...")
 
@@ -3610,7 +3749,6 @@ def run(
             "pipeline to run here. Run 'calkit init' to make this a "
             "project, or change to the project directory."
         )
-    ck_info = calkit.load_calkit_info()
     # Ensure Git is initialized so DVC can be used.
     # Use search_parent_directories so running from a subproject folder
     # discovers the parent repo instead of triggering a new git init.
@@ -3625,6 +3763,16 @@ def run(
             raise_error("Failed to initialize Git repo")
     # So Git merges dvc.lock and stage run records stage by stage
     calkit.merge.configure_driver()
+    # What's been pushed from elsewhere comes in before anything reads the
+    # project, so the run includes it, e.g., a stage a coauthor added, and
+    # the save after can push
+    if (
+        not dry
+        and (save_after_run or save_message is not None)
+        and not no_push
+    ):
+        merge_remote_changes(commit_first=True)
+    ck_info = calkit.load_calkit_info()
     # Set env vars
     calkit.set_env_vars(ck_info=ck_info)
     # Stages that can't run here are skipped, keeping their outputs, and
@@ -3982,9 +4130,14 @@ def run(
         if unknown:
             raise_error(f"No stage(s) named: {', '.join(unknown)}")
         try:
-            md_changed_paths = _inject_markdown_values()
+            md_changed_paths, md_value_errors = _inject_markdown_values()
         except Exception as e:
             raise_error(f"Failed to write values into markdown: {e}")
+        if md_value_errors:
+            raise_error(
+                "Failed to write values into markdown:\n  "
+                + "\n  ".join(md_value_errors)
+            )
         if not quiet:
             for md_path in md_changed_paths:
                 typer.echo(f"Updated values in {md_path}")
@@ -4341,9 +4494,16 @@ def run(
     # ...and bring any values the Markdown shows into line with the
     # results files the stages produced
     try:
-        _inject_markdown_values()
+        _, md_value_errors = _inject_markdown_values()
     except Exception as e:
-        warn(f"Failed to write values into markdown: {e}")
+        md_value_errors = [str(e)]
+    # Stale values in a document are a failure, not a warning
+    for message in md_value_errors:
+        typer.echo(
+            f"Failed to write values into markdown: {message}", err=True
+        )
+    if md_value_errors:
+        failed = True
     # Zip dvc-zip outputs for stages that actually ran
     if stage_run_info:
         from calkit.models.io import PathOutput
@@ -4745,7 +4905,12 @@ def run(
             save_message = "Run pipeline"
         if not quiet:
             typer.echo("Saving the project after successful run")
-        save(save_all=True, message=save_message, no_push=no_push)
+        try:
+            save(save_all=True, message=save_message, no_push=no_push)
+        except typer.Exit as e:
+            # Nothing new to save still leaves Overleaf to sync
+            if e.exit_code != 0:
+                raise
     # If specified, perform final Overleaf sync
     if sync_overleaf:
         overleaf_sync(
@@ -6020,14 +6185,20 @@ def merge(
         unmerged = result["unmerged"]
     else:
         unmerged = calkit.merge.get_unmerged_paths(repo)
-        if unmerged:
-            typer.echo("Still in conflict:")
-            for path in unmerged:
-                typer.echo(f"  {path}")
-    if unmerged:
+    kinds = calkit.merge.get_unmerged_kinds(repo, unmerged)
+    # A text file with no marks left is resolved, as 'git add' would say,
+    # but a binary one or one deleted on a side never had any
+    if cont and unmerged:
+        marked = calkit.merge.get_paths_with_markers(repo, unmerged)
+        resolved = [
+            p for p in unmerged if kinds[p] == "text" and p not in marked
+        ]
+        if resolved:
+            repo.git.add("-A", "--", *resolved)
+        kinds = {p: k for p, k in kinds.items() if p not in resolved}
+    if kinds:
         raise_error(
-            "Resolve the conflicts, 'git add' them, then run "
-            "'calkit merge --continue'"
+            calkit.merge.get_unmerged_message(kinds, "calkit merge --continue")
         )
     commit()
 

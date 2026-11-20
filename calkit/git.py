@@ -162,6 +162,20 @@ def get_set_upstream_args(
     return ["--set-upstream", remote, branch.name]
 
 
+def get_n_unpushed_commits(repo: git.Repo | None = None) -> int:
+    """How many commits the current branch has that its upstream doesn't,
+    as of the last fetch, or zero with no upstream.
+    """
+    if repo is None:
+        repo = get_repo()
+    if repo.head.is_detached:
+        return 0
+    upstream = repo.active_branch.tracking_branch()
+    if upstream is None or not upstream.is_valid():
+        return 0
+    return int(repo.git.rev_list("--count", f"{upstream.name}..HEAD"))
+
+
 def check_branch_is_current(
     repo: git.Repo, branch: str | None = None, fetch: bool = True
 ) -> str | None:

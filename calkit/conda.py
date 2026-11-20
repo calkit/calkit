@@ -213,9 +213,11 @@ def _local_pip_path(dep: str) -> str | None:
     target = dep[editable.end() :].strip() if editable else dep
     url = re.match(r"^(?:\S+\s*@\s*)?(file:\S+)$", target)
     if url:
-        from urllib.parse import unquote, urlparse
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
 
-        return unquote(urlparse(url[1]).path) or None
+        # e.g., 'file:///D:/pkg' is D:\pkg on Windows
+        return url2pathname(urlparse(url[1]).path) or None
     is_path = target.startswith((".", "/", "~")) or re.match(
         r"^[A-Za-z]:[\\/]", target
     )

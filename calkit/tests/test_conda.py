@@ -1,6 +1,7 @@
 """Tests for the ``conda`` module."""
 
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -376,7 +377,9 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         compiles.append((pip_deps, constraints))
         # uv names an editable install by its URL
         editable = [
-            "-e file://" + d[3:] for d in pip_deps if d.startswith("-e /")
+            "-e " + pathlib.Path(d[3:]).as_uri()
+            for d in pip_deps
+            if d.startswith("-e ") and os.path.isabs(d[3:])
         ]
         return ["iniconfig==2.1.0", "NumPy==2.3.0"] + editable
 

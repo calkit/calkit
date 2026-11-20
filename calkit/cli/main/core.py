@@ -5358,10 +5358,12 @@ def run_in_env(
                 ),
                 relaxed=relaxed_check,
                 quiet=not verbose,
+                prefix=env.get("prefix"),
             )
             save_env_check_cache()
-        # TODO: Prefix should only be in the env file or calkit.yaml, not both?
-        prefix = env.get("prefix")
+        # Where the environment is kept can be set in either calkit.yaml or
+        # the spec
+        prefix = env.get("prefix") or conda_env.get("prefix")
         # Conda is often not on the PATH (especially on Windows), so search
         # typical install locations rather than relying on the bare name,
         # which would fail with a confusing FileNotFoundError traceback.

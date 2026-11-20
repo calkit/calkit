@@ -566,6 +566,7 @@ def check_environment(
             alt_lock_fpaths=alt_lock_fpaths,
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
+            prefix=env.get("prefix"),
         )
     elif env["kind"] == "pixi":
         cmd = ["pixi", "install"]
@@ -1327,6 +1328,13 @@ def check_conda_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
+    prefix: Annotated[
+        str | None,
+        typer.Option(
+            "--prefix",
+            help="Where the environment is kept, if the spec doesn't say.",
+        ),
+    ] = None,
 ) -> None:
     log_func: Callable[..., None]
     if quiet:
@@ -1342,6 +1350,7 @@ def check_conda_env(
             log_func=log_func,
             relaxed=relaxed,
             verbose=not quiet,
+            prefix=prefix,
         )
     except Exception as e:
         warn_app_control(output=str(e), maybe=True)

@@ -374,7 +374,11 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         timeout: float | None = None,
     ) -> list[str]:
         compiles.append((pip_deps, constraints))
-        return ["iniconfig==2.1.0", "NumPy==2.3.0"]
+        # uv names an editable install by its URL
+        editable = [
+            "-e file://" + d[3:] for d in pip_deps if d.startswith("-e /")
+        ]
+        return ["iniconfig==2.1.0", "NumPy==2.3.0"] + editable
 
     monkeypatch.setattr(calkit.conda.subprocess, "run", fake_run)
     monkeypatch.setattr(calkit.conda, "_compile_pip_deps", fake_compile)
@@ -486,7 +490,24 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         "iniconfig==2.1.0",
         'uvloop==0.19.0; sys_platform != "win32"',
     ]
-    for local in ("-e ./pkg", "./pkg", "pkg @ file:///x", "-r more.txt"):
+    # A path in the project, e.g., its own package, is the same everywhere,
+    # so it's compiled from where it is here and written as the lock here
+    # writes it; one outside the project, or an included file, isn't
+    os.makedirs("pkg")
+    write_local(["iniconfig==2.1.0", "-e ../pkg"])
+    write_spec(["iniconfig", "-e ./pkg"])
+    assert locks() == [osx, win]
+    assert compiles[-1][0] == [
+        "iniconfig==2.1.0",
+        "-e " + os.path.realpath("pkg"),
+    ]
+    with open(win) as f:
+        assert calkit.ryaml.load(f)["dependencies"][-1] == {
+            "pip": ["iniconfig==2.1.0", "-e ../pkg"]
+        }
+    write_local(["iniconfig==2.1.0", "packaging==25.0"])
+    write_spec(["iniconfig"])
+    for local in ("pkg @ file:///x", "-r more.txt"):
         assert locks() == [osx, win]
         write_spec(["iniconfig", local])
         assert locks() == []
@@ -722,6 +743,31 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
             "import requests",
         ]
     )
+    # The prefix can be set in calkit.yaml alone, and a global environment
+    # with the same name doesn't stand in for it
+    with open("environment.yml") as f:
+        env = calkit.ryaml.load(f)
+    del env["prefix"]
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump(env, f)
+    global_name = env["name"]
+    subprocess.check_call(
+        [CONDA, "create", "-y", "-q", "-n", global_name, "python=3.12"]
+    )
+    try:
+        subprocess.check_call(
+            [CONDA, "env", "remove", "-y", "--prefix", conda_env_prefix]
+        )
+        out = subprocess.check_output(
+            ["calkit", "xenv", "-n", "my-conda-env", "python", "-c"]
+            + ["import requests, sys; print(sys.prefix)"],
+            text=True,
+        )
+        assert os.path.realpath(
+            out.strip().splitlines()[-1]
+        ) == os.path.realpath(conda_env_prefix)
+    finally:
+        delete_env(global_name)
 
 
 @pytest.mark.xdist_group("conda")

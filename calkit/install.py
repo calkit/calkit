@@ -323,6 +323,42 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "%LOCALAPPDATA%\\Pandoc",
         },
     },
+    # Coding agents, with their own installers; ``calkit install`` also
+    # adds Calkit's plugin to them
+    "claude": {
+        "unix": {
+            "script": "curl -fsSL https://claude.ai/install.sh | bash",
+            "path_add": "~/.local/bin",
+        },
+        "windows": {
+            "script": (
+                "powershell -ExecutionPolicy ByPass -c "
+                '"irm https://claude.ai/install.ps1 | iex"'
+            ),
+            "path_add": "~\\.local\\bin",
+            # Claude Code runs its commands with Git Bash there
+            "requires": ["git"],
+        },
+    },
+    "codex": {
+        "unix": {
+            "script": "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+            "path_add": "~/.local/bin",
+        },
+        "windows": {
+            "script": (
+                "powershell -ExecutionPolicy ByPass -c "
+                '"irm https://chatgpt.com/codex/install.ps1 | iex"'
+            ),
+            "path_add": "%LOCALAPPDATA%\\Programs\\OpenAI\\Codex\\bin",
+        },
+    },
+    "opencode": {
+        "unix": {
+            "script": "curl -fsSL https://opencode.ai/v2/install | bash",
+            "path_add": "~/.opencode/bin",
+        },
+    },
 }
 # Aliases for the binaries users actually invoke / list as deps; sharing
 # the same installer dict by reference keeps the entries in lockstep.
@@ -398,6 +434,13 @@ _PLATFORM_UNSUPPORTED: dict[str, dict[Platform, str]] = {
     },
 }
 _PLATFORM_UNSUPPORTED["Rscript"] = _PLATFORM_UNSUPPORTED["R"]
+_PLATFORM_UNSUPPORTED["opencode"] = {
+    "windows": (
+        "Install OpenCode with npm, e.g., "
+        "'npm i -g @opencode/cli@latest', then run 'calkit install opencode' "
+        "again to add Calkit's plugin."
+    ),
+}
 
 
 def get_unsupported_message(app: str) -> str | None:
@@ -560,6 +603,51 @@ def add_vscode_recs(code: str) -> None:
     os.makedirs(os.path.dirname(settings_path), exist_ok=True)
     with open(settings_path, "w", encoding="utf-8") as f:
         json.dump(recommended | current, f, indent=2)
+
+
+# Commands that add Calkit's plugin to each coding agent, after its binary
+AGENT_PLUGIN_CMDS: dict[str, list[list[str]]] = {
+    "claude": [
+        ["plugin", "marketplace", "add", "calkit/calkit"],
+        ["plugin", "install", "calkit@calkit"],
+    ],
+    "codex": [
+        [
+            "plugin",
+            "marketplace",
+            "add",
+            "calkit/calkit",
+            "--sparse",
+            ".agents/plugins",
+            "--sparse",
+            "agent-plugin",
+        ],
+        ["plugin", "add", "calkit@calkit"],
+    ],
+    "opencode": [
+        [
+            "plugin",
+            "add",
+            "git+https://github.com/calkit/calkit.git#main::path:agent-plugin",
+        ],
+    ],
+}
+
+
+def add_agent_plugin(agent: str, binary_path: str) -> bool:
+    """Add Calkit's plugin to a coding agent, returning whether it worked.
+
+    Only the last command has to succeed, since adding a marketplace that's
+    already there fails.
+    """
+    import shlex
+
+    cmds = AGENT_PLUGIN_CMDS[agent]
+    returncode = 0
+    for args in cmds:
+        print(f"  {shlex.join([agent, *args])}")
+        returncode = subprocess.call([binary_path, *args])
+    return returncode == 0
 
 
 def install(app: str, entry: Installer | None = None) -> bool:

@@ -357,6 +357,9 @@ Apps currently in the registry:
 | `code`               | Homebrew cask on macOS, `winget` on Windows                                                        |
 | `R`, `Rscript`       | Homebrew cask on macOS, `winget` on Windows                                                        |
 | `node`, `npm`, `npx` | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                        |
+| `claude`             | upstream script; then adds Calkit's plugin                                                         |
+| `codex`              | upstream script; then adds Calkit's plugin                                                         |
+| `opencode`           | upstream script on Unix; then adds Calkit's plugin                                                 |
 | `brew`               | the upstream Homebrew script, macOS only                                                           |
 | `choco`              | the upstream Chocolatey script in an elevated shell, Windows only                                  |
 

@@ -242,6 +242,47 @@ def test_install_cli_command(monkeypatch):
         assert result.exit_code != 0
         m_prompt.assert_called_once()
         assert m_prompt.call_args.args[0] == "pixi"
+    # An agent that's installed only gets Calkit's plugin, and one that
+    # isn't is installed first
+    for found in [True, False]:
+        finds = ["/bin/claude"] * 2 if found else [None, "/bin/claude"]
+        with (
+            mock.patch("calkit.install.find", side_effect=finds),
+            mock.patch("shutil.which", return_value="/bin/git"),
+            mock.patch(
+                "calkit.install.install", return_value=True
+            ) as m_install,
+            mock.patch("calkit.install.subprocess.call", return_value=0) as m,
+        ):
+            result = runner.invoke(calkit_app, ["install", "claude", "-y"])
+            assert result.exit_code == 0, result.output
+            assert m_install.called is not found
+            assert [c.args[0][1:3] for c in m.call_args_list] == [
+                ["plugin", "marketplace"],
+                ["plugin", "install"],
+            ]
+            assert "Added Calkit plugin" in result.output
+    # Without Git, it's installed before adding the plugin, and only the
+    # last plugin command has to succeed
+    with (
+        mock.patch("calkit.install.find", return_value="/bin/codex"),
+        mock.patch("shutil.which", return_value=None),
+        mock.patch("calkit.install.install", return_value=True) as m_install,
+        mock.patch("calkit.install.subprocess.call", side_effect=[1, 0]),
+    ):
+        result = runner.invoke(calkit_app, ["install", "codex", "-y"])
+        assert result.exit_code == 0, result.output
+        m_install.assert_called_once_with("git")
+    with (
+        mock.patch("calkit.install.find", return_value="/bin/opencode"),
+        mock.patch("shutil.which", return_value="/bin/git"),
+        mock.patch("calkit.install.subprocess.call", return_value=1),
+    ):
+        result = runner.invoke(calkit_app, ["install", "opencode", "-y"])
+        assert result.exit_code != 0
+        assert "Failed to add Calkit plugin" in (
+            result.output + (result.stderr or "")
+        )
 
 
 @skipif_windows_fake_binary
@@ -287,6 +328,12 @@ def test_platform_entries_prerequisites_and_record(
         assert "Docker Desktop" in str(
             install.get_unsupported_message("colima")
         )
+        # Claude Code needs Git Bash, and OpenCode comes from npm
+        claude = install.get_installer("claude")
+        assert claude is not None and claude.get("requires") == ["git"]
+        assert install.get_installer("codex") is not None
+        assert install.get_installer("opencode") is None
+        assert "npm" in str(install.get_unsupported_message("opencode"))
     # Aliases share entries by reference
     assert install.INSTALLERS["mamba"] is install.INSTALLERS["conda"]
     assert install.INSTALLERS["Rscript"] is install.INSTALLERS["R"]

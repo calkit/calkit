@@ -73,6 +73,19 @@ For Claude Code, create a `CLAUDE.md` at the repo root with the same content
 Calkit ships agent skills covering `calkit.yaml` structure, stage
 kinds, environment types, and CLI commands.
 
+<!-- TODO: needs human review -->
+
+To install Claude Code, Codex, or OpenCode along with Calkit's plugin, run
+one of:
+
+```bash
+calkit install claude
+calkit install codex
+calkit install opencode
+```
+
+If the agent is already installed, this only adds the plugin.
+
 ### Claude Code
 
 Claude Code supports a plugin system that loads skills on demand.

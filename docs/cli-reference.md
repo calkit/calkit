@@ -437,7 +437,7 @@ Options:
 
 ### `calkit install`
 
-Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform.
+Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. For a coding agent (claude, codex, opencode), also add Calkit's plugin.
 
 Usage:
 
@@ -447,9 +447,9 @@ calkit install [OPTIONS] NAME
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                              |
-| -------- | ---- | -------- | ------- | ---------------------------------------- |
-| `name`   | str  | yes      |         | The app to install (e.g., 'pixi', 'uv'). |
+| Argument | Type | Required | Default | Description                                        |
+| -------- | ---- | -------- | ------- | -------------------------------------------------- |
+| `name`   | str  | yes      |         | The app to install (e.g., 'pixi', 'uv', 'claude'). |
 
 Options:
 

@@ -473,12 +473,29 @@ def clone(
     if use_ssh is False and url.startswith("git@github.com:"):
         url = "https://github.com/" + url.removeprefix("git@github.com:")
     on_github = url.startswith("https://github.com/")
+    ssh_ok = False
     if use_ssh is None:
-        use_ssh = on_github and calkit.github.can_use_ssh()
+        use_ssh = ssh_ok = on_github and calkit.github.can_use_ssh()
         if use_ssh:
             typer.echo("Cloning over SSH, which is set up for GitHub")
     if use_ssh and on_github:
         url = url.replace("https://github.com/", "git@github.com:")
+    # Cloning over SSH needs a key GitHub accepts, so offer to add one
+    if (
+        url.startswith("git@github.com:")
+        and not ssh_ok
+        and calkit.core.is_tty()
+        and not calkit.github.can_use_ssh()
+    ):
+        if typer.confirm(
+            "SSH not set up for GitHub. Set up now?", default=True
+        ):
+            from calkit.cli.config import config_github_ssh
+
+            config_github_ssh()
+        else:
+            typer.echo("Cloning over HTTPS")
+            url = "https://github.com/" + url.removeprefix("git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
     if not non_recursive:
@@ -5773,14 +5790,15 @@ def run_in_env(
     name="install",
     help=(
         "Install a registered native dependency (e.g., pixi, uv) via its "
-        "upstream installer for the current platform."
+        "upstream installer for the current platform. For a coding agent "
+        "(claude, codex, opencode), also add Calkit's plugin."
     ),
 )
 def install_app(
     name: Annotated[
         str,
         typer.Argument(
-            help="The app to install (e.g., 'pixi', 'uv').",
+            help="The app to install (e.g., 'pixi', 'uv', 'claude').",
         ),
     ],
     yes: Annotated[
@@ -5806,17 +5824,41 @@ def install_app(
             f"No registered installer for '{name}'. Known apps: "
             + ", ".join(sorted(_install.INSTALLERS))
         )
-    # ``--yes`` makes this scriptable (CI, provisioning) without losing
-    # the safety prompt for plain interactive use.
-    if yes:
-        ok = _install.install(name)
-    else:
-        from calkit.core import is_tty
+    from calkit.core import is_tty
 
-        ok = _install.prompt_and_install(name, interactive=is_tty())
-    if not ok:
-        raise_error(f"Failed to install '{name}'")
-    calkit.echo(f"✅ Installed '{name}'")
+    is_agent = name in _install.AGENT_PLUGIN_CMDS
+    # An agent that's already installed only needs Calkit's plugin
+    binary_path = _install.find(name) if is_agent else None
+    if binary_path is None:
+        # ``--yes`` makes this scriptable (CI, provisioning) without losing
+        # the safety prompt for plain interactive use.
+        if yes:
+            ok = _install.install(name)
+        else:
+            ok = _install.prompt_and_install(name, interactive=is_tty())
+        if not ok:
+            raise_error(f"Failed to install '{name}'")
+        calkit.echo(f"✅ Installed '{name}'")
+    if not is_agent:
+        return
+    binary_path = _install.find(name)
+    if binary_path is None:
+        raise_error(f"'{name}' not found on PATH; restart your shell")
+    # Plugin marketplaces are cloned with Git
+    if shutil.which("git") is None:
+        if yes:
+            ok = _install.install("git")
+        else:
+            ok = _install.prompt_and_install("git", interactive=is_tty())
+        if not ok:
+            raise_error(
+                _install.get_unsupported_message("git")
+                or "Git is required to add Calkit's plugin"
+            )
+    calkit.echo(f"Adding Calkit plugin to '{name}'")
+    if not _install.add_agent_plugin(name, binary_path):
+        raise_error(f"Failed to add Calkit plugin to '{name}'")
+    calkit.echo(f"✅ Added Calkit plugin to '{name}'")
 
 
 @app.command(name="xproc|runproc", help="Execute a procedure.")

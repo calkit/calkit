@@ -31,11 +31,35 @@ def run() -> None:
                 stream.reconfigure(encoding="utf-8", line_buffering=True)
     from .main import app
 
-    # Completion lists commands, so needs them all
-    if any(k.startswith("_") and k.endswith("_COMPLETE") for k in os.environ):
-        app()
-    else:
-        _only_invoked(app, sys.argv[1:])()
+    try:
+        # Completion lists commands, so needs them all
+        if any(
+            k.startswith("_") and k.endswith("_COMPLETE") for k in os.environ
+        ):
+            app()
+        else:
+            _only_invoked(app, sys.argv[1:])()
+    except ImportError as e:
+        # GitPython can't be imported without Git, which a new machine,
+        # e.g., on Windows, may not have
+        if "git executable" not in str(e):
+            raise
+        import subprocess
+
+        from calkit import install
+        from calkit.core import is_tty
+
+        print("Git is required but isn't installed", file=sys.stderr)
+        unsupported = install.get_unsupported_message("git")
+        if unsupported:
+            print(unsupported, file=sys.stderr)
+            sys.exit(1)
+        if not install.prompt_and_install("git", interactive=is_tty()):
+            sys.exit(1)
+        # The command stopped partway, so run it again from the start
+        sys.exit(
+            subprocess.call([sys.executable, "-m", "calkit", *sys.argv[1:]])
+        )
 
 
 def _only_invoked(

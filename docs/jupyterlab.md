@@ -83,3 +83,33 @@ After running the full pipeline, the play button will turn green,
 indicating that all notebooks and outputs are up-to-date.
 
 ![Sidebar pipeline up-to-date.](img/jupyterlab/all-green.png)
+
+<!-- TODO: needs human review -->
+
+## Saving values, figures, and tables from cells
+
+A notebook doesn't have to write its results to files for a paper to show
+them.
+Instead, mark what a cell makes,
+and Calkit saves it whenever the pipeline runs the notebook;
+see [saving values, figures, and tables from cells](notebooks.md#saving-values-figures-and-tables-from-cells)
+for what can be saved.
+
+<!-- prettier-ignore -->
+!!! note
+    The notebook needs a pipeline stage first, which you can assign with
+    the pipeline badge in its toolbar.
+
+To mark a cell, click the Calkit button in its toolbar
+and select **Value**, **Figure**, or **Table**.
+Then select the variable it's saved from, e.g., `fig` for a figure or `df`
+for a table, or for a figure, the image the cell shows.
+For a figure or table, also enter the path to save it to, e.g.,
+`figures/fit-rates-fig.pdf`.
+The notebook is saved first, so the mark stays with its cell as cells move.
+
+Each marked cell gets a label under its code saying what it saves, e.g.,
+`k_25 = 0.03091` after a run, `k_25 (not saved yet)` before one,
+or `figures/fit.pdf from fig`.
+Click a label to copy the command that shows it in a LaTeX document,
+e.g., `\ckvalue{fit-rates.ipynb}{k_25}`, or to unmark it.

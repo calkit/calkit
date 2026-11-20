@@ -21,10 +21,9 @@ import { ITranslator } from "@jupyterlab/translation";
 
 import { IFileBrowserFactory } from "@jupyterlab/filebrowser";
 
-import { Cell } from "@jupyterlab/cells";
 import { IMainMenu } from "@jupyterlab/mainmenu";
 
-import { createOutputMarkerButton } from "./cell-output-marker";
+import { registerCellOutputMarking } from "./cell-output-marker";
 import { showCommitDialog } from "./components/commit-dialog";
 import { createNotebookToolbar } from "./components/notebook-toolbar";
 import { PipelineStatusWidget } from "./components/pipeline-status-bar";
@@ -115,19 +114,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
       },
     });
 
-    // Register cell toolbar button for marking outputs
-    if (toolbarRegistry && isFeatureEnabled("cellOutputMarking")) {
-      toolbarRegistry.addFactory("Cell", "calkit-output-marker", (widget) => {
-        // Only add to code cells
-        const cell = widget as Cell;
-        if (cell.model.type === "code") {
-          return createOutputMarkerButton(cell, translator || undefined);
-        }
-        // Return an empty widget for non-code cells (required by type)
-        const emptyWidget = new Widget();
-        emptyWidget.hide();
-        return emptyWidget;
-      });
+    // Register cell toolbar button for marking outputs, and cell labels
+    if (
+      notebookTracker &&
+      toolbarRegistry &&
+      isFeatureEnabled("cellOutputMarking")
+    ) {
+      registerCellOutputMarking(
+        notebookTracker,
+        toolbarRegistry,
+        translator || undefined,
+      );
     }
 
     // Register notebook toolbar with badges

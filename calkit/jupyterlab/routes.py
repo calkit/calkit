@@ -19,6 +19,7 @@ from pydantic import BaseModel
 import calkit
 import calkit.cli.main
 import calkit.environments
+import calkit.notebooks
 import calkit.pipeline
 from calkit.cli.new import (
     new_conda_env,
@@ -35,7 +36,7 @@ from calkit.models.pipeline import JupyterNotebookStage
 
 
 class APIHandler(_APIHandler):
-    def error(self, code: int, message: str):
+    def error(self, code: int, message: str) -> None:
         # This might be kind of risk to define with inheritance, but it seems
         # like none of the classes in the hierarchy define an error method
         # In the future, we could consider composing in a calkit attribute
@@ -469,6 +470,71 @@ class NotebookStageRouteHandler(APIHandler):
             f"environment '{env_name}', inputs: {inputs}, outputs: {outputs}"
         )
         self.finish(json.dumps({"ok": True}))
+
+
+class NotebookCellOutputsRouteHandler(APIHandler):
+    """Values, figures, and tables a notebook's cells are marked to make,
+    which the pipeline saves when it runs the notebook.
+    """
+
+    @tornado.web.authenticated
+    def get(self) -> None:
+        """List a notebook's marks."""
+        notebook_path = self.get_argument("path", "")
+        if not notebook_path:
+            return self.error(400, "Query must include 'path'")
+        self.finish(
+            json.dumps(calkit.notebooks.list_cell_outputs(notebook_path))
+        )
+
+    @tornado.web.authenticated
+    def post(self) -> None:
+        """Mark a value, figure, or table a cell makes."""
+        body = self.get_json_body()
+        if not body or not body.get("path"):
+            return self.error(400, "Request body must include 'path'")
+        output = {
+            key: body.get(key)
+            for key in (
+                "cell",
+                "value",
+                "figure",
+                "table",
+                "variable",
+                "format",
+            )
+        }
+        try:
+            marked = calkit.notebooks.mark_cell_output(
+                body["path"],
+                output,
+                stage=body.get("stage"),
+                cell_index=body.get("cell_index"),
+            )
+        except ValueError as e:
+            return self.error(400, str(e))
+        self.finish(json.dumps(marked))
+
+    @tornado.web.authenticated
+    def delete(self) -> None:
+        """Unmark a value, a figure or table, or everything after a cell."""
+        notebook_path = self.get_argument("path", "")
+        if not notebook_path:
+            return self.error(400, "Query must include 'path'")
+        try:
+            n_removed = calkit.notebooks.unmark_cell_outputs(
+                notebook_path,
+                value=self.get_argument("value", None),
+                path=(
+                    self.get_argument("figure", None)
+                    or self.get_argument("table", None)
+                ),
+                cell=self.get_argument("cell", None),
+                stage=self.get_argument("stage", None),
+            )
+        except ValueError as e:
+            return self.error(400, str(e))
+        self.finish(json.dumps({"n_removed": n_removed}))
 
 
 class NotebookStageRunSessionRouteHandler(APIHandler):

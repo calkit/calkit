@@ -191,7 +191,8 @@ and Calkit saves it whenever the pipeline runs the notebook:
 - A table, from a DataFrame or a list of rows, as LaTeX (`.tex`) for
   `\cktable`, CSV, Markdown, or JSON.
 
-In VS Code, click **Mark as Value, Figure, or Table** in a cell's toolbar.
+In VS Code or JupyterLab, click **Mark as Value, Figure, or Table** in a
+cell's toolbar.
 Each marked cell gets a label saying what it saves, e.g.,
 `k_25 = 0.0309` after a run; click it to copy the command that shows it in
 a document.

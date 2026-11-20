@@ -258,3 +258,148 @@ def read_table(
         "n_rows": len(table["rows"]),
         "n_rows_matching": n_filtered,
     }
+
+
+def format_table_cell(value: Any, number_format: str | None = None) -> str:
+    """A table cell's text, with a number that isn't whole formatted by
+    ``number_format``, e.g., ``.3f``, or else to six significant figures.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (bool, int)):
+        return str(value)
+    if isinstance(value, float):
+        return format(value, number_format or "g")
+    if isinstance(value, list):
+        return ", ".join(format_table_cell(v, number_format) for v in value)
+    return str(value)
+
+
+def get_latex_table(table: dict, number_format: str | None = None) -> str:
+    """A table as a LaTeX ``tabular``, with the rules ``booktabs`` draws,
+    or plain lines without it, and numbers aligned right.
+    """
+    import re
+
+    def escape(text: str) -> str:
+        replacements = {
+            "\\": r"\textbackslash{}",
+            "&": r"\&",
+            "%": r"\%",
+            "$": r"\$",
+            "#": r"\#",
+            "_": r"\_",
+            "{": r"\{",
+            "}": r"\}",
+            "~": r"\textasciitilde{}",
+            "^": r"\textasciicircum{}",
+        }
+        return re.sub(
+            r"[\\&%$#_{}~^]", lambda m: replacements[m.group()], text
+        )
+
+    def cell_tex(value: Any) -> str:
+        text = format_table_cell(value, number_format)
+        # A minus sign rather than a hyphen
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return (
+                text.replace("-", "$-$", 1) if text.startswith("-") else text
+            )
+        return escape(text)
+
+    columns = list(table.get("columns") or [])
+    rows = [list(r) for r in table.get("data") or []]
+    index = table.get("index")
+    if index is not None:
+        columns = [table.get("index_name") or ""] + columns
+        rows = [[i] + r for i, r in zip(index, rows)]
+    numeric = [
+        all(
+            isinstance(r[j], (int, float)) and not isinstance(r[j], bool)
+            for r in rows
+            if j < len(r) and r[j] is not None
+        )
+        and any(j < len(r) and r[j] is not None for r in rows)
+        for j in range(len(columns))
+    ]
+    align = "".join("r" if n else "l" for n in numeric)
+    lines = [
+        "% Written by Calkit from a notebook's cell output",
+        r"\providecommand{\toprule}{\hline}",
+        r"\providecommand{\midrule}{\hline}",
+        r"\providecommand{\bottomrule}{\hline}",
+        rf"\begin{{tabular}}{{{align}}}",
+        r"\toprule",
+        " & ".join(escape(str(c)) for c in columns) + r" \\",
+        r"\midrule",
+    ]
+    for row in rows:
+        lines.append(" & ".join(cell_tex(v) for v in row) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}", ""]
+    return "\n".join(lines)
+
+
+def get_markdown_table(table: dict, number_format: str | None = None) -> str:
+    """A table as a Markdown pipe table."""
+
+    def cell_md(value: Any) -> str:
+        text = format_table_cell(value, number_format)
+        return text.replace("|", r"\|").replace("\n", " ")
+
+    columns = list(table.get("columns") or [])
+    rows = [list(r) for r in table.get("data") or []]
+    index = table.get("index")
+    if index is not None:
+        columns = [table.get("index_name") or ""] + columns
+        rows = [[i] + r for i, r in zip(index, rows)]
+    lines = [
+        "| " + " | ".join(cell_md(c) for c in columns) + " |",
+        "|" + "|".join("---" for _ in columns) + "|",
+    ]
+    lines += ["| " + " | ".join(cell_md(v) for v in r) + " |" for r in rows]
+    return "\n".join(lines) + "\n"
+
+
+def write_table(
+    path: str, table: dict, number_format: str | None = None
+) -> None:
+    """Write a table, as its ``columns``, ``data`` rows, and an optional
+    ``index`` and ``index_name``, in the format the path's extension says:
+    LaTeX, CSV, Markdown, or JSON.
+    """
+    import csv
+    import json
+
+    suffix = ext(path)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if suffix == ".json":
+        records = [dict(zip(table["columns"], r)) for r in table["data"]]
+        if table.get("index") is not None:
+            name = table.get("index_name") or "index"
+            records = [{name: i} | r for i, r in zip(table["index"], records)]
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(records, f, indent=2)
+            f.write("\n")
+        return
+    if suffix == ".csv":
+        columns = list(table["columns"])
+        rows = [list(r) for r in table["data"]]
+        if table.get("index") is not None:
+            columns = [table.get("index_name") or ""] + columns
+            rows = [[i] + r for i, r in zip(table["index"], rows)]
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f, lineterminator="\n")
+            writer.writerow(columns)
+            for row in rows:
+                writer.writerow(
+                    [format_table_cell(v, number_format) for v in row]
+                )
+        return
+    if suffix == ".tex":
+        text = get_latex_table(table, number_format)
+    elif suffix == ".md":
+        text = get_markdown_table(table, number_format)
+    else:
+        raise ValueError(f"Can't write a table as '{suffix}'")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)

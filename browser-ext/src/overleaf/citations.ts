@@ -12,6 +12,7 @@ import {
   IGNORE_COMMENT,
   citationProblems,
   citationText,
+  notebookOfValuesPath,
   roundedLike,
   typedNumberCitation,
   typedNumberMatches,
@@ -731,6 +732,8 @@ export function renderInsert(
       );
       clear(list).append(format);
       for (const resultPath of paths) {
+        // Values a notebook's cells make are cited by the notebook
+        const citedAs = notebookOfValuesPath(resultPath) ?? resultPath;
         const keys = el("div", { style: { paddingLeft: "10px" } });
         const open = el("button", {
           class: "action secondary",
@@ -753,7 +756,7 @@ export function renderInsert(
                   row(prefix, valueText(value), () =>
                     insert({
                       kind: "value",
-                      path: resultPath,
+                      path: citedAs,
                       key: prefix,
                       options: format.value.trim(),
                     }),
@@ -778,7 +781,7 @@ export function renderInsert(
         });
         list.append(
           el("div", { class: "row" }, [
-            el("div", { class: "grow small", text: resultPath }),
+            el("div", { class: "grow small", text: citedAs }),
             open,
           ]),
           keys,

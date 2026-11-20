@@ -510,6 +510,19 @@ def execute_notebook(
             help="Do not replace notebook outputs from executed version.",
         ),
     ] = False,
+    cell_outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "A value, figure, or table a cell makes, to save after it "
+                "runs, e.g., 'value=k,cell=3f9a1c2e' or "
+                "'figure=figures/fit.pdf,cell=8b77d0aa,variable=fig'. Can "
+                "be given more than once."
+            ),
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -519,8 +532,11 @@ def execute_notebook(
     This can be useful to use as a preprocessing DVC stage to use a clean
     notebook as a dependency for a stage that caches and executed notebook.
     """
+    import shutil
+
     import papermill
 
+    import calkit.tables
     from calkit.cli.main import run_in_env
     from calkit.detect import language_from_notebook
     from calkit.environments import (
@@ -528,9 +544,67 @@ def execute_notebook(
         env_from_notebook_path,
         language_from_env,
     )
+    from calkit.models.pipeline import NotebookCellOutput
+
+    def from_kernel(p: str) -> str:
+        """A path as the kernel, running in the notebook's folder, finds
+        it.
+        """
+        return Path(os.path.relpath(p, notebook_dir or ".")).as_posix()
+
+    def save_cell_outputs() -> None:
+        """Take the cells added to save cell outputs out of the executed
+        notebook, and save what they couldn't, from scratch, where they
+        go.
+        """
+        with open(fpath_out_exec, encoding="utf-8") as f:
+            executed = json.load(f)
+        with open(fpath_out_exec, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(
+                calkit.notebooks.remove_capture_cells(executed), f, indent=1
+            )
+        saved = []
+        if any(o.value is not None for o in outputs):
+            os.makedirs(os.path.dirname(values_path), exist_ok=True)
+            shutil.move(os.path.join(scratch_dir, "values.json"), values_path)
+            saved.append(values_path)
+        for i, o in enumerate(outputs):
+            if o.table is not None:
+                with open(
+                    os.path.join(scratch_dir, "tables", f"{i}.json"),
+                    encoding="utf-8",
+                ) as f:
+                    table = json.load(f)
+                calkit.tables.write_table(o.table, table, o.format)
+                saved.append(o.table)
+            elif o.figure is not None and o.variable is None:
+                try:
+                    image = calkit.notebooks.get_cell_image(
+                        executed,
+                        str(o.cell),
+                        os.path.splitext(o.figure)[1],
+                    )
+                except ValueError as e:
+                    raise_error(f"Can't save {o.figure}: {e}")
+                os.makedirs(os.path.dirname(o.figure) or ".", exist_ok=True)
+                with open(o.figure, "wb") as f:
+                    f.write(image)
+                saved.append(o.figure)
+            elif o.figure is not None:
+                if not os.path.isfile(o.figure):
+                    raise_error(
+                        f"{o.figure} wasn't saved from '{o.variable}' after "
+                        f"cell {o.cell}"
+                    )
+                saved.append(o.figure)
+        typer.echo("Saved " + ", ".join(dict.fromkeys(saved)))
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
+    try:
+        outputs = [NotebookCellOutput.from_arg(a) for a in cell_outputs]
+    except ValueError as e:
+        raise_error(f"Invalid output: {e}")
     # Detect environment
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
@@ -607,6 +681,8 @@ def execute_notebook(
     except Exception as e:
         if verbose:
             warn(f"Warning: failed to set kernelspec metadata: {e}")
+    if outputs and language.lower() != "python":
+        raise_error("Cell outputs can only be saved from Python notebooks")
     # We can't handle parameters unless language is Python, Julia, or R
     if language.lower() not in ["python", "julia", "r"]:
         if params or params_json is not None or params_base64 is not None:
@@ -648,118 +724,192 @@ def execute_notebook(
         typer.echo(f"Using kernel: {kernel_name}")
         typer.echo(f"Running with cwd: {notebook_dir}")
         typer.echo(f"Output will be saved to: {fpath_out_exec}")
-    # If this is a Python, Julia, or R notebook, we can use Papermill.
-    # If it's a MATLAB notebook, we need to use the MATLAB kernel inside the
-    # specified environment.
-    # Exception: If the environment is a Docker environment, we run Papermill
-    # inside the container so the kernel (which lives in the image) and
-    # Papermill share a process namespace---this avoids registering a host
-    # kernel and cross-container networking entirely
-    if docker_env:
-        # run_in_env mounts the project at the working directory and applies
-        # the env's user/platform/args, so we only need to invoke Papermill
-        # ipykernel is in the image, but Papermill may not be, so install it
-        # on demand (warning the user) before executing. We install into a
-        # writable temp dir on PYTHONPATH rather than the image's site-packages:
-        # run_in_env maps the host user into the container, so writing to the
-        # system location is typically denied, but /tmp is world-writable
-        pm_target = "/tmp/calkit-papermill"
-        pythonpath = f"PYTHONPATH={pm_target}"
-        pm_cmd = [
-            pythonpath,
-            "python",
-            "-c",
-            "import papermill",
-            "2>/dev/null",
-            "||",
-            "(",
-            "echo",
-            "papermill not found in image; installing it with pip...",
-            "&&",
-            "python",
-            "-m",
-            "pip",
-            "install",
-            "-q",
-            "--target",
-            pm_target,
-            "papermill",
-            ")",
-            "&&",
-            pythonpath,
-            "python",
-            "-m",
-            "papermill",
-            path,
-            fpath_out_exec,
-            "-k",
-            kernel_name,
-            "--log-output",
-        ]
-        if notebook_dir:
-            pm_cmd += ["--cwd", notebook_dir]
-        if parsed_params:
-            # JSON is valid YAML, so pass parameters as base64-encoded JSON to
-            # avoid shell-quoting issues across the container boundary
-            params_b64 = base64.b64encode(
-                json.dumps(parsed_params).encode()
-            ).decode()
-            pm_cmd += ["-b", params_b64]
-        run_in_env(
-            pm_cmd,
-            env_name=env_name,
-            no_check=no_check,
-            verbose=verbose,
-        )
-    elif language.lower() in ["python", "julia", "r"]:
-        # The kernel inherits this process's environmental variables, so
-        # it gets the programs of environments composed into its own while
-        # it runs, and what the project sets wins
+    # Cell outputs are saved by cells added to a copy of the notebook, which
+    # is what runs, writing into a scratch folder beside the values file
+    input_path = path
+    values_path = calkit.notebooks.get_notebook_values_path(
+        path, parameters=parsed_params
+    )
+    scratch_dir = os.path.join(os.path.dirname(values_path), "_saving")
+    if outputs:
+        with open(path, encoding="utf-8") as f:
+            source_nb = json.load(f)
+        if calkit.notebooks.has_ordinal_cell_ids(source_nb):
+            warn(
+                f"{path}'s cell IDs count up from 0, as nbstripout writes "
+                "them without --keep-id, so they change when cells are "
+                "added; a cell output may be saved after the wrong cell"
+            )
         try:
-            composed = calkit.environments.get_composed_env_vars(
-                env_name,
-                env,
-                envs,
-                keep=[
-                    *(ck_info.get("env_vars") or {}),
-                    *dotenv.dotenv_values(".env"),
+            capture_nb = calkit.notebooks.add_capture_cells(
+                source_nb,
+                outputs=[
+                    o.model_dump()
+                    | {
+                        "path": (
+                            from_kernel(o.figure)
+                            if o.figure is not None
+                            else None
+                        )
+                    }
+                    for o in outputs
                 ],
+                values_path=from_kernel(
+                    os.path.join(scratch_dir, "values.json")
+                ),
+                tables_dir=from_kernel(os.path.join(scratch_dir, "tables")),
+            )
+        except ValueError as e:
+            raise_error(
+                f"{e}, which calkit.yaml saves a cell output after; mark it "
+                "again in the notebook"
+            )
+        if os.path.isdir(scratch_dir):
+            shutil.rmtree(scratch_dir)
+        os.makedirs(scratch_dir)
+        input_path = Path(os.path.join(scratch_dir, "input.ipynb")).as_posix()
+        with open(input_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(capture_nb, f, indent=1)
+        # Each figure and table is written again, so a stale one isn't kept
+        for o in outputs:
+            if o.path is not None and os.path.isfile(o.path):
+                os.remove(o.path)
+    # Whatever happens, the scratch folder for cell outputs is removed
+    try:
+        # If this is a Python, Julia, or R notebook, we can use Papermill.
+        # If it's a MATLAB notebook, we need to use the MATLAB kernel inside the
+        # specified environment.
+        # Exception: If the environment is a Docker environment, we run Papermill
+        # inside the container so the kernel (which lives in the image) and
+        # Papermill share a process namespace---this avoids registering a host
+        # kernel and cross-container networking entirely
+        if docker_env:
+            # run_in_env mounts the project at the working directory and applies
+            # the env's user/platform/args, so we only need to invoke Papermill
+            # ipykernel is in the image, but Papermill may not be, so install it
+            # on demand (warning the user) before executing. We install into a
+            # writable temp dir on PYTHONPATH rather than the image's site-packages:
+            # run_in_env maps the host user into the container, so writing to the
+            # system location is typically denied, but /tmp is world-writable
+            pm_target = "/tmp/calkit-papermill"
+            pythonpath = f"PYTHONPATH={pm_target}"
+            pm_cmd = [
+                pythonpath,
+                "python",
+                "-c",
+                "import papermill",
+                "2>/dev/null",
+                "||",
+                "(",
+                "echo",
+                "papermill not found in image; installing it with pip...",
+                "&&",
+                "python",
+                "-m",
+                "pip",
+                "install",
+                "-q",
+                "--target",
+                pm_target,
+                "papermill",
+                ")",
+                "&&",
+                pythonpath,
+                "python",
+                "-m",
+                "papermill",
+                input_path,
+                fpath_out_exec,
+                "-k",
+                kernel_name,
+                "--log-output",
+            ]
+            if notebook_dir:
+                pm_cmd += ["--cwd", notebook_dir]
+            if parsed_params:
+                # JSON is valid YAML, so pass parameters as base64-encoded JSON to
+                # avoid shell-quoting issues across the container boundary
+                params_b64 = base64.b64encode(
+                    json.dumps(parsed_params).encode()
+                ).decode()
+                pm_cmd += ["-b", params_b64]
+            run_in_env(
+                pm_cmd,
+                env_name=env_name,
+                no_check=no_check,
                 verbose=verbose,
             )
-        except (ValueError, RuntimeError, OSError) as e:
-            raise_error(str(e))
-        saved_env_vars = dict(os.environ)
-        if composed is not None:
-            os.environ.clear()
-            os.environ.update(composed)
-        try:
-            papermill.execute_notebook(
-                input_path=path,
-                output_path=fpath_out_exec,
-                kernel_name=kernel_name,
-                log_output=True,
-                parameters=parsed_params,
-                cwd=notebook_dir,
+        elif language.lower() in ["python", "julia", "r"]:
+            # The kernel inherits this process's environmental variables, so
+            # it gets the programs of environments composed into its own while
+            # it runs, and what the project sets wins
+            try:
+                composed = calkit.environments.get_composed_env_vars(
+                    env_name,
+                    env,
+                    envs,
+                    keep=[
+                        *(ck_info.get("env_vars") or {}),
+                        *dotenv.dotenv_values(".env"),
+                    ],
+                    verbose=verbose,
+                )
+            except (ValueError, RuntimeError, OSError) as e:
+                raise_error(str(e))
+            saved_env_vars = dict(os.environ)
+            if composed is not None:
+                os.environ.clear()
+                os.environ.update(composed)
+            try:
+                papermill.execute_notebook(
+                    input_path=input_path,
+                    output_path=fpath_out_exec,
+                    kernel_name=kernel_name,
+                    log_output=True,
+                    parameters=parsed_params,
+                    cwd=notebook_dir,
+                )
+            except papermill.PapermillExecutionError as e:
+                # A cell output that couldn't be saved says why, without the
+                # traceback through Calkit's own cell
+                if outputs and str(e.evalue).startswith("Calkit: "):
+                    if os.path.isfile(fpath_out_exec):
+                        with open(fpath_out_exec, encoding="utf-8") as f:
+                            failed_nb = calkit.notebooks.remove_capture_cells(
+                                json.load(f)
+                            )
+                        with open(
+                            fpath_out_exec, "w", encoding="utf-8", newline="\n"
+                        ) as f:
+                            json.dump(failed_nb, f, indent=1)
+                    raise_error(str(e.evalue).removeprefix("Calkit: "))
+                raise
+            finally:
+                os.environ.clear()
+                os.environ.update(saved_env_vars)
+        elif language.lower() == "matlab":
+            # Use nbconvert to execute the notebook with the MATLAB kernel
+            cmd = [
+                "python",
+                "-m",
+                "jupyter",
+                "nbconvert",
+                "--to",
+                "notebook",
+                "--execute",
+                f"--ExecutePreprocessor.kernel_name={kernel_name}",
+                "--output",
+                fpath_out_exec,
+                path,
+            ]
+            run_in_env(
+                cmd, env_name=env_name, no_check=no_check, verbose=verbose
             )
-        finally:
-            os.environ.clear()
-            os.environ.update(saved_env_vars)
-    elif language.lower() == "matlab":
-        # Use nbconvert to execute the notebook with the MATLAB kernel
-        cmd = [
-            "python",
-            "-m",
-            "jupyter",
-            "nbconvert",
-            "--to",
-            "notebook",
-            "--execute",
-            f"--ExecutePreprocessor.kernel_name={kernel_name}",
-            "--output",
-            fpath_out_exec,
-            path,
-        ]
-        run_in_env(cmd, env_name=env_name, no_check=no_check, verbose=verbose)
+        if outputs:
+            save_cell_outputs()
+    finally:
+        if outputs:
+            shutil.rmtree(scratch_dir, ignore_errors=True)
     if not no_replace:
         # Replace original notebook outputs with those from executed version
         with open(fpath_out_exec, "r", encoding="utf-8") as f:
@@ -854,6 +1004,272 @@ def _pyodide_provided_packages() -> set[str]:
     return {
         name.lower().replace("_", "-") for name in lock.get("packages", {})
     }
+
+
+def _get_notebook_stage(ck_info: dict, path: str, stage: str | None) -> str:
+    """The stage running a notebook, which must be in the pipeline for its
+    cells' outputs to be saved, or the one named, if it runs it.
+    """
+    names = calkit.notebooks.find_notebook_stages(ck_info, path)
+    if stage is not None:
+        if stage not in names:
+            raise_error(f"Stage '{stage}' doesn't run {path}")
+        return stage
+    if not names:
+        raise_error(
+            f"{path} isn't in the pipeline yet; add it first, e.g., with "
+            f"'calkit xr {path}'"
+        )
+    if len(names) > 1:
+        raise_error(
+            f"{path} is run by stages {', '.join(names)}; name one with "
+            "--stage"
+        )
+    return names[0]
+
+
+def _read_notebook(path: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as f:
+            nb: dict = json.load(f)
+        return nb
+    except (OSError, json.JSONDecodeError) as e:
+        raise_error(f"Can't read {path}: {e}")
+        raise
+
+
+@notebooks_app.command("mark")
+def mark_cell_output(
+    path: Annotated[str, typer.Argument(help="Path to the notebook.")],
+    cell: Annotated[
+        str | None,
+        typer.Option("--cell", help="ID of the cell it's saved after."),
+    ] = None,
+    cell_index: Annotated[
+        int | None,
+        typer.Option(
+            "--cell-index",
+            help="Position of the cell it's saved after, from 0, for a "
+            "notebook whose cells have no IDs yet, which gives them some.",
+        ),
+    ] = None,
+    value: Annotated[
+        str | None,
+        typer.Option("--value", help="Variable to save as a value."),
+    ] = None,
+    figure: Annotated[
+        str | None,
+        typer.Option(
+            "--figure",
+            help="Path to save a figure to, e.g., figures/fit.pdf, from "
+            "--variable, or else the image the cell shows.",
+        ),
+    ] = None,
+    table: Annotated[
+        str | None,
+        typer.Option(
+            "--table",
+            help="Path to save a table to from --variable, as LaTeX (.tex), "
+            "CSV, Markdown, or JSON.",
+        ),
+    ] = None,
+    variable: Annotated[
+        str | None,
+        typer.Option(
+            "--variable", help="Variable holding the figure or table."
+        ),
+    ] = None,
+    number_format: Annotated[
+        str | None,
+        typer.Option(
+            "--format", help="Format for a table's numbers, e.g., '.3f'."
+        ),
+    ] = None,
+    stage: Annotated[
+        str | None,
+        typer.Option(
+            "--stage", help="Stage running the notebook, if several do."
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Print the result as JSON.")
+    ] = False,
+) -> None:
+    """Mark a value, figure, or table a notebook's cell makes, to be saved
+    whenever the pipeline runs it.
+    """
+    from pydantic import ValidationError
+
+    from calkit.models.pipeline import JupyterNotebookStage, NotebookCellOutput
+
+    def get_message(e: ValidationError) -> str:
+        return "; ".join(
+            str(err["msg"]).removeprefix("Value error, ") for err in e.errors()
+        )
+
+    path = Path(path).as_posix()
+    if cell is not None and cell_index is not None:
+        raise_error("Give --cell or --cell-index, not both")
+    ck_info = calkit.load_calkit_info()
+    name = _get_notebook_stage(ck_info, path, stage)
+    nb = _read_notebook(path)
+    if cell_index is not None:
+        n_cells = len(nb.get("cells", []))
+        if not 0 <= cell_index < n_cells:
+            raise_error(f"{path} has {n_cells} cells, not {cell_index + 1}")
+        if calkit.notebooks.ensure_cell_ids(nb):
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(nb, f, indent=1)
+                f.write("\n")
+        cell = calkit.notebooks.get_cell_ids(nb)[cell_index]
+    elif cell is not None and cell not in calkit.notebooks.get_cell_ids(nb):
+        raise_error(f"{path} has no cell {cell}")
+    if calkit.notebooks.has_ordinal_cell_ids(nb) and not json_output:
+        warn(
+            f"{path}'s cell IDs count up from 0, as nbstripout writes them "
+            "without --keep-id, so they change when cells are added; "
+            "install it with --keep-id so marks stay on their cells"
+        )
+    fields = {
+        "cell": cell,
+        "value": value,
+        "figure": figure,
+        "table": table,
+        "variable": variable,
+        "format": number_format,
+    }
+    try:
+        output = NotebookCellOutput.model_validate(
+            {k: v for k, v in fields.items() if v is not None}
+        )
+    except ValidationError as e:
+        raise_error(get_message(e))
+        raise
+    stage_dict = ck_info["pipeline"]["stages"][name]
+    new = output.model_dump(exclude_none=True)
+    outputs = calkit.notebooks.with_cell_output(
+        [dict(o) for o in stage_dict.get("cell_outputs") or []], new
+    )
+    try:
+        JupyterNotebookStage.model_validate(
+            dict(stage_dict) | {"cell_outputs": outputs}
+        )
+    except ValidationError as e:
+        raise_error(get_message(e))
+    stage_dict["cell_outputs"] = outputs
+    calkit.save_calkit_info(ck_info)
+    citation = calkit.notebooks.get_cell_output_citation(
+        new, path, stage_dict.get("parameters") or None
+    )
+    if json_output:
+        typer.echo(
+            json.dumps({"stage": name, "output": new, "citation": citation})
+        )
+        return
+    target = value or figure or table
+    typer.echo(
+        f"Marked {target} to be saved from {path} when stage '{name}' runs"
+    )
+    if citation:
+        typer.echo(f"Once it's run, show it in a document with {citation}")
+
+
+@notebooks_app.command("unmark")
+def unmark_cell_output(
+    path: Annotated[str, typer.Argument(help="Path to the notebook.")],
+    value: Annotated[
+        str | None, typer.Option("--value", help="Value to stop saving.")
+    ] = None,
+    figure: Annotated[
+        str | None,
+        typer.Option("--figure", help="Path of a figure to stop saving."),
+    ] = None,
+    table: Annotated[
+        str | None,
+        typer.Option("--table", help="Path of a table to stop saving."),
+    ] = None,
+    cell: Annotated[
+        str | None,
+        typer.Option(
+            "--cell", help="ID of a cell to stop saving anything after."
+        ),
+    ] = None,
+    stage: Annotated[
+        str | None,
+        typer.Option(
+            "--stage", help="Stage running the notebook, if several do."
+        ),
+    ] = None,
+) -> None:
+    """Stop saving a value, figure, or table from a notebook's cell."""
+    path = Path(path).as_posix()
+    if not any((value, figure, table, cell)):
+        raise_error("Give --value, --figure, --table, or --cell")
+    ck_info = calkit.load_calkit_info()
+    name = _get_notebook_stage(ck_info, path, stage)
+    stage_dict = ck_info["pipeline"]["stages"][name]
+    before = [dict(o) for o in stage_dict.get("cell_outputs") or []]
+    after = calkit.notebooks.without_cell_outputs(
+        before, value=value, path=figure or table, cell=cell
+    )
+    if len(after) == len(before):
+        raise_error(f"Nothing like that is marked in {path}")
+    if after:
+        stage_dict["cell_outputs"] = after
+    else:
+        del stage_dict["cell_outputs"]
+    calkit.save_calkit_info(ck_info)
+    typer.echo(
+        f"Stopped saving {len(before) - len(after)} cell output"
+        f"{'s' if len(before) - len(after) != 1 else ''} from {path}"
+    )
+
+
+@notebooks_app.command("outputs")
+def list_cell_outputs(
+    path: Annotated[str, typer.Argument(help="Path to the notebook.")],
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Print them as JSON.")
+    ] = False,
+) -> None:
+    """List the values, figures, and tables marked in a notebook's cells,
+    and how a document shows each.
+    """
+    path = Path(path).as_posix()
+    ck_info = calkit.load_calkit_info(read_only=True)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    nb = _read_notebook(path) if os.path.isfile(path) else None
+    described = []
+    for name in calkit.notebooks.find_notebook_stages(ck_info, path):
+        stage = stages[name]
+        values = None
+        values_path = calkit.notebooks.get_notebook_values_path(
+            path, parameters=stage.get("parameters") or None
+        )
+        if os.path.isfile(values_path):
+            with open(values_path, encoding="utf-8") as f:
+                values = json.load(f)
+        described += calkit.notebooks.describe_cell_outputs(
+            name, stage, nb, values=values
+        )
+    if json_output:
+        typer.echo(json.dumps(described))
+        return
+    if not described:
+        typer.echo(f"Nothing is marked in {path}")
+        return
+    for item in described:
+        where = (
+            f"cell {item['cell_index'] + 1}"
+            if item["cell_index"] is not None
+            else (f"missing cell {item['cell']}" if item["cell"] else "end")
+        )
+        text = f"{item['kind']} {item.get('name') or item.get('path')}"
+        if "saved_value" in item:
+            text += f" = {json.dumps(item['saved_value'])}"
+        typer.echo(f"{text} ({where})")
+        if item["citation"]:
+            typer.echo(f"  {item['citation']}")
 
 
 @notebooks_app.command(

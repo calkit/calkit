@@ -132,6 +132,11 @@ export function citationCandidates(
   const exts = citation.kind === "figure" ? GRAPHICS_EXTS : [".tex"];
   if (!citation.included) {
     const path = citation.path.replace(/^\.\//, "");
+    // A value cited from a notebook is one its cells make, which the
+    // pipeline saves beside it, as get_notebook_values_path says
+    if (citation.kind === "value" && path.toLowerCase().endsWith(".ipynb")) {
+      return [notebookValuesPath(path)];
+    }
     if (
       citation.kind === "value" ||
       exts.some((ext) => path.toLowerCase().endsWith(ext))
@@ -153,6 +158,27 @@ export function citationCandidates(
     return [path];
   }
   return [path, ...exts.map((ext) => path + ext)];
+}
+
+/**
+ * Where the values a notebook's cells make are saved, mirroring
+ * ``get_notebook_values_path`` in calkit/notebooks.py for a notebook run
+ * without parameters.
+ */
+export function notebookValuesPath(notebook: string): string {
+  return `.calkit/notebooks/outputs/${notebook.replace(
+    /\.ipynb$/i,
+    "",
+  )}/values.json`;
+}
+
+/**
+ * The notebook a values file was saved from, which is how a value from it
+ * is cited, or null for any other file.
+ */
+export function notebookOfValuesPath(path: string): string | null {
+  const m = /^\.calkit\/notebooks\/outputs\/(.+)\/values\.json$/.exec(path);
+  return m ? `${m[1]}.ipynb` : null;
 }
 
 /** The command that cites something, to insert into a document. */

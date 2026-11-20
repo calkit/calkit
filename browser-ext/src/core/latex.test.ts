@@ -8,6 +8,8 @@ import {
   citationText,
   citationCandidates,
   isDiffableDocument,
+  notebookOfValuesPath,
+  notebookValuesPath,
   latexDiffPath,
   refDirName,
   getShownValue,
@@ -198,6 +200,22 @@ describe("citationCandidates", () => {
         options: "",
       }),
     ).toEqual(["tables/t.tex"]);
+    // A value cited from a notebook is saved beside it by the pipeline
+    expect(
+      citationCandidates("paper", {
+        kind: "value",
+        path: "nbs/fit.ipynb",
+        key: "k",
+        options: "",
+      }),
+    ).toEqual([".calkit/notebooks/outputs/nbs/fit/values.json"]);
+    expect(notebookValuesPath("fit.IPYNB")).toBe(
+      ".calkit/notebooks/outputs/fit/values.json",
+    );
+    expect(
+      notebookOfValuesPath(".calkit/notebooks/outputs/nbs/fit/values.json"),
+    ).toBe("nbs/fit.ipynb");
+    expect(notebookOfValuesPath("results/values.json")).toBeNull();
     expect(
       citationCandidates("paper", {
         kind: "value",

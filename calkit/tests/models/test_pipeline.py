@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 import subprocess
 import sys
 
@@ -23,6 +24,7 @@ from calkit.models.pipeline import (
     MarkdownStage,
     MatlabCommandStage,
     MatlabScriptStage,
+    NotebookCellOutput,
     Pipeline,
     PptxExportStage,
     PythonScriptStage,
@@ -494,6 +496,108 @@ def test_jupyternotebookstage():
         " --params-base64 "
         '"eyJwYXJhbTEiOiAidmFsdWUxIiwgInBhcmFtMiI6ICJ2YWx1ZTIifQ==" '
     ) in dvc_stage["cmd"]
+    # Cell outputs are passed to the command and are outputs of the stage,
+    # with values saved together in Git
+    s = JupyterNotebookStage(
+        name="fit",
+        environment="main",
+        notebook_path="nbs/fit.ipynb",
+        html_storage=None,
+        cell_outputs=[
+            {"cell": "3f9a1c2e", "value": "k_25"},
+            {"value": "rates"},
+            {
+                "cell": "8b77d0aa",
+                "figure": "figures/fit.pdf",
+                "variable": "fig",
+            },
+            {"cell": "8b77d0aa", "figure": "figures/shown.svg"},
+            {
+                "cell": "1d2e4c0b",
+                "table": "tables/rates.tex",
+                "variable": "df",
+                "format": ".3f",
+            },
+        ],
+    )
+    dvc_stage = s.to_dvc()
+    assert s.values_path == ".calkit/notebooks/outputs/nbs/fit/values.json"
+    assert dvc_stage["cmd"] == (
+        "calkit nb execute --environment main --no-check "
+        '--output "value=k_25,cell=3f9a1c2e" --output "value=rates" '
+        '--output "figure=figures/fit.pdf,cell=8b77d0aa,variable=fig" '
+        '--output "figure=figures/shown.svg,cell=8b77d0aa" '
+        '--output "table=tables/rates.tex,cell=1d2e4c0b,variable=df,'
+        'format=.3f" "nbs/fit.ipynb"'
+    )
+    assert {s.values_path: {"cache": False}} in dvc_stage["outs"]
+    assert {"figures/fit.pdf": {"cache": True}} in dvc_stage["outs"]
+    assert {"figures/shown.svg": {"cache": False}} in dvc_stage["outs"]
+    assert {"tables/rates.tex": {"cache": False}} in dvc_stage["outs"]
+    assert s.values_path in [o.path for o in s.notebook_outputs]
+    for out in s.cell_outputs:
+        assert NotebookCellOutput.from_arg(out.to_arg()) == out
+    # Without values, there's no values file
+    s = JupyterNotebookStage(
+        environment="main",
+        notebook_path="fit.ipynb",
+        cell_outputs=[
+            {"cell": "a", "figure": "f.png", "storage": "git"},
+        ],
+    )
+    assert [o.path for o in s.cell_output_paths] == ["f.png"]
+    assert {"f.png": {"cache": False}} in s.to_dvc()["outs"]
+    # What can't be saved
+    bad_outputs = [
+        ({}, "needs one of"),
+        ({"value": "a", "figure": "f.png"}, "needs one of"),
+        ({"value": "not a name"}, "isn't a variable name"),
+        ({"value": "a", "variable": "b"}, "don't apply"),
+        ({"cell": "a b", "value": "a"}, "isn't a cell ID"),
+        ({"cell": "a", "figure": "f.gif"}, "not '.gif'"),
+        ({"figure": "f.png"}, "Name the cell"),
+        ({"cell": "a", "figure": "/abs/f.png"}, "relative"),
+        ({"cell": "a", "figure": "f,g.png"}, "comma"),
+        ({"cell": "a", "table": "t.tex"}, "Name the variable"),
+        ({"cell": "a", "table": "t.xlsx", "variable": "df"}, "not '.xlsx'"),
+        (
+            {"cell": "a", "table": "t.tex", "variable": "d", "format": "q"},
+            "format",
+        ),
+        (
+            {"cell": "a", "table": "t.tex", "variable": "d", "format": ",.2f"},
+            "'_'",
+        ),
+        ({"cell": "a", "figure": "f.png", "format": ".2f"}, "only applies"),
+    ]
+    for fields, message in bad_outputs:
+        with pytest.raises(ValidationError, match=re.escape(message)):
+            NotebookCellOutput.model_validate(fields)
+    with pytest.raises(ValueError, match="give it as"):
+        NotebookCellOutput.from_arg("value")
+    with pytest.raises(ValueError, match="given twice"):
+        NotebookCellOutput.from_arg("value=a,value=b")
+    bad_stages = [
+        ([{"value": "a"}, {"cell": "x", "value": "a"}], {}, "more than once"),
+        (
+            [
+                {"cell": "x", "figure": "f.png"},
+                {"cell": "y", "figure": "f.png"},
+            ],
+            {},
+            "more than one cell",
+        ),
+        ([{"cell": "x", "figure": "f.png"}], {"outputs": ["f.png"]}, "too"),
+        ([{"value": "a"}], {"language": "julia"}, "only saved from Python"),
+    ]
+    for cell_outputs, extra, message in bad_stages:
+        with pytest.raises(ValidationError, match=message):
+            JupyterNotebookStage(
+                environment="main",
+                notebook_path="fit.ipynb",
+                cell_outputs=cell_outputs,
+                **extra,
+            )
 
 
 def test_stageiteration(monkeypatch, tmp_path):

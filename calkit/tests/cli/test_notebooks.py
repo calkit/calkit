@@ -494,3 +494,186 @@ def test_execute_notebook_docker(tmp_dir):
         if o.get("name") == "stdout"
     )
     assert "result = 40" in text
+
+
+def test_cell_outputs(tmp_dir):
+    import nbformat
+
+    subprocess.check_call(
+        ["calkit", "new", "project", ".", "-n", "fits", "--title", "Fits"]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "py",
+            "ipykernel",
+            "matplotlib",
+            "pandas",
+        ]
+    )
+    nb = nbformat.v4.new_notebook()
+    nb.cells = [
+        nbformat.v4.new_code_cell(
+            "import numpy as np\n"
+            "import pandas as pd\n"
+            "import matplotlib.pyplot as plt\n"
+            "rates = {'25C': 0.0309, '35C': np.float64(0.0616)}\n"
+            "k_25 = rates['25C']"
+        ),
+        nbformat.v4.new_markdown_cell("# Plots"),
+        nbformat.v4.new_code_cell(
+            "fig, ax = plt.subplots()\nax.plot([1, 2], [3, 4])"
+        ),
+        nbformat.v4.new_code_cell("plt.plot([1, 2], [4, 1])\nplt.show()"),
+        nbformat.v4.new_code_cell(
+            "df = pd.DataFrame({'T': [25, 35], 'k': [0.0309, 0.0616]})"
+        ),
+        nbformat.v4.new_code_cell("k_25 = 999\nlast = 'done'"),
+    ]
+    nbformat.write(nb, "fit.ipynb")
+    ids = [c.id for c in nb.cells]
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "fit": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "fit.ipynb",
+                "environment": "py",
+                "html_storage": None,
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+
+    def mark(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "nb", "mark", "fit.ipynb", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    # Marking says how to show each in a document
+    out = mark("--cell", ids[0], "--value", "k_25", "--json")
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == {
+        "stage": "fit",
+        "output": {"cell": ids[0], "value": "k_25"},
+        "citation": r"\ckvalue{fit.ipynb}{k_25}",
+    }
+    for args in [
+        ["--cell", ids[0], "--value", "rates"],
+        ["--value", "last"],
+        ["--cell", ids[2], "--figure", "figures/fit.pdf", "--variable", "fig"],
+        ["--cell-index", "3", "--figure", "figures/shown.png"],
+        ["--cell", ids[4], "--table", "tables/rates.tex", "--variable", "df"],
+        ["--cell", ids[4], "--table", "rates.csv", "--variable", "df"],
+    ]:
+        out = mark(*args)
+        assert out.returncode == 0, out.stderr
+    assert (
+        "\\cktable{tables/rates.tex}"
+        in mark(
+            "--cell", ids[4], "--table", "tables/rates.tex", "--variable", "df"
+        ).stdout
+    )
+    # What can't be marked
+    for args, message in [
+        (["--cell", "nope", "--value", "x"], "has no cell nope"),
+        (["--cell-index", "9", "--value", "x"], "has 6 cells"),
+        (["--cell", ids[0], "--cell-index", "0", "--value", "x"], "not both"),
+        (["--cell", ids[0], "--value", "x", "--format", ".2f"], "don't apply"),
+        (["--cell", ids[0], "--figure", "fit.pdf"], "can't be in"),
+    ]:
+        if "can't be in" in message:
+            ck_info = calkit.load_calkit_info()
+            ck_info["pipeline"]["stages"]["fit"]["outputs"] = ["fit.pdf"]
+            calkit.save_calkit_info(ck_info)
+            message = "so it can't be in 'outputs' too"
+        out = mark(*args)
+        assert out.returncode != 0
+        assert message in out.stderr + out.stdout
+    ck_info = calkit.load_calkit_info()
+    del ck_info["pipeline"]["stages"]["fit"]["outputs"]
+    calkit.save_calkit_info(ck_info)
+    out = subprocess.run(
+        ["calkit", "nb", "mark", "other.ipynb", "--value", "x"],
+        capture_output=True,
+        text=True,
+    )
+    assert "isn't in the pipeline yet" in out.stderr + out.stdout
+    subprocess.check_call(
+        ["calkit", "nb", "unmark", "fit.ipynb", "--table", "rates.csv"]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert len(ck_info["pipeline"]["stages"]["fit"]["cell_outputs"]) == 6
+    # Running saves each, the value as it was right after its cell, and
+    # leaves no sign of the cells that saved them
+    subprocess.check_call(["calkit", "run"])
+    values_path = ".calkit/notebooks/outputs/fit/values.json"
+    with open(values_path) as f:
+        assert json.load(f) == {
+            "k_25": 0.0309,
+            "rates": {"25C": 0.0309, "35C": 0.0616},
+            "last": "done",
+        }
+    with open("figures/fit.pdf", "rb") as f:
+        assert f.read(4) == b"%PDF"
+    with open("figures/shown.png", "rb") as f:
+        assert f.read(4) == b"\x89PNG"
+    with open("tables/rates.tex") as f:
+        assert r"25 & 0.0309 \\" in f.read()
+    for path in ["fit.ipynb", ".calkit/notebooks/executed/fit.ipynb"]:
+        with open(path) as f:
+            sources = [c["source"] for c in json.load(f)["cells"]]
+        assert len(sources) == 6
+        assert not any("_calkit" in "".join(s) for s in sources)
+    status = subprocess.check_output(["calkit", "status"], text=True)
+    assert "fit" not in status.split("Pipeline")[-1] or "up to date" in status
+    # Listing shows what was saved, by the cell it's after
+    listed = json.loads(
+        subprocess.check_output(
+            ["calkit", "nb", "outputs", "fit.ipynb", "--json"], text=True
+        )
+    )
+    assert [(d["kind"], d["cell_index"]) for d in listed] == [
+        ("value", 0),
+        ("value", 0),
+        ("value", None),
+        ("figure", 2),
+        ("figure", 3),
+        ("table", 4),
+    ]
+    assert listed[0]["saved_value"] == 0.0309
+    # A document cites the value by the notebook, wherever it's built
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "$k = \\ckvalue[.3f]{fit.ipynb}{rates.35C}$\n"
+            "\\end{document}\n"
+        )
+    assert calkit.latex.map_ck_components("paper/main.tex") == []
+    with open("paper/_calkit/values.tex") as f:
+        assert "\\cksetvalue{fit.ipynb}{rates.35C}{n}{0.0616}" in f.read()
+    # What couldn't be saved stops the run, saying why
+    for arg, message in [
+        (
+            f"value=nope,cell={ids[2]}",
+            f"no variable 'nope' after cell {ids[2]}",
+        ),
+        (f"value=plt,cell={ids[0]}", "since it's a module"),
+        (f"figure=x.png,cell={ids[0]}", f"Cell {ids[0]} shows no image/png"),
+        ("value=k_25,cell=gone", "no cell gone"),
+    ]:
+        out = subprocess.run(
+            ["calkit", "nb", "execute", "fit.ipynb", "-e", "py", "-o", arg],
+            capture_output=True,
+            text=True,
+        )
+        assert out.returncode != 0
+        assert message in out.stdout + out.stderr
+        assert not os.path.isdir(".calkit/notebooks/outputs/fit/_saving")

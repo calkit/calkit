@@ -1872,13 +1872,16 @@ Options:
 
 Work with computational notebooks.
 
-| Command                                                             | Description                                                         |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`clean`](#subcommand-notebooks-nb-clean)                           | Clean notebook and place a copy in the cleaned notebooks directory. |
-| [`clean-all`](#subcommand-notebooks-nb-clean-all)                   | Clean all notebooks in the pipeline.                                |
-| [`check-kernel`](#subcommand-notebooks-nb-check-kernel)             | Check that an environment has a registered Jupyter kernel.          |
-| [`execute`](#subcommand-notebooks-nb-execute)                       | Execute notebook and place a copy in the relevant directory.        |
-| [`export-marimo-wasm`](#subcommand-notebooks-nb-export-marimo-wasm) | Export a marimo notebook to a WebAssembly app.                      |
+| Command                                                             | Description                                                                                        |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| [`clean`](#subcommand-notebooks-nb-clean)                           | Clean notebook and place a copy in the cleaned notebooks directory.                                |
+| [`clean-all`](#subcommand-notebooks-nb-clean-all)                   | Clean all notebooks in the pipeline.                                                               |
+| [`check-kernel`](#subcommand-notebooks-nb-check-kernel)             | Check that an environment has a registered Jupyter kernel.                                         |
+| [`execute`](#subcommand-notebooks-nb-execute)                       | Execute notebook and place a copy in the relevant directory.                                       |
+| [`mark`](#subcommand-notebooks-nb-mark)                             | Mark a value, figure, or table a notebook's cell makes, to be saved whenever the pipeline runs it. |
+| [`unmark`](#subcommand-notebooks-nb-unmark)                         | Stop saving a value, figure, or table from a notebook's cell.                                      |
+| [`outputs`](#subcommand-notebooks-nb-outputs)                       | List the values, figures, and tables marked in a notebook's cells, and how a document shows each.  |
+| [`export-marimo-wasm`](#subcommand-notebooks-nb-export-marimo-wasm) | Export a marimo notebook to a WebAssembly app.                                                     |
 
 <a id="subcommand-notebooks-nb-clean"></a>
 
@@ -1969,17 +1972,102 @@ Arguments:
 
 Options:
 
-| Option                  | Type      | Required | Default  | Description                                                                     |
-| ----------------------- | --------- | -------- | -------- | ------------------------------------------------------------------------------- |
-| `--environment`, `-e`   | str       | no       |          | Name or path to the spec of the environment in which to run the notebook.       |
-| `--to`                  | list[str] | no       | notebook | Output format ('html' or 'notebook').                                           |
-| `--no-check`            | boolean   | no       | False    | Do not check environment before executing.                                      |
-| `--param`, `-p`         | list[str] | no       |          | Parameter to pass to the notebook in key=value format.                          |
-| `--params-json`, `-j`   | str       | no       |          | JSON string to parse as parameters to pass to the notebook.                     |
-| `--params-base64`, `-b` | str       | no       |          | Base64-encoded JSON string to parse as parameters to pass to the notebook.      |
-| `--language`, `-l`      | str       | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
-| `--no-replace`          | boolean   | no       | False    | Do not replace notebook outputs from executed version.                          |
-| `--verbose`, `-v`       | boolean   | no       | False    | Print verbose output.                                                           |
+| Option                  | Type      | Required | Default  | Description                                                                                                                                                                       |
+| ----------------------- | --------- | -------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`   | str       | no       |          | Name or path to the spec of the environment in which to run the notebook.                                                                                                         |
+| `--to`                  | list[str] | no       | notebook | Output format ('html' or 'notebook').                                                                                                                                             |
+| `--no-check`            | boolean   | no       | False    | Do not check environment before executing.                                                                                                                                        |
+| `--param`, `-p`         | list[str] | no       |          | Parameter to pass to the notebook in key=value format.                                                                                                                            |
+| `--params-json`, `-j`   | str       | no       |          | JSON string to parse as parameters to pass to the notebook.                                                                                                                       |
+| `--params-base64`, `-b` | str       | no       |          | Base64-encoded JSON string to parse as parameters to pass to the notebook.                                                                                                        |
+| `--language`, `-l`      | str       | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment.                                                                                                   |
+| `--no-replace`          | boolean   | no       | False    | Do not replace notebook outputs from executed version.                                                                                                                            |
+| `--output`, `-o`        | list[str] | no       |          | A value, figure, or table a cell makes, to save after it runs, e.g., 'value=k,cell=3f9a1c2e' or 'figure=figures/fit.pdf,cell=8b77d0aa,variable=fig'. Can be given more than once. |
+| `--verbose`, `-v`       | boolean   | no       | False    | Print verbose output.                                                                                                                                                             |
+
+<a id="subcommand-notebooks-nb-mark"></a>
+
+#### `calkit notebooks|nb mark`
+
+Mark a value, figure, or table a notebook's cell makes, to be saved whenever the pipeline runs it.
+
+Usage:
+
+```text
+calkit notebooks|nb mark [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description           |
+| -------- | ---- | -------- | ------- | --------------------- |
+| `path`   | str  | yes      |         | Path to the notebook. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                                       |
+| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `--cell`       | str     | no       |         | ID of the cell it's saved after.                                                                                  |
+| `--cell-index` | int     | no       |         | Position of the cell it's saved after, from 0, for a notebook whose cells have no IDs yet, which gives them some. |
+| `--value`      | str     | no       |         | Variable to save as a value.                                                                                      |
+| `--figure`     | str     | no       |         | Path to save a figure to, e.g., figures/fit.pdf, from --variable, or else the image the cell shows.               |
+| `--table`      | str     | no       |         | Path to save a table to from --variable, as LaTeX (.tex), CSV, Markdown, or JSON.                                 |
+| `--variable`   | str     | no       |         | Variable holding the figure or table.                                                                             |
+| `--format`     | str     | no       |         | Format for a table's numbers, e.g., '.3f'.                                                                        |
+| `--stage`      | str     | no       |         | Stage running the notebook, if several do.                                                                        |
+| `--json`       | boolean | no       | False   | Print the result as JSON.                                                                                         |
+
+<a id="subcommand-notebooks-nb-unmark"></a>
+
+#### `calkit notebooks|nb unmark`
+
+Stop saving a value, figure, or table from a notebook's cell.
+
+Usage:
+
+```text
+calkit notebooks|nb unmark [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description           |
+| -------- | ---- | -------- | ------- | --------------------- |
+| `path`   | str  | yes      |         | Path to the notebook. |
+
+Options:
+
+| Option     | Type | Required | Default | Description                                 |
+| ---------- | ---- | -------- | ------- | ------------------------------------------- |
+| `--value`  | str  | no       |         | Value to stop saving.                       |
+| `--figure` | str  | no       |         | Path of a figure to stop saving.            |
+| `--table`  | str  | no       |         | Path of a table to stop saving.             |
+| `--cell`   | str  | no       |         | ID of a cell to stop saving anything after. |
+| `--stage`  | str  | no       |         | Stage running the notebook, if several do.  |
+
+<a id="subcommand-notebooks-nb-outputs"></a>
+
+#### `calkit notebooks|nb outputs`
+
+List the values, figures, and tables marked in a notebook's cells, and how a document shows each.
+
+Usage:
+
+```text
+calkit notebooks|nb outputs [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description           |
+| -------- | ---- | -------- | ------- | --------------------- |
+| `path`   | str  | yes      |         | Path to the notebook. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description         |
+| -------- | ------- | -------- | ------- | ------------------- |
+| `--json` | boolean | no       | False   | Print them as JSON. |
 
 <a id="subcommand-notebooks-nb-export-marimo-wasm"></a>
 

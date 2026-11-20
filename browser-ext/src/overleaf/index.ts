@@ -23,6 +23,7 @@ import {
   type ResultValue,
   type TableFile,
   citationCandidates,
+  notebookOfValuesPath,
   resultValues,
   tableFile,
 } from "../core/latex";
@@ -212,7 +213,9 @@ export function projectValues(
       paths.map((path) => provenanceFor(link, path).catch(() => null)),
     );
     return files.flatMap((file, i) =>
-      file && !file.value_error ? resultValues(paths[i], file.value) : [],
+      file && !file.value_error
+        ? resultValues(notebookOfValuesPath(paths[i]) ?? paths[i], file.value)
+        : [],
     );
   })();
   values.catch(() => valuesCache.delete(cacheKey));

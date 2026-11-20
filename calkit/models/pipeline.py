@@ -2474,6 +2474,170 @@ class SBatchStage(Stage):
         return cmd
 
 
+class NotebookCellOutput(Model):
+    """A value, figure, or table one of a notebook's cells makes, which
+    Calkit saves when the pipeline runs the notebook, so the notebook
+    doesn't have to write it itself.
+    """
+
+    cell: str | None = Field(
+        default=None,
+        description="ID of the cell it's saved after, which Jupyter and VS "
+        "Code keep on the cell as it moves. A value with none is saved "
+        "after the last cell.",
+    )
+    value: str | None = Field(
+        default=None,
+        description="Name of a variable to save as a value, cited by the "
+        "notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}.",
+    )
+    figure: str | None = Field(
+        default=None,
+        description="Path to save a figure to, from 'variable', e.g., a "
+        "Matplotlib figure, in the format its extension says, or else the "
+        "image the cell shows.",
+    )
+    table: str | None = Field(
+        default=None,
+        description="Path to save a table to, from 'variable', e.g., a "
+        "DataFrame, as LaTeX (.tex), CSV, Markdown, or JSON, by its "
+        "extension.",
+    )
+    variable: str | None = Field(
+        default=None,
+        description="Name of the variable holding the figure or table.",
+    )
+    format: str | None = Field(
+        default=None,
+        description="Python format spec for a table's numbers, e.g., '.3f'.",
+    )
+    storage: Literal["git", "dvc"] | None = Field(
+        default=None,
+        description="Where to store a figure or table; by its extension if "
+        "not set, as for other outputs.",
+    )
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def check_kind(self) -> "NotebookCellOutput":
+        from calkit.notebooks import (
+            CELL_OUTPUT_FIGURE_EXTS,
+            CELL_OUTPUT_TABLE_EXTS,
+        )
+
+        kinds = [k for k in ("value", "figure", "table") if getattr(self, k)]
+        if len(kinds) != 1:
+            raise ValueError(
+                "A cell output needs one of 'value', 'figure', or 'table'"
+            )
+        names = [self.value, self.variable]
+        for name in names:
+            if name is not None and not name.isidentifier():
+                raise ValueError(f"'{name}' isn't a variable name")
+        if self.cell is not None and not re.fullmatch(
+            r"[A-Za-z0-9_-]+", self.cell
+        ):
+            raise ValueError(f"'{self.cell}' isn't a cell ID")
+        if self.value is not None:
+            if self.variable or self.format or self.storage:
+                raise ValueError(
+                    "A value is saved from the variable it names, so "
+                    "'variable', 'format', and 'storage' don't apply"
+                )
+            return self
+        path = str(self.figure or self.table)
+        check_path_relative_and_child_of_cwd(path)
+        if "," in path:
+            raise ValueError(f"'{path}' can't include a comma")
+        ext = os.path.splitext(path)[1].lower()
+        if self.figure is not None:
+            if self.variable is None and self.cell is None:
+                raise ValueError(
+                    f"Name the cell that shows {path}, or the variable "
+                    "holding it"
+                )
+            if ext not in CELL_OUTPUT_FIGURE_EXTS:
+                raise ValueError(
+                    f"A figure is saved as one of "
+                    f"{', '.join(CELL_OUTPUT_FIGURE_EXTS)}, not '{ext}'"
+                )
+            if self.format:
+                raise ValueError("'format' only applies to tables")
+        else:
+            if ext not in CELL_OUTPUT_TABLE_EXTS:
+                raise ValueError(
+                    f"A table is saved as one of "
+                    f"{', '.join(CELL_OUTPUT_TABLE_EXTS)}, not '{ext}'"
+                )
+            if self.variable is None:
+                raise ValueError(
+                    f"Name the variable holding the table for {path}"
+                )
+            if self.format:
+                # Commas separate the fields of its command line argument
+                if "," in self.format:
+                    raise ValueError(
+                        "A table's format can't include a comma; use '_' "
+                        "to group thousands"
+                    )
+                try:
+                    format(1.5, self.format)
+                except ValueError:
+                    raise ValueError(
+                        f"'{self.format}' isn't a format for numbers"
+                    )
+        return self
+
+    @property
+    def kind(self) -> Literal["value", "figure", "table"]:
+        if self.value is not None:
+            return "value"
+        return "figure" if self.figure is not None else "table"
+
+    @property
+    def path(self) -> str | None:
+        """Where a figure or table is saved."""
+        return self.figure or self.table
+
+    @property
+    def stored_with(self) -> Literal["git", "dvc"]:
+        """Where a figure or table is stored, by extension unless set."""
+        from calkit.core import DVC_EXTENSIONS
+
+        if self.storage is not None:
+            return self.storage
+        ext = os.path.splitext(str(self.path))[1].lower()
+        return "dvc" if ext in DVC_EXTENSIONS else "git"
+
+    def to_arg(self) -> str:
+        """This output as ``calkit nb execute --output`` takes it."""
+        fields = ("value", "figure", "table", "cell", "variable", "format")
+        return ",".join(
+            f"{f}={getattr(self, f)}"
+            for f in fields
+            if getattr(self, f) is not None
+        )
+
+    @classmethod
+    def from_arg(cls, arg: str) -> "NotebookCellOutput":
+        """Parse what ``to_arg`` writes, e.g.,
+        ``figure=figures/fit.pdf,cell=8b77d0aa,variable=fig``.
+        """
+        fields: dict[str, str] = {}
+        for part in arg.split(","):
+            key, sep, val = part.partition("=")
+            key = key.strip()
+            if not sep or not key:
+                raise ValueError(
+                    f"Can't read '{arg}'; give it as, e.g., "
+                    "'value=k,cell=3f9a1c2e'"
+                )
+            if key in fields:
+                raise ValueError(f"'{key}' is given twice in '{arg}'")
+            fields[key] = val.strip()
+        return cls.model_validate(fields)
+
+
 class JupyterNotebookStage(Stage):
     """A stage that runs a Jupyter notebook.
 
@@ -2505,6 +2669,31 @@ class JupyterNotebookStage(Stage):
         description="The notebook's language. Detected automatically if "
         "unset.",
     )
+    cell_outputs: list[NotebookCellOutput] = Field(
+        default=[],
+        description="Values, figures, and tables the notebook's cells make, "
+        "saved by Calkit when the notebook runs, so it doesn't have to "
+        "write them. Only for Python notebooks.",
+    )
+
+    @model_validator(mode="after")
+    def check_cell_outputs(self) -> "JupyterNotebookStage":
+        values = [o.value for o in self.cell_outputs if o.value is not None]
+        for name in set(values):
+            if values.count(name) > 1:
+                raise ValueError(f"Value '{name}' is saved more than once")
+        paths = [o.path for o in self.cell_outputs if o.path is not None]
+        declared = [o if isinstance(o, str) else o.path for o in self.outputs]
+        for path in paths:
+            if paths.count(path) > 1:
+                raise ValueError(f"{path} is saved from more than one cell")
+            if path in declared:
+                raise ValueError(
+                    f"{path} is a cell output, so it can't be in 'outputs' too"
+                )
+        if self.cell_outputs and self.language not in (None, "python"):
+            raise ValueError("Cell outputs are only saved from Python")
+        return self
 
     def update_parameters(self, params: dict) -> None:
         """If we have any templated parameters, update those, e.g., from
@@ -2585,6 +2774,8 @@ class JupyterNotebookStage(Stage):
                 params_json.encode("utf-8")
             ).decode("utf-8")
             cmd += f' --params-base64 "{params_base64}"'
+        for out in self.cell_outputs:
+            cmd += f' --output "{out.to_arg()}"'
         cmd += f' "{self.notebook_path}"'
         if self.scheduler is not None:
             cmd = self.scheduler_cmd + " --command -- " + cmd
@@ -2603,6 +2794,30 @@ class JupyterNotebookStage(Stage):
             outs.append(
                 {html_path: {"cache": self.html_storage == "dvc"}},
             )
+        for out in self.cell_output_paths:
+            outs.append({out.path: {"cache": out.storage == "dvc"}})
+        return outs
+
+    @property
+    def values_path(self) -> str:
+        """Where the values its cells make are saved."""
+        from calkit.notebooks import get_notebook_values_path
+
+        return get_notebook_values_path(
+            self.notebook_path, parameters=self.parameters
+        )
+
+    @property
+    def cell_output_paths(self) -> list[PathOutput]:
+        """The files its cell outputs are saved to: the values file, if
+        any are values, and each figure and table.
+        """
+        outs = []
+        if any(o.value is not None for o in self.cell_outputs):
+            outs.append(PathOutput(path=self.values_path, storage="git"))
+        for o in self.cell_outputs:
+            if o.path is not None:
+                outs.append(PathOutput(path=o.path, storage=o.stored_with))
         return outs
 
     @property
@@ -2620,7 +2835,7 @@ class JupyterNotebookStage(Stage):
                 storage=self.executed_ipynb_storage,
             ),
             PathOutput(path=self.html_path, storage=self.html_storage),
-        ]
+        ] + self.cell_output_paths
 
 
 class WordToPdfStage(Stage):

@@ -58,6 +58,483 @@ def get_executed_notebook_path(
     return p
 
 
+CELL_OUTPUT_FIGURE_EXTS = (".png", ".pdf", ".svg", ".jpg", ".jpeg")
+CELL_OUTPUT_TABLE_EXTS = (".tex", ".csv", ".md", ".json")
+# The MIME type of the image a cell shows for each figure extension, for a
+# figure saved without a variable
+CELL_IMAGE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+}
+# Marks the cells Calkit adds to save cell outputs, which are taken out of
+# the executed notebook again
+CAPTURE_CELL_KEY = "calkit_capture"
+# Defined in the kernel by the first cell Calkit adds, and called after each
+# cell with outputs. It's self-contained, since the notebook's environment
+# needn't have Calkit installed, and leaves a figure saved without a variable
+# to be taken from the executed notebook instead
+CAPTURE_HELPER = r"""
+def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
+    import json
+    import os
+
+    def to_data(value, what, strict=True):
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        if isinstance(value, dict):
+            return {str(k): to_data(v, what, strict) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [to_data(v, what, strict) for v in value]
+        # A pandas Series or DataFrame, then NumPy arrays and scalars
+        for method in ("to_dict", "tolist"):
+            if callable(getattr(value, method, None)):
+                return to_data(getattr(value, method)(), what, strict)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            pass
+        if not strict:
+            return str(value)
+        raise TypeError(
+            f"Calkit: can't save {what} after {where}, since it's a "
+            f"{type(value).__name__}; save a number, string, or a list or "
+            "dict of them"
+        )
+
+    def to_table(value, what):
+        index = None
+        index_name = None
+        if callable(getattr(value, "to_frame", None)) and not hasattr(
+            value, "columns"
+        ):
+            value = value.to_frame()
+        if hasattr(value, "columns") and hasattr(value, "index"):
+            split = value.to_dict(orient="split")
+            columns = split["columns"]
+            rows = split["data"]
+            idx = value.index
+            if not (
+                type(idx).__name__ == "RangeIndex"
+                and idx.start == 0
+                and idx.step == 1
+                and idx.name is None
+            ):
+                index = split["index"]
+                index_name = idx.name
+        elif hasattr(value, "columns") and callable(getattr(value, "rows", None)):
+            columns = list(value.columns)
+            rows = value.rows()
+        elif isinstance(value, dict) and all(
+            isinstance(v, (list, tuple)) or hasattr(v, "tolist")
+            for v in value.values()
+        ):
+            columns = list(value)
+            cols = [list(v) for v in value.values()]
+            if len({len(c) for c in cols}) > 1:
+                raise ValueError(
+                    f"Calkit: can't save {what} after {where} as a table, "
+                    "since its columns are different lengths"
+                )
+            rows = [list(r) for r in zip(*cols)]
+        elif (
+            isinstance(value, (list, tuple))
+            and value
+            and all(isinstance(r, dict) for r in value)
+        ):
+            columns = list(dict.fromkeys(k for r in value for k in r))
+            rows = [[r.get(c) for c in columns] for r in value]
+        elif (
+            isinstance(value, (list, tuple))
+            and value
+            and all(isinstance(r, (list, tuple)) for r in value)
+        ):
+            columns = list(value[0])
+            rows = [list(r) for r in value[1:]]
+        else:
+            raise TypeError(
+                f"Calkit: can't save {what} after {where} as a table, since "
+                f"it's a {type(value).__name__}; save a DataFrame, or a "
+                "list of rows"
+            )
+        return {
+            "columns": [str(c) for c in columns],
+            "index": to_data(index, what, strict=False),
+            "index_name": None if index_name is None else str(index_name),
+            "data": [[to_data(c, what, strict=False) for c in r] for r in rows],
+        }
+
+    def save_figure(fig, path, what):
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        # A Matplotlib figure, or what's drawn on one, e.g., axes, saved
+        # tight like the notebook shows it
+        if not callable(getattr(fig, "savefig", None)):
+            fig = getattr(fig, "figure", None) or fig
+        if callable(getattr(fig, "savefig", None)):
+            fig.savefig(path, bbox_inches="tight")
+        elif callable(getattr(fig, "write_image", None)):
+            fig.write_image(path)
+        elif callable(getattr(fig, "save", None)):
+            fig.save(path)
+        else:
+            raise TypeError(
+                f"Calkit: can't save {what} after {where} as a figure, "
+                f"since it's a {type(fig).__name__}; save a Matplotlib "
+                "figure, or leave out the variable to save the image the "
+                "cell shows"
+            )
+
+    user = globals()
+    for i, out in outputs:
+        name = out.get("value") or out.get("variable")
+        what = f"'{name}'"
+        if name is None:
+            continue
+        if name not in user:
+            raise NameError(
+                f"Calkit: there's no variable '{name}' after {where} to "
+                f"save as {out.get('path') or 'a value'}"
+            )
+        if out.get("value"):
+            values = {}
+            if os.path.isfile(values_path):
+                with open(values_path, encoding="utf-8") as f:
+                    values = json.load(f)
+            values[name] = to_data(user[name], what)
+            os.makedirs(os.path.dirname(values_path) or ".", exist_ok=True)
+            with open(values_path, "w", encoding="utf-8") as f:
+                json.dump(values, f, indent=2)
+        elif out.get("figure"):
+            save_figure(user[name], out["path"], what)
+        else:
+            table = to_table(user[name], what)
+            os.makedirs(tables_dir, exist_ok=True)
+            with open(
+                os.path.join(tables_dir, f"{i}.json"), "w", encoding="utf-8"
+            ) as f:
+                json.dump(table, f)
+"""
+
+
+def get_notebook_values_path(
+    notebook_path: str, parameters: dict[str, Any] | None = None
+) -> str:
+    """Where the values a notebook's cells make are saved, e.g.,
+    ``.calkit/notebooks/outputs/analysis/values.json`` for
+    ``analysis.ipynb``, with any parameters in the folder's name as for its
+    executed copy.
+    """
+    executed = get_executed_notebook_path(
+        notebook_path, to="notebook", parameters=parameters
+    )
+    prefix = ".calkit/notebooks/executed/"
+    name = executed.removeprefix(prefix).removesuffix(".ipynb")
+    return f".calkit/notebooks/outputs/{name}/values.json"
+
+
+def get_notebook_of_values_path(path: str) -> str | None:
+    """The notebook a values file was saved from, for one without
+    parameters, which is how a value from it is cited.
+    """
+    prefix = ".calkit/notebooks/outputs/"
+    path = path.replace("\\", "/")
+    if not (path.startswith(prefix) and path.endswith("/values.json")):
+        return None
+    name = path.removeprefix(prefix).removesuffix("/values.json")
+    return name + ".ipynb" if name else None
+
+
+def get_cell_ids(nb: dict) -> list[str | None]:
+    """Each cell's ID, or None for one without, e.g., in a notebook older
+    than nbformat 4.5.
+    """
+    return [cell.get("id") for cell in nb.get("cells", [])]
+
+
+def ensure_cell_ids(nb: dict) -> bool:
+    """Give each cell without one an ID, as Jupyter does, upgrading an older
+    notebook to nbformat 4.5, which is the first with them.
+
+    Returns whether anything changed.
+    """
+    import uuid
+
+    changed = False
+    taken = {i for i in get_cell_ids(nb) if i}
+    for cell in nb.get("cells", []):
+        if cell.get("id"):
+            continue
+        new_id = uuid.uuid4().hex[:8]
+        while new_id in taken:
+            new_id = uuid.uuid4().hex[:8]
+        taken.add(new_id)
+        cell["id"] = new_id
+        changed = True
+    if changed and (nb.get("nbformat"), nb.get("nbformat_minor", 0)) < (4, 5):
+        nb["nbformat"] = 4
+        nb["nbformat_minor"] = 5
+    return changed
+
+
+def has_ordinal_cell_ids(nb: dict) -> bool:
+    """Whether a notebook's cell IDs are numbers counting up, which is what
+    nbstripout replaces them with unless given ``--keep-id``, so they change
+    whenever a cell is added or removed above.
+    """
+    ids = get_cell_ids(nb)
+    return len(ids) > 1 and ids == [str(i) for i in range(len(ids))]
+
+
+def add_capture_cells(
+    nb: dict,
+    outputs: list[dict],
+    values_path: str,
+    tables_dir: str,
+) -> dict:
+    """A copy of a notebook with cells added to save its cell outputs, one
+    after each cell some are saved after, and one at the end for values
+    named without a cell.
+
+    ``outputs`` are cell outputs as ``NotebookCellOutput.model_dump`` gives
+    them, with ``path`` set to where a figure is saved, relative to where
+    the kernel runs, like ``values_path`` and ``tables_dir``. Raises a
+    ``ValueError`` naming a cell the notebook doesn't have.
+    """
+    import copy
+
+    def make_cell(source: str, n: int) -> dict:
+        return {
+            "cell_type": "code",
+            "id": f"calkit-capture-{n}",
+            "metadata": {CAPTURE_CELL_KEY: True},
+            "execution_count": None,
+            "outputs": [],
+            "source": source,
+        }
+
+    def make_call(where: str, items: list[tuple[int, dict]]) -> str:
+        args = json.dumps([[i, o] for i, o in items])
+        return (
+            f"_calkit_save_cell_outputs({where!r}, "
+            f"__import__('json').loads({args!r}), {values_path!r}, "
+            f"{tables_dir!r})"
+        )
+
+    nb = copy.deepcopy(nb)
+    ids = get_cell_ids(nb)
+    by_cell: dict[str, list[tuple[int, dict]]] = {}
+    at_end: list[tuple[int, dict]] = []
+    for i, out in enumerate(outputs):
+        cell = out.get("cell")
+        if cell is None:
+            at_end.append((i, out))
+            continue
+        if cell not in ids:
+            raise ValueError(f"The notebook has no cell {cell}")
+        by_cell.setdefault(cell, []).append((i, out))
+    cells = [make_cell(CAPTURE_HELPER, 0)]
+    for cell in nb.get("cells", []):
+        cells.append(cell)
+        items = by_cell.get(cell.get("id"))
+        if items:
+            cells.append(
+                make_cell(make_call(f"cell {cell['id']}", items), len(cells))
+            )
+    if at_end:
+        cells.append(make_cell(make_call("the last cell", at_end), len(cells)))
+    nb["cells"] = cells
+    if (nb.get("nbformat"), nb.get("nbformat_minor", 0)) < (4, 5):
+        nb["nbformat"] = 4
+        nb["nbformat_minor"] = 5
+    return nb
+
+
+def remove_capture_cells(nb: dict) -> dict:
+    """A notebook without the cells ``add_capture_cells`` added."""
+    nb = dict(nb)
+    nb["cells"] = [
+        cell
+        for cell in nb.get("cells", [])
+        if not cell.get("metadata", {}).get(CAPTURE_CELL_KEY)
+    ]
+    return nb
+
+
+def get_cell_image(nb: dict, cell_id: str, ext: str) -> bytes:
+    """The image a cell shows, as a file with the extension given, from an
+    executed notebook, e.g., a plot Matplotlib drew inline.
+
+    Raises a ``ValueError`` saying what's wrong, e.g., that it shows none,
+    or more than one.
+    """
+    import base64
+
+    mime = CELL_IMAGE_MIME_TYPES[ext.lower()]
+    cell = next(
+        (c for c in nb.get("cells", []) if c.get("id") == cell_id), None
+    )
+    if cell is None:
+        raise ValueError(f"The notebook has no cell {cell_id}")
+    images = [
+        out["data"][mime]
+        for out in cell.get("outputs", [])
+        if mime in (out.get("data") or {})
+    ]
+    if not images:
+        shown = sorted(
+            {
+                m
+                for out in cell.get("outputs", [])
+                for m in (out.get("data") or {})
+                if m in CELL_IMAGE_MIME_TYPES.values()
+            }
+        )
+        hint = (
+            f"; it shows {', '.join(shown)}, so save it as that, or name "
+            "the figure's variable"
+            if shown
+            else "; name the figure's variable to save it from that"
+        )
+        raise ValueError(f"Cell {cell_id} shows no {mime} image" + hint)
+    if len(images) > 1:
+        raise ValueError(
+            f"Cell {cell_id} shows {len(images)} images; name the variable "
+            "of the figure to save"
+        )
+    data: str = (
+        "".join(images[0]) if isinstance(images[0], list) else images[0]
+    )
+    if mime == "image/svg+xml":
+        return data.encode("utf-8")
+    return base64.b64decode(data)
+
+
+def find_notebook_stages(ck_info: dict, notebook_path: str) -> list[str]:
+    """The names of the pipeline's stages that run a notebook."""
+    path = Path(notebook_path).as_posix()
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    return [
+        name
+        for name, stage in stages.items()
+        if isinstance(stage, dict)
+        and stage.get("kind") == "jupyter-notebook"
+        and Path(str(stage.get("notebook_path", ""))).as_posix() == path
+    ]
+
+
+def get_cell_output_target(output: dict) -> tuple[str, str]:
+    """What a cell output saves, e.g., ``("value", "k")`` or
+    ``("figure", "figures/fit.pdf")``, which is unique within a stage.
+    """
+    for kind in ("value", "figure", "table"):
+        if output.get(kind):
+            return kind, str(output[kind])
+    raise ValueError(
+        "A cell output needs one of 'value', 'figure', or 'table'"
+    )
+
+
+def with_cell_output(outputs: list[dict], new: dict) -> list[dict]:
+    """A stage's cell outputs with one added, replacing one that saves the
+    same thing, e.g., when a value is marked again on another cell, and
+    taking a figure or table's path from another of its kind.
+    """
+    target = get_cell_output_target(new)
+    path = new.get("figure") or new.get("table")
+    replaced = False
+    out = []
+    for existing in outputs:
+        same = get_cell_output_target(existing) == target or (
+            path is not None
+            and path in (existing.get("figure"), existing.get("table"))
+        )
+        if same:
+            if not replaced:
+                out.append(new)
+                replaced = True
+            continue
+        out.append(existing)
+    if not replaced:
+        out.append(new)
+    return out
+
+
+def without_cell_outputs(
+    outputs: list[dict],
+    value: str | None = None,
+    path: str | None = None,
+    cell: str | None = None,
+) -> list[dict]:
+    """A stage's cell outputs without those saving a value or a figure or
+    table at a path, or saved after a cell.
+    """
+    return [
+        o
+        for o in outputs
+        if not (
+            (value is not None and o.get("value") == value)
+            or (path is not None and path in (o.get("figure"), o.get("table")))
+            or (cell is not None and o.get("cell") == cell)
+        )
+    ]
+
+
+def get_cell_output_citation(
+    output: dict, notebook_path: str, parameters: dict | None = None
+) -> str | None:
+    """The calkit.sty command a document shows a cell output with, or None
+    for a table that isn't LaTeX, which needs a stage to typeset it.
+    """
+    if output.get("value"):
+        source = (
+            get_notebook_values_path(notebook_path, parameters)
+            if parameters
+            else Path(notebook_path).as_posix()
+        )
+        return f"\\ckvalue{{{source}}}{{{output['value']}}}"
+    if output.get("figure"):
+        return f"\\ckfigure{{{output['figure']}}}"
+    if str(output.get("table", "")).lower().endswith(".tex"):
+        return f"\\cktable{{{output['table']}}}"
+    return None
+
+
+def describe_cell_outputs(
+    stage_name: str,
+    stage: dict,
+    nb: dict | None,
+    values: dict | None = None,
+) -> list[dict]:
+    """A stage's cell outputs as editors show them: what each saves, the
+    cell it's after and that cell's position, how a document cites it, and
+    for a value, what the last run saved, from ``values``.
+    """
+    ids = get_cell_ids(nb) if nb is not None else []
+    params = stage.get("parameters") or None
+    described = []
+    for output in stage.get("cell_outputs") or []:
+        kind, target = get_cell_output_target(output)
+        cell = output.get("cell")
+        item = {
+            "stage": stage_name,
+            "kind": kind,
+            "name" if kind == "value" else "path": target,
+            "cell": cell,
+            "cell_index": ids.index(cell) if cell in ids else None,
+            "variable": output.get("variable"),
+            "format": output.get("format"),
+            "citation": get_cell_output_citation(
+                output, stage["notebook_path"], params
+            ),
+        }
+        if kind == "value" and values is not None and target in values:
+            item["saved_value"] = values[target]
+        described.append(item)
+    return described
+
+
 # How much of a file to read when deciding whether it's a marimo notebook.
 # marimo writes its header at the top, but a project's own license banner or
 # module docstring comes first, so leave room for one.

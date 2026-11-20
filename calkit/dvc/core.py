@@ -385,6 +385,42 @@ def skip_stages(
         setattr(Stage, "reproduce", original_reproduce)
 
 
+@contextlib.contextmanager
+def thaw_stages(names: set[str]) -> Iterator[None]:
+    """Run these frozen stages in ``dvc repro`` while active.
+
+    Keyed by Calkit stage name, which also covers the ``<name>@<item>``
+    stages DVC makes from an iterated one. Only stages in the root
+    ``dvc.yaml`` match. DVC never runs a frozen stage, even forced, so this
+    is how one named outright with ``--force`` runs, e.g., to retrain a
+    model whose committed weights are otherwise left alone.
+    """
+    from dvc.stage.loader import StageLoader
+
+    original_load = StageLoader.__dict__["load_stage"]
+
+    def load_stage(cls: Any, *args: Any, **kwargs: Any) -> Any:
+        stage = original_load.__func__(cls, *args, **kwargs)
+        name = getattr(stage, "name", None) or ""
+        dvcfile = getattr(stage, "dvcfile", None)
+        if (
+            name.split("@")[0] in names
+            and dvcfile is not None
+            and os.path.normpath(os.path.relpath(dvcfile.path)) == "dvc.yaml"
+        ):
+            stage.frozen = False
+        return stage
+
+    if not names:
+        yield
+        return
+    setattr(StageLoader, "load_stage", classmethod(load_stage))
+    try:
+        yield
+    finally:
+        setattr(StageLoader, "load_stage", original_load)
+
+
 _memoized_hashes_lock = threading.RLock()
 
 

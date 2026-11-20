@@ -72,6 +72,7 @@ from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.open_ import open_app
 from calkit.cli.overleaf import overleaf_app
+from calkit.cli.quarto import quarto_app
 from calkit.cli.scheduler import scheduler_app
 from calkit.cli.show import show_app
 from calkit.cli.sync import sync_app
@@ -112,6 +113,7 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
+app.add_typer(quarto_app, name="quarto", help="Work with Quarto.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
@@ -4417,6 +4419,14 @@ def run(
                 f"'{found['stage']}' stores it with DVC"
             )
     dvc.stage.run._run = _patched_run
+    # DVC never runs a frozen stage, so one named outright with --force is
+    # thawed for this run
+    thawed = (
+        calkit.pipeline.frozen_stage_base_names(ck_info=ck_info)
+        & {t.split("@")[0] for t in targets or []}
+        if force
+        else set()
+    )
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s
         # default. Brief contention is common and benign: a background
@@ -4428,6 +4438,7 @@ def run(
         with (
             calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT),
             calkit.dvc.skip_stages(gated_stages, skipped=skipped_stale),
+            calkit.dvc.thaw_stages(thawed),
         ):
             res = _run_dvc_repro(["repro"] + args)
     finally:
@@ -5363,9 +5374,35 @@ def run_in_env(
         conda_cmd = [conda_exe, "run"]
         if prefix is not None:
             conda_cmd += ["--prefix", os.path.abspath(prefix)]
+            env_prefix = os.path.abspath(prefix)
         else:
             conda_cmd += ["-n", conda_env["name"]]
+            # Named environments are in the envs folder of Conda's root,
+            # which holds its executable in bin, condabin, or Scripts
+            env_prefix = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.realpath(conda_exe))),
+                "envs",
+                conda_env["name"],
+            )
         cmd = conda_cmd + cmd
+        # Activating an environment while Conda's base is on PATH swaps it in
+        # at base's position rather than putting it first, so anything
+        # earlier on PATH, e.g., a Quarto or Python installed with Homebrew
+        # or Pixi, would win over the environment's own
+        bin_dirs = (
+            [env_prefix, os.path.join(env_prefix, "Library", "bin")]
+            + [os.path.join(env_prefix, "Scripts")]
+            if sys.platform == "win32"
+            else [os.path.join(env_prefix, "bin")]
+        )
+        bin_dirs = [d for d in bin_dirs if os.path.isdir(d)]
+        if bin_dirs:
+            run_env_vars = dict(
+                run_env_vars if run_env_vars is not None else os.environ
+            )
+            run_env_vars["PATH"] = os.pathsep.join(
+                bin_dirs + [run_env_vars.get("PATH", "")]
+            )
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

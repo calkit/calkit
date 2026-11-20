@@ -50,6 +50,7 @@
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
+| [`quarto`](#command-group-quarto)                | Work with Quarto.                                                                                            |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
@@ -4544,6 +4545,44 @@ Options:
 | --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
+
+<a id="command-group-quarto"></a>
+
+### `calkit quarto`
+
+Work with Quarto.
+
+| Command                                 | Description                                                      |
+| --------------------------------------- | ---------------------------------------------------------------- |
+| [`prepare`](#subcommand-quarto-prepare) | Get a Quarto document ready for its pipeline stage to render it. |
+
+<a id="subcommand-quarto-prepare"></a>
+
+#### `calkit quarto prepare`
+
+Get a Quarto document ready for its pipeline stage to render it.
+
+Checks Quarto comes from the document's environment, or that the project lists it as a requirement, so a version installed on this machine isn't used without saying so. Then writes the values the document shows with the 'ckvalue' shortcode, read from their results files, beside it with the shortcode itself.
+
+Usage:
+
+```text
+calkit quarto prepare [OPTIONS] TARGET-PATH
+```
+
+Arguments:
+
+| Argument      | Type | Required | Default | Description                  |
+| ------------- | ---- | -------- | ------- | ---------------------------- |
+| `target_path` | str  | yes      |         | Path to the Quarto document. |
+
+Options:
+
+| Option                | Type | Required | Default | Description                                                                                          |
+| --------------------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e` | str  | no       |         | Environment the document is rendered in, to check Quarto comes from it or is a declared requirement. |
+| `--stage`             | str  | no       |         | Stage rendering the document, whose requirements count.                                              |
+| `--project-dir`       | str  | no       | .       | Project directory, if not the current one.                                                           |
 
 <a id="command-group-overleaf-ol"></a>
 

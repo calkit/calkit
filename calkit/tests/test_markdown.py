@@ -1123,6 +1123,14 @@ def test_installing_the_projects_own_package_is_a_dev_install(
     # The source is a dependency in its own right, because an editable
     # install is a pointer to the working tree
     assert local_package_source_paths("python") == ["src/wave_tools"]
+    # A src layout whose package isn't named for the distribution, as a
+    # template's often isn't, still has its source depended on, but not
+    # build residue beside it
+    (tmp_path / "src" / "wave_tools").rename(tmp_path / "src" / "analysis")
+    (tmp_path / "src" / "wave_tools.egg-info").mkdir()
+    (tmp_path / "src" / "wave_tools.egg-info" / "PKG-INFO").write_text("")
+    assert local_package_source_paths("python") == ["src/analysis"]
+    (tmp_path / "src" / "analysis").rename(tmp_path / "src" / "wave_tools")
     text = (
         "```sh calkit environment name=py\nuv add wave-tools\n```\n\n"
         "```python calkit stage name=py environment=py\nprint(1)\n```\n"

@@ -523,7 +523,7 @@ class Stage(Model):
     frozen: bool = Field(
         default=False,
         description="Never rerun this stage, treating its outputs as "
-        "up-to-date.",
+        "up-to-date, unless it's named outright with 'calkit run --force'.",
     )
     scheduler: StageSchedulerOptions | None = Field(
         default=None,
@@ -1851,6 +1851,12 @@ class QuartoStage(Stage):
     arbitrary paths. As with other stages, plain string outputs are
     DVC-cached by default; use a ``PathOutput`` to store an output with Git
     instead.
+
+    Before rendering, ``calkit quarto prepare`` checks Quarto comes from the
+    stage's environment, or is a declared requirement, and resolves the
+    values the document shows with the ``ckvalue`` shortcode. A notebook is
+    depended on with its outputs stripped, like a notebook stage's, since
+    rendering it with ``--execute`` writes them back into it.
     """
 
     kind: Literal["quarto"] = "quarto"
@@ -1866,18 +1872,142 @@ class QuartoStage(Stage):
         default=[], description="Extra arguments passed to 'quarto render'."
     )
 
+    # The results files the document's ckvalue shortcodes read, relative to
+    # the project, set by preprocess
+    _value_paths: list[str] = PrivateAttr(default_factory=list)
+    _shows_values: bool = PrivateAttr(default=False)
+
+    @property
+    def is_notebook(self) -> bool:
+        return self.target_path.endswith(".ipynb")
+
+    @property
+    def project_target_path(self) -> str:
+        """The document's path relative to the project."""
+        return posixpath.normpath(
+            posixpath.join(self.wdir or "", self.target_path)
+        )
+
+    @property
+    def cleaned_notebook_path(self) -> str:
+        """The notebook with its outputs stripped, relative to the project."""
+        from calkit.notebooks import get_cleaned_notebook_path
+
+        return get_cleaned_notebook_path(self.project_target_path)
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Find the results files the document's ``ckvalue`` shortcodes read,
+        since they're as much inputs as its source, and with
+        ``write_files``, write the shortcode beside it.
+
+        A malformed shortcode is left for ``calkit quarto prepare`` to
+        report when the stage runs, rather than stopping the pipeline from
+        compiling.
+        """
+        import calkit
+        import calkit.quarto
+        from calkit.markdown import MarkdownParseError, results_by_name
+
+        def exists(p: str) -> bool:
+            return os.path.isfile(os.path.join(project_dir or "", p))
+
+        document = os.path.join(project_dir or "", self.project_target_path)
+        text = calkit.quarto.read_document_text(document)
+        self._value_paths = []
+        self._shows_values = False
+        if text is None or "ckvalue" not in text:
+            return
+        try:
+            ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
+            values = calkit.quarto.extract_values(
+                text,
+                self.project_target_path,
+                results=results_by_name(ck_info),
+            )
+        except (MarkdownParseError, ValueError):
+            values = []
+        self._shows_values = bool(values)
+        for value in values:
+            if (
+                exists(value.path)
+                or exists(value.path + ".dvc")
+                or is_output(value.path)
+            ) and value.path not in self._value_paths:
+                self._value_paths.append(value.path)
+        if write_files and self._shows_values:
+            calkit.quarto.write_components(document)
+
+    @property
+    def component_outputs(self) -> list[PathOutput]:
+        """The values the stage writes beside the document for the
+        ``ckvalue`` shortcode, relative to its ``wdir``, kept in Git, like
+        the shortcode, so the document renders the same without Calkit,
+        e.g., when a site is published."""
+        import calkit.quarto
+
+        if not self._shows_values:
+            return []
+        return [
+            PathOutput(
+                path=calkit.quarto.get_values_path(self.target_path),
+                storage="git",
+            )
+        ]
+
+    @property
+    def notebook_outputs(self) -> list[PathOutput]:
+        """The stripped notebook it depends on, kept out of Git, as a notebook
+        stage's is by default."""
+        if not self.is_notebook:
+            return []
+        return [PathOutput(path=self.cleaned_notebook_path, storage=None)]
+
     @property
     def dvc_cmd(self) -> str:
+        prepare = ["calkit", "quarto", "prepare"]
+        # Where Quarto comes from can only be checked where the stage runs,
+        # so not through a job scheduler or on another machine
+        if (
+            self.scheduler is None
+            and self.inner_environment == self.outer_environment
+        ):
+            prepare += ["-e", self.environment, "--stage", str(self.name)]
+        if self.wdir:
+            prepare += ["--project-dir", posixpath.relpath(".", self.wdir)]
+        prepare.append(self.target_path)
         cmd = f"{self.xenv_cmd} quarto render {self.target_path}"
         if self.to is not None:
             cmd += f" --to {self.to}"
         for arg in self.args:
             cmd += f" {quote_arg(arg)}"
-        return cmd.strip()
+        return shlex.join(prepare) + " && " + cmd.strip()
 
     @property
     def dvc_deps(self) -> list[str]:
-        return [self.target_path] + super().dvc_deps
+        document = (
+            self.path_from_wdir(self.cleaned_notebook_path)
+            if self.is_notebook
+            else self.target_path
+        )
+        deps = [document] + super().dvc_deps
+        for path in self._value_paths:
+            path = self.path_from_wdir(path)
+            if path not in deps:
+                deps.append(path)
+        return deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        for out in self.component_outputs:
+            outs.append({out.path: {"cache": False, "persist": False}})
+        return outs
 
 
 class JsonToLatexStage(Stage):

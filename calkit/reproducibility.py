@@ -458,9 +458,16 @@ def find_scripts_not_in_pipeline(
     # One string to search rather than a set of paths, since a command
     # names its script somewhere inside it and a dependency may be written
     # with a leading ./
-    referenced = "\n".join(
-        _strings_in(pipeline.get("stages", {}))
-        + _strings_in(ck_info.get("pipeline", {}))
+    strings = _strings_in(pipeline.get("stages", {})) + _strings_in(
+        ck_info.get("pipeline", {})
+    )
+    referenced = "\n".join(strings)
+    # A folder a stage reads or writes covers what's in it, e.g., a package's
+    # modules under an input 'src', or generated data under an output
+    referenced_dirs = tuple(
+        posixpath.normpath(s.strip()) + "/"
+        for s in strings
+        if s.strip() and not any(c.isspace() for c in s.strip())
     )
     # Tracked paths are relative to the repo root, which may be above wdir
     # when checking a subproject, so make them relative to wdir
@@ -482,7 +489,7 @@ def find_scripts_not_in_pipeline(
             path == p or path.startswith(p + "/") for p in env_prefixes
         ):
             continue
-        if path not in referenced:
+        if path not in referenced and not path.startswith(referenced_dirs):
             scripts.append(path)
     return scripts
 

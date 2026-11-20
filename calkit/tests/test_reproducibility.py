@@ -112,7 +112,9 @@ def test_check_reproducibility(tmp_dir):
     ]
     # Scripts are the tracked ones no stage names, in either pipeline;
     # tooling and environment directories don't count, nor do untracked
-    # files, and a nested project's files are relative to it
+    # files, and a nested project's files are relative to it. A folder a
+    # stage reads or writes covers the scripts in it, e.g., a package's
+    # modules or data written as Python
     ck_info["environments"] = {
         "py": {"kind": "venv", "path": "requirements.txt", "prefix": "myenv"}
     }
@@ -122,6 +124,8 @@ def test_check_reproducibility(tmp_dir):
                 "kind": "jupyter-notebook",
                 "notebook_path": "analysis.ipynb",
                 "environment": "py",
+                "inputs": ["src/pkg"],
+                "outputs": ["data"],
             }
         }
     }
@@ -150,6 +154,8 @@ def test_check_reproducibility(tmp_dir):
         "myenv/hook.sh",
         "requirements.txt",
         "untracked.py",
+        "src/pkg/mod.py",
+        "data/params.py",
     ]:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w") as f:
@@ -166,6 +172,8 @@ def test_check_reproducibility(tmp_dir):
             ".devcontainer",
             "myenv",
             "requirements.txt",
+            "src",
+            "data",
         ]
     )
     res = check_reproducibility()

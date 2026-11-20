@@ -3780,6 +3780,7 @@ Check things.
 | [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
 | [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that this machine meets the project's requirements.                                                    |
 | [`stage-runs`](#subcommand-check-stage-runs)                | Check each stage in dvc.lock matches the recorded run that made it.                                          |
+| [`app`](#subcommand-check-app)                              | Check that an environment provides an app, rather than one installed on this machine being used.             |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
@@ -4070,6 +4071,33 @@ Usage:
 ```text
 calkit check stage-runs
 ```
+
+<a id="subcommand-check-app"></a>
+
+#### `calkit check app`
+
+Check that an environment provides an app, rather than one installed on this machine being used.
+
+An app a stage runs belongs in its environment, so every machine runs the same version, unless the project or stage lists it as a requirement. Environments whose commands don't run locally, e.g., Docker ones, aren't checked.
+
+Usage:
+
+```text
+calkit check app [OPTIONS] NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description          |
+| -------- | ---- | -------- | ------- | -------------------- |
+| `name`   | str  | yes      |         | App, e.g., 'quarto'. |
+
+Options:
+
+| Option                | Type | Required | Default | Description                                        |
+| --------------------- | ---- | -------- | ------- | -------------------------------------------------- |
+| `--environment`, `-e` | str  | yes      |         | Environment that should provide it.                |
+| `--stage`             | str  | no       |         | Pipeline stage using it, whose requirements count. |
 
 <a id="subcommand-check-env-vars"></a>
 
@@ -4552,37 +4580,39 @@ Options:
 
 Work with Quarto.
 
-| Command                                 | Description                                                      |
-| --------------------------------------- | ---------------------------------------------------------------- |
-| [`prepare`](#subcommand-quarto-prepare) | Get a Quarto document ready for its pipeline stage to render it. |
+| Command                               | Description                                 |
+| ------------------------------------- | ------------------------------------------- |
+| [`render`](#subcommand-quarto-render) | Render a Quarto document in an environment. |
 
-<a id="subcommand-quarto-prepare"></a>
+<a id="subcommand-quarto-render"></a>
 
-#### `calkit quarto prepare`
+#### `calkit quarto render`
 
-Get a Quarto document ready for its pipeline stage to render it.
+Render a Quarto document in an environment.
 
-Checks Quarto comes from the document's environment, or that the project lists it as a requirement, so a version installed on this machine isn't used without saying so. Then writes the values the document shows with the 'ckvalue' shortcode, read from their results files, beside it with the shortcode itself.
+Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement. The values the document shows with the 'ckvalue' shortcode are read from their results files and written beside it first.
 
 Usage:
 
 ```text
-calkit quarto prepare [OPTIONS] TARGET-PATH
+calkit quarto render [OPTIONS] TARGET-PATH [QUARTO-ARGS...]
 ```
 
 Arguments:
 
-| Argument      | Type | Required | Default | Description                  |
-| ------------- | ---- | -------- | ------- | ---------------------------- |
-| `target_path` | str  | yes      |         | Path to the Quarto document. |
+| Argument      | Type      | Required | Default | Description                                                            |
+| ------------- | --------- | -------- | ------- | ---------------------------------------------------------------------- |
+| `target_path` | str       | yes      |         | Path to the Quarto document to render.                                 |
+| `quarto_args` | list[str] | no       |         | Extra arguments for 'quarto render', after '--', e.g., '-- --execute'. |
 
 Options:
 
-| Option                | Type | Required | Default | Description                                                                                          |
-| --------------------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `--environment`, `-e` | str  | no       |         | Environment the document is rendered in, to check Quarto comes from it or is a declared requirement. |
-| `--stage`             | str  | no       |         | Stage rendering the document, whose requirements count.                                              |
-| `--project-dir`       | str  | no       | .       | Project directory, if not the current one.                                                           |
+| Option                   | Type    | Required | Default | Description                                                                                                                                             |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto. Without one, Quarto installed on this machine is used, if the project lists it as a requirement. |
+| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.                                   |
+| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                                               |
+| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                                                  |
 
 <a id="command-group-overleaf-ol"></a>
 

@@ -85,16 +85,3 @@ def test_values(tmp_path, monkeypatch):
     mtime = lua.stat().st_mtime_ns
     calkit.quarto.write_components("pub/index.ipynb")
     assert lua.stat().st_mtime_ns == mtime
-
-
-def test_is_quarto_required():
-    assert not calkit.quarto.is_quarto_required({})
-    assert not calkit.quarto.is_quarto_required({"requirements": ["docker"]})
-    assert calkit.quarto.is_quarto_required({"requirements": ["quarto>=1.8"]})
-    assert calkit.quarto.is_quarto_required(
-        {"requirements": [{"kind": "app", "name": "quarto"}]}
-    )
-    # A stage's own requirements count too
-    assert calkit.quarto.is_quarto_required(
-        {}, stage={"requirements": ["quarto"]}
-    )

@@ -21,9 +21,12 @@ Quarto is part of the environment, like any other tool a stage runs,
 so a document renders with the same version on every machine:
 add `quarto` to a Conda or Pixi environment,
 or `quarto-cli` to a uv or pip one.
-Before rendering, the stage checks that the environment provides it,
+The stage renders with `calkit quarto render`,
+which checks that the environment provides it,
 and fails rather than quietly using whatever version is installed on the
 machine.
+`calkit check app quarto -e <environment>` makes the same check on its own,
+for Quarto or any other app.
 To use one installed outside the environment on purpose,
 list it in the project's [requirements](requirements.md):
 

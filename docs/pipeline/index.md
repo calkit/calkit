@@ -757,9 +757,9 @@ arbitrary paths. As with other stages, plain string outputs are
 DVC-cached by default; use a `PathOutput` to store an output with Git
 instead.
 
-Before rendering, `calkit quarto prepare` checks Quarto comes from the
-stage's environment, or is a declared requirement, and resolves the
-values the document shows with the `ckvalue` shortcode. A notebook is
+It renders with `calkit quarto render`, which checks Quarto comes from
+the stage's environment, or is a declared requirement, and resolves the
+values the document shows with the `ckvalue` shortcode first. A notebook is
 depended on with its outputs stripped, like a notebook stage's, since
 rendering it with `--execute` writes them back into it.
 

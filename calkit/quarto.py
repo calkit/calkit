@@ -245,24 +245,3 @@ def write_components(
         os.makedirs(os.path.dirname(fpath), exist_ok=True)
         with open(fpath, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
-
-
-def is_quarto_required(ck_info: dict, stage: dict | None = None) -> bool:
-    """Whether the project, or the stage, lists Quarto as a requirement, so
-    a copy outside the stage's environment is expected."""
-    import calkit
-    from calkit.core import _normalize_requirement
-
-    reqs = list(calkit.get_requirements(ck_info) or [])
-    reqs += list((stage or {}).get("requirements") or [])
-    for req in reqs:
-        try:
-            normalized = _normalize_requirement(req)
-        except ValueError:
-            continue
-        if normalized.get("kind") == "app" and normalized.get("name") in (
-            "quarto",
-            "quarto-cli",
-        ):
-            return True
-    return False

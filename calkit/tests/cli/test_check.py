@@ -2371,3 +2371,40 @@ def test_check_storage_stage_output_dvc_file(tmp_dir):
         ["git", "diff", "--cached", "--name-only"], text=True
     ).split()
     assert "fig.png.dvc" in staged
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Uses a shell script")
+def test_check_app_in_environment(tmp_dir, monkeypatch):
+    os.makedirs("bin")
+    with open(os.path.join("bin", "myapp"), "w") as f:
+        f.write("#!/bin/sh\n")
+    os.chmod(os.path.join("bin", "myapp"), 0o755)
+    monkeypatch.setenv(
+        "PATH", os.path.abspath("bin") + os.pathsep + os.environ["PATH"]
+    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"name": "test"}, f)
+    check = ["calkit", "check", "app", "myapp", "-e", "_system"]
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "'myapp' isn't in an environment" in res.stdout + res.stderr
+    # A stage's requirements count when it's named
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "test",
+                "pipeline": {
+                    "stages": {
+                        "s": {
+                            "kind": "shell-command",
+                            "command": "myapp",
+                            "environment": "_system",
+                            "requirements": ["myapp"],
+                        }
+                    }
+                },
+            },
+            f,
+        )
+    assert subprocess.run(check, capture_output=True).returncode != 0
+    subprocess.check_call(check + ["--stage", "s"])

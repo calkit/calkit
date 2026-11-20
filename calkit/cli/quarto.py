@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 
 import typer
 from typing_extensions import Annotated
@@ -14,110 +13,116 @@ from calkit.cli.core import raise_error
 quarto_app = typer.Typer(no_args_is_help=True)
 
 
-@quarto_app.command(name="prepare")
-def prepare(
+@quarto_app.command(name="render")
+def render(
     target_path: Annotated[
-        str, typer.Argument(help="Path to the Quarto document.")
+        str, typer.Argument(help="Path to the Quarto document to render.")
     ],
+    quarto_args: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="Extra arguments for 'quarto render', after '--', e.g., "
+            "'-- --execute'."
+        ),
+    ] = None,
     environment: Annotated[
         str | None,
         typer.Option(
             "--environment",
             "-e",
             help=(
-                "Environment the document is rendered in, to check Quarto "
-                "comes from it or is a declared requirement."
+                "Environment to render in, which should provide Quarto. "
+                "Without one, Quarto installed on this machine is used, if "
+                "the project lists it as a requirement."
             ),
         ),
     ] = None,
-    stage_name: Annotated[
+    allow_machine_quarto: Annotated[
+        bool,
+        typer.Option(
+            "--allow-machine-quarto",
+            help=(
+                "Allow Quarto installed on this machine rather than in the "
+                "environment, e.g., for a stage listing it as a requirement."
+            ),
+        ),
+    ] = False,
+    to: Annotated[
         str | None,
-        typer.Option(
-            "--stage",
-            help="Stage rendering the document, whose requirements count.",
-        ),
+        typer.Option("--to", help="Output format, passed to 'quarto render'."),
     ] = None,
-    project_dir: Annotated[
-        str,
+    no_check: Annotated[
+        bool,
         typer.Option(
-            "--project-dir",
-            help="Project directory, if not the current one.",
+            "--no-check",
+            help="Don't check the environment is valid before rendering.",
         ),
-    ] = ".",
+    ] = False,
 ) -> None:
-    """Get a Quarto document ready for its pipeline stage to render it.
+    """Render a Quarto document in an environment.
 
-    Checks Quarto comes from the document's environment, or that the
-    project lists it as a requirement, so a version installed on this
-    machine isn't used without saying so. Then writes the values the
-    document shows with the 'ckvalue' shortcode, read from their results
-    files, beside it with the shortcode itself.
+    Quarto has to come from the environment, so every machine renders with
+    the same version, unless the project lists 'quarto' as a requirement. The values the document shows with the 'ckvalue'
+    shortcode are read from their results files and written beside it
+    first.
     """
     import calkit
+    import calkit.environments
     import calkit.quarto
+    from calkit.cli.main.core import run_in_env
     from calkit.markdown import MarkdownParseError, results_by_name
 
-    def get_quarto_bin_dir(prefix: list[str]) -> str | None:
-        # Quarto reports where its binary is, which a launcher on PATH, e.g.,
-        # Pixi's for a global install, wouldn't
-        try:
-            res = subprocess.run(
-                prefix + ["quarto", "--paths"],
-                capture_output=True,
-                text=True,
-                cwd=project_dir,
-            )
-        except OSError:
-            return None
-        if res.returncode != 0 or not res.stdout.strip():
-            return None
-        return os.path.realpath(res.stdout.strip().splitlines()[0].strip())
+    environment = environment or "_system"
 
+    # The project is wherever calkit.yaml is above the document, since a
+    # stage renders from its working directory
+    doc_path = os.path.abspath(target_path)
+    project_dir = os.path.dirname(doc_path)
+    while not os.path.isfile(os.path.join(project_dir, "calkit.yaml")):
+        parent = os.path.dirname(project_dir)
+        if parent == project_dir:
+            raise_error(f"{target_path} isn't in a Calkit project")
+        project_dir = parent
     ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
-    stage = (ck_info.get("pipeline", {}).get("stages") or {}).get(
-        stage_name or ""
+    problem = (
+        None
+        if allow_machine_quarto
+        else calkit.environments.check_app_in_env(
+            "quarto", environment, ck_info, wdir=project_dir
+        )
     )
-    if environment is not None and not calkit.quarto.is_quarto_required(
-        ck_info, stage if isinstance(stage, dict) else None
-    ):
-        system_bin = get_quarto_bin_dir([])
-        if environment == "_system":
-            env_bin = system_bin
-        else:
-            env_bin = get_quarto_bin_dir(
-                [sys.executable, "-m", "calkit", "xenv", "-n", environment]
-                + ["--no-check", "--"]
-            )
-        fix = (
-            "add it to the environment, e.g., 'quarto' to a Conda or Pixi "
-            "one, or 'quarto-cli' to a uv or pip one, or list 'quarto' in "
-            "the project's requirements"
+    if problem is not None and problem.startswith("Couldn't"):
+        raise_error(problem)
+    if problem is not None:
+        raise_error(
+            f"{problem}. Quarto is 'quarto' in a Conda or Pixi environment, "
+            "and 'quarto-cli' in a uv or pip one"
         )
-        where = (
-            "isn't in an environment"
-            if environment == "_system"
-            else f"isn't in environment '{environment}'"
-        )
-        if env_bin is None:
-            raise_error(f"Quarto {where}; {fix}")
-        if env_bin == system_bin:
-            raise_error(
-                f"Quarto {where}, so the one installed on this machine "
-                f"({env_bin}) would be used; {fix}"
-            )
     text = calkit.quarto.read_document_text(target_path)
     if text is None:
         raise_error(f"{target_path} doesn't exist or can't be read")
-    document_rel = os.path.relpath(target_path, project_dir)
+    document_rel = os.path.relpath(doc_path, project_dir)
     try:
         values = calkit.quarto.extract_values(
             text, document_rel, results=results_by_name(ck_info)
         )
-        if not values:
-            return
-        resolved = calkit.quarto.resolve_values(
-            values, document_rel, wdir=project_dir
-        )
+        if values:
+            calkit.quarto.write_components(
+                target_path,
+                calkit.quarto.resolve_values(
+                    values, document_rel, wdir=project_dir
+                ),
+            )
     except (MarkdownParseError, ValueError) as e:
         raise_error(str(e))
-    calkit.quarto.write_components(target_path, resolved)
+    cmd = ["quarto", "render", target_path]
+    if to is not None:
+        cmd += ["--to", to]
+    cmd += quarto_args or []
+    if environment == "_system":
+        try:
+            subprocess.check_call(cmd)
+        except (OSError, subprocess.CalledProcessError) as e:
+            raise_error(f"Rendering {target_path} failed: {e}")
+    else:
+        run_in_env(cmd, env_name=environment, no_check=no_check)

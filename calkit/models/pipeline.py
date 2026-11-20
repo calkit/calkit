@@ -1852,9 +1852,9 @@ class QuartoStage(Stage):
     DVC-cached by default; use a ``PathOutput`` to store an output with Git
     instead.
 
-    Before rendering, ``calkit quarto prepare`` checks Quarto comes from the
-    stage's environment, or is a declared requirement, and resolves the
-    values the document shows with the ``ckvalue`` shortcode. A notebook is
+    It renders with ``calkit quarto render``, which checks Quarto comes from
+    the stage's environment, or is a declared requirement, and resolves the
+    values the document shows with the ``ckvalue`` shortcode first. A notebook is
     depended on with its outputs stripped, like a notebook stage's, since
     rendering it with ``--execute`` writes them back into it.
     """
@@ -1906,8 +1906,8 @@ class QuartoStage(Stage):
         since they're as much inputs as its source, and with
         ``write_files``, write the shortcode beside it.
 
-        A malformed shortcode is left for ``calkit quarto prepare`` to
-        report when the stage runs, rather than stopping the pipeline from
+        A malformed shortcode is left for ``calkit quarto render`` to report
+        when the stage runs, rather than stopping the pipeline from
         compiling.
         """
         import calkit
@@ -1970,23 +1970,38 @@ class QuartoStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        prepare = ["calkit", "quarto", "prepare"]
-        # Where Quarto comes from can only be checked where the stage runs,
-        # so not through a job scheduler or on another machine
-        if (
-            self.scheduler is None
-            and self.inner_environment == self.outer_environment
+        import calkit.environments
+
+        # Dispatched to a job scheduler or another machine as other stages
+        # are, with 'calkit quarto render' taking the place of the inner
+        # xenv; with no runtime to activate there, it renders as is
+        inner_xenv = f"calkit xenv -n {self.inner_environment} --no-check --"
+        prefix = self.xenv_cmd
+        environment = self.inner_environment
+        if prefix == inner_xenv:
+            prefix = ""
+        elif prefix.endswith(inner_xenv):
+            prefix = prefix[: -len(inner_xenv)].strip()
+        elif prefix:
+            environment = "_system"
+        args = ["-e", environment, "--no-check"]
+        # Quarto from the machine is expected if the stage requires it, as it
+        # is if the project does, which the command reads itself
+        requirements = [
+            r.model_dump(exclude_none=True) if isinstance(r, BaseModel) else r
+            for r in self.requirements
+        ]
+        if calkit.environments.is_app_required(
+            "quarto", {}, stage={"requirements": requirements}
         ):
-            prepare += ["-e", self.environment, "--stage", str(self.name)]
-        if self.wdir:
-            prepare += ["--project-dir", posixpath.relpath(".", self.wdir)]
-        prepare.append(self.target_path)
-        cmd = f"{self.xenv_cmd} quarto render {self.target_path}"
+            args.append("--allow-machine-quarto")
+        args.append(self.target_path)
         if self.to is not None:
-            cmd += f" --to {self.to}"
-        for arg in self.args:
-            cmd += f" {quote_arg(arg)}"
-        return shlex.join(prepare) + " && " + cmd.strip()
+            args += ["--to", self.to]
+        if self.args:
+            args += ["--"] + self.args
+        cmd = "calkit quarto render " + shlex.join(args)
+        return f"{prefix} {cmd}".strip()
 
     @property
     def dvc_deps(self) -> list[str]:

@@ -407,12 +407,10 @@ def test_quartostage(tmp_path):
         outputs=["report/report.html"],
     )
     sd = s.to_dvc()
-    # Prepared first, which checks where Quarto comes from and resolves the
-    # document's values
+    # Calkit renders it, checking Quarto comes from the environment and
+    # resolving the document's values first
     assert sd["cmd"] == (
-        "calkit quarto prepare -e analysis --stage render-report "
-        "report/report.qmd && "
-        "calkit xenv -n analysis --no-check -- quarto render report/report.qmd"
+        "calkit quarto render -e analysis --no-check report/report.qmd"
     )
     assert "report/report.qmd" in sd["deps"]
     assert "report/results.json" in sd["deps"]
@@ -429,13 +427,11 @@ def test_quartostage(tmp_path):
         # A PathOutput can be used to store with Git instead
         outputs=[PathOutput(path="report/report.pdf", storage="git")],
     )
-    assert s.dvc_cmd.endswith(
-        "quarto render report/report.qmd --to pdf --no-clean"
-    )
+    assert s.dvc_cmd.endswith("report/report.qmd --to pdf -- --no-clean")
     assert s.dvc_outs == [
         {"report/report.pdf": {"cache": False, "persist": False}}
     ]
-    # System environment renders without an xenv wrapper
+    # Outside any environment, it renders with what's on this machine
     s = QuartoStage(
         name="render-report",
         environment="_system",
@@ -443,8 +439,19 @@ def test_quartostage(tmp_path):
         outputs=["report/report.html"],
     )
     assert s.dvc_cmd == (
-        "calkit quarto prepare -e _system --stage render-report "
-        "report/report.qmd && quarto render report/report.qmd"
+        "calkit quarto render -e _system --no-check report/report.qmd"
+    )
+    # A stage listing Quarto as a requirement says one installed on the
+    # machine is expected
+    s = QuartoStage(
+        name="render-report",
+        environment="_system",
+        target_path="report/report.qmd",
+        requirements=["quarto>=1.8"],
+    )
+    assert s.dvc_cmd == (
+        "calkit quarto render -e _system --no-check --allow-machine-quarto "
+        "report/report.qmd"
     )
     # A notebook rendered with --execute gets its outputs written back, so
     # it's depended on stripped of them, from wherever the stage runs
@@ -462,7 +469,7 @@ def test_quartostage(tmp_path):
     assert s.notebook_outputs == [
         PathOutput(path=s.cleaned_notebook_path, storage=None)
     ]
-    assert "--project-dir .. index.ipynb" in s.dvc_cmd
+    assert s.dvc_cmd.endswith("index.ipynb -- --execute")
     # The files its ckvalue shortcodes read are inputs, if they exist or a
     # stage makes them, and the values it shows are an output beside it,
     # with the shortcode written there too

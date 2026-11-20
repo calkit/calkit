@@ -2,21 +2,24 @@
 
 import json
 import os
-import stat
 import subprocess
 import sys
+
+import pytest
 
 import calkit
 
 
-def test_prepare(tmp_path, monkeypatch):
+@pytest.mark.skipif(sys.platform == "win32", reason="Uses a shell script")
+def test_render(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    def prepare(*args: str) -> subprocess.CompletedProcess:
+    def render(*args: str, cwd: str = ".") -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "calkit", "quarto", "prepare", *args],
+            [sys.executable, "-m", "calkit", "quarto", "render", *args],
             capture_output=True,
             text=True,
+            cwd=cwd,
         )
 
     with open("calkit.yaml", "w") as f:
@@ -25,52 +28,59 @@ def test_prepare(tmp_path, monkeypatch):
     (tmp_path / "report.qmd").write_text(
         "RMS is {{< ckvalue results.json rms .3f >}}.\n"
     )
-    # Quarto rendered outside any environment, from wherever it's installed
-    # on this machine, has to be a declared requirement
+    # A stand-in for Quarto installed on this machine, which records how it
+    # was called
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     quarto = bin_dir / "quarto"
-    quarto.write_text(f"#!/bin/sh\necho {bin_dir}\necho {tmp_path}/share\n")
-    quarto.chmod(quarto.stat().st_mode | stat.S_IEXEC)
+    quarto.write_text(f'#!/bin/sh\necho "$@" > {tmp_path}/called.txt\n')
+    quarto.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
-    res = prepare("-e", "_system", "report.qmd")
+    # Outside any environment, it has to be a declared requirement
+    res = render("report.qmd")
     assert res.returncode != 0
-    assert "Quarto isn't in an environment" in res.stdout + res.stderr
-    assert str(bin_dir) in res.stdout + res.stderr
-    assert not (tmp_path / "_calkit").exists()
-    # Declared, it's fine, and the document's values are written beside it
-    # with the shortcode that shows them
+    assert "'quarto' isn't in an environment" in res.stdout + res.stderr
+    assert not (tmp_path / "called.txt").exists()
+    # Allowed, e.g., by a stage requiring it, it renders
+    res = render("--allow-machine-quarto", "report.qmd")
+    assert res.returncode == 0, res.stdout + res.stderr
+    (tmp_path / "called.txt").unlink()
+    # Declared by the project, the document's values are written beside it,
+    # with the shortcode that shows them, and then it's rendered with what's
+    # passed
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump({"name": "test", "requirements": ["quarto"]}, f)
-    res = prepare("-e", "_system", "report.qmd")
+    res = render("report.qmd", "--to", "pdf", "--", "--execute")
     assert res.returncode == 0, res.stdout + res.stderr
+    assert (tmp_path / "called.txt").read_text().split() == [
+        "render",
+        "report.qmd",
+        "--to",
+        "pdf",
+        "--execute",
+    ]
     values = json.loads(
         (tmp_path / "_calkit" / "values" / "report.json").read_text()
     )
     assert values == {"results.json\trms\t.3f": "0.123"}
     assert (tmp_path / "_calkit" / "calkit.lua").is_file()
-    # Without an environment to check, it only resolves values, and a
-    # mistake fails the stage, naming where it is
+    # A mistake fails before rendering, naming where it is
+    (tmp_path / "called.txt").unlink()
     (tmp_path / "report.qmd").write_text(
         "\nRMS is {{< ckvalue results.json nope >}}.\n"
     )
-    res = prepare("report.qmd")
+    res = render("report.qmd")
     assert res.returncode != 0
     assert "has no key 'nope'" in res.stdout + res.stderr
     assert "report.qmd:2" in res.stdout + res.stderr
-    # Run from a stage's working directory, values are read from the
-    # project, and written beside the document
+    assert not (tmp_path / "called.txt").exists()
+    # From a stage's working directory, the project is found above it and
+    # values are read from there
     (tmp_path / "pub").mkdir()
     (tmp_path / "pub" / "index.qmd").write_text(
         "{{< ckvalue results.json rms .1f >}}\n"
     )
-    res = subprocess.run(
-        [sys.executable, "-m", "calkit", "quarto", "prepare"]
-        + ["--project-dir", "..", "index.qmd"],
-        capture_output=True,
-        text=True,
-        cwd="pub",
-    )
+    res = render("index.qmd", cwd="pub")
     assert res.returncode == 0, res.stdout + res.stderr
     values = json.loads(
         (tmp_path / "pub" / "_calkit" / "values" / "index.json").read_text()

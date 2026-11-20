@@ -11,6 +11,7 @@ from calkit.reproducibility import (
     check_reproducibility,
     find_literals_in_project,
     find_retyped_values,
+    find_scripts_not_in_pipeline,
     find_unattributed_numbers,
 )
 
@@ -183,6 +184,14 @@ def test_check_reproducibility(tmp_dir):
     assert res.scripts_not_in_pipeline == ["explore.R", "scripts/orphan.py"]
     assert res.n_scripts_not_in_pipeline == 2
     assert "Scripts not run by any pipeline stage: 2" in res.to_pretty()
+    # A folder that's only named, e.g., like the environment, isn't read or
+    # written, so it doesn't cover what's in it
+    os.makedirs("py")
+    with open("py/tool.py", "w") as f:
+        f.write("")
+    subprocess.check_call(["git", "add", "py/tool.py"])
+    assert "py/tool.py" in find_scripts_not_in_pipeline()
+    subprocess.check_call(["git", "rm", "-q", "--cached", "py/tool.py"])
     assert "lacking provenance: 2" in res.to_pretty()
     # Both make it into the recommendation once the basics are in place,
     # scripts first, since an unrun script is a gap in the pipeline itself

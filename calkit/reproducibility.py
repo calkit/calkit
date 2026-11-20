@@ -421,6 +421,30 @@ def _strings_in(obj: object) -> list[str]:
     return []
 
 
+def _stage_io_paths(pipeline: dict, ck_info: dict) -> list[str]:
+    """The paths the pipeline's stages read and write, relative to the
+    project."""
+    paths = []
+    for stage in (pipeline.get("stages") or {}).values():
+        if not isinstance(stage, dict):
+            continue
+        wdir = stage.get("wdir") or ""
+        for item in (stage.get("deps") or []) + (stage.get("outs") or []):
+            for path in item if isinstance(item, dict) else [item]:
+                if isinstance(path, str):
+                    paths.append(posixpath.join(wdir, path))
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        wdir = stage.get("wdir") or ""
+        for item in (stage.get("inputs") or []) + (stage.get("outputs") or []):
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str):
+                paths.append(posixpath.join(wdir, path))
+    return [p for p in paths if p.strip()]
+
+
 def find_scripts_not_in_pipeline(
     wdir: str = ".", ck_info: dict | None = None, pipeline: dict | None = None
 ) -> list[str]:
@@ -463,11 +487,10 @@ def find_scripts_not_in_pipeline(
     )
     referenced = "\n".join(strings)
     # A folder a stage reads or writes covers what's in it, e.g., a package's
-    # modules under an input 'src', or generated data under an output
+    # modules under an input 'src', or generated data under an output, but
+    # not one that's only named, e.g., by an environment
     referenced_dirs = tuple(
-        posixpath.normpath(s.strip()) + "/"
-        for s in strings
-        if s.strip() and not any(c.isspace() for c in s.strip())
+        posixpath.normpath(p) + "/" for p in _stage_io_paths(pipeline, ck_info)
     )
     # Tracked paths are relative to the repo root, which may be above wdir
     # when checking a subproject, so make them relative to wdir

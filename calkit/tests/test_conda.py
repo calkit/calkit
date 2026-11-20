@@ -508,6 +508,19 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         assert calkit.ryaml.load(f)["dependencies"][-1] == {
             "pip": ["iniconfig==2.1.0", "-e ../pkg"]
         }
+    # With extras, which are resolved too, and with '/' on every platform
+    # when the lock here doesn't say how to write it
+    write_local(["iniconfig==2.1.0"])
+    write_spec(["iniconfig", "-e ./pkg[dev]"])
+    assert locks() == [osx, win]
+    assert compiles[-1][0] == [
+        "iniconfig==2.1.0",
+        "-e " + os.path.realpath("pkg") + "[dev]",
+    ]
+    with open(osx) as f:
+        assert calkit.ryaml.load(f)["dependencies"][-1] == {
+            "pip": ["iniconfig==2.1.0", "-e ../pkg[dev]"]
+        }
     write_local(["iniconfig==2.1.0", "packaging==25.0"])
     write_spec(["iniconfig"])
     for local in ("pkg @ file:///x", "-r more.txt"):

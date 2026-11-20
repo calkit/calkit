@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 
 import typer
@@ -120,6 +121,8 @@ def render(
         cmd += ["--to", to]
     cmd += quarto_args or []
     if environment == "_system":
+        # Resolved first, so a 'quarto.cmd' shim is found on Windows
+        cmd[0] = shutil.which("quarto") or "quarto"
         try:
             subprocess.check_call(cmd)
         except (OSError, subprocess.CalledProcessError) as e:

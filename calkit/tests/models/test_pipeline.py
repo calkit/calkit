@@ -470,6 +470,23 @@ def test_quartostage(tmp_path):
         PathOutput(path=s.cleaned_notebook_path, storage=None)
     ]
     assert s.dvc_cmd.endswith("index.ipynb -- --execute")
+    # Rendered without executing, it shows the outputs saved in it, so
+    # those are depended on
+    s = QuartoStage(
+        name="nb", environment="analysis", target_path="index.ipynb"
+    )
+    assert s.dvc_deps[0] == "index.ipynb"
+    assert s.notebook_outputs == []
+    # Args are quoted so sh and cmd.exe on Windows both read them the same
+    s = QuartoStage(
+        name="nb",
+        environment="analysis",
+        target_path="my report.qmd",
+        args=["-M", "title:My Paper", "-P", "n:{n}"],
+    )
+    assert s.dvc_cmd.endswith(
+        '"my report.qmd" -- -M "title:My Paper" -P n:{n}'
+    )
     # The files its ckvalue shortcodes read are inputs, if they exist or a
     # stage makes them, and the values it shows are an output beside it,
     # with the shortcode written there too

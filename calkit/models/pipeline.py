@@ -1854,9 +1854,11 @@ class QuartoStage(Stage):
 
     It renders with ``calkit quarto render``, which checks Quarto comes from
     the stage's environment, or is a declared requirement, and resolves the
-    values the document shows with the ``ckvalue`` shortcode first. A notebook is
-    depended on with its outputs stripped, like a notebook stage's, since
-    rendering it with ``--execute`` writes them back into it.
+    values the document shows with the ``ckvalue`` shortcode first. A notebook
+    rendered with ``--execute`` is depended on with its outputs stripped,
+    like a notebook stage's, since rendering writes them back into it.
+    Otherwise Quarto shows the outputs saved in it, so they're depended on
+    too.
     """
 
     kind: Literal["quarto"] = "quarto"
@@ -1880,6 +1882,18 @@ class QuartoStage(Stage):
     @property
     def is_notebook(self) -> bool:
         return self.target_path.endswith(".ipynb")
+
+    @property
+    def executes_notebook(self) -> bool:
+        """Whether rendering executes the notebook, writing its outputs back
+        into it. Execution enabled in its metadata instead isn't seen, so
+        such a notebook is depended on with its outputs, which only means
+        rerunning it after its cells are rerun interactively."""
+        return (
+            self.is_notebook
+            and "--execute" in self.args
+            and "--no-execute" not in self.args
+        )
 
     @property
     def project_target_path(self) -> str:
@@ -1964,7 +1978,7 @@ class QuartoStage(Stage):
     def notebook_outputs(self) -> list[PathOutput]:
         """The stripped notebook it depends on, kept out of Git, as a notebook
         stage's is by default."""
-        if not self.is_notebook:
+        if not self.executes_notebook:
             return []
         return [PathOutput(path=self.cleaned_notebook_path, storage=None)]
 
@@ -2000,14 +2014,15 @@ class QuartoStage(Stage):
             args += ["--to", self.to]
         if self.args:
             args += ["--"] + self.args
-        cmd = "calkit quarto render " + shlex.join(args)
+        # Quoted for cmd.exe too, which DVC runs commands with on Windows
+        cmd = "calkit quarto render " + " ".join(quote_arg(a) for a in args)
         return f"{prefix} {cmd}".strip()
 
     @property
     def dvc_deps(self) -> list[str]:
         document = (
             self.path_from_wdir(self.cleaned_notebook_path)
-            if self.is_notebook
+            if self.executes_notebook
             else self.target_path
         )
         deps = [document] + super().dvc_deps

@@ -2894,6 +2894,17 @@ def test_check_app_in_env(tmp_path, monkeypatch):
     # Provided by the environment, it wins over this machine's
     make_app(os.path.join(".venv", "bin"))
     assert check_app_in_env("myapp", "py", ck_info) is None
+    # Even when the environment is already active, e.g., under 'uv run'
+    with monkeypatch.context() as m:
+        venv_bin = str(tmp_path / ".venv" / "bin")
+        m.setenv("PATH", venv_bin + os.pathsep + os.environ["PATH"])
+        m.setenv("VIRTUAL_ENV", str(tmp_path / ".venv"))
+        m.delenv("CONDA_DEFAULT_ENV", raising=False)
+        assert check_app_in_env("myapp", "py", ck_info) is None
+        os.remove(os.path.join(venv_bin, "myapp"))
+        problem = check_app_in_env("myapp", "py", ck_info)
+        assert problem is not None and "machine" in problem
+        make_app(venv_bin)
     # Environments whose commands don't run here aren't checked
     ck_info["environments"]["img"] = {"kind": "docker", "image": "x"}
     assert check_app_in_env("myapp", "img", ck_info) is None

@@ -144,14 +144,21 @@ def test_clean_all_in_pipeline(tmp_path, monkeypatch):
         "nbformat_minor": 5,
     }
     os.makedirs("pub")
-    for path in ["analysis.ipynb", "pub/index.ipynb"]:
+    for path in ["analysis.ipynb", "pub/index.ipynb", "shown.ipynb"]:
         with open(path, "w") as f:
             json.dump(nb, f)
     stages = {
         "nb": {"kind": "jupyter-notebook", "notebook_path": "analysis.ipynb"},
         # Quarto rendering a notebook with --execute writes its outputs back
         # into it, so it's cleaned too, from the stage's working directory
-        "pub": {"kind": "quarto", "target_path": "index.ipynb", "wdir": "pub"},
+        "pub": {
+            "kind": "quarto",
+            "target_path": "index.ipynb",
+            "wdir": "pub",
+            "args": ["--execute"],
+        },
+        # Rendered from the outputs saved in it, so it isn't cleaned
+        "shown": {"kind": "quarto", "target_path": "shown.ipynb"},
         "report": {"kind": "quarto", "target_path": "report.qmd"},
         "missing": {"kind": "quarto", "target_path": "gone.ipynb"},
     }

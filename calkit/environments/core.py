@@ -4375,6 +4375,29 @@ def is_app_required(
     return False
 
 
+def _path_outside_active_env() -> str:
+    """PATH without the environment active in this process, if any, e.g.,
+    under 'uv run' or 'pixi run', or in a shell that activated it, so an app
+    from it isn't mistaken for one installed on the machine."""
+    active = [
+        os.environ.get("VIRTUAL_ENV"),
+        os.environ.get("PIXI_PROJECT_ROOT") and os.environ.get("CONDA_PREFIX"),
+    ]
+    if os.environ.get("CONDA_DEFAULT_ENV") not in (None, "base"):
+        active.append(os.environ.get("CONDA_PREFIX"))
+    prefixes = [os.path.realpath(p) for p in active if p]
+    dirs = os.environ.get("PATH", "").split(os.pathsep)
+    return os.pathsep.join(
+        d
+        for d in dirs
+        if not any(
+            os.path.realpath(d) == p
+            or os.path.realpath(d).startswith(p + os.sep)
+            for p in prefixes
+        )
+    )
+
+
 def check_app_in_env(
     app: str,
     env_name: str,
@@ -4395,7 +4418,7 @@ def check_app_in_env(
     """
     if is_app_required(app, ck_info, stage):
         return None
-    system_path = shutil.which(app)
+    system_path = shutil.which(app, path=_path_outside_active_env())
     fix = (
         f"add it to the environment, or list '{app}' in the project's "
         "requirements"

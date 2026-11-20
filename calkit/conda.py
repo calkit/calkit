@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -216,8 +217,9 @@ def _local_pip_path(dep: str) -> str | None:
         from urllib.parse import urlparse
         from urllib.request import url2pathname
 
-        # e.g., 'file:///D:/pkg' is D:\pkg on Windows
-        return url2pathname(urlparse(url[1]).path) or None
+        # e.g., 'file:///D:/pkg' is D:\pkg on Windows, without extras
+        path = url2pathname(urlparse(url[1]).path)
+        return re.sub(r"\[[^\]]*\]$", "", path) or None
     is_path = target.startswith((".", "/", "~")) or re.match(
         r"^[A-Za-z]:[\\/]", target
     )
@@ -1102,8 +1104,10 @@ def write_cross_platform_locks(
     spec_dir = os.path.dirname(os.path.abspath(env_fpath))
     project_dir = os.path.realpath(".")
     lock_dir_abs = os.path.abspath(os.path.dirname(lock_fpath))
-    # Each in-project local dependency's absolute path
+    # Each in-project local dependency's absolute path, and its extras,
+    # e.g., '[dev]', which installing it elsewhere needs too
     in_project: dict[str, str] = {}
+    in_project_extras: dict[str, str] = {}
     for d in pip_deps:
         local = _local_pip_path(d)
         if local is None:
@@ -1113,6 +1117,8 @@ def write_cross_platform_locks(
         )
         if full == project_dir or full.startswith(project_dir + os.sep):
             in_project[d] = full
+            extras = re.search(r"\[[^\]]*\]$", d.split("#", 1)[0].strip())
+            in_project_extras[full] = extras[0] if extras else ""
     unpinnable = [
         d
         for d in pip_deps
@@ -1161,7 +1167,9 @@ def write_cross_platform_locks(
             # Compiled from elsewhere, so named by its absolute path
             editable = re.match(r"^(-e|--editable)[\s=]+", dep.strip())
             pinned_pip_deps.append(
-                ("-e " if editable else "") + in_project[dep]
+                ("-e " if editable else "")
+                + in_project[dep]
+                + in_project_extras[in_project[dep]]
             )
         elif name in local_pip_urls:
             pinned_pip_deps.append(local_pip_urls[name])
@@ -1236,7 +1244,8 @@ def write_cross_platform_locks(
                     continue
                 pinned_pip[i] = next(
                     (
-                        dep
+                        # The same on every platform
+                        dep.replace("\\", "/")
                         for dep in local_pip
                         if _local_pip_path(dep) is not None
                         and os.path.realpath(
@@ -1245,7 +1254,10 @@ def write_cross_platform_locks(
                         == full
                     ),
                     ("-e " if line.startswith(("-e", "--editable")) else "")
-                    + os.path.relpath(full, lock_dir_abs),
+                    + pathlib.PurePath(
+                        os.path.relpath(full, lock_dir_abs)
+                    ).as_posix()
+                    + in_project_extras[full],
                 )
             # Pip leaves alone what conda already installed
             from_conda = {_norm_pkg_name(p["name"]) for p in links}

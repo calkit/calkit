@@ -43,6 +43,8 @@ The stage depends on the notebook with its outputs stripped,
 as a [notebook stage](notebooks.md) does,
 so re-running cells interactively doesn't make it out of date,
 while editing a cell's code or prose does.
+Without `--execute`, Quarto shows the outputs saved in the notebook,
+so the stage depends on them too.
 
 ## Values from the pipeline
 

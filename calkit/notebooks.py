@@ -159,7 +159,9 @@ def clean_all_in_pipeline(ck_info: dict | None = None) -> list[str]:
             path = posixpath.normpath(
                 posixpath.join(stage.get("wdir") or "", target)
             )
-            if target.endswith(".ipynb") and os.path.isfile(path):
+            args = stage.get("args") or []
+            executes = "--execute" in args and "--no-execute" not in args
+            if target.endswith(".ipynb") and executes and os.path.isfile(path):
                 clean_notebook_outputs(path)
                 cleaned.append(path)
     return cleaned

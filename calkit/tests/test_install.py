@@ -355,6 +355,15 @@ def test_platform_entries_prerequisites_and_record(
         assert "Docker Desktop" in str(
             install.get_unsupported_message("colima")
         )
+        # Docker Desktop gets Virtual Machine Platform enabled first, but
+        # only where it isn't
+        docker = install.get_installer("docker")
+        assert docker is not None
+        check, _, rest = docker["script"].partition(" -ne 1) { ")
+        assert check.endswith("'VirtualMachinePlatform').InstallState")
+        enable, _, winget = rest.partition('}" && ')
+        assert "-Verb runAs" in enable and "-NoRestart" in enable
+        assert winget == install._WINGET + "Docker.DockerDesktop"
         # Claude Code needs Git Bash, and OpenCode comes from npm
         claude = install.get_installer("claude")
         assert claude is not None and claude.get("requires") == ["git"]

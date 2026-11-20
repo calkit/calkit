@@ -240,7 +240,21 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "/usr/bin",
         },
         "windows": {
-            "script": _WINGET + "Docker.DockerDesktop",
+            # Docker Desktop's WSL 2 backend needs Virtual Machine Platform,
+            # which isn't always enabled, and enabling it needs an elevated
+            # shell (with a UAC prompt) and a restart
+            "script": (
+                'powershell -ExecutionPolicy ByPass -c "if ((Get-CimInstance '
+                "Win32_OptionalFeature | Where-Object Name -eq "
+                "'VirtualMachinePlatform').InstallState -ne 1) { "
+                "Start-Process powershell -Verb runAs -Wait -ErrorAction Stop "
+                "-ArgumentList '-NoProfile','-Command','Enable-Windows"
+                "OptionalFeature -Online -FeatureName VirtualMachinePlatform "
+                "-NoRestart'; Write-Host 'Restart Windows to finish enabling "
+                "Virtual Machine Platform' }\" && "
+                + _WINGET
+                + "Docker.DockerDesktop"
+            ),
             "path_add": "%ProgramFiles%\\Docker\\Docker\\resources\\bin",
         },
     },

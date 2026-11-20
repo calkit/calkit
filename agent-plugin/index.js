@@ -2,7 +2,7 @@
 //
 // Claude Code and Codex read the skills directly via their plugin
 // manifests. OpenCode has no manifest format, so this module adds the skills
-// itself, prefixed with `calkit-` like `calkit update agent-skills` does.
+// itself, prefixed with `calkit-` like `calkit update agent-skills --copy`.
 // It targets the OpenCode 2 plugin API and has no dependencies, so it works
 // when installed straight from Git.
 
@@ -62,7 +62,7 @@ export default {
     await ctx.skill.transform((editor) => {
       for (const skill of skills) {
         // A user's own skill with the same ID takes precedence, e.g., one
-        // copied by `calkit update agent-skills`.
+        // copied by `calkit update agent-skills --copy`.
         if (editor.get(skill.id)) continue;
         try {
           editor.add(skill);

@@ -248,7 +248,7 @@ def test_install_cli_command(monkeypatch):
         finds = ["/bin/claude"] * 2 if found else [None, "/bin/claude"]
         with (
             mock.patch("calkit.install.find", side_effect=finds),
-            mock.patch("shutil.which", return_value="/bin/git"),
+            mock.patch("calkit.install.can_run_git", return_value=True),
             mock.patch(
                 "calkit.install.install", return_value=True
             ) as m_install,
@@ -257,32 +257,53 @@ def test_install_cli_command(monkeypatch):
             result = runner.invoke(calkit_app, ["install", "claude", "-y"])
             assert result.exit_code == 0, result.output
             assert m_install.called is not found
-            assert [c.args[0][1:3] for c in m.call_args_list] == [
-                ["plugin", "marketplace"],
-                ["plugin", "install"],
+            assert [c.args[0] for c in m.call_args_list] == [
+                [
+                    "/bin/claude",
+                    "plugin",
+                    "marketplace",
+                    "add",
+                    "calkit/calkit",
+                ],
+                ["/bin/claude", "plugin", "install", "calkit@calkit"],
             ]
             assert "Added Calkit plugin" in result.output
-    # Without Git, it's installed before adding the plugin, and only the
-    # last plugin command has to succeed
+    # Where Git doesn't run, e.g., macOS without the Command Line Tools,
+    # it's installed before adding the plugin, and only the last plugin
+    # command has to succeed
     with (
         mock.patch("calkit.install.find", return_value="/bin/codex"),
-        mock.patch("shutil.which", return_value=None),
+        mock.patch("calkit.install.can_run_git", return_value=False),
         mock.patch("calkit.install.install", return_value=True) as m_install,
-        mock.patch("calkit.install.subprocess.call", side_effect=[1, 0]),
+        mock.patch(
+            "calkit.install.subprocess.call", side_effect=[1, 0]
+        ) as m_call,
     ):
         result = runner.invoke(calkit_app, ["install", "codex", "-y"])
         assert result.exit_code == 0, result.output
         m_install.assert_called_once_with("git")
-    with (
-        mock.patch("calkit.install.find", return_value="/bin/opencode"),
-        mock.patch("shutil.which", return_value="/bin/git"),
-        mock.patch("calkit.install.subprocess.call", return_value=1),
-    ):
-        result = runner.invoke(calkit_app, ["install", "opencode", "-y"])
+        assert m_call.call_args.args[0] == [
+            "/bin/codex",
+            "plugin",
+            "add",
+            "calkit@calkit",
+        ]
+    # OpenCode has no installer on Windows, but once it's installed, it
+    # still gets the plugin
+    for found in [None, "C:/oc.exe"]:
+        with (
+            mock.patch("calkit.install.sys.platform", "win32"),
+            mock.patch("calkit.install.find", return_value=found),
+            mock.patch("calkit.install.can_run_git", return_value=True),
+            mock.patch("calkit.install.subprocess.call", return_value=1),
+        ):
+            result = runner.invoke(calkit_app, ["install", "opencode", "-y"])
+        output = result.output + (result.stderr or "")
         assert result.exit_code != 0
-        assert "Failed to add Calkit plugin" in (
-            result.output + (result.stderr or "")
-        )
+        if found is None:
+            assert "npm" in output
+        else:
+            assert "Failed to add Calkit plugin" in output
 
 
 @skipif_windows_fake_binary

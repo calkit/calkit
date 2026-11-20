@@ -336,19 +336,26 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
                 '"irm https://claude.ai/install.ps1 | iex"'
             ),
             "path_add": "~\\.local\\bin",
-            # Claude Code runs its commands with Git Bash there
+            # Calkit's plugin is added with Git, and Claude Code uses Git
+            # Bash there when it can
             "requires": ["git"],
         },
     },
     "codex": {
         "unix": {
-            "script": "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+            # Without asking to start Codex, which would hold up adding the
+            # plugin until it exits
+            "script": (
+                "curl -fsSL https://chatgpt.com/codex/install.sh "
+                "| CODEX_NON_INTERACTIVE=1 sh"
+            ),
             "path_add": "~/.local/bin",
         },
         "windows": {
             "script": (
                 "powershell -ExecutionPolicy ByPass -c "
-                '"irm https://chatgpt.com/codex/install.ps1 | iex"'
+                "\"$env:CODEX_NON_INTERACTIVE='1'; "
+                'irm https://chatgpt.com/codex/install.ps1 | iex"'
             ),
             "path_add": "%LOCALAPPDATA%\\Programs\\OpenAI\\Codex\\bin",
         },
@@ -605,6 +612,21 @@ def add_vscode_recs(code: str) -> None:
         json.dump(recommended | current, f, indent=2)
 
 
+def can_run_git() -> bool:
+    """Whether Git runs, which on macOS it doesn't before the Command Line
+    Tools are installed, though ``git`` is on ``PATH``.
+    """
+    try:
+        return (
+            subprocess.run(
+                ["git", "--version"], capture_output=True
+            ).returncode
+            == 0
+        )
+    except OSError:
+        return False
+
+
 # Commands that add Calkit's plugin to each coding agent, after its binary
 AGENT_PLUGIN_CMDS: dict[str, list[list[str]]] = {
     "claude": [
@@ -634,20 +656,44 @@ AGENT_PLUGIN_CMDS: dict[str, list[list[str]]] = {
 }
 
 
-def add_agent_plugin(agent: str, binary_path: str) -> bool:
-    """Add Calkit's plugin to a coding agent, returning whether it worked.
+# Commands that update Calkit's plugin in each coding agent
+AGENT_PLUGIN_UPDATE_CMDS: dict[str, list[list[str]]] = {
+    "claude": [
+        ["plugin", "marketplace", "update", "calkit"],
+        ["plugin", "update", "calkit@calkit"],
+    ],
+    "codex": [["plugin", "marketplace", "upgrade", "calkit"]],
+    "opencode": [["plugin", "update"]],
+}
 
-    Only the last command has to succeed, since adding a marketplace that's
-    already there fails.
+
+def run_agent_cmds(
+    agent: str, binary_path: str, cmds: list[list[str]]
+) -> bool:
+    """Run an agent's plugin commands, returning whether the last one
+    succeeded, since, e.g., adding a marketplace that's already there fails.
     """
     import shlex
 
-    cmds = AGENT_PLUGIN_CMDS[agent]
     returncode = 0
     for args in cmds:
         print(f"  {shlex.join([agent, *args])}")
         returncode = subprocess.call([binary_path, *args])
     return returncode == 0
+
+
+def add_agent_plugin(agent: str, binary_path: str) -> bool:
+    """Add Calkit's plugin to a coding agent, returning whether it worked."""
+    return run_agent_cmds(agent, binary_path, AGENT_PLUGIN_CMDS[agent])
+
+
+def update_agent_plugin(agent: str, binary_path: str) -> bool:
+    """Update Calkit's plugin in a coding agent, adding it if that fails,
+    e.g., since it was never added.
+    """
+    if run_agent_cmds(agent, binary_path, AGENT_PLUGIN_UPDATE_CMDS[agent]):
+        return True
+    return add_agent_plugin(agent, binary_path)
 
 
 def install(app: str, entry: Installer | None = None) -> bool:

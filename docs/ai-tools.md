@@ -85,6 +85,11 @@ calkit install opencode
 ```
 
 If the agent is already installed, this only adds the plugin.
+To update the plugin in every agent on this machine, run:
+
+```bash
+calkit update agent-skills
+```
 
 ### Claude Code
 
@@ -179,7 +184,7 @@ opencode plugin update
 For other agents that read skills from `~/.agents/skills`, run:
 
 ```bash
-calkit update agent-skills
+calkit update agent-skills --copy
 ```
 
 This copies skills into `~/.agents/skills`.
@@ -192,7 +197,7 @@ For command details, see the
 ## What the Calkit conventions cover
 
 The skills loaded by the plugins (or installed by
-`calkit update agent-skills`) include:
+`calkit update agent-skills --copy`) include:
 
 - The `calkit.yaml` schema: All top-level sections and their purpose
 - All pipeline stage kinds and their required/optional fields

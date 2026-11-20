@@ -49,7 +49,11 @@ def run() -> None:
         from calkit import install
         from calkit.core import is_tty
 
-        print("Git is required but isn't installed", file=sys.stderr)
+        # Where Git runs, installing it won't help, e.g., since
+        # GIT_PYTHON_GIT_EXECUTABLE points elsewhere
+        if install.can_run_git():
+            raise
+        print("Git not found", file=sys.stderr)
         unsupported = install.get_unsupported_message("git")
         if unsupported:
             print(unsupported, file=sys.stderr)

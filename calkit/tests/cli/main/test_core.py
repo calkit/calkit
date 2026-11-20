@@ -2766,6 +2766,7 @@ def test_run_offers_git_install(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("calkit.cli._only_invoked", lambda app, args: fail)
     monkeypatch.setattr(sys, "argv", ["calkit", "config", "github-ssh"])
+    monkeypatch.setattr("calkit.install.can_run_git", lambda: False)
     # Where it can be installed, it's offered, then the command runs again
     for installed in [True, False]:
         with (
@@ -2781,12 +2782,26 @@ def test_run_offers_git_install(monkeypatch: pytest.MonkeyPatch) -> None:
         assert exc.value.code == (0 if installed else 1)
         assert m_call.called is installed
         if installed:
-            assert m_call.call_args.args[0][-2:] == ["config", "github-ssh"]
+            assert m_call.call_args.args[0] == [
+                sys.executable,
+                "-m",
+                "calkit",
+                "config",
+                "github-ssh",
+            ]
     # Where it can't, it says what to run
     with (
         patch("calkit.install.get_unsupported_message", return_value="apt"),
         patch("calkit.install.prompt_and_install") as m_prompt,
         pytest.raises(SystemExit),
+    ):
+        cli_run()
+    m_prompt.assert_not_called()
+    # Where Git runs, installing it won't help, so the error is raised
+    monkeypatch.setattr("calkit.install.can_run_git", lambda: True)
+    with (
+        patch("calkit.install.prompt_and_install") as m_prompt,
+        pytest.raises(ImportError),
     ):
         cli_run()
     m_prompt.assert_not_called()
@@ -5293,7 +5308,9 @@ def test_clone(monkeypatch):
         cloned.clear()
         hubs.clear()
         monkeypatch.delenv("CALKIT_HUB", raising=False)
-        monkeypatch.setattr(calkit.github, "can_use_ssh", lambda: ssh_set_up)
+        monkeypatch.setattr(
+            calkit.github, "can_use_ssh", lambda interactive=False: ssh_set_up
+        )
         result = CliRunner().invoke(calkit.cli.main.app, ["clone", *args])
         assert result.exit_code != 0
         return result
@@ -5332,23 +5349,44 @@ def test_clone(monkeypatch):
         clone_url("me/proj", "--ssh", ssh_set_up=False)
         == "git@github.com:me/proj.git"
     )
-    # Interactively, SSH where it isn't set up offers to set it up, or
-    # falls back to HTTPS
+    # Interactively, SSH where it isn't set up offers to set it up, which
+    # can end early, e.g., once GitHub's host key is trusted, then checks
+    # again, or falls back to HTTPS, unless SSH was asked for
     monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
-    for answer, url in [
-        ("y", "git@github.com:me/proj.git"),
-        ("n", "https://github.com/me/proj.git"),
+    for args, answer, setup_works, url in [
+        ([], "y", True, "git@github.com:me/proj.git"),
+        ([], "y", False, "https://github.com/me/proj.git"),
+        ([], "n", False, "https://github.com/me/proj.git"),
+        (["--ssh"], "n", False, "git@github.com:me/proj.git"),
     ]:
-        with patch("calkit.cli.config.config_github_ssh") as m_setup:
+        monkeypatch.setattr(
+            calkit.github,
+            "can_use_ssh",
+            lambda interactive=False: interactive and setup_works,
+        )
+        with patch(
+            "calkit.cli.config.config_github_ssh", side_effect=typer.Exit()
+        ) as m_setup:
             result = CliRunner().invoke(
                 calkit.cli.main.app,
-                ["clone", "git@github.com:me/proj.git"],
+                ["clone", "git@github.com:me/proj.git", *args],
                 input=answer + "\n",
             )
         assert "SSH not set up" in result.output
-        assert cloned[-1] == url
+        assert cloned[-1] == url, (args, answer, setup_works)
         assert m_setup.called is (answer == "y")
     monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    # Without Git, it's offered first
+    for installed in [True, False]:
+        with (
+            patch("calkit.install.can_run_git", return_value=False),
+            patch(
+                "calkit.install.prompt_and_install", return_value=installed
+            ) as m_prompt,
+        ):
+            clone("me/proj")
+        assert m_prompt.call_args.args[0] == "git"
+        assert bool(cloned) is installed
     # Another host's URL is left as given
     assert (
         clone_url("https://gitlab.com/me/proj.git")

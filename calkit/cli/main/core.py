@@ -427,6 +427,7 @@ def clone(
     ] = False,
 ) -> None:
     """Clone or download a copy of a project."""
+    from calkit import install
     from calkit.config import normalize_hub_url
 
     def hub_url(hub: str) -> str:
@@ -468,8 +469,16 @@ def clone(
     # given by its repo URL
     if hub is not None:
         calkit.config.set_hub(hub_url(hub))
+    # A new machine may not have Git yet
+    if not install.can_run_git() and not install.prompt_and_install(
+        "git", interactive=calkit.core.is_tty()
+    ):
+        raise_error(
+            install.get_unsupported_message("git") or "Git is required"
+        )
     # Use SSH for GitHub when it's set up, unless asked for one or the other,
     # so pushing later needs no token
+    ssh_given = use_ssh is True
     if use_ssh is False and url.startswith("git@github.com:"):
         url = "https://github.com/" + url.removeprefix("git@github.com:")
     on_github = url.startswith("https://github.com/")
@@ -492,8 +501,14 @@ def clone(
         ):
             from calkit.cli.config import config_github_ssh
 
-            config_github_ssh()
-        else:
+            # It exits early if SSH works after all, e.g., once GitHub's
+            # host key is trusted, or if setting it up fails
+            try:
+                config_github_ssh()
+            except typer.Exit:
+                pass
+            ssh_ok = calkit.github.can_use_ssh(interactive=True)
+        if not ssh_ok and not ssh_given:
             typer.echo("Cloning over HTTPS")
             url = "https://github.com/" + url.removeprefix("git@github.com:")
     # Git clone
@@ -5811,25 +5826,23 @@ def install_app(
     ] = False,
 ) -> None:
     from calkit import install as _install
-
-    name = _install.NAME_ALIASES.get(name, name)
-    # Surface a platform-specific "use X instead" message before the
-    # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
-    unsupported = _install.get_unsupported_message(name)
-    if unsupported:
-        raise_error(unsupported)
-    entry = _install.get_installer(name)
-    if entry is None:
-        raise_error(
-            f"No registered installer for '{name}'. Known apps: "
-            + ", ".join(sorted(_install.INSTALLERS))
-        )
     from calkit.core import is_tty
 
+    name = _install.NAME_ALIASES.get(name, name)
     is_agent = name in _install.AGENT_PLUGIN_CMDS
     # An agent that's already installed only needs Calkit's plugin
     binary_path = _install.find(name) if is_agent else None
     if binary_path is None:
+        # Surface a platform-specific "use X instead" message before the
+        # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
+        unsupported = _install.get_unsupported_message(name)
+        if unsupported:
+            raise_error(unsupported)
+        if _install.get_installer(name) is None:
+            raise_error(
+                f"No registered installer for '{name}'. Known apps: "
+                + ", ".join(sorted(_install.INSTALLERS))
+            )
         # ``--yes`` makes this scriptable (CI, provisioning) without losing
         # the safety prompt for plain interactive use.
         if yes:
@@ -5845,7 +5858,7 @@ def install_app(
     if binary_path is None:
         raise_error(f"'{name}' not found on PATH; restart your shell")
     # Plugin marketplaces are cloned with Git
-    if shutil.which("git") is None:
+    if not _install.can_run_git():
         if yes:
             ok = _install.install("git")
         else:

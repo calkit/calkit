@@ -470,7 +470,7 @@ def fake_home(tmp_path, monkeypatch):
 
 def test_update_agent_skills_copies_bundled_skills(fake_home):
     skills_dir = fake_home / ".agents" / "skills"
-    result = runner.invoke(update_app, ["agent-skills"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result.exit_code == 0
     assert (skills_dir / "calkit-add-pipeline-stage" / "SKILL.md").exists()
     assert (skills_dir / "calkit-conventions" / "SKILL.md").exists()
@@ -479,7 +479,7 @@ def test_update_agent_skills_copies_bundled_skills(fake_home):
 
 def test_update_agent_skills_renames_skill_name_in_frontmatter(fake_home):
     skills_dir = fake_home / ".agents" / "skills"
-    result = runner.invoke(update_app, ["agent-skills"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result.exit_code == 0
     # Each installed SKILL.md should have its name updated to the calkit- prefixed folder name.
     for skill_name in (
@@ -502,7 +502,7 @@ def test_update_agent_skills_preserves_custom_skill(fake_home):
     custom_skill = skills_dir / "my-skill" / "SKILL.md"
     custom_skill.parent.mkdir(parents=True)
     custom_skill.write_text("# Custom\n")
-    result = runner.invoke(update_app, ["agent-skills"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result.exit_code == 0
     assert custom_skill.exists()
 
@@ -510,24 +510,65 @@ def test_update_agent_skills_preserves_custom_skill(fake_home):
 def test_update_agent_skills_does_not_touch_home_agents_md(fake_home):
     agents_md = fake_home / "AGENTS.md"
     agents_md.write_text("# Existing\n")
-    result = runner.invoke(update_app, ["agent-skills"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result.exit_code == 0
     assert agents_md.read_text() == "# Existing\n"
 
 
 def test_update_agent_skills_supports_quiet_flag(fake_home):
-    result = runner.invoke(update_app, ["agent-skills", "--quiet"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy", "--quiet"])
     assert result.exit_code == 0
 
 
 def test_update_agent_skills_can_be_run_twice(fake_home):
     skills_dir = fake_home / ".agents" / "skills"
-    result1 = runner.invoke(update_app, ["agent-skills"])
-    result2 = runner.invoke(update_app, ["agent-skills"])
+    result1 = runner.invoke(update_app, ["agent-skills", "--copy"])
+    result2 = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result1.exit_code == 0
     assert result2.exit_code == 0
     # Existing custom files should be preserved by copytree dirs_exist_ok.
     assert (skills_dir / "calkit-conventions" / "SKILL.md").exists()
+
+
+def test_update_agent_skills_updates_plugins(fake_home, monkeypatch):
+    skills_dir = fake_home / ".agents" / "skills"
+    runner.invoke(update_app, ["agent-skills", "--copy"])
+    custom_skill = skills_dir / "my-skill" / "SKILL.md"
+    custom_skill.parent.mkdir(parents=True)
+    custom_skill.write_text("# Custom\n")
+    calls = []
+
+    def call(cmd):
+        calls.append(cmd)
+        # Codex's plugin hasn't been added, so updating it fails
+        return 1 if cmd[0] == "/bin/codex" and "upgrade" in cmd else 0
+
+    monkeypatch.setattr("calkit.install.subprocess.call", call)
+    # Without any agents, the copies are kept
+    monkeypatch.setattr("calkit.install.find", lambda app: None)
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0
+    assert "No coding agents updated" in result.output
+    assert (skills_dir / "calkit-conventions").is_dir()
+    assert not calls
+    # Each agent found gets its plugin updated, or added if that fails, and
+    # the copies are removed, but not anyone else's skills
+    monkeypatch.setattr(
+        "calkit.install.find",
+        lambda app: f"/bin/{app}" if app in ["claude", "codex"] else None,
+    )
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0, result.output
+    assert [c[1:4] for c in calls] == [
+        ["plugin", "marketplace", "update"],
+        ["plugin", "update", "calkit@calkit"],
+        ["plugin", "marketplace", "upgrade"],
+        ["plugin", "marketplace", "add"],
+        ["plugin", "add", "calkit@calkit"],
+    ]
+    assert not list(skills_dir.glob("calkit-*"))
+    assert custom_skill.exists()
+    assert "Removed" in result.output
 
 
 def test_update_docker_env_registry(tmp_dir):

@@ -19,10 +19,10 @@ import {
 const value: ICellOutputMark = {
   stage: "fit",
   kind: "value",
-  name: "k_25",
-  cell: "c0",
+  cell_id: "c0",
   cell_index: 0,
-  variable: null,
+  variable: "k_25",
+  path: null,
   format: null,
   citation: "\\ckvalue{fit.ipynb}{k_25}",
   saved_value: 0.030912,
@@ -30,10 +30,10 @@ const value: ICellOutputMark = {
 const figure: ICellOutputMark = {
   stage: "fit",
   kind: "figure",
-  path: "figures/fit.pdf",
-  cell: "c2",
+  cell_id: "c2",
   cell_index: 2,
   variable: "fig",
+  path: "figures/fit.pdf",
   format: null,
   citation: "\\ckfigure{figures/fit.pdf}",
 };
@@ -176,36 +176,48 @@ describe("cell outputs", () => {
         notebookPath: "fit.ipynb",
         cellId: "c2",
         kind: "figure",
-        target: "figures/fit.pdf",
         variable: "fig",
+        path: "figures/fit.pdf",
       }),
     ).toEqual({
       path: "fit.ipynb",
-      cell: "c2",
-      figure: "figures/fit.pdf",
-      variable: "fig",
+      output: {
+        kind: "figure",
+        cell_id: "c2",
+        variable: "fig",
+        path: "figures/fit.pdf",
+      },
     });
-    // A value is its variable, so it isn't sent twice
+    // A value has no path of its own
     expect(
       getMarkRequestBody({
         notebookPath: "fit.ipynb",
         cellId: "c0",
         kind: "value",
-        target: "k",
         variable: "k",
+        path: "ignored",
         stage: "fit-2",
       }),
-    ).toEqual({ path: "fit.ipynb", cell: "c0", value: "k", stage: "fit-2" });
+    ).toEqual({
+      path: "fit.ipynb",
+      output: { kind: "value", cell_id: "c0", variable: "k" },
+      stage: "fit-2",
+    });
     expect(getUnmarkQuery("nbs/fit rates.ipynb", figure)).toBe(
-      "path=nbs%2Ffit+rates.ipynb&figure=figures%2Ffit.pdf&stage=fit",
+      "path=nbs%2Ffit+rates.ipynb&output_path=figures%2Ffit.pdf&stage=fit",
     );
     expect(getUnmarkQuery("fit.ipynb", value)).toBe(
-      "path=fit.ipynb&value=k_25&stage=fit",
+      "path=fit.ipynb&variable=k_25&stage=fit",
     );
   });
 
   it("finds a cell's marks by ID or position", () => {
-    const atEnd = { ...value, name: "last", cell: null, cell_index: null };
+    const atEnd = {
+      ...value,
+      variable: "last",
+      cell_id: null,
+      cell_index: null,
+    };
     const marks = [value, figure, atEnd];
     expect(getMarksForCell(marks, 0, "c0", false)).toEqual([value]);
     // An ID wins over a position, e.g., once cells have moved

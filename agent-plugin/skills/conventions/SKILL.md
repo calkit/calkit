@@ -157,12 +157,13 @@ notebook writing files, which is what to offer someone who'd rather not
 add `json.dump` or `savefig` calls.
 Mark them with `calkit nb mark`, which records them under the stage's
 `cell_outputs` by cell ID (read IDs from the `.ipynb`, or use
-`--cell-index`, which adds IDs if the notebook has none):
+`--cell-index`, which adds IDs if the notebook has none), each with a
+`kind` of `value`, `figure`, or `table`:
 
 ```sh
-calkit nb mark analysis.ipynb --cell 3f9a1c2e --value k_25
-calkit nb mark analysis.ipynb --cell 8b77d0aa --figure figures/fit.pdf --variable fig
-calkit nb mark analysis.ipynb --cell 1d2e4c0b --table tables/rates.tex --variable df
+calkit nb mark analysis.ipynb value --cell-id 3f9a1c2e --variable k_25
+calkit nb mark analysis.ipynb figure --cell-id 8b77d0aa --variable fig --path figures/fit.pdf
+calkit nb mark analysis.ipynb table --cell-id 1d2e4c0b --variable df --path tables/rates.tex
 calkit nb outputs analysis.ipynb --json
 ```
 

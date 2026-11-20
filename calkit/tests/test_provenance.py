@@ -1261,7 +1261,9 @@ def test_get_path_provenance():
                     "kind": "jupyter-notebook",
                     "notebook_path": "nbs/fit.ipynb",
                     "environment": "py",
-                    "cell_outputs": [{"cell": "a", "value": "k"}],
+                    "cell_outputs": [
+                        {"kind": "value", "cell_id": "a", "variable": "k"}
+                    ],
                 },
                 "copy-figs": {
                     "kind": "map-paths",

@@ -493,17 +493,10 @@ class NotebookCellOutputsRouteHandler(APIHandler):
         body = self.get_json_body()
         if not body or not body.get("path"):
             return self.error(400, "Request body must include 'path'")
-        output = {
-            key: body.get(key)
-            for key in (
-                "cell",
-                "value",
-                "figure",
-                "table",
-                "variable",
-                "format",
-            )
-        }
+        # The notebook's path, and the output as calkit.yaml has it
+        output = body.get("output")
+        if not isinstance(output, dict):
+            return self.error(400, "Request body must include 'output'")
         try:
             marked = calkit.notebooks.mark_cell_output(
                 body["path"],
@@ -524,12 +517,9 @@ class NotebookCellOutputsRouteHandler(APIHandler):
         try:
             n_removed = calkit.notebooks.unmark_cell_outputs(
                 notebook_path,
-                value=self.get_argument("value", None),
-                path=(
-                    self.get_argument("figure", None)
-                    or self.get_argument("table", None)
-                ),
-                cell=self.get_argument("cell", None),
+                value=self.get_argument("variable", None),
+                path=self.get_argument("output_path", None),
+                cell_id=self.get_argument("cell_id", None),
                 stage=self.get_argument("stage", None),
             )
         except ValueError as e:

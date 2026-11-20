@@ -17,10 +17,10 @@ import {
 const value: CellOutputMark = {
   stage: "fit",
   kind: "value",
-  name: "k_25",
-  cell: "c0",
+  cell_id: "c0",
   cell_index: 0,
-  variable: null,
+  variable: "k_25",
+  path: null,
   format: null,
   citation: "\\ckvalue{fit.ipynb}{k_25}",
   saved_value: 0.030912,
@@ -28,10 +28,10 @@ const value: CellOutputMark = {
 const figure: CellOutputMark = {
   stage: "fit",
   kind: "figure",
-  path: "figures/fit.pdf",
-  cell: "c2",
+  cell_id: "c2",
   cell_index: 2,
   variable: "fig",
+  path: "figures/fit.pdf",
   format: null,
   citation: "\\ckfigure{figures/fit.pdf}",
 };
@@ -156,19 +156,20 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
       cellId: "c2",
       cellIndex: 2,
       kind: "figure",
-      target: "figures/fit.pdf",
       variable: "fig",
+      path: "figures/fit.pdf",
     }),
     [
       "nb",
       "mark",
       "fit.ipynb",
-      "--cell",
+      "figure",
+      "--cell-id",
       "c2",
-      "--figure",
-      "figures/fit.pdf",
       "--variable",
       "fig",
+      "--path",
+      "figures/fit.pdf",
       "--json",
     ],
   );
@@ -178,16 +179,17 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
       notebookPath: "fit.ipynb",
       cellIndex: 0,
       kind: "value",
-      target: "k",
+      variable: "k",
       stage: "fit-2",
     }),
     [
       "nb",
       "mark",
       "fit.ipynb",
+      "value",
       "--cell-index",
       "0",
-      "--value",
+      "--variable",
       "k",
       "--stage",
       "fit-2",
@@ -198,7 +200,7 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
     "nb",
     "unmark",
     "fit.ipynb",
-    "--figure",
+    "--path",
     "figures/fit.pdf",
     "--stage",
     "fit",
@@ -206,7 +208,7 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
 });
 
 test("getMarksForCell finds a cell's marks by ID or position", () => {
-  const atEnd = { ...value, name: "last", cell: null, cell_index: null };
+  const atEnd = { ...value, variable: "last", cell_id: null, cell_index: null };
   const marks = [value, figure, atEnd];
   assert.deepEqual(getMarksForCell(marks, 0, "c0", false), [value]);
   // An ID wins over a position, e.g., once cells have moved

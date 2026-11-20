@@ -188,7 +188,7 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
 
     user = globals()
     for i, out in outputs:
-        name = out.get("value") or out.get("variable")
+        name = out.get("variable")
         what = f"'{name}'"
         if name is None:
             continue
@@ -197,7 +197,7 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
                 f"Calkit: there's no variable '{name}' after {where} to "
                 f"save as {out.get('path') or 'a value'}"
             )
-        if out.get("value"):
+        if out["kind"] == "value":
             values = {}
             if os.path.isfile(values_path):
                 with open(values_path, encoding="utf-8") as f:
@@ -206,7 +206,7 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
             os.makedirs(os.path.dirname(values_path) or ".", exist_ok=True)
             with open(values_path, "w", encoding="utf-8") as f:
                 json.dump(values, f, indent=2)
-        elif out.get("figure"):
+        elif out["kind"] == "figure":
             save_figure(user[name], out["path"], what)
         else:
             table = to_table(user[name], what)
@@ -298,8 +298,8 @@ def add_capture_cells(
     named without a cell.
 
     ``outputs`` are cell outputs as ``NotebookCellOutput.model_dump`` gives
-    them, with ``path`` set to where a figure is saved, relative to where
-    the kernel runs, like ``values_path`` and ``tables_dir``. Raises a
+    them, with a figure's ``path`` relative to where the kernel runs, like
+    ``values_path`` and ``tables_dir``. Raises a
     ``ValueError`` naming a cell the notebook doesn't have.
     """
     import copy
@@ -327,7 +327,7 @@ def add_capture_cells(
     by_cell: dict[str, list[tuple[int, dict]]] = {}
     at_end: list[tuple[int, dict]] = []
     for i, out in enumerate(outputs):
-        cell = out.get("cell")
+        cell = out.get("cell_id")
         if cell is None:
             at_end.append((i, out))
             continue
@@ -426,29 +426,26 @@ def find_notebook_stages(ck_info: dict, notebook_path: str) -> list[str]:
 
 def get_cell_output_target(output: dict) -> tuple[str, str]:
     """What a cell output saves, e.g., ``("value", "k")`` or
-    ``("figure", "figures/fit.pdf")``, which is unique within a stage.
+    ``("figure", "figures/fit.pdf")``, which is unique within a stage: a
+    value's variable, or a figure or table's path.
     """
-    for kind in ("value", "figure", "table"):
-        if output.get(kind):
-            return kind, str(output[kind])
-    raise ValueError(
-        "A cell output needs one of 'value', 'figure', or 'table'"
-    )
+    kind = str(output.get("kind"))
+    target = output.get("variable") if kind == "value" else output.get("path")
+    return kind, str(target)
 
 
 def with_cell_output(outputs: list[dict], new: dict) -> list[dict]:
     """A stage's cell outputs with one added, replacing one that saves the
-    same thing, e.g., when a value is marked again on another cell, and
-    taking a figure or table's path from another of its kind.
+    same thing, e.g., when a value is marked again on another cell, or a
+    figure or table saved to the same path.
     """
     target = get_cell_output_target(new)
-    path = new.get("figure") or new.get("table")
+    path = new.get("path")
     replaced = False
     out = []
     for existing in outputs:
         same = get_cell_output_target(existing) == target or (
-            path is not None
-            and path in (existing.get("figure"), existing.get("table"))
+            path is not None and existing.get("path") == path
         )
         if same:
             if not replaced:
@@ -465,18 +462,22 @@ def without_cell_outputs(
     outputs: list[dict],
     value: str | None = None,
     path: str | None = None,
-    cell: str | None = None,
+    cell_id: str | None = None,
 ) -> list[dict]:
-    """A stage's cell outputs without those saving a value or a figure or
-    table at a path, or saved after a cell.
+    """A stage's cell outputs without those saving a value by its name, a
+    figure or table at a path, or anything after a cell.
     """
     return [
         o
         for o in outputs
         if not (
-            (value is not None and o.get("value") == value)
-            or (path is not None and path in (o.get("figure"), o.get("table")))
-            or (cell is not None and o.get("cell") == cell)
+            (
+                value is not None
+                and o.get("kind") == "value"
+                and o.get("variable") == value
+            )
+            or (path is not None and o.get("path") == path)
+            or (cell_id is not None and o.get("cell_id") == cell_id)
         )
     ]
 
@@ -487,17 +488,18 @@ def get_cell_output_citation(
     """The calkit.sty command a document shows a cell output with, or None
     for a table that isn't LaTeX, which needs a stage to typeset it.
     """
-    if output.get("value"):
+    kind = output.get("kind")
+    if kind == "value":
         source = (
             get_notebook_values_path(notebook_path, parameters)
             if parameters
             else Path(notebook_path).as_posix()
         )
-        return f"\\ckvalue{{{source}}}{{{output['value']}}}"
-    if output.get("figure"):
-        return f"\\ckfigure{{{output['figure']}}}"
-    if str(output.get("table", "")).lower().endswith(".tex"):
-        return f"\\cktable{{{output['table']}}}"
+        return f"\\ckvalue{{{source}}}{{{output['variable']}}}"
+    if kind == "figure":
+        return f"\\ckfigure{{{output['path']}}}"
+    if kind == "table" and str(output.get("path")).lower().endswith(".tex"):
+        return f"\\cktable{{{output['path']}}}"
     return None
 
 
@@ -515,22 +517,22 @@ def describe_cell_outputs(
     params = stage.get("parameters") or None
     described = []
     for output in stage.get("cell_outputs") or []:
-        kind, target = get_cell_output_target(output)
-        cell = output.get("cell")
+        cell_id = output.get("cell_id")
         item = {
             "stage": stage_name,
-            "kind": kind,
-            "name" if kind == "value" else "path": target,
-            "cell": cell,
-            "cell_index": ids.index(cell) if cell in ids else None,
+            "kind": output.get("kind"),
+            "cell_id": cell_id,
+            "cell_index": ids.index(cell_id) if cell_id in ids else None,
             "variable": output.get("variable"),
+            "path": output.get("path"),
             "format": output.get("format"),
             "citation": get_cell_output_citation(
                 output, stage["notebook_path"], params
             ),
         }
-        if kind == "value" and values is not None and target in values:
-            item["saved_value"] = values[target]
+        name = output.get("variable")
+        if item["kind"] == "value" and values is not None and name in values:
+            item["saved_value"] = values[name]
         described.append(item)
     return described
 
@@ -591,7 +593,7 @@ def mark_cell_output(
     notebook_path = Path(notebook_path).as_posix()
     fpath = os.path.join(wdir or ".", notebook_path)
     output = {k: v for k, v in output.items() if v is not None}
-    if cell_index is not None and output.get("cell") is not None:
+    if cell_index is not None and output.get("cell_id") is not None:
         raise ValueError("Name the cell by its ID or position, not both")
     ck_info = calkit.load_calkit_info(wdir=wdir)
     name = get_notebook_stage(ck_info, notebook_path, stage)
@@ -610,11 +612,11 @@ def mark_cell_output(
             with open(fpath, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(nb, f, indent=1)
                 f.write("\n")
-        output["cell"] = get_cell_ids(nb)[cell_index]
-    elif output.get("cell") is not None and output["cell"] not in get_cell_ids(
-        nb
-    ):
-        raise ValueError(f"{notebook_path} has no cell {output['cell']}")
+        output["cell_id"] = get_cell_ids(nb)[cell_index]
+    elif output.get("cell_id") is not None and output[
+        "cell_id"
+    ] not in get_cell_ids(nb):
+        raise ValueError(f"{notebook_path} has no cell {output['cell_id']}")
     try:
         new = NotebookCellOutput.model_validate(output).model_dump(
             exclude_none=True
@@ -654,7 +656,7 @@ def unmark_cell_outputs(
     notebook_path: str,
     value: str | None = None,
     path: str | None = None,
-    cell: str | None = None,
+    cell_id: str | None = None,
     stage: str | None = None,
     wdir: str | None = None,
 ) -> int:
@@ -667,13 +669,15 @@ def unmark_cell_outputs(
     import calkit
 
     notebook_path = Path(notebook_path).as_posix()
-    if not any((value, path, cell)):
+    if not any((value, path, cell_id)):
         raise ValueError("Name a value, a figure or table's path, or a cell")
     ck_info = calkit.load_calkit_info(wdir=wdir)
     name = get_notebook_stage(ck_info, notebook_path, stage)
     stage_dict = ck_info["pipeline"]["stages"][name]
     before = [dict(o) for o in stage_dict.get("cell_outputs") or []]
-    after = without_cell_outputs(before, value=value, path=path, cell=cell)
+    after = without_cell_outputs(
+        before, value=value, path=path, cell_id=cell_id
+    )
     if len(after) == len(before):
         raise ValueError(f"Nothing like that is marked in {notebook_path}")
     if after:

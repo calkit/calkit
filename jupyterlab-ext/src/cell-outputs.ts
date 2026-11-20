@@ -10,11 +10,10 @@ export type CellOutputKind = "value" | "figure" | "table";
 export interface ICellOutputMark {
   stage: string;
   kind: CellOutputKind;
-  name?: string;
-  path?: string;
-  cell: string | null;
+  cell_id: string | null;
   cell_index: number | null;
   variable: string | null;
+  path: string | null;
   format: string | null;
   citation: string | null;
   saved_value?: unknown;
@@ -52,7 +51,7 @@ export function filterCellOutputMarks(data: unknown): ICellOutputMark[] {
 
 /** What a mark saves: a value's name, or a figure or table's path. */
 export function getMarkTarget(mark: ICellOutputMark): string {
-  return (mark.kind === "value" ? mark.name : mark.path) ?? "";
+  return (mark.kind === "value" ? mark.variable : mark.path) ?? "";
 }
 
 /** A saved value as short text, e.g., `0.03091` or `{3 keys}`. */
@@ -233,27 +232,33 @@ export function getMarkPathError(
     : `Use ${exts.join(", ")}`;
 }
 
-/** The body of a request to mark a cell's output. */
+/**
+ * The body of a request to mark a cell's output: the notebook's path, and
+ * the output as calkit.yaml has it.
+ */
 export function getMarkRequestBody(options: {
   notebookPath: string;
   cellId: string;
   kind: CellOutputKind;
-  target: string;
   variable?: string;
+  path?: string;
   stage?: string;
-}): Record<string, string> {
-  const body: Record<string, string> = {
-    path: options.notebookPath,
-    cell: options.cellId,
-    [options.kind]: options.target,
+}): Record<string, unknown> {
+  const output: Record<string, string> = {
+    kind: options.kind,
+    cell_id: options.cellId,
   };
-  if (options.variable && options.kind !== "value") {
-    body.variable = options.variable;
+  if (options.variable) {
+    output.variable = options.variable;
   }
-  if (options.stage) {
-    body.stage = options.stage;
+  if (options.path && options.kind !== "value") {
+    output.path = options.path;
   }
-  return body;
+  return {
+    path: options.notebookPath,
+    output,
+    ...(options.stage ? { stage: options.stage } : {}),
+  };
 }
 
 /** The query of a request to unmark a mark. */
@@ -263,7 +268,7 @@ export function getUnmarkQuery(
 ): string {
   return new URLSearchParams({
     path: notebookPath,
-    [mark.kind]: getMarkTarget(mark),
+    [mark.kind === "value" ? "variable" : "output_path"]: getMarkTarget(mark),
     stage: mark.stage,
   }).toString();
 }
@@ -279,10 +284,10 @@ export function getMarksForCell(
   isLast: boolean,
 ): ICellOutputMark[] {
   return marks.filter((m) => {
-    if (m.cell === null) {
+    if (m.cell_id === null) {
       return isLast;
     }
-    return cellId ? m.cell === cellId : m.cell_index === cellIndex;
+    return cellId ? m.cell_id === cellId : m.cell_index === cellIndex;
   });
 }
 

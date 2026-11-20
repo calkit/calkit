@@ -504,18 +504,20 @@ def test_jupyternotebookstage():
         notebook_path="nbs/fit.ipynb",
         html_storage=None,
         cell_outputs=[
-            {"cell": "3f9a1c2e", "value": "k_25"},
-            {"value": "rates"},
+            {"kind": "value", "cell_id": "3f9a1c2e", "variable": "k_25"},
+            {"kind": "value", "variable": "rates"},
             {
-                "cell": "8b77d0aa",
-                "figure": "figures/fit.pdf",
+                "kind": "figure",
+                "cell_id": "8b77d0aa",
                 "variable": "fig",
+                "path": "figures/fit.pdf",
             },
-            {"cell": "8b77d0aa", "figure": "figures/shown.svg"},
+            {"kind": "figure", "cell_id": "8b77d0aa", "path": "f/shown.svg"},
             {
-                "cell": "1d2e4c0b",
-                "table": "tables/rates.tex",
+                "kind": "table",
+                "cell_id": "1d2e4c0b",
                 "variable": "df",
+                "path": "tables/rates.tex",
                 "format": ".3f",
             },
         ],
@@ -524,15 +526,17 @@ def test_jupyternotebookstage():
     assert s.values_path == ".calkit/notebooks/outputs/nbs/fit/values.json"
     assert dvc_stage["cmd"] == (
         "calkit nb execute --environment main --no-check "
-        '--output "value=k_25,cell=3f9a1c2e" --output "value=rates" '
-        '--output "figure=figures/fit.pdf,cell=8b77d0aa,variable=fig" '
-        '--output "figure=figures/shown.svg,cell=8b77d0aa" '
-        '--output "table=tables/rates.tex,cell=1d2e4c0b,variable=df,'
-        'format=.3f" "nbs/fit.ipynb"'
+        '--output "kind=value,cell_id=3f9a1c2e,variable=k_25" '
+        '--output "kind=value,variable=rates" '
+        '--output "kind=figure,cell_id=8b77d0aa,variable=fig,'
+        'path=figures/fit.pdf" '
+        '--output "kind=figure,cell_id=8b77d0aa,path=f/shown.svg" '
+        '--output "kind=table,cell_id=1d2e4c0b,variable=df,'
+        'path=tables/rates.tex,format=.3f" "nbs/fit.ipynb"'
     )
     assert {s.values_path: {"cache": False}} in dvc_stage["outs"]
     assert {"figures/fit.pdf": {"cache": True}} in dvc_stage["outs"]
-    assert {"figures/shown.svg": {"cache": False}} in dvc_stage["outs"]
+    assert {"f/shown.svg": {"cache": False}} in dvc_stage["outs"]
     assert {"tables/rates.tex": {"cache": False}} in dvc_stage["outs"]
     assert s.values_path in [o.path for o in s.notebook_outputs]
     for out in s.cell_outputs:
@@ -542,53 +546,60 @@ def test_jupyternotebookstage():
         environment="main",
         notebook_path="fit.ipynb",
         cell_outputs=[
-            {"cell": "a", "figure": "f.png", "storage": "git"},
+            {
+                "kind": "figure",
+                "cell_id": "a",
+                "path": "f.png",
+                "storage": "git",
+            },
         ],
     )
     assert [o.path for o in s.cell_output_paths] == ["f.png"]
     assert {"f.png": {"cache": False}} in s.to_dvc()["outs"]
     # What can't be saved
+    figure = {"kind": "figure", "cell_id": "a"}
+    table = {"kind": "table", "cell_id": "a", "variable": "d"}
     bad_outputs = [
-        ({}, "needs one of"),
-        ({"value": "a", "figure": "f.png"}, "needs one of"),
-        ({"value": "not a name"}, "isn't a variable name"),
-        ({"value": "a", "variable": "b"}, "don't apply"),
-        ({"cell": "a b", "value": "a"}, "isn't a cell ID"),
-        ({"cell": "a", "figure": "f.gif"}, "not '.gif'"),
-        ({"figure": "f.png"}, "Name the cell"),
-        ({"cell": "a", "figure": "/abs/f.png"}, "relative"),
-        ({"cell": "a", "figure": "f,g.png"}, "comma"),
-        ({"cell": "a", "table": "t.tex"}, "Name the variable"),
-        ({"cell": "a", "table": "t.xlsx", "variable": "df"}, "not '.xlsx'"),
-        (
-            {"cell": "a", "table": "t.tex", "variable": "d", "format": "q"},
-            "format",
-        ),
-        (
-            {"cell": "a", "table": "t.tex", "variable": "d", "format": ",.2f"},
-            "'_'",
-        ),
-        ({"cell": "a", "figure": "f.png", "format": ".2f"}, "only applies"),
+        ({}, "Field required"),
+        ({"kind": "plot", "variable": "a"}, "Input should be"),
+        ({"kind": "value"}, "Name the variable"),
+        ({"kind": "value", "variable": "not a name"}, "isn't a variable"),
+        ({"kind": "value", "variable": "a", "path": "a.json"}, "don't apply"),
+        ({"kind": "value", "cell_id": "a b", "variable": "a"}, "cell ID"),
+        ({"kind": "value", "variable": "a", "figure": "f.png"}, "Extra"),
+        (figure, "Give the path to save the figure to"),
+        (figure | {"path": "f.gif"}, "not '.gif'"),
+        ({"kind": "figure", "path": "f.png"}, "Name the cell"),
+        (figure | {"path": "/abs/f.png"}, "relative"),
+        (figure | {"path": "f,g.png"}, "comma"),
+        (figure | {"path": "f.png", "format": ".2f"}, "only applies"),
+        (table | {"variable": None, "path": "t.tex"}, "Name the variable"),
+        (table | {"path": "t.xlsx"}, "not '.xlsx'"),
+        (table | {"path": "t.tex", "format": "q"}, "format"),
+        (table | {"path": "t.tex", "format": ",.2f"}, "'_'"),
     ]
     for fields, message in bad_outputs:
         with pytest.raises(ValidationError, match=re.escape(message)):
-            NotebookCellOutput.model_validate(fields)
+            NotebookCellOutput.model_validate(
+                {k: v for k, v in fields.items() if v is not None}
+            )
     with pytest.raises(ValueError, match="give it as"):
         NotebookCellOutput.from_arg("value")
     with pytest.raises(ValueError, match="given twice"):
-        NotebookCellOutput.from_arg("value=a,value=b")
+        NotebookCellOutput.from_arg("kind=value,kind=value")
+    value = {"kind": "value", "variable": "a"}
     bad_stages = [
-        ([{"value": "a"}, {"cell": "x", "value": "a"}], {}, "more than once"),
+        ([value, value | {"cell_id": "x"}], {}, "more than once"),
         (
             [
-                {"cell": "x", "figure": "f.png"},
-                {"cell": "y", "figure": "f.png"},
+                figure | {"path": "f.png"},
+                figure | {"cell_id": "y", "path": "f.png"},
             ],
             {},
             "more than one cell",
         ),
-        ([{"cell": "x", "figure": "f.png"}], {"outputs": ["f.png"]}, "too"),
-        ([{"value": "a"}], {"language": "julia"}, "only saved from Python"),
+        ([figure | {"path": "f.png"}], {"outputs": ["f.png"]}, "too"),
+        ([value], {"language": "julia"}, "only saved from Python"),
     ]
     for cell_outputs, extra, message in bad_stages:
         with pytest.raises(ValidationError, match=message):

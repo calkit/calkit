@@ -199,11 +199,11 @@ a document.
 From a terminal, or for an agent, use `calkit nb mark`:
 
 ```sh
-calkit nb mark fit-rates.ipynb --cell 3f9a1c2e --value k_25
-calkit nb mark fit-rates.ipynb --cell 8b77d0aa \
-    --figure figures/decay.pdf --variable fig
-calkit nb mark fit-rates.ipynb --cell 1d2e4c0b \
-    --table tables/rates.tex --variable rates_df --format .3f
+calkit nb mark fit-rates.ipynb value --cell-id 3f9a1c2e --variable k_25
+calkit nb mark fit-rates.ipynb figure --cell-id 8b77d0aa \
+    --variable fig --path figures/decay.pdf
+calkit nb mark fit-rates.ipynb table --cell-id 1d2e4c0b \
+    --variable rates_df --path tables/rates.tex --format .3f
 calkit nb outputs fit-rates.ipynb
 ```
 
@@ -219,14 +219,17 @@ pipeline:
       notebook_path: fit-rates.ipynb
       environment: py
       cell_outputs:
-        - cell: 3f9a1c2e
-          value: k_25
-        - cell: 8b77d0aa
-          figure: figures/decay.pdf
+        - kind: value
+          cell_id: 3f9a1c2e
+          variable: k_25
+        - kind: figure
+          cell_id: 8b77d0aa
           variable: fig
-        - cell: 1d2e4c0b
-          table: tables/rates.tex
+          path: figures/decay.pdf
+        - kind: table
+          cell_id: 1d2e4c0b
           variable: rates_df
+          path: tables/rates.tex
           format: .3f
 ```
 

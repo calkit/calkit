@@ -517,9 +517,9 @@ def execute_notebook(
             "-o",
             help=(
                 "A value, figure, or table a cell makes, to save after it "
-                "runs, e.g., 'value=k,cell=3f9a1c2e' or "
-                "'figure=figures/fit.pdf,cell=8b77d0aa,variable=fig'. Can "
-                "be given more than once."
+                "runs, e.g., 'kind=value,cell_id=3f9a1c2e,variable=k' or "
+                "'kind=figure,cell_id=8b77d0aa,variable=fig,"
+                "path=figures/fit.pdf'. Can be given more than once."
             ),
         ),
     ] = [],
@@ -564,39 +564,38 @@ def execute_notebook(
                 calkit.notebooks.remove_capture_cells(executed), f, indent=1
             )
         saved = []
-        if any(o.value is not None for o in outputs):
+        if any(o.kind == "value" for o in outputs):
             os.makedirs(os.path.dirname(values_path), exist_ok=True)
             shutil.move(os.path.join(scratch_dir, "values.json"), values_path)
             saved.append(values_path)
         for i, o in enumerate(outputs):
-            if o.table is not None:
+            if o.kind == "value" or o.path is None:
+                continue
+            if o.kind == "table":
                 with open(
                     os.path.join(scratch_dir, "tables", f"{i}.json"),
                     encoding="utf-8",
                 ) as f:
                     table = json.load(f)
-                calkit.tables.write_table(o.table, table, o.format)
-                saved.append(o.table)
-            elif o.figure is not None and o.variable is None:
+                calkit.tables.write_table(o.path, table, o.format)
+            elif o.variable is None:
                 try:
                     image = calkit.notebooks.get_cell_image(
                         executed,
-                        str(o.cell),
-                        os.path.splitext(o.figure)[1],
+                        str(o.cell_id),
+                        os.path.splitext(o.path)[1],
                     )
                 except ValueError as e:
-                    raise_error(f"Can't save {o.figure}: {e}")
-                os.makedirs(os.path.dirname(o.figure) or ".", exist_ok=True)
-                with open(o.figure, "wb") as f:
+                    raise_error(f"Can't save {o.path}: {e}")
+                os.makedirs(os.path.dirname(o.path) or ".", exist_ok=True)
+                with open(o.path, "wb") as f:
                     f.write(image)
-                saved.append(o.figure)
-            elif o.figure is not None:
-                if not os.path.isfile(o.figure):
-                    raise_error(
-                        f"{o.figure} wasn't saved from '{o.variable}' after "
-                        f"cell {o.cell}"
-                    )
-                saved.append(o.figure)
+            elif not os.path.isfile(o.path):
+                raise_error(
+                    f"{o.path} wasn't saved from '{o.variable}' after "
+                    f"cell {o.cell_id}"
+                )
+            saved.append(o.path)
         typer.echo("Saved " + ", ".join(dict.fromkeys(saved)))
 
     if os.path.isabs(path):
@@ -747,9 +746,9 @@ def execute_notebook(
                     o.model_dump()
                     | {
                         "path": (
-                            from_kernel(o.figure)
-                            if o.figure is not None
-                            else None
+                            from_kernel(o.path)
+                            if o.kind == "figure" and o.path is not None
+                            else o.path
                         )
                     }
                     for o in outputs
@@ -1009,9 +1008,13 @@ def _pyodide_provided_packages() -> set[str]:
 @notebooks_app.command("mark")
 def mark_cell_output(
     path: Annotated[str, typer.Argument(help="Path to the notebook.")],
-    cell: Annotated[
+    kind: Annotated[
+        str,
+        typer.Argument(help="What it is: 'value', 'figure', or 'table'."),
+    ],
+    cell_id: Annotated[
         str | None,
-        typer.Option("--cell", help="ID of the cell it's saved after."),
+        typer.Option("--cell-id", help="ID of the cell it's saved after."),
     ] = None,
     cell_index: Annotated[
         int | None,
@@ -1021,30 +1024,20 @@ def mark_cell_output(
             "notebook whose cells have no IDs yet, which gives them some.",
         ),
     ] = None,
-    value: Annotated[
-        str | None,
-        typer.Option("--value", help="Variable to save as a value."),
-    ] = None,
-    figure: Annotated[
-        str | None,
-        typer.Option(
-            "--figure",
-            help="Path to save a figure to, e.g., figures/fit.pdf, from "
-            "--variable, or else the image the cell shows.",
-        ),
-    ] = None,
-    table: Annotated[
-        str | None,
-        typer.Option(
-            "--table",
-            help="Path to save a table to from --variable, as LaTeX (.tex), "
-            "CSV, Markdown, or JSON.",
-        ),
-    ] = None,
     variable: Annotated[
         str | None,
         typer.Option(
-            "--variable", help="Variable holding the figure or table."
+            "--variable",
+            help="Variable it's saved from; for a figure, the image the cell "
+            "shows if not given.",
+        ),
+    ] = None,
+    output_path: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            help="Where to save a figure or table, e.g., figures/fit.pdf or "
+            "tables/rates.tex.",
         ),
     ] = None,
     number_format: Annotated[
@@ -1070,11 +1063,10 @@ def mark_cell_output(
         marked = calkit.notebooks.mark_cell_output(
             path,
             {
-                "cell": cell,
-                "value": value,
-                "figure": figure,
-                "table": table,
+                "kind": kind,
+                "cell_id": cell_id,
                 "variable": variable,
+                "path": output_path,
                 "format": number_format,
             },
             stage=stage,
@@ -1089,7 +1081,7 @@ def mark_cell_output(
     if marked["warning"]:
         warn(marked["warning"])
     typer.echo(
-        f"Marked {value or figure or table} to be saved from {path} when "
+        f"Marked {output_path or variable} to be saved from {path} when "
         f"stage '{marked['stage']}' runs"
     )
     if marked["citation"]:
@@ -1101,22 +1093,17 @@ def mark_cell_output(
 @notebooks_app.command("unmark")
 def unmark_cell_output(
     path: Annotated[str, typer.Argument(help="Path to the notebook.")],
-    value: Annotated[
-        str | None, typer.Option("--value", help="Value to stop saving.")
-    ] = None,
-    figure: Annotated[
+    variable: Annotated[
         str | None,
-        typer.Option("--figure", help="Path of a figure to stop saving."),
+        typer.Option("--variable", help="Value to stop saving, by name."),
     ] = None,
-    table: Annotated[
+    output_path: Annotated[
         str | None,
-        typer.Option("--table", help="Path of a table to stop saving."),
+        typer.Option("--path", help="Figure or table to stop saving."),
     ] = None,
-    cell: Annotated[
+    cell_id: Annotated[
         str | None,
-        typer.Option(
-            "--cell", help="ID of a cell to stop saving anything after."
-        ),
+        typer.Option("--cell-id", help="Cell to stop saving anything after."),
     ] = None,
     stage: Annotated[
         str | None,
@@ -1128,7 +1115,11 @@ def unmark_cell_output(
     """Stop saving a value, figure, or table from a notebook's cell."""
     try:
         n = calkit.notebooks.unmark_cell_outputs(
-            path, value=value, path=figure or table, cell=cell, stage=stage
+            path,
+            value=variable,
+            path=output_path,
+            cell_id=cell_id,
+            stage=stage,
         )
     except ValueError as e:
         raise_error(str(e))
@@ -1159,9 +1150,11 @@ def list_cell_outputs(
         where = (
             f"cell {item['cell_index'] + 1}"
             if item["cell_index"] is not None
-            else (f"missing cell {item['cell']}" if item["cell"] else "end")
+            else (
+                f"missing cell {item['cell_id']}" if item["cell_id"] else "end"
+            )
         )
-        text = f"{item['kind']} {item.get('name') or item.get('path')}"
+        text = f"{item['kind']} {item['path'] or item['variable']}"
         if "saved_value" in item:
             text += f" = {json.dumps(item['saved_value'])}"
         typer.echo(f"{text} ({where})")

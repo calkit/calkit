@@ -177,15 +177,15 @@ def test_capture_cells():
         ],
     }
     outputs = [
-        {"cell": "c", "value": "x"},
-        {"value": "y"},
+        {"kind": "value", "cell_id": "c", "variable": "x"},
+        {"kind": "value", "variable": "y"},
         {
-            "cell": "a",
-            "figure": "f.png",
+            "kind": "figure",
+            "cell_id": "a",
             "variable": "fig",
             "path": "../f.png",
         },
-        {"cell": "a", "value": "z"},
+        {"kind": "value", "cell_id": "a", "variable": "z"},
     ]
     captured = calkit.notebooks.add_capture_cells(nb, outputs, "v.json", "t")
     sources = [c["source"] for c in captured["cells"]]
@@ -194,10 +194,16 @@ def test_capture_cells():
     assert sources[0] == calkit.notebooks.CAPTURE_HELPER
     assert sources[1] == "x = 1"
     assert sources[2].startswith("_calkit_save_cell_outputs('cell a', ")
-    assert '[[2, {"cell": "a", "figure": "f.png"' in sources[2]
-    assert '[3, {"cell": "a", "value": "z"}]' in sources[2]
+    assert '[[2, {"kind": "figure", "cell_id": "a"' in sources[2]
+    assert (
+        '[3, {"kind": "value", "cell_id": "a", "variable": "z"}]'
+        in (sources[2])
+    )
     assert sources[3:5] == ["# Hi", "x = 2"]
-    assert '[[0, {"cell": "c", "value": "x"}]]' in sources[5]
+    assert (
+        '[[0, {"kind": "value", "cell_id": "c", "variable": "x"}]]'
+        in (sources[5])
+    )
     assert sources[6].startswith("_calkit_save_cell_outputs('the last cell'")
     assert "'v.json', 't')" in sources[6]
     assert len({c["id"] for c in captured["cells"]}) == 7
@@ -206,7 +212,10 @@ def test_capture_cells():
     assert calkit.notebooks.remove_capture_cells(captured) == nb
     with pytest.raises(ValueError, match="no cell zz"):
         calkit.notebooks.add_capture_cells(
-            nb, [{"cell": "zz", "value": "x"}], "v.json", "t"
+            nb,
+            [{"kind": "value", "cell_id": "zz", "variable": "x"}],
+            "v.json",
+            "t",
         )
     # The helper saves values, figures, and tables in the kernel, failing
     # with what to do about anything it can't
@@ -227,11 +236,11 @@ def test_capture_cells():
         save(
             "cell a",
             [
-                [0, {"value": "k"}],
-                [1, {"value": "rates"}],
-                [2, {"table": "t.tex", "variable": "rows"}],
-                [3, {"table": "t.tex", "variable": "cols"}],
-                [4, {"table": "t.tex", "variable": "grid"}],
+                [0, {"kind": "value", "variable": "k"}],
+                [1, {"kind": "value", "variable": "rates"}],
+                [2, {"kind": "table", "variable": "rows"}],
+                [3, {"kind": "table", "variable": "cols"}],
+                [4, {"kind": "table", "variable": "grid"}],
             ],
             values,
             tables,
@@ -253,11 +262,19 @@ def test_capture_cells():
         with open(os.path.join(tables, "4.json")) as f:
             assert json.load(f)["data"] == [[25, 0.031]]
         failures = [
-            ({"value": "missing"}, NameError, "no variable 'missing'"),
-            ({"value": "bad"}, TypeError, "since it's a object"),
-            ({"table": "t.tex", "variable": "k"}, TypeError, "as a table"),
             (
-                {"figure": "f.png", "variable": "k", "path": "f.png"},
+                {"kind": "value", "variable": "missing"},
+                NameError,
+                "no variable 'missing'",
+            ),
+            (
+                {"kind": "value", "variable": "bad"},
+                TypeError,
+                "since it's a object",
+            ),
+            ({"kind": "table", "variable": "k"}, TypeError, "as a table"),
+            (
+                {"kind": "figure", "variable": "k", "path": "f.png"},
                 TypeError,
                 "as a figure",
             ),
@@ -316,48 +333,46 @@ def test_cell_output_marks():
         "fit-2",
     ]
     assert calkit.notebooks.find_notebook_stages({}, "fit.ipynb") == []
-    outputs = [
-        {"cell": "a", "value": "k"},
-        {"cell": "b", "figure": "f.png"},
-        {"cell": "b", "table": "t.tex", "variable": "df"},
-    ]
+    value = {"kind": "value", "cell_id": "a", "variable": "k"}
+    figure = {"kind": "figure", "cell_id": "b", "path": "f.png"}
+    table = {
+        "kind": "table",
+        "cell_id": "b",
+        "variable": "df",
+        "path": "t.tex",
+    }
+    outputs = [value, figure, table]
     # Marking something again moves it, and a path takes over from another
     # output saved to it
-    marked = calkit.notebooks.with_cell_output(
-        outputs, {"cell": "c", "value": "k"}
-    )
-    assert marked[0] == {"cell": "c", "value": "k"}
-    assert len(marked) == 3
-    marked = calkit.notebooks.with_cell_output(
-        outputs, {"cell": "c", "figure": "t.tex", "variable": "fig"}
-    )
-    assert [o.get("figure") or o.get("table") for o in marked] == [
-        None,
-        "f.png",
-        "t.tex",
-    ]
-    assert marked[2]["cell"] == "c"
-    assert calkit.notebooks.with_cell_output(outputs, {"value": "j"})[-1] == {
-        "value": "j"
+    moved = value | {"cell_id": "c"}
+    marked = calkit.notebooks.with_cell_output(outputs, moved)
+    assert marked == [moved, figure, table]
+    replacing = {
+        "kind": "figure",
+        "cell_id": "c",
+        "variable": "fig",
+        "path": "t.tex",
     }
-    assert (
-        calkit.notebooks.without_cell_outputs(outputs, value="k")
-        == outputs[1:]
-    )
-    assert (
-        calkit.notebooks.without_cell_outputs(outputs, path="t.tex")
-        == (outputs[:2])
-    )
-    assert (
-        calkit.notebooks.without_cell_outputs(outputs, cell="b")
-        == (outputs[:1])
-    )
+    marked = calkit.notebooks.with_cell_output(outputs, replacing)
+    assert marked == [value, figure, replacing]
+    added = {"kind": "value", "variable": "j"}
+    assert calkit.notebooks.with_cell_output(outputs, added)[-1] == added
+    without = calkit.notebooks.without_cell_outputs
+    assert without(outputs, value="k") == [figure, table]
+    assert without(outputs, value="df") == outputs
+    assert without(outputs, path="t.tex") == [value, figure]
+    assert without(outputs, cell_id="b") == [value]
     stage = {
         "notebook_path": "fit.ipynb",
         "cell_outputs": outputs
         + [
-            {"cell": "gone", "table": "t.csv", "variable": "df"},
-            {"value": "j"},
+            {
+                "kind": "table",
+                "cell_id": "gone",
+                "variable": "df",
+                "path": "t.csv",
+            },
+            added,
         ],
     }
     nb = {"cells": [{"id": "a"}, {"id": "x"}, {"id": "b"}]}
@@ -367,10 +382,10 @@ def test_cell_output_marks():
     assert described[0] == {
         "stage": "fit",
         "kind": "value",
-        "name": "k",
-        "cell": "a",
+        "cell_id": "a",
         "cell_index": 0,
-        "variable": None,
+        "variable": "k",
+        "path": None,
         "format": None,
         "citation": r"\ckvalue{fit.ipynb}{k}",
         "saved_value": 0.25,
@@ -481,21 +496,27 @@ def test_mark_cell_output(tmp_path):
     )
     wdir = str(tmp_path)
     # A cell named by position gets an ID, as do the rest
+    value = {"kind": "value", "variable": "k"}
     marked = calkit.notebooks.mark_cell_output(
-        "fit.ipynb", {"value": "k"}, cell_index=0, wdir=wdir
+        "fit.ipynb", value, cell_index=0, wdir=wdir
     )
     saved = json.loads((tmp_path / "fit.ipynb").read_text())
     ids = calkit.notebooks.get_cell_ids(saved)
     assert all(ids) and saved["nbformat_minor"] == 5
     assert marked == {
         "stage": "fit",
-        "output": {"cell": ids[0], "value": "k"},
+        "output": {"kind": "value", "cell_id": ids[0], "variable": "k"},
         "citation": r"\ckvalue{fit.ipynb}{k}",
         "warning": None,
     }
     calkit.notebooks.mark_cell_output(
         "fit.ipynb",
-        {"cell": ids[1], "figure": "f.pdf", "variable": "fig"},
+        {
+            "kind": "figure",
+            "cell_id": ids[1],
+            "variable": "fig",
+            "path": "f.pdf",
+        },
         wdir=wdir,
     )
     text = (tmp_path / "calkit.yaml").read_text()
@@ -505,31 +526,23 @@ def test_mark_cell_output(tmp_path):
         ("value", 0),
         ("figure", 1),
     ]
+    on_first = value | {"cell_id": ids[0]}
     for args, kwargs, message in [
-        ({"cell": "zz", "value": "k"}, {}, "has no cell zz"),
-        ({"value": "k"}, {"cell_index": 5}, "has 2 cells, not 6"),
-        ({"cell": ids[0], "value": "k"}, {"cell_index": 0}, "not both"),
-        ({"cell": ids[0], "value": "k"}, {"stage": "other"}, "doesn't run"),
-        ({"cell": ids[0]}, {}, "needs one of"),
+        (value | {"cell_id": "zz"}, {}, "has no cell zz"),
+        (value, {"cell_index": 5}, "has 2 cells, not 6"),
+        (on_first, {"cell_index": 0}, "not both"),
+        (on_first, {"stage": "other"}, "doesn't run"),
+        ({"kind": "value", "cell_id": ids[0]}, {}, "Name the variable"),
     ]:
         with pytest.raises(ValueError, match=message):
             calkit.notebooks.mark_cell_output(
                 "fit.ipynb", args, wdir=wdir, **kwargs
             )
     with pytest.raises(ValueError, match="isn't in the pipeline yet"):
-        calkit.notebooks.mark_cell_output(
-            "other.ipynb", {"value": "k"}, wdir=wdir
-        )
-    assert (
-        calkit.notebooks.unmark_cell_outputs(
-            "fit.ipynb", cell=ids[1], wdir=wdir
-        )
-        == 1
-    )
+        calkit.notebooks.mark_cell_output("other.ipynb", value, wdir=wdir)
+    unmark = calkit.notebooks.unmark_cell_outputs
+    assert unmark("fit.ipynb", cell_id=ids[1], wdir=wdir) == 1
     with pytest.raises(ValueError, match="Nothing like that"):
-        calkit.notebooks.unmark_cell_outputs("fit.ipynb", value="z", wdir=wdir)
-    assert (
-        calkit.notebooks.unmark_cell_outputs("fit.ipynb", value="k", wdir=wdir)
-        == 1
-    )
+        unmark("fit.ipynb", value="z", wdir=wdir)
+    assert unmark("fit.ipynb", value="k", wdir=wdir) == 1
     assert "cell_outputs" not in (tmp_path / "calkit.yaml").read_text()

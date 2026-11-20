@@ -174,7 +174,12 @@ def test_list_tables(tmp_dir):
         "notebook_path": "fit.ipynb",
         "environment": "py",
         "cell_outputs": [
-            {"cell": "a", "table": "tables/k.tex", "variable": "df"}
+            {
+                "kind": "table",
+                "cell_id": "a",
+                "variable": "df",
+                "path": "tables/k.tex",
+            }
         ],
     }
     with open("calkit.yaml", "w") as f:

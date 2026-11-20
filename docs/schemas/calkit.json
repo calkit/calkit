@@ -6176,7 +6176,7 @@
       "additionalProperties": false,
       "description": "A value, figure, or table one of a notebook's cells makes, which\nCalkit saves when the pipeline runs the notebook, so the notebook\ndoesn't have to write it itself.",
       "properties": {
-        "cell": {
+        "cell_id": {
           "anyOf": [
             {
               "type": "string"
@@ -6187,20 +6187,7 @@
           ],
           "default": null,
           "description": "ID of the cell it's saved after, which Jupyter and VS Code keep on the cell as it moves. A value with none is saved after the last cell.",
-          "title": "Cell"
-        },
-        "figure": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to save a figure to, from 'variable', e.g., a Matplotlib figure, in the format its extension says, or else the image the cell shows.",
-          "title": "Figure"
+          "title": "Cell Id"
         },
         "format": {
           "anyOf": [
@@ -6214,6 +6201,29 @@
           "default": null,
           "description": "Python format spec for a table's numbers, e.g., '.3f'.",
           "title": "Format"
+        },
+        "kind": {
+          "description": "What it is: a value, cited by the notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}, or a figure or table, saved to 'path'.",
+          "enum": [
+            "value",
+            "figure",
+            "table"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where a figure or table is saved, in the format its extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as LaTeX (.tex), CSV, Markdown, or JSON.",
+          "title": "Path"
         },
         "storage": {
           "anyOf": [
@@ -6232,32 +6242,6 @@
           "description": "Where to store a figure or table; by its extension if not set, as for other outputs.",
           "title": "Storage"
         },
-        "table": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to save a table to, from 'variable', e.g., a DataFrame, as LaTeX (.tex), CSV, Markdown, or JSON, by its extension.",
-          "title": "Table"
-        },
-        "value": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Name of a variable to save as a value, cited by the notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}.",
-          "title": "Value"
-        },
         "variable": {
           "anyOf": [
             {
@@ -6268,10 +6252,13 @@
             }
           ],
           "default": null,
-          "description": "Name of the variable holding the figure or table.",
+          "description": "Name of the variable it's saved from: a value's name, e.g., a number or a dict of them, a figure, e.g., a Matplotlib figure, or a table, e.g., a DataFrame. A figure without one is the image the cell shows.",
           "title": "Variable"
         }
       },
+      "required": [
+        "kind"
+      ],
       "title": "NotebookCellOutput",
       "type": "object"
     },

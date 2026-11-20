@@ -105,7 +105,7 @@ Judgment, done here:
 
    When a notebook in the pipeline computes the number, e.g., it's in a
    cell's printed output, mark the variable holding it instead of changing
-   the notebook: `calkit nb mark <notebook> --cell <id> --value <name>`,
+   the notebook: `calkit nb mark <notebook> value --cell-id <id> --variable <name>`,
    then cite it as `\ckvalue{<notebook>}{<name>}`. See the conventions
    skill's section on notebook cells.
 

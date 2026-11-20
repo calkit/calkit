@@ -434,8 +434,8 @@ function renderTyped(
           project: link.project_name,
           notebook: match.notebook,
           stage: match.stage,
-          cell: match.cell,
-          value: name,
+          cell_id: match.cell,
+          variable: name,
         });
         clear(message).append(
           el("div", {

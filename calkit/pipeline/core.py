@@ -2099,7 +2099,7 @@ def get_cell_output_paths(stage: dict) -> list[str]:
         return []
     marks = [o for o in stage.get("cell_outputs") or [] if isinstance(o, dict)]
     paths = []
-    if any(o.get("value") for o in marks) and isinstance(
+    if any(o.get("kind") == "value" for o in marks) and isinstance(
         stage.get("notebook_path"), str
     ):
         paths.append(
@@ -2108,9 +2108,9 @@ def get_cell_output_paths(stage: dict) -> list[str]:
             )
         )
     paths += [
-        str(o.get("figure") or o.get("table"))
+        str(o["path"])
         for o in marks
-        if o.get("figure") or o.get("table")
+        if o.get("kind") in ("figure", "table") and o.get("path")
     ]
     return [
         posixpath.normpath(posixpath.join(stage.get("wdir") or "", p))

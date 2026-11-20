@@ -2480,32 +2480,29 @@ class NotebookCellOutput(Model):
     doesn't have to write it itself.
     """
 
-    cell: str | None = Field(
+    kind: Literal["value", "figure", "table"] = Field(
+        description="What it is: a value, cited by the notebook's path, "
+        "e.g., \\ckvalue{analysis.ipynb}{name}, or a figure or table, "
+        "saved to 'path'."
+    )
+    cell_id: str | None = Field(
         default=None,
         description="ID of the cell it's saved after, which Jupyter and VS "
         "Code keep on the cell as it moves. A value with none is saved "
         "after the last cell.",
     )
-    value: str | None = Field(
-        default=None,
-        description="Name of a variable to save as a value, cited by the "
-        "notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}.",
-    )
-    figure: str | None = Field(
-        default=None,
-        description="Path to save a figure to, from 'variable', e.g., a "
-        "Matplotlib figure, in the format its extension says, or else the "
-        "image the cell shows.",
-    )
-    table: str | None = Field(
-        default=None,
-        description="Path to save a table to, from 'variable', e.g., a "
-        "DataFrame, as LaTeX (.tex), CSV, Markdown, or JSON, by its "
-        "extension.",
-    )
     variable: str | None = Field(
         default=None,
-        description="Name of the variable holding the figure or table.",
+        description="Name of the variable it's saved from: a value's name, "
+        "e.g., a number or a dict of them, a figure, e.g., a Matplotlib "
+        "figure, or a table, e.g., a DataFrame. A figure without one is "
+        "the image the cell shows.",
+    )
+    path: str | None = Field(
+        default=None,
+        description="Where a figure or table is saved, in the format its "
+        "extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as "
+        "LaTeX (.tex), CSV, Markdown, or JSON.",
     )
     format: str | None = Field(
         default=None,
@@ -2525,35 +2522,31 @@ class NotebookCellOutput(Model):
             CELL_OUTPUT_TABLE_EXTS,
         )
 
-        kinds = [k for k in ("value", "figure", "table") if getattr(self, k)]
-        if len(kinds) != 1:
-            raise ValueError(
-                "A cell output needs one of 'value', 'figure', or 'table'"
-            )
-        names = [self.value, self.variable]
-        for name in names:
-            if name is not None and not name.isidentifier():
-                raise ValueError(f"'{name}' isn't a variable name")
-        if self.cell is not None and not re.fullmatch(
-            r"[A-Za-z0-9_-]+", self.cell
+        if self.variable is not None and not self.variable.isidentifier():
+            raise ValueError(f"'{self.variable}' isn't a variable name")
+        if self.cell_id is not None and not re.fullmatch(
+            r"[A-Za-z0-9_-]+", self.cell_id
         ):
-            raise ValueError(f"'{self.cell}' isn't a cell ID")
-        if self.value is not None:
-            if self.variable or self.format or self.storage:
+            raise ValueError(f"'{self.cell_id}' isn't a cell ID")
+        if self.kind == "value":
+            if self.variable is None:
+                raise ValueError("Name the variable to save as a value")
+            if self.path or self.format or self.storage:
                 raise ValueError(
-                    "A value is saved from the variable it names, so "
-                    "'variable', 'format', and 'storage' don't apply"
+                    "A value is saved with the notebook's other values, so "
+                    "'path', 'format', and 'storage' don't apply"
                 )
             return self
-        path = str(self.figure or self.table)
-        check_path_relative_and_child_of_cwd(path)
-        if "," in path:
-            raise ValueError(f"'{path}' can't include a comma")
-        ext = os.path.splitext(path)[1].lower()
-        if self.figure is not None:
-            if self.variable is None and self.cell is None:
+        if self.path is None:
+            raise ValueError(f"Give the path to save the {self.kind} to")
+        check_path_relative_and_child_of_cwd(self.path)
+        if "," in self.path:
+            raise ValueError(f"'{self.path}' can't include a comma")
+        ext = os.path.splitext(self.path)[1].lower()
+        if self.kind == "figure":
+            if self.variable is None and self.cell_id is None:
                 raise ValueError(
-                    f"Name the cell that shows {path}, or the variable "
+                    f"Name the cell that shows {self.path}, or the variable "
                     "holding it"
                 )
             if ext not in CELL_OUTPUT_FIGURE_EXTS:
@@ -2563,41 +2556,28 @@ class NotebookCellOutput(Model):
                 )
             if self.format:
                 raise ValueError("'format' only applies to tables")
-        else:
-            if ext not in CELL_OUTPUT_TABLE_EXTS:
+            return self
+        if ext not in CELL_OUTPUT_TABLE_EXTS:
+            raise ValueError(
+                f"A table is saved as one of "
+                f"{', '.join(CELL_OUTPUT_TABLE_EXTS)}, not '{ext}'"
+            )
+        if self.variable is None:
+            raise ValueError(
+                f"Name the variable holding the table for {self.path}"
+            )
+        if self.format:
+            # Commas separate the fields of its command line argument
+            if "," in self.format:
                 raise ValueError(
-                    f"A table is saved as one of "
-                    f"{', '.join(CELL_OUTPUT_TABLE_EXTS)}, not '{ext}'"
+                    "A table's format can't include a comma; use '_' to "
+                    "group thousands"
                 )
-            if self.variable is None:
-                raise ValueError(
-                    f"Name the variable holding the table for {path}"
-                )
-            if self.format:
-                # Commas separate the fields of its command line argument
-                if "," in self.format:
-                    raise ValueError(
-                        "A table's format can't include a comma; use '_' "
-                        "to group thousands"
-                    )
-                try:
-                    format(1.5, self.format)
-                except ValueError:
-                    raise ValueError(
-                        f"'{self.format}' isn't a format for numbers"
-                    )
+            try:
+                format(1.5, self.format)
+            except ValueError:
+                raise ValueError(f"'{self.format}' isn't a format for numbers")
         return self
-
-    @property
-    def kind(self) -> Literal["value", "figure", "table"]:
-        if self.value is not None:
-            return "value"
-        return "figure" if self.figure is not None else "table"
-
-    @property
-    def path(self) -> str | None:
-        """Where a figure or table is saved."""
-        return self.figure or self.table
 
     @property
     def stored_with(self) -> Literal["git", "dvc"]:
@@ -2611,7 +2591,7 @@ class NotebookCellOutput(Model):
 
     def to_arg(self) -> str:
         """This output as ``calkit nb execute --output`` takes it."""
-        fields = ("value", "figure", "table", "cell", "variable", "format")
+        fields = ("kind", "cell_id", "variable", "path", "format")
         return ",".join(
             f"{f}={getattr(self, f)}"
             for f in fields
@@ -2621,7 +2601,7 @@ class NotebookCellOutput(Model):
     @classmethod
     def from_arg(cls, arg: str) -> "NotebookCellOutput":
         """Parse what ``to_arg`` writes, e.g.,
-        ``figure=figures/fit.pdf,cell=8b77d0aa,variable=fig``.
+        ``kind=figure,cell_id=8b77d0aa,variable=fig,path=figures/fit.pdf``.
         """
         fields: dict[str, str] = {}
         for part in arg.split(","):
@@ -2630,7 +2610,7 @@ class NotebookCellOutput(Model):
             if not sep or not key:
                 raise ValueError(
                     f"Can't read '{arg}'; give it as, e.g., "
-                    "'value=k,cell=3f9a1c2e'"
+                    "'kind=value,cell_id=3f9a1c2e,variable=k'"
                 )
             if key in fields:
                 raise ValueError(f"'{key}' is given twice in '{arg}'")
@@ -2678,7 +2658,7 @@ class JupyterNotebookStage(Stage):
 
     @model_validator(mode="after")
     def check_cell_outputs(self) -> "JupyterNotebookStage":
-        values = [o.value for o in self.cell_outputs if o.value is not None]
+        values = [o.variable for o in self.cell_outputs if o.kind == "value"]
         for name in set(values):
             if values.count(name) > 1:
                 raise ValueError(f"Value '{name}' is saved more than once")
@@ -2813,7 +2793,7 @@ class JupyterNotebookStage(Stage):
         any are values, and each figure and table.
         """
         outs = []
-        if any(o.value is not None for o in self.cell_outputs):
+        if any(o.kind == "value" for o in self.cell_outputs):
             outs.append(PathOutput(path=self.values_path, storage="git"))
         for o in self.cell_outputs:
             if o.path is not None:

@@ -264,8 +264,8 @@ async function markCellOutput(
           notebookPath,
           cellId: cell.model.id,
           kind,
-          target,
           variable,
+          path: kind === "value" ? undefined : target,
         }),
       ),
     });

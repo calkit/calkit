@@ -883,8 +883,8 @@ async function handle(
         project: `${message.owner}/${message.project}`,
         notebook: message.notebook,
         stage: message.stage,
-        cell: message.cell,
-        value: message.value,
+        cell_id: message.cell_id,
+        variable: message.variable,
       });
     case "local.save":
       await waitForJob(

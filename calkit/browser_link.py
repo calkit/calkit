@@ -429,7 +429,11 @@ def get_result(msg: dict) -> Any:
         notebook = get_project_path(paths[0], msg.get("notebook"), "notebook")
         result = mark_cell_output(
             notebook,
-            {"cell": msg.get("cell"), "value": msg.get("value")},
+            {
+                "kind": "value",
+                "cell_id": msg.get("cell_id"),
+                "variable": msg.get("variable"),
+            },
             stage=msg.get("stage"),
             wdir=paths[0],
         )

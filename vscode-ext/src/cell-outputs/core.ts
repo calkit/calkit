@@ -10,11 +10,10 @@ export type CellOutputKind = "value" | "figure" | "table";
 export interface CellOutputMark {
   stage: string;
   kind: CellOutputKind;
-  name?: string;
-  path?: string;
-  cell: string | null;
+  cell_id: string | null;
   cell_index: number | null;
   variable: string | null;
+  path: string | null;
   format: string | null;
   citation: string | null;
   saved_value?: unknown;
@@ -37,9 +36,9 @@ export function parseCellOutputs(stdout: string): CellOutputMark[] {
   }
 }
 
-/** What a mark saves: a value's name, or a figure or table's path. */
+/** What a mark saves: a value's variable, or a figure or table's path. */
 export function getMarkTarget(mark: CellOutputMark): string {
-  return (mark.kind === "value" ? mark.name : mark.path) ?? "";
+  return (mark.kind === "value" ? mark.variable : mark.path) ?? "";
 }
 
 /** A saved value as short text, e.g., `0.03091` or `{3 keys}`. */
@@ -212,19 +211,21 @@ export function getMarkArgs(options: {
   cellId?: string;
   cellIndex: number;
   kind: CellOutputKind;
-  target: string;
   variable?: string;
+  path?: string;
   stage?: string;
 }): string[] {
-  const args = ["nb", "mark", options.notebookPath];
+  const args = ["nb", "mark", options.notebookPath, options.kind];
   args.push(
     ...(options.cellId
-      ? ["--cell", options.cellId]
+      ? ["--cell-id", options.cellId]
       : ["--cell-index", String(options.cellIndex)]),
   );
-  args.push(`--${options.kind}`, options.target);
   if (options.variable) {
     args.push("--variable", options.variable);
+  }
+  if (options.path) {
+    args.push("--path", options.path);
   }
   if (options.stage) {
     args.push("--stage", options.stage);
@@ -241,7 +242,7 @@ export function getUnmarkArgs(
     "nb",
     "unmark",
     notebookPath,
-    `--${mark.kind}`,
+    mark.kind === "value" ? "--variable" : "--path",
     getMarkTarget(mark),
     "--stage",
     mark.stage,
@@ -259,10 +260,10 @@ export function getMarksForCell(
   isLast: boolean,
 ): CellOutputMark[] {
   return marks.filter((m) => {
-    if (m.cell === null) {
+    if (m.cell_id === null) {
       return isLast;
     }
-    return cellId ? m.cell === cellId : m.cell_index === cellIndex;
+    return cellId ? m.cell_id === cellId : m.cell_index === cellIndex;
   });
 }
 

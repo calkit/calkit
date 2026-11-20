@@ -217,8 +217,8 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
       cellId,
       cellIndex: cell.index,
       kind,
-      target,
-      variable: kind === "value" ? undefined : variable,
+      variable,
+      path: kind === "value" ? undefined : target,
     }),
   );
   if (!result.ok) {

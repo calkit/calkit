@@ -55,10 +55,14 @@ def list_tables(
         if not isinstance(stage, dict):
             continue
         for out in stage.get("cell_outputs") or []:
-            if not isinstance(out, dict) or not out.get("table"):
+            if (
+                not isinstance(out, dict)
+                or out.get("kind") != "table"
+                or not out.get("path")
+            ):
                 continue
             path = posixpath.normpath(
-                posixpath.join(stage.get("wdir") or "", str(out["table"]))
+                posixpath.join(stage.get("wdir") or "", str(out["path"]))
             )
             if path not in listed:
                 marked.append({"path": path, "detected": True})

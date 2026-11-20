@@ -73,27 +73,22 @@ async def test_notebook_cell_outputs(
     assert response.code == 200
     assert json.loads(response.body) == []
     # Marking says how to cite it
-    response = await fetch(
-        "POST", body={"path": "fit.ipynb", "cell": ids[0], "value": "k_25"}
-    )
+    value = {"kind": "value", "cell_id": ids[0], "variable": "k_25"}
+    response = await fetch("POST", body={"path": "fit.ipynb", "output": value})
     assert response.code == 200
     assert json.loads(response.body) == {
         "stage": "fit",
-        "output": {"cell": ids[0], "value": "k_25"},
+        "output": value,
         "citation": r"\ckvalue{fit.ipynb}{k_25}",
         "warning": None,
     }
+    figure = {"kind": "figure", "variable": "fig", "path": "figures/fit.pdf"}
     response = await fetch(
         "POST",
-        body={
-            "path": "fit.ipynb",
-            "cell_index": 1,
-            "figure": "figures/fit.pdf",
-            "variable": "fig",
-        },
+        body={"path": "fit.ipynb", "cell_index": 1, "output": figure},
     )
     assert response.code == 200
-    assert json.loads(response.body)["output"]["cell"] == ids[1]
+    assert json.loads(response.body)["output"]["cell_id"] == ids[1]
     # Listing shows each by its cell, with a saved value once there's one
     os.makedirs(".calkit/notebooks/outputs/fit")
     with open(".calkit/notebooks/outputs/fit/values.json", "w") as f:
@@ -106,16 +101,13 @@ async def test_notebook_cell_outputs(
     assert listed[0]["saved_value"] == 0.0309
     assert listed[1]["path"] == "figures/fit.pdf"
     # What can't be marked or unmarked says why
+    elsewhere = value | {"cell_id": "nope"}
     for method, body, params, message in [
-        (
-            "POST",
-            {"path": "fit.ipynb", "cell": "nope", "value": "x"},
-            {},
-            "no cell nope",
-        ),
-        ("POST", {"path": "other.ipynb", "value": "x"}, {}, "pipeline yet"),
-        ("POST", {"value": "x"}, {}, "must include 'path'"),
-        ("DELETE", None, {"path": "fit.ipynb", "value": "nope"}, "Nothing"),
+        ("POST", {"path": "fit.ipynb", "output": elsewhere}, {}, "no cell"),
+        ("POST", {"path": "other.ipynb", "output": value}, {}, "yet"),
+        ("POST", {"path": "fit.ipynb"}, {}, "must include 'output'"),
+        ("POST", {"output": value}, {}, "must include 'path'"),
+        ("DELETE", None, {"path": "fit.ipynb", "variable": "no"}, "Nothing"),
         ("DELETE", None, {}, "must include 'path'"),
         ("GET", None, {}, "must include 'path'"),
     ]:
@@ -124,13 +116,13 @@ async def test_notebook_cell_outputs(
         assert message in json.loads(response.body)["error"]
     # Unmarking a figure by its path leaves the rest
     response = await fetch(
-        "DELETE", path="fit.ipynb", figure="figures/fit.pdf"
+        "DELETE", path="fit.ipynb", output_path="figures/fit.pdf"
     )
     assert response.code == 200
     assert json.loads(response.body) == {"n_removed": 1}
     listed = json.loads((await fetch("GET", path="fit.ipynb")).body)
     assert [m["kind"] for m in listed] == ["value"]
-    response = await fetch("DELETE", path="fit.ipynb", cell=ids[0])
+    response = await fetch("DELETE", path="fit.ipynb", cell_id=ids[0])
     assert json.loads(response.body) == {"n_removed": 1}
     assert (
         "cell_outputs"

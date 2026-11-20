@@ -172,6 +172,89 @@ we can simply add `calkit-python` to the `requirements.txt` file and rerun
 `calkit xenv -n py jupyter lab`.
 The environment will be updated before starting JupyterLab.
 
+<!-- TODO: needs human review -->
+
+## Saving values, figures, and tables from cells
+
+A notebook doesn't have to write its results to files for a paper to show
+them.
+Mark what a cell makes instead,
+and Calkit saves it whenever the pipeline runs the notebook:
+
+- A value, e.g., a fitted constant, which a LaTeX document shows with
+  `\ckvalue{notebook.ipynb}{name}`.
+  Numbers, text, and lists and dicts of them can be saved,
+  and a key reaches into a dict, e.g., `{rates.25C}`.
+- A figure, from the variable holding it, e.g., a Matplotlib figure,
+  in whatever format its path says, e.g., a PDF that stays sharp in a
+  paper, or else the image the cell shows.
+- A table, from a DataFrame or a list of rows, as LaTeX (`.tex`) for
+  `\cktable`, CSV, Markdown, or JSON.
+
+In VS Code, click **Mark as Value, Figure, or Table** in a cell's toolbar.
+Each marked cell gets a label saying what it saves, e.g.,
+`k_25 = 0.0309` after a run; click it to copy the command that shows it in
+a document.
+From a terminal, or for an agent, use `calkit nb mark`:
+
+```sh
+calkit nb mark fit-rates.ipynb --cell 3f9a1c2e --value k_25
+calkit nb mark fit-rates.ipynb --cell 8b77d0aa \
+    --figure figures/decay.pdf --variable fig
+calkit nb mark fit-rates.ipynb --cell 1d2e4c0b \
+    --table tables/rates.tex --variable rates_df --format .3f
+calkit nb outputs fit-rates.ipynb
+```
+
+Marks are kept with the notebook's stage in `calkit.yaml`,
+by the ID Jupyter and VS Code give each cell, which stays with it as it
+moves:
+
+```yaml
+pipeline:
+  stages:
+    fit-rates:
+      kind: jupyter-notebook
+      notebook_path: fit-rates.ipynb
+      environment: py
+      cell_outputs:
+        - cell: 3f9a1c2e
+          value: k_25
+        - cell: 8b77d0aa
+          figure: figures/decay.pdf
+          variable: fig
+        - cell: 1d2e4c0b
+          table: tables/rates.tex
+          variable: rates_df
+          format: .3f
+```
+
+A value is saved as it is right after its cell runs, so a variable
+changed further down still saves what that cell made.
+Values are kept in `.calkit/notebooks/outputs/`,
+and figures and tables where their paths say,
+as outputs of the stage, so the pipeline knows when they're out of date.
+Running the notebook yourself doesn't save them:
+what a document shows always comes from a pipeline run.
+If something marked can't be saved, e.g., a variable was renamed,
+the run stops and says which cell and variable.
+
+On Overleaf, with the browser extension connected to Calkit on your
+machine, a number typed into the paper that one of the project's notebooks
+printed gets **Use this** in the Calkit card,
+which marks the variable it came from and replaces the number with a
+`\ckvalue`.
+
+Writing results files from the notebook works too, e.g., with `json.dump`,
+and keeps the notebook usable without Calkit;
+list those files as the stage's `outputs`.
+
+<!-- prettier-ignore -->
+!!! note
+    Cell IDs only stay put if nothing rewrites them.
+    `nbstripout` renumbers them unless it's installed with `--keep-id`,
+    and `calkit nb mark` warns when a notebook's IDs look renumbered.
+
 ## Working interactively
 
 The main advantage of Jupyter notebooks is the ability to work interactively,

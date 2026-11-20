@@ -148,6 +148,31 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
 The stage depends on everything included this way, so don't add
 `json-to-latex` or `map-paths` stages, or list those files in `inputs`.
 
+<!-- TODO: needs human review -->
+
+### Values, figures, and tables from notebook cells
+
+A `jupyter-notebook` stage can save what its cells make without the
+notebook writing files, which is what to offer someone who'd rather not
+add `json.dump` or `savefig` calls.
+Mark them with `calkit nb mark`, which records them under the stage's
+`cell_outputs` by cell ID (read IDs from the `.ipynb`, or use
+`--cell-index`, which adds IDs if the notebook has none):
+
+```sh
+calkit nb mark analysis.ipynb --cell 3f9a1c2e --value k_25
+calkit nb mark analysis.ipynb --cell 8b77d0aa --figure figures/fit.pdf --variable fig
+calkit nb mark analysis.ipynb --cell 1d2e4c0b --table tables/rates.tex --variable df
+calkit nb outputs analysis.ipynb --json
+```
+
+A value is cited by the notebook, e.g.,
+`\ckvalue[.3f]{analysis.ipynb}{k_25}`, or a key inside a dict,
+`{rates.25C}`; figures and tables by their paths.
+They're saved when the pipeline runs the notebook, not when it's run by
+hand, so run `calkit run` after marking.
+Don't also list a marked figure or table in the stage's `outputs`.
+
 ### Outputs: Git vs. DVC storage
 
 By default, outputs are stored with DVC (large file storage). Use

@@ -101,6 +101,14 @@ Judgment, done here:
    number, or edit a generated file by hand: either one is a typed value
    with extra steps.
 
+   <!-- TODO: needs human review -->
+
+   When a notebook in the pipeline computes the number, e.g., it's in a
+   cell's printed output, mark the variable holding it instead of changing
+   the notebook: `calkit nb mark <notebook> --cell <id> --value <name>`,
+   then cite it as `\ckvalue{<notebook>}{<name>}`. See the conventions
+   skill's section on notebook cells.
+
 5. **Run the pipeline** (`calkit run`) and check again. Do not run the
    script yourself and paste the number in: that is the failure this whole
    check exists to catch.

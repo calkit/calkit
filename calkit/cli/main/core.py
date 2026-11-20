@@ -4420,13 +4420,17 @@ def run(
             )
     dvc.stage.run._run = _patched_run
     # DVC never runs a frozen stage, so one named outright with --force is
-    # thawed for this run
+    # thawed for this run. When those are all that's named, only they're
+    # forced, so what they depend on reruns only if it's out of date, e.g.,
+    # retraining a model doesn't regenerate its data
+    targeted_names = {t.split("@")[0] for t in targets or []}
     thawed = (
         calkit.pipeline.frozen_stage_base_names(ck_info=ck_info)
-        & {t.split("@")[0] for t in targets or []}
+        & targeted_names
         if force
         else set()
     )
+    force_only_thawed = bool(thawed) and thawed == targeted_names
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s
         # default. Brief contention is common and benign: a background
@@ -4438,7 +4442,7 @@ def run(
         with (
             calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT),
             calkit.dvc.skip_stages(gated_stages, skipped=skipped_stale),
-            calkit.dvc.thaw_stages(thawed),
+            calkit.dvc.thaw_stages(thawed, force_only=force_only_thawed),
         ):
             res = _run_dvc_repro(["repro"] + args)
     finally:
@@ -5379,24 +5383,22 @@ def run_in_env(
             env_prefix = os.path.abspath(prefix)
         else:
             conda_cmd += ["-n", conda_env["name"]]
-            # Named environments are in the envs folder of Conda's root,
-            # which holds its executable in bin, condabin, or Scripts
-            env_prefix = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.realpath(conda_exe))),
-                "envs",
-                conda_env["name"],
+            env_prefix = calkit.conda.find_named_env_prefix(
+                conda_env["name"], conda_exe
             )
         cmd = conda_cmd + cmd
         # Activating an environment while Conda's base is on PATH swaps it in
         # at base's position rather than putting it first, so anything
         # earlier on PATH, e.g., a Quarto or Python installed with Homebrew
         # or Pixi, would win over the environment's own
-        bin_dirs = (
-            [env_prefix, os.path.join(env_prefix, "Library", "bin")]
-            + [os.path.join(env_prefix, "Scripts")]
-            if sys.platform == "win32"
-            else [os.path.join(env_prefix, "bin")]
-        )
+        bin_dirs = []
+        if env_prefix is not None:
+            bin_dirs = (
+                [env_prefix, os.path.join(env_prefix, "Library", "bin")]
+                + [os.path.join(env_prefix, "Scripts")]
+                if sys.platform == "win32"
+                else [os.path.join(env_prefix, "bin")]
+            )
         bin_dirs = [d for d in bin_dirs if os.path.isdir(d)]
         if bin_dirs:
             run_env_vars = dict(

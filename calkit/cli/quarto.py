@@ -5,11 +5,20 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 
 import typer
 from typing_extensions import Annotated
 
 from calkit.cli.core import raise_error
+
+# Runs a command in a directory, finding it on PATH as a shell would, e.g.,
+# a 'quarto.cmd' on Windows
+_RUN_IN_DIR = (
+    "import os, shutil, subprocess, sys; os.chdir(sys.argv[1]); "
+    "cmd = sys.argv[2:]; cmd[0] = shutil.which(cmd[0]) or cmd[0]; "
+    "sys.exit(subprocess.call(cmd))"
+)
 
 quarto_app = typer.Typer(no_args_is_help=True)
 
@@ -63,9 +72,9 @@ def render(
     """Render a Quarto document in an environment.
 
     Quarto has to come from the environment, so every machine renders with
-    the same version, unless the project lists 'quarto' as a requirement. The values the document shows with the 'ckvalue'
-    shortcode are read from their results files and written beside it
-    first.
+    the same version, unless the project lists 'quarto' as a requirement.
+    The values the document shows with the 'ckvalue' shortcode are read
+    from their results files and written beside it first.
     """
     import calkit
     import calkit.environments
@@ -128,4 +137,14 @@ def render(
         except (OSError, subprocess.CalledProcessError) as e:
             raise_error(f"Rendering {target_path} failed: {e}")
     else:
-        run_in_env(cmd, env_name=environment, no_check=no_check)
+        # The environment is defined relative to the project, but the
+        # document and args are relative to where this was run, e.g., a
+        # stage's working directory, so Calkit's own interpreter goes back
+        # there inside the environment to run Quarto
+        wdir = os.getcwd()
+        cmd = [sys.executable, "-c", _RUN_IN_DIR, wdir] + cmd
+        os.chdir(project_dir)
+        try:
+            run_in_env(cmd, env_name=environment, no_check=no_check)
+        finally:
+            os.chdir(wdir)

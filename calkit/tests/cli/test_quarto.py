@@ -86,3 +86,31 @@ def test_render(tmp_path, monkeypatch):
         (tmp_path / "pub" / "_calkit" / "values" / "index.json").read_text()
     )
     assert values == {"results.json\trms\t.1f": "0.1"}
+    # And in an environment, which is defined relative to the project, with
+    # Quarto from the environment
+    (tmp_path / "called.txt").unlink()
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "test",
+                "environments": {
+                    "py": {
+                        "kind": "venv",
+                        "path": "requirements.txt",
+                        "prefix": ".venv",
+                    }
+                },
+            },
+            f,
+        )
+    (tmp_path / "requirements.txt").write_text("")
+    subprocess.check_call([sys.executable, "-m", "venv", ".venv"])
+    env_quarto = tmp_path / ".venv" / "bin" / "quarto"
+    env_quarto.write_text(quarto.read_text())
+    env_quarto.chmod(0o755)
+    res = render("-e", "py", "--no-check", "index.qmd", cwd="pub")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert (tmp_path / "called.txt").read_text().split() == [
+        "render",
+        "index.qmd",
+    ]

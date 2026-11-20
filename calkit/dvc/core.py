@@ -386,7 +386,7 @@ def skip_stages(
 
 
 @contextlib.contextmanager
-def thaw_stages(names: set[str]) -> Iterator[None]:
+def thaw_stages(names: set[str], force_only: bool = False) -> Iterator[None]:
     """Run these frozen stages in ``dvc repro`` while active.
 
     Keyed by Calkit stage name, which also covers the ``<name>@<item>``
@@ -394,7 +394,14 @@ def thaw_stages(names: set[str]) -> Iterator[None]:
     ``dvc.yaml`` match. DVC never runs a frozen stage, even forced, so this
     is how one named outright with ``--force`` runs, e.g., to retrain a
     model whose committed weights are otherwise left alone.
+
+    With ``force_only``, a forced run forces only these stages, and the
+    stages upstream of them run only if they're out of date, as they would
+    for an unfrozen stage that is. DVC otherwise forces every stage in the
+    plan, which thawing one brings its upstream stages into, e.g.,
+    regenerating the data a model is trained on.
     """
+    import dvc.repo.reproduce
     from dvc.stage.loader import StageLoader
 
     original_load = StageLoader.__dict__["load_stage"]
@@ -411,14 +418,32 @@ def thaw_stages(names: set[str]) -> Iterator[None]:
             stage.frozen = False
         return stage
 
+    original_reproduce = dvc.repo.reproduce._reproduce
+
+    def reproduce(stages: Any, *args: Any, **kwargs: Any) -> Any:
+        repro_fn = kwargs.pop("repro_fn", dvc.repo.reproduce._reproduce_stage)
+
+        def repro_thawed_only(stage: Any, **stage_kwargs: Any) -> Any:
+            name = getattr(stage, "name", None) or ""
+            if name.split("@")[0] not in names:
+                stage_kwargs["force"] = False
+            return repro_fn(stage, **stage_kwargs)
+
+        return original_reproduce(
+            stages, *args, repro_fn=repro_thawed_only, **kwargs
+        )
+
     if not names:
         yield
         return
     setattr(StageLoader, "load_stage", classmethod(load_stage))
+    if force_only:
+        setattr(dvc.repo.reproduce, "_reproduce", reproduce)
     try:
         yield
     finally:
         setattr(StageLoader, "load_stage", original_load)
+        setattr(dvc.repo.reproduce, "_reproduce", original_reproduce)
 
 
 _memoized_hashes_lock = threading.RLock()

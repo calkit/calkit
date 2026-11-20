@@ -108,6 +108,40 @@ def find_conda_exe() -> str | None:
     return _find_exe("conda")
 
 
+def find_named_env_prefix(name: str, conda_exe: str) -> str | None:
+    """Where a named environment is kept, found without running Conda.
+
+    Named environments are usually in the envs folder of Conda's root, which
+    holds its executable in bin, condabin, or Scripts, but may be in another
+    envs folder, e.g., ~/.conda/envs on a shared install, which Conda's
+    record of the environments it made, ~/.conda/environments.txt, lists.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.realpath(conda_exe)))
+    envs_dirs = [os.path.join(root, "envs")]
+    for var in ("CONDA_ENVS_PATH", "CONDA_ENVS_DIRS"):
+        envs_dirs += [
+            d for d in os.environ.get(var, "").split(os.pathsep) if d
+        ]
+    envs_dirs.append(os.path.join(os.path.expanduser("~"), ".conda", "envs"))
+    candidates = [os.path.join(d, name) for d in envs_dirs]
+    record = os.path.join(
+        os.path.expanduser("~"), ".conda", "environments.txt"
+    )
+    try:
+        with open(record, encoding="utf-8") as f:
+            candidates += [
+                line.strip()
+                for line in f
+                if os.path.basename(line.strip().rstrip("/\\")) == name
+            ]
+    except OSError:
+        pass
+    for candidate in candidates:
+        if os.path.isdir(os.path.join(candidate, "conda-meta")):
+            return candidate
+    return None
+
+
 def find_mamba_exe() -> str | None:
     """Find the absolute path to the Mamba executable."""
     return _find_exe("mamba")
@@ -584,7 +618,8 @@ def check_env(
     with open(env_fpath, encoding="utf-8") as f:
         env_spec = ryaml.load(f)
     env_name = env_spec["name"]
-    prefix = env_spec.get("prefix") or prefix
+    # Set in calkit.yaml, it wins over the spec, as it does when running in it
+    prefix = prefix or env_spec.get("prefix")
     prefix_orig = prefix
     if prefix is not None:
         prefix = os.path.abspath(prefix)

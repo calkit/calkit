@@ -964,3 +964,38 @@ def test_find_mamba_exe():
     # valid path
     if mamba_exe is not None:
         assert os.path.isfile(mamba_exe)
+
+
+def test_find_named_env_prefix(tmp_path, monkeypatch):
+    from calkit.conda import find_named_env_prefix
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("CONDA_ENVS_PATH", raising=False)
+    monkeypatch.delenv("CONDA_ENVS_DIRS", raising=False)
+    root = tmp_path / "miniforge"
+    conda_exe = root / "bin" / "conda"
+    conda_exe.parent.mkdir(parents=True)
+    conda_exe.write_text("")
+
+    def make_env(prefix):
+        (prefix / "conda-meta").mkdir(parents=True)
+        return str(prefix)
+
+    assert find_named_env_prefix("a", str(conda_exe)) is None
+    # In the envs folder of Conda's root
+    expected = make_env(root / "envs" / "a")
+    assert find_named_env_prefix("a", str(conda_exe)) == expected
+    # In the user's, e.g., on a shared install
+    expected = make_env(home / ".conda" / "envs" / "b")
+    assert find_named_env_prefix("b", str(conda_exe)) == expected
+    # In one set by the environment
+    other = tmp_path / "other"
+    monkeypatch.setenv("CONDA_ENVS_PATH", str(other))
+    expected = make_env(other / "c")
+    assert find_named_env_prefix("c", str(conda_exe)) == expected
+    # Anywhere else Conda recorded making it
+    expected = make_env(tmp_path / "elsewhere" / "d")
+    (home / ".conda" / "environments.txt").write_text(expected + "\n")
+    assert find_named_env_prefix("d", str(conda_exe)) == expected

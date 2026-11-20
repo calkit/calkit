@@ -1887,6 +1887,7 @@ def test_check_stage_runs(tmp_dir):
         "kind": "shell-command",
         "command": "echo f > f.txt",
         "environment": "_system",
+        "inputs": [{"from_stage_outputs": "a"}],
         "outputs": [{"path": "f.txt", "storage": "git"}],
         "frozen": True,
     }
@@ -1898,14 +1899,17 @@ def test_check_stage_runs(tmp_dir):
     with open("f.txt") as f:
         assert f.read() == "trained elsewhere\n"
     subprocess.check_call(check)
-    # Forcing all stages leaves it alone, but naming it runs it
+    # Forcing all stages leaves it alone, but naming it runs it,
     subprocess.check_call(["calkit", "run", "--force"])
     with open("f.txt") as f:
         assert f.read() == "trained elsewhere\n"
+    # without rerunning what it depends on, which is up to date
+    a_run = calkit.read_stage_runs()["a"]
     subprocess.check_call(["calkit", "run", "--force", "f"])
     with open("f.txt") as f:
         assert f.read() == "f\n"
     assert "f" in calkit.read_stage_runs()
+    assert calkit.read_stage_runs()["a"] == a_run
     subprocess.check_call(check)
     del ck_info["pipeline"]["stages"]["f"]
     with open("calkit.yaml", "w") as f:

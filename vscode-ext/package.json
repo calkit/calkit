@@ -476,7 +476,7 @@
       },
       {
         "command": "calkit-vscode.markCellOutput",
-        "title": "Mark as Value, Figure, or Table",
+        "title": "Save as Output",
         "category": "Calkit",
         "icon": "$(pin)"
       },

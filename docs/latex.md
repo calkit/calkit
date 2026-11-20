@@ -160,7 +160,7 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
   file.
   Keys are separated by dots to reach into nested values, e.g., `fit.slope`.
   <!-- TODO: needs human review -->
-  A value a notebook's cell is marked to make is named by the notebook,
+  A value saved from a notebook's cell is named by the notebook,
   e.g., `\ckvalue[.3f]{fit-rates.ipynb}{k_25}`; see
   [saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells).
 - `\ckfigure[options]{path}` includes a figure, with the same options as

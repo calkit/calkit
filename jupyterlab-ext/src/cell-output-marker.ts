@@ -144,7 +144,7 @@ function createLabelNode(
   return node;
 }
 
-/** What to do with a mark, from its label: copy how to cite it, or unmark. */
+/** What to do with a mark, from its label: copy how to cite it, or stop saving it. */
 function showMarkActions(
   panel: NotebookPanel,
   mark: ICellOutputMark,
@@ -165,7 +165,7 @@ function showMarkActions(
     menu.addItem({ command: "copy" });
   }
   commands.addCommand("unmark", {
-    label: "Unmark",
+    label: "Stop saving",
     icon: closeIcon,
     execute: async () => {
       try {
@@ -192,7 +192,7 @@ async function markCellOutput(
   cell: Cell,
   kind: CellOutputKind,
 ): Promise<void> {
-  const title = `Mark ${kind}`;
+  const title = `Save ${kind}`;
   const notebookPath = panel.context.path;
   // The variable it's saved from, or for a figure, what the cell shows
   const outputs = (cell.model as ICodeCellModel).outputs?.toJSON() ?? [];
@@ -301,7 +301,7 @@ async function markCellOutput(
         }),
       ),
     });
-    Notification.success(`Marked ${target}`, { autoClose: 4000 });
+    Notification.success(`Saving ${target} on each run`, { autoClose: 4000 });
     if (marked.warning) {
       Notification.warning(marked.warning);
     }
@@ -342,7 +342,7 @@ function createMarkButton(
   }
   const button = new ToolbarButton({
     icon: calkitIcon,
-    tooltip: trans.__("Mark as value, figure, or table"),
+    tooltip: trans.__("Save as output"),
     onClick: () => {
       const rect = button.node.getBoundingClientRect();
       menu.open(rect.left, rect.bottom);

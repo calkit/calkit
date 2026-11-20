@@ -440,7 +440,7 @@ function renderTyped(
         clear(message).append(
           el("div", {
             class: "small",
-            text: `Marked ${name}. Once it's saved, link the number here.`,
+            text: `Saving ${name} on each run. Once saved, link the number here.`,
           }),
           el("div", { class: "actions" }, [
             el("button", {

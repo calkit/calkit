@@ -178,7 +178,7 @@ The environment will be updated before starting JupyterLab.
 
 A notebook doesn't have to write its results to files for a paper to show
 them.
-Mark what a cell makes instead,
+Add what a cell makes as an output instead,
 and Calkit saves it whenever the pipeline runs the notebook:
 
 - A value, e.g., a fitted constant, which a LaTeX document shows with
@@ -191,9 +191,9 @@ and Calkit saves it whenever the pipeline runs the notebook:
 - A table, from a DataFrame or a list of rows, as LaTeX (`.tex`) for
   `\cktable`, CSV, Markdown, or JSON.
 
-In VS Code or JupyterLab, click **Mark as Value, Figure, or Table** in a
+In VS Code or JupyterLab, click **Save as Output** in a
 cell's toolbar.
-Each marked cell gets a label saying what it saves, e.g.,
+Each cell with outputs gets a label saying what it saves, e.g.,
 `k_25 = 0.0309` after a run; click it to copy the command that shows it in
 a document.
 From a terminal, or for an agent, use `calkit nb add-output`,
@@ -248,7 +248,7 @@ and figures and tables where their paths say,
 as outputs of the stage, so the pipeline knows when they're out of date.
 Running the notebook yourself doesn't save them:
 what a document shows always comes from a pipeline run.
-If something marked can't be saved, e.g., a variable was renamed,
+If an output can't be saved, e.g., a variable was renamed,
 the run stops and says which cell and variable.
 
 On Overleaf, with the browser extension connected to Calkit on your

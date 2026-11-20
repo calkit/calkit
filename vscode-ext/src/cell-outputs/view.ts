@@ -107,7 +107,7 @@ function getCommandCell(arg: unknown): vscode.NotebookCell | undefined {
 /** Ask for a variable's name, for one a cell's code doesn't show. */
 async function askVariableName(kindLabel: string): Promise<string | undefined> {
   const typed = await vscode.window.showInputBox({
-    title: `Mark ${kindLabel.toLowerCase()}`,
+    title: `Save ${kindLabel.toLowerCase()}`,
     prompt: "Variable name",
     validateInput: (v) =>
       /^[A-Za-z_][A-Za-z0-9_]*$/.test(v) ? undefined : "Not a variable name",
@@ -115,7 +115,7 @@ async function askVariableName(kindLabel: string): Promise<string | undefined> {
   return typed?.trim() || undefined;
 }
 
-/** Ask what a cell makes for documents, and mark it to be saved. */
+/** Ask what a cell makes for documents, and save it on each run. */
 async function markCellOutput(root: string, arg: unknown): Promise<void> {
   const cell = getCommandCell(arg);
   if (!cell || cell.kind !== vscode.NotebookCellKind.Code) {
@@ -148,7 +148,7 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
         markKind: "table" as CellOutputKind,
       },
     ],
-    { title: "Mark as", placeHolder: "What this cell makes for documents" },
+    { title: "Save as", placeHolder: "What this cell makes for documents" },
   );
   if (!kindPick) {
     return;
@@ -176,7 +176,7 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
   let variableNames: string[] = [];
   if (kind === "value") {
     const picks = await vscode.window.showQuickPick(items, {
-      title: `Mark ${kindPick.label.toLowerCase()}`,
+      title: `Save ${kindPick.label.toLowerCase()}`,
       placeHolder: "Variables it's saved from",
       canPickMany: true,
     });
@@ -193,7 +193,7 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
     }
   } else {
     const variablePick = await vscode.window.showQuickPick(items, {
-      title: `Mark ${kindPick.label.toLowerCase()}`,
+      title: `Save ${kindPick.label.toLowerCase()}`,
       placeHolder: "Variable it's saved from",
     });
     if (!variablePick) {
@@ -217,7 +217,7 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
         ? [".pdf", ".png", ".svg", ".jpg", ".jpeg"]
         : [".tex", ".csv", ".md", ".json"];
     const chosen = await vscode.window.showInputBox({
-      title: `Mark ${kindPick.label.toLowerCase()}`,
+      title: `Save ${kindPick.label.toLowerCase()}`,
       prompt:
         kind === "figure"
           ? "Path to save it to; PDF stays sharp in a paper"
@@ -256,18 +256,21 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
     );
     return;
   }
-  vscode.window.setStatusBarMessage(`$(check) Marked ${target}`, 4000);
+  vscode.window.setStatusBarMessage(
+    `$(check) Saving ${target} on each run`,
+    4000,
+  );
   await loadMarks(root, cell.notebook);
 }
 
-/** What to do with a mark, from its label: copy how to cite it, or unmark. */
+/** What to do with a mark, from its label: copy how to cite it, or stop saving it. */
 async function showMarkActions(
   root: string,
   notebookUri: vscode.Uri,
   mark: CellOutputMark,
 ): Promise<void> {
   const copy = mark.citation ? `$(copy) Copy ${mark.citation}` : undefined;
-  const unmark = "$(close) Unmark";
+  const unmark = "$(close) Stop saving";
   const picked = await vscode.window.showQuickPick(
     [...(copy ? [copy] : []), unmark],
     { title: getMarkTarget(mark) },

@@ -168,6 +168,23 @@ def test_list_tables(tmp_dir):
     tables = {t["path"]: t for t in calkit.tables.list_tables()}
     assert tables["results/extra.csv"]["detected"] is True
     assert "stages" not in tables["results/extra.csv"]
+    # A table a notebook's cell is marked to make is listed in any format
+    ck_info["pipeline"]["stages"]["fit"] = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "fit.ipynb",
+        "environment": "py",
+        "cell_outputs": [
+            {"cell": "a", "table": "tables/k.tex", "variable": "df"}
+        ],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    tables = {t["path"]: t for t in calkit.tables.list_tables()}
+    assert tables["tables/k.tex"]["stages"] == ["fit"]
+    assert tables["tables/k.tex"]["exists"] is False
+    assert "tables/k.tex" not in [
+        t["path"] for t in calkit.tables.list_tables(declared_only=True)
+    ]
 
 
 def test_write_table(tmp_dir):

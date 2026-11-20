@@ -27,16 +27,44 @@ def list_tables(
     with ``status``, whether that stage is up to date, which needs DVC and
     so costs a pipeline status check.
     """
+    import posixpath
+
+    import calkit
     import calkit.detect
     import calkit.pipeline
 
-    return calkit.pipeline.list_artifacts(
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    tables = calkit.pipeline.list_artifacts(
         "tables",
         ck_info=ck_info,
         wdir=wdir,
         declared_only=declared_only,
         status=status,
         pending_extensions=calkit.detect.TABLE_EXTENSIONS,
+    )
+    if declared_only:
+        return tables
+    # A table a notebook's cell is marked to make is one whatever its
+    # format, e.g., LaTeX, which isn't otherwise taken for a table
+    listed = {t.get("path") for t in tables}
+    marked = []
+    for stage in (
+        (ck_info.get("pipeline") or {}).get("stages") or {}
+    ).values():
+        if not isinstance(stage, dict):
+            continue
+        for out in stage.get("cell_outputs") or []:
+            if not isinstance(out, dict) or not out.get("table"):
+                continue
+            path = posixpath.normpath(
+                posixpath.join(stage.get("wdir") or "", str(out["table"]))
+            )
+            if path not in listed:
+                marked.append({"path": path, "detected": True})
+                listed.add(path)
+    return tables + calkit.pipeline.annotate_artifacts(
+        marked, ck_info=ck_info, wdir=wdir, status=status
     )
 
 

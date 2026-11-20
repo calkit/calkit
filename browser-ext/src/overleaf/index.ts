@@ -490,6 +490,9 @@ export async function syncOverleaf(
 /** Look again at what's synced and shown, now that a sync changed it. */
 function afterSync(): void {
   provenanceCache.clear();
+  // A run saves values, e.g., a notebook's, that typed numbers can link to
+  valuesCache.clear();
+  printedCache.clear();
   checkingAfterSync = true;
   drawStatusParts();
   drawRail();

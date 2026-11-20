@@ -41,6 +41,7 @@ import {
   provenanceFor,
   projectValues,
   projectPrintedNumbers,
+  startRun,
   projectTables,
   citationProvenance,
   linkKey,
@@ -401,8 +402,10 @@ function renderTyped(
         : null,
     ]);
   };
-  // A notebook's printed number becomes a value saved from the variable
-  // holding it, which the next run saves
+  // A notebook's printed number is linked once the variable holding it is
+  // marked as a value and the pipeline has saved it, since the variable may
+  // hold more than this number, e.g., a dict of them, whose key the saved
+  // value then shows
   const printedRow = (match: PrintedMatch) => {
     const variable = el("select", { class: "grow" }) as HTMLSelectElement;
     for (const name of match.variables) {
@@ -434,21 +437,18 @@ function renderTyped(
           cell: match.cell,
           value: name,
         });
-        const text = citationText(
-          typedNumberCitation(number, {
-            path: match.notebook,
-            key: name,
-            value: Number(match.printed),
-          }),
-        );
-        const error = await replaceInEditor(link, at, text);
         clear(message).append(
-          error
-            ? errorMessage(error)
-            : el("div", {
-                class: "small",
-                text: `Marked ${name}. Run and sync to show it.`,
-              }),
+          el("div", {
+            class: "small",
+            text: `Marked ${name}. Once it's saved, link the number here.`,
+          }),
+          el("div", { class: "actions" }, [
+            el("button", {
+              class: "action",
+              text: "Run and sync",
+              onClick: () => void startRun(link),
+            }),
+          ]),
         );
       } catch (e) {
         useIt.disabled = false;
@@ -495,7 +495,7 @@ function renderTyped(
         el("div", {
           class: "dim small",
           style: { marginTop: "6px" },
-          text: "Printed by a notebook; link the variable it's in:",
+          text: "Printed by a notebook; save the variable it's in:",
         }),
         ...fromNotebooks.slice(0, 3).map(printedRow),
       );

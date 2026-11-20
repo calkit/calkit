@@ -242,8 +242,10 @@ the run stops and says which cell and variable.
 On Overleaf, with the browser extension connected to Calkit on your
 machine, a number typed into the paper that one of the project's notebooks
 printed gets **Use this** in the Calkit card,
-which marks the variable it came from and replaces the number with a
-`\ckvalue`.
+which marks the variable it came from.
+Once **Run and sync** saves it, the card offers to link the number to it,
+replacing it with a `\ckvalue`, including a key inside the variable,
+e.g., `rates.25C`, if the variable holds more than one number.
 
 Writing results files from the notebook works too, e.g., with `json.dump`,
 and keeps the notebook usable without Calkit;

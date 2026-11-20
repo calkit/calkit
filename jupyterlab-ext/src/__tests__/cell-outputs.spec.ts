@@ -21,8 +21,8 @@ const value: ICellOutputMark = {
   kind: "value",
   cell_id: "c0",
   cell_index: 0,
-  variable: "k_25",
-  path: null,
+  variable_name: "k_25",
+  output_path: null,
   format: null,
   citation: "\\ckvalue{fit.ipynb}{k_25}",
   saved_value: 0.030912,
@@ -32,8 +32,8 @@ const figure: ICellOutputMark = {
   kind: "figure",
   cell_id: "c2",
   cell_index: 2,
-  variable: "fig",
-  path: "figures/fit.pdf",
+  variable_name: "fig",
+  output_path: "figures/fit.pdf",
   format: null,
   citation: "\\ckfigure{figures/fit.pdf}",
 };
@@ -62,12 +62,12 @@ describe("cell outputs", () => {
     delete unsaved.saved_value;
     expect(getMarkLabel(unsaved).text).toBe("k_25 (not saved yet)");
     expect(getMarkLabel(figure).text).toBe("figures/fit.pdf from fig");
-    expect(getMarkLabel({ ...figure, variable: null, citation: null })).toEqual(
-      {
-        text: "figures/fit.pdf",
-        tooltip: "Figure saved from what this cell shows when stage 'fit' runs",
-      },
-    );
+    expect(
+      getMarkLabel({ ...figure, variable_name: null, citation: null }),
+    ).toEqual({
+      text: "figures/fit.pdf",
+      tooltip: "Figure saved from what this cell shows when stage 'fit' runs",
+    });
   });
 
   it("offers the variables a cell assigns, likely ones first", () => {
@@ -188,16 +188,16 @@ describe("cell outputs", () => {
         notebookPath: "fit.ipynb",
         cellId: "c2",
         kind: "figure",
-        variable: "fig",
-        path: "figures/fit.pdf",
+        variableNames: ["fig"],
+        outputPath: "figures/fit.pdf",
       }),
     ).toEqual({
       path: "fit.ipynb",
       output: {
         kind: "figure",
         cell_id: "c2",
-        variable: "fig",
-        path: "figures/fit.pdf",
+        variable_name: "fig",
+        output_path: "figures/fit.pdf",
       },
     });
     // A value has no path of its own
@@ -206,27 +206,36 @@ describe("cell outputs", () => {
         notebookPath: "fit.ipynb",
         cellId: "c0",
         kind: "value",
-        variable: "k",
-        path: "ignored",
+        variableNames: ["k"],
+        outputPath: "ignored",
         stage: "fit-2",
       }),
     ).toEqual({
       path: "fit.ipynb",
-      output: { kind: "value", cell_id: "c0", variable: "k" },
+      output: { kind: "value", cell_id: "c0", variable_name: "k" },
       stage: "fit-2",
     });
+    // Several values at once
+    expect(
+      getMarkRequestBody({
+        notebookPath: "fit.ipynb",
+        cellId: "c0",
+        kind: "value",
+        variableNames: ["k", "j"],
+      }).output,
+    ).toEqual({ kind: "value", cell_id: "c0", variable_names: ["k", "j"] });
     expect(getUnmarkQuery("nbs/fit rates.ipynb", figure)).toBe(
       "path=nbs%2Ffit+rates.ipynb&output_path=figures%2Ffit.pdf&stage=fit",
     );
     expect(getUnmarkQuery("fit.ipynb", value)).toBe(
-      "path=fit.ipynb&variable=k_25&stage=fit",
+      "path=fit.ipynb&variable_name=k_25&stage=fit",
     );
   });
 
   it("finds a cell's marks by ID or position", () => {
     const atEnd = {
       ...value,
-      variable: "last",
+      variable_name: "last",
       cell_id: null,
       cell_index: null,
     };

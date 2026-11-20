@@ -12,8 +12,8 @@ export interface ICellOutputMark {
   kind: CellOutputKind;
   cell_id: string | null;
   cell_index: number | null;
-  variable: string | null;
-  path: string | null;
+  variable_name: string | null;
+  output_path: string | null;
   format: string | null;
   citation: string | null;
   saved_value?: unknown;
@@ -51,7 +51,7 @@ export function filterCellOutputMarks(data: unknown): ICellOutputMark[] {
 
 /** What a mark saves: a value's name, or a figure or table's path. */
 export function getMarkTarget(mark: ICellOutputMark): string {
-  return (mark.kind === "value" ? mark.variable : mark.path) ?? "";
+  return (mark.kind === "value" ? mark.variable_name : mark.output_path) ?? "";
 }
 
 /** A saved value as short text, e.g., `0.03091` or `{3 keys}`. */
@@ -89,15 +89,15 @@ export function getMarkLabel(mark: ICellOutputMark): {
       "saved_value" in mark
         ? ` = ${formatSavedValue(mark.saved_value)}`
         : " (not saved yet)";
-  } else if (mark.variable) {
-    text += ` from ${mark.variable}`;
+  } else if (mark.variable_name) {
+    text += ` from ${mark.variable_name}`;
   }
   const lines = [
     mark.kind === "value"
       ? `Value saved after this cell when stage '${mark.stage}' runs`
       : `${mark.kind === "figure" ? "Figure" : "Table"} saved ${
-          mark.variable
-            ? `from '${mark.variable}'`
+          mark.variable_name
+            ? `from '${mark.variable_name}'`
             : "from what this cell shows"
         } when stage '${mark.stage}' runs`,
   ];
@@ -254,25 +254,28 @@ export function getMarkPathError(
 
 /**
  * The body of a request to mark a cell's output: the notebook's path, and
- * the output as calkit.yaml has it.
+ * the output as calkit.yaml has it, which can save several values at once.
  */
 export function getMarkRequestBody(options: {
   notebookPath: string;
   cellId: string;
   kind: CellOutputKind;
-  variable?: string;
-  path?: string;
+  variableNames?: string[];
+  outputPath?: string;
   stage?: string;
 }): Record<string, unknown> {
-  const output: Record<string, string> = {
+  const output: Record<string, unknown> = {
     kind: options.kind,
     cell_id: options.cellId,
   };
-  if (options.variable) {
-    output.variable = options.variable;
+  const names = options.variableNames ?? [];
+  if (names.length === 1) {
+    output.variable_name = names[0];
+  } else if (names.length > 1) {
+    output.variable_names = names;
   }
-  if (options.path && options.kind !== "value") {
-    output.path = options.path;
+  if (options.outputPath && options.kind !== "value") {
+    output.output_path = options.outputPath;
   }
   return {
     path: options.notebookPath,
@@ -288,7 +291,8 @@ export function getUnmarkQuery(
 ): string {
   return new URLSearchParams({
     path: notebookPath,
-    [mark.kind === "value" ? "variable" : "output_path"]: getMarkTarget(mark),
+    [mark.kind === "value" ? "variable_name" : "output_path"]:
+      getMarkTarget(mark),
     stage: mark.stage,
   }).toString();
 }

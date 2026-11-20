@@ -72,17 +72,21 @@ async def test_notebook_cell_outputs(
     response = await fetch("GET", path="fit.ipynb")
     assert response.code == 200
     assert json.loads(response.body) == []
-    # Marking says how to cite it
-    value = {"kind": "value", "cell_id": ids[0], "variable": "k_25"}
+    # Adding one says how to cite it
+    value = {"kind": "value", "cell_id": ids[0], "variable_name": "k_25"}
     response = await fetch("POST", body={"path": "fit.ipynb", "output": value})
     assert response.code == 200
     assert json.loads(response.body) == {
         "stage": "fit",
         "output": value,
-        "citation": r"\ckvalue{fit.ipynb}{k_25}",
+        "citations": [r"\ckvalue{fit.ipynb}{k_25}"],
         "warning": None,
     }
-    figure = {"kind": "figure", "variable": "fig", "path": "figures/fit.pdf"}
+    figure = {
+        "kind": "figure",
+        "variable_name": "fig",
+        "output_path": "figures/fit.pdf",
+    }
     response = await fetch(
         "POST",
         body={"path": "fit.ipynb", "cell_index": 1, "output": figure},
@@ -99,22 +103,27 @@ async def test_notebook_cell_outputs(
         ("figure", 1),
     ]
     assert listed[0]["saved_value"] == 0.0309
-    assert listed[1]["path"] == "figures/fit.pdf"
-    # What can't be marked or unmarked says why
+    assert listed[1]["output_path"] == "figures/fit.pdf"
+    # What can't be added or removed says why
     elsewhere = value | {"cell_id": "nope"}
     for method, body, params, message in [
         ("POST", {"path": "fit.ipynb", "output": elsewhere}, {}, "no cell"),
         ("POST", {"path": "other.ipynb", "output": value}, {}, "yet"),
         ("POST", {"path": "fit.ipynb"}, {}, "must include 'output'"),
         ("POST", {"output": value}, {}, "must include 'path'"),
-        ("DELETE", None, {"path": "fit.ipynb", "variable": "no"}, "Nothing"),
+        (
+            "DELETE",
+            None,
+            {"path": "fit.ipynb", "variable_name": "no"},
+            "Nothing",
+        ),
         ("DELETE", None, {}, "must include 'path'"),
         ("GET", None, {}, "must include 'path'"),
     ]:
         response = await fetch(method, body=body, **params)
         assert response.code == 400
         assert message in json.loads(response.body)["error"]
-    # Unmarking a figure by its path leaves the rest
+    # Removing a figure by its path leaves the rest
     response = await fetch(
         "DELETE", path="fit.ipynb", output_path="figures/fit.pdf"
     )

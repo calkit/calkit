@@ -294,7 +294,7 @@ def test_ck_components(tmp_dir):
     )
     assert component_path("other.ipynb") == (
         None,
-        "No values saved from other.ipynb yet; mark it as a cell output "
+        "No values saved from other.ipynb yet; add it as a cell output "
         "and run the pipeline",
     )
     # The same can be worked out without the files on disk, e.g., from the

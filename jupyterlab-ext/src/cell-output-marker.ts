@@ -201,38 +201,70 @@ async function markCellOutput(
     kind,
     hasImageOutput(getOutputMimeTypes(outputs)),
   );
-  let choice = choices[0];
-  if (choices.length > 1) {
-    const picked = await InputDialog.getItem({
-      title,
-      label: "Variable it's saved from",
-      items: choices.map((c) => c.label),
-      current: 0,
-    });
-    if (!picked.button.accept) {
-      return;
-    }
-    choice = choices.find((c) => c.label === picked.value) ?? choice;
-  }
-  let variable = choice.variable;
-  if (choice.isOther) {
+  // Several values can be saved after one cell at once
+  let variableNames: string[] = [];
+  const askName = async (): Promise<string | undefined> => {
     const typed = await InputDialog.getText({
       title,
       label: "Variable name",
       pattern: "[A-Za-z_][A-Za-z0-9_]*",
       required: true,
     });
-    if (!typed.button.accept || !typed.value?.trim()) {
+    const name = typed.button.accept ? typed.value?.trim() : undefined;
+    if (name && !isVariableName(name)) {
+      Notification.error("Not a variable name");
+      return undefined;
+    }
+    return name || undefined;
+  };
+  if (kind === "value") {
+    const picked = await InputDialog.getMultipleItems({
+      title,
+      label: "Variables it's saved from",
+      items: choices.map((c) => c.label),
+      defaults: [choices[0].label],
+    });
+    if (!picked.button.accept || !picked.value?.length) {
       return;
     }
-    variable = typed.value.trim();
-    if (!isVariableName(variable)) {
-      Notification.error("Not a variable name");
-      return;
+    const chosen = choices.filter((c) => picked.value?.includes(c.label));
+    variableNames = chosen
+      .map((c) => c.variable)
+      .filter((v): v is string => !!v);
+    if (chosen.some((c) => c.isOther)) {
+      const typed = await askName();
+      if (!typed) {
+        return;
+      }
+      variableNames.push(typed);
+    }
+  } else {
+    let choice = choices[0];
+    if (choices.length > 1) {
+      const picked = await InputDialog.getItem({
+        title,
+        label: "Variable it's saved from",
+        items: choices.map((c) => c.label),
+        current: 0,
+      });
+      if (!picked.button.accept) {
+        return;
+      }
+      choice = choices.find((c) => c.label === picked.value) ?? choice;
+    }
+    if (choice.isOther) {
+      const typed = await askName();
+      if (!typed) {
+        return;
+      }
+      variableNames = [typed];
+    } else if (choice.variable) {
+      variableNames = [choice.variable];
     }
   }
+  const variable = variableNames[0];
   // Where a figure or table is saved to
-  let target = variable ?? "";
+  let target = variableNames.join(", ");
   if (kind !== "value") {
     const chosen = await InputDialog.getText({
       title,
@@ -264,8 +296,8 @@ async function markCellOutput(
           notebookPath,
           cellId: cell.model.id,
           kind,
-          variable,
-          path: kind === "value" ? undefined : target,
+          variableNames,
+          outputPath: kind === "value" ? undefined : target,
         }),
       ),
     });

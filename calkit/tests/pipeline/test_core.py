@@ -5701,17 +5701,21 @@ def test_get_figure_paths_with_origins(tmp_dir):
                     "environment": "py",
                     "wdir": "nbs",
                     "cell_outputs": [
-                        {"kind": "value", "cell_id": "a", "variable": "k"},
+                        {
+                            "kind": "value",
+                            "cell_id": "a",
+                            "variable_name": "k",
+                        },
                         {
                             "kind": "figure",
                             "cell_id": "b",
-                            "path": "figs/fit.pdf",
+                            "output_path": "figs/fit.pdf",
                         },
                         {
                             "kind": "table",
                             "cell_id": "c",
-                            "variable": "df",
-                            "path": "t.tex",
+                            "variable_name": "df",
+                            "output_path": "t.tex",
                         },
                     ],
                 },

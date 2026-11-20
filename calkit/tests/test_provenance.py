@@ -1262,7 +1262,7 @@ def test_get_path_provenance():
                     "notebook_path": "nbs/fit.ipynb",
                     "environment": "py",
                     "cell_outputs": [
-                        {"kind": "value", "cell_id": "a", "variable": "k"}
+                        {"kind": "value", "cell_id": "a", "variable_name": "k"}
                     ],
                 },
                 "copy-figs": {

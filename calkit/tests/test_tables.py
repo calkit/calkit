@@ -177,8 +177,8 @@ def test_list_tables(tmp_dir):
             {
                 "kind": "table",
                 "cell_id": "a",
-                "variable": "df",
-                "path": "tables/k.tex",
+                "variable_name": "df",
+                "output_path": "tables/k.tex",
             }
         ],
     }

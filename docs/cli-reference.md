@@ -1878,9 +1878,9 @@ Work with computational notebooks.
 | [`clean-all`](#subcommand-notebooks-nb-clean-all)                   | Clean all notebooks in the pipeline.                                                               |
 | [`check-kernel`](#subcommand-notebooks-nb-check-kernel)             | Check that an environment has a registered Jupyter kernel.                                         |
 | [`execute`](#subcommand-notebooks-nb-execute)                       | Execute notebook and place a copy in the relevant directory.                                       |
-| [`mark`](#subcommand-notebooks-nb-mark)                             | Mark a value, figure, or table a notebook's cell makes, to be saved whenever the pipeline runs it. |
-| [`unmark`](#subcommand-notebooks-nb-unmark)                         | Stop saving a value, figure, or table from a notebook's cell.                                      |
-| [`outputs`](#subcommand-notebooks-nb-outputs)                       | List the values, figures, and tables marked in a notebook's cells, and how a document shows each.  |
+| [`add-output`](#subcommand-notebooks-nb-add-output)                 | Save a value, figure, or table a notebook's cell makes whenever the pipeline runs it.              |
+| [`remove-output`](#subcommand-notebooks-nb-remove-output)           | Stop saving a value, figure, or table from a notebook's cell.                                      |
+| [`outputs`](#subcommand-notebooks-nb-outputs)                       | List the values, figures, and tables saved from a notebook's cells, and how a document shows each. |
 | [`export-marimo-wasm`](#subcommand-notebooks-nb-export-marimo-wasm) | Export a marimo notebook to a WebAssembly app.                                                     |
 
 <a id="subcommand-notebooks-nb-clean"></a>
@@ -1985,16 +1985,16 @@ Options:
 | `--output`, `-o`        | list[str] | no       |          | A value, figure, or table a cell makes, to save after it runs, e.g., 'kind=value,cell_id=3f9a1c2e,variable=k' or 'kind=figure,cell_id=8b77d0aa,variable=fig,path=figures/fit.pdf'. Can be given more than once. |
 | `--verbose`, `-v`       | boolean   | no       | False    | Print verbose output.                                                                                                                                                                                           |
 
-<a id="subcommand-notebooks-nb-mark"></a>
+<a id="subcommand-notebooks-nb-add-output"></a>
 
-#### `calkit notebooks|nb mark`
+#### `calkit notebooks|nb add-output`
 
-Mark a value, figure, or table a notebook's cell makes, to be saved whenever the pipeline runs it.
+Save a value, figure, or table a notebook's cell makes whenever the pipeline runs it.
 
 Usage:
 
 ```text
-calkit notebooks|nb mark [OPTIONS] PATH KIND
+calkit notebooks|nb add-output [OPTIONS] PATH KIND
 ```
 
 Arguments:
@@ -2006,26 +2006,26 @@ Arguments:
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                                       |
-| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
-| `--cell-id`    | str     | no       |         | ID of the cell it's saved after.                                                                                  |
-| `--cell-index` | int     | no       |         | Position of the cell it's saved after, from 0, for a notebook whose cells have no IDs yet, which gives them some. |
-| `--variable`   | str     | no       |         | Variable it's saved from; for a figure, the image the cell shows if not given.                                    |
-| `--path`       | str     | no       |         | Where to save a figure or table, e.g., figures/fit.pdf or tables/rates.tex.                                       |
-| `--format`     | str     | no       |         | Format for a table's numbers, e.g., '.3f'.                                                                        |
-| `--stage`      | str     | no       |         | Stage running the notebook, if several do.                                                                        |
-| `--json`       | boolean | no       | False   | Print the result as JSON.                                                                                         |
+| Option                  | Type      | Required | Default | Description                                                                                                                 |
+| ----------------------- | --------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `--cell-id`             | str       | no       |         | ID of the cell it's saved after.                                                                                            |
+| `--cell-index`          | int       | no       |         | Position of the cell it's saved after, from 0, for a notebook whose cells have no IDs yet, which gives them some.           |
+| `--variable-name`, `-v` | list[str] | no       |         | Variable it's saved from, which can be given several times for values; for a figure, the image the cell shows if not given. |
+| `--output-path`, `-o`   | str       | no       |         | Where to save a figure or table, e.g., figures/fit.pdf or tables/rates.tex.                                                 |
+| `--format`              | str       | no       |         | Format for a table's numbers, e.g., '.3f'.                                                                                  |
+| `--stage`               | str       | no       |         | Stage running the notebook, if several do.                                                                                  |
+| `--json`                | boolean   | no       | False   | Print the result as JSON.                                                                                                   |
 
-<a id="subcommand-notebooks-nb-unmark"></a>
+<a id="subcommand-notebooks-nb-remove-output"></a>
 
-#### `calkit notebooks|nb unmark`
+#### `calkit notebooks|nb remove-output`
 
 Stop saving a value, figure, or table from a notebook's cell.
 
 Usage:
 
 ```text
-calkit notebooks|nb unmark [OPTIONS] PATH
+calkit notebooks|nb remove-output [OPTIONS] PATH
 ```
 
 Arguments:
@@ -2036,18 +2036,18 @@ Arguments:
 
 Options:
 
-| Option       | Type | Required | Default | Description                                |
-| ------------ | ---- | -------- | ------- | ------------------------------------------ |
-| `--variable` | str  | no       |         | Value to stop saving, by name.             |
-| `--path`     | str  | no       |         | Figure or table to stop saving.            |
-| `--cell-id`  | str  | no       |         | Cell to stop saving anything after.        |
-| `--stage`    | str  | no       |         | Stage running the notebook, if several do. |
+| Option                  | Type | Required | Default | Description                                |
+| ----------------------- | ---- | -------- | ------- | ------------------------------------------ |
+| `--variable-name`, `-v` | str  | no       |         | Value to stop saving, by name.             |
+| `--output-path`, `-o`   | str  | no       |         | Figure or table to stop saving.            |
+| `--cell-id`             | str  | no       |         | Cell to stop saving anything after.        |
+| `--stage`               | str  | no       |         | Stage running the notebook, if several do. |
 
 <a id="subcommand-notebooks-nb-outputs"></a>
 
 #### `calkit notebooks|nb outputs`
 
-List the values, figures, and tables marked in a notebook's cells, and how a document shows each.
+List the values, figures, and tables saved from a notebook's cells, and how a document shows each.
 
 Usage:
 

@@ -19,8 +19,8 @@ const value: CellOutputMark = {
   kind: "value",
   cell_id: "c0",
   cell_index: 0,
-  variable: "k_25",
-  path: null,
+  variable_name: "k_25",
+  output_path: null,
   format: null,
   citation: "\\ckvalue{fit.ipynb}{k_25}",
   saved_value: 0.030912,
@@ -30,8 +30,8 @@ const figure: CellOutputMark = {
   kind: "figure",
   cell_id: "c2",
   cell_index: 2,
-  variable: "fig",
-  path: "figures/fit.pdf",
+  variable_name: "fig",
+  output_path: "figures/fit.pdf",
   format: null,
   citation: "\\ckfigure{figures/fit.pdf}",
 };
@@ -71,7 +71,7 @@ test("getMarkLabel says what's saved, and how to cite it", () => {
     "$(symbol-number) k_25 (not saved yet)",
   );
   assert.equal(getMarkLabel(figure).text, "$(graph) figures/fit.pdf from fig");
-  const shown = { ...figure, variable: null, citation: null };
+  const shown = { ...figure, variable_name: null, citation: null };
   assert.deepEqual(getMarkLabel(shown), {
     text: "$(graph) figures/fit.pdf",
     tooltip: "Figure saved from what this cell shows when stage 'fit' runs",
@@ -156,19 +156,19 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
       cellId: "c2",
       cellIndex: 2,
       kind: "figure",
-      variable: "fig",
-      path: "figures/fit.pdf",
+      variableNames: ["fig"],
+      outputPath: "figures/fit.pdf",
     }),
     [
       "nb",
-      "mark",
+      "add-output",
       "fit.ipynb",
       "figure",
       "--cell-id",
       "c2",
-      "--variable",
+      "--variable-name",
       "fig",
-      "--path",
+      "--output-path",
       "figures/fit.pdf",
       "--json",
     ],
@@ -179,18 +179,20 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
       notebookPath: "fit.ipynb",
       cellIndex: 0,
       kind: "value",
-      variable: "k",
+      variableNames: ["k", "j"],
       stage: "fit-2",
     }),
     [
       "nb",
-      "mark",
+      "add-output",
       "fit.ipynb",
       "value",
       "--cell-index",
       "0",
-      "--variable",
+      "--variable-name",
       "k",
+      "--variable-name",
+      "j",
       "--stage",
       "fit-2",
       "--json",
@@ -198,9 +200,9 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
   );
   assert.deepEqual(getUnmarkArgs("fit.ipynb", figure), [
     "nb",
-    "unmark",
+    "remove-output",
     "fit.ipynb",
-    "--path",
+    "--output-path",
     "figures/fit.pdf",
     "--stage",
     "fit",
@@ -208,7 +210,12 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
 });
 
 test("getMarksForCell finds a cell's marks by ID or position", () => {
-  const atEnd = { ...value, variable: "last", cell_id: null, cell_index: null };
+  const atEnd = {
+    ...value,
+    variable_name: "last",
+    cell_id: null,
+    cell_index: null,
+  };
   const marks = [value, figure, atEnd];
   assert.deepEqual(getMarksForCell(marks, 0, "c0", false), [value]);
   // An ID wins over a position, e.g., once cells have moved

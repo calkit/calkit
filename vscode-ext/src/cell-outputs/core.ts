@@ -12,8 +12,8 @@ export interface CellOutputMark {
   kind: CellOutputKind;
   cell_id: string | null;
   cell_index: number | null;
-  variable: string | null;
-  path: string | null;
+  variable_name: string | null;
+  output_path: string | null;
   format: string | null;
   citation: string | null;
   saved_value?: unknown;
@@ -38,7 +38,7 @@ export function parseCellOutputs(stdout: string): CellOutputMark[] {
 
 /** What a mark saves: a value's variable, or a figure or table's path. */
 export function getMarkTarget(mark: CellOutputMark): string {
-  return (mark.kind === "value" ? mark.variable : mark.path) ?? "";
+  return (mark.kind === "value" ? mark.variable_name : mark.output_path) ?? "";
 }
 
 /** A saved value as short text, e.g., `0.03091` or `{3 keys}`. */
@@ -80,15 +80,15 @@ export function getMarkLabel(mark: CellOutputMark): {
       "saved_value" in mark
         ? ` = ${formatSavedValue(mark.saved_value)}`
         : " (not saved yet)";
-  } else if (mark.variable) {
-    text += ` from ${mark.variable}`;
+  } else if (mark.variable_name) {
+    text += ` from ${mark.variable_name}`;
   }
   const lines = [
     mark.kind === "value"
       ? `Value saved after this cell when stage '${mark.stage}' runs`
       : `${mark.kind === "figure" ? "Figure" : "Table"} saved ${
-          mark.variable
-            ? `from '${mark.variable}'`
+          mark.variable_name
+            ? `from '${mark.variable_name}'`
             : "from what this cell shows"
         } when stage '${mark.stage}' runs`,
   ];
@@ -205,27 +205,30 @@ export function getDefaultMarkPath(
   return `figures/${name}.${variable ? "pdf" : "png"}`;
 }
 
-/** The arguments to `calkit nb mark` for a mark. */
+/**
+ * The arguments to `calkit nb add-output` for a mark, which can save
+ * several values at once.
+ */
 export function getMarkArgs(options: {
   notebookPath: string;
   cellId?: string;
   cellIndex: number;
   kind: CellOutputKind;
-  variable?: string;
-  path?: string;
+  variableNames?: string[];
+  outputPath?: string;
   stage?: string;
 }): string[] {
-  const args = ["nb", "mark", options.notebookPath, options.kind];
+  const args = ["nb", "add-output", options.notebookPath, options.kind];
   args.push(
     ...(options.cellId
       ? ["--cell-id", options.cellId]
       : ["--cell-index", String(options.cellIndex)]),
   );
-  if (options.variable) {
-    args.push("--variable", options.variable);
+  for (const name of options.variableNames ?? []) {
+    args.push("--variable-name", name);
   }
-  if (options.path) {
-    args.push("--path", options.path);
+  if (options.outputPath) {
+    args.push("--output-path", options.outputPath);
   }
   if (options.stage) {
     args.push("--stage", options.stage);
@@ -233,16 +236,16 @@ export function getMarkArgs(options: {
   return [...args, "--json"];
 }
 
-/** The arguments to `calkit nb unmark` for a mark. */
+/** The arguments to `calkit nb remove-output` for a mark. */
 export function getUnmarkArgs(
   notebookPath: string,
   mark: CellOutputMark,
 ): string[] {
   return [
     "nb",
-    "unmark",
+    "remove-output",
     notebookPath,
-    mark.kind === "value" ? "--variable" : "--path",
+    mark.kind === "value" ? "--variable-name" : "--output-path",
     getMarkTarget(mark),
     "--stage",
     mark.stage,

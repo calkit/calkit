@@ -548,80 +548,119 @@ def test_cell_outputs(tmp_dir):
     }
     calkit.save_calkit_info(ck_info)
 
-    def mark(*args: str) -> subprocess.CompletedProcess:
+    def add(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["calkit", "nb", "mark", "fit.ipynb", *args],
+            ["calkit", "nb", "add-output", "fit.ipynb", *args],
             capture_output=True,
             text=True,
         )
 
-    # Marking says how to show each in a document
-    out = mark("value", "--cell-id", ids[0], "--variable", "k_25", "--json")
+    # Adding one says how to show each in a document
+    out = add(
+        "value", "--cell-id", ids[0], "--variable-name", "k_25", "--json"
+    )
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == {
         "stage": "fit",
-        "output": {"kind": "value", "cell_id": ids[0], "variable": "k_25"},
-        "citation": r"\ckvalue{fit.ipynb}{k_25}",
+        "output": {
+            "kind": "value",
+            "cell_id": ids[0],
+            "variable_name": "k_25",
+        },
+        "citations": [r"\ckvalue{fit.ipynb}{k_25}"],
         "warning": None,
     }
-    table = ["table", "--cell-id", ids[4], "--variable", "df", "--path"]
+    table = [
+        "table",
+        "--cell-id",
+        ids[4],
+        "--variable-name",
+        "df",
+        "--output-path",
+    ]
     for args in [
-        ["value", "--cell-id", ids[0], "--variable", "rates"],
-        ["value", "--variable", "last"],
+        ["value", "--cell-id", ids[0], "--variable-name", "rates"],
+        ["value", "--variable-name", "last"],
         [
             "figure",
             "--cell-id",
             ids[2],
-            "--variable",
+            "--variable-name",
             "fig",
-            "--path",
+            "--output-path",
             "figures/fit.pdf",
         ],
-        ["figure", "--cell-index", "3", "--path", "figures/shown.png"],
+        ["figure", "--cell-index", "3", "--output-path", "figures/shown.png"],
         table + ["tables/rates.tex"],
         table + ["rates.csv"],
     ]:
-        out = mark(*args)
+        out = add(*args)
         assert out.returncode == 0, out.stderr
     assert (
-        "\\cktable{tables/rates.tex}"
-        in mark(*table, "tables/rates.tex").stdout
+        "\\cktable{tables/rates.tex}" in add(*table, "tables/rates.tex").stdout
     )
-    # What can't be marked
+    # What can't be saved
     first = ["--cell-id", ids[0]]
     for args, message in [
         (
-            ["value", "--cell-id", "nope", "--variable", "x"],
+            ["value", "--cell-id", "nope", "--variable-name", "x"],
             "has no cell nope",
         ),
-        (["value", "--cell-index", "9", "--variable", "x"], "has 6 cells"),
-        (["value", *first, "--cell-index", "0", "--variable", "x"], "both"),
-        (["value", *first, "--variable", "x", "--format", ".2f"], "apply"),
-        (["plot", *first, "--variable", "x"], "Input should be"),
-        (["figure", *first, "--path", "fit.pdf"], "can't be in"),
+        (
+            ["value", "--cell-index", "9", "--variable-name", "x"],
+            "has 6 cells",
+        ),
+        (
+            ["value", *first, "--cell-index", "0", "--variable-name", "x"],
+            "both",
+        ),
+        (
+            ["value", *first, "--variable-name", "x", "--format", ".2f"],
+            "apply",
+        ),
+        (["plot", *first, "--variable-name", "x"], "Input should be"),
+        (["figure", *first, "--output-path", "fit.pdf"], "can't be in"),
     ]:
         if "can't be in" in message:
             ck_info = calkit.load_calkit_info()
             ck_info["pipeline"]["stages"]["fit"]["outputs"] = ["fit.pdf"]
             calkit.save_calkit_info(ck_info)
             message = "so it can't be in 'outputs' too"
-        out = mark(*args)
+        out = add(*args)
         assert out.returncode != 0
         assert message in out.stderr + out.stdout
     ck_info = calkit.load_calkit_info()
     del ck_info["pipeline"]["stages"]["fit"]["outputs"]
     calkit.save_calkit_info(ck_info)
     out = subprocess.run(
-        ["calkit", "nb", "mark", "other.ipynb", "value", "--variable", "x"],
+        [
+            "calkit",
+            "nb",
+            "add-output",
+            "other.ipynb",
+            "value",
+            "--variable-name",
+            "x",
+        ],
         capture_output=True,
         text=True,
     )
     assert "isn't in the pipeline yet" in out.stderr + out.stdout
     subprocess.check_call(
-        ["calkit", "nb", "unmark", "fit.ipynb", "--path", "rates.csv"]
+        [
+            "calkit",
+            "nb",
+            "remove-output",
+            "fit.ipynb",
+            "--output-path",
+            "rates.csv",
+        ]
     )
+    # Values saved after the same cell are kept together
     ck_info = calkit.load_calkit_info()
-    assert len(ck_info["pipeline"]["stages"]["fit"]["cell_outputs"]) == 6
+    saved = ck_info["pipeline"]["stages"]["fit"]["cell_outputs"]
+    assert len(saved) == 5
+    assert saved[0]["variable_names"] == ["k_25", "rates"]
     # Running saves each, the value as it was right after its cell, and
     # leaves no sign of the cells that saved them
     subprocess.check_call(["calkit", "run"])
@@ -675,15 +714,18 @@ def test_cell_outputs(tmp_dir):
     # What couldn't be saved stops the run, saying why
     for arg, message in [
         (
-            f"kind=value,cell_id={ids[2]},variable=nope",
+            f"kind=value,cell_id={ids[2]},variable_name=nope",
             f"no variable 'nope' after cell {ids[2]}",
         ),
-        (f"kind=value,cell_id={ids[0]},variable=plt", "since it's a module"),
         (
-            f"kind=figure,cell_id={ids[0]},path=x.png",
+            f"kind=value,cell_id={ids[0]},variable_name=plt",
+            "since it's a module",
+        ),
+        (
+            f"kind=figure,cell_id={ids[0]},output_path=x.png",
             f"Cell {ids[0]} shows no image/png",
         ),
-        ("kind=value,cell_id=gone,variable=k_25", "no cell gone"),
+        ("kind=value,cell_id=gone,variable_name=k_25", "no cell gone"),
     ]:
         out = subprocess.run(
             ["calkit", "nb", "execute", "fit.ipynb", "-e", "py", "-o", arg],

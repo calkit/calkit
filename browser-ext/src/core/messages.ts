@@ -361,7 +361,7 @@ export type Request =
       notebook: string;
       stage: string;
       cell_id: string;
-      variable: string;
+      variable_name: string;
     }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */

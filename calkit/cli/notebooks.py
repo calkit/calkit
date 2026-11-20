@@ -591,7 +591,7 @@ def execute_notebook(
             shutil.move(os.path.join(scratch_dir, "values.json"), values_path)
             saved.append(values_path)
         for i, o in enumerate(outputs):
-            if o.kind == "value" or o.path is None:
+            if o.kind == "value" or o.output_path is None:
                 continue
             if o.kind == "table":
                 with open(
@@ -599,25 +599,27 @@ def execute_notebook(
                     encoding="utf-8",
                 ) as f:
                     table = json.load(f)
-                calkit.tables.write_table(o.path, table, o.format)
-            elif o.variable is None:
+                calkit.tables.write_table(o.output_path, table, o.format)
+            elif o.variable_name is None:
                 try:
                     image = calkit.notebooks.get_cell_image(
                         executed,
                         str(o.cell_id),
-                        os.path.splitext(o.path)[1],
+                        os.path.splitext(o.output_path)[1],
                     )
                 except ValueError as e:
-                    raise_error(f"Can't save {o.path}: {e}")
-                os.makedirs(os.path.dirname(o.path) or ".", exist_ok=True)
-                with open(o.path, "wb") as f:
+                    raise_error(f"Can't save {o.output_path}: {e}")
+                os.makedirs(
+                    os.path.dirname(o.output_path) or ".", exist_ok=True
+                )
+                with open(o.output_path, "wb") as f:
                     f.write(image)
-            elif not os.path.isfile(o.path):
+            elif not os.path.isfile(o.output_path):
                 raise_error(
-                    f"{o.path} wasn't saved from '{o.variable}' after "
+                    f"{o.output_path} wasn't saved from '{o.variable_name}' after "
                     f"cell {o.cell_id}"
                 )
-            saved.append(o.path)
+            saved.append(o.output_path)
         typer.echo("Saved " + ", ".join(dict.fromkeys(saved)))
 
     if os.path.isabs(path):
@@ -767,10 +769,10 @@ def execute_notebook(
                 outputs=[
                     o.model_dump()
                     | {
-                        "path": (
-                            from_kernel(o.path)
-                            if o.kind == "figure" and o.path is not None
-                            else o.path
+                        "output_path": (
+                            from_kernel(o.output_path)
+                            if o.kind == "figure" and o.output_path is not None
+                            else o.output_path
                         )
                     }
                     for o in outputs
@@ -782,7 +784,7 @@ def execute_notebook(
             )
         except ValueError as e:
             raise_error(
-                f"{e}, which calkit.yaml saves a cell output after; mark it "
+                f"{e}, which calkit.yaml saves a cell output after; add it "
                 "again in the notebook"
             )
         if os.path.isdir(scratch_dir):
@@ -793,8 +795,8 @@ def execute_notebook(
             json.dump(capture_nb, f, indent=1)
         # Each figure and table is written again, so a stale one isn't kept
         for o in outputs:
-            if o.path is not None and os.path.isfile(o.path):
-                os.remove(o.path)
+            if o.output_path is not None and os.path.isfile(o.output_path):
+                os.remove(o.output_path)
     # Whatever happens, the scratch folder for cell outputs is removed
     try:
         # If this is a Python, Julia, or R notebook, we can use Papermill.
@@ -1025,8 +1027,8 @@ def _pyodide_provided_packages() -> set[str]:
     }
 
 
-@notebooks_app.command("mark")
-def mark_cell_output(
+@notebooks_app.command("add-output")
+def add_cell_output(
     path: Annotated[str, typer.Argument(help="Path to the notebook.")],
     kind: Annotated[
         str,
@@ -1044,18 +1046,20 @@ def mark_cell_output(
             "notebook whose cells have no IDs yet, which gives them some.",
         ),
     ] = None,
-    variable: Annotated[
-        str | None,
+    variable_names: Annotated[
+        list[str] | None,
         typer.Option(
-            "--variable",
-            help="Variable it's saved from; for a figure, the image the cell "
-            "shows if not given.",
+            "--variable-name",
+            "-v",
+            help="Variable it's saved from, which can be given several times "
+            "for values; for a figure, the image the cell shows if not given.",
         ),
     ] = None,
     output_path: Annotated[
         str | None,
         typer.Option(
-            "--path",
+            "--output-path",
+            "-o",
             help="Where to save a figure or table, e.g., figures/fit.pdf or "
             "tables/rates.tex.",
         ),
@@ -1076,17 +1080,19 @@ def mark_cell_output(
         bool, typer.Option("--json", help="Print the result as JSON.")
     ] = False,
 ) -> None:
-    """Mark a value, figure, or table a notebook's cell makes, to be saved
-    whenever the pipeline runs it.
+    """Save a value, figure, or table a notebook's cell makes whenever the
+    pipeline runs it.
     """
+    names = variable_names or []
     try:
-        marked = calkit.notebooks.mark_cell_output(
+        added = calkit.notebooks.add_cell_output(
             path,
             {
                 "kind": kind,
                 "cell_id": cell_id,
-                "variable": variable,
-                "path": output_path,
+                "variable_name": names[0] if len(names) == 1 else None,
+                "variable_names": names if len(names) > 1 else None,
+                "output_path": output_path,
                 "format": number_format,
             },
             stage=stage,
@@ -1096,30 +1102,32 @@ def mark_cell_output(
         raise_error(str(e))
         raise
     if json_output:
-        typer.echo(json.dumps(marked))
+        typer.echo(json.dumps(added))
         return
-    if marked["warning"]:
-        warn(marked["warning"])
+    if added["warning"]:
+        warn(added["warning"])
+    saved = output_path or ", ".join(names)
     typer.echo(
-        f"Marked {output_path or variable} to be saved from {path} when "
-        f"stage '{marked['stage']}' runs"
+        f"Saving {saved} from {path} when stage '{added['stage']}' runs"
     )
-    if marked["citation"]:
-        typer.echo(
-            f"Once it's run, show it in a document with {marked['citation']}"
-        )
+    for citation in added["citations"]:
+        typer.echo(f"Once it's run, show it in a document with {citation}")
 
 
-@notebooks_app.command("unmark")
-def unmark_cell_output(
+@notebooks_app.command("remove-output")
+def remove_cell_output(
     path: Annotated[str, typer.Argument(help="Path to the notebook.")],
-    variable: Annotated[
+    variable_name: Annotated[
         str | None,
-        typer.Option("--variable", help="Value to stop saving, by name."),
+        typer.Option(
+            "--variable-name", "-v", help="Value to stop saving, by name."
+        ),
     ] = None,
     output_path: Annotated[
         str | None,
-        typer.Option("--path", help="Figure or table to stop saving."),
+        typer.Option(
+            "--output-path", "-o", help="Figure or table to stop saving."
+        ),
     ] = None,
     cell_id: Annotated[
         str | None,
@@ -1134,10 +1142,10 @@ def unmark_cell_output(
 ) -> None:
     """Stop saving a value, figure, or table from a notebook's cell."""
     try:
-        n_removed = calkit.notebooks.unmark_cell_outputs(
+        n_removed = calkit.notebooks.remove_cell_outputs(
             path,
-            value=variable,
-            path=output_path,
+            variable_name=variable_name,
+            output_path=output_path,
             cell_id=cell_id,
             stage=stage,
         )
@@ -1155,7 +1163,7 @@ def list_cell_outputs(
         bool, typer.Option("--json", help="Print them as JSON.")
     ] = False,
 ) -> None:
-    """List the values, figures, and tables marked in a notebook's cells,
+    """List the values, figures, and tables saved from a notebook's cells,
     and how a document shows each.
     """
     described = calkit.notebooks.list_cell_outputs(path)
@@ -1163,7 +1171,7 @@ def list_cell_outputs(
         typer.echo(json.dumps(described))
         return
     if not described:
-        typer.echo(f"Nothing is marked in {path}")
+        typer.echo(f"Nothing is saved from {path}'s cells")
         return
     for item in described:
         where = (
@@ -1173,7 +1181,7 @@ def list_cell_outputs(
                 f"missing cell {item['cell_id']}" if item["cell_id"] else "end"
             )
         )
-        text = f"{item['kind']} {item['path'] or item['variable']}"
+        text = f"{item['kind']} {item['output_path'] or item['variable_name']}"
         if "saved_value" in item:
             text += f" = {json.dumps(item['saved_value'])}"
         typer.echo(f"{text} ({where})")

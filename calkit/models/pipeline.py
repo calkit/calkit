@@ -2483,7 +2483,7 @@ class NotebookCellOutput(Model):
     kind: Literal["value", "figure", "table"] = Field(
         description="What it is: a value, cited by the notebook's path, "
         "e.g., \\ckvalue{analysis.ipynb}{name}, or a figure or table, "
-        "saved to 'path'."
+        "saved to 'output_path'."
     )
     cell_id: str | None = Field(
         default=None,
@@ -2491,14 +2491,19 @@ class NotebookCellOutput(Model):
         "Code keep on the cell as it moves. A value with none is saved "
         "after the last cell.",
     )
-    variable: str | None = Field(
+    variable_name: str | None = Field(
         default=None,
         description="Name of the variable it's saved from: a value's name, "
         "e.g., a number or a dict of them, a figure, e.g., a Matplotlib "
         "figure, or a table, e.g., a DataFrame. A figure without one is "
         "the image the cell shows.",
     )
-    path: str | None = Field(
+    variable_names: list[str] | None = Field(
+        default=None,
+        description="Names of several variables to save as values after the "
+        "same cell, each cited by its own name, instead of 'variable_name'.",
+    )
+    output_path: str | None = Field(
         default=None,
         description="Where a figure or table is saved, in the format its "
         "extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as "
@@ -2515,9 +2520,9 @@ class NotebookCellOutput(Model):
     )
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("path")
+    @field_validator("output_path")
     @classmethod
-    def normalize_path(cls, path: str | None) -> str | None:
+    def normalize_output_path(cls, path: str | None) -> str | None:
         from calkit.notebooks import get_normalized_output_path
 
         return None if path is None else get_normalized_output_path(path)
@@ -2529,36 +2534,50 @@ class NotebookCellOutput(Model):
             CELL_OUTPUT_TABLE_EXTS,
         )
 
-        if self.variable is not None and not self.variable.isidentifier():
-            raise ValueError(f"'{self.variable}' isn't a variable name")
+        if self.variable_name is not None and self.variable_names is not None:
+            raise ValueError(
+                "Give 'variable_name' or 'variable_names', not both"
+            )
+        for name in self.variable_names_saved:
+            if not name.isidentifier():
+                raise ValueError(f"'{name}' isn't a variable name")
         if self.cell_id is not None and not re.fullmatch(
             r"[A-Za-z0-9_-]+", self.cell_id
         ):
             raise ValueError(f"'{self.cell_id}' isn't a cell ID")
         if self.kind == "value":
-            if self.variable is None:
+            if not self.variable_names_saved:
                 raise ValueError("Name the variable to save as a value")
-            if self.path or self.format or self.storage:
+            names = self.variable_names_saved
+            for name in set(names):
+                if names.count(name) > 1:
+                    raise ValueError(f"Value '{name}' is named twice")
+            if self.output_path or self.format or self.storage:
                 raise ValueError(
                     "A value is saved with the notebook's other values, so "
-                    "'path', 'format', and 'storage' don't apply"
+                    "'output_path', 'format', and 'storage' don't apply"
                 )
             return self
-        if self.path is None:
+        if self.variable_names is not None:
+            raise ValueError(
+                f"A {self.kind} is saved from one variable; give "
+                "'variable_name'"
+            )
+        if self.output_path is None:
             raise ValueError(f"Give the path to save the {self.kind} to")
-        check_path_relative_and_child_of_cwd(self.path)
-        if "," in self.path:
-            raise ValueError(f"'{self.path}' can't include a comma")
+        check_path_relative_and_child_of_cwd(self.output_path)
+        if "," in self.output_path:
+            raise ValueError(f"'{self.output_path}' can't include a comma")
         # The shell running the stage's command would expand these
-        for text in (self.path, self.format or ""):
+        for text in (self.output_path, self.format or ""):
             unsafe = [c for c in '"$`%' if c in text]
             if unsafe:
                 raise ValueError(f"'{text}' can't include {unsafe[0]}")
-        ext = os.path.splitext(self.path)[1].lower()
+        ext = os.path.splitext(self.output_path)[1].lower()
         if self.kind == "figure":
-            if self.variable is None and self.cell_id is None:
+            if self.variable_name is None and self.cell_id is None:
                 raise ValueError(
-                    f"Name the cell that shows {self.path}, or the variable "
+                    f"Name the cell that shows {self.output_path}, or the variable "
                     "holding it"
                 )
             if ext not in CELL_OUTPUT_FIGURE_EXTS:
@@ -2574,9 +2593,9 @@ class NotebookCellOutput(Model):
                 f"A table is saved as one of "
                 f"{', '.join(CELL_OUTPUT_TABLE_EXTS)}, not '{ext}'"
             )
-        if self.variable is None:
+        if self.variable_name is None:
             raise ValueError(
-                f"Name the variable holding the table for {self.path}"
+                f"Name the variable holding the table for {self.output_path}"
             )
         if self.format:
             # Commas separate the fields of its command line argument
@@ -2598,35 +2617,53 @@ class NotebookCellOutput(Model):
 
         if self.storage is not None:
             return self.storage
-        ext = os.path.splitext(str(self.path))[1].lower()
+        ext = os.path.splitext(str(self.output_path))[1].lower()
         return "dvc" if ext in DVC_EXTENSIONS else "git"
 
+    @property
+    def variable_names_saved(self) -> list[str]:
+        """The variables it's saved from, whether named once or as a list."""
+        if self.variable_names is not None:
+            return list(self.variable_names)
+        return [] if self.variable_name is None else [self.variable_name]
+
     def to_arg(self) -> str:
-        """This output as ``calkit nb execute --output`` takes it."""
-        fields = ("kind", "cell_id", "variable", "path", "format")
-        return ",".join(
-            f"{f}={getattr(self, f)}"
-            for f in fields
-            if getattr(self, f) is not None
-        )
+        """This output as ``calkit nb execute --output`` takes it, with
+        several variables' names separated by spaces.
+        """
+        fields = {
+            "kind": self.kind,
+            "cell_id": self.cell_id,
+            "variable_name": self.variable_name,
+            "variable_names": (
+                None
+                if self.variable_names is None
+                else " ".join(self.variable_names)
+            ),
+            "output_path": self.output_path,
+            "format": self.format,
+        }
+        return ",".join(f"{k}={v}" for k, v in fields.items() if v is not None)
 
     @classmethod
     def from_arg(cls, arg: str) -> "NotebookCellOutput":
         """Parse what ``to_arg`` writes, e.g.,
-        ``kind=figure,cell_id=8b77d0aa,variable=fig,path=figures/fit.pdf``.
+        ``kind=figure,cell_id=8b77d0aa,variable_name=fig,output_path=f.pdf``.
         """
-        fields: dict[str, str] = {}
+        fields: dict[str, Any] = {}
         for part in arg.split(","):
             key, sep, val = part.partition("=")
             key = key.strip()
             if not sep or not key:
                 raise ValueError(
                     f"Can't read '{arg}'; give it as, e.g., "
-                    "'kind=value,cell_id=3f9a1c2e,variable=k'"
+                    "'kind=value,cell_id=3f9a1c2e,variable_name=k'"
                 )
             if key in fields:
                 raise ValueError(f"'{key}' is given twice in '{arg}'")
             fields[key] = val.strip()
+        if "variable_names" in fields:
+            fields["variable_names"] = fields["variable_names"].split()
         return cls.model_validate(fields)
 
 
@@ -2696,11 +2733,20 @@ class JupyterNotebookStage(Stage):
 
     @model_validator(mode="after")
     def check_cell_outputs(self) -> "JupyterNotebookStage":
-        values = [o.variable for o in self.cell_outputs if o.kind == "value"]
+        values = [
+            name
+            for o in self.cell_outputs
+            if o.kind == "value"
+            for name in o.variable_names_saved
+        ]
         for name in set(values):
             if values.count(name) > 1:
                 raise ValueError(f"Value '{name}' is saved more than once")
-        paths = [o.path for o in self.cell_outputs if o.path is not None]
+        paths = [
+            o.output_path
+            for o in self.cell_outputs
+            if o.output_path is not None
+        ]
         declared = [o if isinstance(o, str) else o.path for o in self.outputs]
         for path in paths:
             if paths.count(path) > 1:
@@ -2817,8 +2863,10 @@ class JupyterNotebookStage(Stage):
         if any(o.kind == "value" for o in self.cell_outputs):
             outs.append(PathOutput(path=self.values_path, storage="git"))
         for o in self.cell_outputs:
-            if o.path is not None:
-                outs.append(PathOutput(path=o.path, storage=o.stored_with))
+            if o.output_path is not None:
+                outs.append(
+                    PathOutput(path=o.output_path, storage=o.stored_with)
+                )
         return outs
 
     @property

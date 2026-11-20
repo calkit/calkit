@@ -1,6 +1,7 @@
 /**
  * Labels on notebook cells for the values, figures, and tables they're
- * marked to make, and the commands marking them, through `calkit nb mark`.
+ * marked to make, and the commands marking them, through
+ * `calkit nb add-output`.
  */
 import { execFile } from "node:child_process";
 import * as path from "node:path";
@@ -103,6 +104,17 @@ function getCommandCell(arg: unknown): vscode.NotebookCell | undefined {
     : undefined;
 }
 
+/** Ask for a variable's name, for one a cell's code doesn't show. */
+async function askVariableName(kindLabel: string): Promise<string | undefined> {
+  const typed = await vscode.window.showInputBox({
+    title: `Mark ${kindLabel.toLowerCase()}`,
+    prompt: "Variable name",
+    validateInput: (v) =>
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(v) ? undefined : "Not a variable name",
+  });
+  return typed?.trim() || undefined;
+}
+
 /** Ask what a cell makes for documents, and mark it to be saved. */
 async function markCellOutput(root: string, arg: unknown): Promise<void> {
   const cell = getCommandCell(arg);
@@ -160,28 +172,45 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
       ? [{ label: shown, detail: "Run the cell first to see it here" }]
       : []),
   ];
-  const variablePick = await vscode.window.showQuickPick(items, {
-    title: `Mark ${kindPick.label.toLowerCase()}`,
-    placeHolder: "Variable it's saved from",
-  });
-  if (!variablePick) {
-    return;
-  }
-  let variable: string | undefined = variablePick.label;
-  if (variable === shown) {
-    variable = undefined;
-  } else if (variable === other) {
-    variable = await vscode.window.showInputBox({
+  // Several values can be saved after one cell at once
+  let variableNames: string[] = [];
+  if (kind === "value") {
+    const picks = await vscode.window.showQuickPick(items, {
       title: `Mark ${kindPick.label.toLowerCase()}`,
-      prompt: "Variable name",
-      validateInput: (v) =>
-        /^[A-Za-z_][A-Za-z0-9_]*$/.test(v) ? undefined : "Not a variable name",
+      placeHolder: "Variables it's saved from",
+      canPickMany: true,
     });
-    if (!variable) {
+    if (!picks?.length) {
       return;
     }
+    variableNames = picks.map((p) => p.label).filter((l) => l !== other);
+    if (picks.some((p) => p.label === other)) {
+      const typed = await askVariableName(kindPick.label);
+      if (!typed) {
+        return;
+      }
+      variableNames.push(typed);
+    }
+  } else {
+    const variablePick = await vscode.window.showQuickPick(items, {
+      title: `Mark ${kindPick.label.toLowerCase()}`,
+      placeHolder: "Variable it's saved from",
+    });
+    if (!variablePick) {
+      return;
+    }
+    if (variablePick.label === other) {
+      const typed = await askVariableName(kindPick.label);
+      if (!typed) {
+        return;
+      }
+      variableNames = [typed];
+    } else if (variablePick.label !== shown) {
+      variableNames = [variablePick.label];
+    }
   }
-  let target = variable ?? "";
+  const variable = variableNames[0];
+  let target = variableNames.join(", ");
   if (kind !== "value") {
     const exts =
       kind === "figure"
@@ -217,8 +246,8 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
       cellId,
       cellIndex: cell.index,
       kind,
-      variable,
-      path: kind === "value" ? undefined : target,
+      variableNames,
+      outputPath: kind === "value" ? undefined : target,
     }),
   );
   if (!result.ok) {

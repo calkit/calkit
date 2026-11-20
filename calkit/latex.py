@@ -900,7 +900,7 @@ def component_path(
             return candidate, None
     if component.kind == "value" and component.path.lower().endswith(".ipynb"):
         return None, (
-            f"No values saved from {component.path} yet; mark it as a cell "
+            f"No values saved from {component.path} yet; add it as a cell "
             "output and run the pipeline"
         )
     return None, f"{component.path} is not in the project yet"

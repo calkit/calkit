@@ -6203,7 +6203,7 @@
           "title": "Format"
         },
         "kind": {
-          "description": "What it is: a value, cited by the notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}, or a figure or table, saved to 'path'.",
+          "description": "What it is: a value, cited by the notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}, or a figure or table, saved to 'output_path'.",
           "enum": [
             "value",
             "figure",
@@ -6212,7 +6212,7 @@
           "title": "Kind",
           "type": "string"
         },
-        "path": {
+        "output_path": {
           "anyOf": [
             {
               "type": "string"
@@ -6223,7 +6223,7 @@
           ],
           "default": null,
           "description": "Where a figure or table is saved, in the format its extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as LaTeX (.tex), CSV, Markdown, or JSON.",
-          "title": "Path"
+          "title": "Output Path"
         },
         "storage": {
           "anyOf": [
@@ -6242,7 +6242,7 @@
           "description": "Where to store a figure or table; by its extension if not set, as for other outputs.",
           "title": "Storage"
         },
-        "variable": {
+        "variable_name": {
           "anyOf": [
             {
               "type": "string"
@@ -6253,7 +6253,23 @@
           ],
           "default": null,
           "description": "Name of the variable it's saved from: a value's name, e.g., a number or a dict of them, a figure, e.g., a Matplotlib figure, or a table, e.g., a DataFrame. A figure without one is the image the cell shows.",
-          "title": "Variable"
+          "title": "Variable Name"
+        },
+        "variable_names": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Names of several variables to save as values after the same cell, each cited by its own name, instead of 'variable_name'.",
+          "title": "Variable Names"
         }
       },
       "required": [

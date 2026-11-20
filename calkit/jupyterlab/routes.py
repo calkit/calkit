@@ -479,7 +479,7 @@ class NotebookCellOutputsRouteHandler(APIHandler):
 
     @tornado.web.authenticated
     def get(self) -> None:
-        """List a notebook's marks."""
+        """List what a notebook's cells save."""
         notebook_path = self.get_argument("path", "")
         if not notebook_path:
             return self.error(400, "Query must include 'path'")
@@ -489,7 +489,7 @@ class NotebookCellOutputsRouteHandler(APIHandler):
 
     @tornado.web.authenticated
     def post(self) -> None:
-        """Mark a value, figure, or table a cell makes."""
+        """Save a value, figure, or table a cell makes."""
         body = self.get_json_body()
         if not body or not body.get("path"):
             return self.error(400, "Request body must include 'path'")
@@ -498,7 +498,7 @@ class NotebookCellOutputsRouteHandler(APIHandler):
         if not isinstance(output, dict):
             return self.error(400, "Request body must include 'output'")
         try:
-            marked = calkit.notebooks.mark_cell_output(
+            marked = calkit.notebooks.add_cell_output(
                 body["path"],
                 output,
                 stage=body.get("stage"),
@@ -510,15 +510,15 @@ class NotebookCellOutputsRouteHandler(APIHandler):
 
     @tornado.web.authenticated
     def delete(self) -> None:
-        """Unmark a value, a figure or table, or everything after a cell."""
+        """Stop saving a value, a figure or table, or everything after a cell."""
         notebook_path = self.get_argument("path", "")
         if not notebook_path:
             return self.error(400, "Query must include 'path'")
         try:
-            n_removed = calkit.notebooks.unmark_cell_outputs(
+            n_removed = calkit.notebooks.remove_cell_outputs(
                 notebook_path,
-                value=self.get_argument("variable", None),
-                path=self.get_argument("output_path", None),
+                variable_name=self.get_argument("variable_name", None),
+                output_path=self.get_argument("output_path", None),
                 cell_id=self.get_argument("cell_id", None),
                 stage=self.get_argument("stage", None),
             )

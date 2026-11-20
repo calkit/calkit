@@ -884,7 +884,7 @@ async function handle(
         notebook: message.notebook,
         stage: message.stage,
         cell_id: message.cell_id,
-        variable: message.variable,
+        variable_name: message.variable_name,
       });
     case "local.save":
       await waitForJob(

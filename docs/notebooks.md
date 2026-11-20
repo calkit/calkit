@@ -196,16 +196,20 @@ cell's toolbar.
 Each marked cell gets a label saying what it saves, e.g.,
 `k_25 = 0.0309` after a run; click it to copy the command that shows it in
 a document.
-From a terminal, or for an agent, use `calkit nb mark`:
+From a terminal, or for an agent, use `calkit nb add-output`,
+giving `--variable-name` again for each value saved after the same cell:
 
 ```sh
-calkit nb mark fit-rates.ipynb value --cell-id 3f9a1c2e --variable k_25
-calkit nb mark fit-rates.ipynb figure --cell-id 8b77d0aa \
-    --variable fig --path figures/decay.pdf
-calkit nb mark fit-rates.ipynb table --cell-id 1d2e4c0b \
-    --variable rates_df --path tables/rates.tex --format .3f
+calkit nb add-output fit-rates.ipynb value --cell-id 3f9a1c2e \
+    --variable-name k_25 --variable-name k_35
+calkit nb add-output fit-rates.ipynb figure --cell-id 8b77d0aa \
+    --variable-name fig --output-path figures/decay.pdf
+calkit nb add-output fit-rates.ipynb table --cell-id 1d2e4c0b \
+    --variable-name rates_df --output-path tables/rates.tex --format .3f
 calkit nb outputs fit-rates.ipynb
 ```
+
+`calkit nb remove-output` stops saving one.
 
 Marks are kept with the notebook's stage in `calkit.yaml`,
 by the ID Jupyter and VS Code give each cell, which stays with it as it
@@ -221,17 +225,21 @@ pipeline:
       cell_outputs:
         - kind: value
           cell_id: 3f9a1c2e
-          variable: k_25
+          variable_names: [k_25, k_35]
         - kind: figure
           cell_id: 8b77d0aa
-          variable: fig
-          path: figures/decay.pdf
+          variable_name: fig
+          output_path: figures/decay.pdf
         - kind: table
           cell_id: 1d2e4c0b
-          variable: rates_df
-          path: tables/rates.tex
+          variable_name: rates_df
+          output_path: tables/rates.tex
           format: .3f
 ```
+
+A single value is saved with `variable_name`,
+and each of several is cited by its own name, e.g.,
+`\ckvalue{fit-rates.ipynb}{k_35}`.
 
 A value is saved as it is right after its cell runs, so a variable
 changed further down still saves what that cell made.
@@ -259,7 +267,7 @@ list those files as the stage's `outputs`.
 !!! note
     Cell IDs only stay put if nothing rewrites them.
     `nbstripout` renumbers them unless it's installed with `--keep-id`,
-    and `calkit nb mark` warns when a notebook's IDs look renumbered.
+    and `calkit nb add-output` warns when a notebook's IDs look renumbered.
 
 ## Working interactively
 

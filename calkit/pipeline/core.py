@@ -2109,10 +2109,10 @@ def get_cell_output_paths(
         paths.append(get_stage_values_path(stage, ck_info))
     paths += [
         posixpath.normpath(
-            posixpath.join(stage.get("wdir") or "", str(o["path"]))
+            posixpath.join(stage.get("wdir") or "", str(o["output_path"]))
         )
         for o in marks
-        if o.get("kind") in ("figure", "table") and o.get("path")
+        if o.get("kind") in ("figure", "table") and o.get("output_path")
     ]
     return paths
 

@@ -12,7 +12,7 @@ laptop-first flow -->
 Most papers on Overleaf are put together by hand. You run a notebook in
 VS Code, it saves a figure, and when enough figures have changed, you drag
 the whole figures folder into the Overleaf project. A diagram gets drawn in
-Google Slides, downloaded, and uploaded. A number gets copied out of a
+PowerPoint, exported as a PDF, and uploaded. A number gets copied out of a
 notebook's output and typed into the text. It works until the data or the
 analysis changes, and then nobody is quite sure which figures are current,
 which numbers came from which run, or how to make any of them again.
@@ -41,12 +41,13 @@ You don't need to have used Calkit before, or Git, or Docker.
   kept.
 - An account on [calkit.io](https://calkit.io), which you can make with
   your GitHub account. It shows the project, its figures, and where they
-  came from, so you can share it, and it's where you connect your GitHub,
-  Overleaf, and Google accounts. Your analysis runs on your laptop.
+  came from, so you can share it, and it's where you connect your GitHub
+  and Overleaf accounts. Your analysis runs on your laptop.
 - [VS Code](https://code.visualstudio.com) with the
   [Calkit extension](https://marketplace.visualstudio.com/items?itemName=calkit.calkit-vscode).
 - The [Calkit browser extension](../browser-ext/index.md), signed in.
-- A Google account, for the diagram drawn in Google Slides.
+- PowerPoint, or [LibreOffice](https://www.libreoffice.org), which is
+  free, for the diagram drawn in PowerPoint.
 - Calkit, installed as below.
 - For the last part, an AI agent with Calkit's skills, e.g.,
   [Claude Code](https://claude.com/claude-code) with the
@@ -96,13 +97,14 @@ The analysis folder has:
   get the activation energy. Its rate constants are typed into a cell,
   copied from `fit_rates.ipynb`'s output, and it reads the temperature log
   from the spectrophotometer's folder, outside `dye-fading`.
-- `figures`, with every figure as it was last saved.
+- `figures`, with every figure as it was last saved, and the setup diagram,
+  drawn in PowerPoint in `figures/setup-diagram.pptx`.
 
 There's no environment file, nothing records which notebook makes which
 figure, and nothing says which order to run them in. The paper on Overleaf
 has copies of the figures from the last time someone uploaded the folder,
-a diagram of the setup downloaded from Google Slides, and the rate constant
-at 25 °C typed into the text.
+a PDF of the setup diagram exported from PowerPoint by hand, and the rate
+constant at 25 °C typed into the text.
 
 <!-- Screenshot: img/overleaf-paper/starter-paper.png
 The starter paper on Overleaf, with the diagram, the plots, and typed
@@ -164,30 +166,41 @@ with open("results/rates.json", "w") as f:
 ```
 
 Here `rates` maps each temperature to its rate constant, e.g.,
-`{"25C": 0.0042, "35C": 0.0089}`. Then run everything that's out of date,
+`{"25C": 0.0309, "35C": 0.0616}`. Then run everything that's out of date,
 save the project, and sync the paper, all at once:
 
 ```sh
 calkit run --save --overleaf
 ```
 
-or click **Run, save, and sync** in VS Code's status bar.
+or click **Run and Save** at the top of the Calkit sidebar in VS Code,
+which syncs the paper too once it's connected to Overleaf.
 
 On Overleaf, hover over the typed rate constant. Calkit finds the value in
 `results/rates.json` that matches it, and offers to use it instead:
 
 ```latex
 % Before
-At 25 °C, the rate constant was 0.0042 s$^{-1}$.
+At 25~$^\circ$C, the rate constant was 0.031~min$^{-1}$.
 % After
-At 25 °C, the rate constant was \ckvalue[.4f]{results/rates.json}{25C}
-s$^{-1}$.
+At 25~$^\circ$C, the rate constant was
+\ckvalue[.3f]{results/rates.json}{25C}~min$^{-1}$.
 ```
 
 `\ckvalue` comes from `calkit.sty`, which Calkit adds to your Overleaf
 project along with a `\usepackage{calkit}` line in the preamble. It reads
 the number from the results file every time the paper compiles, so it
 can't be mistyped or left behind when the results change.
+
+<!-- TODO: needs human review -->
+
+If you've put numbers into a paper from code before, it was probably with
+a script that writes a `\newcommand` for each one into a `.tex` file the
+paper inputs, which means writing that script, rounding every number in
+it, and making up a name for each without digits, e.g.,
+`\RateTwentyFiveC`. With `\ckvalue`, the notebook saves its results as
+they are, and the paper says which file and key, and how to format it,
+where the number goes.
 
 A number that isn't a result, e.g., one you're quoting from another paper,
 can be left as is: add `% calkit: ignore` to the end of its line.
@@ -212,22 +225,28 @@ syncs the paper, while the card on Overleaf shows how it's going.
 <!-- Screenshot: img/overleaf-paper/define-origin-script.png
 Defining the spectra plot's origin by picking plot_spectra.py. -->
 
-## The diagram: drawn in Google Slides
+## The diagram: drawn in PowerPoint
 
-The setup diagram was drawn on a slide in Google Slides. Instead of
-downloading it again whenever it changes, have the pipeline export it.
-Copy the slide's URL from your browser, with the slide selected, and run:
+<!-- TODO: needs human review -->
 
-```sh
-calkit new figure figures/setup.png --google-slide https://docs.google.com/presentation/d/...
-```
+The setup diagram is drawn in `figures/setup-diagram.pptx`, and the PDF in
+the paper was exported from it by hand. Instead of exporting and uploading
+it again every time you change it, have the pipeline do it.
 
-The first time, Calkit asks you to connect your Google account. From then
-on, whenever the pipeline runs, it checks whether the presentation has been
-edited and, if so, exports the slide, cropped to what's drawn on it. You
-keep drawing in Google Slides. See
-[Google Workspace](../google-workspace.md) for more, e.g., putting the
-project's plots into a slide.
+On Overleaf, hover over the diagram's `\includegraphics` line and click
+**Define origin**. Calkit suggests `figures/setup-diagram.pptx`, since it
+has the same name, so click **Confirm**, then **Save**. Calkit on your
+laptop adds a step to the pipeline that exports the slide to PDF, with
+PowerPoint, or with LibreOffice if you don't have PowerPoint, and syncs it
+to the paper.
+
+<!-- Screenshot: img/overleaf-paper/define-origin-exported.png
+Defining the diagram's origin as exported from setup-diagram.pptx. -->
+
+You keep drawing in PowerPoint. From now on, whenever the pipeline runs and
+the PowerPoint file has changed, the diagram in the paper is exported
+again, and the PowerPoint file is saved with the rest of the project, so
+it's backed up and every version of it is kept.
 
 ## When xr isn't enough: hand it to an agent
 
@@ -273,8 +292,22 @@ which notebook made which figure, or what had to run after it.
 <!-- Screenshot: img/overleaf-paper/open-in-vscode.png
 The decay plot's card on Overleaf, with the "Open in VS Code" button. -->
 
-The same goes for the diagram: edit the slide in Google Slides, run, and
-the new diagram is in the paper.
+<!-- TODO: needs human review -->
+
+Now a bigger change. Say the fits should only use the first 30 minutes of
+each run. In `fit_rates.ipynb`, keep only those rows before fitting, e.g.,
+`df = df[df.time_min <= 30]`, and run, save, and sync again. The decay
+plot, the rate constants in `results/rates.json`, the Arrhenius fit that
+reads them, and the activation energy all change, and so does every
+`\ckvalue` in the paper that shows one of them. By hand, that's rerunning
+two notebooks in the right order, uploading two figures, and finding and
+retyping every number that moved.
+
+The same goes for the diagram. Open `figures/setup-diagram.pptx` in
+PowerPoint, change the slide, and save it. Then, on Overleaf, click
+**Run and sync** in the Calkit sidebar. Calkit on your laptop exports the
+slide, saves the project, and syncs the paper, and the new diagram is in
+the PDF the next time Overleaf compiles it.
 
 ## Write the paper in VS Code too
 

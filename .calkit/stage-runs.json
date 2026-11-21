@@ -1,13 +1,13 @@
 {
   "budget-2027": {
-    "start_time": "2026-11-21T15:29:17.592000",
-    "end_time": "2026-11-21T15:29:18.013000",
+    "start_time": "2026-11-21T17:40:46.980000",
+    "end_time": "2026-11-21T17:40:49.952000",
     "environment": "dev",
-    "git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:61cf737560183ef6f993e210278e763b15d7e6e8814e7f388a54ebcb378e9bd9",
-    "calkit_version": "0.52.3.dev34+gbc711d963",
-    "calkit_git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "dvc_lock_hash": "sha256:5cd4c21d0e0c6fc0c549531ab64a51a2390f8bcac9323310c1b3572701ea0cbb",
+    "calkit_version": "0.52.3.dev26+gb3cca0296",
+    "calkit_git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
@@ -76,13 +76,13 @@
     }
   },
   "latex-image-readme/sizes": {
-    "start_time": "2026-11-21T15:29:19.088000",
-    "end_time": "2026-11-21T15:29:28.857000",
-    "git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "start_time": "2026-11-21T17:40:50.155000",
+    "end_time": "2026-11-21T17:41:08.293000",
+    "git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:e81700e58a759b253219c4428c17fd2a9cbe0e44a57f3bd6f354d69c4b5c3f24",
-    "calkit_version": "0.52.3.dev34+gbc711d963",
-    "calkit_git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "dvc_lock_hash": "sha256:c338b8cc48ee3783fb7524cda3b7a45cb5390d4313236f93024ae9c092a43415",
+    "calkit_version": "0.52.3.dev26+gb3cca0296",
+    "calkit_git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
@@ -94,14 +94,14 @@
     }
   },
   "latex-word-round-trip": {
-    "start_time": "2026-11-21T15:24:27.497000",
-    "end_time": "2026-11-21T15:24:49.734000",
+    "start_time": "2026-11-21T17:31:29.142000",
+    "end_time": "2026-11-21T17:32:50.513000",
     "environment": "dev",
-    "git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:db86ce379b59e58a25f303f6ba6f20e6136d446743b60443d3cfd08b63c7dab4",
-    "calkit_version": "0.52.3.dev34+gbc711d963",
-    "calkit_git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "dvc_lock_hash": "sha256:314715daa0b535e9ead529a27dd93277caef282c4c826771c5ade6aae849e421",
+    "calkit_version": "0.52.3.dev26+gb3cca0296",
+    "calkit_git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
@@ -113,14 +113,14 @@
     }
   },
   "latex-word-round-trip-figure": {
-    "start_time": "2026-11-21T15:24:49.734000",
-    "end_time": "2026-11-21T15:24:53.606000",
+    "start_time": "2026-11-21T17:32:50.513000",
+    "end_time": "2026-11-21T17:32:57.026000",
     "environment": "dev",
-    "git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:5abbe5e8794a49805f0d5bdd4a5b2ba5c0c34ad34a304bd46b5bc0fd8888e586",
-    "calkit_version": "0.52.3.dev34+gbc711d963",
-    "calkit_git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "dvc_lock_hash": "sha256:28f5f23198572ebcd232b9e2498b71b0d4dbc1c4f5b42bae48d958f91ef9dd23",
+    "calkit_version": "0.52.3.dev26+gb3cca0296",
+    "calkit_git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
@@ -169,14 +169,14 @@
     }
   },
   "research-flow": {
-    "start_time": "2026-11-21T15:24:53.606000",
-    "end_time": "2026-11-21T15:29:15.634000",
+    "start_time": "2026-11-21T17:32:57.026000",
+    "end_time": "2026-11-21T17:40:46.562000",
     "environment": "dev",
-    "git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:44fa873b7dd17bf6bd13b2e55d23ee200d8fd20d7a8f55cd2cab34f2a94f3e33",
-    "calkit_version": "0.52.3.dev34+gbc711d963",
-    "calkit_git_rev": "bc711d9632c5e2d639b0ce8b812546bd5999b897",
+    "dvc_lock_hash": "sha256:866c5ed7091d1ffece357379c13b361884a10b4fcbc7eca9134a14721ecb5ec1",
+    "calkit_version": "0.52.3.dev26+gb3cca0296",
+    "calkit_git_rev": "b3cca0296af236251118fcdd734134e78aa36fc7",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",

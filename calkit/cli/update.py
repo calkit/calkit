@@ -694,27 +694,36 @@ def update_agent_skills(
         return
     # Update the plugin in each agent found
     n_found = 0
-    n_updated = 0
+    updated = []
     for agent in install.AGENT_PLUGIN_CMDS:
         binary_path = install.find(agent)
         if binary_path is None:
             continue
         n_found += 1
+        if not install.is_agent_logged_in(agent, binary_path):
+            warn(
+                f"'{agent}' not logged in, so its Calkit plugin can't be "
+                f"updated; run '{agent} auth login'"
+            )
+            continue
         if not quiet:
             typer.echo(f"Updating Calkit plugin in '{agent}'")
         if install.update_agent_plugin(agent, binary_path):
-            n_updated += 1
+            updated.append(agent)
         else:
             warn(f"Failed to update Calkit plugin in '{agent}'")
-    if n_found and not n_updated:
+    if n_found and not updated:
         raise_error("Failed to update Calkit plugin in any coding agent")
-    if not n_updated:
+    if not updated:
         warn(
             "No coding agents updated; install one with, e.g., "
             "'calkit install claude', or use '--copy' for other agents"
         )
         return
-    # Remove copies, which only now have a plugin to stand in for them
+    # Remove copies, which only now have a plugin to stand in for them, in
+    # an agent that reads them
+    if not set(updated) & set(install.AGENTS_READING_SKILL_COPIES):
+        return
     n_removed = 0
     for name in skill_names:
         copy_path = os.path.join(dest_root, f"calkit-{name}")

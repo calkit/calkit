@@ -537,13 +537,22 @@ def test_update_agent_skills_updates_plugins(fake_home, monkeypatch):
     custom_skill.parent.mkdir(parents=True)
     custom_skill.write_text("# Custom\n")
     calls = []
+    added = []
 
     def call(cmd):
         calls.append(cmd)
-        # Codex's plugin hasn't been added, so updating it fails
-        return 1 if cmd[0] == "/bin/codex" and "upgrade" in cmd else 0
+        # Codex's marketplace hasn't been added, so updating its plugin fails
+        if cmd[0] == "/bin/codex" and "marketplace" in cmd:
+            added.append("add" in cmd)
+            return 0 if added[-1] else 1
+        return 0 if cmd[0] != "/bin/codex" or any(added) else 1
 
     monkeypatch.setattr("calkit.install.subprocess.call", call)
+    logged_in = {"claude": True}
+    monkeypatch.setattr(
+        "calkit.install.is_agent_logged_in",
+        lambda agent, path: logged_in.get(agent, True),
+    )
     # Without any agents, the copies are kept
     monkeypatch.setattr("calkit.install.find", lambda app: None)
     result = runner.invoke(update_app, ["agent-skills"])
@@ -551,8 +560,21 @@ def test_update_agent_skills_updates_plugins(fake_home, monkeypatch):
     assert "No coding agents updated" in result.output
     assert (skills_dir / "calkit-conventions").is_dir()
     assert not calls
+    # With only Claude Code, which doesn't read them, the copies are kept
+    monkeypatch.setattr(
+        "calkit.install.find",
+        lambda app: "/bin/claude" if app == "claude" else None,
+    )
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0, result.output
+    assert [c[1:4] for c in calls] == [
+        ["plugin", "marketplace", "update"],
+        ["plugin", "update", "calkit@calkit"],
+    ]
+    assert (skills_dir / "calkit-conventions").is_dir()
     # Each agent found gets its plugin updated, or added if that fails, and
     # the copies are removed, but not anyone else's skills
+    calls.clear()
     monkeypatch.setattr(
         "calkit.install.find",
         lambda app: f"/bin/{app}" if app in ["claude", "codex"] else None,
@@ -563,13 +585,26 @@ def test_update_agent_skills_updates_plugins(fake_home, monkeypatch):
         ["plugin", "marketplace", "update"],
         ["plugin", "update", "calkit@calkit"],
         ["plugin", "marketplace", "upgrade"],
+        ["plugin", "add", "calkit@calkit"],
         ["plugin", "marketplace", "add"],
         ["plugin", "add", "calkit@calkit"],
     ]
     assert not list(skills_dir.glob("calkit-*"))
     assert custom_skill.exists()
     assert "Removed" in result.output
+    # Once Codex's marketplace is there, its plugin is added with the update,
+    # and Claude Code not logged in is skipped
+    calls.clear()
+    logged_in["claude"] = False
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0, result.output
+    assert "'claude auth login'" in result.output
+    assert [c[1:4] for c in calls] == [
+        ["plugin", "marketplace", "upgrade"],
+        ["plugin", "add", "calkit@calkit"],
+    ]
     # Found but none updated is a failure, which keeps the copies
+    logged_in["claude"] = True
     runner.invoke(update_app, ["agent-skills", "--copy"])
     monkeypatch.setattr("calkit.install.subprocess.call", lambda cmd: 1)
     result = runner.invoke(update_app, ["agent-skills"])

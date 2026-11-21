@@ -2821,10 +2821,11 @@ def test_run_offers_git_install(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("calkit.cli._only_invoked", lambda app, args: fail)
     monkeypatch.setattr(sys, "argv", ["calkit", "config", "github-ssh"])
-    monkeypatch.setattr("calkit.install.can_run_git", lambda: False)
-    # Where it can be installed, it's offered, then the command runs again
-    for installed in [True, False]:
+    # Where it can be installed, it's offered, then the command runs again,
+    # unless Git still doesn't run, which would only offer it again
+    for installed, runs in [(True, True), (True, False), (False, False)]:
         with (
+            patch("calkit.install.can_run_git", side_effect=[False, runs]),
             patch("calkit.install.get_unsupported_message", return_value=None),
             patch(
                 "calkit.install.prompt_and_install", return_value=installed
@@ -2834,15 +2835,16 @@ def test_run_offers_git_install(monkeypatch: pytest.MonkeyPatch) -> None:
         ):
             cli_run()
         assert m_prompt.call_args.args[0] == "git"
-        assert exc.value.code == (0 if installed else 1)
-        assert m_call.called is installed
-        if installed:
+        assert exc.value.code == (0 if runs else 1)
+        assert m_call.called is runs
+        if runs:
             assert m_call.call_args.args[0] == [
                 *calkit.get_calkit_cmd(),
                 "config",
                 "github-ssh",
             ]
     # Where it can't, it says what to run
+    monkeypatch.setattr("calkit.install.can_run_git", lambda: False)
     with (
         patch("calkit.install.get_unsupported_message", return_value="apt"),
         patch("calkit.install.prompt_and_install") as m_prompt,

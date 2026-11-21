@@ -71,6 +71,15 @@ def run() -> None:
             sys.exit(1)
         if not install.prompt_and_install("git", interactive=is_tty()):
             sys.exit(1)
+        # Where it's installed but still doesn't run, running again would
+        # just offer it again
+        if not install.can_run_git():
+            print(
+                "Git installed but doesn't run; restart your shell and "
+                "run again",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         # The command stopped partway, so run it again from the start
         sys.exit(subprocess.call([*get_calkit_cmd(), *sys.argv[1:]]))
 

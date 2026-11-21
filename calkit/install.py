@@ -757,9 +757,38 @@ AGENT_PLUGIN_UPDATE_CMDS: dict[str, list[list[str]]] = {
         ["plugin", "marketplace", "update", "calkit"],
         ["plugin", "update", "calkit@calkit"],
     ],
-    "codex": [["plugin", "marketplace", "upgrade", "calkit"]],
+    # Upgrading the marketplace succeeds without the plugin, which adding
+    # installs, or updates where it's there
+    "codex": [
+        ["plugin", "marketplace", "upgrade", "calkit"],
+        ["plugin", "add", "calkit@calkit"],
+    ],
     "opencode": [["plugin", "update"]],
 }
+# Agents that read skills from ``~/.agents/skills``, where copies of
+# Calkit's would duplicate or shadow its plugin's
+AGENTS_READING_SKILL_COPIES = ["codex", "opencode"]
+
+
+def is_agent_logged_in(agent: str, binary_path: str) -> bool:
+    """Whether a coding agent is logged in, which Claude Code needs to be
+    to add plugins.
+
+    One that can't say, e.g., an older version, counts as logged in, so its
+    plugin commands say what's wrong instead.
+    """
+    if agent != "claude":
+        return True
+    try:
+        p = subprocess.run(
+            [binary_path, "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return bool(json.loads(p.stdout).get("loggedIn", True))
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        return True
 
 
 def run_agent_cmds(

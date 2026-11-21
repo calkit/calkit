@@ -381,6 +381,41 @@ def test_install_cli_command(monkeypatch):
             "add",
             "calkit@calkit",
         ]
+    # Claude Code adds plugins only once logged in, which it says as JSON,
+    # and an agent that can't say counts as logged in
+    for agent, stdout, expected in [
+        ("claude", '{"loggedIn": false}', False),
+        ("claude", '{"loggedIn": true}', True),
+        ("claude", "error: unknown command 'auth'", True),
+        ("codex", '{"loggedIn": false}', True),
+    ]:
+        with mock.patch(
+            "calkit.install.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout=stdout),
+        ):
+            assert install.is_agent_logged_in(agent, "/bin/x") is expected
+    # Not logged in, it's offered on a terminal, otherwise said what to run
+    for tty in [False, True]:
+        with (
+            mock.patch("calkit.install.find", return_value="/bin/claude"),
+            mock.patch("calkit.install.can_run_git", return_value=True),
+            mock.patch(
+                "calkit.install.is_agent_logged_in", return_value=False
+            ),
+            mock.patch("calkit.core.is_tty", return_value=tty),
+            mock.patch("calkit.install.subprocess.call", return_value=0) as m,
+        ):
+            result = runner.invoke(calkit_app, ["install", "claude", "-y"])
+        calls = [c.args[0][1:] for c in m.call_args_list]
+        if tty:
+            assert result.exit_code == 0, result.output
+            assert calls[0] == ["auth", "login"] and len(calls) == 3
+        else:
+            assert result.exit_code != 0
+            assert "'claude auth login'" in result.output + (
+                result.stderr or ""
+            )
+            assert not calls
     # OpenCode has no installer on Windows, but once it's installed, it
     # still gets the plugin
     for found in [None, "C:/oc.exe"]:

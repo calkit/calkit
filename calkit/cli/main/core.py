@@ -5919,6 +5919,14 @@ def install_app(
                 _install.get_unsupported_message("git")
                 or "Git is required to add Calkit's plugin"
             )
+    # Claude Code adds plugins only once logged in, which a new install isn't
+    if not _install.is_agent_logged_in(name, binary_path):
+        login_cmd = [binary_path, "auth", "login"]
+        if not is_tty() or subprocess.call(login_cmd) != 0:
+            raise_error(
+                f"Log in with '{name} auth login', then run "
+                f"'calkit install {name}' again to add Calkit's plugin"
+            )
     calkit.echo(f"Adding Calkit plugin to '{name}'")
     if not _install.add_agent_plugin(name, binary_path):
         raise_error(f"Failed to add Calkit plugin to '{name}'")

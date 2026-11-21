@@ -223,6 +223,23 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "%ProgramFiles%\\Git\\cmd",
         },
     },
+    "gh": {
+        "mac": {
+            "script": "brew install gh",
+            "path_add": _BREW_BINS,
+            "requires": ["brew"],
+        },
+        # GitHub's own apt and dnf repos take several steps to add
+        "linux": {
+            "script": "pixi global install gh",
+            "path_add": "~/.pixi/bin",
+            "requires": ["pixi"],
+        },
+        "windows": {
+            "script": _WINGET + "GitHub.cli --source winget",
+            "path_add": "%ProgramFiles%\\GitHub CLI",
+        },
+    },
     "docker": {
         "mac": {
             "script": "brew install --cask docker",

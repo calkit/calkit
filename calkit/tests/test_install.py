@@ -57,6 +57,15 @@ def test_get_installer():
         win_entry = install.get_installer("uv")
     assert win_entry is not None
     assert "powershell" in win_entry["script"].lower()
+    # gh comes from each platform's package manager, or pixi on Linux
+    for platform, expected in [
+        ("darwin", "brew"),
+        ("linux", "pixi"),
+        ("win32", "winget"),
+    ]:
+        with mock.patch("calkit.install.sys.platform", platform):
+            gh = install.get_installer("gh")
+        assert gh is not None and gh["script"].startswith(expected)
 
 
 @skipif_windows_fake_binary

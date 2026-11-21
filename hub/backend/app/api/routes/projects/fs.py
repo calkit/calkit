@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 import app
 import app.projects
@@ -24,6 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 RETURN_CONTENT_SIZE_LIMIT = 1_000_000
+XET_HASH_RE = r"^[0-9a-f]{64}$"
 # Shared by every batch request, so concurrent requests can't multiply the
 # threads and storage connections a worker holds
 _batch_op_pool = ThreadPoolExecutor(
@@ -87,6 +88,26 @@ class SftpAccess(BaseModel):
     expires_at: datetime | None = None
 
 
+class XetAccess(BaseModel):
+    """Access to Hugging Face storage through the Xet protocol.
+
+    The client uploads or downloads content with ``hf_xet`` using this
+    short-lived token, which covers the whole bucket, so a client can reuse
+    it until it expires. After uploads, the client sends a batch
+    ``register`` operation with their Xet hashes so the hub can add the
+    paths to the bucket, which the token alone can't do.
+    """
+
+    kind: Literal["hf-xet"] = "hf-xet"
+    operation: Literal["upload", "download"]
+    cas_url: str
+    access_token: str
+    expires_at_unix: int
+    # For downloads
+    xet_hash: str | None = None
+    size: int | None = None
+
+
 class FsListResult(BaseModel):
     paths: list[str] | list[dict]  # Depends on detail flag in request
 
@@ -121,7 +142,8 @@ class FsOpResponse(BaseModel):
             | PresignedMultipartAccess
             | PresignedChunkedAccess
             | HttpRequestAccess
-            | SftpAccess,
+            | SftpAccess
+            | XetAccess,
             Field(discriminator="kind"),
         ]
         | None
@@ -137,6 +159,14 @@ class FsOpRequest(BaseModel):
     content_length: int | None = None
     content_type: str | None = None
     detail: bool = False
+
+
+def _get_time_modified(info: dict[str, Any]) -> str | None:
+    """Get an object's modification time, which HF calls ``mtime``."""
+    value = info.get("time_modified") or info.get("mtime")
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 def _strip_data_prefix(path: str, data_prefix: str) -> str:
@@ -190,7 +220,7 @@ def post_project_fs_op(
         if operation in ["get", "list", "exists", "info", "find"]
         else "write"
     )
-    app.projects.get_project(
+    project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
         session=session,
@@ -201,133 +231,167 @@ def post_project_fs_op(
         f"Getting {operation} instructions for "
         f"{owner_name}/{project_name}/{path}"
     )
-    # TODO: Determine project fs storage type
-    # Should we allow for multiple depending on the path?
-    # Is Git one?
-    # If none is defined, they are using the default object storage connected
-    # to this system
-    # For now, only support GCS/S3 via presigned URLs
-    # Future: Add google_drive, box, huggingface backends
-    backend = storage.get_backend()
-    fs = storage.get_object_fs()
-    # Construct full storage path
-    data_prefix = storage.get_data_prefix()
-    if settings.ENVIRONMENT == "local" and not fs.exists(data_prefix):
-        fs.makedir(data_prefix)
-    full_path = f"{data_prefix}/{owner_name}/{project_name}/{path}"
-    # If operation is "exists" or "list", we can check if the file exists and
-    # return that info to avoid an extra round trip
+    # New objects go to the first storage, and reads fall back through the
+    # rest, since objects aren't moved when a project switches storage
+    storages = storage.get_project_storages(session, project)
+    backend = storages[0].backend
+    for st in storages:
+        if (
+            st.backend != "hf"
+            and settings.ENVIRONMENT == "local"
+            and not st.fs.exists(st.data_prefix)
+        ):
+            st.fs.makedir(st.data_prefix)
     if operation == "exists":
-        # Use ls here since some backends (like GCS) don't have an efficient
-        # way to check for existence
-        try:
-            res = fs.ls(full_path, detail=False)
-            exists = len(res) > 0
-        except FileNotFoundError:
-            exists = False
+        exists = False
+        for st in storages:
+            # Use ls here since some backends (like GCS) don't have an
+            # efficient way to check for existence
+            try:
+                res = st.fs.ls(
+                    st.make_project_path(owner_name, project_name, path),
+                    detail=False,
+                )
+            except FileNotFoundError:
+                continue
+            if len(res) > 0:
+                exists = True
+                break
         return FsOpResponse(
             backend=backend,
             result=ExistsResult(exists=exists),
         )
     if operation == "info":
-        try:
-            info_dict = fs.info(full_path)
-        except FileNotFoundError:
-            raise HTTPException(404, "Path not found")
-        return FsOpResponse(
-            backend=backend,
-            result=InfoResult(
-                name=info_dict.get("name", ""),
-                size=info_dict.get("size", 0),
-                type=info_dict.get("type", "file"),
-                time_modified=info_dict.get("time_modified"),
-            ),
-        )
-    if operation == "list":
-        try:
-            paths = fs.ls(full_path, detail=req.detail)
-        except FileNotFoundError:
-            # Missing prefixes are normal in fresh projects; return empty list
-            paths = []
-        if req.detail:
-            paths = [
-                obj
-                | {
-                    "name": _strip_data_prefix(
-                        obj.get("name", ""), data_prefix
-                    ),
-                    "Key": _strip_data_prefix(obj.get("Key", ""), data_prefix),
-                }
-                for obj in paths
-            ]
-        else:
-            paths = [_strip_data_prefix(path, data_prefix) for path in paths]
-        return FsOpResponse(
-            backend=backend,
-            result=FsListResult(paths=paths),
-        )
-    if operation == "find":
-        try:
-            paths = fs.find(full_path, detail=req.detail)
-        except FileNotFoundError:
-            # For "find", a missing prefix should behave like no matches
-            # This avoids noisy 404s for normal existence probes
-            paths = {} if req.detail else []
-        if req.detail:
-            if isinstance(paths, dict):
-                paths = [
-                    obj
-                    | {
-                        "name": _strip_data_prefix(
-                            obj.get("name", path), data_prefix
-                        ),
+        for st in storages:
+            try:
+                info_dict = st.fs.info(
+                    st.make_project_path(owner_name, project_name, path)
+                )
+            except FileNotFoundError:
+                continue
+            return FsOpResponse(
+                backend=backend,
+                result=InfoResult(
+                    name=info_dict.get("name", ""),
+                    size=info_dict.get("size", 0),
+                    type=info_dict.get("type", "file"),
+                    time_modified=_get_time_modified(info_dict),
+                ),
+            )
+        raise HTTPException(404, "Path not found")
+    if operation in ("list", "find"):
+        # Merge results across storages, keeping the first seen per name
+        merged: dict[str, dict[str, Any] | str] = {}
+        for st in storages:
+            full_path = st.make_project_path(owner_name, project_name, path)
+            try:
+                if operation == "list":
+                    found = st.fs.ls(full_path, detail=req.detail)
+                else:
+                    found = st.fs.find(full_path, detail=req.detail)
+            except FileNotFoundError:
+                # Missing prefixes are normal in fresh projects and behave
+                # like no matches
+                continue
+            if isinstance(found, dict):
+                found = (
+                    [
+                        obj | {"name": obj.get("name", k)}
+                        for k, obj in found.items()
+                    ]
+                    if req.detail
+                    else list(found.keys())
+                )
+            for item in found:
+                if req.detail:
+                    if isinstance(item, str):
+                        item = {"name": item, "Key": item}
+                    name = _strip_data_prefix(
+                        item.get("name", ""), st.data_prefix
+                    )
+                    item = item | {
+                        "name": name,
                         "Key": _strip_data_prefix(
-                            obj.get("Key", path), data_prefix
+                            item.get("Key", item.get("name", "")),
+                            st.data_prefix,
                         ),
                     }
-                    for path, obj in paths.items()
-                ]
-            else:
-                paths = [
-                    {
-                        "name": _strip_data_prefix(path, data_prefix),
-                        "Key": _strip_data_prefix(path, data_prefix),
-                    }
-                    for path in paths
-                ]
-        else:
-            if isinstance(paths, dict):
-                paths = list(paths.keys())
-            paths = [_strip_data_prefix(path, data_prefix) for path in paths]
+                    merged.setdefault(name, item)
+                else:
+                    name = _strip_data_prefix(item, st.data_prefix)
+                    merged.setdefault(name, name)
         return FsOpResponse(
             backend=backend,
-            result=FsListResult(paths=paths),
+            result=FsListResult(paths=list(merged.values())),  # type: ignore[arg-type]
         )
     if operation == "get":
+        found_obj = storage.find_project_object(
+            session, project, path, storages=storages
+        )
+        if found_obj is None:
+            raise HTTPException(404, "Path not found")
+        st, full_path = found_obj
+        if st.backend == "hf":
+            info_dict = st.fs.info(full_path)
+            try:
+                token = storage.get_xet_token(st, "read")
+            except Exception:
+                logger.exception(f"Failed to get Xet read token for {path}")
+                raise HTTPException(502, "Failed to get download access")
+            return FsOpResponse(
+                backend=st.backend,
+                access=XetAccess(
+                    operation="download",
+                    cas_url=token["casUrl"],
+                    access_token=token["accessToken"],
+                    expires_at_unix=token["exp"],
+                    xet_hash=info_dict["xet_hash"],
+                    size=info_dict["size"],
+                ),
+            )
         url = get_object_url(
             fpath=full_path,
             fname=None,
             expires=3600,
-            fs=fs,
+            fs=st.fs,
             method="get",
         )
         return FsOpResponse(
-            backend=backend,
+            backend=st.backend,
             access=PresignedUrlAccess(
                 url=url,
                 http_method="GET",
             ),
         )
+    target = storage.get_project_storage(session, project)
+    backend = target.backend
+    full_path = target.make_project_path(owner_name, project_name, path)
     # We are doing a PUT if we've made it this far
     assert operation == "put"
+    if target.backend == "hf":
+        try:
+            token = storage.get_xet_token(target, "write")
+        except Exception:
+            logger.exception(f"Failed to get Xet write token for {path}")
+            raise HTTPException(502, "Failed to get upload access")
+        access: (
+            XetAccess
+            | PresignedMultipartAccess
+            | PresignedChunkedAccess
+            | PresignedUrlAccess
+        ) = XetAccess(
+            operation="upload",
+            cas_url=token["casUrl"],
+            access_token=token["accessToken"],
+            expires_at_unix=token["exp"],
+        )
     # Determine if we need chunked upload for large puts
-    chunked = storage.upload_should_be_chunked(content_length)
-    if chunked:
+    elif storage.upload_should_be_chunked(content_length):
         # At this point, content_length is guaranteed to be not None
         assert content_length is not None
         try:
             upload_info = storage.get_multipart_upload_info(
-                fs=fs,
+                fs=target.fs,
                 fpath=full_path,
                 upload_size_bytes=content_length,
                 expires=900,
@@ -373,7 +437,7 @@ def post_project_fs_op(
                 fpath=full_path,
                 fname=None,
                 expires=900,
-                fs=fs,
+                fs=target.fs,
                 method="put",
             )
         except RuntimeError:
@@ -392,9 +456,14 @@ def post_project_fs_op(
 
 
 class FsOpBatchRequest(BaseModel):
-    operation: Literal["exists", "info"]
+    operation: Literal["exists", "info", "register"]
     paths: list[str]
     include: list[Literal["exists", "info", "content"]] | None = None
+    # For register, each path's Xet hash after an upload
+    xet_hashes: (
+        dict[str, Annotated[str, StringConstraints(pattern=XET_HASH_RE)]]
+        | None
+    ) = None
 
 
 class FsOpBatchResult(BaseModel):
@@ -421,7 +490,16 @@ def post_project_fs_batch_op(
     """Endpoint for batch file system operations for multiple paths."""
 
     def get_result(path: str) -> FsOpBatchResult:
-        full_path = f"{data_prefix}/{owner_name}/{project_name}/{path}"
+        # Use the first storage that has the path, or the first overall
+        fs = storages[0].fs
+        full_path = storages[0].make_project_path(
+            owner_name, project_name, path
+        )
+        for st in storages:
+            candidate = st.make_project_path(owner_name, project_name, path)
+            if len(storages) == 1 or st.fs.exists(candidate):
+                fs, full_path = st.fs, candidate
+                break
         path_result: dict[str, Any] = {}
         # Handle exists
         if operation == "exists" or "exists" in include:
@@ -445,8 +523,11 @@ def post_project_fs_batch_op(
                     "name": info_dict.get("name", ""),
                     "size": info_dict.get("size", 0),
                     "type": info_dict.get("type", "file"),
-                    "time_modified": info_dict.get("time_modified"),
+                    "time_modified": _get_time_modified(info_dict),
                 }
+                # So clients can download from HF without asking per file
+                if info_dict.get("xet_hash"):
+                    path_result["info"]["xet_hash"] = info_dict["xet_hash"]
         # Handle content (if requested via include)
         if "content" in include and info_dict is not None:
             path_result["content_base64"] = None
@@ -491,18 +572,48 @@ def post_project_fs_batch_op(
     min_access = (
         "read" if operation in ["get", "list", "exists", "info"] else "write"
     )
-    app.projects.get_project(
+    project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
         session=session,
         current_user=current_user,
         min_access_level=min_access,
     )
-    backend = storage.get_backend()
-    fs = storage.get_object_fs()
-    data_prefix = storage.get_data_prefix()
-    if settings.ENVIRONMENT == "local" and not fs.exists(data_prefix):
-        fs.makedir(data_prefix)
+    if operation == "register":
+        # Many uploads' paths added with one call to HF
+        target = storage.get_project_storage(session, project)
+        if target.backend != "hf":
+            raise HTTPException(
+                400, "Register is only needed for Hugging Face storage"
+            )
+        xet_hashes = req.xet_hashes or {}
+        if set(paths) != set(xet_hashes):
+            raise HTTPException(422, "Every path needs a xet_hash")
+        ops = [
+            {
+                "type": "addFile",
+                "path": target.make_project_path(
+                    owner_name, project_name, path
+                ).removeprefix(f"{target.data_prefix}/"),
+                "xetHash": xet_hashes[path],
+            }
+            for path in paths
+        ]
+        try:
+            storage.post_hf_bucket_batch(target, ops)
+        except Exception:
+            logger.exception(f"Failed to register {len(ops)} files")
+            raise HTTPException(502, "Failed to register uploaded files")
+        return FsOpBatchResponse(backend=target.backend, results={})
+    storages = storage.get_project_storages(session, project)
+    backend = storages[0].backend
+    for st in storages:
+        if (
+            st.backend != "hf"
+            and settings.ENVIRONMENT == "local"
+            and not st.fs.exists(st.data_prefix)
+        ):
+            st.fs.makedir(st.data_prefix)
     # Each path is a round trip to object storage, and a DVC push asks
     # about hundreds of them, so they're made concurrently
     results = dict(zip(paths, _batch_op_pool.map(get_result, paths)))

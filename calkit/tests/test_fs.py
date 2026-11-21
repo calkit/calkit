@@ -3,6 +3,7 @@
 import os
 import subprocess
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -132,6 +133,7 @@ def test_put_file_uses_callback(tmp_path):
     session.request.return_value = put_resp
     fs = ckfs.CalkitFileSystem.__new__(ckfs.CalkitFileSystem)
     fs._session = session
+    fs._xet_access = {}
     operation_info = {
         "access": {
             "kind": "presigned-url",
@@ -399,3 +401,190 @@ def test_calkitfilesystem_dvc_staging(monkeypatch, tmp_dir):
     subprocess.run(["calkit", "dvc", "add", "data.txt"], check=True)
     subprocess.run(["calkit", "dvc", "push"], check=True)
     subprocess.run(["calkit", "dvc", "pull"], check=True)
+
+
+def test_xet_transfers(tmp_path: Path) -> None:
+    import hashlib
+    import threading
+    import time
+    from types import SimpleNamespace
+    from typing import Any
+
+    content = b"some DVC object content"
+    md5 = hashlib.md5(content).hexdigest()
+    obj_path = f"files/md5/{md5[:2]}/{md5[2:]}"
+    stored: dict[str, bytes] = {}
+    upload_calls: list[list[str]] = []
+
+    def upload_files(paths: list[str], *a: Any, **k: Any) -> list[Any]:
+        upload_calls.append(paths)
+        if len(upload_calls) == 1 and upload_gate is not None:
+            upload_gate()
+        for path in paths:
+            with open(path, "rb") as f:
+                stored["xethash"] = f.read()
+        return [SimpleNamespace(hash="xethash") for _ in paths]
+
+    def upload_bytes(datas: list[bytes], *a: Any, **k: Any) -> list[Any]:
+        stored["xethash"] = datas[0]
+        return [SimpleNamespace(hash="xethash")]
+
+    def download_files(infos: list[Any], *a: Any) -> None:
+        for info in infos:
+            with open(info.destination_path, "wb") as f:
+                f.write(stored[info.hash])
+
+    upload_gate = None
+    fake_xet = SimpleNamespace(
+        upload_files=upload_files,
+        upload_bytes=upload_bytes,
+        download_files=download_files,
+        PyXetDownloadInfo=lambda **kw: SimpleNamespace(**kw),
+    )
+    access = {
+        "kind": "hf-xet",
+        "cas_url": "https://cas.example.com",
+        "access_token": "xet_token",
+        "expires_at_unix": 2_000_000_000,
+    }
+    fs = ckfs.CalkitFileSystem(
+        endpoint_url="https://api.example.com", skip_instance_cache=True
+    )
+    local = tmp_path / "upload.bin"
+    local.write_bytes(content)
+    # Uploading a file registers its Xet hash at the same path
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value={"access": access | {"operation": "upload"}},
+        ) as get_op,
+        patch.object(ckfs.calkit.hub, "post") as post,
+    ):
+        fs.put_file(str(local), f"ck://owner/project/{obj_path}")
+        post.assert_called_once()
+        assert post.call_args.args[0] == "/projects/owner/project/fs/ops/batch"
+        assert post.call_args.kwargs["json"] == {
+            "operation": "register",
+            "paths": [obj_path],
+            "xet_hashes": {obj_path: "xethash"},
+        }
+        assert stored["xethash"] == content
+        # The access covers the whole bucket, so the next upload reuses it
+        fs.put_file(str(local), "ck://owner/project/again.bin")
+        get_op.assert_called_once()
+        # Files DVC puts while an upload is in flight go up together next,
+        # in one Xet session and one registration
+        n = 8
+        batcher = fs._xet_batchers[("owner", "project", "put")]
+        upload_calls.clear()
+        post.reset_mock()
+
+        def wait_for_others() -> None:
+            deadline = time.time() + 10
+            while len(batcher._waiting) < n - 1:
+                assert time.time() < deadline
+                time.sleep(0.01)
+
+        upload_gate = wait_for_others
+        threads = [
+            threading.Thread(
+                target=fs.put_file,
+                args=(str(local), f"ck://owner/project/f{i}.bin"),
+            )
+            for i in range(n)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        upload_gate = None
+        assert [len(c) for c in upload_calls] == [1, n - 1]
+        assert post.call_count == 2
+        assert len(post.call_args.kwargs["json"]["paths"]) == n - 1
+        # A failed registration fails the uploads waiting on it
+        post.side_effect = RuntimeError("hub down")
+        with pytest.raises(RuntimeError, match="hub down"):
+            fs.put_file(str(local), "ck://owner/project/fails.bin")
+        # Access that's about to expire isn't reused
+        post.side_effect = None
+        fs._xet_access[("owner", "project", "put")] = access | {
+            "expires_at_unix": 0
+        }
+        fs.put_file(str(local), "ck://owner/project/later.bin")
+        assert get_op.call_count == 2
+    # Writing through a file object uploads its bytes the same way
+    stored.clear()
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value={"access": access | {"operation": "upload"}},
+        ),
+        patch.object(ckfs.calkit.hub, "post") as post,
+    ):
+        with fs.open("ck://owner/project/other.txt", "wb") as f:
+            f.write(content)
+    assert stored["xethash"] == content
+    assert post.call_args.kwargs["json"]["paths"] == ["other.txt"]
+    # Downloading checks the content against the MD5 in the path, and a
+    # file the batch lookup doesn't find in HF is fetched on its own
+    download = access | {
+        "operation": "download",
+        "xet_hash": "xethash",
+        "size": len(content),
+    }
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(
+            fs,
+            "_get_fs_op_info_batch",
+            return_value={"backend": "s3", "results": {}},
+        ),
+        patch.object(fs, "_get_fs_op_info", return_value={"access": download}),
+    ):
+        out = tmp_path / "out.bin"
+        fs.get_file(f"ck://owner/project/{obj_path}", str(out))
+        assert out.read_bytes() == content
+        assert fs.cat_file(f"ck://owner/project/{obj_path}", 5, 8) == b"DVC"
+        # Content that doesn't match its MD5 is an error, and not left behind
+        stored["xethash"] = b"tampered"
+        bad = tmp_path / "bad.bin"
+        with pytest.raises(OSError, match="doesn't match its MD5"):
+            fs.get_file(f"ck://owner/project/{obj_path}", str(bad))
+        assert not bad.exists()
+        # Empty files don't need a download
+        empty = download | {"xet_hash": "x", "size": 0}
+        with patch.object(
+            fs, "_get_fs_op_info", return_value={"access": empty}
+        ):
+            out = tmp_path / "empty.bin"
+            fs.get_file("ck://owner/project/empty.txt", str(out))
+            assert out.read_bytes() == b""
+    # With the hash from a batch lookup, a download doesn't ask the hub
+    # about the file
+    stored["xethash"] = content
+    batch = {
+        "backend": "hf",
+        "results": {
+            obj_path: {
+                "info": {"name": obj_path, "size": len(content)}
+                | {"xet_hash": "xethash"}
+            }
+        },
+    }
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(fs, "_get_fs_op_info_batch", return_value=batch) as bop,
+        patch.object(fs, "_get_fs_op_info") as get_op,
+    ):
+        out = tmp_path / "out2.bin"
+        fs.get_file(f"ck://owner/project/{obj_path}", str(out))
+        assert out.read_bytes() == content
+        get_op.assert_not_called()
+        bop.assert_called_once()
+        # And one already looked up isn't looked up again
+        fs.get_file(f"ck://owner/project/{obj_path}", str(out))
+        bop.assert_called_once()

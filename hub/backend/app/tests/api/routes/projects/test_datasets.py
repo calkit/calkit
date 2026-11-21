@@ -214,14 +214,18 @@ def test_imported_dataset_reads_from_source_project(
     )
     looked_up: list[tuple[str, str]] = []
 
-    def fake_fpath(owner_name, project_name, md5, fs):
-        looked_up.append((owner_name, project_name))
-        return "src/proj/ab/c123" if owner_name == "src" else None
-
     class FakeFS:
         def open(self, path, mode="rb"):
             assert path == "src/proj/ab/c123"
             return io.BytesIO(b"a,b\n1,2\n")
+
+    def fake_find(
+        owner_name: str, project_name: str, md5: str, storages: object
+    ) -> tuple[SimpleNamespace, str] | None:
+        looked_up.append((owner_name, project_name))
+        if owner_name != "src":
+            return None
+        return SimpleNamespace(fs=FakeFS()), "src/proj/ab/c123"
 
     seen_projects: list[str] = []
 
@@ -237,15 +241,15 @@ def test_imported_dataset_reads_from_source_project(
             side_effect=fake_get_project,
         ),
         patch("app.api.routes.projects.datasets.get_repo", return_value=repo),
-        patch("app.dvc.get_data_fpath_for_md5", side_effect=fake_fpath),
-        patch("app.projects.get_object_fs", return_value=FakeFS()),
+        patch("app.projects.find_md5_object", side_effect=fake_find),
     ):
         resp = client.get(f"{BASE}/data/imported.csv")
     assert resp.status_code == 200, resp.text
     assert _csv(resp).splitlines() == ["a,b", "1,2"]
-    # Looked up in the source project's storage, after an access check on it
+    # Looked up in the source project's storage, after an access check on it,
+    # and the source is fetched again to find its storages
     assert looked_up == [("src", "proj")]
-    assert seen_projects == ["o/p", "src/proj"]
+    assert seen_projects == ["o/p", "src/proj", "src/proj"]
 
 
 URL = "/projects/o/p/datasets"

@@ -80,7 +80,11 @@ def get_project_provenance(
     )
     tree = get_repo_tree_for_ref(repo, ref)
     pipeline = pipeline_at_ref(
-        repo, ref, project.owner_account_name, project.name
+        repo,
+        ref,
+        project.owner_account_name,
+        project.name,
+        storages=app.projects.get_storages_for_project(project),
     )
     out = Provenance.model_validate(
         calkit.provenance.get_path_provenance(

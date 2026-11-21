@@ -569,6 +569,14 @@ def test_update_agent_skills_updates_plugins(fake_home, monkeypatch):
     assert not list(skills_dir.glob("calkit-*"))
     assert custom_skill.exists()
     assert "Removed" in result.output
+    # Found but none updated is a failure, which keeps the copies
+    runner.invoke(update_app, ["agent-skills", "--copy"])
+    monkeypatch.setattr("calkit.install.subprocess.call", lambda cmd: 1)
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code != 0
+    assert "Failed to update Calkit plugin in any" in result.output
+    assert "calkit install claude" not in result.output
+    assert (skills_dir / "calkit-conventions").is_dir()
 
 
 def test_update_docker_env_registry(tmp_dir):

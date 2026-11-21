@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -105,6 +106,40 @@ def _find_exe(exe_name: str) -> str | None:
 def find_conda_exe() -> str | None:
     """Find the absolute path to the Conda executable."""
     return _find_exe("conda")
+
+
+def find_named_env_prefix(name: str, conda_exe: str) -> str | None:
+    """Where a named environment is kept, found without running Conda.
+
+    Named environments are usually in the envs folder of Conda's root, which
+    holds its executable in bin, condabin, or Scripts, but may be in another
+    envs folder, e.g., ~/.conda/envs on a shared install, which Conda's
+    record of the environments it made, ~/.conda/environments.txt, lists.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.realpath(conda_exe)))
+    envs_dirs = [os.path.join(root, "envs")]
+    for var in ("CONDA_ENVS_PATH", "CONDA_ENVS_DIRS"):
+        envs_dirs += [
+            d for d in os.environ.get(var, "").split(os.pathsep) if d
+        ]
+    envs_dirs.append(os.path.join(os.path.expanduser("~"), ".conda", "envs"))
+    candidates = [os.path.join(d, name) for d in envs_dirs]
+    record = os.path.join(
+        os.path.expanduser("~"), ".conda", "environments.txt"
+    )
+    try:
+        with open(record, encoding="utf-8") as f:
+            candidates += [
+                line.strip()
+                for line in f
+                if os.path.basename(line.strip().rstrip("/\\")) == name
+            ]
+    except OSError:
+        pass
+    for candidate in candidates:
+        if os.path.isdir(os.path.join(candidate, "conda-meta")):
+            return candidate
+    return None
 
 
 def find_mamba_exe() -> str | None:
@@ -213,9 +248,12 @@ def _local_pip_path(dep: str) -> str | None:
     target = dep[editable.end() :].strip() if editable else dep
     url = re.match(r"^(?:\S+\s*@\s*)?(file:\S+)$", target)
     if url:
-        from urllib.parse import unquote, urlparse
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
 
-        return unquote(urlparse(url[1]).path) or None
+        # e.g., 'file:///D:/pkg' is D:\pkg on Windows, without extras
+        path = url2pathname(urlparse(url[1]).path)
+        return re.sub(r"\[[^\]]*\]$", "", path) or None
     is_path = target.startswith((".", "/", "~")) or re.match(
         r"^[A-Za-z]:[\\/]", target
     )
@@ -454,10 +492,14 @@ def check_env(
     alt_lock_fpaths_delete: list[str] = [],
     relaxed: bool = False,
     verbose: bool = True,
+    prefix: str | None = None,
 ) -> EnvCheckResult:
     """Check that a conda environment matches its spec.
 
     If it doesn't match, recreate it.
+
+    ``prefix`` is where the environment is kept, e.g., from calkit.yaml,
+    when the spec doesn't say.
 
     Note that this only works with exact or no version specification.
     Using greater than and less than operators is not supported.
@@ -573,12 +615,11 @@ def check_env(
     existing_env_names = [
         os.path.basename(env) for env in envs if env.startswith(envs_dir)
     ]
-    # Get a list of environments defined by prefix instead of name
-    env_prefixes = [e for e in envs if not e.startswith(root_prefix)]
     with open(env_fpath, encoding="utf-8") as f:
         env_spec = ryaml.load(f)
     env_name = env_spec["name"]
-    prefix = env_spec.get("prefix")
+    # Set in calkit.yaml, it wins over the spec, as it does when running in it
+    prefix = prefix or env_spec.get("prefix")
     prefix_orig = prefix
     if prefix is not None:
         prefix = os.path.abspath(prefix)
@@ -619,7 +660,13 @@ def check_env(
         export_cmd += ["-n", env_name]
     # Check if env even exists
     # If env has a prefix defined, it will be identified by that
-    if env_name not in existing_env_names and prefix not in env_prefixes:
+    # One kept at a prefix is that folder, whatever else shares its name,
+    # e.g., the same project's environment created globally elsewhere
+    if prefix is not None:
+        env_exists = os.path.isdir(os.path.join(prefix, "conda-meta"))
+    else:
+        env_exists = env_name in existing_env_names
+    if not env_exists:
         log_func(f"Environment {env_name} doesn't exist; creating")
         res.env_exists = False
         # Environment doesn't exist, so create it
@@ -1086,12 +1133,31 @@ def write_cross_platform_locks(
     with open(env_fpath, encoding="utf-8") as f:
         env_spec = ryaml.load(f)
     conda_deps, pip_deps = _split_env_dependencies(env_spec["dependencies"])
-    # Git URLs resolve the same anywhere, but local paths and included
-    # files may not
+    # Git URLs resolve the same anywhere, and so does a path in the project,
+    # e.g., '-e .' for its own package, but other local paths and included
+    # files may not. The project is where the pipeline runs from.
+    spec_dir = os.path.dirname(os.path.abspath(env_fpath))
+    project_dir = os.path.realpath(".")
+    lock_dir_abs = os.path.abspath(os.path.dirname(lock_fpath))
+    # Each in-project local dependency's absolute path, and its extras,
+    # e.g., '[dev]', which installing it elsewhere needs too
+    in_project: dict[str, str] = {}
+    in_project_extras: dict[str, str] = {}
+    for d in pip_deps:
+        local = _local_pip_path(d)
+        if local is None:
+            continue
+        full = os.path.realpath(
+            os.path.join(spec_dir, os.path.expanduser(local))
+        )
+        if full == project_dir or full.startswith(project_dir + os.sep):
+            in_project[d] = full
+            extras = re.search(r"\[[^\]]*\]$", d.split("#", 1)[0].strip())
+            in_project_extras[full] = extras[0] if extras else ""
     unpinnable = [
         d
         for d in pip_deps
-        if _local_pip_path(d) is not None
+        if (_local_pip_path(d) is not None and d not in in_project)
         or re.match(r"^(-r|-c|--requirement|--constraint)\b", d.strip())
     ]
     channels = list(env_spec.get("channels") or [])
@@ -1132,6 +1198,14 @@ def write_cross_platform_locks(
         name = _norm_pkg_name(pkg.split("[")[0])
         if dep in unpinnable:
             pinned_pip_deps.append(dep)
+        elif dep in in_project:
+            # Compiled from elsewhere, so named by its absolute path
+            editable = re.match(r"^(-e|--editable)[\s=]+", dep.strip())
+            pinned_pip_deps.append(
+                ("-e " if editable else "")
+                + in_project[dep]
+                + in_project_extras[in_project[dep]]
+            )
         elif name in local_pip_urls:
             pinned_pip_deps.append(local_pip_urls[name])
         elif name not in local_pip_vers:
@@ -1196,6 +1270,30 @@ def write_cross_platform_locks(
             for p in sorted(links, key=lambda p: p["name"])
         ]
         if pinned_pip is not None:
+            # A project path is written as this platform's lock writes it,
+            # relative to the lock, rather than where it is on this machine
+            for i, line in enumerate(pinned_pip):
+                local = _local_pip_path(line)
+                full = os.path.realpath(local) if local else None
+                if full not in in_project.values():
+                    continue
+                pinned_pip[i] = next(
+                    (
+                        # The same on every platform
+                        dep.replace("\\", "/")
+                        for dep in local_pip
+                        if _local_pip_path(dep) is not None
+                        and os.path.realpath(
+                            os.path.join(lock_dir_abs, _local_pip_path(dep))
+                        )
+                        == full
+                    ),
+                    ("-e " if line.startswith(("-e", "--editable")) else "")
+                    + pathlib.PurePath(
+                        os.path.relpath(full, lock_dir_abs)
+                    ).as_posix()
+                    + in_project_extras[full],
+                )
             # Pip leaves alone what conda already installed
             from_conda = {_norm_pkg_name(p["name"]) for p in links}
             dependencies.append(

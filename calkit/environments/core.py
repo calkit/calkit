@@ -4348,3 +4348,119 @@ def relock(env_name: str, env: dict) -> None:
             err=True,
         )
         raise
+
+
+# Kinds whose commands run as local processes with the environment's PATH,
+# where Calkit's own interpreter can be run to see what that PATH resolves
+_APP_CHECK_ENV_KINDS = ("uv", "uv-venv", "venv", "conda", "pixi")
+
+
+def is_app_required(
+    app: str, ck_info: dict, stage: dict | None = None
+) -> bool:
+    """Whether the project, or the stage, lists an app as a requirement,
+    so a copy installed outside its environment is expected."""
+    import calkit
+    from calkit.core import _normalize_requirement
+
+    reqs = list(calkit.get_requirements(ck_info) or [])
+    reqs += list((stage or {}).get("requirements") or [])
+    for req in reqs:
+        try:
+            normalized = _normalize_requirement(req)
+        except ValueError:
+            continue
+        if normalized.get("kind") == "app" and normalized.get("name") == app:
+            return True
+    return False
+
+
+def _path_outside_active_env() -> str:
+    """PATH without the environment active in this process, if any, e.g.,
+    under 'uv run' or 'pixi run', or in a shell that activated it, so an app
+    from it isn't mistaken for one installed on the machine."""
+    active = [
+        os.environ.get("VIRTUAL_ENV"),
+        os.environ.get("PIXI_PROJECT_ROOT") and os.environ.get("CONDA_PREFIX"),
+    ]
+    if os.environ.get("CONDA_DEFAULT_ENV") not in (None, "base"):
+        active.append(os.environ.get("CONDA_PREFIX"))
+    prefixes = [os.path.realpath(p) for p in active if p]
+    dirs = os.environ.get("PATH", "").split(os.pathsep)
+    return os.pathsep.join(
+        d
+        for d in dirs
+        if not any(
+            os.path.realpath(d) == p
+            or os.path.realpath(d).startswith(p + os.sep)
+            for p in prefixes
+        )
+    )
+
+
+def check_app_in_env(
+    app: str,
+    env_name: str,
+    ck_info: dict,
+    stage: dict | None = None,
+    wdir: str | None = None,
+) -> str | None:
+    """Return what's wrong with where an app comes from in an environment,
+    or None if nothing is.
+
+    An app a stage runs belongs in its environment, like any other tool, so
+    the same version runs on every machine, unless the project or stage
+    lists it as a requirement, saying one installed on the machine is
+    expected. It's in the environment if the environment's PATH resolves
+    it somewhere other than PATH outside it does, which also sees through a
+    launcher, e.g., Pixi's for a global install. Only environments that run
+    commands locally are checked. The '_system' environment is this
+    machine, so there it only has to be installed.
+    """
+    if is_app_required(app, ck_info, stage):
+        return None
+    system_path = shutil.which(app, path=_path_outside_active_env())
+    if env_name == "_system":
+        if system_path is None:
+            return (
+                f"'{app}' isn't installed on this machine; install it, or "
+                "use an environment that provides it"
+            )
+        return None
+    fix = (
+        f"add it to the environment, or list '{app}' in the project's "
+        "requirements"
+    )
+    env = (ck_info.get("environments") or {}).get(env_name)
+    if not isinstance(env, dict) or env.get("kind") not in (
+        _APP_CHECK_ENV_KINDS
+    ):
+        return None
+    where = f"isn't in environment '{env_name}'"
+    res = subprocess.run(
+        [sys.executable, "-m", "calkit", "xenv", "-n", env_name]
+        + ["--no-check", "--", sys.executable, "-c"]
+        + ["import shutil, sys; print(shutil.which(sys.argv[1]) or '')"]
+        + [app],
+        capture_output=True,
+        text=True,
+        cwd=wdir,
+    )
+    if res.returncode != 0:
+        errors = (res.stderr or res.stdout).strip().splitlines()
+        return (
+            f"Couldn't run a command in environment '{env_name}' to find "
+            f"'{app}'" + (f": {errors[-1]}" if errors else "")
+        )
+    lines = res.stdout.strip().splitlines()
+    env_path = (lines[-1].strip() if lines else "") or None
+    if env_path is None:
+        return f"'{app}' {where}; {fix}"
+    if system_path is not None and os.path.realpath(
+        env_path
+    ) == os.path.realpath(system_path):
+        return (
+            f"'{app}' {where}, so the one installed on this machine "
+            f"({system_path}) would be used; {fix}"
+        )
+    return None

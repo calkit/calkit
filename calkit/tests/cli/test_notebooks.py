@@ -61,6 +61,15 @@ def test_clean_notebook_is_invariant_to_cell_ids():
     assert calkit.notebooks.clean_notebook(
         executed
     ) == calkit.notebooks.clean_notebook(stripped)
+    # Nor whether a cell's source is one string or a list of lines, which
+    # tools rewrite between, e.g., Quarto rendering with --execute
+    joined = copy.deepcopy(executed)
+    joined["cells"][0]["source"] = "print('hi')\nprint('bye')"
+    split = copy.deepcopy(executed)
+    split["cells"][0]["source"] = ["print('hi')\n", "print('bye')"]
+    assert calkit.notebooks.clean_notebook(
+        joined
+    ) == calkit.notebooks.clean_notebook(split)
 
 
 def test_execute_notebook(tmp_dir):

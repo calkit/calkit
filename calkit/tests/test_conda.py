@@ -1,6 +1,7 @@
 """Tests for the ``conda`` module."""
 
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -374,7 +375,13 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         timeout: float | None = None,
     ) -> list[str]:
         compiles.append((pip_deps, constraints))
-        return ["iniconfig==2.1.0", "NumPy==2.3.0"]
+        # uv names an editable install by its URL
+        editable = [
+            "-e " + pathlib.Path(d[3:]).as_uri()
+            for d in pip_deps
+            if d.startswith("-e ") and os.path.isabs(d[3:])
+        ]
+        return ["iniconfig==2.1.0", "NumPy==2.3.0"] + editable
 
     monkeypatch.setattr(calkit.conda.subprocess, "run", fake_run)
     monkeypatch.setattr(calkit.conda, "_compile_pip_deps", fake_compile)
@@ -486,7 +493,37 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         "iniconfig==2.1.0",
         'uvloop==0.19.0; sys_platform != "win32"',
     ]
-    for local in ("-e ./pkg", "./pkg", "pkg @ file:///x", "-r more.txt"):
+    # A path in the project, e.g., its own package, is the same everywhere,
+    # so it's compiled from where it is here and written as the lock here
+    # writes it; one outside the project, or an included file, isn't
+    os.makedirs("pkg")
+    write_local(["iniconfig==2.1.0", "-e ../pkg"])
+    write_spec(["iniconfig", "-e ./pkg"])
+    assert locks() == [osx, win]
+    assert compiles[-1][0] == [
+        "iniconfig==2.1.0",
+        "-e " + os.path.realpath("pkg"),
+    ]
+    with open(win) as f:
+        assert calkit.ryaml.load(f)["dependencies"][-1] == {
+            "pip": ["iniconfig==2.1.0", "-e ../pkg"]
+        }
+    # With extras, which are resolved too, and with '/' on every platform
+    # when the lock here doesn't say how to write it
+    write_local(["iniconfig==2.1.0"])
+    write_spec(["iniconfig", "-e ./pkg[dev]"])
+    assert locks() == [osx, win]
+    assert compiles[-1][0] == [
+        "iniconfig==2.1.0",
+        "-e " + os.path.realpath("pkg") + "[dev]",
+    ]
+    with open(osx) as f:
+        assert calkit.ryaml.load(f)["dependencies"][-1] == {
+            "pip": ["iniconfig==2.1.0", "-e ../pkg[dev]"]
+        }
+    write_local(["iniconfig==2.1.0", "packaging==25.0"])
+    write_spec(["iniconfig"])
+    for local in ("pkg @ file:///x", "-r more.txt"):
         assert locks() == [osx, win]
         write_spec(["iniconfig", local])
         assert locks() == []
@@ -722,6 +759,31 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
             "import requests",
         ]
     )
+    # The prefix can be set in calkit.yaml alone, and a global environment
+    # with the same name doesn't stand in for it
+    with open("environment.yml") as f:
+        env = calkit.ryaml.load(f)
+    del env["prefix"]
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump(env, f)
+    global_name = env["name"]
+    subprocess.check_call(
+        [CONDA, "create", "-y", "-q", "-n", global_name, "python=3.12"]
+    )
+    try:
+        subprocess.check_call(
+            [CONDA, "env", "remove", "-y", "--prefix", conda_env_prefix]
+        )
+        out = subprocess.check_output(
+            ["calkit", "xenv", "-n", "my-conda-env", "python", "-c"]
+            + ["import requests, sys; print(sys.prefix)"],
+            text=True,
+        )
+        assert os.path.realpath(
+            out.strip().splitlines()[-1]
+        ) == os.path.realpath(conda_env_prefix)
+    finally:
+        delete_env(global_name)
 
 
 @pytest.mark.xdist_group("conda")
@@ -902,3 +964,38 @@ def test_find_mamba_exe():
     # valid path
     if mamba_exe is not None:
         assert os.path.isfile(mamba_exe)
+
+
+def test_find_named_env_prefix(tmp_path, monkeypatch):
+    from calkit.conda import find_named_env_prefix
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("CONDA_ENVS_PATH", raising=False)
+    monkeypatch.delenv("CONDA_ENVS_DIRS", raising=False)
+    root = tmp_path / "miniforge"
+    conda_exe = root / "bin" / "conda"
+    conda_exe.parent.mkdir(parents=True)
+    conda_exe.write_text("")
+
+    def make_env(prefix):
+        (prefix / "conda-meta").mkdir(parents=True)
+        return str(prefix)
+
+    assert find_named_env_prefix("a", str(conda_exe)) is None
+    # In the envs folder of Conda's root
+    expected = make_env(root / "envs" / "a")
+    assert find_named_env_prefix("a", str(conda_exe)) == expected
+    # In the user's, e.g., on a shared install
+    expected = make_env(home / ".conda" / "envs" / "b")
+    assert find_named_env_prefix("b", str(conda_exe)) == expected
+    # In one set by the environment
+    other = tmp_path / "other"
+    monkeypatch.setenv("CONDA_ENVS_PATH", str(other))
+    expected = make_env(other / "c")
+    assert find_named_env_prefix("c", str(conda_exe)) == expected
+    # Anywhere else Conda recorded making it
+    expected = make_env(tmp_path / "elsewhere" / "d")
+    (home / ".conda" / "environments.txt").write_text(expected + "\n")
+    assert find_named_env_prefix("d", str(conda_exe)) == expected

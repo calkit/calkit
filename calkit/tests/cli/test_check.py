@@ -1878,6 +1878,42 @@ def test_check_stage_runs(tmp_dir):
     # Rerunning them records them again
     subprocess.check_call(["calkit", "run", "--force"])
     subprocess.check_call(check)
+    # A frozen stage's committed output, e.g., model weights trained
+    # elsewhere, gets an entry DVC writes on verifying it, not a run, so
+    # it isn't checked against one
+    with open("f.txt", "w") as f:
+        f.write("trained elsewhere\n")
+    ck_info["pipeline"]["stages"]["f"] = {
+        "kind": "shell-command",
+        "command": "echo f > f.txt",
+        "environment": "_system",
+        "inputs": [{"from_stage_outputs": "a"}],
+        "outputs": [{"path": "f.txt", "storage": "git"}],
+        "frozen": True,
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    assert "f" in calkit.dvc.read_lock_stages()
+    assert "f" not in calkit.read_stage_runs()
+    with open("f.txt") as f:
+        assert f.read() == "trained elsewhere\n"
+    subprocess.check_call(check)
+    # Forcing all stages leaves it alone, but naming it runs it,
+    subprocess.check_call(["calkit", "run", "--force"])
+    with open("f.txt") as f:
+        assert f.read() == "trained elsewhere\n"
+    # without rerunning what it depends on, which is up to date
+    a_run = calkit.read_stage_runs()["a"]
+    subprocess.check_call(["calkit", "run", "--force", "f"])
+    with open("f.txt") as f:
+        assert f.read() == "f\n"
+    assert "f" in calkit.read_stage_runs()
+    assert calkit.read_stage_runs()["a"] == a_run
+    subprocess.check_call(check)
+    del ck_info["pipeline"]["stages"]["f"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
     # A subproject's runs are kept beside its dvc.lock under their names
     # there, so it is the same record whichever directory ran them
     os.makedirs("sub")
@@ -2339,3 +2375,46 @@ def test_check_storage_stage_output_dvc_file(tmp_dir):
         ["git", "diff", "--cached", "--name-only"], text=True
     ).split()
     assert "fig.png.dvc" in staged
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Uses a shell script")
+def test_check_app_in_environment(tmp_dir, monkeypatch):
+    os.makedirs("bin")
+    with open(os.path.join("bin", "myapp"), "w") as f:
+        f.write("#!/bin/sh\n")
+    os.chmod(os.path.join("bin", "myapp"), 0o755)
+    monkeypatch.setenv(
+        "PATH", os.path.abspath("bin") + os.pathsep + os.environ["PATH"]
+    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"name": "test"}, f)
+    res = subprocess.run(
+        ["calkit", "check", "app", "myapp", "-e", "_system"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    check = ["calkit", "check", "app", "missing-app", "-e", "_system"]
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "'missing-app' isn't installed" in res.stdout + res.stderr
+    # A stage's requirements count when it's named
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "test",
+                "pipeline": {
+                    "stages": {
+                        "s": {
+                            "kind": "shell-command",
+                            "command": "missing-app",
+                            "environment": "_system",
+                            "requirements": ["missing-app"],
+                        }
+                    }
+                },
+            },
+            f,
+        )
+    assert subprocess.run(check, capture_output=True).returncode != 0
+    subprocess.check_call(check + ["--stage", "s"])

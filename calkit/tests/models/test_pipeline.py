@@ -398,7 +398,7 @@ def test_latexstage(tmp_path):
     assert all_deps == [expected] * 3
 
 
-def test_quartostage():
+def test_quartostage(tmp_path):
     s = QuartoStage(
         name="render-report",
         environment="analysis",
@@ -407,8 +407,10 @@ def test_quartostage():
         outputs=["report/report.html"],
     )
     sd = s.to_dvc()
+    # Calkit renders it, checking Quarto comes from the environment and
+    # resolving the document's values first
     assert sd["cmd"] == (
-        "calkit xenv -n analysis --no-check -- quarto render report/report.qmd"
+        "calkit quarto render -e analysis --no-check report/report.qmd"
     )
     assert "report/report.qmd" in sd["deps"]
     assert "report/results.json" in sd["deps"]
@@ -425,20 +427,106 @@ def test_quartostage():
         # A PathOutput can be used to store with Git instead
         outputs=[PathOutput(path="report/report.pdf", storage="git")],
     )
-    assert s.dvc_cmd.endswith(
-        "quarto render report/report.qmd --to pdf --no-clean"
-    )
+    assert s.dvc_cmd.endswith("report/report.qmd --to pdf -- --no-clean")
     assert s.dvc_outs == [
         {"report/report.pdf": {"cache": False, "persist": False}}
     ]
-    # System environment renders without an xenv wrapper
+    # Outside any environment, it renders with what's on this machine
     s = QuartoStage(
         name="render-report",
         environment="_system",
         target_path="report/report.qmd",
         outputs=["report/report.html"],
     )
-    assert s.dvc_cmd == "quarto render report/report.qmd"
+    assert s.dvc_cmd == (
+        "calkit quarto render -e _system --no-check report/report.qmd"
+    )
+    # A stage listing Quarto as a requirement says one installed on the
+    # machine is expected
+    s = QuartoStage(
+        name="render-report",
+        environment="_system",
+        target_path="report/report.qmd",
+        requirements=["quarto>=1.8"],
+    )
+    assert s.dvc_cmd == (
+        "calkit quarto render -e _system --no-check --allow-machine-quarto "
+        "report/report.qmd"
+    )
+    # A notebook rendered with --execute gets its outputs written back, so
+    # it's depended on stripped of them, from wherever the stage runs
+    s = QuartoStage(
+        name="nb",
+        environment="analysis",
+        target_path="index.ipynb",
+        args=["--execute"],
+        wdir="pub",
+    )
+    assert (
+        s.cleaned_notebook_path == ".calkit/notebooks/cleaned/pub/index.ipynb"
+    )
+    assert s.dvc_deps[0] == "../.calkit/notebooks/cleaned/pub/index.ipynb"
+    assert s.notebook_outputs == [
+        PathOutput(path=s.cleaned_notebook_path, storage=None)
+    ]
+    assert s.dvc_cmd.endswith("index.ipynb -- --execute")
+    # Rendered without executing, it shows the outputs saved in it, so
+    # those are depended on
+    s = QuartoStage(
+        name="nb", environment="analysis", target_path="index.ipynb"
+    )
+    assert s.dvc_deps[0] == "index.ipynb"
+    assert s.notebook_outputs == []
+    # Args are quoted so sh and cmd.exe on Windows both read them the same
+    s = QuartoStage(
+        name="nb",
+        environment="analysis",
+        target_path="my report.qmd",
+        args=["-M", "title:My Paper", "-P", "n:{n}"],
+    )
+    assert s.dvc_cmd.endswith(
+        '"my report.qmd" -- -M "title:My Paper" -P n:{n}'
+    )
+    # The files its ckvalue shortcodes read are inputs, if they exist or a
+    # stage makes them, and the values it shows are an output beside it,
+    # with the shortcode written there too
+    (tmp_path / "calkit.yaml").write_text(
+        "results:\n  - name: metrics\n    path: results/metrics.json\n"
+    )
+    (tmp_path / "report").mkdir()
+    (tmp_path / "report" / "report.qmd").write_text(
+        "RMS {{< ckvalue metrics rms .2f >}}, n "
+        "{{< ckvalue path=data/n.json key=n >}}, and an escaped "
+        "{{</* ckvalue other.json x */>}}, and a typo "
+        "{{< ckvalue missing.json x >}}.\n"
+    )
+    s = QuartoStage(
+        name="report",
+        environment="analysis",
+        target_path="report/report.qmd",
+    )
+    s.preprocess(
+        str(tmp_path),
+        lambda p: p in ("results/metrics.json", "data/n.json"),
+        write_files=True,
+    )
+    assert s.dvc_deps[0] == "report/report.qmd"
+    assert s.dvc_deps[-2:] == ["results/metrics.json", "data/n.json"]
+    assert "missing.json" not in s.dvc_deps
+    assert s.dvc_outs == [
+        {
+            "report/_calkit/values/report.json": {
+                "cache": False,
+                "persist": False,
+            }
+        }
+    ]
+    assert (tmp_path / "report" / "_calkit" / "calkit.lua").is_file()
+    # One that shows nothing has nothing extra
+    (tmp_path / "report" / "report.qmd").write_text("No values.\n")
+    s.preprocess(str(tmp_path), lambda p: False, write_files=True)
+    assert s.dvc_outs == []
+    assert s.dvc_deps == ["report/report.qmd"]
 
 
 def test_jupyternotebookstage():

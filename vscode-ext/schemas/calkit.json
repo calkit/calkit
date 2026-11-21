@@ -210,7 +210,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -859,7 +859,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -1839,7 +1839,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2119,7 +2119,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2468,7 +2468,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2715,7 +2715,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -3032,7 +3032,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -3309,7 +3309,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -3660,7 +3660,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4237,7 +4237,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4490,7 +4490,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4757,7 +4757,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -5138,7 +5138,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -5362,7 +5362,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -5676,7 +5676,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -6781,7 +6781,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -7220,7 +7220,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -7804,7 +7804,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -8008,7 +8008,7 @@
     },
     "QuartoStage": {
       "additionalProperties": false,
-      "description": "A stage that renders a Quarto document.\n\nCalkit controls only what belongs on the CLI: which environment to\nrender in, the target document, and (optionally) the output format and\nextra ``quarto render`` arguments. The output format(s) and any other\nrendering behavior are left to the document/``_quarto.yml`` metadata, so\nthere is no redundancy between the pipeline definition and the doc.\n\nOutputs are declared explicitly via ``outputs`` rather than parsed out\nof the Quarto document, since a document can emit multiple formats to\narbitrary paths. As with other stages, plain string outputs are\nDVC-cached by default; use a ``PathOutput`` to store an output with Git\ninstead.",
+      "description": "A stage that renders a Quarto document.\n\nCalkit controls only what belongs on the CLI: which environment to\nrender in, the target document, and (optionally) the output format and\nextra ``quarto render`` arguments. The output format(s) and any other\nrendering behavior are left to the document/``_quarto.yml`` metadata, so\nthere is no redundancy between the pipeline definition and the doc.\n\nOutputs are declared explicitly via ``outputs`` rather than parsed out\nof the Quarto document, since a document can emit multiple formats to\narbitrary paths. As with other stages, plain string outputs are\nDVC-cached by default; use a ``PathOutput`` to store an output with Git\ninstead.\n\nIt renders with ``calkit quarto render``, which checks Quarto comes from\nthe stage's environment, or is a declared requirement, and resolves the\nvalues the document shows with the ``ckvalue`` shortcode first. A notebook\nrendered with ``--execute`` is depended on with its outputs stripped,\nlike a notebook stage's, since rendering writes them back into it.\nOtherwise Quarto shows the outputs saved in it, so they're depended on\ntoo.",
       "properties": {
         "always_run": {
           "default": false,
@@ -8056,7 +8056,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -8471,7 +8471,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -8784,7 +8784,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -9121,7 +9121,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -9959,7 +9959,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -10414,7 +10414,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -10671,7 +10671,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -12686,7 +12686,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },

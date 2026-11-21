@@ -2006,6 +2006,14 @@ def local_package_source_paths(
         full = os.path.join(wdir, candidate) if wdir else candidate
         if os.path.isdir(full):
             found.append(Path(candidate).as_posix())
+    # A src layout's packages needn't be named for the distribution, e.g.,
+    # 'analysis' in a project called 'my-paper', so they're found by their
+    # __init__.py, which leaves out build residue beside them, e.g., egg-info
+    src_dir = os.path.join(wdir, "src") if wdir else "src"
+    if language == "python" and not found and os.path.isdir(src_dir):
+        for entry in sorted(os.listdir(src_dir)):
+            if os.path.isfile(os.path.join(src_dir, entry, "__init__.py")):
+                found.append(f"src/{entry}")
     return found
 
 

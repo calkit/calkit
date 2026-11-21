@@ -50,6 +50,7 @@
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
+| [`quarto`](#command-group-quarto)                | Work with Quarto.                                                                                            |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
@@ -3779,6 +3780,7 @@ Check things.
 | [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
 | [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that this machine meets the project's requirements.                                                    |
 | [`stage-runs`](#subcommand-check-stage-runs)                | Check each stage in dvc.lock matches the recorded run that made it.                                          |
+| [`app`](#subcommand-check-app)                              | Check that an environment provides an app, rather than one installed on this machine being used.             |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
@@ -3981,6 +3983,7 @@ Options:
 | `--input-delete` | list[str] | no       |                 | Alternative lock file input paths to delete after use.                                                                                                        |
 | `--relaxed`      | boolean   | no       | False           | Treat conda and pip dependencies as equivalent.                                                                                                               |
 | `--quiet`, `-q`  | boolean   | no       | False           | Be quiet.                                                                                                                                                     |
+| `--prefix`       | str       | no       |                 | Where the environment is kept, if the spec doesn't say.                                                                                                       |
 
 <a id="subcommand-check-venv"></a>
 
@@ -4069,6 +4072,33 @@ Usage:
 ```text
 calkit check stage-runs
 ```
+
+<a id="subcommand-check-app"></a>
+
+#### `calkit check app`
+
+Check that an environment provides an app, rather than one installed on this machine being used.
+
+An app a stage runs belongs in its environment, so every machine runs the same version, unless the project or stage lists it as a requirement. Environments whose commands don't run locally, e.g., Docker ones, aren't checked.
+
+Usage:
+
+```text
+calkit check app [OPTIONS] NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description          |
+| -------- | ---- | -------- | ------- | -------------------- |
+| `name`   | str  | yes      |         | App, e.g., 'quarto'. |
+
+Options:
+
+| Option                | Type | Required | Default | Description                                        |
+| --------------------- | ---- | -------- | ------- | -------------------------------------------------- |
+| `--environment`, `-e` | str  | yes      |         | Environment that should provide it.                |
+| `--stage`             | str  | no       |         | Pipeline stage using it, whose requirements count. |
 
 <a id="subcommand-check-env-vars"></a>
 
@@ -4544,6 +4574,46 @@ Options:
 | --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
+
+<a id="command-group-quarto"></a>
+
+### `calkit quarto`
+
+Work with Quarto.
+
+| Command                               | Description                                 |
+| ------------------------------------- | ------------------------------------------- |
+| [`render`](#subcommand-quarto-render) | Render a Quarto document in an environment. |
+
+<a id="subcommand-quarto-render"></a>
+
+#### `calkit quarto render`
+
+Render a Quarto document in an environment.
+
+Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. The values the document shows with the 'ckvalue' shortcode are read from their results files and written beside it first.
+
+Usage:
+
+```text
+calkit quarto render [OPTIONS] TARGET-PATH [QUARTO-ARGS...]
+```
+
+Arguments:
+
+| Argument      | Type      | Required | Default | Description                                                            |
+| ------------- | --------- | -------- | ------- | ---------------------------------------------------------------------- |
+| `target_path` | str       | yes      |         | Path to the Quarto document to render.                                 |
+| `quarto_args` | list[str] | no       |         | Extra arguments for 'quarto render', after '--', e.g., '-- --execute'. |
+
+Options:
+
+| Option                   | Type    | Required | Default | Description                                                                                                                   |
+| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto, or `_system` for Quarto installed on this machine. There's no default. |
+| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.         |
+| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                     |
+| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                        |
 
 <a id="command-group-overleaf-ol"></a>
 

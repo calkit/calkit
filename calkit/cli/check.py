@@ -566,6 +566,7 @@ def check_environment(
             alt_lock_fpaths=alt_lock_fpaths,
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
+            prefix=env.get("prefix"),
         )
     elif env["kind"] == "pixi":
         cmd = ["pixi", "install"]
@@ -1327,6 +1328,13 @@ def check_conda_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
+    prefix: Annotated[
+        str | None,
+        typer.Option(
+            "--prefix",
+            help="Where the environment is kept, if the spec doesn't say.",
+        ),
+    ] = None,
 ) -> None:
     log_func: Callable[..., None]
     if quiet:
@@ -1342,6 +1350,7 @@ def check_conda_env(
             log_func=log_func,
             relaxed=relaxed,
             verbose=not quiet,
+            prefix=prefix,
         )
     except Exception as e:
         warn_app_control(output=str(e), maybe=True)
@@ -1999,10 +2008,18 @@ def check_stage_runs() -> None:
     problems = []
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
+        # DVC writes a frozen stage's entry whenever it verifies the stage's
+        # outputs rather than running it, so there's no run to match
+        try:
+            frozen = calkit.pipeline.frozen_stage_base_names(wdir=lock_dir)
+        except Exception:
+            frozen = set()
         for lock_name, locked in sorted(lock_stages.items()):
             if not isinstance(locked, dict) or lock_name in removed.get(
                 lock_dir, set()
             ):
+                continue
+            if lock_name.split("@")[0] in frozen:
                 continue
             name = (
                 lock_name
@@ -2032,6 +2049,50 @@ def check_stage_runs() -> None:
             "'calkit run --force <stage>' records them"
         )
     typer.echo("Every stage in dvc.lock matches its recorded run")
+
+
+@check_app.command(name="app")
+def check_app_in_environment(
+    name: Annotated[str, typer.Argument(help="App, e.g., 'quarto'.")],
+    environment: Annotated[
+        str,
+        typer.Option(
+            "--environment",
+            "-e",
+            help="Environment that should provide it.",
+        ),
+    ],
+    stage_name: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Pipeline stage using it, whose requirements count.",
+        ),
+    ] = None,
+) -> None:
+    """Check that an environment provides an app, rather than one
+    installed on this machine being used.
+
+    An app a stage runs belongs in its environment, so every machine runs
+    the same version, unless the project or stage lists it as a
+    requirement. Environments whose commands don't run locally, e.g.,
+    Docker ones, aren't checked.
+    """
+    import calkit.environments
+
+    ck_info = calkit.load_calkit_info(read_only=True)
+    stage = (ck_info.get("pipeline", {}).get("stages") or {}).get(
+        stage_name or ""
+    )
+    problem = calkit.environments.check_app_in_env(
+        name,
+        environment,
+        ck_info,
+        stage=stage if isinstance(stage, dict) else None,
+    )
+    if problem is not None:
+        raise_error(problem)
+    typer.echo(f"'{name}' is OK for environment '{environment}'")
 
 
 @check_app.command(name="env-vars")

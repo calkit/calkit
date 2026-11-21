@@ -772,16 +772,20 @@ def test_check_dep_exists_conda_off_path(monkeypatch):
     # When neither is findable, it should report missing.
     monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
     assert not calkit.check_dep_exists("conda", "app")
-    # Word and LibreOffice aren't run by their names
+    # Office apps and LibreOffice aren't run by their names
+    import calkit.office
+
     for found in [True, False]:
-        monkeypatch.setattr(calkit.docx, "word_installed", lambda: found)
+        monkeypatch.setattr(
+            calkit.office, "is_office_app_installed", lambda app: found
+        )
         monkeypatch.setattr(
             calkit.docx,
             "find_soffice",
             lambda: "/bin/soffice" if found else None,
         )
-        assert calkit.check_dep_exists("word", "app") is found
-        assert calkit.check_dep_exists("libreoffice", "app") is found
+        for app in ["word", "excel", "powerpoint", "libreoffice"]:
+            assert calkit.check_dep_exists(app, "app") is found
 
 
 def test_get_md5(tmp_dir):

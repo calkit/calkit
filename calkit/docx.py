@@ -1145,37 +1145,6 @@ class Document:
         self._save_content_types(root)
 
 
-def word_installed() -> bool:
-    """Whether Microsoft Word is installed, which only it can tell on
-    Windows, through the path it registers."""
-    if sys.platform == "darwin":
-        return any(
-            os.path.isdir(os.path.expanduser(p))
-            for p in (
-                "/Applications/Microsoft Word.app",
-                "~/Applications/Microsoft Word.app",
-            )
-        )
-    if sys.platform == "win32":
-        import winreg
-
-        # Machine-wide, else for this user, as Office installs either way
-        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-            try:
-                winreg.CloseKey(
-                    winreg.OpenKey(
-                        hive,
-                        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion"
-                        "\\App Paths\\Winword.exe",
-                    )
-                )
-            except OSError:
-                continue
-            return True
-        return False
-    return False
-
-
 def find_soffice() -> str | None:
     """LibreOffice's command, from ``PATH`` or where it installs itself."""
     import shutil

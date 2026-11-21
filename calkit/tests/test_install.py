@@ -489,10 +489,6 @@ def test_platform_entries_prerequisites_and_record(
     # prerequisite first, both land on PATH, and both are recorded
     fake_bin = tmp_dir / "bin"
     fake_bin.mkdir()
-    for name in ("prereq", "tool"):
-        exe = fake_bin / name
-        exe.write_text("#!/bin/sh\nexit 0\n")
-        exe.chmod(0o755)
     registry: dict[str, install.Installer] = {
         "prereq": {"script": "install-prereq", "path_add": str(fake_bin)},
         "tool": {
@@ -511,6 +507,12 @@ def test_platform_entries_prerequisites_and_record(
 
     def fake_run(script: str, shell: bool) -> subprocess.CompletedProcess:
         ran.append(script)
+        # The prerequisite and tool are there once installed
+        name = script.removeprefix("install-")
+        if name in ("prereq", "tool"):
+            exe = fake_bin / name
+            exe.write_text("#!/bin/sh\nexit 0\n")
+            exe.chmod(0o755)
         return subprocess.CompletedProcess(args=[], returncode=0)
 
     with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
@@ -530,8 +532,10 @@ def test_platform_entries_prerequisites_and_record(
         assert install.install("suite") is True
         del registry["suite"]["binary"]
         assert install.install("suite") is False
-    # A prerequisite that's already present isn't reinstalled
+    # A prerequisite that's already installed isn't reinstalled, even where
+    # it isn't on PATH yet
     ran.clear()
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
     with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
         assert install.install("tool") is True
     assert ran == ["install-tool"]

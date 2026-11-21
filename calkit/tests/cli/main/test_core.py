@@ -2838,9 +2838,7 @@ def test_run_offers_git_install(monkeypatch: pytest.MonkeyPatch) -> None:
         assert m_call.called is installed
         if installed:
             assert m_call.call_args.args[0] == [
-                sys.executable,
-                "-m",
-                "calkit",
+                *calkit.get_calkit_cmd(),
                 "config",
                 "github-ssh",
             ]

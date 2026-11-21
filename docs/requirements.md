@@ -374,6 +374,15 @@ so there it points to Docker Engine instead,
 and it doesn't run on Windows, so there it points to Docker Desktop.
 After installing it, `colima start` starts its VM.
 
+<!-- TODO: needs human review -->
+
+On Windows, Docker Desktop needs Windows 10 22H2 or Windows 11 23H2 or
+later, and WSL 2.1.5 or later.
+Before installing it, Calkit says what to run for either if this machine
+doesn't have it.
+The install enables Virtual Machine Platform if it isn't already,
+from an elevated shell, after which Windows needs a restart.
+
 Some entries depend on another, e.g., Git on macOS is installed with
 Homebrew.
 Those prerequisites are prompted for first, one at a time,

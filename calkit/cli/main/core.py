@@ -5844,8 +5844,13 @@ def install_app(
                 + ", ".join(sorted(_install.INSTALLERS))
             )
         # ``--yes`` makes this scriptable (CI, provisioning) without losing
-        # the safety prompt for plain interactive use.
+        # the safety prompt for plain interactive use, which says what
+        # Docker needs on Windows itself
         if yes:
+            if name == "docker" and sys.platform == "win32":
+                docker_message = _install.get_docker_windows_message()
+                if docker_message:
+                    warn(docker_message)
             ok = _install.install(name)
         else:
             ok = _install.prompt_and_install(name, interactive=is_tty())

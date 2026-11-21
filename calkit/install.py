@@ -570,6 +570,58 @@ def _add_to_path(entry: Installer) -> None:
             os.environ["PATH"] = path_add + os.pathsep + current_path
 
 
+def get_wsl_version() -> tuple[int, ...] | None:
+    """Return the version of WSL on this Windows machine, or None where
+    it's missing or the inbox version, which doesn't know its version.
+    """
+    try:
+        p = subprocess.run(
+            ["wsl", "--version"],
+            capture_output=True,
+            # It writes UTF-16 otherwise, at least in older versions
+            env=os.environ | {"WSL_UTF8": "1"},
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode != 0:
+        return None
+    # The first line has WSL's own version, whatever the language
+    out = p.stdout.decode("utf-8", errors="ignore").replace("\x00", "")
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+    return tuple(int(n) for n in match.groups()) if match else None
+
+
+def get_docker_windows_message() -> str | None:
+    """Return what Docker Desktop needs that this Windows machine lacks,
+    and how to get it, if anything.
+    """
+    import platform
+
+    # Windows 10 22H2 or Windows 11 23H2 or later; Windows 11's builds
+    # start at 22000
+    build = int(platform.version().split(".")[-1])
+    if build < 19045 or 22000 <= build < 22631:
+        return (
+            "Docker Desktop needs Windows 10 22H2 or Windows 11 23H2 or "
+            f"later, but this is build {build}; update Windows first."
+        )
+    wsl_version = get_wsl_version()
+    if wsl_version is not None and wsl_version >= (2, 1, 5):
+        return None
+    found = (
+        "isn't installed or is the inbox version"
+        if wsl_version is None
+        else "is " + ".".join(str(n) for n in wsl_version)
+    )
+    return (
+        f"Docker Desktop needs WSL 2.1.5 or later, which {found}. "
+        "To get it, run 'wsl --install --no-distribution', or "
+        "'wsl --update' where WSL is installed, in an admin terminal, "
+        "then restart Windows."
+    )
+
+
 def find(app: str) -> str | None:
     """Find an app's binary on ``PATH``, or where its installer puts it.
 
@@ -770,9 +822,13 @@ def prompt_and_install(
     if app == "docker":
         from calkit.core import is_wsl
 
+        if _current_platform() == "windows":
+            docker_message = get_docker_windows_message()
+            if docker_message:
+                print(f"  {docker_message}")
         # Docker Desktop on Windows can serve WSL too, and then the same
         # Docker works on both sides
-        if is_wsl():
+        elif is_wsl():
             print(
                 "  Docker Desktop on Windows can also provide Docker here: "
                 "install it in Windows, then enable this distro in its "

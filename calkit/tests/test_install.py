@@ -132,6 +132,78 @@ def test_prompt_and_install(monkeypatch):
     assert install.prompt_and_install("nope", interactive=True) is False
 
 
+def test_docker_windows_requirements(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run_wsl(stdout: bytes, returncode: int = 0) -> None:
+        monkeypatch.setattr(
+            "calkit.install.subprocess.run",
+            lambda *a, **k: subprocess.CompletedProcess(
+                a, returncode, stdout=stdout
+            ),
+        )
+
+    # WSL's version is read whether it writes UTF-8 or UTF-16, and the
+    # inbox version, or none, has no version
+    for stdout, returncode, version in [
+        (
+            "WSL version: 2.6.1.0\nKernel version: 6.6.87.2-1\n".encode(),
+            0,
+            (2, 6, 1),
+        ),
+        ("WSL-Version: 2.0.14.0\r\n".encode("utf-16-le"), 0, (2, 0, 14)),
+        (b"Usage: wsl.exe [Argument]", 1, None),
+    ]:
+        run_wsl(stdout, returncode)
+        assert install.get_wsl_version() == version
+    monkeypatch.setattr(
+        "calkit.install.subprocess.run", mock.Mock(side_effect=OSError)
+    )
+    assert install.get_wsl_version() is None
+    # Docker Desktop says what to update, Windows first
+    for build, wsl_version, expected in [
+        ("10.0.19044", (2, 6, 1), "build 19044"),
+        ("10.0.22621", (2, 6, 1), "Windows 11 23H2"),
+        ("10.0.19045", None, "inbox version"),
+        ("10.0.26100", (2, 0, 14), "is 2.0.14"),
+        ("10.0.26100", (2, 1, 5), None),
+    ]:
+        with (
+            mock.patch("platform.version", return_value=build),
+            mock.patch(
+                "calkit.install.get_wsl_version", return_value=wsl_version
+            ),
+        ):
+            message = install.get_docker_windows_message()
+        if expected is None:
+            assert message is None
+        else:
+            assert message is not None and expected in message
+    # It's shown before asking to install Docker on Windows, or before
+    # installing it with --yes
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app as calkit_app
+
+    with (
+        mock.patch("calkit.install.sys.platform", "win32"),
+        mock.patch(
+            "calkit.install.get_docker_windows_message", return_value="Old"
+        ),
+    ):
+        script = install.INSTALLERS["docker"]["windows"]["script"]
+        with (
+            mock.patch("builtins.input", return_value="n"),
+            mock.patch("builtins.print") as m_print,
+        ):
+            install.prompt_and_install("docker", interactive=True)
+        printed = [str(c.args[0]) for c in m_print.call_args_list]
+        assert printed[:2] == ["  Old", f"  {script}"]
+        with mock.patch("calkit.install.install", return_value=True):
+            result = CliRunner().invoke(
+                calkit_app, ["install", "docker", "--yes"]
+            )
+        assert "Warning: Old" in result.output
+
+
 @skipif_windows_fake_binary
 def test_check_system_deps_orders_and_auto_installs(tmp_dir, monkeypatch):
     # Mixed-order deps: a setup step listed first, an env-var, and an

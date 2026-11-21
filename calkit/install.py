@@ -754,6 +754,10 @@ def install(app: str, entry: Installer | None = None) -> bool:
     if entry is None:
         return False
     for req in entry.get("requires", []):
+        # One installed but not on PATH yet, e.g., in this shell, is used
+        req_entry = get_installer(req)
+        if find(req) is not None and req_entry is not None:
+            _add_to_path(req_entry)
         if shutil.which(req) is None and not install(req):
             return False
     # capture=False so installers can stream their own progress output

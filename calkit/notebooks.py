@@ -17,6 +17,29 @@ if TYPE_CHECKING:
     )
 
 
+def get_parameters_text(parameters: dict[str, Any]) -> str:
+    """Parameters as text for a file name, e.g., ``t-25-cases-a,b``, with a
+    hash for a long list or a dict.
+    """
+    parameters_cleaned = {}
+    for k, v in parameters.items():
+        if isinstance(v, list):
+            if len(v) == 0:
+                v = "empty"
+            elif len(v) < 5:
+                v = ",".join(map(str, v))
+            else:
+                v = hashlib.md5(
+                    json.dumps(v, sort_keys=True).encode()
+                ).hexdigest()[:7]
+        elif isinstance(v, dict):
+            v = hashlib.md5(
+                json.dumps(v, sort_keys=True).encode()
+            ).hexdigest()[:7]
+        parameters_cleaned[k] = v
+    return "-".join(f"{k}-{v}" for k, v in parameters_cleaned.items())
+
+
 def get_executed_notebook_path(
     notebook_path: str,
     to: Literal["html", "notebook"],
@@ -28,25 +51,7 @@ def get_executed_notebook_path(
     nb_fname = os.path.basename(notebook_path)
     # If we have any parameters, add these to the notebook name
     if parameters:
-        parameters_cleaned = {}
-        for k, v in parameters.items():
-            if isinstance(v, list):
-                if len(v) == 0:
-                    v = "empty"
-                elif len(v) < 5:
-                    v = ",".join(map(str, v))
-                else:
-                    v = hashlib.md5(
-                        json.dumps(v, sort_keys=True).encode()
-                    ).hexdigest()[:7]
-            elif isinstance(v, dict):
-                v = hashlib.md5(
-                    json.dumps(v, sort_keys=True).encode()
-                ).hexdigest()[:7]
-            parameters_cleaned[k] = v
-        params_txt = "-".join(
-            f"{k}-{v}" for k, v in parameters_cleaned.items()
-        )
+        params_txt = get_parameters_text(parameters)
         nb_fname = f"{nb_fname.removesuffix('.ipynb')}-{params_txt}.ipynb"
     if to == "html":
         fname_out = nb_fname.removesuffix(".ipynb") + ".html"
@@ -229,16 +234,16 @@ def get_notebook_values_path(
     notebook_path: str, parameters: dict[str, Any] | None = None
 ) -> str:
     """Where the values a notebook's cells make are saved, e.g.,
-    ``.calkit/notebooks/outputs/analysis/values.json`` for
-    ``analysis.ipynb``, with any parameters in the folder's name as for its
-    executed copy.
+    ``.calkit/notebooks/outputs/nbs/fit.ipynb/values.json`` for
+    ``nbs/fit.ipynb``, or in a folder in that named for its parameters,
+    e.g., ``fit.ipynb/t-25/values.json``.
     """
-    executed = get_executed_notebook_path(
-        notebook_path, to="notebook", parameters=parameters
+    folder = ".calkit/notebooks/outputs/" + posixpath.normpath(
+        notebook_path.replace("\\", "/")
     )
-    prefix = ".calkit/notebooks/executed/"
-    name = executed.removeprefix(prefix).removesuffix(".ipynb")
-    return f".calkit/notebooks/outputs/{name}/values.json"
+    if parameters:
+        folder += "/" + get_parameters_text(parameters)
+    return folder + "/values.json"
 
 
 def get_notebook_of_values_path(path: str) -> str | None:
@@ -250,7 +255,7 @@ def get_notebook_of_values_path(path: str) -> str | None:
     if not (path.startswith(prefix) and path.endswith("/values.json")):
         return None
     name = path.removeprefix(prefix).removesuffix("/values.json")
-    return name + ".ipynb" if name else None
+    return name if name.lower().endswith(".ipynb") else None
 
 
 def get_cell_ids(nb: dict) -> list[str | None]:

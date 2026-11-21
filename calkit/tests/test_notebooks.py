@@ -131,16 +131,21 @@ def test_is_marimo_notebook():
 
 def test_get_notebook_values_path():
     path = calkit.notebooks.get_notebook_values_path("fit.ipynb")
-    assert path == ".calkit/notebooks/outputs/fit/values.json"
+    assert path == ".calkit/notebooks/outputs/fit.ipynb/values.json"
     assert calkit.notebooks.get_notebook_of_values_path(path) == "fit.ipynb"
     path = calkit.notebooks.get_notebook_values_path("nbs/fit.ipynb")
-    assert path == ".calkit/notebooks/outputs/nbs/fit/values.json"
+    assert path == ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
     assert (
         calkit.notebooks.get_notebook_of_values_path(path) == "nbs/fit.ipynb"
     )
-    # Parameters are in the name, as for the executed copy
+    # Parameters name a folder in the notebook's, which isn't how a value is
+    # cited
     path = calkit.notebooks.get_notebook_values_path("fit.ipynb", {"t": 25})
-    assert path == ".calkit/notebooks/outputs/fit-t-25/values.json"
+    assert path == ".calkit/notebooks/outputs/fit.ipynb/t-25/values.json"
+    assert calkit.notebooks.get_notebook_of_values_path(path) is None
+    assert calkit.notebooks.get_notebook_values_path(".\\nbs\\fit.ipynb") == (
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+    )
     assert (
         calkit.notebooks.get_notebook_of_values_path("results/v.json") is None
     )
@@ -420,7 +425,7 @@ def test_cell_output_marks():
     stage["parameters"] = {"t": 25}
     described = calkit.notebooks.describe_cell_outputs("fit", stage, None)
     assert described[0]["citation"] == (
-        r"\ckvalue{.calkit/notebooks/outputs/fit-t-25/values.json}{k}"
+        r"\ckvalue{.calkit/notebooks/outputs/fit.ipynb/t-25/values.json}{k}"
     )
     assert described[0]["cell_index"] is None
     # Including one the project's parameters fill in, as the pipeline does
@@ -429,7 +434,7 @@ def test_cell_output_marks():
         "fit", stage, None, ck_info={"parameters": {"temp": 35}}
     )
     assert described[0]["citation"] == (
-        r"\ckvalue{.calkit/notebooks/outputs/fit-t-35/values.json}{k}"
+        r"\ckvalue{.calkit/notebooks/outputs/fit.ipynb/t-35/values.json}{k}"
     )
     # A stage's wdir is part of every path cited, and of the notebook's
     in_sub = {"kind": "jupyter-notebook", "wdir": "sub"} | {
@@ -439,11 +444,11 @@ def test_cell_output_marks():
         {"pipeline": {"stages": {"sub": in_sub}}}, "sub/fit.ipynb"
     ) == ["sub"]
     assert calkit.notebooks.get_stage_values_path(in_sub) == (
-        "sub/.calkit/notebooks/outputs/fit/values.json"
+        "sub/.calkit/notebooks/outputs/fit.ipynb/values.json"
     )
     described = calkit.notebooks.describe_cell_outputs("sub", in_sub, None)
     assert [d["citation"] for d in described[:2]] == [
-        r"\ckvalue{sub/.calkit/notebooks/outputs/fit/values.json}{k}",
+        r"\ckvalue{sub/.calkit/notebooks/outputs/fit.ipynb/values.json}{k}",
         r"\ckfigure{sub/f.png}",
     ]
 

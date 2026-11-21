@@ -258,7 +258,7 @@ def test_ck_components(tmp_dir):
                     "figures/fit_1.5.pdf",
                     "tables/summary.tex",
                     "results/m.json",
-                    ".calkit/notebooks/outputs/nbs/fit/values.json",
+                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json",
                 }
             ),
         )
@@ -289,7 +289,7 @@ def test_ck_components(tmp_dir):
     # A value cited from a notebook is one its cells make, saved beside it,
     # which says what to do before it's been saved
     assert component_path("nbs/fit.ipynb") == (
-        ".calkit/notebooks/outputs/nbs/fit/values.json",
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json",
         None,
     )
     assert component_path("other.ipynb") == (

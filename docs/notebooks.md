@@ -243,7 +243,8 @@ and each of several is cited by its own name, e.g.,
 
 A value is saved as it is right after its cell runs, so a variable
 changed further down still saves what that cell made.
-Values are kept in `.calkit/notebooks/outputs/`,
+Values are kept in a JSON file named for the notebook, e.g.,
+`.calkit/notebooks/outputs/fit.ipynb/values.json`,
 and figures and tables where their paths say,
 as outputs of the stage, so the pipeline knows when they're out of date.
 Running the notebook yourself doesn't save them:

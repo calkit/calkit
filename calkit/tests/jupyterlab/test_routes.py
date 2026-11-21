@@ -94,8 +94,8 @@ async def test_notebook_cell_outputs(
     assert response.code == 200
     assert json.loads(response.body)["output"]["cell_id"] == ids[1]
     # Listing shows each by its cell, with a saved value once there's one
-    os.makedirs(".calkit/notebooks/outputs/fit")
-    with open(".calkit/notebooks/outputs/fit/values.json", "w") as f:
+    os.makedirs(".calkit/notebooks/outputs/fit.ipynb")
+    with open(".calkit/notebooks/outputs/fit.ipynb/values.json", "w") as f:
         json.dump({"k_25": 0.0309}, f)
     listed = json.loads((await fetch("GET", path="fit.ipynb")).body)
     assert [(m["kind"], m["cell_index"]) for m in listed] == [

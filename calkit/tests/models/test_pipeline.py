@@ -528,7 +528,9 @@ def test_jupyternotebookstage():
         ],
     )
     dvc_stage = s.to_dvc()
-    assert s.values_path == ".calkit/notebooks/outputs/nbs/fit/values.json"
+    assert (
+        s.values_path == ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+    )
     assert dvc_stage["cmd"] == (
         "calkit nb execute --environment main --no-check "
         '--output "kind=value,cell_id=3f9a1c2e,variable_name=k_25" '

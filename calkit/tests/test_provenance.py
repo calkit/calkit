@@ -1234,7 +1234,7 @@ def test_get_path_provenance():
         "paper/figures/plot.png": "",
         "figures/plot.png": "",
         "nbs/fit.ipynb": "{}",
-        ".calkit/notebooks/outputs/nbs/fit/values.json": json.dumps(
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json": json.dumps(
             {"k": 0.25}
         ),
     }
@@ -1298,7 +1298,9 @@ def test_get_path_provenance():
             "fit": {
                 "cmd": "calkit nb execute nbs/fit.ipynb",
                 "deps": [".calkit/notebooks/cleaned/nbs/fit.ipynb"],
-                "outs": [".calkit/notebooks/outputs/nbs/fit/values.json"],
+                "outs": [
+                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+                ],
             },
         }
     }

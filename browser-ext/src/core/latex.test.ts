@@ -210,14 +210,22 @@ describe("citationCandidates", () => {
         key: "k",
         options: "",
       }),
-    ).toEqual([".calkit/notebooks/outputs/nbs/fit/values.json"]);
+    ).toEqual([".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"]);
     expect(notebookValuesPath("fit.IPYNB")).toBe(
-      ".calkit/notebooks/outputs/fit/values.json",
+      ".calkit/notebooks/outputs/fit.IPYNB/values.json",
     );
     expect(
-      notebookOfValuesPath(".calkit/notebooks/outputs/nbs/fit/values.json"),
+      notebookOfValuesPath(
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json",
+      ),
     ).toBe("nbs/fit.ipynb");
     expect(notebookOfValuesPath("results/values.json")).toBeNull();
+    // One with parameters isn't how a value is cited
+    expect(
+      notebookOfValuesPath(
+        ".calkit/notebooks/outputs/fit.ipynb/t-25/values.json",
+      ),
+    ).toBeNull();
     expect(
       citationCandidates("paper", {
         kind: "value",

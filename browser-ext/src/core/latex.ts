@@ -166,19 +166,18 @@ export function citationCandidates(
  * without parameters.
  */
 export function notebookValuesPath(notebook: string): string {
-  return `.calkit/notebooks/outputs/${notebook.replace(
-    /\.ipynb$/i,
-    "",
-  )}/values.json`;
+  return `.calkit/notebooks/outputs/${notebook}/values.json`;
 }
 
 /**
  * The notebook a values file was saved from, which is how a value from it
- * is cited, or null for any other file.
+ * is cited, or null for any other file, or one saved with parameters.
  */
 export function notebookOfValuesPath(path: string): string | null {
-  const m = /^\.calkit\/notebooks\/outputs\/(.+)\/values\.json$/.exec(path);
-  return m ? `${m[1]}.ipynb` : null;
+  const m = /^\.calkit\/notebooks\/outputs\/(.+\.ipynb)\/values\.json$/i.exec(
+    path,
+  );
+  return m ? m[1] : null;
 }
 
 /** The command that cites something, to insert into a document. */

@@ -664,7 +664,7 @@ def test_cell_outputs(tmp_dir):
     # Running saves each, the value as it was right after its cell, and
     # leaves no sign of the cells that saved them
     subprocess.check_call(["calkit", "run"])
-    values_path = ".calkit/notebooks/outputs/fit/values.json"
+    values_path = ".calkit/notebooks/outputs/fit.ipynb/values.json"
     with open(values_path) as f:
         assert json.load(f) == {
             "k_25": 0.0309,
@@ -734,4 +734,4 @@ def test_cell_outputs(tmp_dir):
         )
         assert out.returncode != 0
         assert message in out.stdout + out.stderr
-        assert not os.path.isdir(".calkit/notebooks/outputs/fit/_saving")
+        assert not os.path.isdir(".calkit/notebooks/outputs/fit.ipynb/_saving")

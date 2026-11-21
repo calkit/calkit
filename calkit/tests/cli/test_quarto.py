@@ -36,8 +36,14 @@ def test_render(tmp_path, monkeypatch):
     quarto.write_text(f'#!/bin/sh\necho "$@" > {tmp_path}/called.txt\n')
     quarto.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
-    # Outside any environment, the machine's is used
+    # The environment has to be named
     res = render("report.qmd")
+    assert res.returncode != 0
+    assert "Name the environment" in res.stdout + res.stderr
+    assert "_system" in res.stdout + res.stderr
+    assert not (tmp_path / "called.txt").exists()
+    # In '_system', the machine's is used
+    res = render("-e", "_system", "report.qmd")
     assert res.returncode == 0, res.stdout + res.stderr
     (tmp_path / "called.txt").unlink()
     # Declared by the project, the document's values are written beside it,
@@ -45,7 +51,9 @@ def test_render(tmp_path, monkeypatch):
     # passed
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump({"name": "test", "requirements": ["quarto"]}, f)
-    res = render("report.qmd", "--to", "pdf", "--", "--execute")
+    res = render(
+        "-e", "_system", "report.qmd", "--to", "pdf", "--", "--execute"
+    )
     assert res.returncode == 0, res.stdout + res.stderr
     assert (tmp_path / "called.txt").read_text().split() == [
         "render",
@@ -64,7 +72,7 @@ def test_render(tmp_path, monkeypatch):
     (tmp_path / "report.qmd").write_text(
         "\nRMS is {{< ckvalue results.json nope >}}.\n"
     )
-    res = render("report.qmd")
+    res = render("-e", "_system", "report.qmd")
     assert res.returncode != 0
     assert "has no key 'nope'" in res.stdout + res.stderr
     assert "report.qmd:2" in res.stdout + res.stderr
@@ -75,7 +83,7 @@ def test_render(tmp_path, monkeypatch):
     (tmp_path / "pub" / "index.qmd").write_text(
         "{{< ckvalue results.json rms .1f >}}\n"
     )
-    res = render("index.qmd", cwd="pub")
+    res = render("-e", "_system", "index.qmd", cwd="pub")
     assert res.returncode == 0, res.stdout + res.stderr
     values = json.loads(
         (tmp_path / "pub" / "_calkit" / "values" / "index.json").read_text()

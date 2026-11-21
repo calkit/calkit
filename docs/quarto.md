@@ -25,6 +25,8 @@ The stage renders with `calkit quarto render`,
 which checks that the environment provides it,
 and fails rather than quietly using whatever version is installed on the
 machine.
+Run by hand, it's given the environment every time,
+e.g., `calkit quarto render -e main index.qmd`.
 `calkit check app quarto -e <environment>` makes the same check on its own,
 for Quarto or any other app.
 A stage in the `_system` environment uses the one installed on the

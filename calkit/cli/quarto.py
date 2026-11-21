@@ -41,8 +41,9 @@ def render(
             "--environment",
             "-e",
             help=(
-                "Environment to render in, which should provide Quarto. "
-                "Without one, Quarto installed on this machine is used."
+                "Environment to render in, which should provide Quarto, or "
+                "`_system` for Quarto installed on this machine. There's no "
+                "default."
             ),
         ),
     ] = None,
@@ -82,8 +83,6 @@ def render(
     from calkit.cli.main.core import run_in_env
     from calkit.markdown import MarkdownParseError, results_by_name
 
-    environment = environment or "_system"
-
     # The project is wherever calkit.yaml is above the document, since a
     # stage renders from its working directory
     doc_path = os.path.abspath(target_path)
@@ -94,6 +93,14 @@ def render(
             raise_error(f"{target_path} isn't in a Calkit project")
         project_dir = parent
     ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
+    # Named every time, since a default would change meaning as the project
+    # gains environments
+    if environment is None:
+        names = list(ck_info.get("environments") or {}) + ["_system"]
+        raise_error(
+            "Name the environment to render in with '-e', one of: "
+            + ", ".join(names)
+        )
     problem = (
         None
         if allow_machine_quarto

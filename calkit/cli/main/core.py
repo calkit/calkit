@@ -799,6 +799,33 @@ def get_status(
                 )
     else:
         categories = default_categories
+    # Without a calkit.yaml this isn't a project, which an empty status
+    # would read as one with nothing in it. Saying so only fits when
+    # project status was asked for: 'calkit status -c git' in a plain Git
+    # repo doesn't care about calkit.yaml.
+    if "project" in categories:
+        # Walking up for a calkit.yaml tells a subdirectory of a project
+        # from a directory that isn't one, where 'calkit init' is wrong
+        project_dir: str | None = os.path.abspath(".")
+        while project_dir is not None and not os.path.isfile(
+            os.path.join(project_dir, "calkit.yaml")
+        ):
+            parent = os.path.dirname(project_dir)
+            project_dir = None if parent == project_dir else parent
+        if project_dir != os.path.abspath("."):
+            if project_dir is None:
+                warn(
+                    f"No calkit.yaml in {os.getcwd()}; not a Calkit "
+                    "project. Run 'calkit init' or change to project "
+                    "directory.",
+                    err=as_json,
+                )
+            else:
+                warn(
+                    f"No calkit.yaml in {os.getcwd()}; project is at "
+                    f"{project_dir}. Change to that directory.",
+                    err=as_json,
+                )
     # Everything is worked out before anything is shown, which can take a
     # while, e.g., when environments are checked again, so a spinner shows
     # until then. It writes to its own copy of the terminal, since what the

@@ -1446,10 +1446,29 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
 
 
 def test_status(tmp_dir):
-    subprocess.check_call(["calkit", "status"])
+    # Without a calkit.yaml this isn't a project, which status says
+    res = subprocess.run(["calkit", "status"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "not a Calkit project" in res.stdout
+    # Unless only non-project categories are asked for
+    res = subprocess.run(
+        ["calkit", "status", "-c", "git"], capture_output=True, text=True
+    )
+    assert res.returncode == 0
+    assert "calkit.yaml" not in res.stdout + res.stderr
     subprocess.check_call(["calkit", "init"])
+    # From a subdirectory of the project, it points to the root instead
+    os.makedirs("figures")
+    res = subprocess.run(
+        ["calkit", "status"], capture_output=True, text=True, cwd="figures"
+    )
+    assert res.returncode == 0
+    assert "not a Calkit project" not in res.stdout
+    assert "project is at" in res.stdout
     subprocess.check_call(["calkit", "new", "status", "in-progress"])
-    subprocess.check_call(["calkit", "status"])
+    res = subprocess.run(["calkit", "status"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "No calkit.yaml" not in res.stdout
     status = calkit.get_latest_project_status()
     assert status is not None
     assert status.status == "in-progress"

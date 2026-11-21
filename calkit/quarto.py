@@ -1,5 +1,4 @@
-"""Quarto documents rendered by the pipeline: the values they show from
-results files with the ``ckvalue`` shortcode, and where Quarto comes from."""
+"""Functionality for using Quarto in Calkit projects."""
 
 from __future__ import annotations
 

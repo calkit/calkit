@@ -341,24 +341,31 @@ non-zero.
 Installing is always opt-in: nothing runs without a yes at the prompt
 or `--yes` on the command line.
 
+<!-- TODO: needs human review: gh and make rows -->
+
 Apps currently in the registry:
 
-| Name                 | Installer                                                                                          |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `pixi`               | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                          |
-| `uv`                 | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                 |
-| `rustup`, `cargo`    | upstream `rustup` script on Unix, `winget` on Windows                                              |
-| `juliaup`, `julia`   | upstream `juliaup` script on Unix, `winget` on Windows                                             |
-| `nix`                | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows |
-| `conda`, `mamba`     | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                 |
-| `git`                | Homebrew on macOS, `winget` on Windows                                                             |
-| `docker`             | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows                             |
-| `colima`             | Homebrew on macOS, with the Docker CLI unless one is already installed                             |
-| `code`               | Homebrew cask on macOS, `winget` on Windows                                                        |
-| `R`, `Rscript`       | Homebrew cask on macOS, `winget` on Windows                                                        |
-| `node`, `npm`, `npx` | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                        |
-| `brew`               | the upstream Homebrew script, macOS only                                                           |
-| `choco`              | the upstream Chocolatey script in an elevated shell, Windows only                                  |
+| Name                 | Installer                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `pixi`               | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                                                 |
+| `uv`                 | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                                        |
+| `rustup`, `cargo`    | upstream `rustup` script on Unix, `winget` on Windows                                                                     |
+| `juliaup`, `julia`   | upstream `juliaup` script on Unix, `winget` on Windows                                                                    |
+| `nix`                | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows                        |
+| `conda`, `mamba`     | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                                        |
+| `git`                | Homebrew on macOS, `winget` on Windows                                                                                    |
+| `gh`                 | Homebrew on macOS, `pixi global install gh` on Linux, `winget` on Windows                                                 |
+| `make`               | `winget` on Windows; comes with the developer tools elsewhere                                                             |
+| `docker`             | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows, enabling Virtual Machine Platform first if needed |
+| `colima`             | Homebrew on macOS, with the Docker CLI unless one is already installed                                                    |
+| `code`               | VS Code's own download on macOS, `winget` on Windows; also `calkit install vscode`                                        |
+| `R`, `Rscript`       | Homebrew cask on macOS, `winget` on Windows                                                                               |
+| `node`, `npm`, `npx` | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                                               |
+| `claude`             | upstream script; then adds Calkit's plugin                                                                                |
+| `codex`              | upstream script; then adds Calkit's plugin                                                                                |
+| `opencode`           | upstream script on Unix; then adds Calkit's plugin                                                                        |
+| `brew`               | the upstream Homebrew script, macOS only                                                                                  |
+| `choco`              | the upstream Chocolatey script in an elevated shell, Windows only                                                         |
 
 Run `calkit list installers` for the live list.
 On Linux, Git, VS Code, and R come from the system package manager,
@@ -370,6 +377,15 @@ Colima isn't needed on Linux, where Docker runs natively,
 so there it points to Docker Engine instead,
 and it doesn't run on Windows, so there it points to Docker Desktop.
 After installing it, `colima start` starts its VM.
+
+<!-- TODO: needs human review -->
+
+On Windows, Docker Desktop needs Windows 10 22H2 or Windows 11 23H2 or
+later, and WSL 2.1.5 or later.
+Before installing it, Calkit says what to run for either if this machine
+doesn't have it.
+The install enables Virtual Machine Platform if it isn't already,
+from an elevated shell, after which Windows needs a restart.
 
 Some entries depend on another, e.g., Git on macOS is installed with
 Homebrew.

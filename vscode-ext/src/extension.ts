@@ -33,7 +33,8 @@ import {
 } from "./environments";
 import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
-  getExecutedNotebookHtmlPath,
+  getNotebookHtmlPath,
+  getStageNotebookPath,
   resolveNotebookEnvironmentName,
 } from "./notebooks";
 import type {
@@ -1726,24 +1727,28 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         // From the sidebar we receive the notebook's relative path; from the
         // notebook toolbar we fall back to the active notebook editor.
-        let relPath = nbPath;
-        if (!relPath) {
-          const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
-          if (!notebookUri) {
-            return;
-          }
-          relPath = path
-            .relative(workspaceRoot, notebookUri.fsPath)
-            .replace(/\\/g, "/");
+        const notebookUri = nbPath
+          ? vscode.Uri.file(path.join(workspaceRoot, nbPath))
+          : vscode.window.activeNotebookEditor?.notebook.uri;
+        if (!notebookUri) {
+          return;
         }
-        // Under the .calkit of the project its stage runs in
-        const nbStage = Object.values(
-          currentCalkitConfig?.pipeline?.stages ?? {},
-        ).find((s) => s.notebook_path === relPath);
-        const htmlRelPath = getExecutedNotebookHtmlPath(
-          relPath,
-          nbStage?.subproject_wdir ??
-            splitSubprojectPath(relPath, currentSubprojectDirs).dir,
+        // Found from the project it runs in, declared by the root or not
+        const projectRoot =
+          getNotebookProjectRoot(notebookUri) ?? workspaceRoot;
+        const relPath = path
+          .relative(projectRoot, notebookUri.fsPath)
+          .replace(/\\/g, "/");
+        const { config } = await readMergedProject(projectRoot);
+        const nbStage = Object.values(config?.pipeline?.stages ?? {}).find(
+          (s) => getStageNotebookPath(s) === relPath,
+        );
+        const htmlRelPath = path.relative(
+          workspaceRoot,
+          path.join(
+            projectRoot,
+            getNotebookHtmlPath(relPath, nbStage, nbStage?.subproject_wdir),
+          ),
         );
         if (!(await fileExists(path.join(workspaceRoot, htmlRelPath)))) {
           void vscode.window.showInformationMessage(
@@ -2623,9 +2628,18 @@ async function scanDetectedFiles(
   }
   const toRel = (u: vscode.Uri): string =>
     path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
+  // A nested project the root doesn't declare has its own notebooks, as a
+  // submodule does
+  const isProject = (d: string) =>
+    fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml"));
   currentDetectedNotebooks = notebookUris
     .map(toRel)
-    .filter((rel) => !isUnderAnyDir(rel, submodulePaths))
+    .filter(
+      (rel) =>
+        !isUnderAnyDir(rel, submodulePaths) &&
+        findUndeclaredProjectDir(rel, isProject, currentSubprojectDirs) ===
+          undefined,
+    )
     .sort();
   currentDetectedFigures = detectedFigures;
   currentDetectedDatasets = detectedDatasets;
@@ -2763,25 +2777,13 @@ async function refreshPipelineOutputContext(
     }
   }
   for (const stage of Object.values(calkitConfig?.pipeline?.stages ?? {})) {
+    // Run as a notebook, or rendered by Quarto
+    const stageNbPath = getStageNotebookPath(stage);
     if (
-      stage.kind === "jupyter-notebook" &&
-      typeof stage.notebook_path === "string"
+      stageNbPath &&
+      (stage.kind === "jupyter-notebook" || stage.kind === "quarto")
     ) {
-      pipelineNotebookUris.add(path.join(workspaceRoot, stage.notebook_path));
-    }
-    // A notebook Quarto renders, relative to the stage's wdir
-    if (
-      stage.kind === "quarto" &&
-      typeof stage.target_path === "string" &&
-      stage.target_path.endsWith(".ipynb")
-    ) {
-      pipelineNotebookUris.add(
-        path.join(
-          workspaceRoot,
-          typeof stage.wdir === "string" ? stage.wdir : "",
-          stage.target_path,
-        ),
-      );
+      pipelineNotebookUris.add(path.join(workspaceRoot, stageNbPath));
     }
   }
   // For explorer menus; resourcePath's form varies by platform, so list both
@@ -5347,20 +5349,27 @@ async function openNotebookHtmlPreview(
   htmlRelPath: string,
   title: string,
 ): Promise<void> {
+  const absUri = vscode.Uri.file(path.join(workspaceRoot, htmlRelPath));
+  const dirUri = vscode.Uri.joinPath(absUri, "..");
   const panel = vscode.window.createWebviewPanel(
     "calkit.notebookHtml",
     title,
     vscode.ViewColumn.Active,
-    { enableScripts: true },
+    { enableScripts: true, localResourceRoots: [dirUri] },
   );
   context.subscriptions.push(panel);
-  const absUri = vscode.Uri.file(path.join(workspaceRoot, htmlRelPath));
   // nbconvert output is a self-contained document (inline styles, base64
   // images, scripts from CDNs), so render it as the webview's own content.
   // Loading it via an iframe + asWebviewUri renders blank, so embed it directly.
+  // Quarto's links its libraries in a folder beside it, so relative URLs
+  // resolve from there.
   try {
     const bytes = await vscode.workspace.fs.readFile(absUri);
-    panel.webview.html = Buffer.from(bytes).toString("utf8");
+    const base = `<base href="${panel.webview.asWebviewUri(dirUri)}/">`;
+    const html = Buffer.from(bytes).toString("utf8");
+    panel.webview.html = /<head[^>]*>/i.test(html)
+      ? html.replace(/<head[^>]*>/i, (head) => head + base)
+      : base + html;
   } catch {
     panel.webview.html = `<!DOCTYPE html><body style="font-family: var(--vscode-font-family); padding: 16px;">Could not read ${escHtml(
       htmlRelPath,

@@ -4,11 +4,13 @@ import * as path from "node:path";
 import {
   getConfiguredCandidateForNotebookPath,
   getExecutedNotebookHtmlPath,
+  getNotebookHtmlPath,
+  getStageNotebookPath,
   resolveNotebookEnvironmentName,
   type CalkitInfo,
 } from "../notebooks";
 
-test("getExecutedNotebookHtmlPath mirrors calkit's executed HTML location", () => {
+test("notebook HTML paths mirror where Calkit and Quarto write them", () => {
   // Notebook in a subdirectory keeps its directory under the html dir.
   assert.equal(
     getExecutedNotebookHtmlPath("notebooks/analysis.ipynb"),
@@ -23,6 +25,24 @@ test("getExecutedNotebookHtmlPath mirrors calkit's executed HTML location", () =
   assert.equal(
     getExecutedNotebookHtmlPath("sub/nb/analysis.ipynb", "sub"),
     path.join("sub", ".calkit", "notebooks", "html", "nb", "analysis.html"),
+  );
+  assert.equal(
+    getNotebookHtmlPath("nb/analysis.ipynb", { kind: "jupyter-notebook" }),
+    path.join(".calkit", "notebooks", "html", "nb", "analysis.html"),
+  );
+  // Quarto's is the output its stage declares for it, from its wdir, or
+  // beside the notebook
+  assert.equal(
+    getNotebookHtmlPath("pub/analysis.ipynb", {
+      kind: "quarto",
+      wdir: "pub",
+      outputs: ["report.html", { path: "_site/analysis.html" }],
+    }),
+    "pub/_site/analysis.html",
+  );
+  assert.equal(
+    getNotebookHtmlPath("pub/analysis.ipynb", { kind: "quarto" }),
+    "pub/analysis.html",
   );
 });
 
@@ -77,6 +97,14 @@ test("resolveNotebookEnvironmentName uses jupyter pipeline stages directly", () 
   assert.equal(
     resolveNotebookEnvironmentName(config, "analysis.ipynb"),
     undefined,
+  );
+  assert.deepEqual(
+    Object.values(config.pipeline!.stages!).map(getStageNotebookPath),
+    [undefined, "pub/analysis.ipynb"],
+  );
+  assert.equal(
+    getStageNotebookPath({ notebook_path: "./nb\\a.ipynb", wdir: "sub" }),
+    "sub/nb/a.ipynb",
   );
 });
 

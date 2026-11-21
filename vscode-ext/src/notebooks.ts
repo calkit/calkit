@@ -36,6 +36,54 @@ export function getExecutedNotebookHtmlPath(
   return path.join(".calkit", "notebooks", "html", rel);
 }
 
+// Root-relative path of the notebook a stage runs, i.e., a notebook stage's,
+// or one a quarto stage renders, from the stage's wdir.
+export function getStageNotebookPath(stage: PipelineStage): string | undefined {
+  const notebookPath =
+    stage.notebook_path ??
+    (stage.kind === "quarto" && stage.target_path?.endsWith(".ipynb")
+      ? stage.target_path
+      : undefined);
+  if (typeof notebookPath !== "string") {
+    return undefined;
+  }
+  const wdir = typeof stage.wdir === "string" ? stage.wdir : "";
+  return path.posix.normalize(
+    path.posix.join(
+      normalizeNotebookPath(wdir),
+      normalizeNotebookPath(notebookPath),
+    ),
+  );
+}
+
+// Root-relative path of a notebook's HTML. Quarto writes it beside the
+// notebook unless the project sets an output dir, so a quarto stage's is the
+// output it declares named after the notebook, or else beside it. Other
+// notebooks' are where Calkit writes executed notebooks.
+export function getNotebookHtmlPath(
+  notebookRelPath: string,
+  stage: PipelineStage | undefined,
+  projectDir = ".",
+): string {
+  if (stage?.kind !== "quarto") {
+    return getExecutedNotebookHtmlPath(notebookRelPath, projectDir);
+  }
+  const notebookPath = normalizeNotebookPath(notebookRelPath);
+  const htmlName = path.posix.basename(notebookPath, ".ipynb") + ".html";
+  const wdir = typeof stage.wdir === "string" ? stage.wdir : "";
+  for (const out of stage.outputs ?? []) {
+    const outPath = normalizeNotebookPath(
+      typeof out === "string" ? out : out.path,
+    );
+    if (path.posix.basename(outPath) === htmlName) {
+      return path.posix.normalize(
+        path.posix.join(normalizeNotebookPath(wdir), outPath),
+      );
+    }
+  }
+  return path.posix.join(path.posix.dirname(notebookPath), htmlName);
+}
+
 // Environment of the pipeline stage that runs this notebook, i.e., a
 // notebook stage, or a quarto stage rendering it, by its path relative to the
 // stage's wdir. Any stage referencing the notebook counts, since the path is

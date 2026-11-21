@@ -42,8 +42,7 @@ def render(
             "-e",
             help=(
                 "Environment to render in, which should provide Quarto. "
-                "Without one, Quarto installed on this machine is used, if "
-                "the project lists it as a requirement."
+                "Without one, Quarto installed on this machine is used."
             ),
         ),
     ] = None,
@@ -72,7 +71,8 @@ def render(
     """Render a Quarto document in an environment.
 
     Quarto has to come from the environment, so every machine renders with
-    the same version, unless the project lists 'quarto' as a requirement.
+    the same version, unless the project lists 'quarto' as a requirement or
+    the environment is `_system`, i.e., this machine.
     The values the document shows with the 'ckvalue' shortcode are read
     from their results files and written beside it first.
     """

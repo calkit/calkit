@@ -4414,42 +4414,46 @@ def check_app_in_env(
     expected. It's in the environment if the environment's PATH resolves
     it somewhere other than PATH outside it does, which also sees through a
     launcher, e.g., Pixi's for a global install. Only environments that run
-    commands locally are checked.
+    commands locally are checked. The '_system' environment is this
+    machine, so there it only has to be installed.
     """
     if is_app_required(app, ck_info, stage):
         return None
     system_path = shutil.which(app, path=_path_outside_active_env())
+    if env_name == "_system":
+        if system_path is None:
+            return (
+                f"'{app}' isn't installed on this machine; install it, or "
+                "use an environment that provides it"
+            )
+        return None
     fix = (
         f"add it to the environment, or list '{app}' in the project's "
         "requirements"
     )
-    if env_name == "_system":
-        where = "isn't in an environment"
-        env_path = system_path
-    else:
-        env = (ck_info.get("environments") or {}).get(env_name)
-        if not isinstance(env, dict) or env.get("kind") not in (
-            _APP_CHECK_ENV_KINDS
-        ):
-            return None
-        where = f"isn't in environment '{env_name}'"
-        res = subprocess.run(
-            [sys.executable, "-m", "calkit", "xenv", "-n", env_name]
-            + ["--no-check", "--", sys.executable, "-c"]
-            + ["import shutil, sys; print(shutil.which(sys.argv[1]) or '')"]
-            + [app],
-            capture_output=True,
-            text=True,
-            cwd=wdir,
+    env = (ck_info.get("environments") or {}).get(env_name)
+    if not isinstance(env, dict) or env.get("kind") not in (
+        _APP_CHECK_ENV_KINDS
+    ):
+        return None
+    where = f"isn't in environment '{env_name}'"
+    res = subprocess.run(
+        [sys.executable, "-m", "calkit", "xenv", "-n", env_name]
+        + ["--no-check", "--", sys.executable, "-c"]
+        + ["import shutil, sys; print(shutil.which(sys.argv[1]) or '')"]
+        + [app],
+        capture_output=True,
+        text=True,
+        cwd=wdir,
+    )
+    if res.returncode != 0:
+        errors = (res.stderr or res.stdout).strip().splitlines()
+        return (
+            f"Couldn't run a command in environment '{env_name}' to find "
+            f"'{app}'" + (f": {errors[-1]}" if errors else "")
         )
-        if res.returncode != 0:
-            errors = (res.stderr or res.stdout).strip().splitlines()
-            return (
-                f"Couldn't run a command in environment '{env_name}' to find "
-                f"'{app}'" + (f": {errors[-1]}" if errors else "")
-            )
-        lines = res.stdout.strip().splitlines()
-        env_path = (lines[-1].strip() if lines else "") or None
+    lines = res.stdout.strip().splitlines()
+    env_path = (lines[-1].strip() if lines else "") or None
     if env_path is None:
         return f"'{app}' {where}; {fix}"
     if system_path is not None and os.path.realpath(

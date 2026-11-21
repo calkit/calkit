@@ -2388,10 +2388,16 @@ def test_check_app_in_environment(tmp_dir, monkeypatch):
     )
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump({"name": "test"}, f)
-    check = ["calkit", "check", "app", "myapp", "-e", "_system"]
+    res = subprocess.run(
+        ["calkit", "check", "app", "myapp", "-e", "_system"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    check = ["calkit", "check", "app", "missing-app", "-e", "_system"]
     res = subprocess.run(check, capture_output=True, text=True)
     assert res.returncode != 0
-    assert "'myapp' isn't in an environment" in res.stdout + res.stderr
+    assert "'missing-app' isn't installed" in res.stdout + res.stderr
     # A stage's requirements count when it's named
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(
@@ -2401,9 +2407,9 @@ def test_check_app_in_environment(tmp_dir, monkeypatch):
                     "stages": {
                         "s": {
                             "kind": "shell-command",
-                            "command": "myapp",
+                            "command": "missing-app",
                             "environment": "_system",
-                            "requirements": ["myapp"],
+                            "requirements": ["missing-app"],
                         }
                     }
                 },

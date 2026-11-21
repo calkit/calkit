@@ -27,7 +27,9 @@ and fails rather than quietly using whatever version is installed on the
 machine.
 `calkit check app quarto -e <environment>` makes the same check on its own,
 for Quarto or any other app.
-To use one installed outside the environment on purpose,
+A stage in the `_system` environment uses the one installed on the
+machine.
+To use one installed outside another environment on purpose,
 list it in the project's [requirements](requirements.md):
 
 ```yaml

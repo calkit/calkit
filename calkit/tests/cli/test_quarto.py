@@ -36,13 +36,8 @@ def test_render(tmp_path, monkeypatch):
     quarto.write_text(f'#!/bin/sh\necho "$@" > {tmp_path}/called.txt\n')
     quarto.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
-    # Outside any environment, it has to be a declared requirement
+    # Outside any environment, the machine's is used
     res = render("report.qmd")
-    assert res.returncode != 0
-    assert "'quarto' isn't in an environment" in res.stdout + res.stderr
-    assert not (tmp_path / "called.txt").exists()
-    # Allowed, e.g., by a stage requiring it, it renders
-    res = render("--allow-machine-quarto", "report.qmd")
     assert res.returncode == 0, res.stdout + res.stderr
     (tmp_path / "called.txt").unlink()
     # Declared by the project, the document's values are written beside it,
@@ -105,6 +100,21 @@ def test_render(tmp_path, monkeypatch):
         )
     (tmp_path / "requirements.txt").write_text("")
     subprocess.check_call([sys.executable, "-m", "venv", ".venv"])
+    # The machine's isn't, unless allowed, e.g., by a stage requiring it
+    res = render("-e", "py", "--no-check", "index.qmd", cwd="pub")
+    assert res.returncode != 0
+    assert "'quarto' isn't in environment 'py'" in res.stdout + res.stderr
+    assert not (tmp_path / "called.txt").exists()
+    res = render(
+        "-e",
+        "py",
+        "--no-check",
+        "--allow-machine-quarto",
+        "index.qmd",
+        cwd="pub",
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    (tmp_path / "called.txt").unlink()
     env_quarto = tmp_path / ".venv" / "bin" / "quarto"
     env_quarto.write_text(quarto.read_text())
     env_quarto.chmod(0o755)

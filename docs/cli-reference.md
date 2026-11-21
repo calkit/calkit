@@ -4591,7 +4591,7 @@ Work with Quarto.
 
 Render a Quarto document in an environment.
 
-Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement. The values the document shows with the 'ckvalue' shortcode are read from their results files and written beside it first.
+Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. The values the document shows with the 'ckvalue' shortcode are read from their results files and written beside it first.
 
 Usage:
 
@@ -4608,12 +4608,12 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                                             |
-| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto. Without one, Quarto installed on this machine is used, if the project lists it as a requirement. |
-| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.                                   |
-| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                                               |
-| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                                                  |
+| Option                   | Type    | Required | Default | Description                                                                                                           |
+| ------------------------ | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto. Without one, Quarto installed on this machine is used.         |
+| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement. |
+| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                             |
+| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                |
 
 <a id="command-group-overleaf-ol"></a>
 

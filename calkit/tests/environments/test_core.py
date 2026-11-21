@@ -2881,11 +2881,11 @@ def test_check_app_in_env(tmp_path, monkeypatch):
     assert problem is not None
     assert "isn't in environment 'py'" in problem
     assert str(tmp_path / "machine" / "myapp") in problem
-    # Rendering outside any environment uses this machine's, so it has to be
-    # declared, by the project or the stage
-    problem = check_app_in_env("myapp", "_system", ck_info)
-    assert problem is not None and "isn't in an environment" in problem
-    assert check_app_in_env("missing-app", "_system", ck_info) is not None
+    # The '_system' environment is this machine, so it only has to be
+    # installed
+    assert check_app_in_env("myapp", "_system", ck_info) is None
+    problem = check_app_in_env("missing-app", "_system", ck_info)
+    assert problem is not None and "isn't installed" in problem
     assert is_app_required("myapp", {}, stage={"requirements": ["myapp"]})
     assert not is_app_required("myapp", {"requirements": ["docker"]})
     required = ck_info | {"requirements": ["myapp>=1"]}

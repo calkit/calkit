@@ -4424,14 +4424,14 @@ def _windows_startup_script() -> str:
     pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
     if os.path.isfile(pythonw):
         exe = pythonw
-    args = " ".join(f'""{a}""' for a in [exe, *_service_command()[1:]])
-    log = get_log_path()
-    # cmd strips the first and last quotes of a command with more than two,
-    # so the whole command gets a pair of its own (quotes are doubled in
-    # VBScript)
+    # The link writes its own log, since one cmd redirects to can't be
+    # opened by anything else, e.g., the link restarting itself
+    cmd = [exe, *_service_command()[1:], "--log-file"]
+    # Quotes are doubled in VBScript
+    args = " ".join(f'""{a}""' for a in cmd)
     return (
         'Set shell = CreateObject("WScript.Shell")\r\n'
-        f'shell.Run "cmd /c ""{args} >> ""{log}"" 2>&1""", 0, False\r\n'
+        f'shell.Run "{args}", 0, False\r\n'
     )
 
 

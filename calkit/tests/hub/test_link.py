@@ -1443,10 +1443,9 @@ def test_service_files(tmp_path, monkeypatch):
     # On Windows, a script in the Startup folder runs it hidden at login
     script = hub_link._windows_startup_script()
     assert "--mode" in script and "service" in script
-    assert hub_link.get_log_path() in script
-    # The whole command has its own quotes, since cmd strips the outer pair
-    # of one with more than two (doubled here, for VBScript)
-    assert 'cmd /c ""' in script and '2>&1"""' in script
+    # It writes its own log, since one cmd redirects to can't be opened again
+    assert "cmd /c" not in script and '""--log-file""' in script
+    assert hub_link.get_log_path() not in script
     unit = hub_link._systemd_unit()
     expected = shlex.join(command).replace("\\", "\\\\")
     assert f"ExecStart={expected}" in unit

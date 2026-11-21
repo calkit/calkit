@@ -24,6 +24,17 @@ def run() -> None:
 
         from calkit.core import is_mintty
 
+        # pythonw, e.g., the hub link started at login, has no streams, so
+        # they go nowhere until something takes their fds, e.g., a log
+        for fd, name in ((1, "stdout"), (2, "stderr")):
+            if getattr(sys, name) is None:
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(devnull, fd)
+                os.close(devnull)
+                stream = open(
+                    fd, "w", encoding="utf-8", buffering=1, closefd=False
+                )
+                setattr(sys, name, stream)
         # mintty shows UTF-8, so emoji needn't be replaced, and output is
         # line buffered as it would be to a terminal
         for stream in (sys.stdout, sys.stderr):

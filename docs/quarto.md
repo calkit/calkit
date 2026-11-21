@@ -1,6 +1,14 @@
 # Quarto documents
 
-<!-- TODO: needs human review -->
+[Quarto](https://quarto.org) is a document publishing system and
+literate programming tool that allows you to execute
+code inside documents, e.g., for doing calculations, creating figures, etc.
+Because it might be unintuitive to write heavy data processing or simulation
+code into a document,
+Calkit enables those steps to be done with other kinds of pipeline stages that
+reproducibly integrate and feed a Quarto stage derived artifacts like reduced
+datasets, results, or figures,
+so that cheap calculations and transformations can stay in Quarto.
 
 A [`quarto` stage](pipeline/index.md#quarto) renders a Quarto document,
 `.qmd` or `.ipynb`, in one of the project's environments:
@@ -15,23 +23,19 @@ pipeline:
       args: [--execute]
 ```
 
-## Where Quarto comes from
+## Which Quarto is used?
 
-Quarto is part of the environment, like any other tool a stage runs,
+Quarto is part of a stage's environment,
+like any other tool a stage runs,
 so a document renders with the same version on every machine:
 add `quarto` to a Conda or Pixi environment,
 or `quarto-cli` to a uv or pip one.
 The stage renders with `calkit quarto render`,
-which checks that the environment provides it,
+which checks that the environment has it included, i.e.,
+that it's not actually on the path from a system-wide install,
 and fails rather than quietly using whatever version is installed on the
 machine.
-Run by hand, it's given the environment every time,
-e.g., `calkit quarto render -e main index.qmd`.
-`calkit check app quarto -e <environment>` makes the same check on its own,
-for Quarto or any other app.
-A stage in the `_system` environment uses the one installed on the
-machine.
-To use one installed outside another environment on purpose,
+To use Quarto installed outside an environment on purpose,
 list it in the project's [requirements](requirements.md):
 
 ```yaml
@@ -52,7 +56,7 @@ so the stage depends on them too.
 
 ## Values from the pipeline
 
-A document can show values from a results file a stage writes,
+A document can show values from a results file written by another stage
 with the `ckvalue` shortcode,
 which reads like its [Markdown](pipeline/markdown.md#values) and
 [LaTeX](latex.md#including-project-components) counterparts:

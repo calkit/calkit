@@ -99,6 +99,10 @@ questions:
 requirements:
   - docker
   - uv
+  # Builds the JupyterLab extension when installing the dev env
+  - node
+  # Runs the dev tasks, e.g., 'make format' and 'make pr'
+  - make
   - gh
   - kind: setup
     name: GitHub CLI logged in

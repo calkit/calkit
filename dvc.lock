@@ -105,8 +105,8 @@ stages:
       size: 134747
     - path: uv.lock
       hash: md5
-      md5: 2331d4a888dc4ab8115aa4b9895f9425
-      size: 1728841
+      md5: 24ac16e67f687740a655276a4750dcce
+      size: 1697847
     outs:
     - path: images/latex/sizes.json
       hash: md5
@@ -129,8 +129,8 @@ stages:
       size: 14225
     - path: uv.lock
       hash: md5
-      md5: 2331d4a888dc4ab8115aa4b9895f9425
-      size: 1728841
+      md5: 24ac16e67f687740a655276a4750dcce
+      size: 1697847
     outs:
     - path: results/research-flow.json
       hash: md5
@@ -153,8 +153,8 @@ stages:
       size: 12155
     - path: uv.lock
       hash: md5
-      md5: 2331d4a888dc4ab8115aa4b9895f9425
-      size: 1728841
+      md5: 24ac16e67f687740a655276a4750dcce
+      size: 1697847
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
@@ -186,8 +186,8 @@ stages:
       size: 2015
     - path: uv.lock
       hash: md5
-      md5: 2331d4a888dc4ab8115aa4b9895f9425
-      size: 1728841
+      md5: 24ac16e67f687740a655276a4750dcce
+      size: 1697847
     outs:
     - path: results/2027-budget.json
       hash: md5
@@ -214,8 +214,8 @@ stages:
       size: 1616
     - path: uv.lock
       hash: md5
-      md5: 2331d4a888dc4ab8115aa4b9895f9425
-      size: 1728841
+      md5: 24ac16e67f687740a655276a4750dcce
+      size: 1697847
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
@@ -251,8 +251,8 @@ stages:
       size: 2652
     - path: uv.lock
       hash: md5
-      md5: 2331d4a888dc4ab8115aa4b9895f9425
-      size: 1728841
+      md5: 24ac16e67f687740a655276a4750dcce
+      size: 1697847
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
@@ -271,8 +271,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 88b32dbae28ca457020146cb7ab49cf3
-      size: 13383
+      md5: fc89fe88f8b0ef813695be57a74f9495
+      size: 13523
     - path: docs/img/2027-budget.png
       hash: md5
       md5: 1078d8d6187e0e072d20f488176ff71e
@@ -304,8 +304,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 59866a782794d2a10d3baec89394e1e7
-      size: 179601
+      md5: bbb12dbccdcff18e6e0eb4a9a916cb6c
+      size: 179799
   latex-word-round-trip:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/latex-word-round-trip.py --engine=libreoffice
@@ -352,8 +352,8 @@ stages:
       size: 4976
     - path: uv.lock
       hash: md5
-      md5: 2331d4a888dc4ab8115aa4b9895f9425
-      size: 1728841
+      md5: 24ac16e67f687740a655276a4750dcce
+      size: 1697847
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5

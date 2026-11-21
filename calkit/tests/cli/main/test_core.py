@@ -1552,6 +1552,61 @@ def test_status(tmp_dir):
     assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
 
 
+def test_status_offers_requirements_for_failed_env_check(
+    tmp_dir, monkeypatch: pytest.MonkeyPatch
+):
+    from typer.testing import CliRunner
+
+    from calkit.pipeline import PipelineStatus
+
+    with open("calkit.yaml", "w") as f:
+        yaml.safe_dump({"requirements": ["fake-node"]}, f)
+    failed = PipelineStatus(
+        has_pipeline=True, environment_checks={"dev": {"success": False}}
+    )
+    ok = PipelineStatus(has_pipeline=True)
+    statuses: list[PipelineStatus] = []
+    asked: list[bool] = []
+    installs: list[bool] = []
+
+    def check_requirements(ck_info=None, interactive=None, **kwargs):
+        asked.append(bool(interactive))
+        if not (interactive and installs.pop(0)):
+            raise ValueError("app 'fake-node' not found on this machine")
+
+    monkeypatch.setattr(
+        calkit.pipeline, "get_status", lambda **kwargs: statuses.pop(0)
+    )
+    monkeypatch.setattr(calkit, "check_requirements", check_requirements)
+    runner = CliRunner()
+    # Without a terminal, what's missing is named, but nothing is offered
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    statuses[:] = [failed]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False]
+    assert "app 'fake-node' not found" in res.output
+    assert "'calkit check reqs'" in res.output
+    # With one, it's offered, and once installed the status is checked again
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    asked.clear()
+    statuses[:] = [failed, ok]
+    installs[:] = [True]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False, True] and not statuses
+    assert "Failed pipeline environment checks" not in res.output
+    # Declined, it's reported as without a terminal
+    asked.clear()
+    statuses[:] = [failed]
+    installs[:] = [False]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False, True]
+    assert "Failed pipeline environment checks for: dev" in res.output
+    assert "app 'fake-node' not found" in res.output
+
+
 def test_no_dvc_repo(tmp_dir, tmp_path):
     # A project with no pipeline, e.g., a website showing imported results,
     # needn't become a DVC repo to run or pull
@@ -2789,6 +2844,61 @@ def test_only_invoked() -> None:
     assert built(["new", "projetc"]) == built(["new", "--help"])
     assert built(["statsu"]) == everything
     assert built([]) == everything
+
+
+def test_run_offers_git_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    from calkit.cli import run as cli_run
+
+    error = ImportError("Failed to initialize: Bad git executable.")
+
+    def fail() -> None:
+        raise error
+
+    monkeypatch.setattr("calkit.cli._only_invoked", lambda app, args: fail)
+    monkeypatch.setattr(sys, "argv", ["calkit", "config", "github-ssh"])
+    # Where it can be installed, it's offered, then the command runs again,
+    # unless Git still doesn't run, which would only offer it again
+    for installed, runs in [(True, True), (True, False), (False, False)]:
+        with (
+            patch("calkit.install.can_run_git", side_effect=[False, runs]),
+            patch("calkit.install.get_unsupported_message", return_value=None),
+            patch(
+                "calkit.install.prompt_and_install", return_value=installed
+            ) as m_prompt,
+            patch("subprocess.call", return_value=0) as m_call,
+            pytest.raises(SystemExit) as exc,
+        ):
+            cli_run()
+        assert m_prompt.call_args.args[0] == "git"
+        assert exc.value.code == (0 if runs else 1)
+        assert m_call.called is runs
+        if runs:
+            assert m_call.call_args.args[0] == [
+                *calkit.get_calkit_cmd(),
+                "config",
+                "github-ssh",
+            ]
+    # Where it can't, it says what to run
+    monkeypatch.setattr("calkit.install.can_run_git", lambda: False)
+    with (
+        patch("calkit.install.get_unsupported_message", return_value="apt"),
+        patch("calkit.install.prompt_and_install") as m_prompt,
+        pytest.raises(SystemExit),
+    ):
+        cli_run()
+    m_prompt.assert_not_called()
+    # Where Git runs, installing it won't help, so the error is raised
+    monkeypatch.setattr("calkit.install.can_run_git", lambda: True)
+    with (
+        patch("calkit.install.prompt_and_install") as m_prompt,
+        pytest.raises(ImportError),
+    ):
+        cli_run()
+    m_prompt.assert_not_called()
+    # Other import errors aren't caught
+    error = ImportError("No module named 'x'")
+    with pytest.raises(ImportError):
+        cli_run()
 
 
 def test_use_version_without_uvx(monkeypatch):
@@ -5288,7 +5398,9 @@ def test_clone(monkeypatch):
         cloned.clear()
         hubs.clear()
         monkeypatch.delenv("CALKIT_HUB", raising=False)
-        monkeypatch.setattr(calkit.github, "can_use_ssh", lambda: ssh_set_up)
+        monkeypatch.setattr(
+            calkit.github, "can_use_ssh", lambda interactive=False: ssh_set_up
+        )
         result = CliRunner().invoke(calkit.cli.main.app, ["clone", *args])
         assert result.exit_code != 0
         return result
@@ -5327,6 +5439,44 @@ def test_clone(monkeypatch):
         clone_url("me/proj", "--ssh", ssh_set_up=False)
         == "git@github.com:me/proj.git"
     )
+    # Interactively, SSH where it isn't set up offers to set it up, which
+    # can end early, e.g., once GitHub's host key is trusted, then checks
+    # again, or falls back to HTTPS, unless SSH was asked for
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    for args, answer, setup_works, url in [
+        ([], "y", True, "git@github.com:me/proj.git"),
+        ([], "y", False, "https://github.com/me/proj.git"),
+        ([], "n", False, "https://github.com/me/proj.git"),
+        (["--ssh"], "n", False, "git@github.com:me/proj.git"),
+    ]:
+        monkeypatch.setattr(
+            calkit.github,
+            "can_use_ssh",
+            lambda interactive=False: interactive and setup_works,
+        )
+        with patch(
+            "calkit.cli.config.config_github_ssh", side_effect=typer.Exit()
+        ) as m_setup:
+            result = CliRunner().invoke(
+                calkit.cli.main.app,
+                ["clone", "git@github.com:me/proj.git", *args],
+                input=answer + "\n",
+            )
+        assert "SSH not set up" in result.output
+        assert cloned[-1] == url, (args, answer, setup_works)
+        assert m_setup.called is (answer == "y")
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    # Without Git, it's offered first
+    for installed in [True, False]:
+        with (
+            patch("calkit.install.can_run_git", return_value=False),
+            patch(
+                "calkit.install.prompt_and_install", return_value=installed
+            ) as m_prompt,
+        ):
+            clone("me/proj")
+        assert m_prompt.call_args.args[0] == "git"
+        assert bool(cloned) is installed
     # Another host's URL is left as given
     assert (
         clone_url("https://gitlab.com/me/proj.git")

@@ -438,7 +438,7 @@ Options:
 
 ### `calkit install`
 
-Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform.
+Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. For a coding agent (claude, codex, opencode), also add Calkit's plugin.
 
 Usage:
 
@@ -448,9 +448,9 @@ calkit install [OPTIONS] NAME
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                              |
-| -------- | ---- | -------- | ------- | ---------------------------------------- |
-| `name`   | str  | yes      |         | The app to install (e.g., 'pixi', 'uv'). |
+| Argument | Type | Required | Default | Description                                        |
+| -------- | ---- | -------- | ------- | -------------------------------------------------- |
+| `name`   | str  | yes      |         | The app to install (e.g., 'pixi', 'uv', 'claude'). |
 
 Options:
 
@@ -3167,7 +3167,7 @@ Update objects.
 | [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match this version of Calkit's recommendations. |
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                         |
 | [`markdown`](#subcommand-update-markdown)             | Update the values Markdown files show, and check their imported images.              |
-| [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                             |
+| [`agent-skills`](#subcommand-update-agent-skills)     | Update Calkit's plugin in each coding agent on this machine.                         |
 | [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                             |
 | [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                           |
 | [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                          |
@@ -3347,7 +3347,9 @@ Options:
 
 #### `calkit update agent-skills`
 
-Copy packaged Calkit agent skills to `~/.agents/skills`.
+Update Calkit's plugin in each coding agent on this machine.
+
+Copies of the skills in `~/.agents/skills` are removed, since they shadow or duplicate the plugin's.
 
 Usage:
 
@@ -3357,9 +3359,10 @@ calkit update agent-skills [OPTIONS]
 
 Options:
 
-| Option          | Type    | Required | Default | Description                    |
-| --------------- | ------- | -------- | ------- | ------------------------------ |
-| `--quiet`, `-q` | boolean | no       | False   | Suppress non-essential output. |
+| Option          | Type    | Required | Default | Description                                                                        |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------- |
+| `--copy`        | boolean | no       | False   | Copy the skills to `~/.agents/skills` instead, for agents without Calkit's plugin. |
+| `--quiet`, `-q` | boolean | no       | False   | Suppress non-essential output.                                                     |
 
 <a id="subcommand-update-uv-env"></a>
 

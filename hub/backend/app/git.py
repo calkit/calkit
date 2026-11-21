@@ -12,11 +12,13 @@ import subprocess
 import tempfile
 import threading
 import time
+import zipfile
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import timezone
-from typing import Any
+from functools import partial
+from typing import Any, Callable, Iterator
 
 import git
 from fastapi import HTTPException
@@ -549,7 +551,13 @@ def get_repo(
                     except subprocess.CalledProcessError:
                         logger.error("Failed to clone repo")
                         shutil.rmtree(staging_dir, ignore_errors=True)
-                        raise HTTPException(404, "Git repo not found")
+                        # Not a 404: the project exists, and GitHub can
+                        # briefly deny a repo created seconds ago, so let the
+                        # client retry rather than show "not found".
+                        raise HTTPException(
+                            502,
+                            "Could not clone this project's repository.",
+                        )
                     except subprocess.TimeoutExpired:
                         # Every retry starts this repo over from nothing, so
                         # a repo too big to clone inside the budget never
@@ -722,23 +730,60 @@ def get_repo(
                         # only writes .git, so it is safe to leave running on
                         # every refresh; skipping the rewrite when there is
                         # nothing new removes the hazard from the common case.
-                        try:
-                            local_sha = repo.head.commit.hexsha
-                            remote_sha = repo.commit(
-                                f"origin/{branch_name}"
-                            ).hexsha
-                        except Exception as e:
-                            logger.warning(f"Could not compare to origin: {e}")
-                            local_sha, remote_sha = None, None
-                        if local_sha is None or local_sha != remote_sha:
-                            # If we had any failed previous transactions, reset
-                            # and clean
-                            repo.git.reset()
-                            repo.git.clean("-fd")
-                            repo.git.stash("save", "Auto-stash before pull")
-                            repo.git.checkout([f"origin/{branch_name}"])
-                            repo.git.branch(["-D", branch_name])
-                            repo.git.checkout(["-b", branch_name])
+                        if not repo.head.is_valid():
+                            # Cloned while the remote was still empty, so
+                            # there's nothing to stash or replace, only
+                            # whatever has been pushed since to check out
+                            remote_ref: str | None = (
+                                f"refs/remotes/origin/{branch_name}"
+                            )
+                            fetched = [
+                                r.path
+                                for r in repo.refs
+                                if r.path.startswith("refs/remotes/origin/")
+                            ]
+                            if not fetched:
+                                logger.info(f"{repo_label} is still empty")
+                                remote_ref = None
+                            elif remote_ref not in fetched:
+                                # The first push may have been to another
+                                # branch, which GitHub then made the default
+                                repo.git.remote(
+                                    ["set-head", "origin", "--auto"],
+                                    kill_after_timeout=GIT_FETCH_TIMEOUT,
+                                )
+                                remote_ref = repo.git.symbolic_ref(
+                                    "refs/remotes/origin/HEAD"
+                                )
+                            if remote_ref is not None:
+                                branch_name = remote_ref.removeprefix(
+                                    "refs/remotes/origin/"
+                                )
+                                repo.git.checkout(
+                                    ["-f", "-B", branch_name, remote_ref]
+                                )
+                        else:
+                            try:
+                                local_sha = repo.head.commit.hexsha
+                                remote_sha = repo.commit(
+                                    f"origin/{branch_name}"
+                                ).hexsha
+                            except Exception as e:
+                                logger.warning(
+                                    f"Could not compare to origin: {e}"
+                                )
+                                local_sha, remote_sha = None, None
+                            if local_sha is None or local_sha != remote_sha:
+                                # If we had any failed previous transactions,
+                                # reset and clean
+                                repo.git.reset()
+                                repo.git.clean("-fd")
+                                repo.git.stash(
+                                    "save", "Auto-stash before pull"
+                                )
+                                repo.git.checkout([f"origin/{branch_name}"])
+                                repo.git.branch(["-D", branch_name])
+                                repo.git.checkout(["-b", branch_name])
                     else:
                         with _timed("fetch-all", repo=repo_label):
                             repo.git.fetch(
@@ -839,6 +884,70 @@ def push_to_shared_read_clone(
     return False
 
 
+def seed_shared_read_clone(project: Project, repo: git.Repo) -> None:
+    """Make the shared checkout of a new project from the writer's clone.
+
+    Otherwise the first read clones it from GitHub with the App's token,
+    which GitHub can answer with "Repository not found" for a few seconds
+    after the repo is created. Best effort: without it, the read clones.
+    """
+    base_dir = shared_read_clone_dir(project)
+    repo_dir = os.path.join(base_dir, "repo")
+    updated_fpath = os.path.join(base_dir, "updated.txt")
+    staging_dir = repo_dir + ".cloning"
+    label = f"{project.owner_github_name}/{project.name}"
+    git_plain_url = project.git_repo_url or ""
+    if git_plain_url and not git_plain_url.endswith(".git"):
+        git_plain_url += ".git"
+    try:
+        os.makedirs(base_dir, exist_ok=True)
+        with FileLock(os.path.join(base_dir, "updating.lock"), timeout=5):
+            try:
+                # A project made seconds ago has no checkout worth keeping;
+                # one here is left from a deleted project of the same name.
+                # The marker goes first so a failure can't leave it claiming
+                # a complete checkout.
+                if os.path.isfile(updated_fpath):
+                    os.remove(updated_fpath)
+                for stale in (staging_dir, repo_dir):
+                    if os.path.isdir(stale):
+                        shutil.rmtree(stale, ignore_errors=True)
+                with _timed("seed-shared", repo=label):
+                    subprocess.check_call(
+                        ["git", "clone", str(repo.working_dir), staging_dir]
+                    )
+                seeded = git.Repo(staging_dir)
+                seeded.remotes.origin.set_url(git_plain_url)
+                # A partial clone has to keep fetching missing objects from
+                # GitHub, not from the writer's clone.
+                writer_config = repo.config_reader()
+                section = 'remote "origin"'
+                with seeded.config_writer() as config:
+                    for key in ("promisor", "partialclonefilter"):
+                        if writer_config.has_option(section, key):
+                            config.set_value(
+                                section,
+                                key,
+                                writer_config.get_value(section, key),
+                            )
+                os.rename(staging_dir, repo_dir)
+                _install_read_only_hooks(repo_dir)
+                subprocess.call(["touch", updated_fpath])
+            except (
+                subprocess.CalledProcessError,
+                GitCommandError,
+                OSError,
+            ) as e:
+                logger.info(
+                    f"Could not seed the shared checkout for {label}: {e}"
+                )
+                # Only while holding the lock: otherwise this could be
+                # another request's clone in progress.
+                shutil.rmtree(staging_dir, ignore_errors=True)
+    except (Timeout, OSError) as e:
+        logger.info(f"Could not seed the shared checkout for {label}: {e}")
+
+
 def push_and_expire(
     project: Project, repo: git.Repo, branch: str | None = None
 ) -> None:
@@ -863,6 +972,56 @@ def push_and_expire(
         # Every clone's cached answer for where the remote is should say
         # where we just put it, not only the one we pushed into.
         _record_remote_head(project, name, head)
+
+
+def commit_to_branch(
+    project: Project,
+    repo: git.Repo,
+    base: str,
+    files: dict[str, str],
+    message: str,
+    author: tuple[str, str],
+    branch: str,
+) -> str:
+    """Commit files on top of a commit and push the result as a branch.
+
+    Nothing is checked out, so this can write to any branch, not only the
+    one a user's clone has out, without disturbing the checkout. The push
+    only moves the branch forward, so if someone else moved it since
+    *base*, Git refuses and this raises ``GitCommandError`` for the caller
+    to start again from the new tip. Returns the new commit's SHA.
+    """
+    from io import BytesIO
+
+    from gitdb import IStream
+
+    refuse_if_shared(repo)
+    name, email = author
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {
+            "GIT_INDEX_FILE": os.path.join(tmp, "index"),
+            "GIT_AUTHOR_NAME": name,
+            "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name,
+            "GIT_COMMITTER_EMAIL": email,
+        }
+        repo.git.read_tree(base, env=env)
+        for path, content in files.items():
+            data = content.encode("utf-8")
+            sha = repo.odb.store(
+                IStream("blob", len(data), BytesIO(data))
+            ).hexsha.decode()
+            # Keep an executable bit, say, if the file had one
+            listed = repo.git.ls_tree(base, "--", path).split(" ", 1)
+            mode = listed[0] if listed[0] else "100644"
+            repo.git.update_index(
+                "--add", "--cacheinfo", f"{mode},{sha},{path}", env=env
+            )
+        tree = repo.git.write_tree(env=env)
+        commit = repo.git.commit_tree(tree, "-p", base, "-m", message, env=env)
+    repo.git.push(["origin", f"{commit}:refs/heads/{branch}"])
+    expire_shared_read_clone(project, branch, head=commit)
+    return commit
 
 
 def record_project_update(
@@ -1037,10 +1196,99 @@ def get_dvc_pipeline_from_repo(
         return (load_yaml_fast(f.read()) if read_only else ryaml.load(f)) or {}
 
 
+# Seconds to wait for another sync of the same Overleaf clone to finish
+OVERLEAF_LOCK_TIMEOUT = 60
+
+
+# Distinct from the hub's own credential errors, so a client asks for a new
+# Overleaf token rather than for the user to sign in again
+OVERLEAF_TOKEN_REJECTED = (
+    "Overleaf rejected your Git token, so it may have expired or been "
+    "revoked. Generate a new one under 'Git Integration' in your Overleaf "
+    "account settings."
+)
+
+
+OVERLEAF_SESSION_REJECTED = (
+    "Overleaf rejected your saved session, so you may have signed out of "
+    "Overleaf. Connect again from the Calkit browser extension on "
+    "overleaf.com."
+)
+
+
+@contextmanager
 def get_overleaf_repo(
-    project: Project, user: User, session: Session, overleaf_project_id: str
-) -> git.Repo:
-    """Get a freshly pulled Overleaf repository for a user/project."""
+    project: Project,
+    user: User,
+    session: Session,
+    overleaf_project_id: str,
+    overleaf_auth: str | calkit.overleaf.WebClient | None = None,
+) -> Iterator[tuple[git.Repo, Callable[[git.Repo], None] | None]]:
+    """Get a freshly pulled Overleaf repository for a user/project, and how
+    to push to it, which is ``None`` to use ``git push``.
+
+    With a Git token this is a clone. With only a browser session, for
+    users without Overleaf Premium, it's a mirror Calkit keeps itself.
+
+    The repo is locked while in use, since a sync resets it and copies files
+    into it, so a concurrent sync or status check could wipe those files or
+    record Overleaf edits as synced without pulling them.
+
+    ``overleaf_auth`` is from ``users.get_overleaf_auth``, which is called
+    if it's not given.
+    """
+
+    def use_session(client: calkit.overleaf.WebClient) -> git.Repo:
+        repo: git.Repo = calkit.overleaf.get_mirror(
+            overleaf_project_id, dest=repo_dir
+        )
+        # Pulling commits, so who the commits are by is set first
+        _configure_committer(repo, user, session=session)
+        try:
+            calkit.overleaf.pull_mirror(repo, client, overleaf_project_id)
+        except calkit.overleaf.AuthError:
+            raise HTTPException(401, OVERLEAF_SESSION_REJECTED)
+        except (RuntimeError, OSError, zipfile.BadZipFile) as e:
+            # Including network errors from requests
+            logger.warning(f"Failed to download Overleaf project: {e}")
+            raise HTTPException(502, "Could not download the Overleaf project")
+        return repo
+
+    def use_token(token: str) -> git.Repo:
+        # Plain URL — credentials supplied via credential helper
+        # (username "git" for Overleaf)
+        git_plain_url = f"https://git.overleaf.com/{overleaf_project_id}"
+        git_auth = _make_git_auth_env(token, username="git")
+        # A mirror kept for a browser session has nothing to pull from
+        if os.path.isdir(repo_dir) and not git.Repo(repo_dir).remotes:
+            shutil.rmtree(repo_dir)
+        if os.path.isdir(repo_dir):
+            repo = git.Repo(repo_dir)
+            repo.git.update_environment(**git_auth)
+            # Resets rather than merges, so a sync that failed after
+            # committing to the clone can't block every later pull
+            calkit.overleaf.pull(repo)
+        else:
+            cloned = subprocess.run(
+                ["git", "clone", git_plain_url, repo_dir],
+                env={**os.environ, **git_auth},
+                timeout=300,
+                capture_output=True,
+                text=True,
+            )
+            if cloned.returncode != 0:
+                raise calkit.overleaf._git_error(
+                    GitCommandError(
+                        ["git", "clone"], cloned.returncode, cloned.stderr
+                    ),
+                    "clone",
+                )
+            repo = git.Repo(repo_dir)
+            repo.git.update_environment(**git_auth)
+        # Run git config so we make commits as this user (with safe fallbacks)
+        _configure_committer(repo, user, session=session)
+        return repo
+
     owner_name, project_name = project.owner_github_name, project.name
     base_dir = (
         f"{settings.CLONE_ROOT}/{user.github_username}/{owner_name}/"
@@ -1048,26 +1296,49 @@ def get_overleaf_repo(
     )
     repo_dir = os.path.join(base_dir, "repo")
     os.makedirs(base_dir, exist_ok=True)
-    overleaf_token = users.get_overleaf_token(session=session, user=user)
-    # Plain URL — credentials supplied via credential helper
-    # (username "git" for Overleaf)
-    git_plain_url = f"https://git.overleaf.com/{overleaf_project_id}"
-    overleaf_auth = _make_git_auth_env(overleaf_token, username="git")
-    if os.path.isdir(repo_dir):
-        repo = git.Repo(repo_dir)
-        repo.git.update_environment(**overleaf_auth)
-        repo.git.pull()
-    else:
-        subprocess.check_call(
-            ["git", "clone", git_plain_url, repo_dir],
-            env={**os.environ, **overleaf_auth},
-            timeout=300,
+    if overleaf_auth is None:
+        overleaf_auth = users.get_overleaf_auth(session=session, user=user)
+    try:
+        lock = FileLock(
+            os.path.join(base_dir, "syncing.lock"),
+            timeout=OVERLEAF_LOCK_TIMEOUT,
         )
-        repo = git.Repo(repo_dir)
-        repo.git.update_environment(**overleaf_auth)
-    # Run git config so we make commits as this user (with safe fallbacks)
-    _configure_committer(repo, user, session=session)
-    return repo
+        lock.acquire()
+    except Timeout:
+        raise HTTPException(
+            409, "Another Overleaf sync of this project is running"
+        )
+    try:
+        repo = None
+        client = (
+            overleaf_auth
+            if isinstance(overleaf_auth, calkit.overleaf.WebClient)
+            else None
+        )
+        if client is None:
+            try:
+                repo = use_token(str(overleaf_auth))
+            except calkit.overleaf.AuthError:
+                # Tokens stop working when Premium ends, but a browser
+                # session saved since still does
+                try:
+                    client = calkit.overleaf.WebClient(
+                        users.get_overleaf_session(session=session, user=user)
+                    )
+                except HTTPException:
+                    raise HTTPException(401, OVERLEAF_TOKEN_REJECTED)
+        push = None
+        if client is not None:
+            repo = use_session(client)
+            push = partial(
+                calkit.overleaf.push_mirror,
+                client=client,
+                project_id=overleaf_project_id,
+            )
+        assert repo is not None
+        yield repo, push
+    finally:
+        lock.release()
 
 
 # Names a main document usually goes by, tried before falling back to
@@ -1085,24 +1356,41 @@ def read_overleaf_title(
     outlive the read. Returns None whenever the title can't be worked out,
     since a project can still be created without one.
     """
-    overleaf_token = users.get_overleaf_token(session=session, user=user)
-    auth = _make_git_auth_env(overleaf_token, username="git")
+    import io
+
+    overleaf_auth = users.get_overleaf_auth(session=session, user=user)
     with tempfile.TemporaryDirectory(prefix="overleaf-title-") as tmp:
         repo_dir = os.path.join(tmp, "repo")
         try:
-            subprocess.check_call(
-                [
-                    "git",
-                    "clone",
-                    "--depth=1",
-                    f"https://git.overleaf.com/{overleaf_project_id}",
-                    repo_dir,
-                ],
-                env={**os.environ, **auth},
-                timeout=120,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-            logger.info(f"Could not clone Overleaf project for title: {e}")
+            if isinstance(overleaf_auth, calkit.overleaf.WebClient):
+                archive = overleaf_auth.download(overleaf_project_id)
+                # Extraction drops absolute paths and '..', so nothing lands
+                # outside the directory
+                zipfile.ZipFile(io.BytesIO(archive)).extractall(repo_dir)
+            else:
+                subprocess.check_call(
+                    [
+                        "git",
+                        "clone",
+                        "--depth=1",
+                        f"https://git.overleaf.com/{overleaf_project_id}",
+                        repo_dir,
+                    ],
+                    env={
+                        **os.environ,
+                        **_make_git_auth_env(overleaf_auth, username="git"),
+                    },
+                    timeout=120,
+                )
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            RuntimeError,
+            zipfile.BadZipFile,
+            # Including network errors from requests
+            OSError,
+        ) as e:
+            logger.info(f"Could not read Overleaf project for title: {e}")
             return None
         tex_paths = sorted(
             os.path.join(root, f)
@@ -2016,11 +2304,18 @@ class WorkingTree(RepoTree):
         fpath = self._abs(path)
         if fpath is None:
             raise HTTPException(404)
+        # A symlink leaving the tree is sized as the link, not its target,
+        # so a listing can't report on files outside. Only links pay for
+        # resolving, since listings size every entry.
+        if os.path.islink(fpath) and not self.is_safe_symlink(path):
+            return os.lstat(fpath).st_size
         return os.path.getsize(fpath)
 
     def listdir(self, path: str | None) -> list[str]:
         fpath = self._abs(path)
-        if fpath is None:
+        # Resolved, since a symlinked directory on the way is as good a way
+        # out as `..`, and a listing names what's there
+        if fpath is None or (path and not self.is_safe_symlink(path)):
             raise HTTPException(404)
         return os.listdir(fpath)
 

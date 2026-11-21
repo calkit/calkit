@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json
+name: example-subprojects
+title: Calkit subprojects example
+
+# This project holds nothing but its subprojects, which run, and are
+# checked, from here
+subprojects:
+  - path: experiment
+  - path: analysis

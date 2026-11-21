@@ -18,8 +18,8 @@ environments:
     description: Python for plotting.
   tex:
     kind: docker
-    image: texlive/texlive:latest-full
-    description: TeX Live via Docker.
+    image: ghcr.io/calkit/latex:0.1.4
+    description: Calkit's TeX Live image via Docker.
 
 pipeline:
   stages:
@@ -48,7 +48,7 @@ publications:
   - path: paper/main.pdf
     kind: journal-article
     title: Wake recovery behind a model turbine
-    description: A two-column stand-in paper with a figure, a table, equations, and citations.
+    description: A stand-in paper with a figure, a table, equations, and citations.
     stage: build-paper
 
 figures:

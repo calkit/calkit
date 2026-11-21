@@ -7,79 +7,10 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel
-
-MINIFORGE_LAYER_TXT = r"""
-# Install Miniforge
-ARG MINIFORGE_NAME=Miniforge3
-ARG MINIFORGE_VERSION=26.7.2-0
-ARG TARGETPLATFORM
-
-ENV CONDA_DIR=/opt/conda
-ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
-ENV PATH=${CONDA_DIR}/bin:${PATH}
-
-# 1. Install just enough for conda to work
-# 2. Keep $HOME clean (no .wget-hsts file), since HSTS isn't useful in this context
-# 3. Install miniforge from GitHub releases
-# 4. Apply some cleanup tips from https://jcrist.github.io/conda-docker-tips.html
-#    Particularly, we remove pyc and a files. The default install has no js, we can skip that
-# 5. Activate base by default when running as any *non-root* user as well
-#    Good security practice requires running most workloads as non-root
-#    This makes sure any non-root users created also have base activated
-#    for their interactive shells.
-# 6. Activate base by default when running as root as well
-#    The root user is already created, so won't pick up changes to /etc/skel
-RUN apt-get update > /dev/null && \
-    apt-get install --no-install-recommends --yes \
-        wget bzip2 ca-certificates \
-        git \
-        tini \
-        > /dev/null && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    wget --no-hsts --quiet https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/${MINIFORGE_NAME}-${MINIFORGE_VERSION}-Linux-$(uname -m).sh -O /tmp/miniforge.sh && \
-    /bin/bash /tmp/miniforge.sh -b -p ${CONDA_DIR} && \
-    rm /tmp/miniforge.sh && \
-    conda clean --tarballs --index-cache --packages --yes && \
-    find ${CONDA_DIR} -follow -type f -name '*.a' -delete && \
-    find ${CONDA_DIR} -follow -type f -name '*.pyc' -delete && \
-    conda clean --force-pkgs-dirs --all --yes  && \
-    echo ". ${CONDA_DIR}/etc/profile.d/conda.sh && conda activate base" >> /etc/skel/.bashrc && \
-    echo ". ${CONDA_DIR}/etc/profile.d/conda.sh && conda activate base" >> ~/.bashrc
-""".strip()
-
-# foamPy ships only an sdist whose setup.py imports numpy, so it needs the
-# surrounding environment rather than an isolated build one
-FOAMPY_LAYER_TEXT = r"""
-RUN pip install --no-cache-dir numpy pandas matplotlib h5py \
-    && pip install --no-cache-dir scipy \
-    && pip install --no-cache-dir --no-build-isolation foampy
-""".strip()
-
-UV_LAYER_TEXT = """
-COPY --from=ghcr.io/astral-sh/uv:0.12.11 /uv /uvx /bin/
-"""
-
-JULIA_LAYER_TEXT = """
-# Install Julia
-# Ensure base image is a bookworm distribution
-COPY --from=julia:1.11.9-bookworm /usr/local/julia /usr/local/julia
-ENV JULIA_PATH=/usr/local/julia \
-    PATH=$PATH:/usr/local/julia/bin \
-    JULIA_GPG=3673DF529D9049477F76B37566E3C7DC03D6E495 \
-    JULIA_VERSION=1.11.9
-"""
-
-LAYERS = {
-    "mambaforge": MINIFORGE_LAYER_TXT,
-    "miniforge": MINIFORGE_LAYER_TXT,
-    "foampy": FOAMPY_LAYER_TEXT,
-    "uv": UV_LAYER_TEXT,
-    "julia": JULIA_LAYER_TEXT,
-}
 
 # Docker images whose commands should be passed directly to the image
 # entrypoint when normalizing `xr` commands
@@ -479,6 +410,11 @@ def infer_xr_docker_environment(
 LOCK_INSPECT_KEYS = ["RepoDigests", "Architecture", "Os", "RootFS"]
 # The registry used when an image reference has no registry component
 DEFAULT_REGISTRY = "docker.io"
+# Where Docker explains its containerd image store, which gives a build the
+# digest it will have once pushed
+CONTAINERD_STORE_DOCS_URL = (
+    "https://docs.docker.com/engine/storage/containerd/"
+)
 
 
 def inspect_image(ref: str) -> dict | None:
@@ -538,31 +474,6 @@ def split_image_ref(
     return registry, name, tag, digest
 
 
-def get_default_registry_prefix(wdir: str | None = None) -> str | None:
-    """Return the default registry prefix for a project's images.
-
-    Images are namespaced under the project's GitHub repo in the GitHub
-    Container Registry, e.g., ``ghcr.io/someone/some-project``. Returns None
-    if the project has no GitHub remote, since there's then no namespace we
-    can claim on the user's behalf.
-    """
-    import calkit
-
-    try:
-        url = calkit.git.get_repo(wdir).remote().url
-    except Exception:
-        return None
-    if "github.com" not in url:
-        return None
-    path = url.split("github.com")[-1].lstrip(":/").removesuffix(".git")
-    parts = [p for p in path.split("/") if p]
-    if len(parts) != 2:
-        return None
-    # Registry paths must be lowercase, whereas GitHub owner and repo names
-    # are case-insensitive but case-preserving
-    return "ghcr.io/" + "/".join(parts).lower()
-
-
 def get_remote_image_ref(
     image: str, registry_prefix: str, env_name: str | None = None
 ) -> str:
@@ -598,7 +509,9 @@ def _run_showing_output(
 
     Pushing and pulling an image are the slowest things Calkit does, and
     swallowing Docker's progress for minutes on end looks like a hang, so
-    the output goes to the terminal as it arrives. It's captured too, since
+    the output goes to the terminal as it arrives. It goes to stderr, since
+    stdout of a command run in an environment belongs to that command,
+    e.g., latexdiff's marked-up document. It's captured too, since
     what a registry says on refusal decides what happens next.
 
     ``start_timeout`` gives up when Docker says nothing at all before it
@@ -660,7 +573,7 @@ def _run_showing_output(
             if last_status.get(layer_id) == status:
                 continue
             last_status[layer_id] = status
-        print(line, end="", flush=True)
+        print(line, end="", file=sys.stderr, flush=True)
     proc.stdout.close()
     return proc.wait() == 0, "".join(lines)
 
@@ -679,6 +592,23 @@ def image_exists_locally(ref: str) -> bool:
         return False
 
 
+def get_no_permission_message() -> str:
+    """What to do when Docker refuses this user."""
+    from calkit.core import is_wsl
+
+    # A group only applies to new sessions, and closing its terminals
+    # doesn't end a WSL session
+    if is_wsl():
+        restart = "restart WSL by running 'wsl --shutdown' in Windows"
+    else:
+        restart = "log out and back in"
+    return (
+        "Docker is installed, but this user isn't allowed to use it. "
+        "Add yourself to the 'docker' group with "
+        f"'sudo usermod -aG docker $USER', then {restart}."
+    )
+
+
 def ensure_image_available(ref: str, platform: str | None = None) -> None:
     """Make sure an image can be run, or say why it can't.
 
@@ -692,6 +622,12 @@ def ensure_image_available(ref: str, platform: str | None = None) -> None:
     success, output = pull_image(ref, platform=platform)
     if success:
         return
+    # A credential helper that can't run is also denied permission, but
+    # only the daemon's socket is about the docker group
+    if "permission denied while trying to connect" in output.lower():
+        raise ValueError(
+            f"{get_no_permission_message()}\n{output.strip()[-500:]}"
+        )
     # Docker announces what it's pulling before it fetches anything, so a
     # pull that produced nothing at all never reached the registry. That
     # is local: most often a credential helper that doesn't answer, which
@@ -720,6 +656,113 @@ def get_creds_store() -> str | None:
     except (OSError, ValueError):
         return None
     return store if isinstance(store, str) else None
+
+
+class DockerNotReadyError(ValueError):
+    """Docker isn't installed, isn't running, or can't be used."""
+
+
+# How long to wait for Docker to answer after starting Docker Desktop, which
+# can take a minute or more on a cold start
+DAEMON_START_TIMEOUT = 180.0
+
+
+def ensure_ready(interactive: bool = False) -> None:
+    """Make sure Docker is installed and running, or say what to do.
+
+    Without both, every Docker command fails, and the failure otherwise
+    surfaces much later as a pull or run that went wrong for no stated
+    reason. On a TTY, installing or starting Docker is offered.
+    """
+    import shutil
+    import time
+
+    from calkit import install
+
+    def get_desktop_start_cmd() -> list[str] | None:
+        # How to start Docker Desktop, if it's installed
+        if sys.platform == "darwin":
+            for apps_dir in ("/Applications", "~/Applications"):
+                if os.path.isdir(
+                    os.path.join(os.path.expanduser(apps_dir), "Docker.app")
+                ):
+                    return ["open", "-a", "Docker"]
+        elif sys.platform.startswith("win"):
+            exe = os.path.expandvars(
+                "%ProgramFiles%\\Docker\\Docker\\Docker Desktop.exe"
+            )
+            if os.path.isfile(exe):
+                return [exe]
+        return None
+
+    def get_daemon_error() -> str | None:
+        # What Docker says when its daemon can't be reached, if it can't
+        try:
+            res = subprocess.run(
+                ["docker", "info"], capture_output=True, text=True, timeout=30
+            )
+        except subprocess.TimeoutExpired:
+            return "Docker did not answer within 30 seconds"
+        except OSError as e:
+            return str(e)
+        if res.returncode == 0:
+            return None
+        return (res.stderr or res.stdout).strip() or "'docker info' failed"
+
+    # Check it's installed
+    if shutil.which("docker") is None:
+        installed = False
+        if interactive:
+            print("Docker is required, but is not installed.")
+            installed = install.prompt_and_install("docker", interactive=True)
+        if not installed:
+            raise DockerNotReadyError(
+                "Docker is required, but is not installed. Install it with "
+                "'calkit install docker', or see "
+                "https://docs.docker.com/get-started/get-docker/"
+            )
+    # Check it's running
+    error = get_daemon_error()
+    if error is None:
+        return
+    if "permission denied" in error.lower():
+        raise DockerNotReadyError(f"{get_no_permission_message()}\n{error}")
+    start_cmd = get_desktop_start_cmd()
+    if start_cmd is not None and interactive:
+        try:
+            answer = (
+                input(
+                    "Docker is installed, but not running. "
+                    "Start Docker Desktop? [Y/n] "
+                )
+                .strip()
+                .lower()
+            )
+        except EOFError:
+            answer = "n"
+        if answer in ("", "y", "yes"):
+            subprocess.Popen(
+                start_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("Waiting for Docker to start...")
+            deadline = time.monotonic() + DAEMON_START_TIMEOUT
+            while time.monotonic() < deadline:
+                time.sleep(2)
+                if get_daemon_error() is None:
+                    return
+            raise DockerNotReadyError(
+                "Started Docker Desktop, but Docker didn't answer within "
+                f"{DAEMON_START_TIMEOUT:.0f} seconds; once it's up, try again"
+            )
+    if start_cmd is not None or not sys.platform.startswith("linux"):
+        how = "start Docker Desktop"
+    else:
+        how = "start it, e.g., with 'sudo systemctl start docker'"
+    raise DockerNotReadyError(
+        f"Docker is installed, but not running; {how} and try again.\n" + error
+    )
 
 
 def pull_image(ref: str, platform: str | None = None) -> tuple[bool, str]:
@@ -863,146 +906,6 @@ def get_remote_image_platform_locks(ref: str) -> dict[str, dict] | None:
     return locks
 
 
-def lock_matches_spec(
-    lock: dict,
-    dockerfile_md5: str | None,
-    deps_md5s: dict[str, str],
-) -> bool:
-    """Return True if a lock file describes the current environment spec.
-
-    A lock that doesn't match is stale rather than merely out-of-date with
-    the local image: its recorded digest identifies an image built from
-    different inputs, so it can't be used to pull.
-
-    What the image is called isn't part of this. A lock belongs to the
-    environment whose directory it sits in, the name comes from calkit.yaml,
-    and the digest names the content, so renaming an image would only rerun
-    every stage in it for software that didn't change. A digest left over
-    from a different image can't resolve either, since the repo it's asked
-    for comes from the current definition.
-    """
-    if lock.get("DockerfileMD5") != dockerfile_md5:
-        return False
-    if (lock.get("DepsMD5s") or {}) != (deps_md5s or {}):
-        return False
-    return True
-
-
-def lock_matches_image(lock: dict, image_info: dict) -> bool:
-    """Return True if an image's content is what a lock file records."""
-    locked = (lock.get("RootFS") or {}).get("Layers")
-    actual = (image_info.get("RootFS") or {}).get("Layers")
-    return bool(locked) and locked == actual
-
-
-def get_lock_digest_refs(
-    lock: dict, remote_ref: str | None = None
-) -> list[str]:
-    """Return references that pull the image a lock records, best first.
-
-    A lock records the digest alone, since a digest names the image's
-    content while a repository only says where a copy of it lives. The repo
-    to pull from comes from ``remote_ref``, worked out from the environment
-    definition at the time of asking, so an environment that changes which
-    image it uses can't resolve a digest left over from the old one. Locks
-    written before digests were stored bare name their repo outright and
-    are still honored.
-    """
-    refs = []
-    remote_repo = (
-        get_repo_from_ref(remote_ref) if remote_ref is not None else None
-    )
-    for digest in lock.get("RepoDigests") or []:
-        if "@" in digest:
-            refs.append(digest)
-        elif remote_repo is not None and ":" in digest:
-            refs.append(f"{remote_repo}@{digest}")
-    if remote_repo is None:
-        return refs
-    # A digest only names this environment's image if it came from this
-    # environment's repository. One recorded against another repository is
-    # left over from an image the project no longer uses, and pulling it
-    # would quietly go on building with the old image however the
-    # environment was changed.
-    return [r for r in refs if _same_repo(get_repo_from_ref(r), remote_repo)]
-
-
-def build_lock(
-    identity: dict,
-    dockerfile_md5: str | None,
-    deps_md5s: dict[str, str],
-    run_config: dict,
-) -> dict:
-    """Assemble a lock file's contents for one platform.
-
-    Key order is fixed so that a lock written for a platform from a registry
-    matches byte-for-byte the one that platform would write for itself.
-    """
-    lock = {key: identity.get(key) for key in LOCK_INSPECT_KEYS}
-    # Normalize here rather than at each call site, so that a lock carried
-    # over from an earlier run, in whatever form that run wrote it, comes
-    # out in the same form as one written from scratch
-    lock["RepoDigests"] = get_content_digests(lock)
-    lock["DockerfileMD5"] = dockerfile_md5
-    lock["DepsMD5s"] = deps_md5s
-    lock.update(run_config)
-    return lock
-
-
-# Values of an environment's ``registry`` that name the GitHub Container
-# Registry without saying which namespace, leaving that to be worked out
-# from the project's Git remote. ``ghcr.io`` is the documented one, since a
-# registry Calkit runs itself someday would have as much claim to 'auto'
-AUTO_REGISTRY_VALUES = ["ghcr.io", "ghcr", "github", "auto", "true"]
-
-
-def registry_is_auto(registry: str | None) -> bool:
-    """Return True if a ``registry`` value asks Calkit to work one out."""
-    if registry is None:
-        return False
-    return str(registry).strip().lower() in AUTO_REGISTRY_VALUES
-
-
-def resolve_registry_prefix(env: dict, wdir: str | None = None) -> str | None:
-    """Return the registry prefix used for an environment's images.
-
-    Registries are opt-in, since pushing an image publishes it somewhere the
-    project doesn't necessarily control, so images are kept local when
-    ``registry`` is unset or null. ``ghcr.io`` on its own resolves to the
-    GitHub Container Registry namespace beside the project's repo, which is
-    the one namespace we can name on the user's behalf. The strings a shell
-    has to use in place of null are read as null too, since ``--registry
-    none`` is the only way to say it on the command line.
-    """
-    registry = env.get("registry")
-    if registry is None or registry is False:
-        return None
-    registry = str(registry).strip()
-    if registry.lower() in ["none", "false", ""]:
-        return None
-    if registry.lower() in AUTO_REGISTRY_VALUES:
-        return get_default_registry_prefix(wdir=wdir)
-    return registry
-
-
-def _same_repo(a: str, b: str) -> bool:
-    """Whether two repositories are the same one written two ways.
-
-    Docker reports what it pulled in full, e.g., ``docker.io/library/foo``,
-    while a project names it as ``foo``.
-    """
-
-    def canonical(repo: str) -> str:
-        for prefix in ("docker.io/library/", "docker.io/", "index."):
-            if repo.startswith(prefix):
-                repo = repo[len(prefix) :]
-        if repo.startswith("docker.io/"):
-            repo = repo[len("docker.io/") :]
-        return repo
-
-    return canonical(a) == canonical(b)
-
-
 def get_repo_from_ref(ref: str) -> str:
     """Return an image reference's repository, without its tag or digest."""
     repo = ref.split("@", 1)[0]
@@ -1088,23 +991,6 @@ def keep_only_repo_digests(identity: dict, ref: str | None) -> dict:
     return identity
 
 
-def get_lock_archs(env: dict) -> list[str]:
-    """Return the architectures an environment should be locked for.
-
-    Both of the architectures in common use are locked whether or not this
-    machine runs them, so that moving a project between them doesn't
-    invalidate every stage in the environment.
-    """
-    from calkit.environments import DEFAULT_DOCKER_LOCK_ARCHS
-
-    archs = list(DEFAULT_DOCKER_LOCK_ARCHS)
-    for platform in env.get("build_platforms") or []:
-        arch = platform_to_arch_name(platform)
-        if arch is not None and arch not in archs:
-            archs.append(arch)
-    return archs
-
-
 def image_exists(ref: str) -> bool:
     """Return True if an image is present in the local image store."""
     try:
@@ -1126,6 +1012,8 @@ _AUTH_ERROR_MARKERS = [
     "unauthorized",
     "authentication required",
     "denied:",
+    # Newer Docker clients report a GHCR refusal with nothing after it
+    "error from registry: denied",
     "requested access to the resource is denied",
 ]
 # Creating a classic token with exactly what pushing an image needs
@@ -1139,6 +1027,35 @@ def is_auth_error(output: str) -> bool:
     """Return True if a registry refused the credentials it was given."""
     lowered = output.lower()
     return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
+
+
+def registry_login_hint(ref: str, output: str) -> str:
+    """Return how to log in to a registry that refused a push, or ''.
+
+    Calkit walks the user through creating a token itself when it can
+    prompt, so this is for when it can't: a push from a pipeline, a script
+    or an agent would otherwise end on the registry's bare "unauthorized",
+    which says nothing about what to do next.
+    """
+    if not is_auth_error(output):
+        return ""
+    host = ref.split("/", 1)[0]
+    if host != "ghcr.io":
+        return (
+            f"{host} refused the push; log Docker in to it with "
+            f"'docker login {host}' and push again"
+        )
+    return (
+        "The GitHub Container Registry refused the push: no credential "
+        "Calkit has can write packages. To fix this, either:\n"
+        "  - run 'calkit push docker' in a terminal, which walks you "
+        "through creating a token and remembers it; or\n"
+        "  - create a token with the 'write:packages' scope at\n"
+        f"      {GITHUB_PACKAGES_TOKEN_URL}\n"
+        "    log Docker in with it, pasting the token as the password:\n"
+        f"      docker login ghcr.io -u {get_github_username()}\n"
+        "    and push again with 'calkit push docker'"
+    )
 
 
 def get_github_token_scopes(token: str) -> set[str]:
@@ -1311,71 +1228,3 @@ def push_image_with_login(
     if success and new_token is not None:
         save_packages_token(new_token)
     return success, output
-
-
-def get_image_name(
-    env: dict, env_name: str, wdir: str | None = None
-) -> str | None:
-    """Return the name of the image an environment uses.
-
-    An environment that builds from a Dockerfile doesn't have to be told
-    what to call its image: the project and environment it belongs to name
-    it unambiguously, by the same convention its Jupyter kernel is named
-    by. One defined purely by an image has to name it, since it's someone
-    else's, so there's nothing to work out and None comes back.
-
-    None also comes back for a project with nothing to be named after: no
-    ``owner`` or ``name`` in ``calkit.yaml`` and no Git remote to read them
-    from. The directory a project happens to sit in is not a name---moving
-    or renaming it would rename the image, and every image built by every
-    project called ``analysis`` would collide---so this is for the project
-    to say rather than for Calkit to guess.
-    """
-    import calkit
-
-    image: str | None = env.get("image")
-    if image:
-        return image
-    if not env.get("path"):
-        return None
-    project: str | None
-    try:
-        project = calkit.detect_project_name(wdir=wdir)
-    except ValueError:
-        # A project that isn't published anywhere yet still names itself if
-        # calkit.yaml says what it's called
-        project = calkit.load_calkit_info(wdir=wdir).get("name")
-        if not project:
-            return None
-    # Repository names must be lowercase, unlike tags
-    return f"{project}.{env_name}".lower()
-
-
-def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
-    """Return the images a project builds that belong in a registry.
-
-    Only environments built from the project's own Dockerfile are included:
-    an environment named after an image someone else publishes already lives
-    somewhere it can be pulled back from.
-    """
-    import calkit
-
-    ck_info = calkit.load_calkit_info(wdir=wdir)
-    resp = {}
-    for env_name, env in (ck_info.get("environments") or {}).items():
-        if not isinstance(env, dict) or env.get("kind") != "docker":
-            continue
-        if not env.get("path"):
-            continue
-        image = get_image_name(env, env_name, wdir=wdir)
-        if not image:
-            continue
-        prefix = resolve_registry_prefix(env, wdir=wdir)
-        if prefix is None:
-            continue
-        resp[env_name] = dict(
-            env=env,
-            image=image,
-            remote_ref=get_remote_image_ref(image, prefix),
-        )
-    return resp

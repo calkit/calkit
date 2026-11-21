@@ -23,6 +23,10 @@ export interface PipelineStage {
   // When present, the stage is run once per iteration; its declared outputs are
   // templated with calkit's `{arg_name}` placeholders.
   iterate_over?: unknown;
+  // Not in calkit.yaml: where a stage merged in from a subproject runs,
+  // relative to the root, for paths derived from it since its own are
+  // already made relative to the root.
+  subproject_wdir?: string;
   [key: string]: unknown;
 }
 
@@ -36,6 +40,7 @@ export interface FigureEntry {
   path: string;
   stage?: string;
   imported_from?: unknown;
+  created_by?: unknown;
   [key: string]: unknown;
 }
 
@@ -58,23 +63,81 @@ export interface ArtifactEntry {
 
 // A question can be a plain string or, in the richer schema, an object with a
 // hypothesis, answer, and supporting evidence (figures or results). See the
-// Python `Question` model in calkit/models/core.py.
+// Python `Question` model in calkit/models/core.py. Evidence with no kind is
+// a plain file, optionally at some lines, unless it has a key or values,
+// which makes it a result.
 export interface QuestionEvidence {
-  kind?: string;
+  kind?: string | null;
   path?: string;
   key?: string;
+  values?: Record<string, string>;
+  lines?: number | string;
   explanation?: string;
+  [key: string]: unknown;
+}
+
+// A person's sign-off on a question, as a verification (the stages implement
+// the approach) or a validation (the approach suits the question and the
+// evidence justifies the answer)
+export interface SignOffEntry {
+  by?: { name?: string; email?: string; with_ai?: string | string[] };
+  date?: string;
+  notes?: string;
   [key: string]: unknown;
 }
 
 export interface QuestionEntry {
   question: string;
   hypothesis?: string;
+  approach?: string;
   // A mapping keyed by "if <condition>", "elif <condition>" and "else" picks
   // its wording from the evidence.
   answer?: string | Record<string, string>;
   evidence?: QuestionEvidence[];
+  notes?: string;
+  verifications?: SignOffEntry[];
+  validations?: SignOffEntry[];
   [key: string]: unknown;
+}
+
+// What `calkit check questions --json` reports for one sign-off and one
+// question. See `SignOffCheck` and `QuestionCheck` in calkit/questions.py.
+// Fields an older CLI doesn't report are optional.
+export interface SignOffCheck {
+  by: string;
+  date?: string | null;
+  notes?: string | null;
+  with_ai?: string[];
+  status: "current" | "stale" | "unchecked";
+  commit?: string | null;
+  message?: string | null;
+}
+
+export type SignOffStatus = "none" | "current" | "stale";
+
+export interface QuestionCheck {
+  index: number;
+  // The subproject it belongs to, relative to the project, if not this one
+  project?: string | null;
+  question: string;
+  answered: boolean;
+  status:
+    | "ok"
+    | "stale"
+    | "frozen"
+    | "missing"
+    | "error"
+    | "unanswered"
+    | "no-evidence";
+  message?: string | null;
+  evidence?: { path?: string; stage?: string | null; status?: string }[];
+  hypothesis?: boolean;
+  approach?: boolean;
+  stages?: string[];
+  verifications?: SignOffCheck[];
+  validations?: SignOffCheck[];
+  verification_status?: SignOffStatus;
+  validation_status?: SignOffStatus;
 }
 
 export interface CalkitInfo {
@@ -84,10 +147,13 @@ export interface CalkitInfo {
   questions?: (string | QuestionEntry)[];
   figures?: FigureEntry[];
   datasets?: DatasetEntry[];
+  // Anything else, which can record who created it or where it came from
+  misc?: ArtifactEntry[];
   results?: ArtifactEntry[];
   publications?: ArtifactEntry[];
   presentations?: ArtifactEntry[];
   apps?: Record<string, AppEntry>;
+  subprojects?: { path?: string; [key: string]: unknown }[];
   pipeline?: {
     stages?: Record<string, PipelineStage>;
   };

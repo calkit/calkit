@@ -263,12 +263,7 @@ def config_github_ssh():
 
     typer.echo("Checking if you can already connect to GitHub via SSH")
     # First check if we can already connect to GitHub
-    ssh_test_cmd = ["ssh", "-T", "git@github.com"]
-    p = subprocess.run(ssh_test_cmd, capture_output=True, text=True)
-    if (
-        "successfully authenticated" in p.stdout
-        or "successfully authenticated" in p.stderr
-    ):
+    if calkit.github.can_use_ssh(interactive=True):
         typer.echo("You can already connect to GitHub via SSH")
         go_on = typer.confirm("Do you want to add a new SSH key anyway?")
         if not go_on:
@@ -410,8 +405,7 @@ def config_github_ssh():
     typer.echo(f"Paste this into the public key field:\n\n{pub_key}\n")
     typer.confirm("Press Enter when done", default=True)
     typer.echo("Testing SSH connection to GitHub")
-    p = subprocess.run(ssh_test_cmd, capture_output=True, text=True)
-    if "successfully authenticated" in p.stderr:
+    if calkit.github.can_use_ssh(interactive=True):
         typer.echo("Successfully connected to GitHub via SSH!")
     else:
         raise_error(

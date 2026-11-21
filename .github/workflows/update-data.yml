@@ -1,0 +1,101 @@
+name: Update data
+
+# The pipeline's stages that collect data once a day, e.g., the projects found
+# on GitHub and the one-pager's usage numbers, run here rather than in every
+# pull request or on every machine, so that work and its API calls happen once
+# a day. Their results wait in one pull request, updated each day, for an
+# admin to merge.
+on:
+  schedule:
+    # Early in the UTC day, when their schedule inputs go out of date, and off
+    # the hour, when GitHub delays or drops scheduled runs most
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    # Each day's results are built on main as it is
+    if: github.ref_name == github.event.repository.default_branch
+    # Holds CALKIT_TOKEN, a hub superuser's, and only lets jobs running on
+    # main read it, so a workflow on another branch or a pull request can't
+    environment: data-update
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATA_BRANCH: data-update
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # As in run-pipeline.yml, so built documents are dated and stamped
+          # as they would be locally
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B "$DATA_BRANCH"
+      - name: Setup uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Install Calkit from this branch
+        run: |
+          uv tool install --editable .
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # Only the data stages and what depends on them run, so the pull
+      # request holds nothing but data. The superuser token only reaches the
+      # stage that needs it, not the others, which read what anyone can put
+      # on GitHub or run Docker images, nor DVC, which logs in through OIDC.
+      - name: Run the data stages
+        uses: ./actions/run
+        env:
+          # For the gh CLI, which stages search GitHub with
+          GH_TOKEN: ${{ github.token }}
+        with:
+          # Its Docker environments only pull public images
+          login_ghcr: "false"
+          run_args: --downstream find-calkit-projects --skip traction
+          # Saved below instead, since the branch is rebuilt each day
+          save: "false"
+      - name: Fetch the usage numbers
+        env:
+          # For the hub's usage stats
+          CALKIT_TOKEN: ${{ secrets.CALKIT_TOKEN }}
+        run: calkit run traction
+      - name: Run what depends on them
+        run: calkit run --downstream traction --skip traction
+      # Each run writes whole snapshots, so rebuilding the branch from main
+      # loses nothing an earlier day's commit had, and never conflicts with it
+      - name: Propose the results to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+            github.run_id }}
+        run: |
+          before=$(git rev-parse HEAD)
+          calkit save -am "Update pipeline data" --no-push
+          if [ "$(git rev-parse HEAD)" = "$before" ]; then
+            echo "Nothing changed"
+            exit 0
+          fi
+          calkit push --no-git
+          git push --force origin "HEAD:refs/heads/$DATA_BRANCH"
+          body="Data from the pipeline's daily stages, rebuilt on main by $RUN_URL.
+          Pushes from this workflow don't start checks, so merge it bypassing them."
+          open=$(gh pr list --head "$DATA_BRANCH" --base main --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -z "$open" ]; then
+            gh pr create --head "$DATA_BRANCH" --base main \
+              --title "Update pipeline data" --body "$body"
+          else
+            gh pr edit "$open" --body "$body"
+          fi

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import pathlib
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import dotenv
 import typer
 from typing_extensions import Annotated
 
@@ -185,22 +188,57 @@ def check_env_kernel(
     from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
     from calkit.cli.update import update_environment
-    from calkit.environments import language_from_env
+    from calkit.environments import get_composed_env_vars, language_from_env
 
-    def get_env():
-        ck_info = calkit.load_calkit_info()
-        envs = ck_info.get("environments", {})
-        if env_name not in envs:
-            raise_error(
-                f"No environment '{env_name}' defined for this project"
-            )
-        return envs[env_name]
+    @contextlib.contextmanager
+    def send_stdout_to_stderr() -> Iterator[None]:
+        # What's run prints to stdout, where only the JSON belongs, and child
+        # processes inherit the file descriptor rather than sys.stdout
+        if not json_output:
+            yield
+            return
+        sys.stdout.flush()
+        stdout_fd = os.dup(1)
+        os.dup2(2, 1)
+        try:
+            yield
+        finally:
+            sys.stdout.flush()
+            os.dup2(stdout_fd, 1)
+            os.close(stdout_fd)
 
-    env = None
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if env_name not in envs:
+        raise_error(f"No environment '{env_name}' defined for this project")
+    env = envs[env_name]
     # Detect language from environment
     if language is None:
-        env = get_env()
         language = language_from_env(env) or "python"
+    # A kernel an editor starts doesn't go through Calkit, so its spec gives
+    # it the environments composed into this one, ahead of the editor's PATH,
+    # but not what the project sets, which the spec's values would override
+    try:
+        with send_stdout_to_stderr():
+            kernel_env_vars = get_composed_env_vars(
+                env_name,
+                env,
+                envs,
+                verbose=verbose,
+                env_vars={"PATH": "${PATH}"},
+            )
+    except (ValueError, RuntimeError, OSError) as e:
+        raise_error(str(e))
+    if kernel_env_vars is not None:
+        project_env_var_names = {
+            *(ck_info.get("env_vars") or {}),
+            *dotenv.dotenv_values(".env"),
+        }
+        kernel_env_vars = {
+            k: v
+            for k, v in kernel_env_vars.items()
+            if k not in project_env_var_names
+        }
     project_name = calkit.detect_project_name(prepend_owner=False)
     if not project_name:
         raise_error("Project name cannot be empty")
@@ -224,22 +262,12 @@ def check_env_kernel(
             "--display-name",
             display_name,
         ]
-        if json_output:
-            # For JSON output, run silently and don't show intermediate
-            # messages
-            res = run_in_env(
+        with send_stdout_to_stderr():
+            run_in_env(
                 cmd=cmd,
                 env_name=env_name,
                 no_check=no_check,
-                verbose=False,
-                relaxed_check=True,
-            )
-        else:
-            res = run_in_env(
-                cmd=cmd,
-                env_name=env_name,
-                no_check=no_check,
-                verbose=verbose,
+                verbose=verbose and not json_output,
                 relaxed_check=True,
             )
     elif language == "r":
@@ -251,18 +279,18 @@ def check_env_kernel(
                 f'"{kernel_name}", displayname = "{display_name}", user = TRUE)'
             ),
         ]
-        run_in_env(
-            cmd=cmd,
-            env_name=env_name,
-            no_check=no_check,
-            verbose=verbose,
-            relaxed_check=True,
-        )
+        with send_stdout_to_stderr():
+            run_in_env(
+                cmd=cmd,
+                env_name=env_name,
+                no_check=no_check,
+                verbose=verbose,
+                relaxed_check=True,
+            )
     elif language == "julia":
         if not no_check:
-            check_environment(env_name=env_name, verbose=verbose)
-        if env is None:
-            env = get_env()
+            with send_stdout_to_stderr():
+                check_environment(env_name=env_name, verbose=verbose)
         env_path = env.get("path")
         julia_version = env.get("julia")
         env_fname = os.path.basename(env_path)
@@ -298,7 +326,10 @@ def check_env_kernel(
                     "install automatically."
                 )
             try:
-                update_environment(env_name=env_name, add_packages=["IJulia"])
+                with send_stdout_to_stderr():
+                    update_environment(
+                        env_name=env_name, add_packages=["IJulia"]
+                    )
             except Exception as e:
                 raise_error(f"Failed to install IJulia: {e}")
             ijulia_ok = _check_ijulia_available(
@@ -315,6 +346,9 @@ def check_env_kernel(
         # Windows project path, whose backslashes are otherwise read as invalid
         # unicode escapes.
         esc = calkit.julia.escape_string
+        kernel_env = {"JULIA_LOAD_PATH": calkit.julia.load_path()} | (
+            kernel_env_vars or {}
+        )
         julia_cmd = (
             "import IJulia;"
             "kp=IJulia.installkernel("
@@ -322,7 +356,11 @@ def check_env_kernel(
             f'"--project={esc(env_dir_abs)}",'
             '"--startup-file=no",'
             f'displayname="{esc(display_name)}",'
-            f'env=Dict("JULIA_LOAD_PATH" => "{esc(calkit.julia.load_path())}")'
+            "env=Dict("
+            + ",".join(
+                f'"{esc(k)}" => "{esc(v)}"' for k, v in kernel_env.items()
+            )
+            + ")"
             ");"
             "println(kp);"
         )
@@ -354,12 +392,48 @@ def check_env_kernel(
     else:
         raise_error(f"{language} not supported")
         return "", ""  # For typing analysis since raise_error exits
+    # IJulia took them, but others go into the spec installed for this user,
+    # since a shell between here and the installer could expand ${PATH}
+    if kernel_env_vars and language != "julia":
+        from jupyter_core.paths import jupyter_data_dir
+
+        spec_fpath = os.path.join(
+            jupyter_data_dir(), "kernels", kernel_name.lower(), "kernel.json"
+        )
+        if not os.path.isfile(spec_fpath):
+            raise_error(
+                f"Kernel '{kernel_name}' isn't in {jupyter_data_dir()}, so "
+                "it can't get the environments in 'with'"
+            )
+        with open(spec_fpath, encoding="utf-8") as f:
+            spec = json.load(f)
+        spec["env"] = spec.get("env", {}) | kernel_env_vars
+        tmp_fpath = f"{spec_fpath}.{os.getpid()}.tmp"
+        with open(tmp_fpath, "w", encoding="utf-8") as f:
+            json.dump(spec, f, indent=1)
+        os.replace(tmp_fpath, spec_fpath)
     # Output result
     if json_output:
         result = {
             "kernel_name": kernel_name,
             "display_name": display_name,
         }
+        # The environment's Python, which an editor's list of kernels names
+        # it by, so it can be told from another environment named alike
+        if language == "python":
+            from jupyter_core.paths import jupyter_data_dir
+
+            spec_fpath = os.path.join(
+                jupyter_data_dir(),
+                "kernels",
+                kernel_name.lower(),
+                "kernel.json",
+            )
+            if os.path.isfile(spec_fpath):
+                with open(spec_fpath, encoding="utf-8") as f:
+                    argv = json.load(f).get("argv") or []
+                if argv:
+                    result["python"] = argv[0]
         typer.echo(json.dumps(result))
     return kernel_name, display_name
 
@@ -528,7 +602,7 @@ def execute_notebook(
         kernelspec["name"] = kernel_name
         kernelspec["display_name"] = display_name
         kernelspec["language"] = language.lower()
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(nb_json, f, indent=1)
     except Exception as e:
         if verbose:
@@ -638,14 +712,38 @@ def execute_notebook(
             verbose=verbose,
         )
     elif language.lower() in ["python", "julia", "r"]:
-        papermill.execute_notebook(
-            input_path=path,
-            output_path=fpath_out_exec,
-            kernel_name=kernel_name,
-            log_output=True,
-            parameters=parsed_params,
-            cwd=notebook_dir,
-        )
+        # The kernel inherits this process's environmental variables, so
+        # it gets the programs of environments composed into its own while
+        # it runs, and what the project sets wins
+        try:
+            composed = calkit.environments.get_composed_env_vars(
+                env_name,
+                env,
+                envs,
+                keep=[
+                    *(ck_info.get("env_vars") or {}),
+                    *dotenv.dotenv_values(".env"),
+                ],
+                verbose=verbose,
+            )
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(str(e))
+        saved_env_vars = dict(os.environ)
+        if composed is not None:
+            os.environ.clear()
+            os.environ.update(composed)
+        try:
+            papermill.execute_notebook(
+                input_path=path,
+                output_path=fpath_out_exec,
+                kernel_name=kernel_name,
+                log_output=True,
+                parameters=parsed_params,
+                cwd=notebook_dir,
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(saved_env_vars)
     elif language.lower() == "matlab":
         # Use nbconvert to execute the notebook with the MATLAB kernel
         cmd = [
@@ -678,7 +776,7 @@ def execute_notebook(
                 and "execution_count" in exec_cell
             ):
                 orig_cell["execution_count"] = exec_cell["execution_count"]
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(original_nb, f, indent=1)
     for to_fmt in to:
         if to_fmt != "notebook":

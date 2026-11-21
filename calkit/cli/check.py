@@ -6,19 +6,26 @@ import functools
 import json
 import os
 import platform as _platform
+import re
 import shutil
 import subprocess
-import textwrap
-from typing import Annotated, Callable
+from typing import Annotated, Any, Callable
 
 import dotenv
 import typer
 
 import calkit
-from calkit.cli import AliasGroup, raise_error, warn
-from calkit.core import get_md5
+from calkit.cli import AliasGroup, raise_error, warn, warn_app_control
 
-check_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+
+def stage_calkit_files(*args: object, **kwargs: object) -> None:
+    """Stage what a check wrote, which stages depend on."""
+    calkit.environments.stage_calkit_files()
+
+
+check_app = typer.Typer(
+    cls=AliasGroup, no_args_is_help=True, result_callback=stage_calkit_files
+)
 
 
 def _juliaup_version_installed(julia_version: str) -> bool:
@@ -62,6 +69,7 @@ def _check_julia_env(
     julia_version: str | None = None,
     verbose: bool = False,
     cache_key: str | None = None,
+    force: bool = False,
 ) -> str:
     """Check a Julia environment and instantiate only when needed."""
     abs_env_path = os.path.abspath(env_path)
@@ -80,7 +88,7 @@ def _check_julia_env(
     cache_env_name = cache_key or (
         f"julia::{abs_env_path}::{julia_version or ''}"
     )
-    if calkit.environments.check_cache(
+    if not force and calkit.environments.check_cache(
         env_name=cache_env_name,
         env=env,
         wdir=env_dir,
@@ -404,16 +412,16 @@ def _echo_retyped(findings: list[dict]) -> None:
     calkit.echo(
         "\nEach of these is a number the project already computes, typed "
         "into the document. It is right today and wrong the next time that "
-        "stage runs. Reference the command the 'json-to-latex' stage "
-        "generates for that key instead."
+        "stage runs. Read it with \\ckvalue{<file>}{<key>} from the "
+        "calkit LaTeX package instead, or, where the document already uses "
+        "a 'json-to-latex' stage, with the command it generates."
         "\n\nWhat this does not catch: a value under two significant "
         "digits (0.5) or an integer under 100 (8), which would match too "
         "much ordinary prose to be worth reporting; a value the document "
         "rounds or reformats before typing, since it is compared as "
-        "written; and anything in a results file no 'json-to-latex' stage "
-        "reads, or in one whose stage names its 'keys' without naming "
-        "that value---the document has no command for it, so typing it "
-        "is what there is until the key is named."
+        "written; and anything in a results file the document doesn't "
+        "read with \\ckvalue and no 'json-to-latex' stage reads, or a "
+        "value a 'json-to-latex' stage leaves out of the 'keys' it names."
     )
 
 
@@ -471,16 +479,26 @@ def check_environment(
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Rebuild the environment from scratch, e.g., after "
+            "something it was built from changed outside the project.",
+        ),
+    ] = False,
 ) -> str | None:
-    """Check that an environment is up-to-date."""
+    """Check that an environment is up-to-date.
+
+    An environment is also rebuilt when one of its 'inputs' changes.
+    """
     from calkit.environments import (
         get_all_conda_lock_fpaths,
-        get_all_docker_lock_fpaths,
         get_all_venv_lock_fpaths,
         get_default_venv_prefix,
         get_env_lock_fpath,
         write_scheduler_env_lock,
-        write_system_env_lock,
     )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
@@ -491,51 +509,46 @@ def check_environment(
     if isinstance(envs, list):
         raise_error("Error: Environments should be a dict, not a list")
     assert isinstance(envs, dict)
-    if env_name not in envs:
+    found = calkit.environments.get_env(env_name, envs)
+    if found is None:
         raise_error(f"Environment '{env_name}' does not exist")
-    env = envs[env_name]
-    if env["kind"] == "docker":
-        lock_fpath = get_env_lock_fpath(
-            env=env, env_name=env_name, as_posix=False
-        )
-        legacy_lock_fpath = get_env_lock_fpath(
-            env=env, env_name=env_name, as_posix=False, legacy=True
-        )
-        # Alt lock paths include other architectures
-        alt_lock_fpaths = get_all_docker_lock_fpaths(
-            env_name=env_name, as_posix=False
-        )
-        image = calkit.docker.get_image_name(env, env_name)
-        if image is None:
-            if not env.get("path"):
-                raise_error(
-                    f"Environment '{env_name}' must define an image, since "
-                    "it has no Dockerfile to build one from"
-                )
-            raise_error(
-                f"Cannot work out what to call the image for environment "
-                f"'{env_name}': set 'image' on it, or set 'owner' and "
-                "'name' in calkit.yaml"
+    env = found
+    try:
+        guests = calkit.environments.get_guest_envs(env_name, env, envs)
+    except ValueError as e:
+        raise_error(str(e))
+    for guest_name, guest in guests:
+        check_environment(env_name=guest_name, verbose=verbose)
+        try:
+            added = calkit.environments.add_host_tex_packages(
+                env_name, env, guest_name, guest
             )
-        check_docker_env(
-            tag=image,
-            fpath=env.get("path"),
-            lock_fpath=lock_fpath,
-            alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
-            alt_lock_fpaths=alt_lock_fpaths,
-            platform=env.get("platform"),
-            deps=calkit.environments.get_env_input_paths(env, env_name),
-            env_vars=env.get("env_vars", []),
-            ports=env.get("ports", []),
-            gpus=env.get("gpus"),
-            user=env.get("user"),
-            wdir=env.get("wdir"),
-            args=env.get("args", []),
-            build_platforms=env.get("build_platforms", []),
-            registry=env.get("registry"),
-            lock_archs=calkit.docker.get_lock_archs(env),
-            quiet=not verbose,
+        except ValueError as e:
+            raise_error(str(e))
+        if added:
+            check_environment(env_name=guest_name, verbose=verbose)
+    # Docker records its inputs in its lock, which rebuilds it already
+    try:
+        rebuild = force or (
+            env["kind"] != "docker"
+            and calkit.environments.inputs_changed_since_build(env_name, env)
         )
+    except ValueError as e:
+        raise_error(f"Environment '{env_name}': {e}")
+    if rebuild and env["kind"] not in (
+        "docker",
+        calkit.environments.SWITCH_KIND,
+    ):
+        try:
+            removed = calkit.environments.remove_built_env(env_name, envs)
+        except (ValueError, OSError, subprocess.CalledProcessError) as e:
+            raise_error(f"Failed to remove environment '{env_name}': {e}")
+        if removed and verbose:
+            typer.echo(f"Removed {removed} to rebuild it")
+    if env["kind"] == "docker":
+        from calkit.environments import docker as env_docker
+
+        env_docker.check(env_name, env, rebuild=rebuild, verbose=verbose)
     elif env["kind"] == "conda":
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
@@ -559,11 +572,15 @@ def check_environment(
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--manifest-path", env["path"]]
+        # Without a name, pixi installs only the manifest's default env
+        if pixi_env_name := env.get("name"):
+            cmd += ["--environment", pixi_env_name]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd)
         except subprocess.CalledProcessError:
+            warn_app_control(maybe=True)
             raise_error("Failed to check pixi environment")
     elif env["kind"] == "uv":
         cmd = ["uv", "sync"]
@@ -575,6 +592,7 @@ def check_environment(
         try:
             subprocess.check_call(cmd)
         except subprocess.CalledProcessError:
+            warn_app_control(maybe=True)
             raise_error("Failed to check uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
         if "path" not in env:
@@ -615,6 +633,7 @@ def check_environment(
             output_fpath=get_env_lock_fpath(
                 env=env, env_name=env_name, as_posix=False
             ),  # type: ignore
+            rebuild=rebuild,
         )
     elif env["kind"] == "julia":
         env_path = env.get("path")
@@ -630,6 +649,7 @@ def check_environment(
             julia_version=julia_version,
             verbose=verbose,
             cache_key=env_name,
+            force=rebuild,
         )
     elif env["kind"] in ("slurm", "pbs"):
         # Job-scheduler envs have no external manifest to validate; the
@@ -637,6 +657,81 @@ def check_environment(
         # env config so DVC stages that depend on the env get invalidated
         # when the config changes.
         write_scheduler_env_lock(env_name=env_name, env=env)
+    elif env["kind"] == calkit.environments.SWITCH_KIND:
+        # Checking a switch means checking what it picks here. Until a stage
+        # has run with it, i.e., none depends on its lock, options on other
+        # machines are locked too, where they can be reached, and every
+        # option's lock is part of the switch's.
+        switch_lock = os.path.join(
+            calkit.environments.get_env_lock_dir(), env_name, "switch.json"
+        )
+        try:
+            with open("dvc.lock") as f:
+                ran = switch_lock.replace(os.sep, "/") in f.read()
+        except OSError:
+            ran = False
+        try:
+            options = calkit.environments.get_switch_options(env_name, envs)
+        except ValueError as e:
+            raise_error(str(e))
+        for option in [] if ran else options:
+            option_env = calkit.environments.get_env(option, envs) or {}
+            option_lock = get_env_lock_fpath(
+                env=option_env, env_name=option, as_posix=False
+            )
+            if (
+                option_env.get("kind") != "system"
+                or not option_env.get("lock")
+                or not option_env.get("host")
+                or calkit.environments.env_is_local(option_env)
+                or (option_lock is not None and os.path.isfile(option_lock))
+            ):
+                continue
+            try:
+                check_environment(env_name=option, verbose=verbose)
+            except typer.Exit:
+                warn(
+                    f"Option '{option}' of '{env_name}' couldn't be locked "
+                    "from here, so it will be on its first check there"
+                )
+        try:
+            calkit.environments.write_switch_env_lock(
+                env_name, envs, relocked=None if ran else options
+            )
+            picked = calkit.environments.resolve_switch(env_name, envs)
+        except ValueError as e:
+            raise_error(str(e))
+        if picked is None:
+            warn(calkit.environments.describe_switch_no_match(env_name, env))
+            return None
+        if verbose:
+            typer.echo(f"Environment '{env_name}' picks '{picked}' here")
+        if env.get("lock"):
+            machine_env = calkit.environments.switch_machine_lock_env(env)
+            try:
+                mismatch = calkit.environments.gate_system_env_lock(
+                    env_name,
+                    machine_env,
+                    system_info=calkit.environments.picked_machine_info(
+                        picked,
+                        (calkit.environments.get_env(picked, envs) or {}),
+                        ck_info,
+                        lock=env.get("lock"),
+                    ),
+                )
+            except ValueError as e:
+                raise_error(f"Environment '{env_name}': {e}")
+            if mismatch:
+                warn(
+                    calkit.environments.describe_system_env_lock_mismatch(
+                        env_name, mismatch
+                    )
+                )
+        lock_fpath = check_environment(
+            env_name=picked, verbose=verbose, force=rebuild
+        )
+        calkit.environments.record_build_inputs(env_name, env)
+        return lock_fpath
     elif env["kind"] == "system":
         # Nothing is installed or built for a system env; checking it means
         # making sure the machine is as the project requires, then reading
@@ -647,7 +742,17 @@ def check_environment(
                 calkit.check_requirements(
                     requirements=env.get("requirements", [])
                 )
-                write_system_env_lock(env_name=env_name, env=env)
+                # A mismatch warns, and stages that need to run are
+                # skipped, or fail at the gate in 'xenv'
+                mismatch = calkit.environments.gate_system_env_lock(
+                    env_name, env
+                )
+                if mismatch:
+                    warn(
+                        calkit.environments.describe_system_env_lock_mismatch(
+                            env_name, mismatch
+                        )
+                    )
             except ValueError as e:
                 # A requirement that isn't met, or a property that can't be
                 # locked -- a misspelled one, or a tool that isn't
@@ -662,9 +767,9 @@ def check_environment(
             # from that machine, since those are the ones the results
             # depend on.
             import calkit.workspace as workspace
-            from calkit.dependencies import _is_interactive
+            from calkit.core import is_tty
 
-            interactive = _is_interactive()
+            interactive = is_tty()
             ck_info = calkit.load_calkit_info()
             try:
                 # Anything written as ${CK_SSH_HOST} is the first thing to
@@ -713,7 +818,12 @@ def check_environment(
                 )
                 system_info = None
                 if needs_system_info:
-                    system_info = workspace.remote_system_info(ws)
+                    system_info = workspace.remote_system_info(
+                        ws,
+                        apps=calkit.environments.lock_app_names(
+                            env.get("lock")
+                        ),
+                    )
                     # Before anything else is decided from it, so a
                     # mismatched machine is reported rather than measured
                     # and recorded as what results depend on
@@ -727,19 +837,29 @@ def check_environment(
                     system_info=system_info,
                     verbose=verbose,
                 )
-                # Returns None when the env locks nothing, so nothing is
-                # written for an env with nothing to record
-                write_system_env_lock(
-                    env_name=env_name,
-                    env=env,
-                    system_info=system_info,
+                mismatch = calkit.environments.gate_system_env_lock(
+                    env_name, env, system_info=system_info
                 )
+                if mismatch:
+                    warn(
+                        calkit.environments.describe_system_env_lock_mismatch(
+                            env_name, mismatch
+                        )
+                    )
             except ValueError as e:
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
+    elif env["kind"] == "texlive":
+        from calkit.environments import texlive as env_texlive
+
+        try:
+            env_texlive.check(env_name, env, rebuild=rebuild, verbose=verbose)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise_error(f"Environment '{env_name}': {e}")
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
+    calkit.environments.record_build_inputs(env_name, env)
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
 
 
@@ -783,35 +903,49 @@ def check_environments(
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
 ) -> None:
+    """Check that the project's environments are up to date.
+
+    Subprojects' environments are checked too, as 'calkit run' does.
+    """
     ck_info = calkit.load_calkit_info()
-    envs = ck_info.get("environments", {})
-    if not envs:
+    projects = list(calkit.iter_projects(ck_info=ck_info))
+    if not any(info.get("environments") for _, info in projects):
         typer.echo("No environments defined in calkit.yaml")
         return
     # Set any project-level environmental variables before checking
     # environments
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    calkit.set_env_vars(ck_info=ck_info, cli=True)
     failures = []
-    for env_name, env in envs.items():
-        if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
-            if verbose:
-                typer.echo(
-                    f"Skipping check for {env['kind']} env '{env_name}'"
-                )
+    for wdir, info in projects:
+        # A parent's variables apply to its subprojects even if it has no
+        # environments of its own, as in 'calkit run'
+        calkit.set_env_vars(ck_info=info, cli=True)
+        if not info.get("environments"):
             continue
-        typer.echo(f"Checking environment: '{env_name}'")
-        try:
-            check_environment(env_name=env_name, verbose=verbose)
-        except typer.Exit:
-            # The check reported its own reason through raise_error, which
-            # has already printed it. Repeating it here would replace a
-            # real message ("Unknown system property to lock: ...") with
-            # the exit code, since that is all this exception carries.
-            failures.append(env_name)
-        except Exception as e:
-            warn(f"Error checking environment '{env_name}': {e}")
-            failures.append(env_name)
+        # check_environment reads the project it's in, so go there
+        with calkit.in_project(wdir):
+            for env_name, env in info["environments"].items():
+                if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
+                    if verbose:
+                        typer.echo(
+                            f"Skipping check for {env['kind']} env "
+                            f"'{env_name}'"
+                        )
+                    continue
+                qualified = calkit.qualify_with_project(wdir, env_name)
+                typer.echo(f"Checking environment: '{qualified}'")
+                try:
+                    check_environment(env_name=env_name, verbose=verbose)
+                except typer.Exit:
+                    # The check reported its own reason through raise_error,
+                    # which has already printed it. Repeating it here would
+                    # replace a real message ("Unknown system property to
+                    # lock: ...") with the exit code, since that is all this
+                    # exception carries.
+                    failures.append(qualified)
+                except Exception as e:
+                    warn(f"Error checking environment '{qualified}': {e}")
+                    failures.append(qualified)
     if failures:
         raise_error(
             f"Failed to check the following environments: {', '.join(failures)}"
@@ -1116,482 +1250,38 @@ def check_docker_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
+    rebuild: Annotated[
+        bool,
+        typer.Option(
+            "--rebuild",
+            help="Build the image from scratch, pulling its base image, "
+            "rather than reusing a cached or locked one.",
+        ),
+    ] = False,
 ) -> None:
     """Check that Docker environment is up-to-date."""
-    from calkit import docker as ck_docker
-    from calkit.environments import get_docker_arch
+    from calkit.environments import docker as env_docker
 
-    if fpath is None and lock_fpath is None:
-        raise_error(
-            "Lock file output path must be provided if input Dockerfile is not"
-        )
-    outfile = open(os.devnull, "w") if quiet else None
-    if fpath is not None:
-        typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
-        dockerfile_md5 = get_md5(fpath)
-    else:
-        dockerfile_md5 = None
-    if lock_fpath is None and fpath is not None:
-        lock_fpath = fpath + "-lock.json"
-    else:
-        lock_fpath = str(lock_fpath)
-    # Compute MD5s of any dependencies
-    deps_md5s = {}
-    for dep in deps:
-        deps_md5s[dep] = get_md5(dep, exclude_files=[lock_fpath])
-
-    def read_lock(path: str) -> dict | None:
-        # A lock that can't be read is treated as one that isn't there:
-        # rebuilding is always an option, so there's no reason to fail
-        try:
-            with open(path) as f:
-                loaded = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            return None
-        # Handle legacy lock files that are lists
-        if isinstance(loaded, list):
-            loaded = loaded[0] if loaded else None
-        return loaded if isinstance(loaded, dict) else None
-
-    # Read the lock file, falling back to legacy paths and then to other
-    # architectures, which still identify the image well enough to pull it
-    lock = None
-    lock_is_current_arch = False
-    if os.path.isfile(lock_fpath):
-        typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
-        lock = read_lock(lock_fpath)
-        lock_is_current_arch = lock is not None
-    else:
-        typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
-        for alt_lock_fpath in alt_lock_fpaths_delete:
-            if os.path.isfile(alt_lock_fpath):
-                typer.echo(f"Reading alternative lock file: {alt_lock_fpath}")
-                lock = read_lock(alt_lock_fpath)
-                # A legacy lock was written before locks were kept per
-                # architecture, by the machine that checked the
-                # environment, so it describes this one. Taking it for
-                # another architecture's would skip checking the local image
-                # against it, and an image left under this tag by something
-                # else would be locked in as this environment's
-                lock_is_current_arch = lock is not None
-                os.remove(alt_lock_fpath)
-                break
-        if lock is None:
-            for alt_lock_fpath in alt_lock_fpaths:
-                if os.path.isfile(alt_lock_fpath):
-                    typer.echo(
-                        f"Reading alternative lock file: {alt_lock_fpath}"
-                    )
-                    lock = read_lock(alt_lock_fpath)
-                    if lock is not None:
-                        break
-    # A lock that doesn't describe the current spec is stale, not merely
-    # out-of-date with the local image: the image it identifies was built
-    # from a different Dockerfile or dependencies, so it must not be pulled
-    # in place of the one asked for
-    if lock is not None and not ck_docker.lock_matches_spec(
-        lock, dockerfile_md5=dockerfile_md5, deps_md5s=deps_md5s
-    ):
-        typer.echo(
-            "Lock file does not match the current environment", file=outfile
-        )
-        lock = None
-        lock_is_current_arch = False
-    # Work out where this image lives in a registry, so it can be pulled
-    # instead of rebuilt, and pushed after being built. Only an image built
-    # from a Dockerfile goes to the project's registry; one named directly
-    # already lives somewhere it can be pulled back from.
-    remote_ref = None
-    registry_prefix = ck_docker.resolve_registry_prefix(
-        {"registry": registry, "path": fpath}
+    env_docker.check_image(
+        tag=tag,
+        fpath=fpath,
+        lock_fpath=lock_fpath,
+        alt_lock_fpaths=alt_lock_fpaths,
+        alt_lock_fpaths_delete=alt_lock_fpaths_delete,
+        platform=platform,
+        user=user,
+        wdir=wdir,
+        deps=deps,
+        env_vars=env_vars,
+        ports=ports,
+        gpus=gpus,
+        args=args,
+        build_platforms=build_platforms,
+        registry=registry,
+        lock_archs=lock_archs,
+        quiet=quiet,
+        rebuild=rebuild,
     )
-    if registry_prefix is None and ck_docker.registry_is_auto(registry):
-        warn(
-            "Could not work out a registry for this project; name one "
-            "explicitly, e.g., 'ghcr.io/someone/some-project', or set "
-            "a GitHub remote"
-        )
-    remote_repo = None
-    if registry_prefix is not None and fpath is not None:
-        remote_ref = ck_docker.get_remote_image_ref(tag, registry_prefix)
-        remote_repo = ck_docker.get_repo_from_ref(remote_ref)
-    # Where a digest the lock records can be pulled from, since the lock
-    # names the digest alone: the project's registry for an image we build,
-    # or the image's own repo for one named directly. Working this out from
-    # the environment definition rather than the lock is what stops a digest
-    # left over from a different image resolving to anything
-    digest_source_ref = remote_ref if remote_ref is not None else tag
-    typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
-    identity = ck_docker.inspect_image_for_lock(tag)
-    if identity is None:
-        typer.echo(f"No image with tag {tag} found locally", file=outfile)
-    # Only a lock for this architecture can say whether the image here is
-    # the one it describes: another architecture's layers never match, so
-    # its lock is taken as an instruction to fetch the image it names rather
-    # than as a blessing for whatever happens to carry this tag
-    up_to_date = (
-        identity is not None
-        and lock is not None
-        and lock_is_current_arch
-        and ck_docker.lock_matches_image(lock, identity)
-    )
-
-    def delete_lock_on_failure() -> None:
-        if lock_fpath and os.path.exists(lock_fpath):
-            os.remove(lock_fpath)
-
-    pulled_from_registry = False
-    already_pushed = False
-    built = False
-    if not up_to_date:
-        obtained = False
-        # Prefer pulling the exact image the lock identifies, since a rebuild
-        # can't reproduce it, and would silently pick up whatever its
-        # undeclared upstream dependencies have become
-        if lock is not None:
-            for digest_ref in ck_docker.get_lock_digest_refs(
-                lock, digest_source_ref
-            ):
-                typer.echo(f"Pulling image by digest: {digest_ref}")
-                # A private image needs credentials we may be able to get,
-                # but only a registry that refused us is worth logging in to
-                if not ck_docker.pull_image_with_login(
-                    digest_ref, platform=platform
-                ):
-                    warn(f"Failed to pull image by digest: {digest_ref}")
-                    continue
-                if not ck_docker.tag_image(digest_ref, tag):
-                    warn(f"Failed to tag pulled image as {tag}")
-                    continue
-                identity = ck_docker.inspect_image_for_lock(tag)
-                if identity is None:
-                    continue
-                if lock_is_current_arch and not ck_docker.lock_matches_image(
-                    lock, identity
-                ):
-                    warn(
-                        f"Image pulled from {digest_ref} does not match the "
-                        "lock file"
-                    )
-                    continue
-                obtained = True
-                pulled_from_registry = (
-                    remote_repo is not None
-                    and digest_ref.split("@", 1)[0] == remote_repo
-                )
-                break
-        # A lock from another architecture named an image we've now tried
-        # to pull. Failing that, an image already here was built from this
-        # same spec, so it stands rather than being rebuilt for a lock that
-        # was never able to describe it
-        if (
-            not obtained
-            and identity is not None
-            and lock is not None
-            and not lock_is_current_arch
-        ):
-            obtained = True
-        # Fall back to an image archived in a release, since a registry makes
-        # no promise to keep an image forever, and rebuilding can't reproduce
-        # one whose upstream dependencies have moved on
-        if not obtained and lock is not None and lock_is_current_arch:
-            layers = (lock.get("RootFS") or {}).get("Layers") or []
-            archived = calkit.releases.find_archived_docker_image(layers)
-            if archived is not None:
-                release_name, image_id, entry = archived
-                typer.echo(
-                    f"Fetching image archived in release '{release_name}'"
-                )
-                if calkit.releases.fetch_archived_docker_image(
-                    release_name, entry
-                ) and ck_docker.tag_image(image_id, tag):
-                    identity = ck_docker.inspect_image_for_lock(tag)
-                    if identity is not None and ck_docker.lock_matches_image(
-                        lock, identity
-                    ):
-                        obtained = True
-                    else:
-                        warn(
-                            f"Image archived in release '{release_name}' does "
-                            "not match the lock file"
-                        )
-                else:
-                    warn(
-                        "Failed to fetch image archived in release "
-                        f"'{release_name}'"
-                    )
-        if not obtained and fpath is not None:
-            dockerfile_dir, dockerfile_name = os.path.split(fpath)
-            build_cwd = dockerfile_dir if dockerfile_dir else None
-            # A multi-platform image can't live in the local image store, so
-            # it's built straight into the registry and pulled back for the
-            # platform we're on
-            multi_platform = len(build_platforms) > 1
-            if multi_platform and remote_ref is None:
-                raise_error(
-                    "Building for multiple platforms requires a registry; "
-                    "set 'registry' on this environment"
-                )
-            if multi_platform:
-                assert remote_ref is not None
-                cmd = [
-                    "docker",
-                    "buildx",
-                    "build",
-                    "--platform",
-                    ",".join(build_platforms),
-                    "-t",
-                    remote_ref,
-                    "--push",
-                    "-f",
-                    dockerfile_name,
-                    ".",
-                ]
-            else:
-                cmd = ["docker", "build", "-t", tag, "-f", dockerfile_name]
-                build_platform = (
-                    build_platforms[0] if build_platforms else platform
-                )
-                if build_platform is not None:
-                    cmd += ["--platform", build_platform]
-                cmd.append(".")
-            try:
-                subprocess.check_output(cmd, cwd=build_cwd)
-            except subprocess.CalledProcessError:
-                delete_lock_on_failure()
-                raise_error(
-                    f"Failed to build Docker image with tag {tag} from {fpath}"
-                )
-            built = True
-            if multi_platform:
-                assert remote_ref is not None
-                already_pushed = True
-                if not ck_docker.pull_image_with_login(
-                    remote_ref, platform=platform
-                ) or not ck_docker.tag_image(remote_ref, tag):
-                    delete_lock_on_failure()
-                    raise_error(
-                        f"Failed to pull image back from {remote_ref} after "
-                        "building it"
-                    )
-        elif not obtained:
-            typer.echo(f"Pulling image: {tag}")
-            if not ck_docker.pull_image_with_login(tag, platform=platform):
-                delete_lock_on_failure()
-                raise_error(f"Failed to pull image: {tag}")
-    identity = ck_docker.inspect_image_for_lock(tag)
-    if identity is None:
-        delete_lock_on_failure()
-        raise_error(f"Failed to inspect image with tag {tag}")
-    assert identity is not None
-    # Checking an environment doesn't publish it: that's what 'calkit push'
-    # is for. A multi-platform build is the exception, since buildx has
-    # nowhere but the registry to put the image it assembles.
-    pushed = already_pushed
-    # A digest already recorded for the project's own registry stands, since
-    # it says the image got there on some earlier push or pull. The image's
-    # own digests can't answer this: tagging one for a registry gives it a
-    # digest under that repo whether or not anything was ever sent.
-    lock_remote_digests = []
-    if lock is not None and remote_repo is not None:
-        lock_remote_digests = [
-            d
-            for d in (lock.get("RepoDigests") or [])
-            # A digest recorded bare is one this project put in its own
-            # registry, since that's the only kind it records; locks written
-            # before digests were stored bare name their repo outright
-            if "@" not in d or d.split("@", 1)[0] == remote_repo
-        ]
-    # A digest belongs in the lock whenever there's a registry to pull it
-    # from. An image store that keeps a manifest gives a build the digest it
-    # will have once pushed, since a manifest is content-addressed, so it
-    # can be recorded before the push and a clone pulls the image as soon as
-    # anyone sends it. One that doesn't has to be pushed to learn it.
-    if remote_ref is not None:
-        if pushed or pulled_from_registry:
-            remote_digests = ck_docker.keep_only_repo_digests(
-                identity, remote_ref
-            )["RepoDigests"]
-        elif lock is not None and ck_docker.lock_matches_image(lock, identity):
-            # Still the same image an earlier run verified, so what it
-            # recorded stands and the lock doesn't churn. A lock written
-            # before digests were taken from the build recorded none, and
-            # keeping that would leave the gap in place for as long as the
-            # image goes unrebuilt, so the image's own digest fills it
-            remote_digests = (
-                lock_remote_digests or ck_docker.get_content_digests(identity)
-            )
-        else:
-            remote_digests = ck_docker.get_content_digests(identity)
-        # An image store that keeps no manifest gives a build no digest of
-        # its own: a manifest names the compressed layers, and nothing
-        # compresses them until a push. Pushing is then the only way to
-        # learn the digest, and a lock without one sends everyone else back
-        # to rebuilding an image that's sitting in the registry.
-        if not remote_digests and fpath is not None:
-            typer.echo(
-                f"Pushing image to {remote_ref} to record its digest, since "
-                "this Docker engine only assigns one on a push"
-            )
-            if not ck_docker.tag_image(tag, remote_ref):
-                warn(f"Failed to tag image as {remote_ref}")
-            else:
-                # Checks run inside pipelines, so a missing credential is
-                # reported rather than prompted for
-                pushed_ok, push_output = ck_docker.push_image_with_login(
-                    remote_ref
-                )
-                if pushed_ok:
-                    pushed_identity = ck_docker.inspect_image_for_lock(tag)
-                    if pushed_identity is not None:
-                        identity = pushed_identity
-                    remote_digests = ck_docker.keep_only_repo_digests(
-                        identity, remote_ref
-                    )["RepoDigests"]
-                else:
-                    # Leaving the tag would fake a registry digest on the
-                    # image, making every later push look unnecessary
-                    ck_docker.untag_image(remote_ref)
-                    warn(
-                        f"Failed to push image to {remote_ref}; its lock "
-                        "file will record no digest, so anyone else who "
-                        "uses this project will rebuild this image rather "
-                        "than pull it\n"
-                        + textwrap.indent(push_output.strip()[-500:], "    ")
-                    )
-        identity = dict(identity, RepoDigests=remote_digests)
-    elif fpath is None:
-        # An environment named after someone else's image is pullable by
-        # whatever digests it arrived with
-        identity = ck_docker.keep_only_repo_digests(identity, tag)
-    else:
-        # An image built where the store assigns no digest, with no registry
-        # to send it to, leaves nothing in the lock that anyone could pull
-        if built and not ck_docker.get_content_digests(identity):
-            warn(
-                "This Docker engine only assigns an image a digest when "
-                "it's pushed, so this environment's lock file will record "
-                "none, and anyone else who uses this project will rebuild "
-                "the image rather than pull it; set 'registry' on the "
-                "environment to publish it and record its digest"
-            )
-        identity = ck_docker.keep_only_repo_digests(identity, None)
-    # Read the other platforms from the exact image this one locked, rather
-    # than from the tag. A tag moves, and asking it again would lock the
-    # other platforms to whatever it points at now, leaving one set of lock
-    # files describing two different builds. Going by digest gives every
-    # platform the same image and its own layers within it.
-    remote_source_ref = None
-    if identity["RepoDigests"]:
-        remote_source_ref = ck_docker.get_lock_digest_refs(
-            identity, digest_source_ref
-        )[0]
-    elif fpath is None:
-        remote_source_ref = tag
-    # Run configuration doesn't affect which image we need, but does affect
-    # how stages run in it, so it belongs in the lock to invalidate them
-    run_config: dict = {}
-    if platform is not None:
-        run_config["Platform"] = platform
-    if wdir is not None:
-        run_config["WorkDir"] = wdir
-    if user is not None:
-        run_config["User"] = user
-    if env_vars:
-        run_config["EnvVars"] = env_vars
-    if ports:
-        run_config["Ports"] = ports
-    if gpus:
-        run_config["GPUs"] = gpus
-    if args:
-        run_config["Args"] = args
-
-    def write_lock(arch: str, arch_identity: dict) -> None:
-        if arch == current_arch:
-            arch_lock_fpath = lock_fpath
-        else:
-            arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
-        arch_lock = ck_docker.build_lock(
-            identity=arch_identity,
-            dockerfile_md5=dockerfile_md5,
-            deps_md5s=deps_md5s,
-            run_config=run_config,
-        )
-        # newline="\n" so the file is byte-identical on every platform,
-        # rather than a Windows checkout flipping it to CRLF.
-        with open(arch_lock_fpath, "w", newline="\n") as f:
-            json.dump(arch_lock, f, indent=4)
-
-    current_arch = get_docker_arch()
-    lock_dir = os.path.dirname(lock_fpath)
-    if lock_dir:
-        os.makedirs(lock_dir, exist_ok=True)
-    write_lock(current_arch, identity)
-    # Lock the platforms this machine can't run, so that moving the project
-    # to one of them doesn't invalidate every stage in the environment. An
-    # existing lock that still describes this spec is reused rather than
-    # re-read from the registry, which keeps checks working offline
-    stale_archs = []
-    contradicted = False
-    for arch in [a for a in lock_archs if a != current_arch]:
-        arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
-        existing = (
-            read_lock(arch_lock_fpath)
-            if os.path.isfile(arch_lock_fpath)
-            else None
-        )
-        if (
-            existing is not None
-            and ck_docker.lock_matches_spec(
-                existing,
-                dockerfile_md5=dockerfile_md5,
-                deps_md5s=deps_md5s,
-            )
-            and ck_docker.get_content_digests(existing)
-            == ck_docker.get_content_digests(identity)
-        ):
-            write_lock(arch, existing)
-        else:
-            # A lock naming a different image than this platform's describes
-            # another build entirely, and leaving one set of lock files
-            # saying two things is worse than the round-trip to settle it
-            contradicted = contradicted or existing is not None
-            stale_archs.append(arch)
-    # Asking the registry which platforms it serves costs a round-trip, and
-    # the answer only changes when the image does. An image that's still the
-    # one the lock describes was already asked about on the run that locked
-    # it, so a platform the registry doesn't publish isn't asked about again
-    # on every check from then on. Nothing is removed either, since a lock
-    # can only be judged stale against an answer we actually have.
-    if (
-        stale_archs
-        and remote_source_ref is not None
-        and (not up_to_date or contradicted)
-    ):
-        typer.echo(
-            f"Reading platforms available for {remote_source_ref}",
-            file=outfile,
-        )
-        remote_locks = ck_docker.get_remote_image_platform_locks(
-            remote_source_ref
-        )
-        if remote_locks is None:
-            # Being unable to ask says nothing about what the registry
-            # serves, and a lock can only be judged stale against an answer
-            # we actually have, so the other platforms' locks stand
-            typer.echo(
-                f"Could not read platforms available for {remote_source_ref}",
-                file=outfile,
-            )
-        else:
-            for arch in stale_archs:
-                arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
-                if arch in remote_locks:
-                    write_lock(arch, remote_locks[arch])
-                elif os.path.isfile(arch_lock_fpath):
-                    # A lock left behind for a platform this image no longer
-                    # has would describe an image built from something else
-                    os.remove(arch_lock_fpath)
 
 
 @check_app.command(
@@ -1654,6 +1344,7 @@ def check_conda_env(
             verbose=not quiet,
         )
     except Exception as e:
+        warn_app_control(output=str(e), maybe=True)
         raise_error(f"Failed to check conda environment: {e}")
 
 
@@ -1736,6 +1427,7 @@ def check_venv(
         try:
             subprocess.check_call(create_cmd + [prefix], cwd=wdir)
         except subprocess.CalledProcessError:
+            warn_app_control(maybe=True)
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
         gitignore_fpath = os.path.join(prefix_full_path, ".gitignore")
@@ -1782,21 +1474,26 @@ def check_venv(
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
-    lock_dir = os.path.dirname(lock_fpath)
+
+    def full(fpath: str) -> str:
+        return os.path.join(wdir or "", fpath)
+
+    lock_fpath_full = full(lock_fpath)
+    lock_dir = os.path.dirname(lock_fpath_full)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
     # Use main lock file if exists, else try alternatives (including legacy)
     reqs_to_use = lock_fpath
     used_legacy_lock = None
-    if not os.path.isfile(lock_fpath):
+    if not os.path.isfile(lock_fpath_full):
         for alt_fpath in alt_lock_fpaths:
-            if os.path.isfile(alt_fpath):
+            if os.path.isfile(full(alt_fpath)):
                 reqs_to_use = alt_fpath
                 if verbose:
                     typer.echo(f"Using alternative lock file: {alt_fpath}")
                 break
         for legacy_fpath in alt_lock_fpaths_delete:
-            if os.path.isfile(legacy_fpath):
+            if os.path.isfile(full(legacy_fpath)):
                 reqs_to_use = legacy_fpath
                 used_legacy_lock = legacy_fpath
                 if verbose:
@@ -1804,20 +1501,89 @@ def check_venv(
                 break
     activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
 
+    def venv_python_version() -> str | None:
+        """The Python version a plain venv was created with."""
+        if _platform.system() == "Windows":
+            exe = os.path.join(prefix_full_path, "Scripts", "python.exe")
+        else:
+            exe = os.path.join(prefix_full_path, "bin", "python")
+        try:
+            return subprocess.check_output(
+                [
+                    exe,
+                    "-c",
+                    "import platform; print(platform.python_version())",
+                ],
+                text=True,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+
+    def is_local(line: str) -> bool:
+        """Whether a frozen requirement names a path on this machine."""
+        line = line.strip()
+        if line.startswith(("-e ", "--editable")):
+            return re.match(r"^(-e|--editable)[\s=]+\w+\+", line) is None
+        return re.search(r"@\s*file:", line) is not None
+
+    recorded_hash = calkit.environments.read_env_spec_hash(lock_fpath, wdir)
+    spec_hash = calkit.environments.env_spec_hash(full(path), python=python)
+    # A lock resolved from the current spec is an input, not rewritten here
+    lock_is_current = (
+        os.path.isfile(lock_fpath_full) and recorded_hash == spec_hash
+    )
+
     def pip_install_and_freeze(reqs_arg: str) -> None:
         check_cmd = (
-            f"{activate_cmd} "
-            f"&& {pip_cmd} install {pip_install_args} {reqs_arg} "
-            f"&& {pip_freeze_cmd} > {lock_fpath} "
-            "&& deactivate"
+            f"{activate_cmd} && {pip_cmd} install {pip_install_args} "
+            f"{reqs_arg}"
         )
+        if not lock_is_current:
+            check_cmd += f" && {pip_freeze_cmd} > {lock_fpath}"
+        check_cmd += " && deactivate"
         if verbose:
             typer.echo(f"Running command: {check_cmd}")
+        try:
+            with open(lock_fpath_full, encoding="utf-8") as f:
+                lock_before = f.read()
+        except OSError:
+            lock_before = None
         subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
+        if lock_is_current:
+            return
+        # Local packages are installed from the spec, since their paths
+        # differ between machines
+        with open(lock_fpath_full, encoding="utf-8") as f:
+            frozen = f.read()
+        lock = "".join(
+            ln for ln in frozen.splitlines(keepends=True) if not is_local(ln)
+        )
+        if lock != frozen:
+            with open(lock_fpath_full, "w", encoding="utf-8") as f:
+                f.write(lock)
+        lock_changed = lock != lock_before
+        # All platforms are relocked together, so they agree; an existing
+        # lock that matches is adopted as is, and one with no record is
+        # only added to
+        spec_changed = recorded_hash != spec_hash
+        adopted = recorded_hash is None and not lock_changed
+        if (lock_changed or spec_changed) and not adopted:
+            calkit.environments.write_cross_platform_venv_locks(
+                spec_fpath=path,
+                lock_fpath=lock_fpath,
+                python_version=python or venv_python_version(),
+                wdir=wdir,
+                verbose=verbose,
+                relock=spec_changed and recorded_hash is not None,
+            )
+        # Last, so an interrupted relock isn't taken as current
+        calkit.environments.write_env_spec_hash(
+            lock_fpath, spec_hash, wdir=wdir
+        )
         # Delete legacy lock file after use
         if used_legacy_lock:
             try:
-                os.remove(used_legacy_lock)
+                os.remove(full(used_legacy_lock))
                 if verbose:
                     typer.echo(
                         "Deleted legacy lock file after use: "
@@ -1830,9 +1596,19 @@ def check_venv(
                         f"{used_legacy_lock}: {e}"
                     )
 
-    # If the lock file exists, try to install with that
+    # A lock resolved from an older spec would bring back what the spec no
+    # longer has, as would the env built from it, so both start over
     dep_file_txt = f"-r {path}"
-    if os.path.isfile(reqs_to_use):
+    if recorded_hash is not None and recorded_hash != spec_hash:
+        if verbose:
+            typer.echo(f"Rebuilding {kind} at {prefix} since its spec changed")
+        try:
+            shutil.rmtree(prefix_full_path)
+            create_venv()
+        except OSError as e:
+            warn(f"Failed to remove {kind} at {prefix}: {e}")
+    elif os.path.isfile(full(reqs_to_use)):
+        # If the lock file exists, try to install with that
         dep_file_txt += f" -r {reqs_to_use}"
     try:
         pip_install_and_freeze(dep_file_txt)
@@ -1851,6 +1627,15 @@ def check_venv(
             create_venv()
             pip_install_and_freeze(dep_file_txt)
         except (subprocess.CalledProcessError, OSError):
+            if lock_is_current:
+                warn_app_control(maybe=True)
+                raise_error(
+                    f"Failed to create {kind} at {prefix} from its lock file "
+                    f"({lock_fpath}), which matches the spec ({path}). "
+                    "Rebuilding from the spec would leave the environment "
+                    "out of sync with its lock; delete the lock file to "
+                    "re-resolve it, which reruns stages that depend on it"
+                )
             warn(
                 f"Failed to create environment from lock file ({reqs_to_use}); "
                 f"attempting rebuild from input file {path}"
@@ -1859,6 +1644,7 @@ def check_venv(
             try:
                 pip_install_and_freeze(f"-r {path}")
             except subprocess.CalledProcessError:
+                warn_app_control(maybe=True)
                 raise_error(f"Failed to check {kind} from input file {path}")
 
 
@@ -1869,15 +1655,20 @@ def check_matlab_env(
         typer.Option("--name", "-n", help="Environment name in calkit.yaml."),
     ],
     output_fpath: Annotated[str, typer.Option("--output", "-o")],
+    rebuild: Annotated[
+        bool,
+        typer.Option("--rebuild", help="Rebuild the image from scratch."),
+    ] = False,
 ) -> None:
     """Check a MATLAB environment matches its spec and export a JSON lock
     file.
     """
     ck_info = calkit.load_calkit_info()
     environments = ck_info.get("environments", {})
-    if env_name not in environments:
+    found = calkit.environments.get_env(env_name, environments)
+    if found is None:
         raise_error(f"Environment '{env_name}' not found in calkit.yaml")
-    env = environments[env_name]
+    env = found
     if env.get("kind") != "matlab":
         raise_error(f"Environment '{env_name}' is not a MATLAB environment")
     if "version" not in env:
@@ -1898,11 +1689,15 @@ def check_matlab_env(
         ck_info=ck_info,
         env_name=env_name,
     )
-    check_docker_env(
+    from calkit.environments import docker as env_docker
+
+    env_docker.check_image(
         tag=tag,
         fpath=dockerfile_fpath,
         lock_fpath=output_fpath,
         platform="linux/amd64",  # Only one available for now
+        rebuild=rebuild,
+        env_name=env_name,
     )
 
 
@@ -1929,18 +1724,314 @@ def check_project_requirements(
             ),
         ),
     ] = False,
+    stale_only: Annotated[
+        bool,
+        typer.Option(
+            "--stale",
+            help=(
+                "Only check what 'calkit run' needs now: the project's "
+                "requirements, and those of out-of-date stages and their "
+                "environments."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Check that a project's system-level requirements are met."""
+    """Check that this machine meets the project's requirements.
+
+    That's the project's own, and those of every stage and environment, so
+    this says whether the whole project can run here. Subprojects' are
+    checked too. On a terminal, what's missing is offered, as by
+    'calkit run'. Those of an environment on another machine are checked
+    there, by 'calkit run'.
+    """
+    import calkit.environments as envs_mod
+    import calkit.markdown
+
+    def check(where: str, **kwargs: Any) -> None:
+        """Check some requirements, noting what's wrong rather than
+        stopping, so everything is reported at once."""
+        if verbose:
+            typer.echo(f"Checking requirements of {where}")
+        try:
+            calkit.check_requirements(
+                use_cache=not no_cache, checked=checked, **kwargs
+            )
+        except Exception as e:
+            problems.append(f"{where}: {e}")
+
+    def add_env(
+        env_name: str, envs: dict, env_names: list[str], where: str
+    ) -> list[str]:
+        """Add an environment to check, and what it picks if a switch,
+        returning them."""
+        env = envs.get(env_name)
+        if not isinstance(env, dict):
+            return []
+        used = [env_name]
+        if env.get("kind") == envs_mod.SWITCH_KIND:
+            try:
+                picked = envs_mod.resolve_switch(env_name, envs)
+            except ValueError as e:
+                problems.append(f"{where}: {e}")
+                picked = None
+            if picked is not None:
+                used.append(picked)
+        env_names.extend(n for n in used if n not in env_names)
+        return used
+
     typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
-        calkit.dependencies.cache_clear()
-    try:
-        calkit.check_requirements(use_cache=not no_cache)
-    except Exception as e:
-        raise_error(str(e))
+        calkit.requirements.cache_clear()
+    # Each requirement is checked once, however many declare it
+    checked: dict[str, str | None] = {}
+    problems: list[str] = []
+    projects = list(calkit.iter_projects())
+    # The projects' own first, since what's out of date can't be known
+    # until, e.g., the apps its environments are checked with are here
+    for wdir, info in projects:
+        with calkit.in_project(wdir):
+            check(
+                "the project" if wdir == "." else f"subproject '{wdir}'",
+                ck_info=info,
+            )
+    # Which stages are out of date is asked as 'calkit status' asks it,
+    # which doesn't check the environments of stages whose requirements
+    # aren't met, so nothing here can change the answer
+    stale: set[str] | None = None
+    if stale_only:
+        if problems:
+            raise_error(
+                "This machine doesn't meet these requirements:\n"
+                + "\n".join(f"  {p}" for p in problems)
+            )
+        status = calkit.pipeline.get_status()
+        if status.errors or status.failed_environment_checks:
+            raise_error(
+                "Failed to determine which stages are out of date: "
+                + "; ".join(
+                    status.errors
+                    + [
+                        f"environment '{e}' failed its check"
+                        for e in status.failed_environment_checks
+                    ]
+                )
+            )
+        stale = {name.split("@")[0] for name in status.stale_stage_names}
+    for wdir, info in projects:
+        with calkit.in_project(wdir):
+            try:
+                info = calkit.markdown.expand_ck_info(info).ck_info
+            except Exception as e:
+                problems.append(
+                    f"{calkit.describe_project(wdir)}failed to read markdown "
+                    f"stages: {e}"
+                )
+            envs = info.get("environments") or {}
+            stages = (info.get("pipeline") or {}).get("stages") or {}
+            # The environments to check, i.e., those the stages use, with
+            # what a switch picks here, and the stages, with any of their
+            # environments that's another machine
+            env_names: list[str] = []
+            remote_env_by_stage: dict[str, str | None] = {}
+            for name, stage in stages.items():
+                qualified = calkit.qualify_with_project(wdir, name)
+                if not isinstance(stage, dict) or (
+                    stale is not None and qualified not in stale
+                ):
+                    continue
+                used = []
+                for env_name in str(stage.get("environment") or "").split(
+                    envs_mod.COMPOSITE_ENV_SEP
+                ):
+                    used += add_env(
+                        env_name, envs, env_names, f"stage '{qualified}'"
+                    )
+                remote_env_names = [
+                    n
+                    for n in used
+                    if envs_mod.runs_elsewhere(envs_mod.get_env(n, envs) or {})
+                ]
+                remote_env_by_stage[name] = (
+                    remote_env_names[0] if remote_env_names else None
+                )
+            # Without --stale, those no stage uses too, except a switch's
+            # options it doesn't pick here, which nothing needs
+            if stale is None:
+                options: set[str] = set()
+                for env_name, env in envs.items():
+                    if (
+                        isinstance(env, dict)
+                        and env.get("kind") == envs_mod.SWITCH_KIND
+                    ):
+                        try:
+                            options.update(
+                                envs_mod.get_switch_options(env_name, envs)
+                            )
+                        except ValueError:
+                            # Said when what it picks is resolved
+                            pass
+                for env_name in envs:
+                    if env_name not in options:
+                        add_env(
+                            env_name,
+                            envs,
+                            env_names,
+                            "environment "
+                            f"'{calkit.qualify_with_project(wdir, env_name)}'",
+                        )
+            for env_name in env_names:
+                env = envs_mod.get_env(env_name, envs) or {}
+                if not env.get("requirements"):
+                    continue
+                where = (
+                    "environment "
+                    f"'{calkit.qualify_with_project(wdir, env_name)}'"
+                )
+                if envs_mod.runs_elsewhere(env):
+                    calkit.echo(
+                        f"Not checking {where} here, since it's another "
+                        "machine; 'calkit run' checks it there"
+                    )
+                    continue
+                check(where, requirements=env["requirements"])
+            for name, elsewhere in remote_env_by_stage.items():
+                stage_reqs = stages[name].get("requirements")
+                if not stage_reqs:
+                    continue
+                where = f"stage '{calkit.qualify_with_project(wdir, name)}'"
+                if elsewhere is not None:
+                    calkit.echo(
+                        f"Not checking {where} here, since it runs on "
+                        f"environment '{elsewhere}', which is another "
+                        "machine; 'calkit run' checks it there"
+                    )
+                    continue
+                check(where, requirements=stage_reqs)
+    if problems:
+        raise_error(
+            "This machine doesn't meet these requirements:\n"
+            + "\n".join(f"  {p}" for p in problems)
+        )
     message = "✅ All set!"
     calkit.echo(message)
+
+
+@check_app.command(name="stage-runs")
+def check_stage_runs() -> None:
+    """Check each stage in dvc.lock matches the recorded run that made it.
+
+    A stage's entry in .calkit/stage-runs.json records a checksum of its
+    dvc.lock entry after it ran, so one that disagrees got its dvc.lock
+    entry some other way, e.g., 'dvc commit' after an output was edited, an
+    edit or merge of dvc.lock, or running it outside Calkit. This catches
+    mistakes and shortcuts, not forgery, since a matching entry can be
+    written by anyone. Like DVC, it ignores the entries of stages no longer
+    in the pipeline.
+    """
+    from dvc.parsing import DataResolver
+
+    # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
+    # subproject's, against the record kept beside its dvc.lock: any other
+    # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
+    # a wrapper stage, which doesn't record its stages.
+    try:
+        listed = subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*/dvc.yaml",
+            ],
+            text=True,
+        ).splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        listed = []
+    lock_dirs: list[str | None] = [None]
+    for path in sorted(listed):
+        parts = path.split("/")[:-1]
+        if not os.path.isfile(path) or any(
+            os.path.isdir(os.path.join(*parts[:i], ".dvc"))
+            for i in range(1, len(parts) + 1)
+        ):
+            continue
+        lock_dirs.append("/".join(parts))
+    stage_runs: dict[str | None, dict] = {}
+    for lock_dir in lock_dirs:
+        try:
+            stage_runs[lock_dir] = calkit.read_stage_runs(lock_dir)
+        except json.JSONDecodeError as e:
+            fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
+            raise_error(f"Can't read {fpath}: {e}")
+    # This project's records of other pipelines' stages, under the names
+    # they have here, from before they were kept beside their own dvc.lock
+    parent_runs = {
+        k.replace("\\", "/"): v for k, v in stage_runs[None].items()
+    }
+    # DVC keeps the dvc.lock entry of a stage removed from dvc.yaml, and
+    # ignores it, so these are skipped, named as DVC resolves them, e.g.,
+    # each foreach item. Nothing is skipped beside a dvc.yaml DVC can't read.
+    removed: dict[str | None, set[str]] = {}
+    try:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+    except Exception:
+        dvc_repo = None
+    for lock_dir in lock_dirs if dvc_repo is not None else []:
+        try:
+            fpath = os.path.join(lock_dir or ".", "dvc.yaml")
+            with open(fpath, encoding="utf-8") as f:
+                dvc_yaml = calkit.core._load_yaml_readonly(f)
+            resolver = DataResolver(
+                dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
+            )
+            removed[lock_dir] = {
+                name
+                for name in calkit.dvc.read_lock_stages(lock_dir)
+                if not resolver.has_key(name)
+            }
+        except Exception:
+            continue
+    if dvc_repo is not None:
+        dvc_repo.close()
+    problems = []
+    for lock_dir in lock_dirs:
+        lock_stages = calkit.dvc.read_lock_stages(lock_dir)
+        for lock_name, locked in sorted(lock_stages.items()):
+            if not isinstance(locked, dict) or lock_name in removed.get(
+                lock_dir, set()
+            ):
+                continue
+            name = (
+                lock_name
+                if lock_dir is None
+                else f"{lock_dir}/dvc.yaml:{lock_name}"
+            )
+            # Either record matching will do, since a stage may have been
+            # run from both directories before they were kept together
+            candidates = [stage_runs[lock_dir].get(lock_name)]
+            if lock_dir is not None:
+                candidates.append(parent_runs.get(name))
+            records = [r for r in candidates if isinstance(r, dict)]
+            lock_hash = calkit.dvc.stage_lock_hash(locked)
+            if not records:
+                problems.append(f"Stage '{name}' has no recorded run")
+            elif all(r.get("dvc_lock_hash") != lock_hash for r in records):
+                problems.append(
+                    f"Stage '{name}' has changed in dvc.lock since its last "
+                    "recorded run"
+                )
+    for problem in problems:
+        typer.echo(problem)
+    if problems:
+        raise_error(
+            f"{len(problems)} stage(s) in dvc.lock don't match a recorded "
+            f"run in {calkit.STAGE_RUNS_FPATH}; rerunning them with "
+            "'calkit run --force <stage>' records them"
+        )
+    typer.echo("Every stage in dvc.lock matches its recorded run")
 
 
 @check_app.command(name="env-vars")
@@ -1949,31 +2040,31 @@ def check_env_vars(
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
     ] = False,
 ) -> None:
-    """Check that the project's required environmental variables exist."""
+    """Check that the project's required environmental variables exist.
+
+    Subprojects' are included, since they are read from the same
+    environment.
+    """
+    from calkit.core import _normalize_requirement
+
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
-    ck_info = calkit.load_calkit_info()
-    deps = calkit.get_requirements(ck_info)
-    env_var_dep_names = calkit.get_env_var_dep_names(ck_info)
-    for name in env_var_dep_names:
-        if verbose:
-            typer.echo(f"Checking for environmental variable '{name}'")
-        # Pull the dep's attrs to honor any per-var default.
-        attrs: dict = {}
-        for dep in deps:
-            if isinstance(dep, dict) and dep.get("name") == name:
-                attrs = dep
-                break
-            if isinstance(dep, dict) and list(dep.keys()) == [name]:
-                attrs = dep[name] or {}
-                break
-        if name not in os.environ:
-            typer.echo(f"Missing env var '{name}'")
-            value = calkit.dependencies.prompt_and_store_env_var(
-                name, default=attrs.get("default")
-            )
-            if value is None:
-                raise_error(f"No value provided for '{name}'")
+    for wdir, info in calkit.iter_projects():
+        with calkit.in_project(wdir):
+            for raw in calkit.get_requirements(info):
+                req = _normalize_requirement(raw)
+                if req["kind"] != "env-var":
+                    continue
+                name = req["name"]
+                if verbose:
+                    typer.echo(f"Checking for environmental variable '{name}'")
+                if name not in os.environ:
+                    value = calkit.requirements.prompt_for_env_var_req(req)
+                    if value is None:
+                        raise_error(
+                            f"{calkit.describe_project(wdir)}no value "
+                            f"provided for '{name}'"
+                        )
     message = "✅ All set!"
     calkit.echo(message)
 
@@ -1989,21 +2080,34 @@ def check_pipeline(
         ),
     ] = False,
 ) -> None:
-    """Check that the project pipeline is defined correctly."""
+    """Check that the project pipeline is defined correctly.
+
+    Subprojects' pipelines are checked too, since those are stages the
+    project runs.
+    """
     from calkit.models.pipeline import Pipeline
 
     ck_info = calkit.load_calkit_info()
-    if "pipeline" not in ck_info:
+    projects = [
+        (wdir, info)
+        for wdir, info in calkit.iter_projects(ck_info=ck_info)
+        if "pipeline" in info
+    ]
+    if not projects:
         raise_error("No pipeline is defined in calkit.yaml")
-    try:
-        pipeline = Pipeline.model_validate(ck_info["pipeline"], strict=True)
-    except Exception as e:
-        raise_error(f"Pipeline is not defined correctly: {e}")
-    # Check that we have no leading underscores in stage names, since those
-    # are reserved for auto-generated stages
-    for stage_name in pipeline.stages.keys():
-        if stage_name.startswith("_"):
-            raise_error("Stage names cannot start with an underscore")
+    for wdir, info in projects:
+        where = calkit.describe_project(wdir)
+        try:
+            pipeline = Pipeline.model_validate(info["pipeline"], strict=True)
+        except Exception as e:
+            raise_error(f"{where}pipeline is not defined correctly: {e}")
+        # Check that we have no leading underscores in stage names, since
+        # those are reserved for auto-generated stages
+        for stage_name in pipeline.stages.keys():
+            if stage_name.startswith("_"):
+                raise_error(
+                    f"{where}stage names cannot start with an underscore"
+                )
     message = "✅ This project's pipeline is defined correctly!"
     calkit.echo(message)
     if compile_to_dvc:
@@ -2014,6 +2118,137 @@ def check_pipeline(
             raise_error(
                 f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
             )
+
+
+@check_app.command(name="storage")
+def check_storage(
+    fix: Annotated[
+        bool,
+        typer.Option(
+            "--fix", help="Move each path to where it's declared to be stored."
+        ),
+    ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output the problems as JSON.")
+    ] = False,
+) -> None:
+    """Check that paths are tracked where they're declared to be stored.
+
+    That is, nothing is tracked by both Git and DVC, no pipeline output has
+    a .dvc file of its own too, no pipeline output stored in Git, or file
+    in one, is ignored by it, and nothing in Git is too large for it.
+    Large files are only reported.
+    With --fix, the pipeline's declarations, or a file's .dvc file, decide
+    where each path belongs, and the changes are staged.
+    Files Git ignores in an output stored in Git are added in spite of the
+    rule, unless they're in the output's 'ignore' list or too large.
+    """
+    import calkit.dvc
+    import calkit.git
+    import calkit.pipeline
+
+    if fix and as_json:
+        raise_error("--json can't be used with --fix")
+    problems = calkit.dvc.get_storage_problems()
+    if as_json:
+        typer.echo(json.dumps(problems, indent=2))
+    if not fix:
+        if not as_json:
+            for problem in problems:
+                warn(problem["message"])
+        if any(p["kind"] != "large" for p in problems):
+            if not as_json:
+                typer.echo("Run 'calkit check storage --fix' to fix these")
+            raise typer.Exit(1)
+        if not problems and not as_json:
+            calkit.echo("✅ Every path is stored where it's declared to be")
+        return
+    repo = calkit.git.get_repo()
+    gitignores = calkit.git.get_dirty_gitignores(repo)
+    fixed = []
+    unfixed = []
+    # Pipeline outputs are recorded in DVC, which records their stages'
+    # inputs too, so only for stages that are up to date
+    to_record = []
+    for problem in problems:
+        path = os.path.abspath(problem["path"])
+        if problem["kind"] == "stage-output-dvc-file":
+            # The stage says how it's made, so its own .dvc file goes
+            dvc_file = problem["dvc_file"]
+            if repo.git.ls_files("--", dvc_file):
+                repo.git.rm("-q", "--", dvc_file)
+            elif os.path.isfile(dvc_file):
+                os.remove(dvc_file)
+        elif problem["kind"] == "excluded-tracked":
+            # Left out of the output, so stored in neither, as declared
+            calkit.dvc.untrack_files(repo, problem["files"])
+        elif problem["store_in"] == "dvc":
+            # Only those in both, if a directory has others only in Git
+            to_untrack = [
+                os.path.abspath(p) for p in problem.get("files", [])
+            ] or [path]
+            for i in range(0, len(to_untrack), 100):
+                repo.git.rm(
+                    "-r",
+                    "-q",
+                    "--cached",
+                    "--",
+                    *[f":(literal){p}" for p in to_untrack[i : i + 100]],
+                )
+            calkit.git.ensure_path_is_ignored(repo, path)
+            if problem["kind"] == "both":
+                to_record.append(problem)
+        elif problem["store_in"] == "git":
+            too_large = []
+            if problem["kind"] == "ignored":
+                calkit.git.ensure_path_is_not_ignored(repo, path)
+                too_large = calkit.dvc.stage_git_outputs(repo, [path])
+            # Files in it Git ignores are added in spite of the rule, which
+            # for an output ignored as a whole can be one besides its own
+            too_large += calkit.dvc.force_add_ignored_files(
+                repo, problem.get("files", [])
+            )
+            if too_large:
+                warn(
+                    calkit.dvc.get_too_large_text(
+                        list(dict.fromkeys(too_large))
+                    )
+                )
+                unfixed.append(problem)
+                continue
+        else:
+            unfixed.append(problem)
+            continue
+        fixed.append(problem)
+        typer.echo(f"Fixed: {problem['message']}")
+    # None when it can't be told which are stale, so none are recorded
+    stale: set[str] | None = set()
+    if any(p["stage"] for p in to_record):
+        status = calkit.pipeline.get_status(
+            check_environments=False,
+            clean_notebooks=False,
+            preprocess_stages=False,
+        )
+        if not status.errors:
+            stale = {n.split("@")[0] for n in status.stale_stage_names}
+        else:
+            stale = None
+    for problem in to_record:
+        stage = problem["stage"]
+        if stage and (stale is None or stage.split("@")[0] in stale):
+            typer.echo(f"Run '{stage}' to record {problem['path']} in DVC")
+            continue
+        target = problem["dvc_file"] or stage
+        if calkit.dvc.run_dvc_command(["commit", "-f", "-q", target]) != 0:
+            warn(f"Couldn't record {problem['path']} in DVC")
+    for message in calkit.git.stage_gitignores(repo, gitignores):
+        warn(message)
+    for problem in unfixed:
+        warn(problem["message"])
+    if fixed:
+        typer.echo("Commit the staged changes")
+    if any(p["kind"] != "large" for p in unfixed):
+        raise typer.Exit(1)
 
 
 @check_app.command(name="call")
@@ -2071,9 +2306,11 @@ def check_questions(
     Reports, worst first: evidence that isn't there (never run, never
     pushed, or pinned to a Git ref that doesn't exist); broken references
     (a key that doesn't resolve, a placeholder that names no evidence, a
-    label missing from the LaTeX); evidence the pipeline would rebuild;
-    and evidence from a frozen stage, or downstream of one, which nothing
-    will ever report out of date unless the citation pins a git_ref.
+    label missing from the LaTeX, lines a cited file no longer has);
+    evidence the pipeline would rebuild; and evidence from a frozen stage,
+    or downstream of one, that no longer matches dvc.lock, which won't be
+    rerun, unless the citation pins a git_ref. Subprojects' questions are
+    checked too.
 
     Evidence pinned with a git_ref is checked at that ref rather than in
     the working tree. Exits with an error if any answered question is
@@ -2088,4 +2325,112 @@ def check_questions(
     else:
         calkit.echo(format_status(status, verbose=verbose))
     if not status.ok:
+        raise typer.Exit(1)
+
+
+@check_app.command(name="references|refs")
+def check_references(
+    path: Annotated[
+        str,
+        typer.Argument(
+            help="What to check: a .tex or Markdown document, a PDF (via "
+            "its source, or its printed reference list if it has none), or "
+            "a .bib file, whose every entry is checked.",
+        ),
+    ],
+    wdir: Annotated[
+        str, typer.Option("--wdir", help="Project working directory.")
+    ] = ".",
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="List every cited reference, not only the ones needing "
+            "attention.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output the report as JSON.")
+    ] = False,
+    output: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Also write the report as JSON to this path.",
+        ),
+    ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="Use only cached answers instead of calling out to "
+            "Crossref, DataCite, OpenAlex, and arXiv.",
+        ),
+    ] = False,
+    refresh: Annotated[
+        bool,
+        typer.Option(
+            "--refresh",
+            help="Ignore cached answers and ask the services again.",
+        ),
+    ] = False,
+    responses: Annotated[
+        str | None,
+        typer.Option(
+            "--responses",
+            help="Reuse the services' responses from this file instead of "
+            "the local cache, and record there the ones this check used, "
+            "so it can be reproduced.",
+        ),
+    ] = None,
+) -> None:
+    """Check that the references a document cites are real.
+
+    Reads citation keys from the document and the files it inputs, or,
+    for a PDF, from the .tex or Markdown file it's built from, then
+    resolves each against the bibliographies the document names, or the
+    collections calkit.yaml declares if it names none. A .bib file has
+    each of its entries checked instead, and so does the reference list
+    printed in a PDF with no source, e.g., a manuscript sent for review.
+    Each entry is looked up in Crossref, DataCite, OpenAlex, and arXiv.
+    Reports, worst first: a key defined in no bibliography, so the citation
+    cannot resolve; a DOI that isn't registered; an entry whose identifier
+    resolves to a different work than it describes; and an entry no
+    service has, which is what a fabricated citation looks like, though a
+    venue that registers no DOIs looks the same and is named as such.
+
+    Answers are cached, so a rerun needs no network. A references-check
+    pipeline stage runs this with --output and --responses, so its report
+    is an output that goes stale when the document or a bibliography
+    changes, and the responses it was based on are kept with it.
+
+    Exits with an error if a key resolves to no entry, a DOI isn't
+    registered, or an entry contradicts the record it was found in. A
+    reference that simply isn't indexed anywhere is reported but doesn't
+    fail the check.
+    """
+    from calkit.references import check_references as _check_references
+    from calkit.references import compact, format_check, write_report
+
+    try:
+        check = _check_references(
+            path,
+            wdir=wdir,
+            offline=offline,
+            refresh=refresh,
+            responses_path=responses,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        raise_error(str(e))
+    if output is not None:
+        write_report(check, output, wdir=wdir)
+    if json_output:
+        calkit.echo(
+            json.dumps(compact(check.model_dump(mode="json")), indent=2)
+        )
+    else:
+        calkit.echo(format_check(check, verbose=verbose))
+    if not check.ok:
         raise typer.Exit(1)

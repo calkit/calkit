@@ -19,6 +19,11 @@ test("getExecutedNotebookHtmlPath mirrors calkit's executed HTML location", () =
     getExecutedNotebookHtmlPath("analysis.ipynb"),
     path.join(".calkit", "notebooks", "html", "analysis.html"),
   );
+  // A subproject's is under its own .calkit
+  assert.equal(
+    getExecutedNotebookHtmlPath("sub/nb/analysis.ipynb", "sub"),
+    path.join("sub", ".calkit", "notebooks", "html", "nb", "analysis.html"),
+  );
 });
 
 test("resolveNotebookEnvironmentName uses jupyter pipeline stages directly", () => {

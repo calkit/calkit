@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 import calkit
 import calkit.docker
+import calkit.environments.docker
 import calkit.resources
 from calkit.cli.update import update_app
 
@@ -23,14 +24,12 @@ def test_update_project_config(tmp_dir, monkeypatch):
 
     import requests
 
-    monkeypatch.setattr(requests, "get", fail)
+    monkeypatch.setattr(requests.Session, "request", fail)
     subprocess.check_call(["calkit", "init"])
     result = runner.invoke(update_app, ["devcontainer"])
     assert result.exit_code == 0
     with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
-        assert json.load(f) == calkit.resources.load_json(
-            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
-        )
+        assert f.read() == calkit.resources.make_devcontainer_spec({})
     result = runner.invoke(update_app, ["vscode-config"])
     assert result.exit_code == 0
     for fname in calkit.resources.VSCODE_FNAMES:
@@ -50,6 +49,45 @@ def test_update_project_config(tmp_dir, monkeypatch):
     assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
     assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     assert not repo.git.status("--porcelain")
+    # A project with a Julia environment gets Julia installed too
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"jl": {"kind": "julia", "julia": "1.11"}}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        assert json.load(f) == calkit.resources.load_json(
+            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+        )
+    # A project that builds LaTeX with TeX Live builds that way in the
+    # editor too, in the container or not
+    ck_info["environments"] = {"tex": {"kind": "texlive"}}
+    ck_info["pipeline"] = {
+        "stages": {
+            "build-paper": {
+                "kind": "latex",
+                "target_path": "paper/main.tex",
+                "environment": "tex",
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    with open(os.path.join(".vscode", "settings.json")) as f:
+        settings = json.load(f)
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        in_container = json.load(f)["customizations"]["vscode"]["settings"]
+    for s in [settings, in_container]:
+        assert s["latex-workshop.docker.enabled"] is False
+        assert s["latex-workshop.latex.tools"][0]["args"][:3] == [
+            "latex",
+            "build",
+            "--as-stage",
+        ]
+    assert repo.git.log("-1", "--format=%s") == "Update devcontainer"
+    assert not repo.git.status("--porcelain", "--", ".vscode", ".devcontainer")
 
 
 def test_update_dataset(tmp_dir):
@@ -224,6 +262,37 @@ def test_update_github_actions(tmp_dir):
     with open(old_fpath) as f:
         assert f.read() == updated_txt
     assert not repo.git.status("--porcelain")
+    # A new workflow can run only when started, and stays that way when
+    # it's updated later without saying what runs it
+    os.remove(old_fpath)
+    on_demand_txt = calkit.resources.render_github_actions_workflow(
+        on=["workflow_dispatch"]
+    )
+    assert (
+        runner.invoke(
+            update_app, ["github-actions", "--on", "workflow_dispatch"]
+        ).exit_code
+        == 0
+    )
+    with open(out_fpath) as f:
+        assert f.read() == on_demand_txt
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(out_fpath) as f:
+        assert f.read() == on_demand_txt
+    # A customized one can have what runs it changed too
+    with open(out_fpath, "w") as f:
+        f.write(custom_txt.replace("jobs:", "on: push\njobs:"))
+    assert (
+        runner.invoke(
+            update_app,
+            ["github-actions", "--on", "push", "--on", "workflow_dispatch"],
+        ).exit_code
+        == 0
+    )
+    with open(out_fpath) as f:
+        workflow = calkit.ryaml.load(f)
+    assert workflow["on"] == {"push": None, "workflow_dispatch": None}
+    assert workflow["jobs"]["main"]["steps"][-1] == {"run": "echo custom"}
 
 
 def test_update_uv_env(tmp_dir):
@@ -365,6 +434,7 @@ def test_update_conda_env(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+@pytest.mark.needs("juliaup")
 def test_update_environment(tmp_dir):
     # Test we can update an environment
     subprocess.check_call(["calkit", "init"])
@@ -400,7 +470,7 @@ def fake_home(tmp_path, monkeypatch):
 
 def test_update_agent_skills_copies_bundled_skills(fake_home):
     skills_dir = fake_home / ".agents" / "skills"
-    result = runner.invoke(update_app, ["agent-skills"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result.exit_code == 0
     assert (skills_dir / "calkit-add-pipeline-stage" / "SKILL.md").exists()
     assert (skills_dir / "calkit-conventions" / "SKILL.md").exists()
@@ -409,7 +479,7 @@ def test_update_agent_skills_copies_bundled_skills(fake_home):
 
 def test_update_agent_skills_renames_skill_name_in_frontmatter(fake_home):
     skills_dir = fake_home / ".agents" / "skills"
-    result = runner.invoke(update_app, ["agent-skills"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result.exit_code == 0
     # Each installed SKILL.md should have its name updated to the calkit- prefixed folder name.
     for skill_name in (
@@ -419,6 +489,12 @@ def test_update_agent_skills_renames_skill_name_in_frontmatter(fake_home):
     ):
         content = (skills_dir / skill_name / "SKILL.md").read_text()
         assert f"name: {skill_name}" in content
+    # Frontmatter must be strict YAML, since Codex skips skills that aren't
+    for skill_md in skills_dir.glob("calkit-*/SKILL.md"):
+        frontmatter = skill_md.read_text().split("---")[1]
+        data = calkit.ryaml.load(frontmatter)
+        assert data["name"] == skill_md.parent.name
+        assert data["description"]
 
 
 def test_update_agent_skills_preserves_custom_skill(fake_home):
@@ -426,7 +502,7 @@ def test_update_agent_skills_preserves_custom_skill(fake_home):
     custom_skill = skills_dir / "my-skill" / "SKILL.md"
     custom_skill.parent.mkdir(parents=True)
     custom_skill.write_text("# Custom\n")
-    result = runner.invoke(update_app, ["agent-skills"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result.exit_code == 0
     assert custom_skill.exists()
 
@@ -434,24 +510,108 @@ def test_update_agent_skills_preserves_custom_skill(fake_home):
 def test_update_agent_skills_does_not_touch_home_agents_md(fake_home):
     agents_md = fake_home / "AGENTS.md"
     agents_md.write_text("# Existing\n")
-    result = runner.invoke(update_app, ["agent-skills"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result.exit_code == 0
     assert agents_md.read_text() == "# Existing\n"
 
 
 def test_update_agent_skills_supports_quiet_flag(fake_home):
-    result = runner.invoke(update_app, ["agent-skills", "--quiet"])
+    result = runner.invoke(update_app, ["agent-skills", "--copy", "--quiet"])
     assert result.exit_code == 0
 
 
 def test_update_agent_skills_can_be_run_twice(fake_home):
     skills_dir = fake_home / ".agents" / "skills"
-    result1 = runner.invoke(update_app, ["agent-skills"])
-    result2 = runner.invoke(update_app, ["agent-skills"])
+    result1 = runner.invoke(update_app, ["agent-skills", "--copy"])
+    result2 = runner.invoke(update_app, ["agent-skills", "--copy"])
     assert result1.exit_code == 0
     assert result2.exit_code == 0
     # Existing custom files should be preserved by copytree dirs_exist_ok.
     assert (skills_dir / "calkit-conventions" / "SKILL.md").exists()
+
+
+def test_update_agent_skills_updates_plugins(fake_home, monkeypatch):
+    skills_dir = fake_home / ".agents" / "skills"
+    runner.invoke(update_app, ["agent-skills", "--copy"])
+    custom_skill = skills_dir / "my-skill" / "SKILL.md"
+    custom_skill.parent.mkdir(parents=True)
+    custom_skill.write_text("# Custom\n")
+    calls = []
+    added = []
+
+    def call(cmd):
+        calls.append(cmd)
+        # Codex's marketplace hasn't been added, so updating its plugin fails
+        if cmd[0] == "/bin/codex" and "marketplace" in cmd:
+            added.append("add" in cmd)
+            return 0 if added[-1] else 1
+        return 0 if cmd[0] != "/bin/codex" or any(added) else 1
+
+    monkeypatch.setattr("calkit.install.subprocess.call", call)
+    logged_in = {"claude": True}
+    monkeypatch.setattr(
+        "calkit.install.is_agent_logged_in",
+        lambda agent, path: logged_in.get(agent, True),
+    )
+    # Without any agents, the copies are kept
+    monkeypatch.setattr("calkit.install.find", lambda app: None)
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0
+    assert "No coding agents updated" in result.output
+    assert (skills_dir / "calkit-conventions").is_dir()
+    assert not calls
+    # With only Claude Code, which doesn't read them, the copies are kept
+    monkeypatch.setattr(
+        "calkit.install.find",
+        lambda app: "/bin/claude" if app == "claude" else None,
+    )
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0, result.output
+    assert [c[1:4] for c in calls] == [
+        ["plugin", "marketplace", "update"],
+        ["plugin", "update", "calkit@calkit"],
+    ]
+    assert (skills_dir / "calkit-conventions").is_dir()
+    # Each agent found gets its plugin updated, or added if that fails, and
+    # the copies are removed, but not anyone else's skills
+    calls.clear()
+    monkeypatch.setattr(
+        "calkit.install.find",
+        lambda app: f"/bin/{app}" if app in ["claude", "codex"] else None,
+    )
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0, result.output
+    assert [c[1:4] for c in calls] == [
+        ["plugin", "marketplace", "update"],
+        ["plugin", "update", "calkit@calkit"],
+        ["plugin", "marketplace", "upgrade"],
+        ["plugin", "add", "calkit@calkit"],
+        ["plugin", "marketplace", "add"],
+        ["plugin", "add", "calkit@calkit"],
+    ]
+    assert not list(skills_dir.glob("calkit-*"))
+    assert custom_skill.exists()
+    assert "Removed" in result.output
+    # Once Codex's marketplace is there, its plugin is added with the update,
+    # and Claude Code not logged in is skipped
+    calls.clear()
+    logged_in["claude"] = False
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0, result.output
+    assert "'claude auth login'" in result.output
+    assert [c[1:4] for c in calls] == [
+        ["plugin", "marketplace", "upgrade"],
+        ["plugin", "add", "calkit@calkit"],
+    ]
+    # Found but none updated is a failure, which keeps the copies
+    logged_in["claude"] = True
+    runner.invoke(update_app, ["agent-skills", "--copy"])
+    monkeypatch.setattr("calkit.install.subprocess.call", lambda cmd: 1)
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code != 0
+    assert "Failed to update Calkit plugin in any" in result.output
+    assert "calkit install claude" not in result.output
+    assert (skills_dir / "calkit-conventions").is_dir()
 
 
 def test_update_docker_env_registry(tmp_dir):
@@ -478,12 +638,89 @@ def test_update_docker_env_registry(tmp_dir):
     assert result.exit_code == 0, result.output
     env = calkit.load_calkit_info()["environments"]["main"]
     assert env["registry"] is None
-    assert calkit.docker.resolve_registry_prefix(env) is None
+    assert calkit.environments.docker.resolve_registry_prefix(env) is None
     with open("calkit.yaml") as f:
         assert "registry: none" not in f.read()
     # Nothing to update is a mistake worth reporting, not a no-op
     result = runner.invoke(update_app, ["docker-env", "-n", "main"])
     assert result.exit_code != 0
+
+
+def test_update_latex_image(tmp_dir, monkeypatch):
+    import calkit.cli.check
+    from calkit.latex import DEFAULT_LATEX_IMAGE
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "tex": {"kind": "docker", "image": "ghcr.io/calkit/latex"},
+        "old": {"kind": "docker", "image": "ghcr.io/calkit/latex:0.1.0"},
+        "full": {"kind": "docker", "image": "texlive/texlive:latest-full"},
+        "built": {
+            "kind": "docker",
+            "path": "Dockerfile",
+            "image": "texlive/texlive",
+        },
+        "other": {"kind": "docker", "image": "python:3.12"},
+        "py": {"kind": "uv", "path": "pyproject.toml"},
+        # An option defined in place is updated as 'switched.1'; a named one
+        # is updated as itself, or not at all
+        "switched": {
+            "kind": "switch",
+            "switch": [
+                {
+                    "when": [{"os_is": "linux"}],
+                    "use": {
+                        "kind": "docker",
+                        "image": "ghcr.io/calkit/latex:0.1.0",
+                    },
+                },
+                {"use": "other"},
+            ],
+        },
+    }
+    calkit.save_calkit_info(ck_info)
+    lock_fpath = calkit.environments.docker.get_lock_fpaths("tex")[0]
+    os.makedirs(os.path.dirname(lock_fpath))
+    with open(lock_fpath, "w") as f:
+        json.dump({"RepoDigests": ["sha256:old"]}, f)
+    relocked = []
+    forced = []
+    monkeypatch.setattr(
+        calkit.cli.check,
+        "check_environment",
+        lambda env_name, force=False, **kwargs: (
+            relocked.append(env_name),
+            forced.append(force),
+        ),
+    )
+    # Environments on Calkit's or TeX Live's image move to the pinned one and
+    # are relocked, with stale locks removed so the old image isn't pulled
+    # back by its digest
+    result = runner.invoke(update_app, ["latex-image"])
+    assert result.exit_code == 0, result.output
+    envs = calkit.load_calkit_info()["environments"]
+    for name in ["tex", "old", "full"]:
+        assert envs[name]["image"] == DEFAULT_LATEX_IMAGE
+    assert envs["switched"]["switch"][0]["use"]["image"] == DEFAULT_LATEX_IMAGE
+    assert envs["switched"]["switch"][1]["use"] == "other"
+    assert relocked == ["tex", "old", "full", "switched.1"]
+    assert not os.path.exists(lock_fpath)
+    # Others are left alone, including one built from a Dockerfile
+    assert envs["built"]["image"] == "texlive/texlive"
+    assert envs["other"]["image"] == "python:3.12"
+    # Once they're pinned there's nothing to do
+    relocked.clear()
+    result = runner.invoke(update_app, ["latex-image"])
+    assert result.exit_code == 0, result.output
+    assert "No LaTeX environments to update" in result.output
+    assert relocked == []
+    # Relocking a Docker env forces a rebuild, as 'update env --lock' does
+    forced.clear()
+    result = runner.invoke(update_app, ["docker-env", "-n", "tex", "--relock"])
+    assert result.exit_code == 0, result.output
+    assert relocked == ["tex"]
+    assert forced == [True]
 
 
 def test_update_imported_from_detects_the_kind(tmp_dir):
@@ -561,16 +798,44 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     posted: list[dict] = []
     remote = {"url": ""}
 
+    posted_resp: dict = {}
+
     def post(path, json=None, **kwargs):
         posted.append(json)
-        return {"git_repo_url": remote["url"]}
+        return {"git_repo_url": remote["url"]} | posted_resp
+
+    existing: set[str] = set()
+    on_hub: dict[str, dict] = {}
+    # What looking up the user raises, and whether each lookup could log in
+    user_error: dict[str, Exception | None] = {"error": None}
+    login_allowed: list[bool] = []
+
+    def get(path, params=None, allow_login=True, **kwargs):
+        if path == "/user":
+            login_allowed.append(allow_login)
+            if user_error["error"] is not None:
+                raise user_error["error"]
+            return {"github_username": "someone"}
+        if path == "/projects":
+            found = on_hub.get(params["github_repo"].lower())
+            return {
+                "data": [found] if found else [],
+                "count": int(bool(found)),
+            }
+        if path not in existing:
+            raise RuntimeError("404: Not found")
+        return {}
+
+    remote_names: list[str] = []
+
+    def configure_remote() -> str:
+        remote_names.append(calkit.detect_project_name())
+        return "calkit"
 
     monkeypatch.setattr(calkit.hub, "post", post)
-    monkeypatch.setattr(
-        calkit.hub, "get_current_user", lambda: {"github_username": "someone"}
-    )
+    monkeypatch.setattr(calkit.hub, "get", get)
     monkeypatch.setattr(calkit.hub, "get_hub_url", lambda: "https://hub.test")
-    monkeypatch.setattr(calkit.dvc, "configure_remote", lambda: "calkit")
+    monkeypatch.setattr(calkit.dvc, "configure_remote", configure_remote)
     monkeypatch.setattr(
         calkit.dvc, "set_remote_auth", lambda remote_name: None
     )
@@ -605,3 +870,677 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
         assert ck_info["git_repo_url"] == remote["url"]
         assert ck_info["owner"] == "someone"
         assert git("status", "--porcelain") == ""
+    # A project already on the hub, e.g., created there for this repo, is
+    # connected to without asking the hub to create it again
+    existing.add("/projects/someone/my-project")
+    n_posted = len(posted)
+    git("remote", "set-url", "origin", remote["url"])
+    # Nor is anything pushed to it meanwhile, e.g., by a collaborator,
+    # dropped from the history, where a push would be refused instead
+    other = str(tmp_path_factory.mktemp("other"))
+    git("clone", "-q", remote["url"], other)
+    git("commit", "-q", "--allow-empty", "-m", "Meanwhile", cwd=other)
+    git("push", "-q", "origin", "main", cwd=other)
+    with open("calkit.yaml", "w") as f:
+        f.write("name: my-project\ntitle: My project\n")
+    git("commit", "-q", "-am", "Disconnect")
+    result = runner.invoke(update_app, ["hub", "https://hub.test"])
+    assert result.exit_code == 0, result.output
+    assert "already exists" in result.output
+    assert len(posted) == n_posted
+    assert calkit.load_calkit_info()["hub"] == "https://hub.test"
+    assert "Meanwhile" not in git("log", "--format=%s")
+    # An org's repo already on the hub is found by its URL, and the remote
+    # is named for the account that owns it there, which is lowercase
+    on_hub["acme-lab/widget"] = {
+        "owner_account_name": "acme-lab",
+        "name": "widget",
+    }
+    # A remote not named 'origin' is used if it's the only one
+    git("remote", "rename", "origin", "github")
+    git("remote", "set-url", "github", "git@github.com:Acme-Lab/widget.git")
+    with open("calkit.yaml", "w") as f:
+        f.write("title: Widget\n")
+    result = runner.invoke(
+        update_app, ["hub", "https://hub.test", "--no-commit"]
+    )
+    assert result.exit_code == 0, result.output
+    assert len(posted) == n_posted
+    assert remote_names[-1] == "acme-lab/widget"
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["owner"] == "acme-lab"
+    assert ck_info["name"] == "widget"
+    assert "https://hub.test/acme-lab/widget" in result.output
+    # One the client creates takes the owner the hub gave it
+    on_hub.clear()
+    with open("calkit.yaml", "w") as f:
+        f.write("name: widget\ntitle: Widget\n")
+    posted_resp["owner_account_name"] = "acme-lab"
+    result = runner.invoke(
+        update_app, ["hub", "https://hub.test", "--no-commit"]
+    )
+    assert result.exit_code == 0, result.output
+    assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
+    assert remote_names[-1] == "acme-lab/widget"
+    assert calkit.load_calkit_info()["owner"] == "acme-lab"
+    # Someone not logged in is offered the login, then connected, but the
+    # lookup never logs in on its own, so declining is possible
+    import calkit.core
+
+    def run_device_flow():
+        user_error["error"] = None
+        return "token"
+
+    monkeypatch.setattr(calkit.hub, "run_device_flow", run_device_flow)
+    for answer, tty, no_login, error in [
+        ("n\n", True, False, ValueError("No token")),
+        ("", False, False, ValueError("No token")),
+        ("", True, True, ValueError("No token")),
+        ("", True, False, RuntimeError("503: Unavailable")),
+        ("y\n", True, False, ValueError("No token")),
+    ]:
+        monkeypatch.setattr(calkit.core, "is_tty", lambda tty=tty: tty)
+        if no_login:
+            monkeypatch.setenv("CALKIT_NO_INTERACTIVE_LOGIN", "1")
+        else:
+            monkeypatch.delenv("CALKIT_NO_INTERACTIVE_LOGIN", raising=False)
+        user_error["error"] = error
+        on_hub.clear()
+        with open("calkit.yaml", "w") as f:
+            f.write("name: widget\ntitle: Widget\n")
+        result = runner.invoke(
+            update_app,
+            ["hub", "https://hub.test", "--no-commit"],
+            input=answer,
+        )
+        asked = "Log in now?" in result.output
+        if answer == "y\n":
+            assert result.exit_code == 0, result.output
+            assert user_error["error"] is None
+            assert calkit.load_calkit_info()["owner"] == "acme-lab"
+        elif isinstance(error, RuntimeError):
+            # Logging in can't fix a hub that's down
+            assert result.exit_code != 0
+            assert "Failed to reach" in result.output
+            assert not asked
+        else:
+            # Declining, or with no way to ask, says how to log in
+            assert result.exit_code != 0
+            assert "calkit hub login" in result.output
+            assert asked == (tty and not no_login)
+    assert login_allowed and not any(login_allowed)
+
+
+def test_update_env_lock(tmp_dir, monkeypatch):
+    import calkit.environments as envs
+    import calkit.workspace
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "bench": {"kind": "system", "lock": ["os", "cpu-count"]},
+        "far": {
+            "kind": "system",
+            "host": "bigbox.invalid",
+            "wdir": "/work",
+            "lock": ["os", "cpu-count"],
+        },
+        "plain": {"kind": "system"},
+        "pick": {
+            "kind": "switch",
+            "switch": [{"use": "plain"}],
+            "lock": ["os"],
+        },
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        },
+        "job": {"kind": "slurm", "host": "cluster.invalid"},
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = ck_info["environments"]["bench"]
+    lock_fpath = os.path.join(".calkit", "env-locks", "bench", "info.json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    locked = envs.read_system_env_lock(env_name="bench", env=env)
+    assert locked == envs.get_system_lock_data(["os", "cpu-count"])
+    # Running it again changes nothing, and says so
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "already locked" in result.output
+    # A lock from another machine is replaced, and the change reported
+    with open(lock_fpath, "w") as f:
+        json.dump({"os": "SomeOtherOS", "cpu-count": 1}, f)
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "SomeOtherOS" in result.output
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])
+    # Any other kind is rebuilt from its spec, taking the newest versions it
+    # allows rather than the ones its lock pins
+    with open("requirements.txt", "w") as f:
+        f.write("six\n")
+    py_env = ck_info["environments"]["py"]
+    py_lock_fpath = envs.get_env_lock_fpath(
+        env=py_env, env_name="py", as_posix=False
+    )
+    assert py_lock_fpath is not None
+    os.makedirs(os.path.dirname(py_lock_fpath), exist_ok=True)
+    with open(py_lock_fpath, "w") as f:
+        f.write("six==1.15.0\n")
+    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(py_lock_fpath) as f:
+        relocked = f.read()
+    assert "six==" in relocked
+    assert "six==1.15.0" not in relocked
+    # A scheduler env is locked to its config, so there's nothing to redo
+    result = runner.invoke(update_app, ["env", "-n", "job", "--lock"])
+    assert result.exit_code == 0, result.output
+    assert "nothing to relock" in result.output
+    # A remote env is locked to the far end, not this machine
+    monkeypatch.setattr(
+        calkit.workspace,
+        "remote_system_info",
+        lambda ws, apps=None: {"os": "FarOS", "cpu_count": 128},
+    )
+    result = runner.invoke(update_app, ["env", "-n", "far", "--lock"])
+    assert result.exit_code == 0, result.output
+    assert "bigbox.invalid" in result.output
+    assert envs.read_system_env_lock(
+        env_name="far", env=ck_info["environments"]["far"]
+    ) == {"os": "FarOS", "cpu-count": 128}
+    # A switch is locked to the machine its pick runs on
+    result = runner.invoke(update_app, ["env", "-n", "pick", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(os.path.join(".calkit", "env-locks", "pick", "info.json")) as f:
+        assert json.load(f) == envs.get_system_lock_data(["os"])
+    # Nothing to relock without machine properties or a machine
+    result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(
+        update_app, ["env", "-n", "bench", "--lock", "--add", "numpy"]
+    )
+    assert result.exit_code != 0
+    assert "not both" in result.output
+    # An unreadable lock doesn't stop a relock
+    with open(lock_fpath, "w") as f:
+        f.write("{not json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])
+
+
+def test_update_path_storage(tmp_dir, tmp_path_factory):
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def update(*args: str):
+        return runner.invoke(update_app, ["path-storage", *args])
+
+    def outputs() -> list:
+        stage = calkit.load_calkit_info()["pipeline"]["stages"]["make"]
+        return list(stage["outputs"])
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt && echo yo > other.txt",
+                "outputs": [
+                    {"path": "out.txt", "storage": "git"},
+                    "other.txt",
+                ],
+            },
+            "paper": {
+                "kind": "latex",
+                "environment": "_system",
+                "target_path": "paper/main.tex",
+            },
+            "sub": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "wdir": "sub",
+                "command": "echo s > out.txt",
+                "outputs": [{"path": "out.txt", "storage": "git"}],
+            },
+            "zipped": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo z > z.txt",
+                "outputs": [{"path": "z.txt", "storage": "dvc-zip"}],
+            },
+            "figs": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p figs && echo f > figs/a.txt",
+                "outputs": ["figs"],
+            },
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    os.makedirs("paper")
+    os.makedirs("sub")
+    for path in ["paper/main.tex", "paper/main.pdf", "z.txt", "notes.txt"]:
+        with open(path, "w") as f:
+            f.write("x")
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
+    subprocess.check_call(["calkit", "run", "make", "sub", "figs"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    # Nothing that isn't here, only Git or DVC, and nothing zipped yet
+    assert update("missing.txt", "--to", "dvc").exit_code != 0
+    assert update("out.txt", "--to", "s3").exit_code != 0
+    result = update("z.txt", "--to", "git")
+    assert result.exit_code != 0
+    assert "zipped" in result.output
+    # Nor part of something DVC tracks as a whole, which would leave it in
+    # both
+    result = update("figs/a.txt", "--to", "git")
+    assert result.exit_code != 0
+    assert "overlaps" in result.output
+    assert not git("ls-files", "--", "figs").strip()
+    # A Git-stored output moves to DVC without its stage rerunning, and its
+    # storage goes back to the default rather than being spelled out
+    result = update("out.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert outputs() == ["out.txt", "other.txt"]
+    assert not git("ls-files", "--", "out.txt").strip()
+    assert git("check-ignore", "out.txt").strip() == "out.txt"
+    assert "up to date" in subprocess.check_output(
+        ["dvc", "status", "make"], text=True
+    )
+    git("add", "-A")
+    git("commit", "-qm", "To DVC")
+    # A stage's outputs are relative to its working directory
+    result = update("sub/out.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["sub"]
+    assert list(stage["outputs"]) == ["out.txt"]
+    assert not git("ls-files", "--", "sub/out.txt").strip()
+    git("add", "-A")
+    git("commit", "-qm", "Sub to DVC")
+    # Back to Git, with outputs and a file added on its own, which leaves
+    # none of them ignored or still tracked by DVC
+    result = update("out.txt", "other.txt", "data.csv", "--to", "git")
+    assert result.exit_code == 0, result.output
+    assert [o["storage"] for o in outputs()] == ["git", "git"]
+    for path in ["out.txt", "other.txt", "data.csv"]:
+        assert git("ls-files", "--", path).strip() == path
+    assert not os.path.isfile("data.csv.dvc")
+    git("commit", "-qam", "To Git")
+    # And the file on its own back to DVC
+    result = update("data.csv", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert os.path.isfile("data.csv.dvc")
+    assert not git("ls-files", "--", "data.csv").strip()
+    git("commit", "-qam", "To DVC again")
+    # A file tracked by both is repaired rather than skipped
+    git("add", "-f", "data.csv")
+    git("commit", "-qm", "Track it twice")
+    result = update("data.csv", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert not git("ls-files", "--", "data.csv").strip()
+    git("commit", "-qm", "Repair")
+    # A .gitignore with changes of its own isn't staged, since that would
+    # commit them too, and when DVC's autostage, which 'calkit add' turned
+    # on, stages it anyway, that's said
+    with open(".gitignore", "a") as f:
+        f.write("# Mine\n")
+    result = update("notes.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert "check them before committing" in result.output
+    assert "/notes.txt" in open(".gitignore").read()
+    # A path a stage's kind implies, here a LaTeX PDF, is set where that
+    # stage declares it; recording it in DVC is refused while the stage is
+    # out of date, since that would pass it off as current
+    result = update("paper/main.pdf", "--to", "git")
+    assert result.exit_code == 0, result.output
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["paper"]
+    assert stage["pdf_storage"] == "git"
+    result = update("paper/main.pdf", "--to", "dvc")
+    assert result.exit_code != 0
+    assert "out of date" in result.output
+    # A project in a subdirectory of its repo, where Git runs from above it
+    os.chdir(tmp_path_factory.mktemp("parent"))
+    git("init", "-q")
+    os.makedirs("proj")
+    subprocess.check_call(["calkit", "-C", "proj", "init"])
+    os.chdir("proj")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt",
+                "outputs": [{"path": "out.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("notes.txt", "w") as f:
+        f.write("x")
+    subprocess.check_call(["calkit", "run"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    result = update("out.txt", "notes.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert not git("ls-files", "--", "out.txt", "notes.txt").strip()
+    assert git("ls-files", "--", "notes.txt.dvc").strip() == "notes.txt.dvc"
+    result = update("out.txt", "notes.txt", "--to", "git")
+    assert result.exit_code == 0, result.output
+    assert git("ls-files", "--", "out.txt", "notes.txt").split() == [
+        "notes.txt",
+        "out.txt",
+    ]
+
+
+def test_update_comment(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\input{intro}\n\nA paragraph.\n")
+    with open("paper/intro.tex", "w") as f:
+        f.write("% COMMENT id=aaaa0001\n%   A:\n%     Why?\nIntro text.\n")
+    with open("note.md", "w") as f:
+        f.write("<!-- COMMENT id=bbbb0002\n  B:\n    Hm.\n-->\nSome text.\n")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "paper": {
+                            "kind": "latex",
+                            "target_path": "main.tex",
+                            "wdir": "paper",
+                            "environment": "_system",
+                        },
+                        "note": {
+                            "kind": "markdown",
+                            "target_path": "note.md",
+                            "pdf": {"environment": "_system"},
+                        },
+                    }
+                }
+            },
+            f,
+        )
+
+    def thread(id_: str) -> dict:
+        listed = json.loads(ck("list", "comments", "--json"))
+        return next(c for c in listed if c["id"] == id_)
+
+    # An ID finds its thread in any of the project's documents, including
+    # what they input, to reply and resolve at once
+    assert (
+        ck(
+            "update",
+            "comment",
+            "--id",
+            "aaaa0001",
+            "-r",
+            "Because.",
+            "--resolve",
+            "--author",
+            "C",
+        )
+        == "aaaa0001"
+    )
+    t = thread("aaaa0001")
+    assert t["resolved"]
+    assert [m["text"] for m in t["messages"]] == ["Why?", "Because."]
+    # A line needs its file, and a thread without an ID gets one
+    ck("update", "comment", "paper/intro.tex", "-l", "1", "--reopen")
+    assert not thread("aaaa0001")["resolved"]
+    with open("note.md", "w") as f:
+        f.write("<!-- COMMENT\n  B:\n    Hm.\n-->\nSome text.\n")
+    new_id = ck("update", "comment", "note.md", "-l", "2", "--resolve")
+    with open("note.md") as f:
+        assert f.read().startswith(f"<!-- COMMENT id={new_id} resolved=true\n")
+    for args in [
+        ["update", "comment", "--id", "nope", "--resolve"],
+        ["update", "comment", "-l", "1", "--resolve"],
+        ["update", "comment", "--id", "aaaa0001"],
+        ["update", "comment", "--id", "aaaa0001", "--resolve", "--reopen"],
+    ]:
+        res = subprocess.run(["calkit", *args], capture_output=True)
+        assert res.returncode != 0, args
+
+
+def test_update_question(tmp_dir):
+    from datetime import date
+
+    from calkit.models.core import ProjectInfo
+
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "config", "user.name", "Ada"])
+    subprocess.check_call(["git", "config", "user.email", "ada@example.org"])
+    calkit.save_calkit_info(
+        {
+            "questions": [
+                "Does it work?",
+                {
+                    "question": "Why?",
+                    "name": "why",
+                    "hypothesis": "Because.",
+                    "answer": "Because.",
+                    "evidence": [],
+                },
+            ]
+        }
+    )
+    # Nothing to do, no such question, AI disclosed with no sign-off, or a
+    # sign-off with nothing to sign off on
+    for args in [
+        ["question", "1"],
+        ["question", "3", "--notes", "x"],
+        ["question", "nope", "--notes", "x"],
+        ["question", "1", "--with-ai", "Claude Opus 5"],
+        ["question", "1", "--verify", ""],
+        ["question", "1", "--approach", "Run it.", "--validate", ""],
+        ["question", "2", "--verify", ""],
+    ]:
+        result = runner.invoke(update_app, args)
+        assert result.exit_code != 0, args
+    # A plain question becomes an entry when a field is set
+    result = runner.invoke(
+        update_app, ["question", "1", "--approach", "Run it."]
+    )
+    assert result.exit_code == 0, result.output
+    questions = calkit.load_calkit_info()["questions"]
+    assert questions[0] == {"question": "Does it work?", "approach": "Run it."}
+    # By name, a new field goes where it would be written by hand, and
+    # sign-offs are recorded from Git's identity, covering this same update
+    result = runner.invoke(
+        update_app,
+        [
+            "question",
+            "why",
+            "--approach",
+            "Ask.",
+            "--verify",
+            "Read the code.",
+            "--validate",
+            "Read the answer.",
+            "--with-ai",
+            "Claude Opus 5",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    q = calkit.load_calkit_info()["questions"][1]
+    assert list(q) == [
+        "question",
+        "name",
+        "hypothesis",
+        "approach",
+        "answer",
+        "evidence",
+        "verifications",
+        "validations",
+    ]
+    ada = {"name": "Ada", "email": "ada@example.org"}
+    for field, notes in [
+        ("verifications", "Read the code."),
+        ("validations", "Read the answer."),
+    ]:
+        # With the time, so signing off again the same day is a new record
+        signed = q[field][0].pop("date")
+        assert signed.tzinfo is not None and signed.date() == date.today()
+        assert q[field] == [
+            {"by": {**ada, "with_ai": "Claude Opus 5"}, "notes": notes}
+        ]
+    # Signing off again replaces that person's sign-off of that kind only,
+    # and notes are optional
+    result = runner.invoke(update_app, ["question", "2", "--validate", ""])
+    assert result.exit_code == 0, result.output
+    q = calkit.load_calkit_info()["questions"][1]
+    assert q["validations"][0].pop("date") >= signed
+    assert q["validations"] == [{"by": ada}]
+    assert q["verifications"][0]["notes"] == "Read the code."
+    assert ProjectInfo.model_validate(calkit.load_calkit_info())
+
+
+def test_update_markdown(tmp_dir):
+    def run(*args):
+        return subprocess.run(
+            ["calkit", "update", "markdown", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    subprocess.run(["git", "init", "-q"], check=True)
+    with open("calkit.yaml", "w") as f:
+        f.write("name: blog\n")
+    os.makedirs("_posts")
+    os.makedirs("_data")
+    with open("_data/r.json", "w") as f:
+        json.dump({"summary": {"frac": 0.6}, "n": 15}, f)
+    post = (
+        "Only <!-- ckvalue _data/r.json summary.frac .0% -->?"
+        "<!-- /ckvalue --> of\n"
+        "<!-- ckvalue _data/r.json n -->?<!-- /ckvalue --> runs.\n"
+    )
+    with open("_posts/a.md", "w") as f:
+        f.write(post)
+    with open("_posts/b.md", "w") as f:
+        f.write("No values here.\n")
+    # With no files named and no markdown stages, there's nothing to do
+    res = run()
+    assert res.returncode != 0
+    assert "none are declared as markdown stages" in res.stdout + res.stderr
+    # Checking reports what's stale without writing it
+    res = run("--check", "_posts/a.md", "_posts/b.md")
+    assert res.returncode != 0
+    assert "Values in _posts/a.md are out of date" in res.stdout
+    with open("_posts/a.md") as f:
+        assert f.read() == post
+    # Updating writes only the file that shows values
+    res = run("_posts/a.md", "_posts/b.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert res.stdout.strip() == "Updated values in _posts/a.md"
+    with open("_posts/a.md") as f:
+        text = f.read()
+    assert "-->60%<!-- /ckvalue -->" in text
+    assert "n -->15<!-- /ckvalue -->" in text
+    assert run("--check", "_posts/a.md").returncode == 0
+    # A block that isn't ended fails with what to add, and a bracketed
+    # format, as LaTeX's \\ckvalue takes one, is moved after the key
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "<!-- calkit values path=_data/r.json -->\n\n"
+            "N is <!-- calkit value key=n -->15<!-- /calkit value -->.\n"
+        )
+    res = run("_posts/old.md")
+    assert res.returncode != 0
+    assert "_posts/old.md:1" in res.stdout + res.stderr
+    assert "add '<!-- /calkit values -->'" in res.stdout + res.stderr
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "N is <!-- ckvalue[.1f] _data/r.json n -->15<!-- /ckvalue -->\n"
+        )
+    assert run("--check", "_posts/old.md").returncode != 0
+    res = run("_posts/old.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("_posts/old.md") as f:
+        assert f.read() == (
+            "N is <!-- ckvalue _data/r.json n .1f -->15.0<!-- /ckvalue -->\n"
+        )
+    # A markdown stage's file is updated with no files named
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "name: blog\npipeline:\n  stages:\n    post:\n"
+            "      kind: markdown\n      target_path: _posts/a.md\n"
+        )
+    with open("_data/r.json", "w") as f:
+        json.dump({"summary": {"frac": 0.8}, "n": 15}, f)
+    res = run()
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("_posts/a.md") as f:
+        assert "-->80%<!-- /ckvalue -->" in f.read()
+    # A key the results file doesn't have is reported with its line
+    with open("_posts/a.md", "a") as f:
+        f.write("<!-- ckvalue _data/r.json missing -->?<!-- /ckvalue -->\n")
+    res = run("_posts/a.md")
+    assert res.returncode != 0
+    assert "_posts/a.md:3" in res.stdout + res.stderr
+    assert "no key 'missing'" in res.stdout + res.stderr
+    # Images are checked against their imports, whether written from the
+    # project root, as a website serves them, or relative to the file.
+    # Ones that weren't imported, or that only appear in code, are not.
+    os.makedirs("images/p")
+    for name in ["a.png", "b.png", "photo.jpg"]:
+        with open(f"images/p/{name}", "w") as f:
+            f.write(name)
+    ck_info = calkit.load_calkit_info()
+    ck_info["figures"] = [
+        {"path": f"images/p/{name}", "imported_from": {"project": "o/p"}}
+        for name in ["a.png", "b.png"]
+    ]
+    calkit.save_calkit_info(ck_info)
+    for name in ["a.png", "b.png"]:
+        path = f"images/p/{name}"
+        calkit.provenance.write_import_lock(
+            path, {"hash": calkit.provenance.hash_path(path)}
+        )
+    with open("_posts/c.md", "w") as f:
+        f.write(
+            "![A](/images/p/a.png)\n![B](../images/p/b.png)\n"
+            "![Photo](/images/p/photo.jpg)\n`![C](/images/p/c.png)`\n"
+        )
+    res = run("--check", "_posts/c.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("images/p/a.png", "a") as f:
+        f.write("edited")
+    os.remove("images/p/b.png")
+    res = run("_posts/c.md")
+    out = res.stdout + res.stderr
+    # Reported, but nothing to update, so not a failure unless checking
+    assert res.returncode == 0, out
+    assert "images/p/a.png, which has been edited since it was imported" in (
+        out
+    )
+    assert "images/p/b.png, imported from o/p, which does not exist" in out
+    assert "photo.jpg" not in out
+    assert "c.png" not in out
+    res = run("--check", "_posts/c.md")
+    assert res.returncode != 0
+    assert "2 imported image(s) don't match their imports" in (
+        res.stdout + res.stderr
+    )

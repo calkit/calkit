@@ -1,0 +1,372 @@
+name: decisions
+title: Decisions
+description: >-
+  Evidence behind decisions made in developing Calkit, so a claim made to
+  justify one can be checked and rerun. Its stages are frozen once run,
+  since each records a decision at the time it was made, so the parent
+  project's pipeline skips them.
+
+questions:
+  - question: >-
+      How much faster does DVC parse a large dvc.lock with ruamel.yaml's C
+      loader, from ruamel.yaml.clib, installed?
+    answer:
+      if speedup > 1: >-
+        {speedup:.1f}x faster: DVC parsed a generated {kb:.0f} KB dvc.lock
+        with {paths} paths in {clib_s:.2f} s with ruamel.yaml.clib
+        installed, and {pure_s:.2f} s without it.
+      else: >-
+        It isn't: DVC parsed a generated {kb:.0f} KB dvc.lock with {paths}
+        paths in {clib_s:.2f} s with ruamel.yaml.clib installed, and
+        {pure_s:.2f} s without it.
+    evidence:
+      - kind: result
+        path: results/ruamel-yaml-clib.json
+        values:
+          speedup: speedup
+          pure_s: seconds.pure
+          clib_s: seconds.clib
+          paths: lock.paths
+          kb: lock.kb
+  - question: >-
+      How much CPU time does every command save by not importing
+      calkit.environments, and with it pydantic, until a command needs it?
+    answer: >-
+      {saved_ms:.0f} ms: importing the CLI took {cli_ms:.0f} ms, and
+      {with_env_ms:.0f} ms with calkit.environments imported first, as it
+      was when calkit.cli.describe imported it at the top. Medians of {n}
+      fresh interpreters each.
+    evidence:
+      - kind: result
+        path: results/imports.json
+        values:
+          saved_ms: saved_ms.environments
+          cli_ms: cpu_ms.cli
+          with_env_ms: cpu_ms.cli_with_environments
+          n: repeats
+  - question: >-
+      How much CPU time does deferring the schemas of Calkit's models, until
+      each is first used, save on importing them?
+    answer: >-
+      {saved_ms:.0f} ms: importing calkit.models took {deferred_ms:.0f} ms
+      with its {models} models' schemas deferred, and {built_ms:.0f} ms with
+      all of them built, as defining them did before. Medians of {n} fresh
+      interpreters each.
+    evidence:
+      - kind: result
+        path: results/imports.json
+        values:
+          saved_ms: saved_ms.models
+          deferred_ms: cpu_ms.models_deferred
+          built_ms: cpu_ms.models_built
+          models: models
+          n: repeats
+  - question: >-
+      How much would checking whether a Docker image exists through Docker's
+      socket, rather than its CLI, save?
+    answer: >-
+      Too little to be worth the code to find the socket the way Docker
+      does, so Calkit uses the CLI: {socket_ms:.0f} ms through the socket
+      against {cli_ms:.0f} ms through the CLI for the TeX Live image, most
+      of which is Docker inspecting it, however it's asked, and
+      {missing_socket_ms:.0f} ms against {missing_cli_ms:.0f} ms for an
+      image that isn't there. Medians of {n} checks each, taking turns,
+      with the socket check from #1817, which was closed.
+    evidence:
+      - kind: result
+        path: results/docker-image-check.json
+        values:
+          socket_ms: ms.present.socket
+          cli_ms: ms.present.cli
+          missing_socket_ms: ms.missing.socket
+          missing_cli_ms: ms.missing.cli
+          n: repeats
+  - question: >-
+      How much CPU time does building only the command being run save Typer
+      on each command?
+    answer: >-
+      {saved_ms:.0f} ms: building the CLI for 'calkit status' took
+      {status_ms:.0f} ms, against {all_ms:.0f} ms building all {commands}
+      commands, which '--help' still does, in {help_ms:.0f} ms. Medians of
+      {n} fresh interpreters each.
+    evidence:
+      - kind: result
+        path: results/cli-build.json
+        values:
+          saved_ms: saved_ms
+          status_ms: cpu_ms.status
+          all_ms: cpu_ms.all
+          help_ms: cpu_ms.help
+          commands: commands.all
+          n: repeats
+  - question: >-
+      How much does a TeX Live environment, which needs no Docker, cost to
+      set up and to compile in, against Calkit's LaTeX Docker image?
+    answer: >-
+      A new environment with only the base packages took {cold_s:.0f} s to
+      set up from nothing here, downloading {download_mb:.0f} MB, and the
+      store held {store_mb:.0f} MB afterwards, against {image_mb:.0f} MB
+      for the image unpacked here. The same environment in another project
+      took {second_s:.2f} s, adding a package {add_s:.1f} s and
+      {add_mb:.1f} MB, and checking a ready one {ready_ms:.1f} ms. A small
+      article built with latexmk in {pdf_s:.1f} s with pdfLaTeX and
+      {lua_s:.1f} s with LuaLaTeX, against {docker_pdf_s:.1f} s and
+      {docker_lua_s:.1f} s in the image, where LuaLaTeX indexes its fonts
+      again in every new container. Medians of {n} builds each.
+    evidence:
+      - kind: result
+        path: results/texlive-env.json
+        values:
+          cold_s: seconds.cold
+          download_mb: mb.download
+          store_mb: mb.store
+          image_mb: mb.docker_image
+          second_s: seconds.second_project
+          add_s: seconds.add_package
+          add_mb: mb.add_package
+          ready_ms: ms.ready_check
+          pdf_s: seconds.compile.texlive-pdf
+          lua_s: seconds.compile.texlive-lualatex
+          docker_pdf_s: seconds.compile.docker-pdf
+          docker_lua_s: seconds.compile.docker-lualatex
+          n: repeats
+  - question: >-
+      How much does 'calkit latex build' add to latexmk in a ready TeX Live
+      environment, and how much would running latexmk itself rather than
+      through 'calkit xenv', importing GitPython only for documents using
+      Calkit's components, and skipping pydantic's plugin search save?
+    answer: >-
+      With nothing to do, a build of an article with a bibliography took
+      {build_unchanged_s:.2f} s, against {latexmk_unchanged_s:.2f} s for
+      latexmk itself, and after an edit {build_edited_s:.2f} s, against
+      {latexmk_edited_s:.2f} s. The second Calkit process a build started
+      to run latexmk cost {xenv_s:.2f} s and importing GitPython
+      {git_ms:.0f} ms ({git_cpu_ms:.0f} ms of CPU time), so both were taken
+      out. Pydantic's plugin search, which every command does since Typer
+      validates options with it, cost {plugins_ms:.0f} ms
+      ({plugins_cpu_ms:.0f} ms of CPU time), too little to rely on its
+      private API to skip, so the CLI still does it. Medians of {n} runs
+      each, taking turns.
+    evidence:
+      - kind: result
+        path: results/latex-build.json
+        values:
+          build_unchanged_s: seconds.wall.build_unchanged
+          latexmk_unchanged_s: seconds.wall.latexmk_unchanged
+          build_edited_s: seconds.wall.build_edited
+          latexmk_edited_s: seconds.wall.latexmk_edited
+          xenv_s: seconds.wall.xenv
+          git_ms: ms.wall.import_git
+          git_cpu_ms: ms.cpu.import_git
+          plugins_ms: ms.wall.pydantic_plugins
+          plugins_cpu_ms: ms.cpu.pydantic_plugins
+          n: repeats
+
+  - question: >-
+      Can a TeX Live environment composed into a Python one give Matplotlib
+      its usetex and its fonts, so a figure can't silently change with the
+      machine?
+    answer:
+      if usetex_ok and from_store and not missing_tex_ok and shared_ok and not new_ok and fontconfig and arimo_new and cmu_new and not arimo_before and not cmu_before and composed_ok and composed_latex and composed_dir and system_fonts > 0: >-
+        Yes, if each composed environment also gets its own Matplotlib
+        config directory. With TeX Live {release}'s base packages and
+        {packages}, {rest_kb:.0f} KB besides {largest}'s {largest_mb:.0f} MB,
+        which Matplotlib's preamble loads for type1ec.sty alone, usetex
+        rendered a figure in {render_s:.1f} s, embedding Computer Modern from
+        the store. A usetex font missing from the environment failed the
+        build, with {missing_file} not found, where a family missing from
+        the machine without usetex quietly became {fallback}. But
+        Matplotlib keys its TeX cache by source alone, so with the config
+        directory that rendered the figure, a TeX with none of those
+        packages rendered it again, and with a new one it failed. Fonts from
+        a TeX Live environment, Arimo, metric-compatible with Arial, and CMU
+        Serif, were found through fontconfig by a new font list but not by
+        one built before. Building one took {font_list_s:.0f} s here, once
+        per config directory. Through 'calkit xenv', in an environment with
+        the TeX Live one composed into it, the figure rendered with the
+        store's latex and a config directory of its own, and fontconfig
+        found {system_fonts} of the system's fonts besides {store_fonts}
+        from the store.
+      else: >-
+        Not as the spike first found; see results/mpl-texlive.json.
+    evidence:
+      - kind: result
+        path: results/mpl-texlive.json
+        values:
+          usetex_ok: usetex.ok
+          from_store: usetex.pdf_fonts_from_store
+          packages: usetex.package_list
+          rest_kb: usetex.rest_kb
+          largest: usetex.largest.name
+          largest_mb: usetex.largest.mb
+          render_s: usetex.seconds.render
+          font_list_s: usetex.seconds.font_list
+          missing_tex_ok: missing_tex_font.ok
+          missing_file: missing_tex_font.missing_file
+          fallback: missing_font.used
+          shared_ok: tex_cache.other_tex_shared_config_ok
+          new_ok: tex_cache.other_tex_new_config_ok
+          fontconfig: env_fonts.fontconfig
+          arimo_new: env_fonts.new_config.Arimo
+          cmu_new: env_fonts.new_config.CMU Serif
+          arimo_before: env_fonts.built_before.Arimo
+          cmu_before: env_fonts.built_before.CMU Serif
+          composed_ok: composed.ok
+          composed_latex: composed.latex_from_store
+          composed_dir: composed.own_config_dir
+          system_fonts: composed.system_fonts
+          store_fonts: composed.store_fonts
+          release: release
+
+environments:
+  pure:
+    kind: uv-venv
+    path: requirements-pure.txt
+    prefix: .venv-pure
+    python: "3.12"
+    description: DVC with ruamel.yaml alone, which parses in pure Python.
+  clib:
+    kind: uv-venv
+    path: requirements-clib.txt
+    prefix: .venv-clib
+    python: "3.12"
+    description: The same, plus ruamel.yaml.clib for its C loader.
+  calkit:
+    kind: uv
+    path: ../pyproject.toml
+    description: Calkit itself, from this checkout.
+  calkit-tex:
+    kind: uv
+    path: ../pyproject.toml
+    with:
+      - mpl-tex
+    description: Calkit itself, with mpl-tex composed into it.
+  mpl-tex:
+    kind: texlive
+    release: 2025
+    packages:
+      - type1cm
+      - geometry
+      - underscore
+      - dvipng
+      - cm-super
+    description: TeX Live for Matplotlib's usetex, alongside the calkit env.
+  mpl-fonts:
+    kind: texlive
+    release: 2025
+    packages:
+      - arimo
+      - cm-unicode
+    description: Fonts from TeX Live for Matplotlib without usetex.
+
+pipeline:
+  stages:
+    parse-dvc-lock-pure:
+      kind: python-script
+      frozen: true
+      script_path: scripts/parse-dvc-lock.py
+      environment: pure
+      args:
+        - --out=results/ruamel-yaml-clib/pure.json
+      outputs:
+        - path: results/ruamel-yaml-clib/pure.json
+          storage: git
+    parse-dvc-lock-clib:
+      kind: python-script
+      frozen: true
+      script_path: scripts/parse-dvc-lock.py
+      environment: clib
+      args:
+        - --out=results/ruamel-yaml-clib/clib.json
+      outputs:
+        - path: results/ruamel-yaml-clib/clib.json
+          storage: git
+    compare-dvc-lock-parsing:
+      kind: python-script
+      frozen: true
+      script_path: scripts/compare-dvc-lock-parsing.py
+      environment: pure
+      inputs:
+        - results/ruamel-yaml-clib/pure.json
+        - results/ruamel-yaml-clib/clib.json
+      outputs:
+        - path: results/ruamel-yaml-clib.json
+          storage: git
+    time-imports:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-imports.py
+      environment: calkit
+      args:
+        - --out=results/imports.json
+      inputs:
+        - ../calkit/calc.py
+        - ../calkit/cli/describe.py
+        - ../calkit/models/base.py
+      outputs:
+        - path: results/imports.json
+          storage: git
+    time-docker-image-check:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-docker-image-check.py
+      environment: calkit
+      args:
+        - --out=results/docker-image-check.json
+      inputs:
+        - ../calkit/docker.py
+      outputs:
+        - path: results/docker-image-check.json
+          storage: git
+    time-cli-build:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-cli-build.py
+      environment: calkit
+      args:
+        - --out=results/cli-build.json
+      inputs:
+        - ../calkit/cli/__init__.py
+      outputs:
+        - path: results/cli-build.json
+          storage: git
+    time-texlive-env:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-texlive-env.py
+      environment: calkit
+      args:
+        - --out=results/texlive-env.json
+      inputs:
+        - ../calkit/environments/texlive.py
+      outputs:
+        - path: results/texlive-env.json
+          storage: git
+    check-mpl-texlive:
+      kind: python-script
+      frozen: true
+      script_path: scripts/check-mpl-texlive.py
+      environment: calkit
+      args:
+        - --out=results/mpl-texlive.json
+      inputs:
+        - ../calkit/environments/texlive.py
+        - .calkit/env-locks/mpl-tex.json
+        - .calkit/env-locks/mpl-fonts.json
+        - ../calkit/environments/core.py
+      outputs:
+        - path: results/mpl-texlive.json
+          storage: git
+    time-latex-build:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-latex-build.py
+      environment: calkit
+      args:
+        - --out=results/latex-build.json
+      inputs:
+        - ../calkit/cli/latex.py
+        - ../calkit/latex.py
+      outputs:
+        - path: results/latex-build.json
+          storage: git

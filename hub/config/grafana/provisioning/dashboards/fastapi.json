@@ -2,7 +2,7 @@
   "title": "FastAPI",
   "uid": "fastapi-overview",
   "schemaVersion": 38,
-  "version": 4,
+  "version": 5,
   "refresh": "30s",
   "time": {
     "from": "now-1h",
@@ -178,6 +178,65 @@
       }
     },
     {
+      "id": 9,
+      "title": "Pipeline Status Timings (max ms by cache outcome)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "compute_stage_statuses, which the pipeline, publications, figures, and releases pages wait on. storage_ms is the part spent checking object storage for outputs; the rest is reading the Git tree.",
+      "targets": [
+        {
+          "expr": "max by (pipeline_status_cache) (max_over_time({service=~\"backend|backend-dvc\"} | json | pipeline_status_cache =~ \".+\" | unwrap duration_ms | __error__=\"\" [5m]))",
+          "legendFormat": "{{pipeline_status_cache}} total"
+        },
+        {
+          "expr": "max by (pipeline_status_cache) (max_over_time({service=~\"backend|backend-dvc\"} | json | pipeline_status_cache =~ \".+\" | unwrap storage_ms | __error__=\"\" [5m]))",
+          "legendFormat": "{{pipeline_status_cache}} storage"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Pipeline Status Logs (per project)",
+      "type": "logs",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "One line per compute_stage_statuses call, with owner_name, project_name, duration_ms, storage_ms, md5s_checked, and md5s_missing. 'hit-missing-rechecked' means a cached result was reused after confirming its missing outputs still aren't pushed.",
+      "targets": [
+        {
+          "expr": "{service=~\"backend|backend-dvc\"} | json | pipeline_status_cache =~ \".+\"",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
       "id": 8,
       "title": "Backend 500s (tracebacks and 5xx responses)",
       "type": "logs",
@@ -185,7 +244,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 32
       },
       "datasource": {
         "type": "loki",
@@ -219,7 +278,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 42
       },
       "datasource": {
         "type": "loki",

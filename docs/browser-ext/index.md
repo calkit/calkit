@@ -20,14 +20,75 @@ From a compatible website,
 click the Calkit toolbar button in the bottom right corner of the page
 and select "Sign in."
 
+## Working with projects on your machine
+
+<!-- TODO: needs human review -->
+
+The extension can work with projects on your machine too, e.g., open the
+script or notebook that makes a figure on Overleaf in your editor, and show
+on Overleaf what's changed on your machine that isn't saved or synced yet.
+It talks to Calkit on your machine directly, not through a hub.
+
+Calkit's installer sets this up, or run:
+
+```sh
+calkit browser-link install
+```
+
+Then, in the extension's options, click **Connect** under
+**This machine**. The editor is Calkit's `default_editor` setting, VS Code
+unless set otherwise, e.g., with
+`calkit config set default_editor cursor`. An editor built on VS Code,
+e.g., Cursor, VSCodium, Positron, or Antigravity, gets Calkit's extension
+if it doesn't have it.
+
+<!-- TODO: needs human review -->
+
+When it's connected, the Overleaf panel works with the project on your
+machine rather than through calkit.io, and says **On this machine**.
+It finds the project from its `calkit.yaml`, and **Sync now** runs
+`calkit overleaf sync` there, instead of on GitHub Actions.
+If any stages are out of date, **Run the pipeline first** next to it runs
+`calkit run --save --overleaf` instead,
+and with nothing to sync, **Run and sync** does the same.
+The pipeline stages in the Calkit sidebar are the ones on your machine,
+in the order `calkit.yaml` defines them,
+and each expands to show what it reads and makes, what's out of date,
+and buttons to open it in your editor or on calkit.io.
+**This machine** in the PDF pane's toolbar shows the PDF built there in
+place of Overleaf's, so you don't wait for Overleaf to compile it.
+If the project isn't on your machine, the panel offers to clone it,
+to `~/calkit/NAME` unless you choose another folder, and if it's there
+more than once, e.g., as Git worktrees, it uses the one in `~/calkit`, or
+the one you select.
+Overleaf credentials come from your Calkit account, as for
+`calkit overleaf sync`, so connecting Overleaf once works on every
+machine you use.
+Without the connection, or for a project that isn't on your machine,
+the panel works through calkit.io as before.
+
 ## Overleaf
 
 <!-- prettier-ignore -->
 !!! note
 
-    Syncing from the extension requires an Overleaf token stored in your
-    Calkit account, the same as syncing from calkit.io. See
-    [Overleaf integration](../overleaf.md) for how to set that up.
+    Syncing from the extension, the same as syncing from calkit.io,
+    needs your Calkit account to have access to Overleaf.
+    If it doesn't, the panel asks for an Overleaf Git token,
+    which requires Overleaf Premium,
+    and offers **Connect with Overleaf login**, which works without it.
+    See [Overleaf integration](../overleaf.md#connecting-to-overleaf)
+    for more.
+
+**Get a token from Overleaf** opens your Overleaf account settings,
+where you click **Generate token**.
+The extension saves the token to your Calkit account
+and takes you back to your project, with nothing to copy and paste.
+
+**Connect with Overleaf login** sends the session your browser is signed in to
+Overleaf with to your Calkit account, so the hub can sync for you.
+If you later sign out of Overleaf, that session stops working,
+and the panel offers to connect again.
 
 Opening an Overleaf project shows the Calkit button in the corner, which
 turns amber when a sync would do something, so a figure that was
@@ -71,6 +132,24 @@ Once everything is connected, syncing between them is a single action.
 The Overleaf document becomes a Calkit pipeline stage with explicit
 inputs for the figures, so they can be checked for staleness,
 synced, and built offline and pushed back up to the web.
+
+### Comments on the PDF
+
+<!-- TODO: needs human review -->
+
+**Comments** in the PDF pane's toolbar shows Overleaf's PDF with the
+comment threads in the document's source,
+written in [Calkit's comment format](../latex.md#comments),
+highlighted where they apply.
+This machine's PDF always shows them.
+Select text in the PDF to comment on it, reply to or resolve a thread in
+the panel beside it, or double-click the PDF to go to that line of the
+source.
+Threads are kept in step with Overleaf's own comments:
+a comment added, replied to, resolved, or deleted on either side shows up on
+the other, and a thread started on the PDF is posted to Overleaf too.
+Boxes and hovering show where figures and values come from,
+the same as on Overleaf's PDF.
 
 ## GitHub
 

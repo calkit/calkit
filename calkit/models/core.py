@@ -7,11 +7,10 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import (
     AliasChoices,
-    BaseModel,
     BeforeValidator,
     ConfigDict,
     Discriminator,
@@ -24,11 +23,28 @@ from pydantic import (
 from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
+from calkit.core import normalize_orcid
+from calkit.models.base import Model
+from calkit.models.io import EnvVarInput
 from calkit.models.iteration import ParametersType
 from calkit.models.pipeline import Pipeline, RelativeChildPathString
+from calkit.models.requirements import (  # noqa: F401
+    AwsCredentialsRequirement,
+    Dependency,
+    DependencyAttrs,
+    Requirement,
+    RequirementAttrs,
+    RequirementType,
+    SetupDependency,
+    SetupRequirement,
+    SystemNumberProperty,
+    SystemNumberRequirement,
+    SystemValueProperty,
+    SystemValueRequirement,
+)
 
 
-class _ImportedFromProject(BaseModel):
+class _ImportedFromProject(Model):
     # An unrecognized key is refused rather than dropped. These entries
     # exist to be trusted, and an untagged union silently ignoring what it
     # doesn't understand means a misspelled key, a key at the wrong level,
@@ -39,6 +55,15 @@ class _ImportedFromProject(BaseModel):
 
     project: str
     path: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Branch, tag, or commit to follow when refreshing this. "
+            "Optional: an entry that names none follows the project's "
+            "default branch. The commit it resolves to is recorded in "
+            ".calkit/imports.json."
+        ),
+    )
     date: date_type | None = Field(
         default=None, description="When the data was downloaded."
     )
@@ -60,7 +85,7 @@ class _ImportedFromProject(BaseModel):
     )
 
 
-class _ImportedFromUrl(BaseModel):
+class _ImportedFromUrl(Model):
     # An unrecognized key is refused rather than dropped. These entries
     # exist to be trusted, and an untagged union silently ignoring what it
     # doesn't understand means a misspelled key, a key at the wrong level,
@@ -86,7 +111,7 @@ class _ImportedFromUrl(BaseModel):
     )
 
 
-class _ImportedFromDoi(BaseModel):
+class _ImportedFromDoi(Model):
     """Data published under a DOI, which is a citation, not just a link.
 
     Kept apart from a URL so it can be cited and resolved as a DOI rather
@@ -139,7 +164,7 @@ class _ImportedFromDoi(BaseModel):
     )
 
 
-class _ImportedFromGit(BaseModel):
+class _ImportedFromGit(Model):
     """Data from a Git repo that isn't a Calkit project.
 
     Written flat, the way a project source is: everything here is already
@@ -205,7 +230,7 @@ class _ImportedFromGit(BaseModel):
         return v
 
 
-class _Person(BaseModel):
+class _Person(Model):
     """A person credited with producing something in the project.
 
     Extra keys are refused rather than ignored: a mistyped ``oricd``, or a
@@ -278,30 +303,7 @@ class _Person(BaseModel):
         # RO-Crate both want, so neither has to guess at a bare identifier.
         if v is None:
             return v
-        match = re.fullmatch(
-            r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
-            r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
-            v.strip(),
-        )
-        if match is None:
-            raise ValueError(
-                f"orcid must look like 0000-0002-1825-0097 (got {v!r})"
-            )
-        bare = match.group(1).upper()
-        # The last character is an ISO 7064 MOD 11-2 check digit over the
-        # other 15, so a typo is caught here rather than by whoever later
-        # finds the identifier resolves to a stranger, or to nobody.
-        total = 0
-        for digit in bare[:-1].replace("-", ""):
-            total = (total + int(digit)) * 2
-        result = (12 - total % 11) % 11
-        expected = "X" if result == 10 else str(result)
-        if bare[-1] != expected:
-            raise ValueError(
-                f"orcid {v!r} has check digit {bare[-1]} but its other "
-                f"digits call for {expected}, so one of them is mistyped"
-            )
-        return f"https://orcid.org/{bare}"
+        return normalize_orcid(v)
 
     @model_validator(mode="after")
     def _check_identifiable(self) -> _Person:
@@ -313,7 +315,7 @@ class _Person(BaseModel):
         return self
 
 
-class _CalkitObject(BaseModel):
+class _CalkitObject(Model):
     path: str = Field(
         description="Path to the file, relative to the project root."
     )
@@ -331,7 +333,7 @@ class _CalkitObject(BaseModel):
 
 # Every place an artifact can have come from. One union shared by every
 # artifact that can be imported, so they all accept the same forms.
-class _ImportedFromDescription(BaseModel):
+class _ImportedFromDescription(Model):
     """Data whose origin can be stated but not resolved.
 
     Some things arrive by other means --- emailed by a person, provided
@@ -591,6 +593,15 @@ PublicationKind = Literal[
 ]
 
 
+class PublicationReview(Model):
+    """A review of a publication, e.g., by a peer reviewer."""
+
+    path: str = Field(
+        description="Path to the review, a Markdown file whose comments are "
+        'numbered items under a heading containing "comments".'
+    )
+
+
 class Publication(_CalkitObject):
     """A publication the project produced, or one it builds upon.
 
@@ -616,6 +627,11 @@ class Publication(_CalkitObject):
     # was got from here, the same way a dataset does.
     imported_from: ImportedFromType | None = Field(
         default=None, description=_IMPORTED_FROM_DESCRIPTION
+    )
+    reviews: list[PublicationReview] = Field(
+        default_factory=list,
+        description="Reviews of this publication, whether written in this "
+        "project or received.",
     )
 
     @model_validator(mode="before")
@@ -645,217 +661,36 @@ class Publication(_CalkitObject):
         return self.doi is not None
 
 
-class ReferenceFile(BaseModel):
+class ReferenceFile(Model):
     path: str
     key: str
 
 
-class ReferenceCollection(BaseModel):
+class ReferenceCollection(Model):
     path: str
     files: list[ReferenceFile] = []
 
 
-class RequirementAttrs(BaseModel):
-    """A requirement's properties, as written under ``{name: {...}}``.
-
-    ``Requirement`` is this plus the name; the mapping form supplies the
-    name as its key instead.
-    """
-
-    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
-    check_command: str | None = None
-    setup_command: str | None = None
-    cache_ttl: str | int | None = None
-    description: str | None = None
-    default: str | None = None
-    version_spec: str | None = None
-    notes: str | None = None
+# The kinds that describe a machine, so can have 'requirements'
+ENV_KINDS_WITH_REQUIREMENTS = ("pbs", "slurm", "system")
 
 
-class Requirement(BaseModel):
-    """Something that must be true of a machine before the project runs.
-
-    Four kinds are supported:
-
-    - ``app``: an executable that must be on ``PATH``, optionally
-      satisfying a ``version_spec``.
-    - ``env-var``: an environmental variable that must be defined.
-    - ``setup``: a per-machine precondition that isn't a file -- e.g.,
-      the user must have authenticated a CLI like ``gh auth login``.
-      A ``setup`` requirement declares ``check_command`` (a shell command
-      whose exit code determines whether it is satisfied) and
-      ``setup_command`` (run on a TTY when the user agrees, or printed
-      as a fix-it command otherwise). To run either inside a project
-      environment, prefix it with ``calkit xenv -n <env> --`` explicitly
-      rather than relying on an implicit wrap. ``cache_ttl`` skips
-      re-probing slow checks.
-    - ``calkit-config``: a value that must be set in the user's Calkit
-      configuration.
-
-    These name a thing that must be present, so each has a ``name``. The
-    properties of a machine that can't be installed -- how many CPUs it
-    has, what OS it runs -- are constrained by
-    ``SystemNumberRequirement`` and ``SystemValueRequirement``
-    instead, which name a property rather than a thing.
-    """
-
-    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
-    name: str
-    # ``setup``-kind fields; ignored for other kinds.
-    check_command: str | None = None
-    setup_command: str | None = None
-    # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
-    # integer number of seconds. Setup requirements cache successful checks
-    # by default for ``DEFAULT_SETUP_CACHE_TTL``; set ``cache_ttl: 0`` to
-    # disable caching and re-probe every run.
-    cache_ttl: str | int | None = None
-    description: str | None = None
-    # Allow a per-env-var default value to be set (used by ``check env-vars``).
-    default: str | None = None
-    version_spec: str | None = Field(
-        default=None,
-        description="Version specifier an 'app' must satisfy, e.g. '>=2.40'. "
-        "A string requirement like 'git>=2.40' is shorthand for this.",
+def env_requirements_problem(env: dict) -> str | None:
+    """Why an environment can't have its 'requirements', if it can't."""
+    kind = env.get("kind")
+    if "requirements" not in env or kind in ENV_KINDS_WITH_REQUIREMENTS:
+        return None
+    if kind == "switch":
+        where = "on the machine environments it picks from"
+    else:
+        where = "on a 'system', 'slurm' or 'pbs' environment it runs inside"
+    return (
+        f"A '{kind}' environment can't have 'requirements', since they "
+        f"describe a machine; put them on the stages using it, or {where}"
     )
-    notes: str | None = None
 
 
-class SetupRequirement(Requirement):
-    """A ``setup`` requirement, whose ``name`` may be omitted.
-
-    A single anonymous setup step is common enough that requiring a name
-    adds friction, so Calkit synthesizes a stable ``setup-<hash>`` one from
-    ``check_command``. This is a separate model rather than a loosening of
-    ``Requirement.name`` so the published schema still rejects an ``app``
-    or ``env-var`` requirement with no name, where the name is the
-    identity.
-    """
-
-    kind: Literal["setup"] = "setup"
-    name: str | None = None
-
-
-# Machine properties whose values are numbers, so they're constrained by
-# range rather than by matching. Kebab-case like the rest of calkit.yaml;
-# ``calkit.environments`` maps these onto the snake_case keys
-# ``get_system_info`` returns.
-SystemNumberProperty = Literal["cpu-count", "memory-gb"]
-
-# Machine properties whose values are strings. ``*-version`` properties of
-# installed tools are deliberately absent: those are reachable as an ``app``
-# requirement with a ``version_spec``, which is one way to say it rather
-# than two. ``python-version`` stays because it describes the interpreter
-# running Calkit, which need not be whatever ``python`` resolves to.
-SystemValueProperty = Literal[
-    "os",
-    "os-version",
-    "platform",
-    "machine",
-    "processor",
-    "hostname",
-    "machine-id",
-    "python-version",
-    "python-implementation",
-]
-
-
-class SystemNumberRequirement(BaseModel):
-    """A bound on a numeric property of the machine.
-
-    A property is not a thing that can be installed, so there is nothing to
-    name and nothing to offer to fix: the check either passes on this
-    machine or reports what it found against what was asked for.
-
-    At least one bound must be given. An entry that constrains nothing says
-    nothing -- if the intent is 'results depend on this property', that is
-    what a ``system`` environment's ``lock`` is for.
-    """
-
-    kind: SystemNumberProperty = Field(
-        description="Which numeric property of the machine to constrain."
-    )
-    min: float | None = Field(
-        default=None, description="Smallest acceptable value, inclusive."
-    )
-    max: float | None = Field(
-        default=None, description="Largest acceptable value, inclusive."
-    )
-    description: str | None = None
-
-    @model_validator(mode="after")
-    def _check_bounded(self) -> SystemNumberRequirement:
-        if self.min is None and self.max is None:
-            raise ValueError(
-                f"Requirement on '{self.kind}' needs a 'min' or a 'max'; "
-                "to depend on its value rather than constrain it, add it to "
-                "the environment's 'lock'"
-            )
-        if self.min is not None and self.max is not None:
-            if self.min > self.max:
-                raise ValueError(
-                    f"Requirement on '{self.kind}' has min {self.min} greater "
-                    f"than max {self.max}, which nothing can satisfy"
-                )
-        return self
-
-
-class SystemValueRequirement(BaseModel):
-    """A constraint on a string-valued property of the machine.
-
-    ``equals`` matches exactly, case-insensitively, and a list of values
-    means any of them will do. ``version_spec`` compares as a version, for
-    properties like ``os-version`` and ``python-version`` where '>=' means
-    something.
-
-    At least one of the two must be given, for the same reason a numeric
-    requirement needs a bound.
-    """
-
-    kind: SystemValueProperty = Field(
-        description="Which property of the machine to constrain."
-    )
-    equals: str | list[str] | None = Field(
-        default=None,
-        description="Value the property must have, matched "
-        "case-insensitively. A list means any one of them is acceptable.",
-    )
-    version_spec: str | None = Field(
-        default=None,
-        description="PEP 440 version specifier the property must satisfy, "
-        "e.g. '>=3.11'. For properties that are versions.",
-    )
-    description: str | None = None
-
-    @model_validator(mode="after")
-    def _check_constrained(self) -> SystemValueRequirement:
-        if self.equals is None and self.version_spec is None:
-            raise ValueError(
-                f"Requirement on '{self.kind}' needs an 'equals' or a "
-                "'version_spec'; to depend on its value rather than "
-                "constrain it, add it to the environment's 'lock'"
-            )
-        return self
-
-
-# Every shape a requirement can be written in. The mapping form
-# ``{name: {...}}`` comes last so a flat dict is matched as the object it
-# looks like rather than as a one-key mapping.
-RequirementType = (
-    str
-    | SystemNumberRequirement
-    | SystemValueRequirement
-    | SetupRequirement
-    | Requirement
-    | dict[str, RequirementAttrs | None]
-)
-
-# Pre-rename names, kept so existing imports keep working.
-DependencyAttrs = RequirementAttrs
-Dependency = Requirement
-SetupDependency = SetupRequirement
-
-
-class Environment(BaseModel):
+class Environment(Model):
     """Base class for environments, which is never used directly.
 
     Environments are always one of the ``kind``-specific subclasses below;
@@ -880,6 +715,8 @@ class Environment(BaseModel):
         "venv",
         "uv-venv",
         "renv",
+        "switch",
+        "texlive",
     ] = Field(description="What kind of environment this is.")
     # Note: ``path`` is declared on the specific subclasses that need it (most
     # of them, required; optional for Docker) rather than here, so subclasses
@@ -888,9 +725,41 @@ class Environment(BaseModel):
     description: str | None = Field(
         default=None, description="A description of the environment."
     )
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project this environment is built from "
+        "that its spec doesn't name, e.g., a local package it installs. "
+        "Editing one rebuilds the environment and reruns the stages using "
+        "it.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_requirements(cls, data: object) -> object:
+        # Requirements describe a machine, so only machine kinds take them
+        if isinstance(data, dict):
+            problem = env_requirements_problem(data)
+            if problem is not None:
+                raise ValueError(problem)
+        return data
 
 
-class CondaEnvironment(Environment):
+class ComposableEnvironment(Environment):
+    """Base class for the kinds other environments can be composed into."""
+
+    with_: list[str] = Field(
+        default=[],
+        alias="with",
+        description=(
+            "Names of TeX Live environments whose programs this one's "
+            "commands also get, e.g., for Matplotlib's usetex. They come "
+            "after this environment's own on PATH and before the system's."
+        ),
+    )
+
+
+class CondaEnvironment(ComposableEnvironment):
     kind: Literal["conda"] = "conda"
     path: str = Field(description="Path to the Conda environment YAML file.")
     prefix: str | None = Field(
@@ -898,7 +767,7 @@ class CondaEnvironment(Environment):
     )
 
 
-class VenvEnvironment(Environment):
+class VenvEnvironment(ComposableEnvironment):
     kind: Literal["venv"] = "venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -917,12 +786,12 @@ class VenvEnvironment(Environment):
     )
 
 
-class UvEnvironment(Environment):
+class UvEnvironment(ComposableEnvironment):
     kind: Literal["uv"] = "uv"
     path: str = Field(description="Path to the uv project's pyproject.toml.")
 
 
-class UvVenvEnvironment(Environment):
+class UvVenvEnvironment(ComposableEnvironment):
     kind: Literal["uv-venv"] = "uv-venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -941,7 +810,7 @@ class UvVenvEnvironment(Environment):
     )
 
 
-class PixiEnvironment(Environment):
+class PixiEnvironment(ComposableEnvironment):
     kind: Literal["pixi"] = "pixi"
     path: str = Field(description="Path to the Pixi manifest file.")
     name: str | None = Field(
@@ -964,6 +833,41 @@ class NixEnvironment(Environment):
         description=(
             "Name of the dev shell to enter, passed as #<shell> to "
             "'nix develop'. Defaults to the flake's default dev shell."
+        ),
+    )
+
+
+class TexLiveEnvironment(Environment):
+    kind: Literal["texlive"] = "texlive"
+    release: int | None = Field(
+        default=None,
+        description=(
+            "TeX Live release, e.g., 2025, to install packages from. A "
+            "past release's repository is frozen, so its lock pins every "
+            "package for good. Defaults to the latest frozen release."
+        ),
+    )
+    packages: list[str] = Field(
+        default=[],
+        description=(
+            "TeX Live packages to install, beyond the base set every "
+            "TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). "
+            "What they depend on comes with them, and packages a build "
+            "finds missing are added to the lock, not here."
+        ),
+    )
+    platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "TeX Live platforms to lock for. Defaults to macOS, Windows, "
+            "and Linux on x86_64 and ARM."
+        ),
+    )
+    repository_url: str | None = Field(
+        default=None,
+        description=(
+            "TeX Live repository URL to install from instead of the one "
+            "for 'release', e.g., a local mirror."
         ),
     )
 
@@ -1052,7 +956,7 @@ class DockerEnvironment(Environment):
         default=None,
         description="User to run the container as. Defaults to the host user.",
     )
-    inputs: list[str] | None = Field(
+    inputs: list[str | EnvVarInput] | None = Field(
         default=None,
         # See the note on the other environments that take this field
         validation_alias=AliasChoices("inputs", "deps"),
@@ -1093,7 +997,7 @@ class DockerEnvironment(Environment):
         return self
 
 
-class REnvironment(Environment):
+class REnvironment(ComposableEnvironment):
     kind: Literal["renv"] = "renv"
     path: str = Field(
         description="Path to the project's DESCRIPTION file. The renv lock "
@@ -1104,7 +1008,7 @@ class REnvironment(Environment):
     )
 
 
-class JuliaEnvironment(Environment):
+class JuliaEnvironment(ComposableEnvironment):
     kind: Literal["julia"] = "julia"
     path: str = Field(description="Path to the Julia project's Project.toml.")
     julia: str = Field(description="Julia version to use.")
@@ -1133,7 +1037,7 @@ class SlurmEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1154,6 +1058,13 @@ class SlurmEnvironment(Environment):
         "a slot, so an iterated stage does not flood a shared cluster's queue "
         "with every one of its jobs at the same time. Null means no limit.",
     )
+    requirements: list[RequirementType] = Field(
+        default=[],
+        description="What must be true of this machine before stages run on "
+        "it: apps on PATH, environmental variables, setup steps, and "
+        "constraints on properties like CPU count. Checked on the machine "
+        "this environment names, which is not necessarily this one.",
+    )
 
 
 class PBSEnvironment(Environment):
@@ -1169,7 +1080,7 @@ class PBSEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1187,6 +1098,13 @@ class PBSEnvironment(Environment):
         ge=1,
         description="How many of this project's jobs may sit in the queue "
         "(running or pending) at once. Null means no limit.",
+    )
+    requirements: list[RequirementType] = Field(
+        default=[],
+        description="What must be true of this machine before stages run on "
+        "it: apps on PATH, environmental variables, setup steps, and "
+        "constraints on properties like CPU count. Checked on the machine "
+        "this environment names, which is not necessarily this one.",
     )
 
 
@@ -1206,6 +1124,7 @@ SystemLockProperty = Literal[
     "cpu-count",
     "memory-gb",
     "python-version",
+    "calkit-python-version",
     "python-implementation",
     "git-version",
     "docker-version",
@@ -1218,6 +1137,17 @@ SystemLockProperty = Literal[
     "rscript-version",
     "brew-version",
 ]
+# Any other app's version, as reported by '<app> --version', or any version
+# to a given precision
+AppVersionLockProperty = Annotated[
+    str,
+    Field(
+        pattern=(
+            r"^[A-Za-z0-9][A-Za-z0-9_.+-]*-version"
+            r"(-major|-minor|-patch|-full)?$"
+        )
+    ),
+]
 
 
 class SystemEnvironment(Environment):
@@ -1229,31 +1159,41 @@ class SystemEnvironment(Environment):
     ``lock`` is how a project says which properties of the machine its
     results actually depend on.
 
-    Locked properties are written to the environment's lock file, which
-    stages depend on, so moving to a machine where one of them differs
-    invalidates the cached result rather than silently reusing it.
+    Locked properties are recorded in the environment's lock file, which
+    stages depend on, the first time the environment is checked. A
+    property added to ``lock`` later is recorded from the first machine
+    matching the rest. After that, the lock is not rewritten when the
+    project moves to a machine where they differ, so stages that are up
+    to date stay up to date.
+    Checking the environment there warns about the difference, and a stage
+    that needs to run is skipped by ``calkit run``, since its result would
+    not be comparable with the existing ones. To make the new machine the
+    one results come from, run ``calkit update env -n NAME --lock``, which
+    updates the lock and invalidates the stages that depend on it. With
+    ``relock: auto``, that happens on its own, for results that should
+    follow the machine.
 
     ``requirements`` is the other half, and answers a different question.
-    It says what must be *true* of this machine -- apps that must be
-    installed, variables that must be set, at least this many CPUs -- and
+    It says what must be *true* of this machine---apps that must be
+    installed, variables that must be set, at least this many CPUs---and
     is checked before anything runs, on the machine the environment names.
-    A requirement that fails stops the run and says how to fix it; a locked
-    property that changes silently invalidates a cached result. One gates,
-    the other pins, so a property that matters both ways is written in both
-    places.
+    A stage whose requirements aren't met there is skipped, keeping its
+    outputs, while a locked property records what results were computed
+    with. One gates, the other pins, so a property that matters both ways
+    is written in both places.
 
     ``default_setup`` is what has to be *done* on this machine before a
     stage can run: sourcing a site setup script, loading modules, putting a
     hand-built toolchain on the ``PATH``. It runs in the same shell as the
     stage's own command, so a variable it sets or a function it defines is
-    in scope for the stage, whether or not it was exported -- only a child
+    in scope for the stage, whether or not it was exported---only a child
     process needs that. This is why it can't be a ``setup`` requirement:
     those run in a shell of their own and are cached, since they check
     whether something has been done rather than doing it every time.
 
     It is not recorded in the environment's lock file. The pipeline
     compiler merges it with each stage's own ``setup`` and writes the
-    result beside the pipeline, which the stage depends on -- so changing
+    result beside the pipeline, which the stage depends on---so changing
     it reruns exactly the stages that run it, and not the ones whose
     ``env_default_setup`` means they never do.
 
@@ -1269,7 +1209,7 @@ class SystemEnvironment(Environment):
     networks, and are reused; a project that means one particular machine
     can name it here instead and have that survive all of it. It replaces
     the name in deciding whether this is that machine, and is checked again
-    on the far end when it isn't -- so a host that has come to point at a
+    on the far end when it isn't---so a host that has come to point at a
     different box is reported rather than run on. ``host`` is still what
     reaches it, so both are worth declaring for a machine that isn't this
     one. Run ``calkit describe system`` on a machine to read its ID.
@@ -1280,7 +1220,7 @@ class SystemEnvironment(Environment):
     one. Whether it does is left to ``lock``, where ``machine-id`` is
     available for projects whose results really are machine-specific.
 
-    ``wdir`` is the project's workspace on that host -- the directory the
+    ``wdir`` is the project's workspace on that host---the directory the
     stage runs in. It defaults to
     ``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just
     names a host lands somewhere predictable rather than having to spell
@@ -1329,7 +1269,7 @@ class SystemEnvironment(Environment):
     default_setup: list[str] | None = Field(
         default=None,
         description="Commands run in the same shell, before every stage "
-        "that uses this environment, e.g. 'module load cuda' or a site "
+        "that uses this environment, e.g., 'module load cuda' or a site "
         "setup script that exports compiler paths. Merged with each "
         "stage's own 'setup' when the pipeline is compiled and written "
         "beside it, which the stage depends on, so changing them reruns "
@@ -1343,11 +1283,11 @@ class SystemEnvironment(Environment):
         "and sourcing a setup script is the usual reason to have setup "
         "commands. Ignored when neither this environment nor any stage "
         "using it has setup commands. Setting it to anything but 'bash' "
-        "is recorded in the environment's lock file -- unlike the commands "
-        "themselves, the shell isn't in the compiled command -- so stages "
-        "that run setup commands rerun when it changes.",
+        "is recorded in the environment's lock file, since unlike the "
+        "commands themselves the shell isn't in the compiled command, so "
+        "stages that run setup commands rerun when it changes.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1360,11 +1300,26 @@ class SystemEnvironment(Environment):
         "this environment, so editing one reruns them. Must be inside the "
         "project: a stage can't depend on something the repo doesn't carry.",
     )
-    lock: list[SystemLockProperty] = Field(
+    lock: list[SystemLockProperty | AppVersionLockProperty] = Field(
         default=[],
         description="Properties of the machine this environment's results "
-        "depend on. Stages rerun when a locked property changes. Empty means "
-        "nothing about the machine is pinned.",
+        "depend on, recorded the first time it is checked. Besides those "
+        "listed, any app's version can be locked as '<app>-version', and "
+        "any version is locked up to its patch part, or to another "
+        "precision with '-major', '-minor', or '-full', e.g., "
+        "'python-version-minor'. "
+        "'relock' says what happens on a machine where they differ. Empty "
+        "means nothing about the machine is pinned.",
+    )
+    relock: Literal["manual", "auto"] = Field(
+        default="manual",
+        description="What happens on a machine whose locked properties "
+        "differ from the lock. 'manual' keeps the lock, and a stage that "
+        "needs to run there is skipped by 'calkit run', and refused by "
+        "'calkit xenv', until 'calkit update env --lock' is run. "
+        "'auto' rewrites the lock, rerunning the stages that depend on it, "
+        "for results that should follow the machine, e.g., ones that "
+        "depend on the version of a tool Calkit doesn't manage.",
     )
     requirements: list[RequirementType] = Field(
         default=[],
@@ -1375,13 +1330,247 @@ class SystemEnvironment(Environment):
     )
 
 
-class Software(BaseModel):
+_OsName = Literal["linux", "macos", "windows"]
+_EnvVarSetting = Annotated[str, Field(pattern=r"^[^=]+=")]
+
+
+class AppExistsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    app_exists: str | list[str] = Field(
+        description="App that must be on PATH, e.g., 'sbatch'."
+    )
+
+
+class EnvVarSetCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    env_var_set: str | list[str] = Field(
+        description="Environmental variable that must be set."
+    )
+
+
+class EnvVarExistsCondition(Model):
+    """The old name for ``env_var_set``, still honored."""
+
+    model_config = ConfigDict(extra="forbid")
+    env_var_exists: str | list[str] = Field(
+        description="Deprecated alias for 'env_var_set'.",
+        json_schema_extra={"deprecated": True},
+    )
+
+
+class EnvVarEqualsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    env_var_equals: _EnvVarSetting | list[_EnvVarSetting] = Field(
+        description="'NAME=value' an environmental variable must be set to, "
+        "e.g., 'NERSC_HOST=perlmutter'."
+    )
+
+
+class HostnameMatchesCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    hostname_matches: str | list[str] = Field(
+        description="Glob the hostname must match, case-insensitively, "
+        "e.g., '*.cluster.edu'."
+    )
+
+
+class OsIsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    os_is: _OsName | list[_OsName] = Field(
+        description="Operating system: 'linux', 'macos' or 'windows'."
+    )
+
+
+class MachineIdEqualsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    machine_id_equals: str | list[str] = Field(
+        description="ID of the machine, as 'calkit describe system' shows "
+        "it, ignoring case and dashes."
+    )
+
+
+_SWITCH_CONDITIONS: list[type[Model]] = [
+    AppExistsCondition,
+    EnvVarSetCondition,
+    EnvVarEqualsCondition,
+    HostnameMatchesCondition,
+    OsIsCondition,
+    MachineIdEqualsCondition,
+]
+
+
+def _switch_condition_name(value: object) -> str | None:
+    # A condition is a one-key map, and the key says which it is
+    if isinstance(value, Model):
+        return next(iter(type(value).model_fields))
+    if isinstance(value, dict) and len(value) == 1:
+        return str(next(iter(value)))
+    return None
+
+
+SwitchCondition = Annotated[
+    Annotated[AppExistsCondition, Tag("app_exists")]
+    | Annotated[EnvVarSetCondition, Tag("env_var_set")]
+    | Annotated[EnvVarExistsCondition, Tag("env_var_exists")]
+    | Annotated[EnvVarEqualsCondition, Tag("env_var_equals")]
+    | Annotated[HostnameMatchesCondition, Tag("hostname_matches")]
+    | Annotated[OsIsCondition, Tag("os_is")]
+    | Annotated[MachineIdEqualsCondition, Tag("machine_id_equals")],
+    Discriminator(
+        _switch_condition_name,
+        custom_error_type="switch_condition",
+        custom_error_message="A condition is one 'name: value' pair, "
+        "e.g., 'os_is: linux', named one of: "
+        + ", ".join(next(iter(c.model_fields)) for c in _SWITCH_CONDITIONS)
+        + "; list several to require all of them",
+    ),
+]
+
+
+# Any environment but a switch, for one a switch defines in place
+InlineEnvironment = Annotated[
+    CondaEnvironment
+    | DockerEnvironment
+    | JuliaEnvironment
+    | MatlabEnvironment
+    | PixiEnvironment
+    | REnvironment
+    | SlurmEnvironment
+    | PBSEnvironment
+    | VenvEnvironment
+    | UvEnvironment
+    | UvVenvEnvironment
+    | NixEnvironment
+    | TexLiveEnvironment
+    | SystemEnvironment,
+    Discriminator("kind"),
+]
+
+
+class SwitchOption(Model):
+    """An environment a switch picks, and when."""
+
+    model_config = ConfigDict(extra="forbid")
+    when: Annotated[list[SwitchCondition], Field(min_length=1)] | None = Field(
+        default=None,
+        description="Conditions this machine must all meet for this "
+        "option to be picked. Only the last option may leave it out, to "
+        "be picked when no other is.",
+    )
+    use: str | InlineEnvironment = Field(
+        description="Name of the environment to use, or its definition, "
+        "e.g., 'kind: slurm', for one only this switch uses."
+    )
+
+
+class SwitchEnvironment(Environment):
+    """One of several environments, picked by the machine Calkit runs on.
+
+    ``switch`` lists the options in order, and the first whose ``when``
+    conditions this machine all meets is picked. The last option can leave
+    out ``when`` to be the default. Each condition is one ``name: value``
+    pair:
+
+    - ``app_exists``: an app on ``PATH``.
+    - ``env_var_set``: an environmental variable that is set.
+    - ``env_var_equals``: ``NAME=value`` for an environmental variable.
+    - ``hostname_matches``: a glob the hostname matches, ignoring case.
+    - ``os_is``: ``linux``, ``macos`` or ``windows``.
+    - ``machine_id_equals``: this machine's ID, as
+      ``calkit describe system`` shows it.
+
+    A list of values means any one of them. To pick an environment when
+    either of two conditions holds, list it as two options. For example:
+
+    ```yaml
+    cluster:
+      kind: switch
+      switch:
+        - when:
+            - os_is: linux
+            - app_exists: sbatch
+          use: any-slurm
+        - when:
+            - env_var_equals: NERSC_HOST=perlmutter
+          use: perlmutter
+        - when:
+            - hostname_matches: ["*.gps.caltech.edu", "*.hpc.caltech.edu"]
+          use: clima
+        - use: clima-remote
+    ```
+
+    The conditions are checked on the machine Calkit runs on, which is
+    where the pick is made, even when the option picked is another
+    machine.
+
+    An environment only the switch uses can be defined in place instead of
+    named, e.g., ``use: {kind: slurm}``. It's named after the switch and
+    its position, e.g., ``cluster.1`` for the first option, which is what
+    ``calkit xenv -n`` and messages call it.
+
+    The options are either all machines (``system``, ``slurm`` or
+    ``pbs``), so the switch can be the outer half of a composite
+    environment like ``cluster:py``, or all runtimes, e.g., one per
+    operating system. An option can't be another switch, or ``_system``;
+    to pick this machine as it is, define an environment with
+    ``kind: system`` and use that.
+
+    Stages depend on the switch's definition and its options', so editing
+    them reruns those stages, but not on which option was picked, so
+    moving between machines the switch covers doesn't. A stage whose
+    switch picks nothing on this machine can't run here, and is skipped.
+
+    An option's ``lock`` is part of the switch's too, so relocking the
+    option, with ``relock: auto`` or ``calkit update env --lock``, reruns
+    the switch's stages. The first time a switch is checked, its options
+    with a ``host`` are locked from there. An option without one is locked
+    the first time it's checked on its own machine, which reruns nothing,
+    since only a machine taking up its option has changed.
+    """
+
+    kind: Literal["switch"] = "switch"
+    switch: list[SwitchOption] = Field(
+        min_length=1,
+        description="Environments to pick from, tried in order.",
+    )
+    lock: list[SystemLockProperty | AppVersionLockProperty] = Field(
+        default=[],
+        description="Properties of the machine the picked environment runs "
+        "on that results depend on, recorded the first time the switch is "
+        "checked, as for a 'system' environment.",
+    )
+    relock: Literal["manual", "auto"] = Field(
+        default="manual",
+        description="What happens on a machine whose locked properties "
+        "differ from the lock. 'manual' keeps the lock, and a stage that "
+        "needs to run there is skipped by 'calkit run', and refused by "
+        "'calkit xenv', until 'calkit update env --lock' is run. "
+        "'auto' rewrites the lock, rerunning the stages that depend on it, "
+        "for results that should follow the machine, e.g., ones that "
+        "depend on the version of a tool Calkit doesn't manage.",
+    )
+
+    @field_validator("switch")
+    @classmethod
+    def check_default_is_last(
+        cls, v: list[SwitchOption]
+    ) -> list[SwitchOption]:
+        for n, option in enumerate(v[:-1], start=1):
+            if option.when is None:
+                raise ValueError(
+                    f"Option {n} has no 'when', so it would always be "
+                    "picked; only the last option may leave it out"
+                )
+        return v
+
+
+class Software(Model):
     title: str
     path: str
     description: str
 
 
-class Notebook(BaseModel):
+class Notebook(Model):
     """A Jupyter notebook.
 
     Unlike the other objects, a notebook entry can be created just to record
@@ -1410,7 +1599,7 @@ class Notebook(BaseModel):
     )
 
 
-class ProcedureInput(BaseModel):
+class ProcedureInput(Model):
     """An input that might be entered while running a procedure.
 
     Attributes
@@ -1433,7 +1622,7 @@ class ProcedureInput(BaseModel):
     description: str | None = None
 
 
-class ProcedureStep(BaseModel):
+class ProcedureStep(Model):
     summary: str
     details: str | None = None
     cmd: str | None = None
@@ -1442,7 +1631,7 @@ class ProcedureStep(BaseModel):
     inputs: dict[str, ProcedureInput] | None = None
 
 
-class Timedelta(BaseModel):
+class Timedelta(Model):
     days: float | None = None
     seconds: float | None = None
     microseconds: float | None = None
@@ -1455,7 +1644,7 @@ class Timedelta(BaseModel):
         return timedelta(**self.model_dump())
 
 
-class Procedure(BaseModel):
+class Procedure(Model):
     """A procedure, typically executed by a human, written out in full."""
 
     # Mirrors ``ProcedureFile``'s refusal of inline keys, so the published
@@ -1469,7 +1658,7 @@ class Procedure(BaseModel):
     imported_from: str | None = None
 
 
-class ProcedureFile(BaseModel):
+class ProcedureFile(Model):
     """A procedure kept in its own YAML or JSON file.
 
     The file holds what an inline ``Procedure`` would: ``title``,
@@ -1519,7 +1708,7 @@ ProcedureEntry = Annotated[
 ]
 
 
-class Release(BaseModel):
+class Release(Model):
     kind: Literal[
         "project",
         "publication",
@@ -1559,7 +1748,7 @@ class Release(BaseModel):
     includes_pipeline: bool = False
 
 
-class StaticHtmlApp(BaseModel):
+class StaticHtmlApp(Model):
     """An app served as static files, with no backend.
 
     ``path`` points at the HTML file itself rather than its directory, since
@@ -1613,42 +1802,42 @@ class StaticHtmlApp(BaseModel):
         return PurePosixPath(self.path).parent.as_posix()
 
 
-class ShowcaseFigure(BaseModel):
+class ShowcaseFigure(Model):
     figure: str
 
 
-class ShowcaseText(BaseModel):
+class ShowcaseText(Model):
     text: str
 
 
-class ShowcaseMarkdown(BaseModel):
+class ShowcaseMarkdown(Model):
     markdown: str
 
 
-class ShowcasePublication(BaseModel):
+class ShowcasePublication(Model):
     publication: str
 
 
-class ShowcaseMarkdownFile(BaseModel):
+class ShowcaseMarkdownFile(Model):
     markdown_file: str
 
 
-class ShowcaseYamlFile(BaseModel):
+class ShowcaseYamlFile(Model):
     yaml_file: str
     object_name: str | None = None
 
 
-class ShowcaseNotebook(BaseModel):
+class ShowcaseNotebook(Model):
     notebook: str
 
 
-class ShowcaseApp(BaseModel):
+class ShowcaseApp(Model):
     """Show an app in the project's showcase, by its key in ``apps``."""
 
     app: str
 
 
-class Subproject(BaseModel):
+class Subproject(Model):
     """A smaller project executed as part of this one."""
 
     path: str = Field(
@@ -1658,7 +1847,7 @@ class Subproject(BaseModel):
     description: str | None = None
 
 
-class OverleafSync(BaseModel):
+class OverleafSync(Model):
     """Configuration for syncing a directory with an Overleaf project."""
 
     url: str | None = Field(
@@ -1674,19 +1863,19 @@ class OverleafSync(BaseModel):
     )
 
 
-class DerivedFromProject(BaseModel):
+class DerivedFromProject(Model):
     project: str
     git_repo_url: str
     git_rev: str
 
 
-class ProjectStatus(BaseModel):
+class ProjectStatus(Model):
     timestamp: datetime
     status: Literal["in-progress", "on-hold", "completed"]
     message: str | None = None
 
 
-class FigureEvidence(BaseModel):
+class FigureEvidence(Model):
     """Evidence to back up the answer to a question."""
 
     kind: Literal["figure"] = "figure"
@@ -1701,7 +1890,7 @@ class FigureEvidence(BaseModel):
     )
 
 
-class ResultsEvidence(BaseModel):
+class ResultsEvidence(Model):
     """Evidence in the form of a results file: a set of values, a table, a
     map, whatever the pipeline wrote.
 
@@ -1711,7 +1900,8 @@ class ResultsEvidence(BaseModel):
     without an entry per value.
     """
 
-    kind: Literal["result"] = "result"
+    # Null too, since an entry with no kind and a key or values is a result
+    kind: Literal["result"] | None = "result"
     path: str
     key: str | None = Field(
         default=None,
@@ -1737,6 +1927,11 @@ class ResultsEvidence(BaseModel):
         ),
     )
 
+    @field_validator("kind", mode="after")
+    @classmethod
+    def _result_kind(cls, kind: str | None) -> str:
+        return "result"
+
     @model_validator(mode="after")
     def _key_or_values(self) -> ResultsEvidence:
         if self.key is not None and self.values is not None:
@@ -1751,7 +1946,7 @@ _KEY_DESCRIPTION = (
 )
 
 
-class ValueEvidence(BaseModel):
+class ValueEvidence(Model):
     """Evidence in the form of one value from a results file.
 
     The value is never copied into ``calkit.yaml``: the pipeline owns it,
@@ -1782,7 +1977,7 @@ class ValueEvidence(BaseModel):
     )
 
 
-class TableEvidence(BaseModel):
+class TableEvidence(Model):
     """Evidence in the form of a table."""
 
     kind: Literal["table"] = "table"
@@ -1797,7 +1992,7 @@ class TableEvidence(BaseModel):
     )
 
 
-class PublicationEvidence(BaseModel):
+class PublicationEvidence(Model):
     """Evidence in the form of a publication.
 
     The pointer to *where* in the publication the evidence lives is split in
@@ -1835,7 +2030,7 @@ class PublicationEvidence(BaseModel):
     )
 
 
-class DocumentEvidence(BaseModel):
+class DocumentEvidence(Model):
     """Evidence in the form of a document cited by path, e.g., a Markdown
     write-up, without declaring it as a publication.
 
@@ -1863,7 +2058,115 @@ class DocumentEvidence(BaseModel):
     )
 
 
-class Question(BaseModel):
+class FileEvidence(Model):
+    """Evidence in the form of a file cited as-is by its path, e.g., a log,
+    a transcript excerpt, a script, or a raw output, optionally at specific
+    lines.
+
+    It has no ``kind``. An entry without one that has a ``key`` or
+    ``values`` is a ``result``, which is how those used to be written.
+    """
+
+    kind: None = Field(
+        default=None,
+        description="Left out, or null, for a file cited by its path.",
+    )
+    path: str
+    lines: (
+        Annotated[int, Field(ge=1)]
+        | Annotated[str, Field(pattern=r"^\s*\d+\s*([-–]\s*\d+\s*)?$")]
+        | None
+    ) = Field(
+        default=None,
+        description=(
+            "Line or inclusive range of lines in the file where the evidence "
+            "is, e.g., 8 or '8-12'. Checked against the file, so a citation "
+            "of lines that are no longer there is an error."
+        ),
+    )
+    explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the file can be found."
+        ),
+    )
+
+    @field_validator("lines", mode="before")
+    @classmethod
+    def _lines_format(cls, lines: object) -> object:
+        from calkit.questions import parse_lines
+
+        if lines is not None:
+            parse_lines(lines)
+        return lines
+
+
+def _evidence_tag(value: object) -> str | None:
+    # Resolved as the check resolves it, so the two can't disagree
+    from calkit.questions import get_evidence_kind
+
+    if isinstance(value, Model):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+    return get_evidence_kind(value) or "file"
+
+
+def _evidence_any_of(schema: dict[str, Any]) -> None:
+    """Publish the evidence union as ``anyOf`` rather than ``oneOf``.
+
+    Every kind but a value's has a default or optional ``kind``, so an
+    entry with just a path, a file, matches several of them, which ``oneOf``
+    would reject.
+    """
+    for option in schema.get("anyOf") or []:
+        items = option.get("items") or {}
+        if "oneOf" in items:
+            items["anyOf"] = items.pop("oneOf")
+
+
+Evidence = Annotated[
+    Annotated[FigureEvidence, Tag("figure")]
+    | Annotated[ResultsEvidence, Tag("result")]
+    | Annotated[ValueEvidence, Tag("value")]
+    | Annotated[TableEvidence, Tag("table")]
+    | Annotated[PublicationEvidence, Tag("publication")]
+    | Annotated[DocumentEvidence, Tag("document")]
+    | Annotated[FileEvidence, Tag("file")],
+    Discriminator(_evidence_tag),
+]
+
+
+class SignOff(Model):
+    """A person's sign-off on a question, as a verification or validation.
+
+    It applies to the question as it was at the commit that added it, which
+    is read from Git rather than written here, so a sign-off can't quietly
+    carry over to something nobody checked.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    by: _Person = Field(
+        description=(
+            "Who signed off. Generative AI tools used are disclosed with "
+            "their ``with_ai``."
+        )
+    )
+    date: date_type | datetime = Field(
+        description=(
+            "When they signed off. Written with the time, so signing off "
+            "again, even on the same day, records a new sign-off."
+        )
+    )
+    notes: str | None = Field(
+        default=None,
+        description="What they checked, or anything they want on record.",
+    )
+
+
+class Question(Model):
     """A question the project hopes to answer.
 
     Each piece of evidence defines what it points at inline, discriminated by
@@ -1880,9 +2183,12 @@ class Question(BaseModel):
 
     An answer is a claim about the evidence as it was when the answer was
     last edited, and Git records when that was. ``calkit check questions``
-    reports a question as stale when any of its evidence has changed since
-    that commit, so editing the question after re-reading it against the
-    new evidence is how to say it still holds.
+    reports evidence that has changed since that commit. People sign off on
+    a question in two ways. A verification says the stages behind the
+    evidence implement the ``approach``, and goes stale when the approach or
+    those stages change. A validation says the approach suits the question
+    and the evidence justifies the answer, and goes stale when the question
+    or its evidence changes.
     """
 
     name: str | None = Field(
@@ -1896,6 +2202,14 @@ class Question(BaseModel):
     )
     question: str
     hypothesis: str | None = None
+    approach: str | None = Field(
+        default=None,
+        description=(
+            "One sentence on how the question is answered, e.g., the method "
+            "the pipeline implements. The stages themselves aren't listed "
+            "here, since they follow from the evidence the pipeline produces."
+        ),
+    )
     answer: str | dict[str, str] | None = Field(
         default=None,
         description=(
@@ -1914,17 +2228,28 @@ class Question(BaseModel):
             "rather than as an answer lacking evidence."
         ),
     )
-    evidence: (
-        list[
-            FigureEvidence
-            | ResultsEvidence
-            | ValueEvidence
-            | TableEvidence
-            | PublicationEvidence
-            | DocumentEvidence
-        ]
-        | None
-    ) = None
+    evidence: list[Evidence] | None = Field(
+        default=None, json_schema_extra=_evidence_any_of
+    )
+    verifications: list[SignOff] | None = Field(
+        default=None,
+        description=(
+            "Sign-offs that the pipeline stages behind the evidence implement "
+            "the approach correctly, i.e., the answer was worked out right. "
+            "Stale once the approach or any of those stages changes. One per "
+            "person; signing off again replaces theirs."
+        ),
+    )
+    validations: list[SignOff] | None = Field(
+        default=None,
+        description=(
+            "Sign-offs that the approach suits the question and the evidence "
+            "justifies the answer, i.e., the right thing was worked out. "
+            "Stale once the question, hypothesis, approach, answer, or "
+            "evidence changes. One per person; signing off again replaces "
+            "theirs."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -1939,7 +2264,7 @@ class Question(BaseModel):
         return v
 
 
-class ProjectInfo(BaseModel):
+class ProjectInfo(Model):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
 
@@ -2069,7 +2394,9 @@ class ProjectInfo(BaseModel):
             | UvEnvironment
             | UvVenvEnvironment
             | NixEnvironment
-            | SystemEnvironment,
+            | TexLiveEnvironment
+            | SystemEnvironment
+            | SwitchEnvironment,
             Discriminator("kind"),
         ],
     ] = Field(

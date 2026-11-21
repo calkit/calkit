@@ -1,5 +1,6 @@
 .PHONY: test
 test:
+	@$(MAKE) -s -C .. dotenv
 	docker compose exec backend bash ./tests-start.sh
 
 .PHONY: format

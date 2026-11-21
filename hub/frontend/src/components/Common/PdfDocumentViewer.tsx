@@ -22,6 +22,7 @@ import {
 } from "@chakra-ui/react"
 import LoadingSpinner from "./LoadingSpinner"
 import Tooltip from "./Tooltip"
+import { safeHref } from "../../lib/strings"
 import mixpanel from "mixpanel-browser"
 import type { PDFDocumentProxy } from "pdfjs-dist"
 import {
@@ -325,6 +326,8 @@ interface PdfViewerInnerProps extends PdfDocumentViewerProps {
   containerRef: RefObject<HTMLDivElement>
 }
 
+const NO_HIGHLIGHTS: IHighlight[] = []
+
 function PdfViewerInner({
   url,
   pdfDocument,
@@ -343,6 +346,10 @@ function PdfViewerInner({
 }: PdfViewerInnerProps) {
   const toolbarBg = useColorModeValue("ui.secondary", "ui.darkSlate")
   const borderColor = useColorModeValue("gray.200", "gray.600")
+  // Our own blob/data PDFs pass through; any other URL must be safe to open.
+  const openHref = /^(blob:|data:application\/pdf[;,])/.test(url)
+    ? url
+    : safeHref(url)
   // The 16:9-ish viewport box for paged ("carousel") mode; its height is
   // clamped to a single page so only one page shows at a time.
   const pdfBoxRef = useRef<HTMLDivElement>(null)
@@ -382,8 +389,14 @@ function PdfViewerInner({
   // (after deduplication) so componentDidUpdate re-renders highlight layers
   // against the surviving page nodes. highlightsKey is a deliberate trigger;
   // referencing it here keeps it a real dependency.
+  //
+  // None until PdfHighlighter's viewer exists, as the same empty array, since
+  // a change of highlights before then has it look up pages on a viewer it
+  // doesn't have yet, which throws. The bump once text layers exist brings
+  // them in.
   const renderedHighlights = useMemo(() => {
     void highlightsKey
+    if (!highlighterRef.current?.viewer) return NO_HIGHLIGHTS
     return highlights ? [...highlights] : []
   }, [highlights, highlightsKey])
 
@@ -720,7 +733,7 @@ function PdfViewerInner({
         new Blob([data], { type: "application/pdf" }),
       )
     } catch {
-      window.open(url, "_blank", "noopener")
+      if (openHref) window.open(openHref, "_blank", "noopener")
       return
     }
     const iframe = document.createElement("iframe")
@@ -745,7 +758,7 @@ function PdfViewerInner({
       }, 60000)
     }
     document.body.appendChild(iframe)
-  }, [pdfDocument, url, source])
+  }, [pdfDocument, openHref, source])
 
   const submitPageInput = useCallback(() => {
     const n = Number.parseInt(pageInput, 10)
@@ -1170,7 +1183,7 @@ function PdfViewerInner({
               <Tooltip label="Open in new tab">
                 <IconButton
                   as={Link}
-                  href={url}
+                  href={openHref}
                   isExternal
                   aria-label="Open in new tab"
                   icon={<FiExternalLink />}
@@ -1187,7 +1200,7 @@ function PdfViewerInner({
             <Tooltip label="Download">
               <IconButton
                 as={Link}
-                href={url}
+                href={openHref}
                 download
                 aria-label="Download"
                 icon={<FiDownload />}

@@ -17,10 +17,14 @@ from pydantic.fields import PydanticUndefined
 from typer.core import TyperArgument, TyperCommand, TyperGroup, TyperOption
 
 from calkit.cli.main.core import app
+from calkit.models.base import Model
 from calkit.models.core import (
     Environment,
 )
 from calkit.models.pipeline import Stage
+
+# Typer's groups aren't commands, though both are documented the same way
+CommandObj = TyperCommand | TyperGroup
 
 SYSTEM_LOCK_START = "<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:START -->"
 SYSTEM_LOCK_END = "<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:END -->"
@@ -47,18 +51,26 @@ def rst_to_markdown(text: str) -> str:
     the RST spellings are what belongs in them; normalizing here keeps
     authors from having to write markdown by hand in a docstring.
     """
-    # ``double backticks`` are RST inline code; markdown uses one
-    text = text.replace("``", "`")
-    # *emphasis* is RST (and the natural thing to type); prettier
-    # normalizes single-asterisk emphasis to underscores, but leaves
-    # **strong** alone. Bounded to one line, and the delimiters exclude
-    # '*' and whitespace on both sides so '**strong**' isn't mangled into
-    # '_*strong*_' and a '* ' bullet isn't read as an opening delimiter.
-    return re.sub(
-        r"(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])",
-        r"_\1_",
-        text,
+    # Fenced code is left exactly as written; the split puts each fence
+    # at an odd index
+    parts = re.split(
+        r"(^[ \t]*```.*?^[ \t]*```[ \t]*$)", text, flags=re.M | re.S
     )
+    for i in range(0, len(parts), 2):
+        # ``double backticks`` are RST inline code; markdown uses one
+        part = re.sub(r"(?<!`)``(?!`)", "`", parts[i])
+        # *emphasis* is RST (and the natural thing to type); prettier
+        # normalizes single-asterisk emphasis to underscores, but leaves
+        # **strong** alone. Bounded to one line, and the delimiters
+        # exclude '*' and whitespace on both sides so '**strong**' isn't
+        # mangled into '_*strong*_' and a '* ' bullet isn't read as an
+        # opening delimiter.
+        parts[i] = re.sub(
+            r"(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])",
+            r"_\1_",
+            part,
+        )
+    return "".join(parts)
 
 
 def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
@@ -89,14 +101,14 @@ def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
-def _command_text(cmd: TyperCommand) -> str:
+def _command_text(cmd: CommandObj) -> str:
     # CLI helps are written in RST style; convert so prettier doesn't
     # rewrite the generated file and fail the pre-commit hook.
     text = (cmd.help or cmd.short_help or "").strip()
     return rst_to_markdown(text)
 
 
-def _command_desc(cmd: TyperCommand) -> str:
+def _command_desc(cmd: CommandObj) -> str:
     text = _command_text(cmd)
     if not text:
         return ""
@@ -106,7 +118,7 @@ def _command_desc(cmd: TyperCommand) -> str:
     return m.group(1) if m else first_para
 
 
-def _command_desc_full(cmd: TyperCommand) -> str:
+def _command_desc_full(cmd: CommandObj) -> str:
     text = _command_text(cmd)
     if not text:
         return ""
@@ -118,16 +130,19 @@ def _command_desc_full(cmd: TyperCommand) -> str:
     return "\n\n".join(paragraphs)
 
 
-def _list_commands(group: TyperGroup) -> list[tuple[str, TyperCommand]]:
-    names = list(group.commands.keys())
-    return [(name, group.commands[name]) for name in names]
+def _list_commands(group: TyperGroup) -> list[tuple[str, CommandObj]]:
+    return [
+        (name, cast(CommandObj, cmd))
+        for name, cmd in group.commands.items()
+        if not getattr(cmd, "hidden", False)
+    ]
 
 
 def _list_unique_commands(
     group: TyperGroup,
-) -> list[tuple[list[str], TyperCommand]]:
+) -> list[tuple[list[str], CommandObj]]:
     alias_re = re.compile(r"\balias for ['\"]([^'\"]+)['\"]", re.IGNORECASE)
-    commands: list[tuple[list[str], TyperCommand]] = []
+    commands: list[tuple[list[str], CommandObj]] = []
     for name, cmd in _list_commands(group):
         desc = _command_text(cmd)
         if alias_re.search(desc):
@@ -136,15 +151,14 @@ def _list_unique_commands(
     return commands
 
 
-def _type_name(param_type: Any) -> str:
-    # Asked for rather than type-checked: the parameter type is Click's
-    # Choice or Typer's vendored one depending on the version, and what
-    # the reference needs from either is the list of values. Without it
-    # the table says 'choice' and leaves the reader to guess them.
-    choices = getattr(param_type, "choices", None)
+def _type_name(param: TyperOption | TyperArgument, cmd_obj: CommandObj) -> str:
+    # Without the values, the table would leave the reader to guess them
+    choices = param.type_descriptor.choices
     if choices is not None:
-        return "choice(" + ", ".join(str(c) for c in choices) + ")"
-    return getattr(param_type, "name", str(param_type))
+        values = [c.value if isinstance(c, Enum) else c for c in choices]
+        return "choice(" + ", ".join(str(v) for v in values) + ")"
+    name = param.display_type(typer.Context(cmd_obj)).strip("<>")
+    return "boolean" if name == "bool" else name
 
 
 def _default_value(param: TyperOption | TyperArgument) -> str:
@@ -172,7 +186,7 @@ def _param_help(param: TyperOption | TyperArgument) -> str:
     return " ".join(help_text.split())
 
 
-def _usage(command_path: str, cmd_obj: TyperCommand) -> str:
+def _usage(command_path: str, cmd_obj: CommandObj) -> str:
     parts = [command_path]
 
     has_visible_options = any(
@@ -198,13 +212,13 @@ def _usage(command_path: str, cmd_obj: TyperCommand) -> str:
     return " ".join(parts)
 
 
-def _args_table(cmd_obj: TyperCommand) -> str:
+def _args_table(cmd_obj: CommandObj) -> str:
     rows: list[list[str]] = []
     for param in cmd_obj.params:
         if not isinstance(param, TyperArgument):
             continue
         name = f"`{param.name}`"
-        ptype = _type_name(param.type)
+        ptype = _type_name(param, cmd_obj)
         required = "yes" if param.required else "no"
         default = _default_value(param)
         help_txt = _param_help(param)
@@ -219,11 +233,11 @@ def _args_table(cmd_obj: TyperCommand) -> str:
     )
 
 
-def _has_args(cmd_obj: TyperCommand) -> bool:
+def _has_args(cmd_obj: CommandObj) -> bool:
     return any(isinstance(param, TyperArgument) for param in cmd_obj.params)
 
 
-def _opts_table(cmd_obj: TyperCommand) -> str:
+def _opts_table(cmd_obj: CommandObj) -> str:
     rows: list[list[str]] = []
     for param in cmd_obj.params:
         if not isinstance(param, TyperOption):
@@ -232,7 +246,7 @@ def _opts_table(cmd_obj: TyperCommand) -> str:
             continue
         option_names = [*param.opts, *param.secondary_opts]
         options = ", ".join(f"`{opt}`" for opt in option_names)
-        ptype = _type_name(param.type)
+        ptype = _type_name(param, cmd_obj)
         required = "yes" if param.required else "no"
         default = _default_value(param)
         help_txt = _param_help(param)
@@ -247,7 +261,7 @@ def _opts_table(cmd_obj: TyperCommand) -> str:
     )
 
 
-def _has_visible_options(cmd_obj: TyperCommand) -> bool:
+def _has_visible_options(cmd_obj: CommandObj) -> bool:
     for param in cmd_obj.params:
         if not isinstance(param, TyperOption):
             continue
@@ -263,7 +277,7 @@ def _has_visible_options(cmd_obj: TyperCommand) -> bool:
 def _append_command_details(
     lines: list[str],
     command_path: str,
-    cmd_obj: TyperCommand,
+    cmd_obj: CommandObj,
     heading: str = "###",
     anchor: str | None = None,
 ) -> None:
@@ -316,10 +330,6 @@ def _group_anchor(names: list[str]) -> str:
     return "command-group-" + _slug(names[0])
 
 
-def _subcommand_anchor(group_names: list[str], sub_names: list[str]) -> str:
-    return f"subcommand-{_slug(group_names[0])}-{_slug(sub_names[0])}"
-
-
 def _command_link_label(names: list[str], anchor: str) -> str:
     return f"[{_command_label(names)}](#{anchor})"
 
@@ -328,6 +338,40 @@ def generate_cli_markdown() -> str:
     root_cmd = typer.main.get_command(app)
     if not isinstance(root_cmd, TyperGroup):
         raise TypeError("Expected root CLI command to be a Typer group")
+
+    def _append_subcommands(
+        path: str, anchor: str, group: TyperGroup, level: int
+    ) -> None:
+        # Recurses into nested groups, e.g., `calkit hub link`
+        subcommands = _list_unique_commands(group)
+        lines.append(
+            make_table(
+                [
+                    (
+                        _command_link_label(
+                            names, f"{anchor}-{_slug(names[0])}"
+                        ),
+                        _command_desc(sub_cmd),
+                    )
+                    for names, sub_cmd in subcommands
+                ],
+                ["Command", "Description"],
+            ).rstrip()
+        )
+        lines.append("")
+        for sub_names, sub_obj in subcommands:
+            sub_path = _command_path_label(path, sub_names)
+            sub_anchor = f"{anchor}-{_slug(sub_names[0])}"
+            _append_command_details(
+                lines,
+                sub_path,
+                sub_obj,
+                heading="#" * level,
+                anchor=sub_anchor,
+            )
+            if isinstance(sub_obj, TyperGroup) and sub_obj.commands:
+                _append_subcommands(sub_path, sub_anchor, sub_obj, level + 1)
+
     top_summary = _command_desc(root_cmd)
     top_commands = [
         (names, cmd_obj, _command_desc(cmd_obj))
@@ -351,7 +395,7 @@ def generate_cli_markdown() -> str:
     lines.append("## Top-level commands")
     lines.append("")
 
-    def _top_table_anchor(names: list[str], cmd_obj: TyperCommand) -> str:
+    def _top_table_anchor(names: list[str], cmd_obj: CommandObj) -> str:
         is_group_with_subcommands = isinstance(cmd_obj, TyperGroup) and bool(
             cmd_obj.commands
         )
@@ -405,31 +449,12 @@ def generate_cli_markdown() -> str:
         if cmd_desc:
             lines.append(cmd_desc)
             lines.append("")
-        lines.append(
-            make_table(
-                [
-                    (
-                        _command_link_label(
-                            names, _subcommand_anchor(cmd_names, names)
-                        ),
-                        _command_desc(sub_cmd),
-                    )
-                    for names, sub_cmd in subcommands
-                ],
-                ["Command", "Description"],
-            ).rstrip()
+        _append_subcommands(
+            _command_path_label("calkit", cmd_names),
+            "subcommand-" + _slug(cmd_names[0]),
+            cmd_obj,
+            4,
         )
-        lines.append("")
-        for sub_names, sub_obj in subcommands:
-            _append_command_details(
-                lines,
-                _command_path_label(
-                    _command_path_label("calkit", cmd_names), sub_names
-                ),
-                sub_obj,
-                heading="####",
-                anchor=_subcommand_anchor(cmd_names, sub_names),
-            )
     if not found_group:
         lines.append("No command groups were detected.")
         lines.append("")
@@ -555,8 +580,8 @@ _MAX_UNION_MEMBERS = 4
 def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
     """Return the model base every one of ``types_`` derives from, if any.
 
-    ``BaseModel`` itself doesn't count: it's shared by everything, so it
-    would summarize a union as nothing at all.
+    ``BaseModel`` itself doesn't count, nor Calkit's ``Model``: they're
+    shared by everything, so would summarize a union as nothing at all.
     """
     if not all(
         isinstance(t, type) and issubclass(t, BaseModel) for t in types_
@@ -565,7 +590,7 @@ def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
     # Walk the first member's bases from most to least specific, so the
     # narrowest shared base wins
     for base in types_[0].__mro__[1:]:
-        if base is BaseModel:
+        if base in (BaseModel, Model):
             break
         if all(issubclass(t, base) for t in types_):
             return cast(type[BaseModel], base)
@@ -644,6 +669,12 @@ def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, ...]]:
 
 
 def generate_environment_kinds_markdown() -> str:
+    def get_subclasses(cls: type) -> list[type]:
+        # Including those of a base like ComposableEnvironment
+        return [
+            s for c in cls.__subclasses__() for s in [c, *get_subclasses(c)]
+        ]
+
     # Derived from the models rather than listed by hand, the same way the
     # stage kinds are. A hand-kept list is a list that silently omits a
     # kind -- 'pbs' was missing from the reference entirely for exactly
@@ -651,7 +682,7 @@ def generate_environment_kinds_markdown() -> str:
     env_classes = [Environment] + sorted(
         (
             cls
-            for cls in Environment.__subclasses__()
+            for cls in get_subclasses(Environment)
             if _kind_for_model_class(cls)
         ),
         key=_kind_for_model_class,
@@ -789,8 +820,11 @@ def _nested_type_markdown(
 def generate_stage_kinds_markdown() -> str:
     base_fields = Stage.model_fields
 
+    # Kinds Calkit generates rather than anyone writing them are left out
     stage_classes = [
-        cls for cls in Stage.__subclasses__() if _kind_for_model_class(cls)
+        cls
+        for cls in Stage.__subclasses__()
+        if _kind_for_model_class(cls) and not getattr(cls, "internal", False)
     ]
     stage_classes = sorted(stage_classes, key=_kind_for_model_class)
 
@@ -986,7 +1020,20 @@ def generate_system_lock_properties_markdown() -> str:
     return (
         "The properties that can be locked are:\n\n"
         + make_table(rows, ["Property", "Description"]).rstrip()
-        + "\n\nRun `calkit describe system` to see what these are on the "
+        + "\n\nAny app's version can be locked too, as `<app>-version`, "
+        "e.g., `gcc-version`.\n"
+        "A version is recorded as its number up to the patch part,\n"
+        "e.g., `27.3.1` from `Docker version 27.3.1, build ce12230`,\n"
+        "or `6.8.0` from a Linux kernel release `6.8.0-45-generic`.\n"
+        "Any version can end in `-major` or `-minor` to lock only those "
+        "parts,\n"
+        "e.g., `python-version-minor` records `3.12` for Python 3.12.8,\n"
+        "so only a move to another minor version counts as a change.\n"
+        "`-patch` is the same as no ending, and `-full` keeps a suffix "
+        "attached to\n"
+        "the number, e.g., `11.4.0-1ubuntu1~22.04` for Ubuntu's GCC "
+        "11.4.0.\n"
+        "\nRun `calkit describe system` to see what these are on the "
         "machine you're on.\n"
     )
 

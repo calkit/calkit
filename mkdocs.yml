@@ -44,7 +44,7 @@ nav:
   - Questions, hypotheses, answers, and evidence: questions.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
-  - Requirements, configuration, and secrets: requirements.md
+  - Project requirements and setup: requirements.md
   - Environments: environments.md
   - The pipeline:
       - pipeline/index.md
@@ -60,7 +60,7 @@ nav:
   - Calculations: calculations.md
   - Apps: apps.md
   - Releasing/archiving projects and artifacts: releases.md
-  - Local server (GUI interaction): local-server.md
+  - Adding compute resources: compute.md
   - LaTeX documents: latex.md
   - Overleaf integration: overleaf.md
   - Browser extension: browser-ext/index.md
@@ -85,11 +85,14 @@ nav:
       - tutorials/vscode-slurm-notebook.md
       - tutorials/ai-agents.md
       - tutorials/writing-first.md
+      - tutorials/peer-review.md
   - CLI reference: cli-reference.md
   - Help and support: help.md
   - Reproducibility: reproducibility.md
   - Calkit vs. other tools: comparisons.md
+  - ROI calculator: roi/index.md
   - Governance: governance.md
+  - Testimonials: testimonials.md
   - Privacy policy: privacy.md
   - Acknowledgements: acknowledgements.md
 # Internal design notes live in docs/dev; they're for contributors, not

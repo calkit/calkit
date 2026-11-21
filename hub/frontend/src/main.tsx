@@ -7,8 +7,8 @@ import ReactDOM from "react-dom/client"
 import { StrictMode } from "react"
 import { client } from "./client/client.gen"
 import NotFound from "./components/Common/NotFound"
-import { initAnalytics } from "./lib/analytics"
-import { getValidAccessToken } from "./lib/auth"
+import { initAnalytics, sensitivePropertyBlacklist } from "./lib/analytics"
+import { forceRefreshAccessToken, getValidAccessToken } from "./lib/auth"
 import { reloadOnStaleChunk } from "./lib/staleChunks"
 import { routeTree } from "./routeTree.gen"
 import theme from "./theme"
@@ -26,20 +26,37 @@ client.instance.interceptors.request.use(async (config) => {
   }
   return config
 })
+// Tokens from before sign-in sessions existed have none, so actions that
+// need one are refused until a refresh; refresh once and try again
+client.instance.interceptors.response.use(undefined, async (error) => {
+  const config = error.config
+  if (
+    error.response?.status === 403 &&
+    error.response.data?.detail === "This requires signing in, not a token" &&
+    config &&
+    !config._sessionRetried
+  ) {
+    config._sessionRetried = true
+    if (await forceRefreshAccessToken()) return client.instance(config)
+  }
+  throw error
+})
 
 const mixpanelToken = import.meta.env.VITE_MIXPANEL_TOKEN
 mixpanel.init(mixpanelToken, {
-  debug: String(import.meta.env.VITE_API_URL).startsWith(
-    "http://api.localhost",
-  ),
+  debug: String(import.meta.env.VITE_API_URL).startsWith("http://localhost"),
   // Page views are tracked in lib/analytics instead of automatically here, so
   // automated sessions can be tagged before any event is sent.
   track_pageview: false,
   persistence: "localStorage",
-  // Nothing is sent or stored until the visitor accepts analytics in the
-  // consent banner (see lib/analytics)
+  // Mixpanel is initialized opted out, so it sends and stores nothing until
+  // the visitor accepts analytics in the consent banner. Anonymous page views
+  // are counted by the hub separately, without this SDK (see lib/analytics).
   opt_out_tracking_by_default: true,
   opt_out_persistence_by_default: true,
+  // Our URLs can carry secrets, e.g., reset and invitation tokens, so Mixpanel
+  // never receives the full current URL or referrer
+  property_blacklist: sensitivePropertyBlacklist,
 })
 
 const queryClient = new QueryClient({

@@ -237,8 +237,8 @@ the properties that go inside pipeline stages are covered under
 | `git_repo_url`                          | str                                                                                                                                                            | no       | URL of the project's Git repository.                                                                                                                                                                                                                                                                                                                                       |
 | `derived_from`                          | DerivedFromProject                                                                                                                                             | no       | The project this one was created as a copy of.                                                                                                                                                                                                                                                                                                                             |
 | [`questions`](questions.md)             | list[str \| Question]                                                                                                                                          | no       | Questions the project seeks to answer.                                                                                                                                                                                                                                                                                                                                     |
-| [`requirements`](requirements.md)       | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                               | no       | What must be true of the machine before the project runs: applications that must be on PATH, environmental variables, per-machine setup steps, and constraints on machine properties like CPU count. These describe the host, which is the built-in '_system' environment; a 'system' environment declares its own.                                                        |
-| [`dependencies`](requirements.md)       | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                               | no       | Deprecated alias for 'requirements', still honored so existing projects keep working. Set one or the other, not both.                                                                                                                                                                                                                                                      |
+| [`requirements`](requirements.md)       | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| AwsCredentialsRequirement \| Requirement \| dict[str, RequirementAttrs]]  | no       | What must be true of the machine before the project runs: applications that must be on PATH, environmental variables, per-machine setup steps, and constraints on machine properties like CPU count. These describe the host, which is the built-in '_system' environment; a 'system' environment declares its own.                                                        |
+| [`dependencies`](requirements.md)       | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| AwsCredentialsRequirement \| Requirement \| dict[str, RequirementAttrs]]  | no       | Deprecated alias for 'requirements', still honored so existing projects keep working. Set one or the other, not both.                                                                                                                                                                                                                                                      |
 | `parameters`                            | dict[str, int \| float \| str \| list[int \| float \| str \| RangeIteration]]                                                                                  | no       | Project-level parameters, which can be referenced from pipeline stages.                                                                                                                                                                                                                                                                                                    |
 | [`pipeline`](pipeline/index.md)         | Pipeline                                                                                                                                                       | no       | The project's reproducible pipeline.                                                                                                                                                                                                                                                                                                                                       |
 | [`datasets`](datasets.md)               | list[Dataset]                                                                                                                                                  | no       | The project's datasets.                                                                                                                                                                                                                                                                                                                                                    |
@@ -275,9 +275,12 @@ Keys above whose type is a named object, like `Figure`, hold the properties desc
 
 #### `RangeIteration`
 
-| Parameter | Type                 | Required | Default | Description                                |
-| --------- | -------------------- | -------- | ------- | ------------------------------------------ |
-| `range`   | RangeIterationParams | yes      |         | Bounds of the range over which to iterate. |
+| Parameter | Type             | Required | Default | Description                                    |
+| --------- | ---------------- | -------- | ------- | ---------------------------------------------- |
+| `kind`    | Literal['range'] | yes      |         | A range of numbers.                            |
+| `start`   | int \| float     | yes      |         | First value in the range, which is included.   |
+| `stop`    | int \| float     | yes      |         | Value at which to stop, which is not included. |
+| `step`    | int \| float     | no       | 1       | Amount by which to increment each value.       |
 
 #### `Figure`
 
@@ -334,6 +337,7 @@ when `doi` is set, and reads the same on the hub and in the CLI.
 | `kind`          | Literal['journal-article', 'conference-paper', 'proposal', 'report', 'blog', 'book', 'thesis', 'phd-thesis'] \| None | no       | null    |                                                                                                     |
 | `doi`           | str \| None                                                                                                          | no       | null    | This publication's own DOI, once it has one. Setting it is what marks the publication as published. |
 | `imported_from` | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| _ImportedFromDescription \| None | no       | null    | Where this came from, if imported.                                                                  |
+| `reviews`       | list[PublicationReview]                                                                                              | no       |         | Reviews of this publication, whether written in this project or received.                           |
 
 #### `Presentation`
 
@@ -540,14 +544,6 @@ Configuration for syncing a directory with an Overleaf project.
 | `sync_paths` | list[str] \| None | no       | null    | Paths synced in both directions with Overleaf.    |
 | `push_paths` | list[str] \| None | no       | null    | Paths only pushed to Overleaf, never pulled back. |
 
-#### `RangeIterationParams`
-
-| Parameter | Type         | Required | Default | Description                                    |
-| --------- | ------------ | -------- | ------- | ---------------------------------------------- |
-| `start`   | int \| float | yes      |         | First value in the range, which is included.   |
-| `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
-| `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
-
 #### `_Person`
 
 A person credited with producing something in the project.
@@ -565,14 +561,15 @@ vanishing and leaving the author thinking they recorded it.
 
 #### `_ImportedFromProject`
 
-| Parameter      | Type              | Required | Default | Description                                                                                      |
-| -------------- | ----------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `project`      | str               | yes      |         |                                                                                                  |
-| `path`         | str \| None       | no       | null    |                                                                                                  |
-| `date`         | date \| None      | no       | null    | When the data was downloaded.                                                                    |
-| `git_rev`      | str \| None       | no       | null    | Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to. |
-| `filter_paths` | list[str] \| None | no       | null    |                                                                                                  |
-| `description`  | str \| None       | no       | null    | Where it came from, in words, for whatever the other fields can't say.                           |
+| Parameter      | Type              | Required | Default | Description                                                                                                                                                                                    |
+| -------------- | ----------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`      | str               | yes      |         |                                                                                                                                                                                                |
+| `path`         | str \| None       | no       | null    |                                                                                                                                                                                                |
+| `git_ref`      | str \| None       | no       | null    | Branch, tag, or commit to follow when refreshing this. Optional: an entry that names none follows the project's default branch. The commit it resolves to is recorded in .calkit/imports.json. |
+| `date`         | date \| None      | no       | null    | When the data was downloaded.                                                                                                                                                                  |
+| `git_rev`      | str \| None       | no       | null    | Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to.                                                                                               |
+| `filter_paths` | list[str] \| None | no       | null    |                                                                                                                                                                                                |
+| `description`  | str \| None       | no       | null    | Where it came from, in words, for whatever the other fields can't say.                                                                                                                         |
 
 #### `_ImportedFromUrl`
 
@@ -629,6 +626,14 @@ address to fetch.
 | ------------- | ------------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `description` | str          | yes      |         | Where it came from, in words, for an origin that can be stated but not resolved, e.g. 'Emailed by someone@example.com' or 'Provided by Acme, Inc.' |
 | `date`        | date \| None | no       | null    | When the data was received.                                                                                                                        |
+
+#### `PublicationReview`
+
+A review of a publication, e.g., by a peer reviewer.
+
+| Parameter | Type | Required | Default | Description                                                                                                  |
+| --------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `path`    | str  | yes      |         | Path to the review, a Markdown file whose comments are numbered items under a heading containing "comments". |
 
 #### `FormulaParams`
 

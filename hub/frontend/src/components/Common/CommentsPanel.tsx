@@ -25,6 +25,7 @@ import { FaCheck, FaGithub, FaReply, FaUndo } from "react-icons/fa"
 
 import type { ProjectComment } from "../../client"
 import LoadingSpinner from "./LoadingSpinner"
+import { safeHref } from "../../lib/strings"
 
 // Normalized comment shape the panel renders, independent of which backend
 // (ProjectComment vs ReleaseComment) produced it. Callers map their SDK type
@@ -41,6 +42,8 @@ export interface PanelComment {
   hasHighlight?: boolean
   // Pre-extracted highlight text to quote in the card, if any.
   highlightText?: string | null
+  // Shown under the author, e.g., where the comment is kept
+  note?: string | null
 }
 
 // Map a ProjectComment (figures, publications, presentations, member releases)
@@ -78,6 +81,7 @@ interface CommentsPanelProps {
   commentingAsLabel?: string | null
   // Optional "Create GitHub issue" checkbox (member project comments).
   showCreateIssueCheckbox?: boolean
+  defaultCreateIssue?: boolean
   // Called when a comment anchored to a highlight is clicked.
   onHighlightClick?: (comment: PanelComment) => void
   // Mutations -- the caller wires the SDK call and query invalidation.
@@ -119,6 +123,7 @@ export default function CommentsPanel({
   askAuthorName,
   commentingAsLabel,
   showCreateIssueCheckbox,
+  defaultCreateIssue = true,
   onHighlightClick,
   onPostComment,
   postingComment,
@@ -139,7 +144,7 @@ export default function CommentsPanel({
   const [replyDraft, setReplyDraft] = useState("")
   const [addingComment, setAddingComment] = useState(false)
   const [newDraft, setNewDraft] = useState("")
-  const [createIssue, setCreateIssue] = useState(true)
+  const [createIssue, setCreateIssue] = useState(defaultCreateIssue)
   const [authorName, setAuthorName] = useState("")
   const replyEnabled = canReply ?? canComment
   const openCount = comments.filter((c) => !c.resolved).length
@@ -204,7 +209,7 @@ export default function CommentsPanel({
             </Text>
             {c.externalUrl && (
               <Link
-                href={c.externalUrl}
+                href={safeHref(c.externalUrl)}
                 isExternal
                 color="gray.500"
                 onClick={(e) => e.stopPropagation()}
@@ -234,6 +239,11 @@ export default function CommentsPanel({
                 />
               ))}
           </Flex>
+          {c.note && (
+            <Text fontSize="xs" color="gray.500" mb={1}>
+              {c.note}
+            </Text>
+          )}
           {c.highlightText && (
             <Box
               mb={1}

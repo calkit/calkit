@@ -45,11 +45,13 @@ no `pipeline` section, skip this—you will add one.
 
 Every stage must reference a named environment. Identify what's needed:
 
-- **Python**: `requirements.txt` or `pyproject.toml` → `uv-venv`;
-  `environment.yml` → `conda`
+- **Python**: `pyproject.toml`, or no spec yet → `uv`, created with
+  `calkit new uv-env`; an existing `requirements.txt` the project should
+  keep → `uv-venv`; `environment.yml` → `conda`
 - **R**: `renv.lock` → `renv`
 - **Julia**: `Project.toml` → `julia`
-- **LaTeX**: `docker` with `texlive/texlive:latest-full`
+- **LaTeX**: `texlive`, created with `calkit new texlive-env`, which
+  needs no Docker
 - **MATLAB**: `matlab`
 
 Add environments to `calkit.yaml`:
@@ -57,9 +59,8 @@ Add environments to `calkit.yaml`:
 ```yaml
 environments:
   main:
-    kind: uv-venv
-    path: requirements.txt
-    python: "3.13"
+    kind: uv
+    path: pyproject.toml
 ```
 
 Name a single Python environment `main`. With multiple environments, use
@@ -84,6 +85,12 @@ calkit xr scripts/train.py \
   --input config/params.yaml \
   --output models/model.pkl
 ```
+
+<!-- TODO: needs human review -->
+
+Create the `texlive` environment before running `xr` on a `.tex` file, so
+`xr` uses it. Older versions of Calkit otherwise create a Docker one with
+Calkit's LaTeX image.
 
 `xr` is not magic—sometimes it won't get everything right. But it handles
 most of the boilerplate, so you can focus on verifying correctness and filling
@@ -120,12 +127,14 @@ pipeline:
     build-paper:
       kind: latex
       target_path: paper/paper.tex
-      environment: texlive
-      inputs:
-        - figures/fig1.png
-        - references.bib
-      outputs: []
+      environment: tex
 ```
+
+<!-- TODO: needs human review -->
+
+The paper includes `figures/fig1.png` with `\ckfigure{figures/fig1.png}`
+and numbers with `\ckvalue`, from the `calkit` LaTeX package (see the
+`conventions` skill), so the stage depends on them without listing them.
 
 Rules:
 

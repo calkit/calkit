@@ -3,13 +3,20 @@
 Based on
 [carteakey/tinytex-docker](https://github.com/carteakey/tinytex-docker),
 the purpose of this image is to provide most of the packages scientific
-articles need without the 9 GB of `texlive/texlive:latest-full`.
-Instead, this one is about 1 GB,
-which speeds up downloads.
+articles need without the <!-- ckvalue images/latex/sizes.json texlive_full.unpacked_gb .1f -->6.3<!-- /ckvalue --> GB
+of `texlive/texlive:latest-full`, a <!-- ckvalue images/latex/sizes.json texlive_full.download_gb .1f -->2.8<!-- /ckvalue --> GB
+download.
+Instead, this one is <!-- ckvalue images/latex/sizes.json calkit.unpacked_mb .0f -->900<!-- /ckvalue --> MB
+unpacked and <!-- ckvalue images/latex/sizes.json calkit.download_mb .0f -->430<!-- /ckvalue --> MB
+to download, which speeds up downloads.
+These are measured for amd64, as described [below](#measuring-its-size).
 When run through `calkit latex build`,
 missing packages are installed into the project's `.calkit/local/texmf`
 directory the first time they're needed.
-It also includes `latexmk`, `latexdiff`, and other useful utilities.
+It also includes `latexmk`, `latexdiff`, and other useful utilities,
+plus TeX4ht's `make4ht` with Ghostscript and zip, which
+`calkit latex to-docx --engine libreoffice` uses to convert a document
+without Word.
 
 This image is used by default for `calkit latex` commands,
 new LaTeX environments,
@@ -97,3 +104,90 @@ its checks won't run until someone pushes to it or closes and reopens it.
 
 The image is versioned on its own rather than with the Calkit release,
 since it changes rarely.
+
+## Measuring image size
+
+The sizes above are measured by this block,
+which runs in the pipeline at the root of this repo,
+against the image `calkit latex` uses by default:
+
+<!-- calkit stage name=sizes environment=dev
+     inputs=[calkit/latex.py]
+     outputs=[{path: images/latex/sizes.json, storage: git}] -->
+
+```python
+import json
+import re
+import subprocess
+
+
+def run(*args: str) -> str:
+    res = subprocess.run(args, capture_output=True, text=True, check=True)
+    return res.stdout
+
+
+def round2(x: float) -> float:
+    # Two significant figures, so measurement jitter between runs doesn't
+    # change the file
+    return float(f"{x:.2g}")
+
+
+def sizes(image: str) -> dict:
+    # The files inside the container, since what Docker reports depends
+    # on the platform and storage driver, and the compressed layers a
+    # registry serves
+    du = "du -sx --block-size=1 / 2>/dev/null | cut -f1"
+    unpacked = int(
+        run(
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            du,
+        )
+    )
+    fmt = (
+        "{{range .Manifest.Manifests}}{{if eq .Platform.Architecture "
+        '"amd64"}}{{.Digest}}{{end}}{{end}}'
+    )
+    digest = run(
+        "docker", "buildx", "imagetools", "inspect", image, "--format", fmt
+    ).strip()
+    manifest = json.loads(
+        run(
+            "docker",
+            "buildx",
+            "imagetools",
+            "inspect",
+            "--raw",
+            image.rsplit(":", 1)[0] + "@" + digest,
+        )
+    )
+    download = sum(layer["size"] for layer in manifest["layers"])
+    return {
+        "image": image,
+        "unpacked_mb": round2(unpacked / 1e6),
+        "download_mb": round2(download / 1e6),
+        "unpacked_gb": round2(unpacked / 1e9),
+        "download_gb": round2(download / 1e9),
+    }
+
+
+with open("calkit/latex.py") as f:
+    image = re.search(r'DEFAULT_LATEX_IMAGE = "([^"]+)"', f.read()).group(1)
+with open("images/latex/sizes.json", "w") as f:
+    json.dump(
+        {
+            "calkit": sizes(image),
+            "texlive_full": sizes("texlive/texlive:latest-full"),
+        },
+        f,
+        indent=2,
+    )
+    f.write("\n")
+```

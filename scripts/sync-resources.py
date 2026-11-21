@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the derived files under calkit/resources.
 
-Two things get generated here, both so a single source of truth stays
+Three things get generated here, all so a single source of truth stays
 editable where it makes sense to read it:
 
 - The dev container's VS Code customizations come from the shared VS Code
@@ -13,6 +13,8 @@ editable where it makes sense to read it:
   the action it calls, but has to ship inside the package for
   ``calkit update github-actions`` to install it without a download. The same
   file fills in the snippet in actions/run/README.md.
+- The Calkit Assistant installs the same VS Code extensions a project
+  recommends, from a copy it bundles, since it doesn't ship with Calkit.
 
 Edit the sources, then run this (``make sync-resources``, or just
 ``make format``).
@@ -58,6 +60,13 @@ def main() -> int:
     readme = readme[:start] + snippet + readme[end:]
     readme_path.write_text(readme, encoding="utf-8")
     print(f"Wrote {readme_path}")
+    extensions_out = (
+        repo_dir / "assistant" / "resources" / ("vscode-extensions.json")
+    )
+    shutil.copyfile(
+        resources_dir / "vscode" / "extensions.json", extensions_out
+    )
+    print(f"Wrote {extensions_out}")
     return 0
 
 

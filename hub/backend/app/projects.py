@@ -239,7 +239,9 @@ def get_project(
     if current_user is None and project.is_public:
         project.current_user_access = "read"
     elif current_user is not None:
-        # Compute access
+        # Compute access, not keeping one worked out for whoever this
+        # instance was last fetched for in the same session
+        project.current_user_access = None
         if project.owner == current_user:
             project.current_user_access = "owner"
         elif isinstance(project.owner, Org):
@@ -254,12 +256,11 @@ def get_project(
                         else "read"
                     )
                     break
-            if project.current_user_access is None and project.is_public:
-                project.current_user_access = "read"
-        else:
+        if project.current_user_access is None:
             # Non-owner: a native Calkit grant (role_id, e.g., from an invite)
             # takes precedence over GitHub-derived access, and is the only
-            # access path for GitHub-less collaborators.
+            # access path for GitHub-less collaborators. This includes
+            # collaborators on an org's repo who aren't in the org.
             access_row = session.exec(
                 select(UserProjectAccess)
                 .where(UserProjectAccess.project_id == project.id)
@@ -359,6 +360,9 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
     Two sources: dvc.lock, which covers anything a pipeline stage
     produces, and the standalone ``.dvc`` pointer files that ``dvc add``
     leaves next to a tracked file, which the lock knows nothing about.
+    The lock also lists stage outputs stored in Git, e.g., with Calkit's
+    ``storage: git``, which are left out since they're in the tree itself
+    and were never pushed to object storage.
     """
     outs: dict[str, dict] = dict(
         get_ck_info_and_dvc_outs_from_tree(
@@ -396,7 +400,7 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
             else pointer_path[: -len(".dvc")]
         )
         outs.setdefault(path, out)
-    return outs
+    return {path: out for path, out in outs.items() if not tree.exists(path)}
 
 
 def read_project_file(
@@ -587,6 +591,40 @@ def get_contents_from_repo(
         project=project,
         tree=get_repo_tree_for_ref(repo, ref),
         path=path,
+    )
+
+
+def readable_project_clause(current_user: User) -> Any:
+    """Projects the user can read, as a SQL predicate, for a query that
+    outer joins ``Project.user_access_records``.
+
+    GitHub-derived access only counts once it's been resolved and cached for
+    the user, i.e., they've opened the project before.
+    """
+    return or_(
+        Project.is_public,
+        Project.owner_account_id == current_user.account.id,
+        # A row in the unified access table with either a native Calkit
+        # grant (role_id, e.g., an invite redemption) or GitHub-derived
+        # access. A row with both null is a cached "no access" result.
+        and_(
+            UserProjectAccess.user_id == current_user.id,
+            or_(
+                UserProjectAccess.role_id.is_not(None),  # type: ignore
+                UserProjectAccess.github_access.is_not(None),  # type: ignore
+            ),
+        ),
+        Project.owner_account.has(  # type: ignore
+            and_(
+                Account.org_id.is_not(None),  # type: ignore
+                select(UserOrgMembership)
+                .where(
+                    UserOrgMembership.user_id == current_user.id,
+                    UserOrgMembership.org_id == Account.org_id,
+                )
+                .exists(),
+            )
+        ),
     )
 
 
@@ -897,7 +935,15 @@ def get_ck_info_and_dvc_outs_from_tree(
         f"(read {t_read * 1000:.0f}ms)"
     )
     t1 = time.perf_counter()
-    ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    try:
+        ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    except yaml.YAMLError as e:
+        # Bad data in the user's repo, so show its files without metadata
+        # rather than failing the whole page
+        logger.warning(
+            f"Failed to parse calkit.yaml for {owner_name}/{project_name}: {e}"
+        )
+        ck_info = {}
     # calkit.yaml can hold any YAML value, and only a mapping is usable
     if not isinstance(ck_info, dict):
         ck_info = {}
@@ -1010,7 +1056,9 @@ def get_contents_from_tree(
         "datasets",
         "references",
         "notebooks",
+        "results",
     ]
+    kinds = CATEGORIES_PLURAL_TO_SINGULAR | {"results": "result"}
     ck_objects = {}
     for category, itemlist in ck_info.items():
         if category not in categories_with_path:
@@ -1020,13 +1068,10 @@ def get_contents_from_tree(
                 f"{owner_name}/{project_name} {category} is not a list"
             )
             continue
-        if category not in CATEGORIES_PLURAL_TO_SINGULAR:
-            logger.warning(
-                f"{owner_name}/{project_name} {category} not understood"
-            )
-            continue
         for item in itemlist:
-            item["kind"] = CATEGORIES_PLURAL_TO_SINGULAR[category]
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            item = item | {"kind": kinds[category]}
             ck_objects[item["path"]] = item
             # Handle files inside references objects
             if category == "references":

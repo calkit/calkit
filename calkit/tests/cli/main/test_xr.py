@@ -76,12 +76,30 @@ print("Processing complete")
         out["path"] if isinstance(out, dict) else out for out in outputs
     ]
     assert "output.txt" in output_paths
+    # Data read from outside the project is reported, and warned about
+    with open("box.py", "w") as f:
+        f.write('import numpy as np\nnp.loadtxt("/Users/me/Box/runs.csv")\n')
+    result = subprocess.run(
+        ["calkit", "xr", "--dry-run", "--json", "box.py"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout[result.stdout.find("{") :])
+    assert out["external_inputs"] == ["/Users/me/Box/runs.csv"]
+    assert "inputs" not in out["stage"]["stage"]
+    result = subprocess.run(
+        ["calkit", "xr", "--dry-run", "box.py"], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert "/Users/me/Box/runs.csv, which is outside" in result.stdout
 
 
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_xr_shell_command(tmp_dir):
     """Test xr command with shell command."""
     subprocess.check_call(["calkit", "init"])
@@ -864,6 +882,7 @@ def test_xr_markdown_no_record(tmp_dir):
     assert not os.path.isfile("dvc.lock")
     assert not os.path.isdir(".dvc")
     assert not os.path.isfile(".dvcignore")
+    assert not os.path.isfile(".calkit/stage-runs.json")
     repo = git.Repo(".")
     assert not repo.head.is_valid()
     # Nothing the bootstrap staged lingers in the index either; only
@@ -902,3 +921,10 @@ def test_xr_no_record_command(tmp_dir):
         assert f.read() == ck_yaml_before
     assert not os.path.isfile("dvc.yaml")
     assert not os.path.isfile("dvc.lock")
+    assert not os.path.isfile(".calkit/stage-runs.json")
+    # Nor is anything the run staged left in the index
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).splitlines()
+    assert ".calkit/stage-runs.json" not in staged
+    assert "dvc.lock" not in staged

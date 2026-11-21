@@ -3,10 +3,14 @@ import test from "node:test";
 import {
   findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
+  getMissingSlurmResources,
   makeCalkitEnvKernelSourceCandidates,
+  mergeSlurmOptions,
   parsePixiPackages,
   parseProjectDependencies,
+  parseRemoteSshHost,
   parseRequirementsTxt,
+  parseSlurmServerOutput,
   parseSlurmOptionList,
   parseUvPackages,
   slurmOptionsToOptionList,
@@ -41,8 +45,100 @@ test("parseSlurmOptionList parses equals and spaced options", () => {
     gpus: "1",
     time: "02:00:00",
     partition: "gpu",
-    extra: "--cpus-per-task=8 --mem=32G",
+    cpus: "8",
+    mem: "32G",
+    extra: undefined,
   });
+  // Short flags, several flags per entry, and unknown flags kept as extra
+  assert.deepEqual(
+    parseSlurmOptionList(["-p short -t 60", "-c 4 --mem-per-cpu=2G -A lab"]),
+    {
+      gpus: undefined,
+      time: "60",
+      partition: "short",
+      cpus: "4",
+      mem: undefined,
+      extra: "--mem-per-cpu=2G -A lab",
+    },
+  );
+  assert.equal(parseSlurmOptionList([" "]), undefined);
+  // Flag-like text in a quoted value stays in that value
+  assert.deepEqual(
+    parseSlurmOptionList(['--comment="notebook -p gpu"', "-p short"]),
+    {
+      gpus: undefined,
+      time: undefined,
+      partition: "short",
+      cpus: undefined,
+      mem: undefined,
+      extra: '--comment="notebook -p gpu"',
+    },
+  );
+});
+
+test("missing SLURM resources are found and filled from other options", () => {
+  assert.deepEqual(getMissingSlurmResources(undefined), [
+    "partition",
+    "time",
+    "cpus",
+    "mem",
+  ]);
+  // Memory per CPU or GPU counts as memory
+  assert.deepEqual(
+    getMissingSlurmResources({
+      partition: "short",
+      cpus: "4",
+      extra: "--mem-per-cpu=2G",
+    }),
+    ["time"],
+  );
+  // Only what the override sets replaces the base
+  assert.deepEqual(
+    mergeSlurmOptions(
+      { time: "120", cpus: "4", gpus: "1" },
+      { time: "60", cpus: " ", partition: "short" },
+    ),
+    {
+      gpus: "1",
+      time: "60",
+      partition: "short",
+      cpus: "4",
+      mem: undefined,
+      extra: undefined,
+    },
+  );
+  // Flags saved in extra by older versions don't survive a newer value
+  assert.deepEqual(
+    mergeSlurmOptions(
+      { extra: "--mem=32G -A lab --qos=low" },
+      { mem: "64G", extra: "--qos=high" },
+    ),
+    {
+      gpus: undefined,
+      time: undefined,
+      partition: undefined,
+      cpus: undefined,
+      mem: "64G",
+      extra: "-A lab --qos=high",
+    },
+  );
+  // Memory flags override each other, since SLURM takes only one
+  assert.deepEqual(
+    mergeSlurmOptions({ mem: "32G" }, { extra: "--mem-per-cpu=2G" }),
+    {
+      gpus: undefined,
+      time: undefined,
+      partition: undefined,
+      cpus: undefined,
+      mem: undefined,
+      extra: "--mem-per-cpu=2G",
+    },
+  );
+  assert.equal(
+    mergeSlurmOptions({ extra: "--mem-per-gpu 8G -A lab" }, { mem: "64G" })
+      .extra,
+    "-A lab",
+  );
 });
 
 test("getDefaultSlurmOptions prefers default_options in calkit.yaml format", () => {
@@ -68,6 +164,69 @@ test("getDefaultSlurmOptions ignores legacy object format", () => {
   });
 
   assert.equal(parsed, undefined);
+});
+
+test("parseRemoteSshHost finds the host a Remote-SSH window connected to", () => {
+  assert.equal(
+    parseRemoteSshHost("ssh-remote+login.hpc.caltech.edu"),
+    "login.hpc.caltech.edu",
+  );
+  assert.equal(
+    parseRemoteSshHost("ssh-remote+pete@login.hpc.caltech.edu:2222"),
+    "login.hpc.caltech.edu",
+  );
+  // Hex-encoded JSON form
+  const encoded = Buffer.from(
+    JSON.stringify({ hostName: "login.hpc.caltech.edu", user: "pete" }),
+  ).toString("hex");
+  assert.equal(
+    parseRemoteSshHost(`ssh-remote+${encoded}`),
+    "login.hpc.caltech.edu",
+  );
+  // A host name that only looks like hex
+  assert.equal(parseRemoteSshHost("ssh-remote+deadbeef"), "deadbeef");
+  // Not Remote-SSH
+  assert.equal(parseRemoteSshHost(""), undefined);
+  assert.equal(parseRemoteSshHost("wsl+Ubuntu"), undefined);
+});
+
+test("parseSlurmServerOutput finds the compute node and Jupyter port", () => {
+  // Nothing printed yet
+  assert.deepEqual(parseSlurmServerOutput(""), {
+    host: undefined,
+    port: undefined,
+  });
+  // Job started, Jupyter not up yet
+  assert.deepEqual(parseSlurmServerOutput("CALKIT_SLURM_NODE=node042\n"), {
+    host: "node042",
+    port: undefined,
+  });
+  // Jupyter up on a fallback port since the requested one was taken
+  const output = [
+    "CALKIT_SLURM_NODE=node042.cluster.edu",
+    "Environment is up to date",
+    "[I ServerApp] Jupyter Server 2.21.1 is running at:",
+    "[I ServerApp] http://0.0.0.0:8889/lab?token=abc",
+    "[I ServerApp]     http://127.0.0.1:8889/lab?token=abc",
+  ].join("\n");
+  assert.deepEqual(parseSlurmServerOutput(output), {
+    host: "node042.cluster.edu",
+    port: 8889,
+  });
+  // Node name cut off mid-chunk isn't used until its line ends
+  assert.equal(
+    parseSlurmServerOutput("CALKIT_SLURM_NODE=node042.cl").host,
+    undefined,
+  );
+  assert.equal(
+    parseSlurmServerOutput("CALKIT_SLURM_NODE=node042.cluster.edu\r\n").host,
+    "node042.cluster.edu",
+  );
+  // URLs that aren't the Jupyter server's are ignored
+  assert.deepEqual(
+    parseSlurmServerOutput("See https://example.com:443/docs for help"),
+    { host: undefined, port: undefined },
+  );
 });
 
 test("makeEnvironmentCandidates returns standalone notebook envs and nested slurm combinations", () => {

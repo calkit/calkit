@@ -8,6 +8,7 @@ import {
   TableContainer,
   Tbody,
   Td,
+  Text,
   Th,
   Thead,
   Tr,
@@ -16,6 +17,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { type TokenPatch, UsersService } from "../../client"
+import useCustomToast from "../../hooks/useCustomToast"
 import NewToken from "./NewToken"
 
 function UserTokens() {
@@ -39,6 +41,14 @@ function UserTokens() {
       queryClient.invalidateQueries({ queryKey: ["user", "tokens"] }),
   })
   const newTokenModal = useDisclosure()
+  const showToast = useCustomToast()
+  const endSessionsMutation = useMutation({
+    mutationFn: () => UsersService.postUserSessionsEndOthers(),
+    onSuccess: () =>
+      showToast("Success!", "Signed out of other sessions.", "success"),
+    onError: (e: any) =>
+      showToast("Error", e.response?.data?.detail ?? e.message, "error"),
+  })
 
   return (
     <Container maxW="full">
@@ -111,6 +121,19 @@ function UserTokens() {
           )}
         </Table>
       </TableContainer>
+      <Heading size="md" pt={8} pb={4}>
+        Sessions
+      </Heading>
+      <Text mb={4}>
+        Sign out everywhere except this browser. Tokens stay active.
+      </Text>
+      <Button
+        variant="outline"
+        isLoading={endSessionsMutation.isPending}
+        onClick={() => endSessionsMutation.mutate()}
+      >
+        Sign out other sessions
+      </Button>
     </Container>
   )
 }

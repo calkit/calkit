@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typer
+from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import AliasGroup, raise_error
@@ -31,3 +32,46 @@ def delete_question(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     typer.echo(f"Removed question: {removed}")
+
+
+@delete_app.command(name="comment")
+def delete_comment(
+    path: Annotated[
+        str | None,
+        typer.Argument(help="File the thread is in, if not found by --id."),
+    ] = None,
+    id: Annotated[
+        str | None,
+        typer.Option(
+            "--id",
+            help="ID of the thread, which finds it in any of the project's documents.",
+        ),
+    ] = None,
+    line: Annotated[
+        int | None,
+        typer.Option("--line", "-l", help="Number of any line in the thread."),
+    ] = None,
+) -> None:
+    """Delete a review comment thread and its replies, or for a PDF, the
+    numbered comment in its review file with this --id."""
+    from calkit.cli.latex import edit_comment
+
+    if path is not None and path.lower().endswith(".pdf"):
+        import os
+        import pathlib
+
+        import calkit.reviews
+
+        review = calkit.reviews.review_path(path, calkit.load_calkit_info())
+        if review is None or not os.path.isfile(review):
+            raise_error(f"{path} has no review file")
+        if id is None or not id.isdigit():
+            raise_error("A PDF's comments are deleted by number, with --id")
+        lines = pathlib.Path(review).read_text(encoding="utf-8").split("\n")
+        try:
+            lines = calkit.reviews.delete(lines, int(id))
+        except ValueError as e:
+            raise_error(str(e))
+        pathlib.Path(review).write_text("\n".join(lines), encoding="utf-8")
+        return
+    edit_comment(path, id, line, None)

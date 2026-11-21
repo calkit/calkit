@@ -27,9 +27,12 @@ import { type SubmitHandler, useFieldArray, useForm } from "react-hook-form"
 import { FaPlus, FaTrash } from "react-icons/fa"
 
 import type { AxiosError } from "axios"
-import { ProjectsService, type QuestionPublic } from "../../client"
+import {
+  ProjectsService,
+  type QuestionEvidencePost,
+  type QuestionPublic,
+} from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
-import DeleteAlert from "../Common/DeleteAlert"
 import {
   useProjectFigures,
   useProjectPublications,
@@ -38,6 +41,8 @@ import {
 } from "../../hooks/useProject"
 import { handleError } from "../../lib/errors"
 import { submitOnCmdEnter } from "../../lib/keyboard"
+import DeleteAlert from "../Common/DeleteAlert"
+import { parseLines } from "./QuestionStatus"
 
 interface EditQuestionProps {
   question: QuestionPublic | null
@@ -68,16 +73,23 @@ interface EvidenceRow {
   // and the file they're keys into, since they mean nothing in another
   values?: Record<string, string>
   valuesPath?: string
+  // A plain file is typed in rather than picked, so its path is its own field
+  filePath?: string
+  lines?: string
 }
 
 interface EditQuestionForm {
   question: string
   hypothesis: string
+  approach: string
   answer: string
   evidence: EvidenceRow[]
 }
 
 const rowToSelection = (kind: string, path: string) => `${kind}:${path}`
+
+// A plain file has no kind on the wire; its path is typed, not selected
+const FILE_SELECTION = rowToSelection("file", "")
 
 const parseSelection = (selection: string) => {
   const idx = selection.indexOf(":")
@@ -91,7 +103,8 @@ const parseSelection = (selection: string) => {
       | "value"
       | "table"
       | "publication"
-      | "document",
+      | "document"
+      | "file",
     path: selection.slice(idx + 1),
   }
 }
@@ -148,7 +161,13 @@ const EditQuestion = ({
     formState: { errors, isSubmitting },
   } = useForm<EditQuestionForm>({
     mode: "onBlur",
-    defaultValues: { question: "", hypothesis: "", answer: "", evidence: [] },
+    defaultValues: {
+      question: "",
+      hypothesis: "",
+      approach: "",
+      answer: "",
+      evidence: [],
+    },
   })
   const { fields, append, remove } = useFieldArray({
     control,
@@ -162,9 +181,13 @@ const EditQuestion = ({
     reset({
       question: question.question,
       hypothesis: question.hypothesis ?? "",
+      approach: question.approach ?? "",
       answer: question.answer ?? "",
       evidence: (question.evidence ?? []).map((ev) => ({
-        selection: rowToSelection(ev.kind, ev.path),
+        selection:
+          ev.kind == null ? FILE_SELECTION : rowToSelection(ev.kind, ev.path),
+        filePath: ev.kind == null ? ev.path : undefined,
+        lines: ev.lines ?? undefined,
         key: ev.key ?? "",
         explanation: ev.explanation ?? "",
         gitRef: ev.git_ref ?? undefined,
@@ -187,11 +210,27 @@ const EditQuestion = ({
         questionPut: {
           question: data.question,
           hypothesis: data.hypothesis,
+          approach: data.approach,
           answer: data.answer,
-          evidence: data.evidence.flatMap((row) => {
+          evidence: data.evidence.flatMap((row): QuestionEvidencePost[] => {
             const parsed = parseSelection(row.selection)
             if (!parsed) {
               return []
+            }
+            if (parsed.kind === "file") {
+              return row.filePath?.trim()
+                ? [
+                    {
+                      kind: null,
+                      path: row.filePath.trim(),
+                      lines: row.lines?.trim() ? row.lines.trim() : undefined,
+                      explanation: row.explanation
+                        ? row.explanation
+                        : undefined,
+                      git_ref: row.gitRef ? row.gitRef : undefined,
+                    },
+                  ]
+                : []
             }
             return [
               {
@@ -289,6 +328,14 @@ const EditQuestion = ({
             />
           </FormControl>
           <FormControl mb={4}>
+            <FormLabel htmlFor="approach">Approach</FormLabel>
+            <Textarea
+              id="approach"
+              {...register("approach")}
+              placeholder="How the question is answered, in one sentence"
+            />
+          </FormControl>
+          <FormControl mb={4}>
             <FormLabel htmlFor="answer">Answer</FormLabel>
             <Textarea
               id="answer"
@@ -329,6 +376,7 @@ const EditQuestion = ({
               // if it isn't in the fetched lists (still loading, or the file
               // was renamed/removed), so the dropdown never blanks out.
               const selectionInList =
+                parsed?.kind === "file" ||
                 (parsed?.kind === "figure" &&
                   figures.some((f) => f.path === parsed.path)) ||
                 (parsed?.kind === "result" &&
@@ -379,12 +427,12 @@ const EditQuestion = ({
                   </Flex>
                   <FormControl mb={2}>
                     <FormLabel fontSize="xs" mb={1}>
-                      Figure, result, table, or publication
+                      Figure, result, table, publication, or file
                     </FormLabel>
                     <Select
                       {...register(`evidence.${index}.selection`)}
                       value={selection}
-                      placeholder="Select a figure, result, table, or publication"
+                      placeholder="Select a figure, result, table, publication, or file"
                       size="sm"
                     >
                       {parsed && !selectionInList ? (
@@ -438,8 +486,67 @@ const EditQuestion = ({
                           ))}
                         </optgroup>
                       ) : null}
+                      <optgroup label="Other">
+                        <option value={FILE_SELECTION}>File</option>
+                      </optgroup>
                     </Select>
                   </FormControl>
+                  {parsed?.kind === "file" ? (
+                    <Flex gap={2}>
+                      <FormControl
+                        mb={2}
+                        isRequired
+                        isInvalid={!!errors.evidence?.[index]?.filePath}
+                      >
+                        <FormLabel fontSize="xs" mb={1}>
+                          Path
+                        </FormLabel>
+                        <Input
+                          autoComplete="off"
+                          data-form-type="other"
+                          data-lpignore="true"
+                          {...register(`evidence.${index}.filePath`, {
+                            validate: (value) =>
+                              parseSelection(
+                                watch(`evidence.${index}.selection`) || "",
+                              )?.kind !== "file" ||
+                              !!value?.trim() ||
+                              "Path is required",
+                          })}
+                          placeholder="e.g., logs/run.log"
+                          size="sm"
+                        />
+                        <FormErrorMessage>
+                          {errors.evidence?.[index]?.filePath?.message}
+                        </FormErrorMessage>
+                      </FormControl>
+                      <FormControl
+                        mb={2}
+                        maxW="140px"
+                        isInvalid={!!errors.evidence?.[index]?.lines}
+                      >
+                        <FormLabel fontSize="xs" mb={1}>
+                          Lines (optional)
+                        </FormLabel>
+                        <Input
+                          autoComplete="off"
+                          data-form-type="other"
+                          data-lpignore="true"
+                          {...register(`evidence.${index}.lines`, {
+                            validate: (value) =>
+                              !value?.trim() ||
+                              !!parseLines(value) ||
+                              "A line or a range, e.g., 8 or 8-12",
+                          })}
+                          placeholder="e.g., 8 or 8-12"
+                          size="sm"
+                        />
+                        <FormErrorMessage>
+                          {errors.evidence?.[index]?.lines?.message}
+                        </FormErrorMessage>
+                      </FormControl>
+                    </Flex>
+                  ) : null}
                   {parsed?.kind === "result" && rowValues ? (
                     // Kept as written in calkit.yaml, since the form has no
                     // editor for a map of names to keys

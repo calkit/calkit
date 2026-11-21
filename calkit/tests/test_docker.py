@@ -12,18 +12,11 @@ from calkit.docker import (
     _parse_docker_run_command,
     _parse_volume_spec,
     _uses_entrypoint_command_mode,
-    build_lock,
-    get_image_name,
-    get_lock_archs,
-    get_lock_digest_refs,
     get_remote_image_ref,
     is_auth_error,
     keep_only_repo_digests,
-    lock_matches_image,
-    lock_matches_spec,
     login_to_registry,
     platform_to_arch_name,
-    resolve_registry_prefix,
     split_image_ref,
 )
 
@@ -160,66 +153,6 @@ def test_platform_to_arch_name():
     assert platform_to_arch_name("windows/amd64") is None
 
 
-def test_lock_matching():
-    lock = {
-        "RootFS": {"Type": "layers", "Layers": ["sha256:a", "sha256:b"]},
-        "DockerfileMD5": "abc",
-        "DepsMD5s": {"reqs.txt": "def"},
-    }
-    kwargs = dict(dockerfile_md5="abc", deps_md5s={"reqs.txt": "def"})
-    assert lock_matches_spec(lock, **kwargs)  # type: ignore[arg-type]
-    # Inputs that decide what gets built are what make a lock stale
-    assert not lock_matches_spec(
-        lock,
-        dockerfile_md5="changed",
-        deps_md5s={"reqs.txt": "def"},
-    )
-    assert not lock_matches_spec(lock, dockerfile_md5="abc", deps_md5s={})
-    assert lock_matches_image(
-        lock, {"RootFS": {"Layers": ["sha256:a", "sha256:b"]}}
-    )
-    assert not lock_matches_image(lock, {"RootFS": {"Layers": ["sha256:a"]}})
-    assert not lock_matches_image(lock, {})
-    assert not lock_matches_image({}, {"RootFS": {"Layers": ["sha256:a"]}})
-
-
-def test_get_lock_digest_refs():
-    lock = {"RepoDigests": ["sha256:remote"]}
-    # A bare digest is only pullable once paired with a repo, and the repo
-    # comes from the environment as it is now, so a digest left over from a
-    # different image is asked for somewhere it cannot resolve
-    assert get_lock_digest_refs(lock) == []
-    assert get_lock_digest_refs(lock, "ghcr.io/o/p/my-image:latest") == [
-        "ghcr.io/o/p/my-image@sha256:remote"
-    ]
-    assert get_lock_digest_refs(lock, "other/image:latest") == [
-        "other/image@sha256:remote"
-    ]
-    # Locks written before digests were stored bare still work, and the
-    # project's own registry is preferred, since that's the copy it controls
-    legacy = {
-        "RepoDigests": [
-            "my-image@sha256:local",
-            "ghcr.io/o/p/my-image@sha256:remote",
-        ]
-    }
-    assert get_lock_digest_refs(legacy) == [
-        "my-image@sha256:local",
-        "ghcr.io/o/p/my-image@sha256:remote",
-    ]
-    assert get_lock_digest_refs(legacy, "ghcr.io/o/p/my-image:latest")[0] == (
-        "ghcr.io/o/p/my-image@sha256:remote"
-    )
-    assert get_lock_digest_refs({}) == []
-    assert get_lock_digest_refs({"RepoDigests": ["no-digest-here"]}) == []
-    assert (
-        get_lock_digest_refs(
-            {"RepoDigests": ["no-digest-here"]}, "ghcr.io/o/p/img"
-        )
-        == []
-    )
-
-
 def test_keep_only_repo_digests():
     identity = {
         "RepoDigests": [
@@ -240,56 +173,6 @@ def test_keep_only_repo_digests():
     ] == ["sha256:remote"]
     # The original is left alone so callers can keep using it
     assert len(identity["RepoDigests"]) == 2
-
-
-def test_build_lock():
-    identity = {
-        "RepoTags": ["something-else:latest"],
-        "RepoDigests": ["sha256:abc"],
-        "Architecture": "amd64",
-        "Os": "linux",
-        "RootFS": {"Type": "layers", "Layers": ["sha256:a"]},
-    }
-    lock = build_lock(
-        identity=identity,
-        dockerfile_md5="abc",
-        deps_md5s={},
-        run_config={"WorkDir": "/work"},
-    )
-    # What an image is called says nothing about what it is, and a lock
-    # already belongs to the environment whose directory it sits in, so
-    # renaming an image doesn't rerun every stage in it
-    assert "RepoTags" not in lock
-    assert lock["WorkDir"] == "/work"
-    assert lock["DockerfileMD5"] == "abc"
-    # Key order has to be stable, since a lock written for another platform
-    # must match what that platform would write for itself
-    other = build_lock(
-        identity=dict(reversed(list(identity.items()))),
-        dockerfile_md5="abc",
-        deps_md5s={},
-        run_config={"WorkDir": "/work"},
-    )
-    assert list(lock) == list(other)
-
-
-def test_resolve_registry_prefix(tmp_dir):
-    # Registries are opt-in, since pushing publishes an image
-    assert resolve_registry_prefix(
-        {"kind": "docker", "path": "Dockerfile"}
-    ) is (None)
-    assert resolve_registry_prefix({"registry": "none"}) is None
-    assert resolve_registry_prefix({"registry": "reg.example.com/ns"}) == (
-        "reg.example.com/ns"
-    )
-
-
-def test_get_lock_archs():
-    assert get_lock_archs({}) == ["amd64", "arm64"]
-    archs = get_lock_archs(
-        {"build_platforms": ["linux/amd64", "linux/arm/v7"]}
-    )
-    assert archs == ["amd64", "arm64", "arm-v7"]
 
 
 def test_pull_image_with_login(monkeypatch):
@@ -343,12 +226,42 @@ def test_is_auth_error():
         "not match expected scopes."
     )
     assert is_auth_error("denied: requested access to the resource is denied")
+    assert is_auth_error(
+        "8b7a0e7328e7: Waiting\nerror from registry: denied\ndenied"
+    )
     assert is_auth_error("unauthorized: authentication required")
     # Anything else has to be reported as-is rather than sending the user
     # off to fix credentials that were fine
     assert not is_auth_error("dial tcp: lookup ghcr.io: no such host")
     assert not is_auth_error("manifest unknown")
+    assert not is_auth_error(
+        "permission denied while trying to connect to the Docker daemon socket"
+    )
     assert not is_auth_error("")
+
+
+def test_registry_login_hint(monkeypatch):
+    import calkit.docker
+
+    monkeypatch.setattr(
+        calkit.docker, "get_github_username", lambda: "someone"
+    )
+    ref = "ghcr.io/o/p/img:latest"
+    # A refusal from GHCR says how to get a token that can push, since a
+    # push that can't prompt otherwise ends on a bare "unauthorized"
+    hint = calkit.docker.registry_login_hint(
+        ref, "error from registry: unauthorized"
+    )
+    assert calkit.docker.GITHUB_PACKAGES_TOKEN_URL in hint
+    assert "docker login ghcr.io -u someone" in hint
+    assert "calkit push docker" in hint
+    # Another registry gets only what Calkit knows: log in to it
+    hint = calkit.docker.registry_login_hint(
+        "docker.io/someone/img:v1", "unauthorized: authentication required"
+    )
+    assert "docker login docker.io" in hint
+    # Anything other than refused credentials is no login problem
+    assert calkit.docker.registry_login_hint(ref, "manifest unknown") == ""
 
 
 def test_login_to_registry_ignores_other_registries():
@@ -426,7 +339,8 @@ def test_run_showing_output_collapses_repeated_layer_status(capfd):
     # Everything Docker said is kept, since what a registry says on refusal
     # decides what happens next
     assert output.count("abc123: Waiting") == 2
-    shown = capfd.readouterr().out
+    # On stderr, so a command run in the environment keeps stdout
+    shown = capfd.readouterr().err
     # ...but a repeat of the same status isn't worth showing twice
     assert shown.count("abc123: Waiting") == 1
     assert shown.count("def456: Waiting") == 1
@@ -451,48 +365,6 @@ def tmp_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_get_image_name(tmp_dir):
-    import calkit
-
-    # An environment named after someone else's image keeps that name
-    assert (
-        get_image_name({"kind": "docker", "image": "alpine:3.18"}, "main")
-        == "alpine:3.18"
-    )
-    # One with neither an image nor a Dockerfile has nothing to name
-    assert get_image_name({"kind": "docker"}, "main") is None
-    calkit.save_calkit_info(
-        {"owner": "Someone", "name": "Some-Project", "environments": {}}
-    )
-    # One that builds its own image is named after the project and the
-    # environment, lowercased, since repository names must be
-    assert (
-        get_image_name({"kind": "docker", "path": "Dockerfile"}, "My-Env")
-        == "someone/some-project.my-env"
-    )
-    # An image that is named wins over the one that would be worked out
-    assert (
-        get_image_name(
-            {"kind": "docker", "path": "Dockerfile", "image": "mine"}, "env"
-        )
-        == "mine"
-    )
-    # A project that isn't published anywhere yet still names itself if
-    # calkit.yaml says what it's called
-    calkit.save_calkit_info({"name": "Some-Project", "environments": {}})
-    assert (
-        get_image_name({"kind": "docker", "path": "Dockerfile"}, "env")
-        == "some-project.env"
-    )
-    # With nothing to be named after, there's nothing to guess from: the
-    # directory a project sits in is not a name, since renaming it would
-    # rename the image, and every project called 'analysis' would collide
-    calkit.save_calkit_info({"environments": {}})
-    assert (
-        get_image_name({"kind": "docker", "path": "Dockerfile"}, "env") is None
-    )
-
-
 def test_ensure_image_available() -> None:
     # An image already here needs no registry at all
     with mock.patch("calkit.docker.image_exists_locally", return_value=True):
@@ -509,6 +381,32 @@ def test_ensure_image_available() -> None:
         ):
             with pytest.raises(ValueError, match="never reached the registry"):
                 calkit.docker.ensure_image_available("some/image:1")
+        # Nor is a credential helper to blame when the daemon refused us
+        with mock.patch(
+            "calkit.docker.pull_image",
+            return_value=(
+                False,
+                "permission denied while trying to connect to the docker "
+                "API at unix:///var/run/docker.sock",
+            ),
+        ):
+            with pytest.raises(ValueError, match="'docker' group"):
+                calkit.docker.ensure_image_available("some/image:1")
+            # Under WSL, the group only applies once WSL itself restarts
+            with mock.patch("calkit.core.is_wsl", return_value=True):
+                with pytest.raises(ValueError, match="wsl --shutdown"):
+                    calkit.docker.ensure_image_available("some/image:1")
+        # A credential helper denied permission isn't about the group
+        with mock.patch(
+            "calkit.docker.pull_image",
+            return_value=(
+                False,
+                "error getting credentials - err: fork/exec "
+                "/usr/bin/docker-credential-desktop.exe: permission denied",
+            ),
+        ):
+            with pytest.raises(ValueError, match="credential helper"):
+                calkit.docker.ensure_image_available("some/image:1")
         # One that got as far as talking to the registry is about the image
         with mock.patch(
             "calkit.docker.pull_image",
@@ -523,31 +421,82 @@ def test_ensure_image_available() -> None:
             calkit.docker.ensure_image_available("some/image:1")
 
 
-def test_lock_digest_refs_stay_with_their_repo() -> None:
-    # A digest recorded against another repository is left over from an
-    # image the project no longer uses. Pulling it would go on building
-    # with the old image however the environment was changed, which is
-    # what made changing an image in calkit.yaml do nothing.
-    stale = {"RepoDigests": ["texlive/texlive@sha256:abc"]}
-    assert (
-        calkit.docker.get_lock_digest_refs(stale, "ghcr.io/calkit/latex:0.1.0")
-        == []
+def test_ensure_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    def docker_info(returncode: int, stderr: str = "") -> Mock:
+        return Mock(return_value=Mock(returncode=returncode, stderr=stderr))
+
+    monkeypatch.setattr(
+        "calkit.docker.DAEMON_START_TIMEOUT", 0.0, raising=True
     )
-    same = {"RepoDigests": ["ghcr.io/calkit/latex@sha256:abc"]}
-    assert calkit.docker.get_lock_digest_refs(
-        same, "ghcr.io/calkit/latex:0.1.0"
-    ) == ["ghcr.io/calkit/latex@sha256:abc"]
-    # Docker reports what it pulled in full while a project names it short
-    assert calkit.docker.get_lock_digest_refs(
-        {"RepoDigests": ["docker.io/library/alpine@sha256:abc"]}, "alpine:3.19"
-    ) == ["docker.io/library/alpine@sha256:abc"]
-    # A bare digest names no repository, so it belongs to whichever one
-    # the environment now points at; a digest that isn't there fails the
-    # pull and the tag is fetched instead
-    assert calkit.docker.get_lock_digest_refs(
-        {"RepoDigests": ["sha256:abc"]}, "ghcr.io/calkit/latex:0.1.0"
-    ) == ["ghcr.io/calkit/latex@sha256:abc"]
-    # With nowhere to pull from, only self-describing digests are usable
-    assert calkit.docker.get_lock_digest_refs(
-        {"RepoDigests": ["sha256:abc", "foo/bar@sha256:def"]}, None
-    ) == ["foo/bar@sha256:def"]
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    # Not installed, which offers the installer only on a TTY
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    with mock.patch("calkit.install.prompt_and_install") as install:
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="calkit install docker"
+        ):
+            calkit.docker.ensure_ready()
+        install.assert_not_called()
+        install.return_value = False
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="not installed"
+        ):
+            calkit.docker.ensure_ready(interactive=True)
+        install.assert_called_once_with("docker", interactive=True)
+    # Installed and running
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/docker")
+    with mock.patch("subprocess.run", docker_info(0)):
+        calkit.docker.ensure_ready()
+    # Installed but not running
+    not_running = docker_info(1, "Cannot connect to the Docker daemon")
+    with mock.patch("subprocess.run", not_running):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="not running"
+        ):
+            calkit.docker.ensure_ready()
+    # Installed but not usable by this user
+    with mock.patch("subprocess.run", docker_info(1, "permission denied")):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="'docker' group"
+        ):
+            calkit.docker.ensure_ready()
+    # A daemon that doesn't answer at all
+    with mock.patch(
+        "subprocess.run", side_effect=subprocess.TimeoutExpired("docker", 30)
+    ):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="did not answer"
+        ):
+            calkit.docker.ensure_ready()
+    # Docker Desktop is offered to be started on a TTY, and waited for
+    monkeypatch.setattr("calkit.docker.DAEMON_START_TIMEOUT", 10.0)
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr("os.path.isdir", lambda _: True)
+    starting = Mock(
+        side_effect=[
+            Mock(returncode=1, stderr="Cannot connect"),
+            Mock(returncode=1, stderr="Cannot connect"),
+            Mock(returncode=0, stderr=""),
+        ]
+    )
+    with (
+        mock.patch("subprocess.run", starting),
+        mock.patch("subprocess.Popen") as popen,
+        mock.patch("builtins.input", return_value=""),
+    ):
+        calkit.docker.ensure_ready(interactive=True)
+    assert popen.call_args.args[0] == ["open", "-a", "Docker"]
+    assert starting.call_count == 3
+    # Declining to start it says how to
+    with (
+        mock.patch("subprocess.run", not_running),
+        mock.patch("subprocess.Popen") as popen,
+        mock.patch("builtins.input", return_value="n"),
+    ):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="start Docker Desktop"
+        ):
+            calkit.docker.ensure_ready(interactive=True)
+    popen.assert_not_called()

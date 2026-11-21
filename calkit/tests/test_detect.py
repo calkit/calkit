@@ -73,6 +73,61 @@ plt.savefig('plot.png')
     assert "result.csv" in result["outputs"]
     assert "output.npy" in result["outputs"]
     assert "plot.png" in result["outputs"]
+    # Reads from outside the project, e.g., a synced Box folder on someone's
+    # laptop, are reported apart rather than taken for project paths, and a
+    # glob reads the folder it matches in
+    os.makedirs("scripts")
+    with open("scripts/wake.py", "w") as f:
+        f.write(
+            "import glob, os\n"
+            "import numpy as np\n"
+            "from pathlib import Path\n"
+            'folder = "/Users/me/Box-Box/Lab Data/tow tank/runs/"\n'
+            'files = glob.glob(folder + "Run*.csv")\n'
+            'cal = np.loadtxt(f"{folder}../calibration.txt")\n'
+            'win = open(r"C:\\Users\\me\\Box\\cal.csv")\n'
+            'x = open(Path.home() / "Dropbox" / "data.csv")\n'
+            'y = open(os.path.expanduser("~/Desktop/t.csv"))\n'
+            'up = open("../shared/thing.csv")\n'
+            'null = open("/dev/null")\n'
+            'runs = [p for p in Path("data/runs").glob("Run*.csv")]\n'
+            'raw = os.listdir("data/raw")\n'
+            'here = glob.glob("*.csv")\n'
+            'np.savetxt("out_" + "1.csv", cal)\n'
+            'np.savetxt("../elsewhere.csv", cal)\n'
+            # Resolved paths stay relative to where it runs
+            'loc = open(Path("data/local.csv").resolve())\n'
+            'np.savetxt(Path("results/r.csv").absolute(), cal)\n'
+            # Relative Windows paths leave the project the same way
+            'w = open(r"..\\shared\\win.csv")\n'
+            'w2 = open(r"data\\..\\..\\up.csv")\n'
+            'np.savetxt(r"..\\win_out.csv", cal)\n'
+            # A glob relative to its root_dir, and one at any depth
+            'box = glob.glob("Run*.csv", root_dir="/Users/me/Box/runs")\n'
+            'deep = list(Path("data/deep").rglob("Run.csv"))\n'
+        )
+    result = detect_python_script_io("scripts/wake.py")
+    assert sorted(result["inputs"]) == [
+        "data/deep",
+        "data/local.csv",
+        "data/raw",
+        "data/runs",
+    ]
+    assert sorted(result["outputs"]) == ["out_1.csv", "results/r.csv"]
+    assert result["external_outputs"] == ["../elsewhere.csv", "../win_out.csv"]
+    assert sorted(result["external_inputs"]) == sorted(
+        [
+            "/Users/me/Box-Box/Lab Data/tow tank/runs",
+            "/Users/me/Box-Box/Lab Data/tow tank/calibration.txt",
+            "C:\\Users\\me\\Box\\cal.csv",
+            "~/Dropbox/data.csv",
+            "~/Desktop/t.csv",
+            "../shared/thing.csv",
+            "../shared/win.csv",
+            "../up.csv",
+            "/Users/me/Box/runs",
+        ]
+    )
 
 
 def test_detect_python_script_io_with_modes(tmp_dir):
@@ -454,8 +509,11 @@ def test_detect_jupyter_notebook_io_with_variables(tmp_dir):
     result = detect_jupyter_notebook_io("notebook_vars.ipynb")
     # Variable references should be resolved
     assert "input_data.csv" in result["inputs"]
-    # Template string from format should be detected
-    assert ".calkit/scheduler/logs/amip-baseline.out" in result["inputs"]
+    # Template string from format should be detected, and is outside the
+    # project, since the notebook is at its root
+    assert result["external_inputs"] == [
+        "../.calkit/scheduler/logs/amip-baseline.out"
+    ]
 
 
 def test_detect_jupyter_notebook_io_julia(tmp_dir):
@@ -1384,6 +1442,57 @@ def test_detect_project_artifacts_includes_results_and_presentations(tmp_dir):
     assert "slides/deck.pdf" in out["presentations"]
 
 
+def test_detect_tables(tmp_dir):
+    import subprocess
+
+    import calkit.detect
+    from calkit.detect import detect_tables, is_table_path
+
+    # Tabular by extension, wherever it's kept
+    assert is_table_path("results/kernels.csv")
+    assert is_table_path("data/runs.parquet")
+    assert is_table_path("summary.TSV")
+    assert not is_table_path("results/metrics.json")
+    assert not is_table_path("figures/plot.png")
+    candidates = [
+        "results/kernels.csv",
+        "results/metrics.json",
+        "data/runs.parquet",
+        ".hidden/table.csv",
+        "declared/table.csv",
+    ]
+    assert detect_tables(candidates, reserved_paths=["declared"]) == [
+        "data/runs.parquet",
+        "results/kernels.csv",
+    ]
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    for name, text in [
+        ("kernels.csv", "a,b\n1,2\n"),
+        ("metrics.json", "{}"),
+        ("stats.toml", "a = 1\n"),
+    ]:
+        with open(os.path.join("results", name), "w") as f:
+            f.write(text)
+    out = calkit.detect.detect_project_artifacts(ck_info={})
+    # A tabular result is both a result and a table, and TOML is a result
+    assert out["tables"] == ["results/kernels.csv"]
+    assert "results/kernels.csv" in out["results"]
+    assert "results/stats.toml" in out["results"]
+    # Declaring a table reserves it from being detected as a table again,
+    # but it's still a result, and a declared result is still a table
+    out = calkit.detect.detect_project_artifacts(
+        ck_info={"tables": [{"path": "results/kernels.csv"}]}
+    )
+    assert out["tables"] == []
+    assert "results/kernels.csv" in out["results"]
+    out = calkit.detect.detect_project_artifacts(
+        ck_info={"results": [{"path": "results/kernels.csv"}]}
+    )
+    assert out["tables"] == ["results/kernels.csv"]
+    assert "results/kernels.csv" not in out["results"]
+
+
 def test_detection_ignore(tmp_dir):
     from calkit.detect import (
         detect_artifact_kind,
@@ -1481,3 +1590,135 @@ def test_detect_latex_io_finds_class_and_style_files(tmp_dir):
     assert "refs.bib" in inputs
     # graphicx comes from TeX Live, not the project
     assert "graphicx.sty" not in inputs
+
+
+def test_detect_project_artifacts_considers_ignored_pipeline_outputs(tmp_dir):
+    import subprocess
+
+    import calkit.detect
+
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("figures")
+    os.makedirs("paper/figures")
+    for path in ("figures/plot.png", "paper/figures/plot.png"):
+        with open(path, "w") as f:
+            f.write("png")
+    # Neither Git nor DVC holds these
+    with open(".gitignore", "w") as f:
+        f.write("figures/plot.png\npaper/figures/plot.png\n")
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "py",
+                    "outputs": ["figures/plot.png"],
+                },
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/plot.png",
+                            "dest": "paper/figures/plot.png",
+                        }
+                    ],
+                },
+            }
+        }
+    }
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "figures/plot.png" in figures
+    # A map-paths destination, declared under 'paths'
+    assert "paper/figures/plot.png" in figures
+    # An output not produced yet isn't on disk
+    ck_info["pipeline"]["stages"]["plot"]["outputs"].append("figures/none.png")
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "figures/none.png" not in figures
+    # Paths are relative to a stage's wdir, and a directory mapping's files
+    # are found under its destination
+    os.makedirs("analysis/figures")
+    os.makedirs("shared/figures")
+    for path in ("analysis/figures/fit.png", "shared/figures/logo.png"):
+        with open(path, "w") as f:
+            f.write("png")
+    with open(".gitignore", "a") as f:
+        f.write("analysis/figures/\npaper/shared/\n")
+    stages = ck_info["pipeline"]["stages"]
+    stages["plot"]["wdir"] = "analysis"
+    stages["plot"]["outputs"] = ["figures/fit.png"]
+    stages["copy"]["paths"].append(
+        {"kind": "dir-to-dir-merge", "src": "shared", "dest": "paper/shared"}
+    )
+    os.makedirs("paper/shared/figures")
+    with open("paper/shared/figures/logo.png", "w") as f:
+        f.write("png")
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "analysis/figures/fit.png" in figures
+    assert "paper/shared/figures/logo.png" in figures
+    # A pipeline can be null
+    calkit.detect.detect_project_artifacts(ck_info={"pipeline": None})
+
+
+def test_rewrite_paths():
+    from calkit.detect import rewrite_paths
+
+    code = (
+        'folder = "/Users/me/Box-Box/Lab Data/runs/"\n'
+        'files = glob.glob(folder + "Run*.csv")\n'
+        'cal = open("/Users/me/Box-Box/Lab Data/runs/cal.txt")\n'
+        "win = open('C:\\\\Users\\\\me\\\\t.csv')\n"
+        "fwd = open(r'C:/Users/me/t.csv')\n"
+        # What follows a Windows folder gets slashes too
+        "raw = open(r'C:\\Users\\me\\runs\\Run1.csv')\n"
+        "sub = 'C:\\\\Users\\\\me\\\\runs\\\\'\n"
+        'home = open(os.path.expanduser("~/Desktop/t.csv"))\n'
+        # Only whole paths, not ones that merely start the same
+        'other = open("/Users/me/Box-Box/Lab Data/runs2/x.csv")\n'
+        'parts = open(Path.home() / "Dropbox" / "data.csv")\n'
+    )
+    moves = {
+        "/Users/me/Box-Box/Lab Data/runs": "data/runs",
+        "/Users/me/Box-Box/Lab Data/runs/cal.txt": "data/cal.txt",
+        "C:\\Users\\me\\t.csv": "data/t.csv",
+        "C:\\Users\\me\\runs": "data/win-runs",
+        "~/Desktop/t.csv": "data/desk.csv",
+        "~/Dropbox/data.csv": "data/data.csv",
+    }
+    text, found = rewrite_paths(code, moves)
+    assert text.splitlines() == [
+        'folder = "data/runs/"',
+        'files = glob.glob(folder + "Run*.csv")',
+        'cal = open("data/cal.txt")',
+        "win = open('data/t.csv')",
+        "fwd = open(r'data/t.csv')",
+        "raw = open(r'data/win-runs/Run1.csv')",
+        "sub = 'data/win-runs/'",
+        'home = open(os.path.expanduser("data/desk.csv"))',
+        'other = open("/Users/me/Box-Box/Lab Data/runs2/x.csv")',
+        'parts = open(Path.home() / "Dropbox" / "data.csv")',
+    ]
+    # One put together from pieces isn't found
+    assert sorted(found) == sorted(set(moves) - {"~/Dropbox/data.csv"})
+    # In a notebook, where the JSON escapes it again
+    source = [
+        'x = open("C:\\\\Users\\\\me\\\\t.csv")',
+        'y = open(r"C:\\Users\\me\\runs\\Run1.csv")',
+    ]
+    notebook = json.dumps({"cells": [{"source": source}]})
+    text, found = rewrite_paths(notebook, moves)
+    assert json.loads(text)["cells"][0]["source"] == [
+        'x = open("data/t.csv")',
+        'y = open(r"data/win-runs/Run1.csv")',
+    ]
+    assert sorted(found) == ["C:\\Users\\me\\runs", "C:\\Users\\me\\t.csv"]
+    # A new path that would need escaping in the string isn't put in it
+    with pytest.raises(ValueError):
+        rewrite_paths(code, {"C:\\Users\\me\\t.csv": "data/O'Brien.csv"})

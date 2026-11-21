@@ -17,6 +17,7 @@ import Appearance from "../../components/UserSettings/Appearance"
 import ChangePassword from "../../components/UserSettings/ChangePassword"
 import ConnectedAccounts from "../../components/UserSettings/ConnectedAccounts"
 import DeleteAccount from "../../components/UserSettings/DeleteAccount"
+import Machines from "../../components/UserSettings/Machines"
 import OnboardingChecklists from "../../components/UserSettings/OnboardingChecklists"
 import Privacy from "../../components/UserSettings/Privacy"
 import Subscription from "../../components/UserSettings/Subscription"
@@ -38,14 +39,18 @@ const tabsConfig = [
   { title: "Privacy", component: Privacy, slug: "privacy" },
   { title: "Setup", component: OnboardingChecklists, slug: "setup" },
   { title: "Tokens", component: UserTokens, slug: "tokens" },
+  { title: "Machines", component: Machines, slug: "machines" },
   { title: "Danger zone", component: DeleteAccount, slug: "delete-account" },
 ]
 
-// `verify` opens the email verification code form on the profile tab, so
-// a reload or a shared link lands on the same step
+// `verify` opens the email verification code form on the profile tab, and
+// `verify_2fa` the one that comes before setting up two-factor
+// authentication, so a reload or a shared link lands on the same step.
+// They're kept apart so only one code form is ever on the page.
 const tabSearchSchema = z.object({
   tab: z.string().catch(""),
   verify: z.boolean().optional().catch(undefined),
+  verify_2fa: z.boolean().optional().catch(undefined),
 })
 
 export const Route = createFileRoute("/_layout/settings")({
@@ -63,9 +68,11 @@ export const Route = createFileRoute("/_layout/settings")({
 function UserSettings() {
   const queryClient = useQueryClient()
   const currentUser = queryClient.getQueryData<UserPublic>(["currentUser"])
-  const finalTabs = currentUser?.is_superuser
-    ? tabsConfig.filter((t) => t.slug !== "delete-account")
-    : tabsConfig
+  const finalTabs = tabsConfig.filter(
+    (t) =>
+      !(t.slug === "delete-account" && currentUser?.is_superuser) &&
+      !(t.slug === "machines" && !currentUser?.can_link_machines),
+  )
   const { tab } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   // The setup tab used to be called "checklists"; old links still land on it.

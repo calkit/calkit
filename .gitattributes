@@ -1,1 +1,5 @@
 test/dvc-md5-dir/** text eol=lf
+
+# >>> calkit generated files (managed by calkit) >>>
+/.calkit/** text eol=lf
+# <<< calkit generated files <<<

@@ -51,6 +51,8 @@ export interface OverleafSyncStatusFile {
 
 export interface OverleafSyncStatus {
   path: string;
+  /** Whether Overleaf was asked just now, when answered on this machine. */
+  pulled?: boolean;
   overleaf_project_id?: string | null;
   overleaf_url?: string | null;
   last_sync_commit?: string | null;
@@ -69,6 +71,13 @@ export interface OverleafLinkPublic {
   project_name: string;
   project_title: string;
   current_user_access?: "read" | "write" | "admin" | "owner" | null;
+  /** Its repo on GitHub, e.g., `https://github.com/owner/name`. */
+  github_repo_url?: string | null;
+  /**
+   * The checkout on this machine that answers for it, when the extension
+   * is connected to Calkit here, rather than the hub.
+   */
+  local_path?: string | null;
 }
 
 export interface OverleafLookup {
@@ -143,6 +152,183 @@ export interface Figure {
   url?: string | null;
   content?: string | null;
   storage?: "git" | "dvc" | "dvc-zip" | null;
+}
+
+export interface FiguresPage {
+  items: Figure[];
+  total: number;
+}
+
+export interface Table {
+  path: string;
+  title: string;
+  stage?: string | null;
+  stage_status?: StageStatus | null;
+}
+
+export interface Result {
+  path: string;
+  title: string;
+  key?: string | null;
+  stage?: string | null;
+  stage_status?: StageStatus | null;
+}
+
+/** Where a path, or one value in a results file, came from. */
+export interface Provenance {
+  path: string;
+  key?: string | null;
+  exists: boolean;
+  value?: unknown;
+  value_error?: string | null;
+  stage?: string | null;
+  stage_kind?: string | null;
+  /** The app an export stage runs, e.g., Inkscape. */
+  stage_app?: string | null;
+  /** What to edit to change it: the stage's script, notebook, or document. */
+  source?: string | null;
+  command?: string | null;
+  /** What a manual step says to do. */
+  message?: string | null;
+  inputs: string[];
+  stage_status?: StageStatus | null;
+  stale_reason?: "pipeline" | "frozen" | null;
+  /** Where a copy, e.g., one put beside a document, came from. */
+  copied_from?: string | null;
+  copy_stage?: string | null;
+  /**
+   * Where calkit.yaml says something no stage makes came from, e.g., an
+   * import or who created it, maybe recorded for a folder it's in.
+   */
+  origin?: string | null;
+  origin_url?: string | null;
+  origin_path?: string | null;
+  /** Imported from a Git repo or another project, so it can be updated. */
+  updatable?: boolean;
+  /** Whether its source has something newer, if that's known. */
+  update_available?: boolean | null;
+  /** Data behind it, however far back, nothing records the origin of. */
+  gaps?: ProvenanceGap[];
+}
+
+/** The stage exporting a figure from the file it's drawn in. */
+export interface ExportStage {
+  name: string;
+  /** As written under its name in calkit.yaml. */
+  stage: Record<string, unknown>;
+  /** The app that exports it as the pipeline runs, if one does. */
+  exported_by?: string | null;
+  saved: boolean;
+}
+
+/** A file a new stage needs, uploaded or already in the project. */
+export interface StageFile {
+  path: string;
+  /** Uploaded, base64-encoded. */
+  content?: string;
+  /** Recorded as created by whoever adds it, e.g., a Photoshop file. */
+  created_by_me?: boolean;
+}
+
+export interface ImportUpdate {
+  path: string;
+  /** Whether the file changed, not only the commit it's recorded at. */
+  changed: boolean;
+  rev?: string | null;
+}
+
+/** A stage made from a script, as `calkit xr` makes one, maybe saved. */
+export interface StageFromScriptOrNotebookResponse {
+  stage_name: string;
+  stage_yaml: string;
+  environment: string;
+  environment_is_new: boolean;
+  environment_spec_path?: string | null;
+  environment_spec_content?: string | null;
+  dependencies: string[];
+  inputs: string[];
+  outputs: string[];
+  /** Found by reading it or declared by its stage, not just shown. */
+  found_outputs?: string[];
+  /** Inputs that aren't in the project and that no stage produces. */
+  missing_inputs: string[];
+  /** Data read from outside the project, as the script names it. */
+  external_inputs?: string[];
+  /** Data paths changed to read from the project instead, as named. */
+  rewritten?: string[];
+  /** Which output is what the document shows. */
+  produces?: string | null;
+  /** Documents changed to show it from there, with `\ckfigure`. */
+  included_in: string[];
+  saved: boolean;
+  git_repo_url: string;
+}
+
+/** The project's pipeline, as the hub summarizes it. */
+export interface ProjectPipeline {
+  /** Stages calkit.yaml declares, in its order. */
+  ck_stages: string[];
+  stage_statuses: Record<string, StageStatus>;
+  status: "up-to-date" | "stale" | "unknown";
+  error?: string | null;
+  /** The compiled DVC stages, by name, with what each runs and reads. */
+  dvc_stages?: Record<
+    string,
+    {
+      cmd?: string | string[];
+      deps?: string[] | null;
+      outs?: (string | Record<string, unknown>)[] | null;
+    }
+  >;
+}
+
+/** A run of the pipeline, wherever it ran. */
+export interface PipelineRun {
+  id: string;
+  location: "github-actions" | "local";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
+  created: string;
+  started?: string | null;
+  finished?: string | null;
+  url?: string | null;
+  git_rev?: string | null;
+  branch?: string | null;
+  started_by?: string | null;
+  /** By file name. */
+  github_workflow?: string | null;
+  /** Unknown for one just started, until GitHub lists it. */
+  github_run_id?: number | null;
+  /** For one on this machine, why it failed, and the end of its output. */
+  error?: string | null;
+  output?: string | null;
+  /** For one on this machine that's running, what it's doing now. */
+  progress?: RunProgress | null;
+}
+
+/** How far a run on this machine has got, from what it's printed. */
+export interface RunProgress {
+  phase: "starting" | "syncing" | "running" | "finishing" | "saving";
+  /** The stage running now, if one is, e.g., "sweep@1". */
+  stage: string | null;
+  n_done: number;
+  /** Unknown until the pipeline's been compiled. */
+  n_stages: number | null;
+}
+
+export interface PipelineRuns {
+  /** Newest first. */
+  runs: PipelineRun[];
+  total: number;
+  github_workflow?: string | null;
+  can_start: boolean;
+  cannot_start_reason?: string | null;
+}
+
+export interface ProvenanceGap {
+  path: string;
+  steps: { path: string; stage?: string | null }[];
+  /** Imported, but from somewhere only described, which nobody can check. */
+  unchecked?: boolean;
 }
 
 export interface ReferenceEntry {

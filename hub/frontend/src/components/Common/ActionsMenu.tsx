@@ -7,7 +7,7 @@ import {
   useDisclosure,
 } from "@chakra-ui/react"
 import { BsThreeDotsVertical } from "react-icons/bs"
-import { FiEdit, FiTrash } from "react-icons/fi"
+import { FiCreditCard, FiEdit, FiTrash } from "react-icons/fi"
 
 import type { UserPublic, ProjectPublic } from "../../client"
 import EditUser from "../Admin/EditUser"
@@ -18,9 +18,15 @@ interface ActionsMenuProps {
   type: string
   value: UserPublic | ProjectPublic
   disabled?: boolean
+  onEditSubscription?: () => void
 }
 
-const ActionsMenu = ({ type, value, disabled }: ActionsMenuProps) => {
+const ActionsMenu = ({
+  type,
+  value,
+  disabled,
+  onEditSubscription,
+}: ActionsMenuProps) => {
   const editEntityModal = useDisclosure()
   const deleteModal = useDisclosure()
 
@@ -40,6 +46,14 @@ const ActionsMenu = ({ type, value, disabled }: ActionsMenuProps) => {
           >
             Edit {type.toLowerCase()}
           </MenuItem>
+          {onEditSubscription ? (
+            <MenuItem
+              onClick={onEditSubscription}
+              icon={<FiCreditCard fontSize="16px" />}
+            >
+              Edit subscription
+            </MenuItem>
+          ) : null}
           <MenuItem
             onClick={deleteModal.onOpen}
             icon={<FiTrash fontSize="16px" />}

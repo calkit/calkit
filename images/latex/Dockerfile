@@ -40,16 +40,33 @@ RUN fmtutil-sys --all
 # demand isn't enough on its own. aastex631.cls refuses to load without
 # revtex4-1 and stops without reporting a missing file. newtx needs
 # txfonts' metrics, which surface as "Metric (TFM) file not found"
-# rather than as a missing .sty. Nothing can auto-install either.
+# rather than as a missing .sty, and tex-gyre's for its text-companion
+# (TS1) symbols, e.g., \textdegree or \textmu, which load TeX Gyre
+# Termes (ts1-qtmr) and fail the same way. Nothing can auto-install
+# either. tex-gyre is about 27 MB, most of it fonts no class asks for,
+# but tlmgr can't install part of a package.
 # sectsty and cite are what Calkit's own paper templates ask for, which
 # is what someone starting a project gets before they have asked for
 # anything.
+# makeindex builds indexes, e.g., the Caltech thesis template's, and is
+# a compiled tool, so like biber it can't be fetched on demand; without
+# it latexmk stops before running biber. About 50 kB.
 # latexdiff is here because `calkit latex diff` needs it; perl above is
-# what makes that possible.
+# what makes that possible. tex4ht and make4ht are for `calkit latex
+# to-docx --engine libreoffice`, which converts the source to ODT with
+# them, and luaxml, which make4ht's ODT output needs but doesn't depend
+# on. tex4ht brings compiled tools, so it can't be fetched on demand. About
+# 50 MB unpacked, mostly small font tables that compress well; what else
+# the conversion needs is installed further down.
 # cm-super supplies Type 1 versions of the EC fonts that elsarticle and
 # mnras ask for. Without it TeX generates bitmaps at run time, which
 # needs a writable texmf-var and produces worse PDFs; texmf-var is made
 # writable below anyway, for whatever else wants to generate a font.
+# dvipng, type1cm and underscore are for Matplotlib's text.usetex,
+# which runs latex and dvipng itself, so nothing fetches what's missing
+# on demand, and dvipng is a compiled tool anyway. With them, a Docker
+# environment built on this image can render plot labels with LaTeX.
+# About 1 MB together.
 # The last four are asked for by documents rather than by any class:
 # units, cross-references and algorithm listings. About 110 kB together.
 RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
@@ -57,8 +74,12 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
     until [ "$i" -gt 3 ]; do \
         tlmgr update --self && \
         tlmgr install biber \
+            makeindex \
             latexmk \
             latexdiff \
+            tex4ht \
+            make4ht \
+            luaxml \
             latexindent \
             chktex \
             texliveonfly \
@@ -79,6 +100,7 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
             caption \
             newtx \
             txfonts \
+            tex-gyre \
             xpatch \
             xstring \
             carlisle \
@@ -106,6 +128,9 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
             cm-super \
             sectsty \
             cite \
+            dvipng \
+            type1cm \
+            underscore \
             siunitx \
             cleveref \
             algorithms \
@@ -141,6 +166,35 @@ RUN i=1; \
     rm /tmp/packages.txt && \
     find /opt/.TinyTeX ! -perm -a+r -exec chmod a+rX {} + && \
     find /opt/.TinyTeX/texmf-var ! -perm -a+rw -exec chmod a+rwX {} +
+
+# What TeX4ht needs beyond TeX to convert a document for `calkit latex
+# to-docx --engine libreoffice`: Ghostscript to turn PDF figures into
+# images and zip to write the ODT. About 70 MB. Its Java post-processing is
+# left out; without it the ODT only loses a few text styles.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ghostscript zip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Pandoc, for documents written in Markdown, e.g., a Markdown stage's PDF,
+# so its version is pinned with the image rather than being whatever a
+# machine happens to have. The release publishes no checksums, so these are
+# the tarballs' as first downloaded. About 35 MB to download. Only pandoc
+# itself, not pandoc-server.
+ARG PANDOC_VERSION=3.12
+ARG TARGETARCH
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+    case "${arch}" in \
+        amd64) sum=67d7d011fed8c8543306022b985b9b2499ab9b74818df91d8727c7e9ebc5ba06 ;; \
+        arm64) sum=6cefcf7100e23a99447c26f89d1ff5b253f3407fcef99a9e27ae06f3ed16cb82 ;; \
+        *) echo "No pandoc build for ${arch}" >&2; exit 1 ;; \
+    esac && \
+    wget -qO /tmp/pandoc.tar.gz \
+        "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-${arch}.tar.gz" && \
+    echo "${sum}  /tmp/pandoc.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/pandoc.tar.gz -C /tmp && \
+    mv "/tmp/pandoc-${PANDOC_VERSION}/bin/pandoc" /usr/local/bin/pandoc && \
+    rm -rf /tmp/pandoc.tar.gz "/tmp/pandoc-${PANDOC_VERSION}"
 
 # The user tree is initialized at run time, not here: a mounted cache
 # starts empty and would hide anything this layer created.

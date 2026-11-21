@@ -8,16 +8,29 @@ import type {
   EnvDescription,
   NotebookEntry,
   PipelineStage,
+  QuestionCheck,
   QuestionEntry,
+  SignOffCheck,
+  SignOffEntry,
   StaleStageDetail,
 } from "./types";
 import { getExecutedNotebookHtmlPath } from "./notebooks";
+import { pipelineLatexDiffs } from "./latex/core";
 import {
   classifyStaleStage,
   dvcStageOutputPaths,
   type StaleClassification,
   outputEntryPath,
 } from "./pipeline/core";
+import { envRefParts } from "./subprojects";
+import { getOverleafRow, type OverleafState } from "./overleaf/core";
+import {
+  LETTER_COLORS,
+  lettersDescription,
+  lettersTooltip,
+  questionLetters,
+  worstLetterState,
+} from "./questions";
 
 // Singular node kinds and the matching calkit.yaml collection keys for the
 // artifact-style sections (figures, datasets, results, publications,
@@ -55,6 +68,23 @@ function answerText(question: string | QuestionEntry): string | undefined {
     .join("; ");
 }
 
+// The first and last line a plain file's evidence cites, e.g., 8 or "8-12",
+// or undefined if none or malformed, which the CLI's check reports.
+export function parseLines(
+  lines: number | string | undefined,
+): [number, number] | undefined {
+  const match = /^\s*(\d+)\s*(?:[-–]\s*(\d+)\s*)?$/.exec(String(lines ?? ""));
+  if (!match) {
+    return undefined;
+  }
+  const first = Number(match[1]);
+  const last = Number(match[2] ?? match[1]);
+  return first >= 1 && last >= first ? [first, last] : undefined;
+}
+
+// Where scheduler logs go, under a subproject's directory for its stages
+const SCHEDULER_LOG_DIR = /(^|\/)\.calkit\/scheduler\/logs\//;
+
 // Base codicon for each artifact kind (used when the artifact has provenance and
 // isn't stale; imported artifacts use a cloud icon instead).
 const ARTIFACT_ICONS: Record<ArtifactKind, string> = {
@@ -64,6 +94,35 @@ const ARTIFACT_ICONS: Record<ArtifactKind, string> = {
   publication: "book",
   presentation: "device-desktop",
 };
+
+// The names of who created an artifact, as calkit.yaml lists them
+function getCreators(entry: ArtifactEntry): string {
+  const people = [entry.created_by]
+    .flat()
+    .filter((p): p is { name?: string; email?: string } =>
+      Boolean(p && typeof p === "object"),
+    );
+  return people
+    .map((p) => p.name ?? p.email ?? "")
+    .filter(Boolean)
+    .join(", ");
+}
+
+// Where an artifact comes from, as a tooltip says it, or undefined when
+// nothing says: a stage makes it, it was imported, or someone created it
+function getOrigin(entry: ArtifactEntry): string | undefined {
+  if (typeof entry.stage === "string") {
+    return `stage: ${entry.stage}`;
+  }
+  if (entry.imported_from) {
+    return "imported";
+  }
+  if (entry.created_by) {
+    const creators = getCreators(entry);
+    return creators ? `created by ${creators}` : "created here";
+  }
+  return undefined;
+}
 
 export class SidebarItem extends vscode.TreeItem {
   constructor(
@@ -104,6 +163,10 @@ export class CalkitSidebarProvider
   // sections containing them) are shown. Set via setFilter, not refresh.
   private filterText = "";
   private lastFingerprint: string | undefined;
+  // From `calkit check questions`, in merged question order; empty until it
+  // has run, so questions render without their status until then
+  private questionChecks: (QuestionCheck | undefined)[] = [];
+  private lastQuestionChecks = "[]";
 
   // Cached section items so reveal() can use getParent()
   private readonly questionsSectionItem = this.makeSection(
@@ -133,6 +196,12 @@ export class CalkitSidebarProvider
     "presentations",
   );
   private readonly resultsSectionItem = this.makeSection("Results", "results");
+  private readonly overleafSectionItem = this.makeSection(
+    "Overleaf",
+    "overleaf",
+  );
+  // The folders synced with Overleaf, as last checked in the background
+  private overleafState: OverleafState = { checking: false };
   private stageItemCache = new Map<string, SidebarItem>();
   private envItemCache = new Map<string, SidebarItem>();
 
@@ -203,6 +272,83 @@ export class CalkitSidebarProvider
     return this.filterText;
   }
 
+  // Show the folders synced with Overleaf as last checked, which arrives
+  // separately from refresh() since asking Overleaf is slow
+  setOverleafState(state: OverleafState): void {
+    this.overleafState = state;
+    this._onDidChangeTreeData.fire();
+  }
+
+  // A row per folder synced with Overleaf, with what a sync would do
+  private getOverleafItems(): SidebarItem[] {
+    const state = this.overleafState;
+    const rows = (state.statuses ?? [])
+      .filter((status) => this.matchesFilter(status.path))
+      .map((status) => {
+        const row = getOverleafRow(status, state);
+        const item = new SidebarItem(
+          status.path,
+          vscode.TreeItemCollapsibleState.None,
+          "overleaf-folder",
+          status.path,
+        );
+        item.description = row.description;
+        item.tooltip = row.tooltip;
+        item.iconPath = new vscode.ThemeIcon(row.icon);
+        item.contextValue = status.overleaf_url
+          ? "overleaf-folder-url"
+          : "overleaf-folder";
+        if (state.conflict === status.path) {
+          item.command = {
+            command: "calkit-vscode.resolveOverleafConflict",
+            title: "Resolve",
+          };
+        }
+        return item;
+      });
+    // What was last known stays shown under why it couldn't be checked
+    if (state.error) {
+      const item = new SidebarItem(
+        state.needsLogin ? "Sign in to Overleaf" : "Couldn't check Overleaf",
+        vscode.TreeItemCollapsibleState.None,
+        "overleaf-error",
+      );
+      item.iconPath = new vscode.ThemeIcon("warning");
+      item.tooltip = state.error;
+      if (state.needsLogin) {
+        item.command = {
+          command: "calkit-vscode.overleafLogin",
+          title: "Sign in to Overleaf",
+        };
+      }
+      return [item, ...rows];
+    }
+    if (!state.statuses) {
+      const item = new SidebarItem(
+        state.checking ? "Checking Overleaf" : "Not synced with Overleaf",
+        vscode.TreeItemCollapsibleState.None,
+        "empty",
+      );
+      item.iconPath = new vscode.ThemeIcon(
+        state.checking ? "sync~spin" : "info",
+      );
+      return [item];
+    }
+    return rows;
+  }
+
+  // Set each question's check, aligned with the merged questions. Kept
+  // separate from refresh() since the check is slower and arrives later.
+  setQuestionChecks(checks: (QuestionCheck | undefined)[]): void {
+    const next = JSON.stringify(checks);
+    if (next === this.lastQuestionChecks) {
+      return;
+    }
+    this.lastQuestionChecks = next;
+    this.questionChecks = checks;
+    this._onDidChangeTreeData.fire();
+  }
+
   // True when no filter is active, or any of the given texts contains it.
   private matchesFilter(...texts: (string | undefined)[]): boolean {
     if (!this.filterText) {
@@ -245,6 +391,13 @@ export class CalkitSidebarProvider
     if (this.staleStageNames.size > 0) {
       counts.set("pipeline", this.staleStageNames.size);
     }
+    // Folders synced with Overleaf that a sync would change
+    const unsynced = (this.overleafState.statuses ?? []).filter(
+      (status) => getOverleafRow(status, this.overleafState).needsSync,
+    ).length;
+    if (unsynced > 0) {
+      counts.set("overleaf", unsynced);
+    }
     // Notebooks with no environment
     const stages = this.calkitConfig?.pipeline?.stages ?? {};
     const listed = this.calkitConfig?.notebooks ?? [];
@@ -282,7 +435,7 @@ export class CalkitSidebarProvider
           nodeKind,
           outputToStage,
         );
-        if (!entry.stage && !entry.imported_from) {
+        if (!getOrigin(entry)) {
           n++;
         }
       }
@@ -297,7 +450,21 @@ export class CalkitSidebarProvider
     if (this.stageItemCache.size === 0) {
       this.getStageItems();
     }
-    return this.stageItemCache.get(stageName);
+    const cached = this.stageItemCache.get(stageName);
+    if (cached) {
+      return cached;
+    }
+    // A stage a Markdown file declares isn't made until its file's stage is
+    // expanded
+    for (const [parent, children] of this.markdownStageChildren()) {
+      if (children.includes(stageName)) {
+        return this.makeStageItem(
+          stageName,
+          stageName.slice(parent.length + 1),
+        );
+      }
+    }
+    return undefined;
   }
 
   findEnvItem(envName: string): SidebarItem | undefined {
@@ -358,6 +525,7 @@ export class CalkitSidebarProvider
           this.figuresSectionItem,
           this.datasetsSectionItem,
           this.publicationsSectionItem,
+          this.overleafSectionItem,
           this.presentationsSectionItem,
           this.resultsSectionItem,
         ]
@@ -394,6 +562,8 @@ export class CalkitSidebarProvider
         return this.getArtifactItems("presentations");
       case "section-results":
         return this.getArtifactItems("results");
+      case "section-overleaf":
+        return this.getOverleafItems();
       case "question":
         return this.getQuestionProps(element.nodeId ?? "");
       case "env":
@@ -436,6 +606,7 @@ export class CalkitSidebarProvider
         this.matchesFilter(
           questionText(question),
           typeof question === "string" ? undefined : question.hypothesis,
+          typeof question === "string" ? undefined : question.approach,
           answerText(question),
         ),
       );
@@ -449,8 +620,11 @@ export class CalkitSidebarProvider
       const hasDetails =
         typeof question !== "string" &&
         (!!question.hypothesis ||
+          !!question.approach ||
           !!question.answer ||
-          (question.evidence?.length ?? 0) > 0);
+          (question.evidence?.length ?? 0) > 0 ||
+          (question.verifications?.length ?? 0) > 0 ||
+          (question.validations?.length ?? 0) > 0);
       const item = new SidebarItem(
         text,
         hasDetails
@@ -462,6 +636,23 @@ export class CalkitSidebarProvider
       item.iconPath = new vscode.ThemeIcon("question");
       item.tooltip = text;
       item.contextValue = "question";
+      const check = this.questionChecks[index - 1];
+      if (check) {
+        // Tree items can't color parts of a row, so the letters go in the
+        // description, the worst state colors the icon, and the tooltip has
+        // the colored row with what each letter means
+        const letters = questionLetters(question, check, this.staleStageNames);
+        item.description = lettersDescription(letters);
+        item.iconPath = new vscode.ThemeIcon(
+          "question",
+          new vscode.ThemeColor(LETTER_COLORS[worstLetterState(letters)]),
+        );
+        const tooltip = new vscode.MarkdownString(
+          lettersTooltip(text, letters),
+        );
+        tooltip.supportHtml = true;
+        item.tooltip = tooltip;
+      }
       return item;
     });
   }
@@ -471,6 +662,7 @@ export class CalkitSidebarProvider
     if (question === undefined || typeof question === "string") {
       return [];
     }
+    const check = this.questionChecks[Number(indexId) - 1];
     const items: SidebarItem[] = [];
     // Hypothesis and answer are single-line text props, mirroring the
     // label/description prop rows used by stages and artifacts.
@@ -488,6 +680,9 @@ export class CalkitSidebarProvider
     if (question.hypothesis) {
       detail("Hypothesis", question.hypothesis, "lightbulb");
     }
+    if (question.approach) {
+      detail("Approach", question.approach, "list-ordered");
+    }
     const answer = answerText(question);
     if (answer) {
       detail("Answer", answer, "check");
@@ -502,19 +697,83 @@ export class CalkitSidebarProvider
         "question-evidence",
         ev.path,
       );
-      evItem.description = ev.path;
+      // As calkit.questions.get_evidence_kind reads it: no kind is a plain
+      // file, unless a key or values make it a result
+      const kind =
+        ev.kind ?? (ev.key != null || ev.values != null ? "result" : undefined);
+      const lines = kind === undefined ? parseLines(ev.lines) : undefined;
+      evItem.description =
+        ev.path && lines
+          ? `${ev.path}, ` +
+            (lines[0] === lines[1]
+              ? `line ${lines[0]}`
+              : `lines ${lines[0]}–${lines[1]}`)
+          : ev.path;
       evItem.tooltip = ev.explanation ?? ev.path;
       evItem.iconPath = new vscode.ThemeIcon(
-        ev.kind === "result" ? "graph" : "file-media",
+        kind === "result" || kind === "value"
+          ? "graph"
+          : kind === undefined
+          ? "file"
+          : "file-media",
       );
       if (this.workspaceRoot && ev.path) {
+        const uri = vscode.Uri.file(path.join(this.workspaceRoot, ev.path));
+        // Opened at the cited lines, which are 1-based and inclusive
         evItem.command = {
           command: "vscode.open",
           title: "Open",
-          arguments: [vscode.Uri.file(path.join(this.workspaceRoot, ev.path))],
+          arguments: lines
+            ? [
+                uri,
+                {
+                  selection: new vscode.Range(
+                    lines[0] - 1,
+                    0,
+                    lines[1] - 1,
+                    Number.MAX_SAFE_INTEGER,
+                  ),
+                },
+              ]
+            : [uri],
         };
       }
       items.push(evItem);
+    }
+    // Sign-offs, with their status once the check has run; the check lists
+    // the same entries in the same order
+    for (const [label, entries, checked] of [
+      ["Verified", question.verifications, check?.verifications],
+      ["Validated", question.validations, check?.validations],
+    ] as [string, SignOffEntry[] | undefined, SignOffCheck[] | undefined][]) {
+      (entries ?? []).forEach((entry, i) => {
+        const c = checked?.[i];
+        const by = c?.by ?? entry.by?.name ?? entry.by?.email ?? "unknown";
+        const date = c?.date ?? entry.date;
+        const item = new SidebarItem(
+          label,
+          vscode.TreeItemCollapsibleState.None,
+          "question-sign-off",
+        );
+        item.description = [
+          by,
+          date ? String(date) : undefined,
+          c?.status === "stale" ? "stale" : undefined,
+        ]
+          .filter(Boolean)
+          .join(", ");
+        item.tooltip =
+          [entry.notes, c?.message].filter(Boolean).join("\n\n") || undefined;
+        item.iconPath = new vscode.ThemeIcon(
+          c?.status === "stale" ? "warning" : "verified",
+          c
+            ? new vscode.ThemeColor(
+                LETTER_COLORS[c.status === "stale" ? "stale" : "ok"],
+              )
+            : undefined,
+        );
+        items.push(item);
+      });
     }
     return items;
   }
@@ -850,7 +1109,10 @@ export class CalkitSidebarProvider
       // The notebook itself opens when clicked in the tree, so no separate
       // "Open" child is needed. Offer the executed HTML when it has been
       // generated.
-      const htmlRel = getExecutedNotebookHtmlPath(nbPath);
+      const htmlRel = getExecutedNotebookHtmlPath(
+        nbPath,
+        stage?.subproject_wdir,
+      );
       if (fs.existsSync(path.join(this.workspaceRoot, htmlRel))) {
         const htmlItem = new SidebarItem(
           "Open executed HTML",
@@ -912,8 +1174,13 @@ export class CalkitSidebarProvider
     outputToStage: Map<string, string>,
   ): ArtifactEntry {
     const list = (this.calkitConfig?.[`${kind}s`] ?? []) as ArtifactEntry[];
-    const fromList = list.find((e) => e.path === artifactPath);
-    if (fromList?.stage || fromList?.imported_from) {
+    // Or under misc, where an origin may have been recorded, e.g., by an
+    // older hub, before it filed data under datasets
+    const misc = (this.calkitConfig?.misc ?? []) as ArtifactEntry[];
+    const fromList =
+      list.find((e) => e.path === artifactPath) ??
+      misc.find((e) => e.path === artifactPath && getOrigin(e));
+    if (fromList && getOrigin(fromList)) {
       return fromList;
     }
     const stageName = outputToStage.get(artifactPath);
@@ -961,7 +1228,8 @@ export class CalkitSidebarProvider
     nodeKind: ArtifactKind,
   ): SidebarItem {
     const label = path.basename(entry.path);
-    const hasProvenance = !!entry.stage || !!entry.imported_from;
+    const origin = getOrigin(entry);
+    const hasProvenance = Boolean(origin);
     const isStale =
       typeof entry.stage === "string" && this.staleStageNames.has(entry.stage);
     const collapsible = hasProvenance
@@ -989,9 +1257,7 @@ export class CalkitSidebarProvider
         isImported ? "cloud-download" : ARTIFACT_ICONS[nodeKind],
         new vscode.ThemeColor("testing.iconPassed"),
       );
-      item.tooltip = entry.stage
-        ? `${entry.path} — stage: ${entry.stage}`
-        : `${entry.path} — imported`;
+      item.tooltip = `${entry.path} — ${origin}`;
       item.contextValue = nodeKind;
     }
     // Clicking opens the file in the regular viewer (the inline carousel icon
@@ -1061,6 +1327,15 @@ export class CalkitSidebarProvider
       importItem.description = src;
       importItem.iconPath = new vscode.ThemeIcon("cloud-download");
       items.push(importItem);
+    } else if (entry.created_by) {
+      const createdItem = new SidebarItem(
+        "Created by",
+        vscode.TreeItemCollapsibleState.None,
+        "artifact-created-prop",
+      );
+      createdItem.description = getCreators(entry);
+      createdItem.iconPath = new vscode.ThemeIcon("person");
+      items.push(createdItem);
     }
     if (this.workspaceRoot) {
       const openItem = new SidebarItem(
@@ -1078,6 +1353,9 @@ export class CalkitSidebarProvider
         ],
       };
       items.push(openItem);
+    }
+    if (nodeKind === "publication" && typeof entry.stage === "string") {
+      items.push(...this.latexDiffItems(entry.stage));
     }
     return items;
   }
@@ -1185,7 +1463,7 @@ export class CalkitSidebarProvider
   // files for each part.
   private envFilePaths(envName: string): string[] {
     const paths: string[] = [];
-    for (const part of envName.split(":")) {
+    for (const part of this.envRefParts(envName)) {
       const desc = this.envDescriptions?.[part];
       if (desc?.spec_path) {
         paths.push(desc.spec_path);
@@ -1232,6 +1510,7 @@ export class CalkitSidebarProvider
               typeof calkitStage.environment === "string"
                 ? this.envFilePaths(calkitStage.environment)
                 : [],
+            projectDir: calkitStage.subproject_wdir,
           })
         : undefined;
     // An output is "modified" when its file changed on disk, or "stale" when an
@@ -1357,7 +1636,7 @@ export class CalkitSidebarProvider
       // "Output" row opens a real file. Scheduler logs get their own row below.
       const explicitOutputs = calkitStage.iterate_over
         ? dvcStageOutputPaths(this.dvcYaml?.stages?.[stageName] ?? {}).filter(
-            (p) => !p.startsWith(".calkit/scheduler/logs/"),
+            (p) => !SCHEDULER_LOG_DIR.test(p),
           )
         : Array.isArray(calkitStage.outputs)
         ? (calkitStage.outputs as (string | { path: string })[]).map(
@@ -1396,7 +1675,68 @@ export class CalkitSidebarProvider
       prop("Log", logPath, "output", logPath);
     }
 
+    items.push(...this.latexDiffItems(stageName));
     return items;
+  }
+
+  // One row per diff a latex stage keeps, showing whether it's built and
+  // current. Clicking opens it once built; the inline action (re)builds it.
+  private latexDiffItems(latexStageName: string): SidebarItem[] {
+    const stages = this.calkitConfig?.pipeline?.stages ?? {};
+    return pipelineLatexDiffs(stages)
+      .filter((diff) => diff.latexStage === latexStageName)
+      .map((diff) => {
+        const label = diff.toRef
+          ? `Diff ${diff.fromRef}..${diff.toRef}`
+          : `Diff vs ${diff.fromRef}`;
+        const absPath = this.workspaceRoot
+          ? path.join(this.workspaceRoot, diff.path)
+          : undefined;
+        const built = !!absPath && fs.existsSync(absPath);
+        const running = this.runningStageNames.has(diff.stage);
+        const stale = this.staleStageNames.has(diff.stage);
+        const item = new SidebarItem(
+          label,
+          vscode.TreeItemCollapsibleState.None,
+          "latex-diff",
+          diff.stage,
+        );
+        const against = diff.toRef ?? "the working tree";
+        if (running) {
+          item.description = "running";
+          item.iconPath = new vscode.ThemeIcon("loading~spin");
+        } else if (!built) {
+          item.description = "not built";
+          item.iconPath = new vscode.ThemeIcon("circle-outline");
+        } else if (stale) {
+          item.description = "stale";
+          item.iconPath = new vscode.ThemeIcon(
+            "warning",
+            new vscode.ThemeColor("list.warningForeground"),
+          );
+        } else {
+          item.iconPath = new vscode.ThemeIcon(
+            "diff",
+            new vscode.ThemeColor("testing.iconPassed"),
+          );
+        }
+        item.contextValue = !built
+          ? "latex-diff-missing"
+          : stale
+          ? "latex-diff-stale"
+          : "latex-diff";
+        item.tooltip =
+          `${diff.document}: ${diff.fromRef} against ${against}\n` +
+          `Stage: ${diff.stage}\n${diff.path}`;
+        if (built && absPath) {
+          item.command = {
+            command: "vscode.open",
+            title: "Open",
+            arguments: [vscode.Uri.file(absPath)],
+          };
+        }
+        return item;
+      });
   }
 
   // Repo-relative path of the scheduler log for a stage, or undefined if the
@@ -1408,7 +1748,7 @@ export class CalkitSidebarProvider
     for (const out of outs) {
       const p =
         typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
-      if (p.startsWith(".calkit/scheduler/logs/")) {
+      if (SCHEDULER_LOG_DIR.test(p)) {
         return p;
       }
     }
@@ -1417,9 +1757,20 @@ export class CalkitSidebarProvider
       const override = stage.scheduler?.log_path;
       return typeof override === "string" && override
         ? override
-        : `.calkit/scheduler/logs/${stageName}.out`;
+        : path.posix.join(
+            stage.subproject_wdir ?? "",
+            ".calkit/scheduler/logs",
+            `${stageName.slice(stageName.lastIndexOf(":") + 1)}.out`,
+          );
     }
     return undefined;
+  }
+
+  private envRefParts(envRef: string): string[] {
+    return envRefParts(
+      envRef,
+      new Set(Object.keys(this.calkitConfig?.environments ?? {})),
+    );
   }
 
   // Whether a stage runs under a SLURM/PBS scheduler. Environments combine as
@@ -1430,7 +1781,7 @@ export class CalkitSidebarProvider
     if (typeof envRef !== "string") {
       return false;
     }
-    const outerName = envRef.split(":")[0];
+    const outerName = this.envRefParts(envRef)[0];
     const kind = this.calkitConfig?.environments?.[outerName]?.kind;
     return kind === "slurm" || kind === "pbs";
   }

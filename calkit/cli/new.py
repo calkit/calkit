@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import time
@@ -425,6 +426,7 @@ def new_project(
         prj = calkit.detect_project_name(wdir=abs_path)
         hub_url = calkit.hub.get_hub_url()
         add_msg = f"\n\nYou can view your project at {hub_url}/{prj}"
+        calkit.record_project_path(abs_path)
         typer.echo(success_message + add_msg)
         return
     # If using a template, clone it first
@@ -562,6 +564,7 @@ def new_project(
         repo.git.add(".")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Create new project from {template_name}"])
+        calkit.record_project_path(abs_path)
         typer.echo(success_message)
         return
     os.makedirs(abs_path, exist_ok=True)
@@ -618,6 +621,7 @@ def new_project(
             warn(f"Failed to set up Calkit DVC remote: {e}")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
+    calkit.record_project_path(abs_path)
     typer.echo(success_message)
 
 
@@ -944,6 +948,133 @@ def new_question(
         repo.git.commit(["-m", "Add question"])
 
 
+@new_app.command(name="comment")
+def new_comment(
+    path: Annotated[
+        str,
+        typer.Argument(
+            help="File to comment in, or a PDF, whose comments go in its "
+            "review file."
+        ),
+    ],
+    text: Annotated[str, typer.Option("--text", "-m", help="The comment.")],
+    line: Annotated[
+        int | None,
+        typer.Option(
+            "--line",
+            "-l",
+            help="A line in, or just above, the paragraph to comment on; for "
+            "a PDF, the line number printed in its margin, if any.",
+        ),
+    ] = None,
+    page: Annotated[
+        int | None,
+        typer.Option("--page", help="For a PDF, the page it's about."),
+    ] = None,
+    highlight: Annotated[
+        str | None,
+        typer.Option(
+            "--highlight", help="Rendered text in the paragraph it's about."
+        ),
+    ] = None,
+    section: Annotated[
+        str | None,
+        typer.Option(
+            "--section",
+            help="For a PDF, the review's comments section to add it to "
+            "(e.g., major or minor), made if missing; defaults to the last.",
+        ),
+    ] = None,
+    occ: Annotated[
+        int,
+        typer.Option(
+            "--occ", help="Which occurrence of the highlight text, from 0."
+        ),
+    ] = 0,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", help="Defaults to Git's user.name."),
+    ] = None,
+    email: Annotated[
+        str | None,
+        typer.Option("--email", help="Defaults to Git's user.email."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output the thread as JSON.")
+    ] = False,
+) -> None:
+    """Start a review comment thread above a paragraph of a LaTeX or
+    Markdown document, printing its ID.
+
+    A comment on a PDF is added to the publication's review file instead,
+    as a numbered item saying where it's about, e.g., Page 3, line 120
+    ("quoted text"), in a section like Major comments, so it can be pasted
+    into a journal's review form.
+    The review file is listed in calkit.yaml and made beside the PDF if
+    there isn't one.
+    """
+    import json
+
+    import calkit.latex
+    from calkit.cli.latex import comment_entry
+
+    if not os.path.isfile(path):
+        raise_error(f"{path} does not exist")
+    if path.lower().endswith(".pdf"):
+        import calkit.reviews
+
+        # The review file only says where a comment is about from its page
+        if page is None and (line is not None or highlight):
+            raise_error("--line and --highlight need --page for a PDF")
+        review = calkit.reviews.ensure_review(path)
+        comment = calkit.reviews.ReviewComment(
+            text=text, page=page, line=line, quote=highlight or None
+        )
+        review_lines = (
+            pathlib.Path(review).read_text(encoding="utf-8").split("\n")
+        )
+        review_lines = calkit.reviews.add(review_lines, comment, section)
+        pathlib.Path(review).write_text(
+            "\n".join(review_lines), encoding="utf-8"
+        )
+        ordinal = next(
+            i
+            for i, c in enumerate(calkit.reviews.parse(review_lines), 1)
+            if c.lineno == comment.lineno
+        )
+        if as_json:
+            typer.echo(
+                json.dumps(
+                    calkit.reviews.to_dict(review, ordinal, comment), indent=2
+                )
+            )
+        else:
+            typer.echo(f"{review}:{comment.lineno}")
+        return
+    if line is None:
+        raise_error("--line is required, except for a PDF")
+    lines = pathlib.Path(path).read_text(encoding="utf-8").split("\n")
+    tc = calkit.latex.TexComment(
+        [comment_entry(text, author, email)],
+        highlight=highlight or None,
+        highlight_occ=occ,
+        id=calkit.latex.new_comment_id(),
+        markdown=calkit.latex.is_markdown(path),
+    )
+    try:
+        calkit.latex.add_comment(lines, line, tc)
+    except ValueError as e:
+        raise_error(str(e))
+    pathlib.Path(path).write_text("\n".join(lines), encoding="utf-8")
+    if as_json:
+        blks = calkit.latex.file_blocks(path, lines)
+        typer.echo(
+            json.dumps(calkit.latex.comment_to_dict(path, tc, blks), indent=2)
+        )
+    else:
+        typer.echo(tc.id)
+
+
 @new_app.command("notebook|nb")
 def new_notebook(
     path: Annotated[str, typer.Argument(help="Notebook path (relative)")],
@@ -1140,7 +1271,7 @@ def new_docker_env(
 ):
     """Create a new Docker environment."""
     from calkit.cli.check import check_environment
-    from calkit.docker import LAYERS
+    from calkit.environments.docker import LAYERS
 
     if base is not None and path is None:
         path = "Dockerfile"
@@ -1216,7 +1347,7 @@ def new_docker_env(
         env["inputs"] = inputs  # type: ignore
     if ports:
         env["ports"] = ports  # type: ignore
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -1573,9 +1704,9 @@ def new_publication(
     repo = calkit.git.get_repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
-        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+        from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
-        envs[env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
+        calkit.set_yaml_item(envs, env_name, dict(DEFAULT_ENVIRONMENT))
         ck_info["environments"] = envs
     # Copy in template files if applicable. This happens before the stage is
     # built so its inputs can be detected from the document itself: a template
@@ -1725,7 +1856,7 @@ def new_conda_env(
         env["prefix"] = prefix
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -1755,7 +1886,15 @@ def new_uv_env(
     ] = None,
     packages: Annotated[
         list[str] | None,
-        typer.Argument(help="Packages to include in the environment."),
+        typer.Argument(
+            help=(
+                "Packages to include in the environment, e.g., "
+                "'pandas==2.2.3' to keep a version."
+            )
+        ),
+    ] = None,
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     no_check: Annotated[
         bool,
@@ -1789,6 +1928,23 @@ def new_uv_env(
             os.makedirs(envdir, exist_ok=True)
         else:
             envdir = "."
+    # uv picks the interpreter from .python-version, since requires-python
+    # is only a floor, so one already there has to agree with --python
+    python_version_path = os.path.join(envdir, ".python-version")
+    if python_version and os.path.isfile(python_version_path):
+        with open(python_version_path, encoding="utf-8") as f:
+            lines = [ln.strip() for ln in f.read().splitlines()]
+        existing_pin = next(
+            (ln for ln in lines if ln and not ln.startswith("#")), ""
+        )
+        if existing_pin != python_version and not existing_pin.startswith(
+            python_version + "."
+        ):
+            raise_error(
+                f"'{python_version_path}' already pins Python "
+                f"'{existing_pin}', not {python_version}; update it with "
+                f"'uv python pin {python_version}' or drop --python"
+            )
     if not os.path.isfile(path):
         res = subprocess.run(
             ["uv", "init", "--bare", "--directory", envdir, "--no-workspace"]
@@ -1796,19 +1952,35 @@ def new_uv_env(
         )
         if res.returncode != 0:
             raise_error("Failed to create uv environment")
+    pinned_python = False
+    if python_version and not os.path.isfile(python_version_path):
+        res = subprocess.run(
+            ["uv", "python", "pin", python_version], cwd=envdir
+        )
+        if res.returncode != 0:
+            raise_error(f"Failed to pin Python {python_version}")
+        pinned_python = True
     if packages:
         res = subprocess.run(["uv", "add"] + packages, cwd=envdir)
         if res.returncode != 0:
             raise_error("Failed to add packages to uv environment")
     if not no_check:
-        subprocess.run(["uv", "sync"], cwd=envdir)
-    envs[name] = dict(kind="uv", path=path)
+        res = subprocess.run(["uv", "sync"], cwd=envdir)
+        if res.returncode != 0:
+            raise_error("Failed to sync uv environment")
+    env = dict(kind="uv", path=path)
+    if description is not None:
+        env["description"] = description
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
         repo = calkit.git.get_repo()
         repo.git.add(path)
+        # A project that ignores the pin has chosen not to commit it
+        if pinned_python and not repo.ignored(python_version_path):
+            repo.git.add(python_version_path)
         repo.git.add("calkit.yaml")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Add uv environment {name}"])
@@ -1904,7 +2076,7 @@ def new_slurm_env(
             env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2013,7 +2185,7 @@ def new_pbs_env(
             env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2120,7 +2292,7 @@ def new_uv_venv(
         env["python"] = python_version
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2219,7 +2391,7 @@ def new_venv(
         env["prefix"] = prefix
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2322,7 +2494,7 @@ def new_pixi_env(
     env = dict(kind="pixi", path="pixi.toml", name=name)
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2465,7 +2637,7 @@ def new_julia_env(
     env = dict(kind="julia", path=path, julia=julia_version)
     if description is not None:
         env["description"] = description
-    envs[name] = env
+    calkit.set_yaml_item(envs, name, env)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2618,7 +2790,7 @@ def new_renv(
     env_info = dict(kind="renv", path=path)
     if description:
         env_info["description"] = description
-    envs[name] = env_info
+    calkit.set_yaml_item(envs, name, env_info)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -2634,6 +2806,82 @@ def new_renv(
         repo.git.add("calkit.yaml")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Add renv environment {name}"])
+
+
+@new_app.command("texlive-env")
+def new_texlive_env(
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ] = "tex",
+    packages: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "TeX Live packages beyond the base set (pdfLaTeX, LuaLaTeX, "
+                "latexmk); builds add what documents need anyway."
+            )
+        ),
+    ] = None,
+    release: Annotated[
+        int | None,
+        typer.Option(
+            "--release",
+            help=(
+                "TeX Live release; defaults to the latest frozen one, "
+                "written out so it only changes when you change it."
+            ),
+        ),
+    ] = None,
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite", "-f", help="Overwrite an existing environment."
+        ),
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Don't lock and install it now.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+) -> None:
+    """Create a new TeX Live environment, which builds LaTeX documents
+    without Docker or a system TeX.
+    """
+    from calkit.cli.check import check_environment
+    from calkit.environments.texlive import DEFAULT_RELEASE
+
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    # Pinned, so a new default in Calkit doesn't move it
+    env: dict = {"kind": "texlive", "release": release or DEFAULT_RELEASE}
+    if packages:
+        env["packages"] = packages
+    if description is not None:
+        env["description"] = description
+    calkit.set_yaml_item(envs, name, env)
+    ck_info["environments"] = envs
+    calkit.save_calkit_info(ck_info)
+    repo = calkit.git.get_repo()
+    repo.git.add("calkit.yaml")
+    if not no_check:
+        env_lock_fpath = check_environment(env_name=name)
+        if env_lock_fpath is not None:
+            repo.git.add(env_lock_fpath)
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add TeX Live environment {name}"])
 
 
 @new_app.command("nix-env")
@@ -2766,7 +3014,7 @@ def new_nix_env(
     env_info: dict = dict(kind="nix", path=path)
     if description:
         env_info["description"] = description
-    envs[name] = env_info
+    calkit.set_yaml_item(envs, name, env_info)
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -3504,15 +3752,17 @@ def new_release(
         ),
     ] = False,
     to: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--to",
             help=(
                 "Archival service to use for external releases (zenodo or "
-                "caltechdata); ignored for --internal releases."
+                "caltechdata); ignored for --internal releases. "
+                "If not specified, default_archival_service from the config "
+                "will be used."
             ),
         ),
-    ] = "zenodo",
+    ] = None,
     draft_only: Annotated[
         bool,
         typer.Option(
@@ -3545,6 +3795,8 @@ def new_release(
 
     import calkit.pipeline
 
+    if to is None:
+        to = calkit.config.read().default_archival_service
     to = to.lower()
     dotenv.load_dotenv()
     ck_info = calkit.load_calkit_info()
@@ -3620,7 +3872,6 @@ def new_release(
             raise_error(str(e))
     # Check that the pipeline is up-to-date, limiting the check to the stage
     # that produces the released artifact when releasing a single path.
-    typer.echo("Checking pipeline is up-to-date for release")
     targets = None
     # The stage that builds the released path, whose upstream stages define
     # what a --pipeline release carries
@@ -3640,6 +3891,34 @@ def new_release(
         # A project release carries the whole pipeline already
         typer.echo("Project releases already include the pipeline")
         include_pipeline = False
+    # A release that carries its pipeline is checked by running it, which
+    # needs the project's requirements met, so check them as 'calkit run'
+    # does before anything slow, like building environments or archiving.
+    # A project archive with no pipeline isn't run, as in
+    # check_project_release_archive, so its requirements don't matter here.
+    has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile("dvc.yaml")
+    if include_pipeline or (
+        path == "." and not internal_release and has_pipeline
+    ):
+        typer.echo("Checking project requirements")
+        # Variables the project sets itself can meet its requirements, as
+        # they do for 'calkit run'
+        calkit.set_env_vars(ck_info=ck_info)
+        for req_wdir, req_info in calkit.iter_projects(ck_info=ck_info):
+            try:
+                with calkit.in_project(req_wdir):
+                    # A dry run doesn't install anything
+                    calkit.check_requirements(
+                        ck_info=req_info,
+                        interactive=False if dry_run else None,
+                    )
+            except Exception as e:
+                raise_error(
+                    "Project requirements aren't met, so the release can't "
+                    "be checked by running its pipeline: "
+                    f"{calkit.describe_project(req_wdir)}{e}"
+                )
+    typer.echo("Checking pipeline is up-to-date for release")
     status = calkit.pipeline.get_status(
         ck_info=ck_info,
         targets=targets,
@@ -3991,31 +4270,8 @@ def new_release(
             typer.echo(f"Read {len(authors)} author(s) from CITATION.cff")
         else:
             warn("No authors defined for the project")
-            still_entering_authors = True
-            n = 0
-            while still_entering_authors:
-                n += 1
-                author = dict()
-                author["first_name"] = typer.prompt(
-                    f"Enter the first name of author {n}"
-                )
-                author["last_name"] = typer.prompt(
-                    f"Enter the last name of author {n}"
-                )
-                author["affiliation"] = typer.prompt(
-                    f"Enter the affiliation of author {n}"
-                )
-                has_orcid = typer.confirm(
-                    f"Does author {n} have an ORCID?", default=False
-                )
-                if has_orcid:
-                    author["orcid"] = typer.prompt(
-                        f"Enter the ORCID of author {n}"
-                    )
-                authors.append(author)
-                still_entering_authors = typer.confirm(
-                    "Are there more authors to enter?", default=True
-                )
+            # A dry run changes nothing, the config included
+            authors = calkit.releases.prompt_authors(save_user=not dry_run)
             # Write authors out to CITATION.cff
             if not dry_run:
                 typer.echo("Writing authors to CITATION.cff")
@@ -4108,28 +4364,9 @@ def new_release(
                 record_id = invenio_dep["id"]
             files = os.listdir(release_files_dir)
             for filename in files:
-                typer.echo(f"Uploading {filename}")
-                fpath = os.path.join(release_files_dir, filename)
-                # First, initiate the file upload
-                calkit.invenio.post(
-                    f"/records/{record_id}/draft/files",
-                    json=[{"key": filename}],
-                    service=to,  # type: ignore
-                )
-                # Then upload the file content
-                with open(fpath, "rb") as f:
-                    file_data = f.read()
-                    resp = calkit.invenio.put(
-                        f"/records/{record_id}/draft/files/{filename}/content",
-                        headers={"Content-Type": "application/octet-stream"},
-                        as_json=False,
-                        service=to,  # type: ignore
-                        data=file_data,
-                    )
-                    typer.echo(f"Status code: {resp.status_code}")
-                # Commit the file
-                calkit.invenio.post(
-                    f"/records/{record_id}/draft/files/{filename}/commit",
+                calkit.invenio.upload_file_with_progress(
+                    record_id,
+                    os.path.join(release_files_dir, filename),
                     service=to,  # type: ignore
                 )
             # Reserve a DOI on the draft before publishing. The publish action's
@@ -4376,3 +4613,115 @@ def new_release(
             # TODO: Upload assets for GitHub release if they're not too big?
     typer.echo(f"New {release_kind} release {name} successfully created")
     return release
+
+
+@new_app.command(name="workspace")
+def new_workspace(
+    branch: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The branch to work on there, created from the current "
+                "commit unless it exists here or on a remote."
+            )
+        ),
+    ],
+    path: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            help=(
+                "Where to put it; defaults to beside this one, named after "
+                "it and the branch."
+            ),
+        ),
+    ] = None,
+    start_point: Annotated[
+        str | None,
+        typer.Option(
+            "--from",
+            help="What to start a new branch from, e.g., another branch.",
+        ),
+    ] = None,
+) -> None:
+    """Create another workspace for this project, e.g., to work on a change
+    without disturbing this one.
+
+    It's a Git worktree that shares the main checkout's DVC cache, so its data
+    is checked out without being pulled again.
+    """
+    import calkit.dvc.zip
+
+    repo = calkit.git.get_repo()
+    root = str(repo.working_dir)
+    # The main checkout, which differs when this is a worktree itself, so
+    # every workspace is named after it and shares its DVC cache
+    main_root = calkit.git.get_main_worktree_dir(repo) or root
+    if path is None:
+        name = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-.")
+        path = os.path.join(
+            os.path.dirname(main_root), f"{os.path.basename(main_root)}-{name}"
+        )
+    path = os.path.abspath(path)
+    if os.path.exists(path):
+        raise_error(f"{path} already exists")
+    # A branch only on a remote, e.g., pushed from another machine, tracks it
+    # rather than starting over from here
+    remote_ref = None
+    if branch not in repo.heads and start_point is None:
+        remotes = sorted(
+            (r.name for r in repo.remotes), key=lambda n: n != "origin"
+        )
+        for remote in remotes:
+            ref = f"refs/remotes/{remote}/{branch}"
+            try:
+                repo.git.rev_parse("--verify", "--quiet", ref)
+            except Exception:
+                continue
+            remote_ref = ref
+            break
+    if branch in repo.heads:
+        if start_point is not None:
+            raise_error(f"Branch '{branch}' exists, so it can't start --from")
+        args = ["--", path, branch]
+    elif remote_ref is not None:
+        args = ["--track", "-b", branch, "--", path, remote_ref]
+    else:
+        # Positionals after --, so none can be taken as an option
+        args = ["-b", branch, "--", path]
+        args += [start_point] if start_point else []
+    try:
+        repo.git.worktree("add", *args)
+    except Exception as e:
+        raise_error(f"Could not create the worktree: {e}")
+    # Never through a link the branch committed in place of .dvc, which
+    # could point outside the workspace
+    if os.path.islink(os.path.join(path, ".dvc")):
+        warn("Not setting up DVC there, since its .dvc is a link")
+    # A branch can predate DVC being set up here, so it needs none
+    elif os.path.isdir(os.path.join(root, ".dvc")) and os.path.isdir(
+        os.path.join(path, ".dvc")
+    ):
+        # The remotes' settings, e.g., their auth, live in the local config,
+        # which Git doesn't carry over
+        cache_root = root
+        if os.path.isdir(os.path.join(main_root, ".dvc")):
+            cache_root = main_root
+        for source in (root, main_root):
+            local_config = os.path.join(source, ".dvc", "config.local")
+            if os.path.isfile(local_config):
+                # Never through a link the branch committed in its place
+                dest = os.path.join(path, ".dvc", "config.local")
+                if os.path.islink(dest):
+                    os.remove(dest)
+                shutil.copy(local_config, dest)
+                break
+        cache_dir = calkit.dvc.get_dvc_repo(cache_root).cache.local_cache_dir
+        calkit.dvc.run_dvc_command(
+            ["config", "--local", "cache.dir", cache_dir], cwd=path
+        )
+        # Data that was never pulled here stays missing until it is
+        if calkit.dvc.run_dvc_command(["checkout", "--quiet"], cwd=path):
+            warn("Some data isn't in the cache; run 'calkit pull' there")
+        calkit.dvc.zip.sync_all(direction="to-workspace", wdir=path)
+    typer.echo(f"Created a workspace at {path} on branch '{branch}'")

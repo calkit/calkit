@@ -2,9 +2,11 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     accounts,
+    analytics,
     datasets,
     feedback,
     login,
+    machines,
     misc,
     orgs,
     projects,
@@ -16,6 +18,7 @@ from app.api.routes.projects import releases
 
 api_router = APIRouter()
 api_router.include_router(accounts.router, tags=["accounts"])
+api_router.include_router(analytics.router, tags=["analytics"])
 api_router.include_router(login.router, tags=["login"])
 api_router.include_router(users.router, tags=["users"])
 api_router.include_router(misc.router, tags=["misc"])
@@ -26,3 +29,4 @@ api_router.include_router(orgs.router, tags=["orgs"])
 api_router.include_router(datasets.router, tags=["datasets"])
 api_router.include_router(feedback.router, tags=["feedback"])
 api_router.include_router(storage.router, tags=["storage"])
+api_router.include_router(machines.router, tags=["machines"])

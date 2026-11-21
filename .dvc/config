@@ -1,0 +1,5 @@
+[core]
+    autostage = true
+    remote = calkit
+['remote "calkit"']
+    url = ck://calkit/calkit

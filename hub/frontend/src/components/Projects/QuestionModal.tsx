@@ -1,4 +1,9 @@
 import {
+  Accordion,
+  AccordionButton,
+  AccordionIcon,
+  AccordionItem,
+  AccordionPanel,
   Badge,
   Box,
   Code,
@@ -28,24 +33,82 @@ import { MdEdit } from "react-icons/md"
 import { TiFlowMerge } from "react-icons/ti"
 
 import { ProjectsService } from "../../client"
-import { encodeBase64Utf8 } from "../../lib/strings"
-import type { QuestionEvidence, QuestionPublic } from "../../client"
+import type {
+  QuestionEvidence,
+  QuestionPublic,
+  QuestionSignOff,
+} from "../../client"
 import useAuth from "../../hooks/useAuth"
 import {
   useProjectPublications,
   useProjectTables,
 } from "../../hooks/useProject"
+import { encodeBase64Utf8 } from "../../lib/strings"
 import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../Common/CommentsPanel"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
-import Tooltip from "../Common/Tooltip"
-import FigureView from "../Figures/FigureView"
-import FileContent from "../Files/FileContent"
 import SandboxedHtml from "../Common/SandboxedHtml"
+import Tooltip from "../Common/Tooltip"
+import FigureView, { PlotlyThumbnail } from "../Figures/FigureView"
+import FileContent, { isShownFromUrl } from "../Files/FileContent"
 import PublicationView from "../Publications/PublicationView"
 import TableView from "../Tables/TableView"
+import QuestionStatusLetters, {
+  formatLines,
+  isEvidenceMissing,
+  isEvidenceStale,
+  parseLines,
+} from "./QuestionStatus"
+
+// Past this, a plain file the listing didn't inline is linked, not read
+const MAX_FILE_TEXT_BYTES = 10_000_000
+
+/**
+ * A response's text, or undefined once it passes ``maxBytes``, so a file of
+ * unknown size, e.g., inside a DVC-tracked directory, is read only if small.
+ */
+const readTextUpTo = async (
+  response: Response,
+  maxBytes: number,
+): Promise<string | undefined> => {
+  if (!response.body) {
+    const text = await response.text()
+    return text.length > maxBytes ? undefined : text
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return undefined
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
+
+/** Whether file content, base64-encoded, looks binary rather than text. */
+const isBinaryContent = (content: string) => {
+  try {
+    return atob(content.slice(0, 8192)).includes("\u0000")
+  } catch {
+    return false
+  }
+}
 
 const IMG_MIME: Record<string, string> = {
   png: "image/png",
@@ -65,20 +128,6 @@ const IMG_MIME: Record<string, string> = {
  */
 const evidenceRefOf = (evidence: QuestionEvidence, gitRef?: string) =>
   evidence.git_ref ?? gitRef
-
-/** Whether what an evidence item cites can be taken at face value.
- *
- * An answer resting on an artifact that isn't there, or that the pipeline
- * considers out of date, is worth flagging: what the reader is looking at
- * isn't what the project would produce now, if it's there to look at at
- * all. The backend works out which of the ways that can happen applies.
- */
-export const isEvidenceStale = (evidence: QuestionEvidence) =>
-  evidence.stale_reason != null
-
-/** Whether the cited artifact resolves to nothing at all. */
-export const isEvidenceMissing = (evidence: QuestionEvidence) =>
-  evidence.stale_reason === "missing"
 
 const STALE_MARKS: Record<
   string,
@@ -118,6 +167,11 @@ const evidencePage = (evidence: QuestionEvidence) => {
 }
 
 const evidenceTitle = (evidence: QuestionEvidence) => {
+  // A plain file is named by its path, which the card shows under this
+  if (evidence.kind == null) {
+    const lines = formatLines(evidence.lines)
+    return lines ? `File, ${lines}` : "File"
+  }
   if (evidence.kind === "figure") {
     return evidence.figure?.title ?? evidence.path
   }
@@ -136,6 +190,64 @@ function StaleBadge({ evidence }: { evidence: QuestionEvidence }) {
         {mark.badge}
       </Badge>
     </Tooltip>
+  )
+}
+
+/** Who signed off on a question one way, and whether it still holds. */
+function SignOffs({
+  title,
+  signOffs,
+}: {
+  title: string
+  signOffs: QuestionSignOff[]
+}) {
+  const subtleColor = useColorModeValue("gray.600", "gray.400")
+  return (
+    <Box mb={4}>
+      <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+        {title}
+      </Text>
+      {signOffs.length ? (
+        signOffs.map((s) => (
+          <Box key={`${s.by}:${s.date}`} mt={1} fontSize="sm">
+            <Flex align="center" gap={2} wrap="wrap">
+              <Text as="span" fontWeight="semibold">
+                {s.by}
+              </Text>
+              {s.date ? (
+                <Text as="span" color={subtleColor}>
+                  {s.date}
+                </Text>
+              ) : null}
+              {s.with_ai?.length ? (
+                <Text as="span" color={subtleColor}>
+                  with {s.with_ai.join(", ")}
+                </Text>
+              ) : null}
+              {s.status === "stale" ? (
+                <Badge colorScheme="orange" fontSize="2xs">
+                  Stale
+                </Badge>
+              ) : null}
+            </Flex>
+            {s.notes ? (
+              <Box color={subtleColor}>
+                <Markdown foldedProse>{s.notes}</Markdown>
+              </Box>
+            ) : null}
+            {s.status === "stale" && s.message ? (
+              <Text fontSize="xs" color={subtleColor}>
+                Changed since: {s.message}
+              </Text>
+            ) : null}
+          </Box>
+        ))
+      ) : (
+        <Text fontSize="sm" color={subtleColor} mt={1}>
+          None yet.
+        </Text>
+      )}
+    </Box>
   )
 }
 
@@ -243,8 +355,12 @@ function EvidenceCard({
           objectFit="contain"
         />
       )
+    } else if (fig?.content && ext === "json") {
+      // Same stripped-down drawing as the gallery, since a live plot this
+      // small squishes its labels into the traces.
+      thumb = <PlotlyThumbnail figure={fig} height={150} />
     } else if (fig && (fig.content || fig.url)) {
-      // Plotly JSON, PDFs, etc. go through the shared figure renderer.
+      // PDFs, etc. go through the shared figure renderer.
       thumb = <FigureView figure={fig} fillHeight />
     } else {
       thumb = (
@@ -291,7 +407,11 @@ function EvidenceCard({
   let icon = null
   if (evidence.kind === "table") {
     icon = <Icon as={FiGrid} color="gray.500" flexShrink={0} />
-  } else if (evidence.kind === "publication" || evidence.kind === "document") {
+  } else if (
+    evidence.kind === "publication" ||
+    evidence.kind === "document" ||
+    evidence.kind == null
+  ) {
     icon = <Icon as={FaRegFileAlt} color="gray.500" flexShrink={0} />
   }
   const body = (
@@ -391,10 +511,17 @@ function EvidenceDetail({
     evidence.kind === "publication" && !!evidence.publication,
   )
   // Cited by path rather than declared, so its content comes from the tree
+  const isPlainFile = evidence.kind == null
   const citedByPath =
+    isPlainFile ||
     evidence.kind === "document" ||
     (evidence.kind === "publication" && !evidence.publication)
-  const isHtml = evidence.path.toLowerCase().endsWith(".html")
+  const highlightLines = isPlainFile ? parseLines(evidence.lines) : undefined
+  // Cited at some lines, HTML is shown as the source they count
+  const isHtml =
+    evidence.path.toLowerCase().endsWith(".html") && !highlightLines
+  // Images, PDFs, and slides are shown from their URL, not read as text
+  const shownFromUrl = isShownFromUrl(evidence.path)
   const documentRequest = useQuery({
     queryKey: [
       "projects",
@@ -414,13 +541,22 @@ function EvidenceDetail({
         })
       ).data
       // A large file comes back as a download URL rather than inline, which
-      // the viewer can't render as text, so read it from there
-      if (!item.content && item.url) {
+      // the viewer can't render as text, so read it from there. A plain
+      // file could be anything, so one too big to be worth reading is
+      // left as a link, and one of unknown size is read only up to that.
+      const tooBig =
+        isPlainFile && item.size != null && item.size > MAX_FILE_TEXT_BYTES
+      if (!item.content && item.url && !shownFromUrl && !tooBig) {
         const response = await fetch(item.url)
         if (!response.ok) {
           throw new Error(`Could not read ${evidence.path}`)
         }
-        return { ...item, content: encodeBase64Utf8(await response.text()) }
+        const text = isPlainFile
+          ? await readTextUpTo(response, MAX_FILE_TEXT_BYTES)
+          : await response.text()
+        return text === undefined
+          ? item
+          : { ...item, content: encodeBase64Utf8(text) }
       }
       return item
     },
@@ -466,8 +602,28 @@ function EvidenceDetail({
       )
     }
     const item = documentRequest.data
-    if (!item?.content) {
+    const unread = !item?.content && !(shownFromUrl && item?.url)
+    if (unread && !item?.url) {
       return <NotFound evidence={evidence} />
+    }
+    // Too big to read, or what no viewer can draw, e.g., an archive
+    if (
+      !item ||
+      unread ||
+      (!shownFromUrl && item.content && isBinaryContent(item.content))
+    ) {
+      return (
+        <Text fontSize="sm" color="gray.500">
+          {evidence.path} can't be shown here.{" "}
+          {item?.url ? (
+            <Link href={item.url} isExternal>
+              Download it <Icon as={FaExternalLinkAlt} boxSize={2.5} />
+            </Link>
+          ) : (
+            "Open it from the link above."
+          )}
+        </Text>
+      )
     }
     if (isHtml) {
       return (
@@ -476,7 +632,15 @@ function EvidenceDetail({
         </Box>
       )
     }
-    return <FileContent item={item} />
+    return (
+      <FileContent
+        item={item}
+        accountName={accountName}
+        projectName={projectName}
+        gitRef={ref}
+        highlightLines={highlightLines}
+      />
+    )
   }
   if (evidence.kind === "publication") {
     if (publicationsRequest.isPending) {
@@ -878,6 +1042,7 @@ function QuestionModal({
                   </Markdown>
                 </Heading>
               </Box>
+              {question ? <QuestionStatusLetters question={question} /> : null}
             </Flex>
           )}
         </ModalHeader>
@@ -939,6 +1104,16 @@ function QuestionModal({
                     </Box>
                   </Box>
                 ) : null}
+                {question?.approach ? (
+                  <Box mb={4}>
+                    <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+                      Approach
+                    </Text>
+                    <Box mt={1}>
+                      <Markdown foldedProse>{question.approach}</Markdown>
+                    </Box>
+                  </Box>
+                ) : null}
                 {question?.answer ? (
                   <Box mb={4}>
                     <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
@@ -953,6 +1128,18 @@ function QuestionModal({
                     Not yet answered.
                   </Text>
                 )}
+                {question ? (
+                  <SimpleGrid columns={{ base: 1, md: 2 }} spacingX={6}>
+                    <SignOffs
+                      title="Verifications"
+                      signOffs={question.verifications ?? []}
+                    />
+                    <SignOffs
+                      title="Validations"
+                      signOffs={question.validations ?? []}
+                    />
+                  </SimpleGrid>
+                ) : null}
                 {question ? (
                   // Set off from the answer rather than running on from it:
                   // what the project concluded and what people are saying
@@ -994,6 +1181,159 @@ function QuestionModal({
                 )}
               </Box>
             </Flex>
+          )}
+        </ModalBody>
+      </ModalContent>
+    </Modal>
+  )
+}
+
+/** Every question at once, each expanding in place to its answer and evidence.
+ *
+ * For reading a project's questions through rather than one at a time. The
+ * discussion, and the full view of an evidence item, are still the question's
+ * own page, which is what onOpenQuestion goes to.
+ */
+export function QuestionsModal({
+  questions,
+  isOpen,
+  onClose,
+  accountName,
+  projectName,
+  gitRef,
+  onOpenQuestion,
+}: {
+  questions: QuestionPublic[]
+  isOpen: boolean
+  onClose: () => void
+  accountName: string
+  projectName: string
+  gitRef?: string
+  onOpenQuestion: (questionNumber: number, evidenceIndex?: number) => void
+}) {
+  const subtleColor = useColorModeValue("gray.600", "gray.400")
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="6xl"
+      scrollBehavior="inside"
+      isCentered
+      motionPreset="none"
+    >
+      <ModalOverlay />
+      <ModalContent maxW={{ base: "100%", lg: "72vw" }} maxH="88vh">
+        <ModalHeader>Questions</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody pt={0} pb={4}>
+          {questions.length ? (
+            <Accordion allowMultiple>
+              {questions.map((question) => {
+                const evidence = question.evidence ?? []
+                return (
+                  <AccordionItem key={question.id}>
+                    <AccordionButton px={2} sx={{ "& p": { my: 0 } }}>
+                      <Box flex="1" minW={0} textAlign="left">
+                        <Markdown>
+                          {`${question.number}. ${question.question}`}
+                        </Markdown>
+                      </Box>
+                      <QuestionStatusLetters question={question} mx={2} />
+                      <AccordionIcon />
+                    </AccordionButton>
+                    <AccordionPanel px={2} pb={4}>
+                      {question.hypothesis ? (
+                        <Box mb={3}>
+                          <Text
+                            fontSize="xs"
+                            fontWeight="bold"
+                            color={subtleColor}
+                          >
+                            Hypothesis
+                          </Text>
+                          <Box mt={1}>
+                            <Markdown foldedProse>
+                              {question.hypothesis}
+                            </Markdown>
+                          </Box>
+                        </Box>
+                      ) : null}
+                      {question.approach ? (
+                        <Box mb={3}>
+                          <Text
+                            fontSize="xs"
+                            fontWeight="bold"
+                            color={subtleColor}
+                          >
+                            Approach
+                          </Text>
+                          <Box mt={1}>
+                            <Markdown foldedProse>{question.approach}</Markdown>
+                          </Box>
+                        </Box>
+                      ) : null}
+                      {question.answer ? (
+                        <Box mb={3}>
+                          <Text
+                            fontSize="xs"
+                            fontWeight="bold"
+                            color={subtleColor}
+                          >
+                            Answer
+                          </Text>
+                          <Box mt={1}>
+                            <Markdown foldedProse>{question.answer}</Markdown>
+                          </Box>
+                        </Box>
+                      ) : (
+                        <Text fontSize="sm" color={subtleColor} mb={3}>
+                          Not yet answered.
+                        </Text>
+                      )}
+                      <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+                        Evidence
+                      </Text>
+                      {evidence.length ? (
+                        <SimpleGrid
+                          columns={{ base: 1, md: 2, xl: 3 }}
+                          spacing={3}
+                          mt={2}
+                        >
+                          {evidence.map((ev, i) => (
+                            <EvidenceCard
+                              key={`${ev.kind}:${ev.path}:${i}`}
+                              evidence={ev}
+                              accountName={accountName}
+                              projectName={projectName}
+                              gitRef={gitRef}
+                              onOpen={() => onOpenQuestion(question.number, i)}
+                            />
+                          ))}
+                        </SimpleGrid>
+                      ) : (
+                        <Text fontSize="sm" color={subtleColor} mt={1}>
+                          None linked yet.
+                        </Text>
+                      )}
+                      <Link
+                        as="button"
+                        type="button"
+                        fontSize="sm"
+                        display="inline-block"
+                        mt={3}
+                        onClick={() => onOpenQuestion(question.number)}
+                      >
+                        Open question and discussion →
+                      </Link>
+                    </AccordionPanel>
+                  </AccordionItem>
+                )
+              })}
+            </Accordion>
+          ) : (
+            <Text fontSize="sm" color={subtleColor}>
+              No research questions defined yet.
+            </Text>
           )}
         </ModalBody>
       </ModalContent>

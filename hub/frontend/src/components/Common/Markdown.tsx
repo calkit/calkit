@@ -9,6 +9,7 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { Box } from "@chakra-ui/react"
+import { useQuery } from "@tanstack/react-query"
 import React, { useMemo } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeKatex from "rehype-katex"
@@ -17,6 +18,8 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import "katex/dist/katex.min.css"
+
+import { ProjectsService } from "../../client"
 
 // Preserve the class names remark-math emits (`math`, `math-inline`,
 // `math-display`) through sanitization so rehype-katex, which runs afterward,
@@ -43,6 +46,66 @@ interface MarkdownProps {
    * into one wall of text. Set this to get the paragraphs back.
    */
   foldedProse?: boolean
+  /**
+   * The project the text comes from, e.g., its README, so images given by
+   * a path in the repo load from it, as they do on GitHub, rather than
+   * from this page's URL.
+   */
+  repo?: {
+    accountName: string
+    projectName: string
+    ref?: string
+    /** The directory the text's file is in; the repo root by default. */
+    dir?: string
+  }
+  /**
+   * Text nobody vetted, e.g., an agent's output: raw HTML is left out and
+   * images become links, so nothing loads from elsewhere by itself.
+   */
+  untrusted?: boolean
+}
+
+/** The repo path an image source points at, resolved against the directory
+ * of the file it's in, or null for one that isn't in the repo, e.g., a URL.
+ */
+export const repoImagePath = (src: string, dir = ""): string | null => {
+  if (!src || /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) {
+    return null
+  }
+  // A leading slash is the repo root, as on GitHub
+  const parts = (src.startsWith("/") ? [] : dir.split("/")).filter(Boolean)
+  for (const raw of src.split(/[?#]/)[0].split("/")) {
+    // Written URL-encoded in Markdown, e.g., "my%20logo.png", but named
+    // plainly in the repo. An encoded separator would smuggle in a path
+    // this loop never sees, so one is refused.
+    let part: string
+    try {
+      part = decodeURIComponent(raw)
+    } catch {
+      return null
+    }
+    if (/[/\\]/.test(part)) {
+      return null
+    }
+    if (part === "..") {
+      if (parts.length === 0) {
+        return null
+      }
+      parts.pop()
+    } else if (part && part !== ".") {
+      parts.push(part)
+    }
+  }
+  return parts.length ? parts.join("/") : null
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+  webp: "image/webp",
 }
 
 /** Restore paragraph breaks YAML folding collapsed into single newlines.
@@ -78,6 +141,15 @@ const BlueLink = (props: any) => {
   return <Link variant="blue" {...props} />
 }
 
+// An image in untrusted text, as a link to it rather than a request for it
+const imageLink = ({ src, alt }: any) => {
+  return (
+    <Link variant="blue" href={src} isExternal rel="noreferrer">
+      {alt || src}
+    </Link>
+  )
+}
+
 const inlineParagraph = ({ children, ...props }: any) => {
   return (
     <Text as="span" my={0} {...props}>
@@ -87,9 +159,23 @@ const inlineParagraph = ({ children, ...props }: any) => {
 }
 
 // Send prop to children of <pre> to differentiate if they are block code or not
+// The background lives on this scrolling box rather than on the inner <code>:
+// a block <code> is only as wide as the container, so when the content
+// overflows and scrolls, the area revealed to the right of it had no
+// background at all.
 const pre = ({ children, ...props }: any) => {
   return (
-    <Box as="pre" maxW="100%" overflowX="auto" {...props}>
+    <Box
+      as="pre"
+      maxW="100%"
+      overflowX="auto"
+      my={2}
+      p={2}
+      borderRadius="sm"
+      bg="gray.100"
+      _dark={{ bg: "whiteAlpha.300" }}
+      {...props}
+    >
       {React.Children.map(children, (child) => {
         return React.cloneElement(child, { insidePre: true })
       })}
@@ -99,13 +185,16 @@ const pre = ({ children, ...props }: any) => {
 
 const code = ({ insidePre = false, ...props }: codeProps) => {
   if (insidePre) {
-    // A block keeps its own line breaks; the <pre> around it scrolls.
+    // A block keeps its own line breaks; the <pre> around it scrolls and
+    // carries the background, so this must not paint one of its own on top.
     return (
       <Code
-        my={2}
+        bg="transparent"
+        _dark={{ bg: "transparent" }}
+        color="inherit"
         whiteSpace={"pre"}
         display={"block"}
-        p={2}
+        p={0}
         fontSize="0.9em"
         {...props}
       />
@@ -131,6 +220,8 @@ const Markdown = ({
   inline = false,
   noOfLines,
   foldedProse = false,
+  repo,
+  untrusted = false,
 }: MarkdownProps) => {
   const tableBorderColor = useColorModeValue("gray.200", "whiteAlpha.300")
   const tableHeaderBg = useColorModeValue("gray.50", "whiteAlpha.100")
@@ -206,6 +297,47 @@ const Markdown = ({
   // it, so a map rebuilt each render tears down and re-creates everything
   // this Markdown rendered. That reads as a flash wherever something else
   // on the page re-renders -- opening a modal over it, say.
+  const repoOwner = repo?.accountName
+  const repoName = repo?.projectName
+  const repoRef = repo?.ref
+  const repoDir = repo?.dir
+  const repoImage = useMemo(() => {
+    if (!repoOwner || !repoName) {
+      return undefined
+    }
+    // Fetched through the hub, so a private project's images load too,
+    // from Git or DVC alike
+    const FetchedImage = ({ path, alt, ...props }: any) => {
+      const { data } = useQuery({
+        queryKey: ["projects", repoOwner, repoName, "contents", path, repoRef],
+        queryFn: () =>
+          ProjectsService.getProjectContents({
+            owner_name: repoOwner,
+            project_name: repoName,
+            path,
+            ref: repoRef,
+          }).then((response) => response.data),
+        retry: false,
+      })
+      const ext = String(path).split(".").pop()?.toLowerCase() ?? ""
+      const resolved = data?.content
+        ? `data:${IMAGE_TYPES[ext] ?? "image/png"};base64,${data.content}`
+        : data?.url ?? undefined
+      return resolved ? <img {...props} src={resolved} alt={alt ?? ""} /> : null
+    }
+    // Only an image in the repo goes through the hub; anything else is
+    // left as written and never touches the query cache
+    const RepoImage = ({ src, alt, ...props }: any) => {
+      const path = repoImagePath(String(src ?? ""), repoDir)
+      return path === null ? (
+        <img {...props} src={src} alt={alt ?? ""} />
+      ) : (
+        <FetchedImage path={path} alt={alt} {...props} />
+      )
+    }
+    return RepoImage
+  }, [repoOwner, repoName, repoRef, repoDir])
+
   const components = useMemo(
     () => ({
       h1: H1,
@@ -218,9 +350,10 @@ const Markdown = ({
       pre,
       code,
       a: BlueLink,
+      ...(untrusted ? { img: imageLink } : repoImage ? { img: repoImage } : {}),
       ...tableComponents,
     }),
-    [inline, tableComponents],
+    [inline, tableComponents, repoImage, untrusted],
   )
 
   return (
@@ -266,7 +399,7 @@ const Markdown = ({
         unwrapDisallowed={inline}
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[
-          rehypeRaw,
+          ...(untrusted ? [] : [rehypeRaw]),
           [rehypeSanitize, sanitizeSchema],
           rehypeKatex,
         ]}

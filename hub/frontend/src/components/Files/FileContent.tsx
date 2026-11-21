@@ -1,4 +1,5 @@
 import { Box, Image } from "@chakra-ui/react"
+import { useEffect, useRef } from "react"
 import SyntaxHighlighter from "react-syntax-highlighter"
 import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
 
@@ -10,6 +11,15 @@ import PresentationView from "../Presentations/PresentationView"
 
 interface FileContentProps {
   item: ContentsItem
+  /** Account and project the file belongs to, so Markdown images given by a
+   * repo path resolve against it, as they do on the project page. */
+  accountName?: string
+  projectName?: string
+  gitRef?: string
+  /** First and last line to highlight and scroll to, for a file cited at
+   * some lines. Shows a Markdown file as its source, since that's what the
+   * line numbers count. */
+  highlightLines?: [number, number]
 }
 
 // Render a Quarto/R Markdown source as Markdown while keeping the leading
@@ -22,6 +32,11 @@ export function qmdToMarkdown(src: string): string {
   const body = src.slice(match[0].length)
   return `\`\`\`yaml\n${frontMatter}\n\`\`\`\n\n${body}`
 }
+
+/** Whether FileContent shows this file from its download URL when the
+ * listing doesn't inline it, rather than as text. */
+export const isShownFromUrl = (name: string) =>
+  /\.(png|jpe?g|svg|pdf|pptx?)$/i.test(name)
 
 export function getLanguage(name: string): string {
   // Compare case-insensitively so all-caps names map to the right language.
@@ -47,8 +62,24 @@ export function getLanguage(name: string): string {
   return "text"
 }
 
-function FileContent({ item }: FileContentProps) {
+function FileContent({
+  item,
+  accountName,
+  projectName,
+  gitRef,
+  highlightLines,
+}: FileContentProps) {
   const { name, content, url } = item
+  const textRef = useRef<HTMLDivElement>(null)
+  const firstLine = highlightLines?.[0]
+  useEffect(() => {
+    if (firstLine === undefined) {
+      return
+    }
+    textRef.current
+      ?.querySelector(".cited-line")
+      ?.scrollIntoView({ block: "center" })
+  }, [firstLine])
   // Match extensions case-insensitively so all-caps names (FOO.PDF, IMG.PNG,
   // SLIDES.PPTX, …) render the same as their lowercase equivalents.
   const lowerName = name.toLowerCase()
@@ -110,7 +141,11 @@ function FileContent({ item }: FileContentProps) {
       </Box>
     )
   }
-  if ((lowerName.endsWith(".md") || lowerName.endsWith(".qmd")) && content) {
+  if (
+    (lowerName.endsWith(".md") || lowerName.endsWith(".qmd")) &&
+    content &&
+    !highlightLines
+  ) {
     const decoded = decodeBase64Utf8(content)
     return (
       <Box
@@ -120,7 +155,20 @@ function FileContent({ item }: FileContentProps) {
         py={2}
         px={4}
       >
-        <Markdown>
+        <Markdown
+          repo={
+            accountName && projectName
+              ? {
+                  accountName,
+                  projectName,
+                  ref: gitRef,
+                  dir: item.path.includes("/")
+                    ? item.path.slice(0, item.path.lastIndexOf("/"))
+                    : undefined,
+                }
+              : undefined
+          }
+        >
           {lowerName.endsWith(".qmd") ? qmdToMarkdown(decoded) : decoded}
         </Markdown>
       </Box>
@@ -128,6 +176,7 @@ function FileContent({ item }: FileContentProps) {
   }
   return (
     <Box
+      ref={textRef}
       borderRadius="lg"
       overflow="hidden"
       height="calc(100vh - 160px)"
@@ -143,6 +192,23 @@ function FileContent({ item }: FileContentProps) {
           overflowX: "auto",
           overflowY: "auto",
         }}
+        // Numbered, with the cited lines marked, when a citation names some
+        showLineNumbers={!!highlightLines}
+        wrapLines={!!highlightLines}
+        lineProps={
+          highlightLines
+            ? (n: number) =>
+                n >= highlightLines[0] && n <= highlightLines[1]
+                  ? {
+                      className: "cited-line",
+                      style: {
+                        display: "block",
+                        backgroundColor: "rgba(255, 213, 79, 0.2)",
+                      },
+                    }
+                  : { style: { display: "block" } }
+            : undefined
+        }
       >
         {content ? decodeBase64Utf8(content) : ""}
       </SyntaxHighlighter>

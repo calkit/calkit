@@ -15,17 +15,16 @@ from calkit.questions import (
     QuestionsStatus,
     check_question,
     check_questions,
-    evaluate_condition,
+    check_sign_offs,
     expand_questions_stages,
     format_status,
     format_summary,
     latex_values,
-    parse_conditional,
     placeholders,
+    question_stages,
     render,
     render_question,
     resolve_key,
-    select_branch,
 )
 
 
@@ -70,10 +69,19 @@ def test_render():
         render("{missing}", values)
     with pytest.raises(ValueError):
         render("{best:.2f}", values)
+    # A value the spec can't take at all, e.g., a null, is a ValueError
+    # too, not a TypeError nothing expects
+    for bad in (None, {"a": 1}):
+        with pytest.raises(ValueError, match="cannot be formatted"):
+            render("{x:.2f}", {"x": bad})
+    # The check reports it as a problem rather than crashing
+    problems = calkit.questions._placeholder_problems("{x:.2f}", {"x": None})
+    assert problems and "cannot render" in problems[0]
 
 
-def _commit(msg: str) -> str:
+def _commit(msg: str, date: str | None = None) -> str:
     subprocess.check_call(["git", "add", "-A"])
+    dates = {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
     subprocess.check_call(
         ["git", "commit", "-q", "-m", msg],
         env={
@@ -82,6 +90,7 @@ def _commit(msg: str) -> str:
             "GIT_AUTHOR_EMAIL": "t@t",
             "GIT_COMMITTER_NAME": "t",
             "GIT_COMMITTER_EMAIL": "t@t",
+            **(dates if date else {}),
         },
     )
     return subprocess.check_output(
@@ -455,10 +464,23 @@ def test_check_questions(tmp_dir):
         "results/findings.json",
         "results/findings.json",
     ]
+    # Without history, the same checks hold but nothing is compared
+    # against when the answer was written
+    no_history = check_questions(
+        ck_info=ck_info, wdir=".", check_history=False
+    )
+    q4 = no_history.questions[3]
+    assert [q.status for q in no_history.questions] == [
+        q.status for q in status.questions
+    ]
+    assert q4.commit is None
+    assert not no_history.changed
+    assert "not yet committed" not in (q4.message or "")
+    assert q4.evidence[4].status == "unattributed"
     report = format_status(status)
     # It still earns a block, since nothing else would say it
     assert "[ok] Do the top structures use the rectifier?" in report
-    assert "editing the question" in report
+    assert "editing the answer or validating it" in report
     assert (
         "Evidence that changed after the answer was written: 2 (worth a look)"
         in report
@@ -724,128 +746,487 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert checked.evidence[0].git_ref == sha
 
 
-def test_conditional_answers(tmp_dir):
-    values = {"p": 0.007, "rho": 0.8373, "n": 17, "leader": "turns-max"}
-    # Comparisons, chaining, boolean operators, strings, and arithmetic
-    assert evaluate_condition("p < 0.05", values)
-    assert not evaluate_condition("p >= 0.05", values)
-    assert evaluate_condition("0.0 <= p < 0.05", values)
-    assert evaluate_condition("p < 0.05 and rho > 0.8", values)
-    assert evaluate_condition("p > 0.5 or rho > 0.8", values)
-    assert evaluate_condition("not p > 0.5", values)
-    assert evaluate_condition("leader == 'turns-max'", values)
-    assert evaluate_condition("n / 2 > 8", values)
-    # A name with no evidence is an error, not a false condition, and
-    # nothing may be called or used as a bare value
-    with pytest.raises(KeyError):
-        evaluate_condition("missing < 1", values)
-    with pytest.raises(Exception):
-        evaluate_condition("len(leader) > 1", values)
-    with pytest.raises(ValueError):
-        evaluate_condition("p", values)
-    # A true/false value can stand alone, e.g., a 'passes' flag in results
-    flags = {"ok": True, "bad": False, "p": 0.007}
-    assert evaluate_condition("ok", flags)
-    assert evaluate_condition("ok and not bad", flags)
-    assert not evaluate_condition("bad or p > 0.5", flags)
-    with pytest.raises(ValueError, match="true/false"):
-        evaluate_condition("ok and p", flags)
-    with pytest.raises(KeyError):
-        evaluate_condition("missing", flags)
-    # A comparison the values can't make is a ValueError like the rest
-    with pytest.raises(ValueError, match="cannot evaluate"):
-        evaluate_condition("leader < 0.5", values)
-    # A name that is not a valid identifier cannot be read as a variable,
-    # and says so rather than reporting a fragment of itself as missing
-    with pytest.raises(ValueError, match="valid Python identifier"):
-        evaluate_condition("paired-gain > 0.1", {"paired-gain": 0.25})
-    # Clauses are tried in the order written, with None marking the else
-    clauses = {
-        "if p < 0.05": "strong, rho {rho:.2f}",
-        "elif p < 0.1": "weak",
-        "else": "none",
+def test_check_questions_frozen_subproject(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("decisions")
+    with open("decisions/n.txt", "w") as f:
+        f.write("2\n")
+    sub_info = {
+        "pipeline": {
+            "stages": {
+                "measure": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo '{\"v\": 2}' > result.json",
+                    "inputs": ["n.txt"],
+                    "outputs": [{"path": "result.json", "storage": "git"}],
+                }
+            }
+        },
+        "questions": [
+            {
+                "question": "How big?",
+                "answer": "{v}.",
+                "evidence": [
+                    {
+                        "kind": "value",
+                        "path": "result.json",
+                        "key": "v",
+                        "name": "v",
+                    }
+                ],
+            }
+        ],
     }
-    assert [c for c, _ in parse_conditional(clauses)] == [
-        "p < 0.05",
-        "p < 0.1",
-        None,
+    with open("decisions/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["subprojects"] = [{"path": "decisions"}]
+    _write_yaml(ck_info)
+    subprocess.check_call(["calkit", "run"])
+    # Frozen once run, and still matching dvc.lock, so as current as ever
+    sub_info["pipeline"]["stages"]["measure"]["frozen"] = True
+    with open("decisions/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    subprocess.check_call(["calkit", "run"])
+    assert frozen_tainted_stage_names(wdir="decisions") == set()
+    # And checked from the parent, with where it came from
+    status = check_questions(wdir=".")
+    assert [(q.project, q.index, q.status) for q in status.questions] == [
+        ("decisions", 1, "ok")
     ]
-    assert select_branch(clauses, {"p": 0.007}) == "strong, rho {rho:.2f}"
-    assert select_branch(clauses, {"p": 0.08}) == "weak"
-    assert select_branch(clauses, {"p": 0.9}) == "none"
-    # Malformed clause sets are errors rather than silent misreadings
-    with pytest.raises(ValueError):
-        parse_conditional({"elif p < 1": "x"})
-    with pytest.raises(ValueError):
-        parse_conditional({"else": "x"})
-    with pytest.raises(ValueError):
-        parse_conditional({"when p < 1": "x"})
-    with pytest.raises(ValueError):
-        parse_conditional({"if p < 1": "x", "else": "y", "elif p < 2": "z"})
-    with pytest.raises(ValueError):
-        parse_conditional({"if p < 1": "x", "if p < 2": "y"})
-    # Nothing holding with no else is an error rather than a blank answer
-    with pytest.raises(ValueError):
-        select_branch({"if p < 0.05": "strong"}, {"p": 0.9})
-    # Rendering picks the branch, then fills its placeholders
-    answer = {
-        "if p < 0.05": "{leader} predicts it (rho {rho:+.2f})",
-        "else": "no feature predicts it",
+    assert status.ok
+    assert "decisions: 1. [ok] How big?" in format_status(status, True)
+    # Once its input moves, it won't be rerun, which is worth a look
+    with open("decisions/n.txt", "w") as f:
+        f.write("3\n")
+    assert frozen_tainted_stage_names(wdir="decisions") == {"measure"}
+    status = check_questions(wdir=".")
+    assert [q.status for q in status.questions] == ["frozen"]
+    assert status.ok
+    # Pinned to a commit, it's read from there, relative to the subproject,
+    # both to check it and to fill in the answer
+    sha = _commit("Measure")
+    sub_info["questions"][0]["evidence"][0]["git_ref"] = sha
+    with open("decisions/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    with open("decisions/result.json", "w") as f:
+        f.write('{"v": 5}\n')
+    status = check_questions(wdir=".")
+    assert [q.status for q in status.questions] == ["ok"]
+    sub_ck_info = calkit.load_calkit_info(wdir="decisions")
+    rendered = render_question(
+        sub_ck_info["questions"][0], wdir="decisions", strict=True
+    )
+    assert isinstance(rendered, dict)
+    assert rendered["answer"] == "2."
+
+
+def test_sign_offs_and_stages(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 2.0}, f)
+    with open("results/plot.png", "w") as f:
+        f.write("png")
+    with open("fit.py", "w") as f:
+        f.write("fit()\n")
+    # Only what dvc.lock lists for the question's stages is followed
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "schema": "2.0",
+                "stages": {
+                    "fit": {
+                        "cmd": "python fit.py",
+                        "deps": [{"path": "fit.py"}],
+                    },
+                    "unrelated": {
+                        "cmd": "python other.py",
+                        "deps": [{"path": "other.py"}],
+                    },
+                },
+            },
+            f,
+        )
+    question = {
+        "question": "Does it work?",
+        "approach": "Fit it, then summarize the fit.",
+        "answer": "It does, by {r}x.",
+        "evidence": [
+            {"kind": "value", "path": "results/summary.json", "key": "r"},
+            {"kind": "figure", "path": "results/plot.png"},
+        ],
     }
-    assert render(answer, values) == "turns-max predicts it (rho +0.84)"
-    assert render(answer, values | {"p": 0.2}) == "no feature predicts it"
-    # Plain strings are untouched by the conditional path
-    assert render("if and only if", values) == "if and only if"
-    # Checking reports every clause's problems, including the clauses the
-    # current values don't select, rather than crashing or passing
-    with open("r.json", "w") as f:
-        json.dump({"p": 0.2, "leader": "x"}, f)
-    evidence = [
-        {"kind": "value", "path": "r.json", "key": "p"},
-        {"kind": "value", "path": "r.json", "key": "leader"},
-    ]
-    cases = [
-        ({"if p < 0.5": "{leader}", "else": "no"}, []),
-        (
-            {"if p < 0.05": "x"},
-            ["no condition of the conditional answer holds"],
-        ),
-        ({"when p < 1": "x"}, ["conditional answer: expected 'if'"]),
-        (
-            {"if leader < 0.05": "x", "else": "y"},
-            ["cannot evaluate condition 'leader < 0.05'"],
-        ),
-        (
-            {"if p > 0.1": "yes", "elif typo < 1": "x", "else": "{rhoo:.2f}"},
-            [
-                "condition 'typo < 1' names no evidence 'typo'",
-                "placeholder {rhoo} names no evidence",
-            ],
-        ),
-    ]
     ck_info = {
         "pipeline": {
             "stages": {
-                "scan": {
+                "plot": {
                     "kind": "python-script",
                     "environment": "py",
-                    "script_path": "s.py",
-                    "outputs": ["r.json"],
-                }
+                    "script_path": "plot.py",
+                    "inputs": [{"from_stage_outputs": "summarize"}],
+                    "outputs": ["results/plot.png"],
+                },
+                "summarize": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "summarize.py",
+                    "inputs": ["summarize.py", "results/fit.json"],
+                    "outputs": [
+                        {"path": "results/summary.json", "storage": "git"}
+                    ],
+                },
+                "fit": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "fit.py",
+                    "outputs": ["results/fit.json"],
+                },
+                "unrelated": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "other.py",
+                    "outputs": ["results/other.json"],
+                },
+            }
+        },
+        "questions": [question],
+    }
+
+    def check(**kwargs):
+        return check_questions(wdir=".", check_pipeline=False, **kwargs)
+
+    def sign_off(date="2026-10-04"):
+        by = {"name": "Ada", "email": "ada@example.org"}
+        question["verifications"] = [{"by": by, "date": date}]
+        question["validations"] = [{"by": by, "date": date}]
+        _write_yaml(ck_info)
+        _commit(f"Sign off {date}")
+
+    # The stages behind the evidence, upstream first, followed through
+    # both input paths and from_stage_outputs
+    _write_yaml(ck_info)
+    status = check()
+    q = status.questions[0]
+    assert q.stages == ["fit", "summarize", "plot"]
+    assert q.approach and not q.hypothesis
+    assert (q.verification_status, q.validation_status) == ("none", "none")
+    lines = format_status(status).splitlines()
+    assert "Answers verified: 0/1" in lines
+    assert "Answers validated: 0/1" in lines
+    # Statuses are in the JSON the editor and hub read
+    dumped = q.model_dump(mode="json")
+    assert dumped["verification_status"] == "none"
+    assert dumped["validation_status"] == "none"
+    # Paths in a stage are relative to its wdir, and a LaTeX stage's PDF is
+    # its output without being listed
+    wdir_info = {
+        "pipeline": {
+            "stages": {
+                "collect": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "collect.py",
+                    "outputs": ["data/raw.csv"],
+                },
+                "fit": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "wdir": "analysis",
+                    "script_path": "fit.py",
+                    "inputs": ["../data/raw.csv"],
+                    "outputs": ["summary.json"],
+                },
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "inputs": ["analysis/summary.json"],
+                },
             }
         }
     }
-    for answer, expected in cases:
-        checked = check_question(
-            1,
-            {"question": "q", "answer": answer, "evidence": evidence},
-            ck_info,
-            ".",
+    for path, expected in [
+        ("analysis/summary.json", ["collect", "fit"]),
+        ("paper/main.pdf", ["collect", "fit", "paper"]),
+        ("paper/main.tex", []),
+    ]:
+        q_dict = {"question": "Q?", "evidence": [{"path": path}]}
+        assert question_stages(q_dict, wdir_info) == expected, path
+    # A sign-off not yet committed covers the working tree
+    question["validations"] = [
+        {
+            "by": {"name": "Ada", "email": "ada@example.org"},
+            "date": "2026-10-04",
+        }
+    ]
+    _write_yaml(ck_info)
+    q = check().questions[0]
+    assert q.validation_status == "current"
+    assert "not yet committed" in (q.validations[0].message or "")
+    # Committed, each applies to that commit
+    sign_off()
+    status = check()
+    assert status.questions[0].validations[0].commit is not None
+    assert status.questions[0].verification_status == "current"
+    assert status.questions[0].validation_status == "current"
+    assert status.ok
+    # Evidence changing makes a validation stale, which fails the check,
+    # but not a verification, since no stage changed
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 3.0}, f)
+    _commit("Rerun")
+    status = check()
+    q = status.questions[0]
+    assert (q.verification_status, q.validation_status) == ("current", "stale")
+    assert "results/summary.json: r was 2 at" in (
+        q.validations[0].message or ""
+    )
+    assert not status.ok
+    assert [s.index for s in status.stale_validations] == [1]
+    assert not status.stale_verifications
+    report = format_status(status)
+    assert (
+        "1. [ok, verification current, validation stale] Does it work?"
+        in report
+    )
+    assert "validated by Ada on 2026-10-04 [stale]" in report
+    assert "verified by" not in report
+    assert (
+        "Answers validated: 1/1, stale since their question or evidence "
+        "changed: 1" in report
+    )
+    assert format_summary(status) == "1 question, 1 with a stale validation"
+    # The generic nudge gives way to the validation's own
+    assert "editing the answer or validating" not in (q.message or "")
+    # At a ref, as the hub reads it, the check is as of that commit, and
+    # ignores the working tree
+    import git
+
+    repo = git.Repo(".")
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 2.0}, f)
+    for ref, expected in [("HEAD~1", "current"), ("HEAD", "stale")]:
+        sha = repo.git.rev_parse(ref)
+        at_ref = calkit.questions._load_calkit_yaml_text(
+            repo.git.show(f"{sha}:calkit.yaml")
         )
-        messages = checked.message or ""
-        assert (checked.status == "error") == bool(expected), answer
-        for fragment in expected:
-            assert fragment in messages, (answer, messages)
+        _, validations = check_sign_offs(
+            at_ref["questions"][0], at_ref, ".", repo, ref=sha
+        )
+        assert validations[0].status == expected, ref
+    assert check().questions[0].validation_status == "current"
+    repo.git.checkout("--", "results/summary.json")
+    # Each kind goes stale on its own changes, and notes go stale on neither.
+    # Rewrapping changes nothing, since a line break is a space, but a blank
+    # line starts a new paragraph. Only prose is compared that way, not
+    # what picks out the evidence.
+    ratio, figure = question["evidence"]
+    explained = {**ratio, "explanation": "The ratio of the fits."}
+    edits = [
+        ("notes", "Checked twice.", "current", "current", None),
+        ("answer", "It does.", "current", "stale", "question was edited"),
+        ("answer", "It\ndoes.\n", "current", "current", None),
+        ("question", "Does it?", "current", "stale", "question was edited"),
+        ("question", "Does  it?\n", "current", "current", None),
+        ("approach", "Fit it.", "stale", "stale", "approach was edited"),
+        ("approach", "Fit\n  it.", "current", "current", None),
+        ("answer", "It\n\ndoes.", "current", "stale", "question was edited"),
+        ("evidence", [explained, figure], "current", "stale", "was edited"),
+        (
+            "evidence",
+            [{**explained, "explanation": "The ratio\nof the fits."}, figure],
+            "current",
+            "current",
+            None,
+        ),
+        (
+            "evidence",
+            [{**explained, "key": "r "}, figure],
+            "current",
+            "stale",
+            "question was edited",
+        ),
+    ]
+    for n, (field, value, verification, validation, reason) in enumerate(
+        edits, start=5
+    ):
+        sign_off(date=f"2026-09-{n:02d}")
+        question[field] = value
+        _write_yaml(ck_info)
+        _commit(f"Edit the {field}")
+        q = check().questions[0]
+        assert q.verification_status == verification, field
+        assert q.validation_status == validation, field
+        if reason:
+            messages = [
+                s.message or "" for s in q.verifications + q.validations
+            ]
+            assert any(reason in m for m in messages), (field, messages)
+    question["evidence"] = [ratio, figure]
+    # Code a stage runs changing makes a verification stale, but not a
+    # validation, since the evidence didn't change; nor does code outside
+    # the question's stages
+    sign_off(date="2026-10-10")
+    for path in ["fit.py", "other.py"]:
+        with open(path, "w") as f:
+            f.write("changed()\n")
+    _commit("Refactor")
+    q = check().questions[0]
+    assert (q.verification_status, q.validation_status) == ("stale", "current")
+    assert "fit.py: changed in 1 commit(s)" in (
+        q.verifications[0].message or ""
+    )
+    assert "other.py" not in (q.verifications[0].message or "")
+    # So does redefining one of its stages
+    sign_off(date="2026-10-11")
+    ck_info["pipeline"]["stages"]["plot"]["script_path"] = "plot2.py"
+    _write_yaml(ck_info)
+    _commit("Redefine")
+    q = check().questions[0]
+    assert q.verification_status == "stale"
+    assert "stage plot was redefined" in (q.verifications[0].message or "")
+    # Identical sign-offs on two questions each find their own question,
+    # and evidence on a branch goes stale when the branch moves, but not
+    # evidence pinned to a commit
+    repo.git.branch("published")
+    pinned = repo.git.rev_parse("HEAD")
+    record = {
+        "by": {"name": "Ada", "email": "ada@example.org"},
+        "date": "2026-10-12",
+    }
+    question["validations"] = [record]
+    ck_info["questions"].append(
+        {
+            "question": "Is it published?",
+            "answer": "It is.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/summary.json",
+                    "key": "r",
+                    "git_ref": "published",
+                },
+                {
+                    "kind": "figure",
+                    "path": "results/plot.png",
+                    "git_ref": pinned,
+                },
+            ],
+            "validations": [record],
+        }
+    )
+    _write_yaml(ck_info)
+    _commit("Sign off both", date="2099-01-01T00:00:00+00:00")
+    statuses = [q.validation_status for q in check().questions]
+    assert statuses == ["current", "current"]
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 4.0}, f)
+    with open("results/plot.png", "w") as f:
+        f.write("png2")
+    _commit("Publish", date="2099-01-02T00:00:00+00:00")
+    repo.git.branch("-f", "published", "HEAD")
+    q = check().questions[1]
+    assert q.validation_status == "stale"
+    message = q.validations[0].message or ""
+    assert "results/summary.json: r was 3 at" in message
+    assert "plot.png" not in message
+    ck_info["questions"].pop()
+    _write_yaml(ck_info)
+    # A stage's script counts even if it has never run, so dvc.lock has
+    # nothing for it
+    with open("summarize.py", "w") as f:
+        f.write("summarize()\n")
+    sign_off(date="2026-10-13")
+    with open("summarize.py", "w") as f:
+        f.write("summarize(again=True)\n")
+    _commit("Edit a stage that hasn't run")
+    q = check().questions[0]
+    assert q.verification_status == "stale"
+    assert "summarize.py: changed in 1 commit(s)" in (
+        q.verifications[0].message or ""
+    )
+    # A stage reading calkit.yaml, as questions-to-latex does, doesn't make
+    # a verification stale when someone else signs off in it
+    lock = calkit.ryaml.load(open("dvc.lock"))
+    lock["stages"]["fit"]["deps"].append({"path": "calkit.yaml"})
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    sign_off(date="2026-10-14")
+    question["verifications"].append(
+        {
+            "by": {"name": "Bob", "email": "bob@example.org"},
+            "date": "2026-10-14",
+        }
+    )
+    _write_yaml(ck_info)
+    _commit("Bob verifies")
+    q = check().questions[0]
+    assert [v.status for v in q.verifications] == ["current", "current"]
+    # One made on a branch is checked from where it was added, so a change
+    # on main it never saw counts, though main's commits are newer
+    main = repo.active_branch.name
+    repo.git.checkout("-q", "-b", "side")
+    sign_off(date="2026-10-15")
+    repo.git.checkout("-q", main)
+    with open("fit.py", "w") as f:
+        f.write("fit(differently=True)\n")
+    with open("calkit.yaml", "a") as f:
+        f.write("description: Changed on main.\n")
+    _commit("Change main", date="2099-02-01T00:00:00+00:00")
+    subprocess.check_call(
+        ["git", "merge", "-q", "--no-edit", "side"],
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "GIT_COMMITTER_DATE": "2099-02-02T00:00:00+00:00",
+        },
+    )
+    q = check().questions[0]
+    assert q.verification_status == "stale"
+    assert "fit.py: changed in 1 commit(s)" in (
+        q.verifications[0].message or ""
+    )
+    # dvc.lock's paths are relative to the stage's wdir
+    ck_info["pipeline"]["stages"]["fit"]["wdir"] = "analysis"
+    ck_info["pipeline"]["stages"]["fit"]["outputs"] = ["../results/fit.json"]
+    os.makedirs("analysis")
+    with open("analysis/fit.py", "w") as f:
+        f.write("fit()\n")
+    sign_off(date="2026-10-16")
+    with open("analysis/fit.py", "w") as f:
+        f.write("fit(in_analysis=True)\n")
+    _commit("Edit the stage in its wdir")
+    q = check().questions[0]
+    assert "fit" in q.stages
+    assert q.verification_status == "stale"
+    message = q.verifications[0].message or ""
+    assert "analysis/fit.py: changed in 1 commit(s)" in message
+    assert " fit.py" not in message
+    lock_text = (
+        "stages:\n  fit:\n    outs:\n    - path: out.txt\n      md5: abc\n"
+    )
+    for path, wdirs, expected in [
+        ("analysis/out.txt", {"fit": "analysis"}, "abc"),
+        ("out.txt", {"fit": "analysis"}, None),
+        ("out.txt", None, "abc"),
+    ]:
+        assert calkit.questions._lock_hash(lock_text, path, wdirs) == expected
+    # Without history, a sign-off can't be checked either way
+    q = check(check_history=False).questions[0]
+    assert q.verifications[0].status == "unchecked"
+    assert q.verification_status == "current"
+    # Sign-offs and the approach are part of the schema
+    assert ProjectInfo.model_validate(calkit.load_calkit_info())
+    for field in ["verifications", "validations"]:
+        with pytest.raises(ValueError):
+            Question.model_validate(
+                {"question": "Q?", field: [{"by": {"name": "Ada"}}]}
+            )
 
 
 def test_format_summary():
@@ -977,3 +1358,253 @@ def test_latex_values(tmp_dir):
         "results.json",
         "extra.txt",
     ]
+
+
+def test_conditional_answers(tmp_dir):
+    values = {"p": 0.007, "rho": 0.8373, "n": 17, "leader": "turns-max"}
+    # Rendering picks the branch, then fills its placeholders
+    answer = {
+        "if p < 0.05": "{leader} predicts it (rho {rho:+.2f})",
+        "else": "no feature predicts it",
+    }
+    assert render(answer, values) == "turns-max predicts it (rho +0.84)"
+    assert render(answer, values | {"p": 0.2}) == "no feature predicts it"
+    # Plain strings are untouched by the conditional path
+    assert render("if and only if", values) == "if and only if"
+    # Checking reports every clause's problems, including the clauses the
+    # current values don't select, rather than crashing or passing
+    with open("r.json", "w") as f:
+        json.dump({"p": 0.2, "leader": "x"}, f)
+    evidence = [
+        {"kind": "value", "path": "r.json", "key": "p"},
+        {"kind": "value", "path": "r.json", "key": "leader"},
+    ]
+    cases = [
+        ({"if p < 0.5": "{leader}", "else": "no"}, []),
+        (
+            {"if p < 0.05": "x"},
+            ["no condition of the conditional answer holds"],
+        ),
+        ({"when p < 1": "x"}, ["conditional answer: expected 'if'"]),
+        (
+            {"if leader < 0.05": "x", "else": "y"},
+            ["cannot evaluate condition 'leader < 0.05'"],
+        ),
+        (
+            {"if p > 0.1": "yes", "elif typo < 1": "x", "else": "{rhoo:.2f}"},
+            [
+                "condition 'typo < 1' names no evidence 'typo'",
+                "placeholder {rhoo} names no evidence",
+            ],
+        ),
+    ]
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "scan": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": ["r.json"],
+                }
+            }
+        }
+    }
+    for answer, expected in cases:
+        checked = check_question(
+            1,
+            {"question": "q", "answer": answer, "evidence": evidence},
+            ck_info,
+            ".",
+        )
+        messages = checked.message or ""
+        assert (checked.status == "error") == bool(expected), answer
+        for fragment in expected:
+            assert fragment in messages, (answer, messages)
+
+
+def test_check_questions_plain_files_and_output_dirs(tmp_dir):
+    from calkit.questions import format_lines, get_evidence_kind, parse_lines
+
+    # How an entry's kind is read: a plain file has none, and one without a
+    # kind but with a key or values is still a result
+    assert get_evidence_kind({"path": "a"}) is None
+    assert get_evidence_kind({"path": "a", "kind": None, "lines": 8}) is None
+    assert get_evidence_kind({"path": "a", "key": "v"}) == "result"
+    assert (
+        get_evidence_kind({"path": "a", "kind": None, "values": {}})
+        == "result"
+    )
+    assert get_evidence_kind({"path": "a", "kind": "figure"}) == "figure"
+    assert parse_lines(8) == (8, 8)
+    assert parse_lines("8-12") == parse_lines("8–12") == (8, 12)
+    assert format_lines("8-12") == "lines 8–12"
+    for bad in ["0", "12-8", "8-", "x", True]:
+        with pytest.raises(ValueError):
+            parse_lines(bad)
+    # A stage that copies a write-up and a transcript excerpt into a
+    # directory it declares as one output, which DVC hashes as a whole
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results/trace/run-1")
+    with open("results/trace/run-1/RESULTS.md", "w") as f:
+        f.write("# Results\n\nThe modulus is 210 GPa.\n")
+    with open("results/trace/run-1/transcript.txt", "w") as f:
+        f.write("$ python fit.py\nE = 210\n")
+    with open(".gitignore", "w") as f:
+        f.write("/results/trace\n")
+    os.makedirs("notes")
+    with open("notes/log.txt", "w") as f:
+        f.write("one\ntwo\n")
+    with open("results/fit.json", "w") as f:
+        json.dump({"E": 210, "nu": 0.3}, f)
+    lock = {
+        "stages": {
+            "trace": {"outs": [{"path": "trace", "md5": "aaa.dir"}]},
+            "fit": {"outs": [{"path": "results/fit.json", "md5": "bbb"}]},
+        }
+    }
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    run = "results/trace/run-1"
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                # Paths relative to its wdir, as is dvc.lock's
+                "trace": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "wdir": "results",
+                    "script_path": "trace.py",
+                    "outputs": ["trace"],
+                },
+                "fit": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "fit.py",
+                    "outputs": ["results/fit.json"],
+                },
+            }
+        },
+        "questions": [
+            {
+                "question": "Where does the wrong modulus come from?",
+                "answer": "The write-up retyped it.",
+                "evidence": [
+                    {"kind": "document", "path": f"{run}/RESULTS.md"},
+                    {"path": f"{run}/RESULTS.md", "lines": 3},
+                    {
+                        "kind": None,
+                        "path": f"{run}/transcript.txt",
+                        "lines": "1-2",
+                        "explanation": "The fit printed it.",
+                    },
+                    {"path": "notes/log.txt"},
+                ],
+            },
+            {
+                "question": "Do rotted lines fail?",
+                "answer": "Yes.",
+                "evidence": [
+                    {"path": f"{run}/transcript.txt", "lines": "2-5"}
+                ],
+            },
+            {
+                "question": "Do results without a kind still read?",
+                "answer": "E is {E} and nu is {nu}.",
+                "evidence": [
+                    {"path": "results/fit.json", "key": "E", "name": "E"},
+                    {"path": "results/fit.json", "values": {"nu": "nu"}},
+                ],
+            },
+        ],
+    }
+    _write_yaml(ck_info)
+    sha = _commit("Trace")
+    status = check_questions(ck_info=ck_info, wdir=".", check_pipeline=False)
+    traced, rotted, legacy = status.questions
+    # Files inside the directory belong to the stage, so the document isn't
+    # an error, and a file nothing produces is only worth a look
+    assert [ev.status for ev in traced.evidence] == [
+        "ok",
+        "ok",
+        "ok",
+        "unattributed",
+    ]
+    assert [ev.stage for ev in traced.evidence] == [
+        "trace",
+        "trace",
+        "trace",
+        None,
+    ]
+    assert [ev.kind for ev in traced.evidence] == [
+        "document",
+        None,
+        None,
+        None,
+    ]
+    assert [ev.lines for ev in traced.evidence] == [None, "3", "1-2", None]
+    assert traced.status == "ok"
+    assert rotted.status == "error"
+    assert "lines 2–5 cited, but the file has only 2 lines" in (
+        rotted.evidence[0].message or ""
+    )
+    assert legacy.status == "ok"
+    assert [ev.kind for ev in legacy.evidence] == ["result", "result"]
+    assert legacy.evidence[0].current == 210
+    assert legacy.evidence[1].values == {"nu": 0.3}
+    report = format_status(status)
+    assert f"file {run}/transcript.txt:2-5 [error]" in report
+    assert "file notes/log.txt [unattributed]" in report
+    # A rerun of the stage makes its files stale
+    stale = check_question(
+        1,
+        ck_info["questions"][0],
+        ck_info,
+        ".",
+        calkit.git.get_repo("."),
+        stale_stages={"trace"},
+    )
+    assert [ev.status for ev in stale.evidence][:3] == ["stale"] * 3
+    # dvc.lock hashes only the directory, so a file in it changes with it
+    lock["stages"]["trace"]["outs"][0]["md5"] = "ccc.dir"
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    _commit("Rerun trace")
+    changed = check_questions(ck_info=ck_info, wdir=".", check_pipeline=False)
+    assert [ev.status for ev in changed.questions[0].evidence][:3] == [
+        "changed"
+    ] * 3
+    assert "hash in dvc.lock changed" in (
+        changed.questions[0].evidence[1].message or ""
+    )
+    # Pinned: a file inside a DVC-tracked directory can't be read at the
+    # ref, while a Git-tracked one has its lines checked there
+    with open("notes/log.txt", "w") as f:
+        f.write("one\ntwo\nthree\n")
+    _commit("Longer log")
+    pinned = check_question(
+        1,
+        {
+            "question": "Pinned?",
+            "answer": "Yes.",
+            "evidence": [
+                {"path": f"{run}/RESULTS.md", "lines": 3, "git_ref": sha},
+                {"path": "notes/log.txt", "lines": "1-2", "git_ref": sha},
+                {"path": "notes/log.txt", "lines": 3, "git_ref": sha},
+                {"path": "notes/log.txt", "lines": 3},
+            ],
+        },
+        ck_info,
+        ".",
+        calkit.git.get_repo("."),
+    )
+    assert [ev.status for ev in pinned.evidence] == [
+        "skipped",
+        "ok",
+        "error",
+        "unattributed",
+    ]
+    assert "inside a DVC-tracked directory" in (
+        pinned.evidence[0].message or ""
+    )
+    assert f"at {sha}" in (pinned.evidence[2].message or "")

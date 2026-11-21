@@ -5,13 +5,14 @@ import logging
 import os
 import posixpath
 import re
-import threading
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import ruamel.yaml
 import yaml
+
+# The CLI's round-trip YAML, so the hub writes calkit.yaml the same way
+from calkit.core import ryaml  # noqa: F401
 
 try:
     # libyaml-backed loader, several times faster than the pure-Python one.
@@ -25,45 +26,6 @@ except ImportError:  # pragma: no cover - depends on the libyaml build
 # logger has a handler, which would silently disable JSON logging (and
 # break every Loki `| json` query / Alloy stage.json extraction).
 logger = logging.getLogger(__name__)
-
-
-class _ThreadLocalYAML(threading.local):
-    """Holds one configured ruamel ``YAML`` per thread.
-
-    A ``YAML`` instance carries scanner, parser and composer state for the
-    duration of a load, so two threads sharing one interleave their parses
-    and corrupt each other. Sync endpoints run in a threadpool, so a single
-    shared instance here means concurrent requests reading the same file get
-    bogus ``ParserError``/``ComposerError`` at random lines, an ``IndexError``
-    from the scanner, or an internal ``AttributeError`` that escapes the YAML
-    error handling and 500s the request.
-    """
-
-    def __init__(self) -> None:
-        self.yaml = ruamel.yaml.YAML()
-        self.yaml.indent(mapping=2, sequence=4, offset=2)
-        self.yaml.preserve_quotes = True
-        self.yaml.width = 70
-
-
-_yaml_local = _ThreadLocalYAML()
-
-
-class _ThreadLocalYAMLProxy:
-    """Forwards to the calling thread's ``YAML``.
-
-    Keeps ``ryaml`` usable as the module-level object it has always been, so
-    no call site has to know about any of this.
-    """
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(_yaml_local.yaml, name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        setattr(_yaml_local.yaml, name, value)
-
-
-ryaml = _ThreadLocalYAMLProxy()
 
 
 def load_yaml_fast(data: str | bytes) -> Any:
@@ -130,6 +92,8 @@ INVALID_ACCOUNT_NAMES = [
     "checks",
     "cloud",
     "clouds",
+    # The user's own machines, workspaces, and sessions
+    "compute",
     "create",
     "data",
     "datasets",
@@ -149,6 +113,8 @@ INVALID_ACCOUNT_NAMES = [
     "hubs",
     "latex",
     "login",
+    # Kept for pages about the machines users link to the hub
+    "machines",
     "new",
     "notifications",
     "organizations",
@@ -183,6 +149,8 @@ INVALID_ACCOUNT_NAMES = [
     "user",
     "users",
     "workflows",
+    # Kept for pages about machines' workspaces
+    "workspaces",
 ]
 
 # Names reserved for organizations, so a user can't claim the product's
@@ -230,6 +198,19 @@ def utcnow() -> datetime:
 def params_from_url(url: str) -> dict:
     parsed_url = urlparse(url)
     return parse_qs(parsed_url.query)
+
+
+def web_url_or_none(url: Any) -> str | None:
+    """Return ``url`` if it's an http(s) URL, so it's safe to render as a
+    link, e.g., not ``javascript:``.
+    """
+    if not isinstance(url, str):
+        return None
+    try:
+        scheme = urlparse(url).scheme
+    except ValueError:
+        return None
+    return url if scheme in ("http", "https") else None
 
 
 def read_last_line_from_file(fpath: str) -> str:

@@ -74,8 +74,9 @@ function AnalyticsConsentBanner() {
         align={{ base: "flex-end", md: "center" }}
       >
         <Text fontSize={{ base: "xs", md: "sm" }} flex={1} alignSelf="stretch">
-          Calkit can record which pages and features you use so we can improve
-          them. Nothing is sold or shared.{" "}
+          Calkit counts anonymous page views to see how the site is used. If you
+          allow it, we'll also record the pages and features you use, tied to
+          your account. Nothing is sold or shared.{" "}
           <Link href={privacyPolicyUrl} isExternal textDecoration="underline">
             Privacy policy
           </Link>

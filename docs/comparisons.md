@@ -129,6 +129,72 @@ Calkit isn't limited to one article, layout, or kind of environment,
 and its questions state claims apart from any document,
 with the check reporting stale or untraceable evidence.
 
+## Project templates
+
+A template repository starts a project from a fixed layout,
+not from a tool you install.
+[The Turing Way's reproducible project template](https://github.com/the-turing-way/reproducible-project-template)
+is a GitHub template repo with folders for `data`, `models`, `src`,
+`notebooks`, `reports`, and `project-management`,
+plus the files a project is expected to have:
+a README, a license, a code of conduct, contribution guidelines, and
+issue templates.
+It's about repository hygiene,
+and nothing in it runs the project.
+
+[Cookiecutter Data Science](https://cookiecutter-data-science.drivendata.org/)
+is the data science equivalent, generated with `ccds`.
+It asks which environment manager, dependency file, testing framework,
+linter, docs, license, and dataset storage to use,
+then writes a `pyproject.toml`, a Makefile, and a Python package with
+modules for data, features, modeling, and plots.
+Its docs hold that analysis is a DAG and raw data is immutable,
+and the Makefile has targets like `make requirements`, `make test`, and
+`make data`,
+but wiring the graph up is left to the user,
+with Make, Airflow, Luigi, and Snakemake suggested.
+
+The [TU Delft Jupyter Book starterkit](https://github.com/TUD-JB-OS/starterkit)
+starts from the other end, the document.
+A GitHub Action builds a MyST site and a PDF on every push,
+and a `pixi` environment and lock file are included to build them
+locally.
+It's for a thesis, so its content is chapters,
+one of which is a notebook that renders into the book,
+and it includes an analysis stack, e.g., NumPy and Matplotlib.
+
+None gives single-button reproducibility.
+The starterkit builds the document in one command,
+and ccds gives you a few convenience targets,
+but no template declares the analysis as a graph of stages,
+so nothing skips a step whose inputs haven't changed,
+and nothing reports an output that's out of date.
+showyourwork gets closer, since it builds the article from a
+Snakemake workflow and reruns it on every push,
+but it does that with tooling of its own rather than by including
+other tools' config.
+With the templates, reproducibility is a property the user maintains
+by hand.
+
+The templates do keep code, notebooks, models, and reports in one
+repository,
+which is a shared home rather than a silo,
+and better than splitting the analysis and the writing across separate
+repos or apps.
+What they don't provide is the vertical integration.
+Nothing declares how the writing and the analysis relate,
+so a figure or number in the report is placed there by hand,
+not read from an output,
+and the report can drift from the analysis it's meant to describe.
+Cookiecutter Data Science also keeps data out of the repository,
+syncing it to cloud storage or Git LFS,
+with no record in the project of which data produced which output.
+Calkit declares the environments, the pipeline, and the publication
+together,
+so a change to the data reruns what depends on it,
+and a question's answer is read from the pipeline output that computes
+it.
+
 ## Environment management
 
 Tools like conda, uv, pixi, renv, Docker, and Julia's package manager
@@ -336,6 +402,46 @@ Its source is available under the Microsoft Reference Source License.
 As of September 2026, cocalc.com redirects to CoCalc.ai,
 a rewrite built around AI.
 Pipelines, data versioning, and provenance aren't part of either version.
+
+<!-- TODO: needs human review -->
+
+## In-browser workspaces
+
+These run everything in the browser, so there's nothing to install.
+
+### Papers AI
+
+[Papers AI](https://papers.ai/), launched in August 2026,
+is a browser-based workspace for research writing with an AI assistant,
+free or £10 per month for more AI usage.
+It edits Word, Markdown, LaTeX, Typst, and MyST documents,
+Jupyter notebooks, and CSV files,
+and connects to Zotero, Mendeley, and ReadCube.
+[Notebooks](https://docs.papers.ai/notebooks-and-data/notebooks.md)
+run Python with Pyodide and R with WebR,
+and LaTeX and Typst compile in the browser,
+with a built-in set of LaTeX packages that can't be added to.
+A project is kept in the browser's storage, on Papers AI's servers,
+or in a folder on the user's computer,
+which only Chromium-based browsers can open.
+Each file keeps a history of snapshots,
+capped at five per file for projects that aren't in the cloud,
+and cloud projects can be shared with real-time editing.
+
+Running in the browser makes it quick to start,
+but limits what a project can do.
+Code runs in WebAssembly builds of Python and R,
+not in the project's own environments,
+so only packages built for them can be used,
+and a 32-bit WebAssembly program can use at most 4 GB of memory,
+which limits how much data an analysis can hold.
+There's no pipeline, environment locking, or data versioning,
+and history is per file rather than a repository of the whole project.
+
+Calkit runs where the project's code and data already are,
+e.g., a laptop, a workstation, or a cluster,
+in environments declared and locked in the project,
+so the analysis that makes a figure is the one anyone can rerun.
 
 ## Agentic research tools
 

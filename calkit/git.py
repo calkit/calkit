@@ -31,6 +31,32 @@ def get_repo(path: str | None = None) -> git.Repo:
     return git.Repo(path, search_parent_directories=True)
 
 
+def get_main_worktree_dir(repo: git.Repo) -> str | None:
+    """Return the directory of the main checkout among ``repo``'s worktrees,
+    or None if there isn't one, e.g., the repo is bare.
+
+    Not from ``git worktree list``, which gives a submodule's Git dir, nor
+    the common Git dir's parent, which is the superproject's ``.git`` there.
+    """
+    common = os.path.abspath(repo.common_dir)
+    if os.path.realpath(repo.git_dir) == os.path.realpath(common):
+        tree = repo.working_tree_dir
+        return None if tree is None else str(tree)
+    main = git.Repo(common)
+    if main.bare:
+        return None
+    # A submodule's Git dir records its checkout
+    worktree = main.config_reader("repository").get_value(
+        "core", "worktree", ""
+    )
+    if worktree:
+        return os.path.normpath(os.path.join(common, str(worktree)))
+    if os.path.basename(common) == ".git":
+        return os.path.dirname(common)
+    # E.g., from 'git init --separate-git-dir', which records none
+    return None
+
+
 def get_default_branch(repo: git.Repo) -> str | None:
     """The name of the project's default branch, e.g., ``main``.
 
@@ -63,6 +89,91 @@ def get_default_branch(repo: git.Repo) -> str | None:
         if candidate in local_branches or candidate in remote_branches:
             return candidate
     return None
+
+
+def get_set_upstream_args(
+    repo: git.Repo, push_args: list[str] | None = None
+) -> list[str]:
+    """Arguments that let a plain ``git push`` publish a new branch.
+
+    Git refuses to push a branch with no upstream unless
+    ``push.autoSetupRemote`` is on, so the first push of a project, e.g.,
+    right after connecting it to a hub, would fail. Returns nothing when
+    the branch already tracks one, ``push_args`` say what or where to
+    push, Git pushes to a remote other than the one it pulls from, the
+    remote's push refspecs say what to push, or there's no obvious remote
+    to choose.
+    """
+
+    def get_config(key: str) -> str:
+        # Through Git, since its keys are case-insensitive and config files
+        # can include others
+        return str(repo.git.config("--get", key, with_exceptions=False))
+
+    # These pick their own refs, so naming the branch would change them
+    ref_flags = {
+        "--all",
+        "--branches",
+        "--mirror",
+        "--tags",
+        "--delete",
+        "-d",
+        "--prune",
+    }
+    for arg in push_args or []:
+        if not arg.startswith("-") or arg in ref_flags:
+            return []
+        # A remote named this way loses to one given as an argument
+        if arg == "--repo" or arg.startswith("--repo="):
+            return []
+    # Neither pushes just the current branch, which naming it would do
+    if get_config("push.default") in ("nothing", "matching"):
+        return []
+    try:
+        branch = repo.active_branch
+    except TypeError:
+        # Detached HEAD
+        return []
+    if branch.tracking_branch() is not None:
+        return []
+    push_remote = get_config(f"branch.{branch.name}.pushRemote") or get_config(
+        "remote.pushDefault"
+    )
+    pull_remote = get_config(f"branch.{branch.name}.remote")
+    # Git already pushes a new branch to a push remote that isn't the one
+    # it pulls from, and setting an upstream would change where it pulls
+    if push_remote and push_remote != (pull_remote or "origin"):
+        return []
+    remote_names = [r.name for r in repo.remotes]
+    if push_remote:
+        remote = push_remote
+    elif pull_remote in remote_names:
+        remote = pull_remote
+    elif "origin" in remote_names:
+        remote = "origin"
+    elif len(remote_names) == 1:
+        remote = remote_names[0]
+    else:
+        return []
+    # Git pushes what the remote's push refspecs say, which naming the
+    # branch would override
+    if get_config(f"remote.{remote}.push"):
+        return []
+    return ["--set-upstream", remote, branch.name]
+
+
+def get_n_unpushed_commits(repo: git.Repo | None = None) -> int:
+    """How many commits the current branch has that its upstream doesn't,
+    as of the last fetch, or zero with no upstream.
+    """
+    if repo is None:
+        repo = get_repo()
+    if repo.head.is_detached:
+        return 0
+    upstream = repo.active_branch.tracking_branch()
+    if upstream is None or not upstream.is_valid():
+        return 0
+    return int(repo.git.rev_list("--count", f"{upstream.name}..HEAD"))
 
 
 def check_branch_is_current(
@@ -131,7 +242,8 @@ def get_staged_files(
         repo = get_repo(path)
     cmd = ["--staged", "--name-only"]
     if path is not None:
-        cmd.append(path)
+        # A staged deletion's path is gone, so Git would read it as a ref
+        cmd += ["--", path]
     diff = repo.git.diff(cmd)
     paths = diff.split("\n")
     return [p for p in paths if p]
@@ -166,7 +278,8 @@ def get_staged_files_with_status(
         repo = get_repo(path)
     cmd = ["--staged", "--name-status"]
     if path is not None:
-        cmd.append(path)
+        # A staged deletion's path is gone, so Git would read it as a ref
+        cmd += ["--", path]
     diff = repo.git.diff(cmd)
     paths = diff.split("\n")
     res = []
@@ -199,7 +312,13 @@ def _resolve_repo_and_ignore_path(
     else:
         abs_path = (repo_root / path_obj).resolve()
     # If the path is inside a submodule, use that repo and relative path.
-    for submodule in repo.submodules:
+    # Listing submodules runs Git, so first look for a checkout to be in.
+    in_checkout = any(
+        (parent / ".git").exists()
+        for parent in abs_path.parents
+        if parent != repo_root and parent.is_relative_to(repo_root)
+    )
+    for submodule in repo.submodules if in_checkout else []:
         submodule_root = (repo_root / submodule.path).resolve()
         if abs_path == submodule_root:
             continue
@@ -215,12 +334,27 @@ def _resolve_repo_and_ignore_path(
     return repo, rel_path
 
 
+def get_ignored_by_rule(repo: git.Repo, *paths: str) -> list[str]:
+    """The given paths an ignore rule matches.
+
+    Unlike ``repo.ignored``, this counts a directory Git already tracks files
+    in, whose new files the rule still hides.
+    """
+    if not paths:
+        return []
+    try:
+        out: str = repo.git.check_ignore("--no-index", "--", *paths)
+    except git.GitCommandError:
+        return []
+    return out.splitlines()
+
+
 def _get_matching_gitignore_details(
     repo: git.Repo, path: str
 ) -> tuple[Path | None, str | None]:
     """Return the repo-local gitignore file and pattern matching ``path``."""
     try:
-        check_ignore = repo.git.check_ignore("-v", "--", path)
+        check_ignore = repo.git.check_ignore("--no-index", "-v", "--", path)
     except git.GitCommandError:
         return None, None
     line = check_ignore.splitlines()[0]
@@ -251,19 +385,33 @@ def ensure_path_is_ignored(
     # No-op if Git already ignores this path.
     if target_repo.ignored(target_path):
         return
+    # A project in a subdirectory of the repo keeps its rules in its own
+    # .gitignore, relative to it, so they go wherever the project goes
+    gitignore_dir, entry = target_repo.working_dir, target_path
+    if target_repo is repo:
+        root = Path(repo.working_dir).resolve()
+        cwd = Path.cwd().resolve()
+        abs_path = (root / target_path).resolve()
+        if (
+            cwd != root
+            and cwd.is_relative_to(root)
+            and abs_path.is_relative_to(cwd)
+        ):
+            gitignore_dir = str(cwd)
+            entry = abs_path.relative_to(cwd).as_posix()
     # Read gitignore first to check if the path is already ignored
     # If not, we don't want to add a line for it since it was added
     # TODO: Add an option to remove cached (`git rm --cached`)
-    gitignore_path = os.path.join(target_repo.working_dir, ".gitignore")
+    gitignore_path = os.path.join(gitignore_dir, ".gitignore")
     if os.path.isfile(gitignore_path):
         with open(gitignore_path) as f:
             gitignore_txt = f.read()
         lines = [line for line in gitignore_txt.splitlines() if line]
-        if target_path in lines:
+        if entry in lines:
             # The direct rule exists; also remove any stale negation that
             # follows it, otherwise the negation wins and the path stays
             # unignored.
-            negation_variants = [f"!{target_path}", f"!/{target_path}"]
+            negation_variants = [f"!{entry}", f"!/{entry}"]
             stale = [n for n in negation_variants if n in lines]
             if not stale:
                 return
@@ -274,12 +422,12 @@ def ensure_path_is_ignored(
             return True
         # Remove any stale negations for this path so the ignore rule takes
         # effect cleanly without accumulating contradictory entries.
-        negation_variants = [f"!{target_path}", f"!/{target_path}"]
+        negation_variants = [f"!{entry}", f"!/{entry}"]
         stale = [n for n in negation_variants if n in lines]
         if stale:
             for n in stale:
                 lines.remove(n)
-            lines.append(target_path)
+            lines.append(entry)
             with open(gitignore_path, "w") as f:
                 f.write("\n".join(lines))
             return True
@@ -289,7 +437,7 @@ def ensure_path_is_ignored(
             and os.path.getsize(gitignore_path) > 0
         ):
             f.write("\n")
-        f.write(f"{target_path}\n")
+        f.write(f"{entry}\n")
         return True
 
 
@@ -300,7 +448,7 @@ def ensure_path_is_not_ignored(
     # Resolve whether the unignore rule belongs to this repo or a submodule.
     target_repo, target_path = _resolve_repo_and_ignore_path(repo, path)
     # No-op if Git does not ignore this path.
-    if not target_repo.ignored(target_path):
+    if not get_ignored_by_rule(target_repo, target_path):
         return
     matching_gitignore_path, matched_pattern = _get_matching_gitignore_details(
         target_repo, target_path
@@ -358,7 +506,9 @@ def ensure_path_is_not_ignored(
             (rule for rule in direct_rule_variants if rule in lines), None
         )
         if direct_rule is not None:
-            lines.remove(direct_rule)
+            lines = [
+                line for line in lines if line not in direct_rule_variants
+            ]
         else:
             # Remove any stale negation and re-append at the end so it takes
             # precedence over any later re-ignore rule
@@ -375,7 +525,9 @@ def ensure_path_is_not_ignored(
             (rule for rule in direct_rule_variants if rule in lines), None
         )
         if direct_rule is not None:
-            lines.remove(direct_rule)
+            lines = [
+                line for line in lines if line not in direct_rule_variants
+            ]
             removed_direct_rule = True
         if ancestor_requires_recursive_unignore():
             # Git will not traverse into a directory excluded by a "dir/"
@@ -430,14 +582,72 @@ def ensure_path_is_not_ignored(
                 lines.remove(no_ignore_line)
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
-        f.write("\n".join(lines))
+        # Ending in a newline, so a rule appended later stays its own
+        f.write("".join(line + "\n" for line in lines))
     # If the path is still ignored after updating this gitignore file (e.g.,
     # because a subdirectory .gitignore also contains a matching rule), fix
     # that file as well. Depth-limit guards against pathological gitignore
     # cycles.
-    if target_repo.ignored(target_path) and _depth < 10:
+    if get_ignored_by_rule(target_repo, target_path) and _depth < 10:
         ensure_path_is_not_ignored(target_repo, target_path, _depth + 1)
     return True
+
+
+def get_dirty_gitignores(
+    repo: git.Repo, fnames: tuple[str, ...] = (".gitignore",)
+) -> dict[str, str]:
+    """Each .gitignore, or file named one of ``fnames``, with changes not yet
+    committed, relative to the repo root, and what it holds.
+    """
+    status = repo.git.status(
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        *[f":(top,glob)**/{fname}" for fname in fnames],
+    )
+    dirty = {}
+    for line in status.splitlines():
+        path = line[3:].strip('"')
+        if path.rsplit("/", 1)[-1] in fnames:
+            fpath = os.path.join(repo.working_dir, path)
+            exists = os.path.isfile(fpath)
+            dirty[path] = open(fpath).read() if exists else ""
+    return dirty
+
+
+def stage_gitignores(
+    repo: git.Repo,
+    dirty_before: dict[str, str],
+    fnames: tuple[str, ...] = (".gitignore",),
+) -> list[str]:
+    """Stage each .gitignore, or file named one of ``fnames``, changed since
+    ``dirty_before`` was taken with ``get_dirty_gitignores``.
+
+    One that already had changes isn't staged, since that would commit
+    them too, though DVC may have staged it already if it autostages.
+    Returns a warning for each that couldn't be staged cleanly.
+    """
+    messages = []
+    for gitignore, text in sorted(get_dirty_gitignores(repo, fnames).items()):
+        if gitignore in dirty_before:
+            if text == dirty_before[gitignore]:
+                continue
+            if repo.git.diff("--name-only", "--", gitignore).strip():
+                messages.append(
+                    f"{gitignore} already had changes, so the rules added "
+                    "to it aren't staged; stage it when it's ready"
+                )
+            else:
+                messages.append(
+                    f"{gitignore} already had changes, which DVC staged "
+                    "with the rules added to it; check them before committing"
+                )
+            continue
+        try:
+            repo.git.add("-A", "--", gitignore)
+        except git.GitCommandError:
+            messages.append(f"Couldn't stage {gitignore}")
+    return messages
 
 
 def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
@@ -569,6 +779,22 @@ def ensure_path_is_not_filtered(
     return True
 
 
+_warned_refs: set[str] = set()
+
+
+def read_at_ref(repo: git.Repo, ref: str, path: str) -> bytes | None:
+    """``path``'s contents at ``ref``, or None if Git doesn't hold it there.
+
+    Read from the object database rather than with ``git show``, which
+    strips a trailing newline, so the bytes hash to something the file
+    never had.
+    """
+    try:
+        return repo.commit(ref).tree[path].data_stream.read()
+    except Exception:
+        return None
+
+
 def resolve_ref(repo: git.Repo, ref: str) -> str | None:
     """Return the commit a revision points at, fetching if it isn't here.
 
@@ -582,18 +808,61 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
     doesn't exist rather than isn't here yet.
     """
 
+    def rev_parse(name: str) -> str | None:
+        try:
+            return str(repo.git.rev_parse("--verify", "--quiet", name)).strip()
+        except Exception:
+            return None
+
+    def warn_once(message: str) -> None:
+        # A ref is resolved several times as a pipeline compiles
+        from calkit.cli import warn
+
+        if message not in _warned_refs:
+            _warned_refs.add(message)
+            warn(message, err=True)
+
+    def is_ancestor(older: str, newer: str) -> bool:
+        try:
+            repo.git.merge_base("--is-ancestor", older, newer)
+        except Exception:
+            return False
+        return True
+
     def parse() -> str | None:
+        local = rev_parse(f"refs/heads/{ref}")
+        if local is not None:
+            # A local branch means what it means everywhere else here, even
+            # if its remote has moved on, but that's worth knowing, since
+            # a comparison elsewhere would see something different
+            upstream = rev_parse(f"{ref}@{{upstream}}") or rev_parse(
+                f"refs/remotes/origin/{ref}"
+            )
+            if upstream is not None and upstream != local:
+                if is_ancestor(local, upstream):
+                    warn_once(
+                        f"Local branch '{ref}' is behind its remote, which "
+                        f"is at {upstream[:7]}; update it with "
+                        f"'git branch -f {ref} {upstream[:12]}' to compare "
+                        "against that"
+                    )
+                elif not is_ancestor(upstream, local):
+                    warn_once(
+                        f"Local branch '{ref}' has diverged from its "
+                        "remote, so a comparison against it elsewhere "
+                        "would differ; reconcile and push it"
+                    )
+            return local
         # A clone that fetched only one branch has the others solely as
         # remote-tracking refs, if at all
-        for name in (ref, f"origin/{ref}"):
-            try:
-                sha = str(repo.git.rev_parse(name)).strip()
-            except Exception:
-                continue
+        for name in [ref] + [f"{remote.name}/{ref}" for remote in remotes]:
+            sha = rev_parse(name)
             if sha:
                 return sha
         return None
 
+    # Origin first, since that's where a clone came from
+    remotes = sorted(repo.remotes, key=lambda remote: remote.name != "origin")
     sha = parse()
     if sha is not None:
         return sha

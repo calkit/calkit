@@ -1,0 +1,80 @@
+{
+  "seconds": {
+    "cold": 21.463260416989215,
+    "second_project": 0.2717602920019999,
+    "add_package": 0.6936672910233028,
+    "compile": {
+      "texlive-pdf": 0.6655941249919124,
+      "docker-pdf": 3.864804374985397,
+      "texlive-lualatex": 1.8552612079947721,
+      "docker-lualatex": 11.838829249987612
+    }
+  },
+  "mb": {
+    "download": 28.22872,
+    "store": 153.82528,
+    "tlpdb_cache": 12.959744,
+    "store_after_add": 153.985024,
+    "add_package": 0.15974400000001765,
+    "docker_image": 1567.834905
+  },
+  "packages": {
+    "locked": 80,
+    "here": 49
+  },
+  "ms": {
+    "ready_check": 0.16029149992391467
+  },
+  "docker_image": "ghcr.io/calkit/latex:0.1.8",
+  "samples": {
+    "texlive-pdf": [
+      0.7072550840093754,
+      0.5219940000097267,
+      0.6655941249919124,
+      0.6431470830284525,
+      0.6700699579960201
+    ],
+    "docker-pdf": [
+      4.407729083002778,
+      3.864804374985397,
+      1.8556969169876538,
+      5.2660607080033515,
+      3.3492504169989843
+    ],
+    "texlive-lualatex": [
+      2.7976871250139084,
+      1.642382666002959,
+      1.8552612079947721,
+      1.6052039169881027,
+      2.3154459169891197
+    ],
+    "docker-lualatex": [
+      12.081838417012477,
+      7.3090430419833865,
+      10.319268499995815,
+      11.838829249987612,
+      12.556769999995595
+    ]
+  },
+  "release": 2025,
+  "repository": "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final",
+  "repeats": 5,
+  "machine": {
+    "platform": "macOS-27.2.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "texlive_platform": "universal-darwin",
+    "cpu_count": 10,
+    "python": "3.12.4",
+    "calkit": "0.51.1.dev16+gf932902a2",
+    "load_before": [
+      97.9150390625,
+      114.01416015625,
+      149.71826171875
+    ],
+    "load_after": [
+      108.287109375,
+      115.7890625,
+      146.30615234375
+    ]
+  }
+}

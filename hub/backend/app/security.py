@@ -1,14 +1,19 @@
 """Authentication."""
 
+import base64
 import hashlib
+import hmac
 import secrets
+import struct
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 import jwt
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 
@@ -70,6 +75,111 @@ def create_access_token(
     return encoded_jwt
 
 
+@lru_cache
+def _machine_grant_key() -> Ed25519PrivateKey:
+    """The key that signs grants to use a machine, derived from
+    SECRET_KEY, so rotating that rotates this too, which machines take at
+    their next check-in, closing channels opened with the old one.
+    """
+    seed = hmac.new(
+        settings.SECRET_KEY.encode(), b"machine-grant", "sha256"
+    ).digest()
+    return Ed25519PrivateKey.from_private_bytes(seed)
+
+
+def get_machine_grant_public_key() -> str:
+    """The public key machines pin to check grants, base64-encoded."""
+    raw = (
+        _machine_grant_key()
+        .public_key()
+        .public_bytes(Encoding.Raw, PublicFormat.Raw)
+    )
+    return base64.b64encode(raw).decode()
+
+
+def create_machine_grant(
+    machine_id: uuid.UUID,
+    user_id: uuid.UUID,
+    expires_delta: timedelta,
+    browser_key: dict[str, str],
+    session_id: uuid.UUID,
+    second_factor_expires: int,
+) -> tuple[str, str]:
+    """Create a grant for a user to open one channel to a machine,
+    returning it and its ID.
+
+    It's signed with a key only the API holds, and the machine checks it,
+    so the relay, which carries it, can't open channels of its own. It
+    names the browser's public key, which the machine checks every message
+    on the channel is signed with, so the relay can't act inside a channel
+    either, and the sign-in it came from, so the machine can close the
+    channel once that sign-in ends, or when the second factor that
+    authorized it expires (``tfa_exp``).
+    """
+    now = datetime.now(timezone.utc)
+    grant_id = secrets.token_hex(16)
+    payload = {
+        "exp": now + expires_delta,
+        "iat": int(now.timestamp()),
+        "aud": str(machine_id),
+        "sub": str(user_id),
+        "jti": grant_id,
+        "cnf": {"jwk": browser_key},
+        "sid": str(session_id),
+        "tfa_exp": second_factor_expires,
+    }
+    token = jwt.encode(payload, _machine_grant_key(), algorithm="EdDSA")
+    return token, grant_id
+
+
+def decode_machine_grant(
+    token: str, machine_id: uuid.UUID
+) -> dict[str, Any] | None:
+    """A grant this API signed for a machine, even once it has expired,
+    since the machine shows the one that opened a session whenever the
+    session asks for credentials, or None if it isn't one.
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            _machine_grant_key().public_key(),
+            algorithms=["EdDSA"],
+            audience=str(machine_id),
+            options={
+                "verify_exp": False,
+                "require": ["iat", "aud", "sub", "sid", "tfa_exp"],
+            },
+        )
+    except InvalidTokenError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def create_relay_token(
+    kind: Literal["machine", "browser"],
+    machine_id: uuid.UUID,
+    user_id: uuid.UUID,
+    expires_delta: timedelta,
+    grant: str | None = None,
+) -> str:
+    """Create a JWT for opening one relay connection.
+
+    These are signed with a key of their own, so the relay, which is
+    exposed to the internet, never holds one that can sign logins. Each has
+    a unique ID, so the relay can take it only once.
+    """
+    payload = {
+        "exp": datetime.now(timezone.utc) + expires_delta,
+        "sub": str(machine_id),
+        "user_id": str(user_id),
+        "scope": f"relay:{kind}",
+        "jti": secrets.token_hex(16),
+    }
+    if grant is not None:
+        payload["grant"] = grant
+    return jwt.encode(payload, settings.RELAY_SECRET_KEY, algorithm=ALGORITHM)
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -78,26 +188,42 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def generate_password_reset_token(email: str) -> str:
+def hash_password_hash(hashed_password: str) -> str:
+    """A short digest of a password hash, which a reset link carries so it
+    stops working once the password changes, e.g., when it's used.
+    """
+    return hashlib.sha256(hashed_password.encode()).hexdigest()[:16]
+
+
+def generate_password_reset_token(email: str, hashed_password: str) -> str:
     delta = timedelta(hours=settings.EMAIL_RESET_TOKEN_EXPIRE_HOURS)
     now = datetime.now(timezone.utc)
     expires = now + delta
     exp = expires.timestamp()
     encoded_jwt = jwt.encode(
-        {"exp": exp, "nbf": now, "sub": email},
+        {
+            "exp": exp,
+            "nbf": now,
+            "sub": email,
+            "purpose": "reset-password",
+            "pwh": hash_password_hash(hashed_password),
+        },
         settings.SECRET_KEY,
         algorithm="HS256",
     )
     return encoded_jwt
 
 
-def verify_password_reset_token(token: str) -> str | None:
+def verify_password_reset_token(token: str) -> tuple[str, str] | None:
+    """The email a reset token was issued for and the digest of the
+    password hash it was issued against.
+    """
     try:
-        decoded_token = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=["HS256"]
-        )
-        return str(decoded_token["sub"])
-    except InvalidTokenError:
+        decoded = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        if decoded.get("purpose") != "reset-password":
+            return None
+        return str(decoded["sub"]), str(decoded["pwh"])
+    except (InvalidTokenError, KeyError):
         return None
 
 
@@ -158,3 +284,98 @@ def generate_refresh_token() -> str:
 def hash_refresh_token(token: str) -> str:
     """Return the hex-encoded SHA-256 digest of a refresh token."""
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+TOTP_PERIOD_SECONDS = 30
+TOTP_DIGITS = 6
+
+
+def generate_totp_secret() -> str:
+    """A random base32 secret for an authenticator app (RFC 6238)."""
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def get_totp_code(secret: str, step: int) -> str:
+    """The code for a time step, per RFC 6238 with SHA-1, as authenticator
+    apps compute it.
+    """
+    key = base64.b32decode(secret + "=" * (-len(secret) % 8), casefold=True)
+    digest = hmac.new(key, struct.pack(">Q", step), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = int.from_bytes(digest[offset : offset + 4], "big") & 0x7FFFFFFF
+    return str(value % 10**TOTP_DIGITS).zfill(TOTP_DIGITS)
+
+
+def match_totp_step(
+    secret: str, code: str, now: float | None = None, window: int = 1
+) -> int | None:
+    """The time step a code is valid for, allowing a step of clock drift
+    either way, or None if it isn't valid.
+    """
+    code = code.strip().replace(" ", "")
+    if now is None:
+        now = datetime.now(timezone.utc).timestamp()
+    current = int(now // TOTP_PERIOD_SECONDS)
+    for step in range(current - window, current + window + 1):
+        if hmac.compare_digest(get_totp_code(secret, step), code):
+            return step
+    return None
+
+
+def hash_token_verifier(verifier: str) -> str:
+    """Hash the secret half of a token for storage.
+
+    Tokens are generated with at least 192 random bits, far beyond what
+    could be guessed, so a fast hash is as good as a slow one here, unlike
+    for passwords. Being fast matters because it runs on every request a
+    token makes.
+    """
+    return hashlib.sha256(verifier.encode()).hexdigest()
+
+
+def verify_token_verifier(verifier: str, hashed: str) -> bool:
+    """Check a token's secret half against its stored hash.
+
+    Tokens made before hashing switched to SHA-256 have bcrypt hashes,
+    which start with "$2", and still verify.
+    """
+    if hashed.startswith("$2"):
+        return verify_password(verifier, hashed)
+    return hmac.compare_digest(hash_token_verifier(verifier), hashed)
+
+
+SECOND_FACTOR_SCOPE = "second-factor"
+
+
+def create_second_factor_token(
+    user_id: uuid.UUID, session_id: uuid.UUID, expires_delta: timedelta
+) -> str:
+    """Create a token proving a second factor was entered in one session.
+
+    The session keeps it and sends it along with sensitive requests. It
+    names that session, so it's worthless to any other credential the user
+    has, and stops working when the session ends. It carries a scope, so
+    the API's own auth rejects it as a login.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "exp": now + expires_delta,
+        "iat": now,
+        "sub": str(user_id),
+        "sid": str(session_id),
+        "scope": SECOND_FACTOR_SCOPE,
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_second_factor_token(token: str) -> dict | None:
+    """Decode a second factor token, or return None if it isn't valid."""
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[ALGORITHM]
+        )
+    except InvalidTokenError:
+        return None
+    if payload.get("scope") != SECOND_FACTOR_SCOPE:
+        return None
+    return payload

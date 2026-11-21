@@ -7,6 +7,8 @@
 - The VS Code extension lives in `vscode-ext`
 - The Chrome extension lives in `browser-ext`
 - The Calkit Assistant desktop app lives in `assistant`
+- The agent plugin for Claude Code, Codex, and OpenCode lives in
+  `agent-plugin`
 - GitHub Actions live in `actions`, e.g., `calkit/calkit/actions/run`
 - Docker images we publish live in `images`, e.g., `images/latex`, which
   is released on its own `latex-image/vX.Y.Z` tag rather than with the CLI
@@ -25,6 +27,9 @@ To run tests, use `uv run pytest`.
 
 To sync the docs and format all the code, run `make format`.
 
+Before pushing a pull request, run `make pr`, which also runs the project's
+pipeline and pushes its outputs, so the pipeline check passes.
+
 Before finishing a change, type-check it. The CLI gate is mypy
 (`uv run mypy <changed files>`, or `make check` for the full suite), and the
 VS Code editor uses Pylance (Pyright). Keep new code clean under both, and do
@@ -38,7 +43,25 @@ preceded by a `<!-- prettier-ignore -->` comment. Otherwise Prettier reformats
 the block and strips the 4-space indentation of the admonition body, which
 breaks rendering.
 
-Agents should never make commits to Git unless asked to.
+`calkit run` and `calkit status` preprocess the pipeline before asking DVC:
+they check environments and clean notebooks, and compiling a LaTeX stage for
+them maps its document's components into `_calkit/`, since each generates
+dependencies the compiled DVC pipeline reads.
+This runs on every call, so only very fast work belongs there, e.g.,
+skipping unchanged files by size and timestamp rather than reading them.
+Anything slow belongs in a stage.
+
+<!-- TODO: needs human review -->
+
+Name PRs and commits for developers scanning the history: say which part
+changed and the outcome, or the symptom a fix removes, rather than how it
+works, e.g., "Allow defining figure origins on Overleaf through browser
+extension" or "Fix spurious warning for origin not being defined for
+something in a directory output".
+Name the mechanism only when someone would search for it, e.g.,
+"Use native messaging to connect browser extension to local machine".
+Use plain verbs, e.g., "Add", "Fix", "Allow", or "Speed up", drop articles,
+and cover the whole PR, not just its first change.
 
 Tests belong in the test module named after the module the exercised code
 lives in, e.g., tests for `calkit/cli/new.py` go in
@@ -49,15 +72,39 @@ a feature in one function over many different test functions.
 
 Do not write docstrings in test functions.
 
+Start every TypeScript module, other than tests, with a doc comment saying
+what it's for, even if it's one sentence.
+
 Do not put blank lines inside function bodies; separate logical sections with
 comments instead. This only applies to blank lines we write, not ones the
 formatter inserts, e.g., ruff-format adds one after an in-function import
 block. Don't hoist imports to module scope just to avoid those; imports are
 kept inside functions to keep CLI startup fast.
 
-For prose, only use one space after punctuation.
+Put the imports a function always needs at its top, not partway through;
+only an import on a conditional path belongs where it's used.
+Module scope is fine for anything that won't slow CLI startup.
 
 Always put a comma after "i.e." and "e.g.".
+
+<!-- TODO: needs human review -->
+
+Text people read in an app, e.g., labels, buttons, statuses, tooltips, and
+error messages, uses the fewest words that say it:
+
+- Drop articles, pronouns, and words the layout already implies, e.g.,
+  "Run pipeline" rather than "Run the pipeline first", "Creating project"
+  rather than "Creating the project", "Make public" rather than
+  "Make it public".
+- Put the adjective first, e.g., "unsaved changes" rather than
+  "changes not saved".
+- Name the specific thing, or say the state plainly, rather than
+  paraphrasing it, e.g., "Out of date: data/raw.csv modified" or
+  "Out of date", not "Out of date: what it's made from changed since it last
+  ran".
+- Use these terms, in the docs too:
+  - "this machine" or "your machine", not "computer"
+  - "Select", not "Pick", when asking someone to choose
 
 Don't overzealously split up functions just because they're long.
 Functions should usually be used ~3 times before abstracting.
@@ -67,15 +114,35 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Start function names with a verb, e.g., `get_evidence_kind` rather than
+`evidence_kind`.
+Name functions for what they return,
+e.g., `get_image_name` rather than `get_image`,
+which could just as well return an image.
+
+Name a value for what it holds, so the name tells its type:
+a commit hash is `commit_sha`, not `commit`, which reads as an object;
+a path is `*_path`; a count is `n_*`.
+
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.
 
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
 
+Keep a subclass in the module of the class it extends,
+so a class's variants are found where it's defined.
+The only exceptions are classes written to be subclassed,
+e.g., `calkit.models.base.Model` and `calkit.cli.core.OptionalValueCommand`,
+and classes from other packages, e.g., pydantic's `BaseModel`.
+
 Don't be verbose in comments. One sentence is usually fine, if anything at all.
 
-Agents should typically not be writing prose for human consumption.
-If some is needed, notify
-the human developer and ask them to write in a given file at a specified
-line and make a commit.
+Agents may make minor corrections to prose for human consumption,
+e.g., fixing a sentence a change made inaccurate, without changing what it
+argues.
+Major writing, e.g., a new section or explanation, needs the human
+developer's approval first.
+Flag any new prose an agent writes as needing human attention:
+put a `<!-- TODO: needs human review -->` comment above it in Markdown,
+and call it out in the PR description.

@@ -36,6 +36,7 @@ import PdfDocumentViewer, {
   type OnSelectionFinished,
 } from "../Common/PdfDocumentViewer"
 import { AddCommentTip } from "../Publications/PdfAnnotator"
+import { safeHref } from "../../lib/strings"
 
 interface ReferenceItemModalProps {
   isOpen: boolean
@@ -418,7 +419,11 @@ const ReferenceItemModal = ({
                             <Td fontWeight="semibold">{k}</Td>
                             <Td>
                               {href ? (
-                                <Link href={href} isExternal variant="blue">
+                                <Link
+                                  href={safeHref(href)}
+                                  isExternal
+                                  variant="blue"
+                                >
                                   {value}
                                 </Link>
                               ) : (

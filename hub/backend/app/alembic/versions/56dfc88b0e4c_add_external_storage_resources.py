@@ -1,7 +1,7 @@
 """Add external storage resources
 
 Revision ID: 56dfc88b0e4c
-Revises: c4e1d7a92b35
+Revises: ff043cba2b65
 
 """
 from alembic import op
@@ -11,7 +11,7 @@ import sqlmodel.sql.sqltypes
 
 # revision identifiers, used by Alembic.
 revision = '56dfc88b0e4c'
-down_revision = 'c4e1d7a92b35'
+down_revision = 'ff043cba2b65'
 branch_labels = None
 depends_on = None
 

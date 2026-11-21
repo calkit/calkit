@@ -13,6 +13,14 @@ import type {
 
 export type DvcStage = DvcPipelineStage | DvcForeachStage
 
+// Mirrors EXPORTED_EXTENSIONS in calkit/provenance.py: something else
+// writes these, e.g., a script or an image editor saving from its own file
+const EXPORTED_EXTS = [".png", ".gif", ".webp", ".bmp", ".pdf", ".eps"]
+
+/** Whether a person can be the origin of a file, as opposed to a tool. */
+export const canBeCreatedByPerson = (path: string) =>
+  !EXPORTED_EXTS.some((ext) => path.toLowerCase().endsWith(ext))
+
 const DATA_SUFFIXES = new Set([
   "csv",
   "parquet",

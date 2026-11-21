@@ -3,6 +3,7 @@ import { Button, HStack, Link, useDisclosure } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import mixpanel from "mixpanel-browser"
+import { useEffect } from "react"
 
 import { ProjectsService } from "../../client"
 import useOnboardingFlags from "../../hooks/useOnboarding"
@@ -24,6 +25,8 @@ interface ProjectChecklistProps {
   accountName: string
   projectName: string
   projectId: string
+  /** Told once the card knows what it will show, including nothing. */
+  onSettledChange?: (settled: boolean) => void
 }
 
 /**
@@ -37,6 +40,7 @@ const ProjectChecklist = ({
   accountName,
   projectName,
   projectId,
+  onSettledChange,
 }: ProjectChecklistProps) => {
   const { projectFlags, setFlag, flagsLoading } = useOnboardingFlags(projectId)
   const { questionsRequest } = useProjectQuestions(accountName, projectName)
@@ -104,6 +108,16 @@ const ProjectChecklist = ({
     >,
     flags: projectFlags,
   })
+  const signalsPending =
+    reproCheckQuery.isPending ||
+    questionsRequest.isPending ||
+    pipelineQuery.isPending ||
+    referencesQuery.isPending
+  const settled =
+    !flagsLoading && (isDismissed || reproCheckQuery.isError || !signalsPending)
+  useEffect(() => {
+    onSettledChange?.(settled)
+  }, [settled, onSettledChange])
   // Waiting on the repo read would flash a list of unchecked boxes at
   // someone whose project is already in good shape, which is the worst
   // first impression this card can make. A read that failed outright says
@@ -113,18 +127,14 @@ const ProjectChecklist = ({
   if (flagsLoading || isDismissed) {
     return null
   }
-  if (reproCheckQuery.isPending || reproCheckQuery.isError) {
+  if (reproCheckQuery.isError) {
     return null
   }
   // Every signal, not just the repo read: these three land at different
   // times, and each one arriving ticks off its own step under the reader,
   // collapsing a row and swapping its mark as it goes. Rendering once they
   // have all settled shows the list in the state it is actually in.
-  if (
-    questionsRequest.isPending ||
-    pipelineQuery.isPending ||
-    referencesQuery.isPending
-  ) {
+  if (signalsPending) {
     return null
   }
   const actions: Record<string, React.ReactNode> = {

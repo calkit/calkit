@@ -7,9 +7,11 @@ import random
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import git
 import pytest
+import requests
 from fastapi import HTTPException
 
 import app.git
@@ -164,7 +166,18 @@ def test_get_app_installation_token(monkeypatch) -> None:
     def fake_get(url, headers=None, timeout=None):
         calls["get_url"] = url
         calls["get_auth"] = headers["Authorization"]
-        return _FakeResp(200, {"id": 12345})
+        return _FakeResp(
+            200,
+            {
+                "id": 12345,
+                "permissions": {
+                    "contents": "write",
+                    "issues": "write",
+                    "actions": "write",
+                    "workflows": "write",
+                },
+            },
+        )
 
     def fake_post(url, headers=None, json=None, timeout=None):
         calls["post_url"] = url
@@ -178,7 +191,30 @@ def test_get_app_installation_token(monkeypatch) -> None:
     assert calls["get_url"].endswith("/repos/owner-acct/my-repo/installation")
     assert calls["get_auth"] == "Bearer fake-jwt"
     assert "/app/installations/12345/access_tokens" in calls["post_url"]
-    assert calls["post_json"] == {"repositories": ["my-repo"]}
+    # Without workflows or actions, which anyone with write access could use
+    # to run a workflow with the repo's secrets
+    assert calls["post_json"] == {
+        "repositories": ["my-repo"],
+        "permissions": {"contents": "write", "issues": "write"},
+    }
+    # Unless asked for, and then only what's asked for
+    token = app.github.get_app_installation_token(
+        "owner-acct", "my-repo", permissions={"actions": "read"}
+    )
+    assert calls["post_json"] == {
+        "repositories": ["my-repo"],
+        "permissions": {"actions": "read"},
+    }
+    app.github.get_app_installation_token("owner-acct", "my-repo", True)
+    assert calls["post_json"]["permissions"] == {"contents": "read"}
+    # As is one with its expiry, e.g., only to push for a linked machine
+    app.github.get_app_installation_token_and_expiry(
+        "owner-acct", "my-repo", permissions={"contents": "write"}
+    )
+    assert calls["post_json"] == {
+        "repositories": ["my-repo"],
+        "permissions": {"contents": "write"},
+    }
 
 
 def test_get_app_installation_token_caches(monkeypatch) -> None:
@@ -421,11 +457,13 @@ def test_get_repo_clone_failures_leave_nothing_readable(tmp_path, monkeypatch):
         assert not os.path.isdir(repo_dir)
         assert not os.path.isdir(repo_dir + ".cloning")
         assert not os.path.isfile(updated_fpath)
-        # A repo that isn't there at all is still a 404
+        # A clone GitHub refuses is a 502, not a 404: the project exists,
+        # and a repo created seconds ago can be briefly refused, so the
+        # client should retry rather than show "not found"
         outcome["mode"] = "missing"
         with pytest.raises(HTTPException) as excinfo:
             app.git.get_repo(project=project, user=None, session=None, ttl=600)
-        assert excinfo.value.status_code == 404
+        assert excinfo.value.status_code == 502
         assert not os.path.isdir(repo_dir)
     finally:
         _shutil.rmtree(base_dir, ignore_errors=True)
@@ -648,6 +686,22 @@ def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
     (ours / "inside.csv").symlink_to(ours / "ours.csv")
     assert tree.is_safe_symlink("inside.csv")
     assert tree.read_bytes("inside.csv") == b"ours\n"
+    # A symlinked directory is a way out too, including to a directory
+    # beyond it that isn't a link itself, so listing one finds nothing
+    (victim / "sub").mkdir()
+    (victim / "sub" / "more.csv").write_text("more,secret\n")
+    (ours / "dirlink").symlink_to(victim)
+    for path in ("dirlink", "dirlink/sub"):
+        with pytest.raises(HTTPException):
+            tree.listdir(path)
+    with pytest.raises(HTTPException):
+        tree.read_bytes("dirlink/sub/more.csv")
+    # A link out of the tree is sized as the link, so a listing of our own
+    # directory says nothing about the file it points to
+    assert tree.size("link.csv") == os.lstat(ours / "link.csv").st_size
+    assert tree.size("link.csv") != len("secret,data\n")
+    assert tree.size("inside.csv") == 5
+    assert "ours.csv" in tree.listdir(None)
 
 
 def test_remote_head_cache_is_bypassed_when_the_caller_wants_the_truth(
@@ -712,6 +766,193 @@ def _fake_overleaf_clone(files: dict[str, str]):
     return clone
 
 
+def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
+    import shutil
+    from types import SimpleNamespace
+
+    from app.config import settings
+
+    project = _StubProject(f"ck-overleaf-{random.randint(0, 10**9)}")
+    user = SimpleNamespace(github_username="ck-test-user")
+    # Without a global identity, committing fails until the hub sets one
+    git_config = tmp_path / "gitconfig"
+    git_config.write_text("[user]\n\tuseConfigOnly = true\n")
+
+    def no_session(**kwargs):
+        raise HTTPException(404)
+
+    def stub_credentials():
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+        monkeypatch.setattr(
+            app.git.users, "get_overleaf_token", lambda **k: "t"
+        )
+        monkeypatch.setattr(app.git.users, "get_overleaf_session", no_session)
+        monkeypatch.setattr(
+            app.git,
+            "_configure_committer",
+            lambda repo, *a, **k: _identify(repo),
+        )
+
+    stub_credentials()
+    # Stand in for Overleaf with a local repo, cloned where the hub keeps it
+    remote = git.Repo.init(tmp_path / "remote")
+    _identify(remote)
+    _commit(remote, "main.tex", "v1")
+    repo_dir = os.path.join(
+        settings.CLONE_ROOT,
+        "ck-test-user",
+        project.owner_github_name,
+        project.name,
+        "overleaf",
+        "abc",
+        "repo",
+    )
+    clone = git.Repo.clone_from(remote.working_dir, repo_dir)
+    _identify(clone)
+    # Leave the clone diverged and dirty, like after a sync whose push to
+    # Overleaf failed, while Overleaf moved on with a conflicting edit
+    _commit(clone, "main.tex", "local")
+    Path(repo_dir, "leftover.tex").write_text("untracked")
+    head = _commit(remote, "main.tex", "v2")
+
+    def get() -> Any:
+        return app.git.get_overleaf_repo(
+            project=project,
+            user=user,
+            session=object(),
+            overleaf_project_id="abc",
+        )
+
+    with get() as (repo, push):
+        assert push is None
+        assert repo.head.commit.hexsha == head
+        assert Path(repo_dir, "main.tex").read_text() == "v2"
+        assert not Path(repo_dir, "leftover.tex").exists()
+        # Another sync of the same clone has to wait its turn
+        monkeypatch.setattr(app.git, "OVERLEAF_LOCK_TIMEOUT", 0)
+        with pytest.raises(HTTPException) as e:
+            with get():
+                pass
+        assert e.value.status_code == 409
+    # The lock is released afterwards, even if the sync fails
+    with pytest.raises(RuntimeError):
+        with get():
+            raise RuntimeError("Sync failed")
+    with get():
+        pass
+
+    # Overleaf rejecting the token asks for a new one, both when pulling into
+    # the clone and when cloning afresh, rather than failing with a 500
+    def reject(*args, **kwargs):
+        raise app.git.calkit.overleaf.AuthError("Authentication failed")
+
+    monkeypatch.setattr(app.git.calkit.overleaf, "pull", reject)
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.status_code == 401
+    assert e.value.detail == app.git.OVERLEAF_TOKEN_REJECTED
+    shutil.rmtree(repo_dir)
+    monkeypatch.setattr(
+        app.git.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=128,
+            stderr="fatal: Authentication failed for 'https://x@git.overleaf.com/abc/'",
+        ),
+    )
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.status_code == 401
+    # A rejected token falls back to a browser session saved since, e.g.,
+    # after Premium ends
+    web_client = app.git.calkit.overleaf.WebClient
+
+    class SavedSession(_FakeOverleafWeb):
+        def __init__(self, session: str) -> None:
+            assert session == "cookie"
+            super().__init__({"main.tex": b"from the session"})
+
+    monkeypatch.setattr(app.git.calkit.overleaf, "WebClient", SavedSession)
+    monkeypatch.setattr(
+        app.git.users, "get_overleaf_session", lambda **k: "cookie"
+    )
+    with get() as (repo, push):
+        assert push is not None
+        assert Path(repo_dir, "main.tex").read_text() == "from the session"
+    monkeypatch.setattr(app.git.calkit.overleaf, "WebClient", web_client)
+    # With only a browser session, the repo is a mirror Calkit keeps, which
+    # replaces any clone, and pushes go through Overleaf's web API
+    client = _FakeOverleafWeb({"main.tex": b"from the web"})
+    monkeypatch.setattr(app.git.users, "get_overleaf_auth", lambda **k: client)
+    with get() as (repo, push):
+        assert not repo.remotes
+        assert Path(repo_dir, "main.tex").read_text() == "from the web"
+        Path(repo_dir, "fig.txt").write_text("figure")
+        repo.git.add("fig.txt")
+        repo.git.commit("-m", "Sync")
+        push(repo)
+    assert client.files["fig.txt"] == b"figure"
+    client.rejected = True
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.detail == app.git.OVERLEAF_SESSION_REJECTED
+    # Not reaching Overleaf is reported as such rather than a server error
+
+    def unreachable(project_id: str) -> bytes:
+        raise requests.ConnectionError("Network down")
+
+    client.rejected = False
+    monkeypatch.setattr(client, "download", unreachable)
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.status_code == 502
+    # Getting a token afterwards replaces the mirror with a clone
+    monkeypatch.undo()
+    stub_credentials()
+    monkeypatch.setattr(
+        app.git.subprocess,
+        "run",
+        lambda args, **k: SimpleNamespace(
+            returncode=0,
+            stderr="",
+            repo=git.Repo.clone_from(remote.working_dir, args[-1]),
+        ),
+    )
+    with get() as (repo, push):
+        assert repo.remotes
+        assert Path(repo_dir, "main.tex").read_text() == "v2"
+
+
+class _FakeOverleafWeb(app.git.calkit.overleaf.WebClient):
+    """Stands in for Overleaf's web app, holding a project's files."""
+
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self.files = files
+        self.rejected = False
+
+    def download(self, project_id: str) -> bytes:
+        import io
+        import zipfile
+
+        if self.rejected:
+            raise app.git.calkit.overleaf.AuthError("Session expired")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for path, content in self.files.items():
+                z.writestr(path, content)
+        return buf.getvalue()
+
+    def get_root_folder(self, project_id: str) -> dict:
+        return {"_id": "root", "docs": [], "fileRefs": [], "folders": []}
+
+    def upload(self, project_id, root_folder_id, path, content) -> None:
+        self.files[path] = content
+
+
 def _read_title(files: dict[str, str]):
     from unittest.mock import patch
 
@@ -743,6 +984,43 @@ def test_read_overleaf_title_finds_the_document_that_builds() -> None:
         }
     )
     assert title == "Coherent structures in boundary layers"
+    # With only a browser session, the project is downloaded instead
+    from unittest.mock import patch
+
+    from app.git import read_overleaf_title
+
+    client = _FakeOverleafWeb(
+        {"main.tex": b"\\documentclass{article}\n\\title{From the web}\n"}
+    )
+    with patch("app.git.users.get_overleaf_auth", return_value=client):
+        title = read_overleaf_title(
+            user=object(), session=object(), overleaf_project_id="abc"
+        )
+    assert title == "From the web"
+    # A rejected session or a network error means asking for the title
+    client.rejected = True
+    with patch("app.git.users.get_overleaf_auth", return_value=client):
+        assert (
+            read_overleaf_title(
+                user=object(), session=object(), overleaf_project_id="abc"
+            )
+            is None
+        )
+    client.rejected = False
+    with (
+        patch("app.git.users.get_overleaf_auth", return_value=client),
+        patch.object(
+            client,
+            "download",
+            side_effect=requests.ConnectionError("Network down"),
+        ),
+    ):
+        assert (
+            read_overleaf_title(
+                user=object(), session=object(), overleaf_project_id="abc"
+            )
+            is None
+        )
 
 
 def test_read_overleaf_title_prefers_a_conventional_name() -> None:
@@ -875,6 +1153,95 @@ def test_push_and_expire_updates_the_shared_checkout(tmp_path) -> None:
     assert (shared_base / "repo" / "data" / "raw.csv").exists()
     # And it is marked current, so the next read doesn't refresh it at all
     assert (shared_base / "updated.txt").stat().st_mtime > 0
+
+
+def test_seed_shared_read_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil as _shutil
+    from typing import Any
+
+    from filelock import Timeout
+
+    project: Any = _StubProject("ck-shared-seed")
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    monkeypatch.setattr(
+        app.git, "shared_reader_root", lambda: str(shared_root)
+    )
+    # The writer's clone of a project just created and pushed
+    writer = git.Repo.init(str(tmp_path / "writer"))
+    _identify(writer)
+    writer.git.remote(["add", "origin", project.git_repo_url + ".git"])
+    head = _commit(writer, "notes.txt", "one")
+    app.git.seed_shared_read_clone(project, writer)
+    # The shared checkout holds what was pushed, points at GitHub rather
+    # than the writer's clone, refuses writes, and is marked complete
+    shared = git.Repo(str(shared_base / "repo"))
+    assert shared.head.commit.hexsha == head
+    assert shared.remotes.origin.url == project.git_repo_url + ".git"
+    for hook in app.git._SHARED_HOOKS:
+        assert os.access(
+            shared_base / "repo" / ".git" / "hooks" / hook, os.X_OK
+        )
+    assert (shared_base / "updated.txt").is_file()
+    assert not (shared_base / "repo.cloning").exists()
+    # The first read uses it without cloning from GitHub
+    real_check_call = subprocess.check_call
+
+    def no_clone(cmd: list[str], *args: Any, **kwargs: Any) -> int:
+        assert cmd[:2] != ["git", "clone"], "read cloned from GitHub"
+        return real_check_call(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "check_call", no_clone)
+    session: Any = None
+    repo = app.git.get_repo(
+        project=project,
+        user=None,
+        session=session,
+        ttl=600,
+        read_only=True,
+    )
+    assert repo.working_dir == str(shared_base / "repo")
+    monkeypatch.setattr(subprocess, "check_call", real_check_call)
+    # A checkout left from a deleted project of the same name is replaced,
+    # even when a rejected push has expired its marker
+    os.utime(shared_base / "updated.txt", (0, 0))
+    writer = git.Repo.init(str(tmp_path / "writer2"))
+    _identify(writer)
+    writer.git.remote(["add", "origin", project.git_repo_url + ".git"])
+    head = _commit(writer, "notes.txt", "two")
+    app.git.seed_shared_read_clone(project, writer)
+    assert git.Repo(str(shared_base / "repo")).head.commit.hexsha == head
+    assert (shared_base / "updated.txt").stat().st_mtime > 0
+    # While another request holds the lock, its clone in progress is left
+    # alone
+    (shared_base / "repo.cloning").mkdir()
+
+    class _HeldLock:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> None:
+            raise Timeout("held")
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+    with monkeypatch.context() as m:
+        m.setattr(app.git, "FileLock", _HeldLock)
+        app.git.seed_shared_read_clone(project, writer)
+    assert (shared_base / "repo.cloning").is_dir()
+    assert git.Repo(str(shared_base / "repo")).head.commit.hexsha == head
+    # A seed that fails leaves nothing a read would mistake for a checkout
+    missing: Any = _StubProject("ck-shared-seed-missing")
+    missing_base = shared_root / missing.owner_github_name / missing.name
+    gone = git.Repo.init(str(tmp_path / "gone"))
+    _shutil.rmtree(str(tmp_path / "gone"))
+    app.git.seed_shared_read_clone(missing, gone)
+    assert not (missing_base / "repo").exists()
+    assert not (missing_base / "repo.cloning").exists()
+    assert not (missing_base / "updated.txt").exists()
 
 
 def test_a_read_after_a_write_touches_the_network_not_at_all(
@@ -1016,6 +1383,74 @@ def test_a_reported_push_to_a_new_branch_shows_up_in_the_branch_list(
         assert exc.value.status_code == 502
         # An ordinary read still serves the stale checkout
         assert main in branches()
+
+
+def test_get_repo_picks_up_the_first_push_to_an_empty_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a clone made while the remote was empty has no commits, so
+    # every refresh failed at `git stash` and the project never showed files.
+    from typing import Any
+    from unittest.mock import patch
+
+    session: Any = None
+    shared_root = tmp_path / "_shared"
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+
+    def setup(name: str) -> tuple[Any, Path, git.Repo]:
+        project: Any = _StubProject(name)
+        origin_dir = tmp_path / name / "origin.git"
+        git.Repo.init(str(origin_dir), bare=True, initial_branch="main")
+        base = shared_root / project.owner_github_name / project.name
+        base.mkdir(parents=True)
+        git.Repo.clone_from(str(origin_dir), str(base / "repo"))
+        (base / "updated.txt").touch()
+        seed = git.Repo.clone_from(str(origin_dir), str(tmp_path / name / "s"))
+        _identify(seed)
+        return project, origin_dir, seed
+
+    def read(project: Any) -> git.Repo:
+        return app.git.get_repo(
+            project=project,
+            user=None,
+            session=session,
+            ttl=0,
+            read_only=True,
+        )
+
+    with patch("app.git.shared_reader_root", return_value=str(shared_root)):
+        # Nothing pushed yet is not an error
+        project, origin_dir, seed = setup("ck-empty-same-branch")
+        assert not read(project).head.is_valid()
+        # The first push to the branch the clone expected shows up, and the
+        # next one goes through the normal update
+        seed.git.checkout(["-b", "main"])
+        first = _commit(seed, "notes.txt", "one")
+        seed.git.push(["origin", "main"])
+        repo = read(project)
+        assert repo.head.commit.hexsha == first
+        assert repo.active_branch.name == "main"
+        second = _commit(seed, "notes.txt", "two")
+        seed.git.push(["origin", "main"])
+        assert read(project).head.commit.hexsha == second
+        # A first push to another branch, which becomes the default, is
+        # picked up too
+        project, origin_dir, seed = setup("ck-empty-other-branch")
+        seed.git.checkout(["-b", "master"])
+        first = _commit(seed, "notes.txt", "one")
+        seed.git.push(["origin", "master"])
+        # Until the remote can say which branch is the default, the refresh
+        # fails rather than reporting an empty tree as current
+        with pytest.raises(HTTPException) as excinfo:
+            read(project)
+        assert excinfo.value.status_code == 502
+        git.Repo(str(origin_dir)).git.symbolic_ref(
+            ["HEAD", "refs/heads/master"]
+        )
+        repo = read(project)
+        assert repo.head.commit.hexsha == first
+        assert repo.active_branch.name == "master"
+        assert (Path(str(repo.working_dir)) / "notes.txt").read_text() == "one"
 
 
 def test_push_and_expire_falls_back_when_the_shared_checkout_wont_take_it(

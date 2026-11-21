@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from unittest import mock
@@ -37,6 +38,7 @@ def _stubs(installed: bool) -> dict:
         ),
         "find_conda_prefix": lambda: "/opt/conda" if installed else "",
         "get_calkit_version": lambda: (99, 0, 0) if installed else None,
+        "get_latest_calkit_version": lambda: (99, 0, 0),
         "get_calkit_token": lambda: "token" if installed else "",
         "get_projects": list,
         "run_in_git_bash": missing,
@@ -44,11 +46,31 @@ def _stubs(installed: bool) -> dict:
     }
 
 
+def _check_setup(window, refresh: bool = True) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    # The checks run on threads and report back through queued signals
+    if refresh:
+        window.refresh_setup_status()
+    window.setup_check_thread.wait()
+    window.projects_widget.load_thread.wait()
+    QApplication.processEvents()
+
+
 def test_main_window_builds_and_refreshes_offscreen(app):
     # A bare machine: every install step shows its install button
     with mock.patch.multiple("main", **_stubs(installed=False)):
         window = main.MainWindow()
         steps = window.setup_step_widgets
+        # The window is built before anything is checked, which happens
+        # in the background behind a progress bar
+        assert "⏳" in steps["git"].label.text()
+        assert not window.setup_progress.isHidden()
+        assert not window.refresh_setup_button.isEnabled()
+        _check_setup(window, refresh=False)
+        assert window.setup_progress.isHidden()
+        assert window.refresh_setup_button.isEnabled()
+        assert window.setup_progress.value() == len(steps)
         install_steps = [
             s for s in steps.values() if isinstance(s, main.DependencyInstall)
         ]
@@ -64,7 +86,7 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         assert not steps["vscode-extensions"].isEnabled()
     # A set-up machine: refreshing clears the buttons and enables the rest
     with mock.patch.multiple("main", **_stubs(installed=True)):
-        window.refresh_setup_status()
+        _check_setup(window)
         assert all(s.install_button is None for s in install_steps)
         assert steps["calkit"].isEnabled()
         assert steps["vscode-extensions"].isEnabled()
@@ -73,10 +95,25 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         "main",
         **{**_stubs(installed=True), "get_calkit_version": lambda: (0, 0, 1)},
     ):
-        window.refresh_setup_status()
+        _check_setup(window)
         assert steps["calkit"].install_button is not None
         assert "Update Calkit" in steps["calkit"].label.text()
         assert steps["calkit"].install_command == ["calkit", "upgrade"]
+    # A usable Calkit behind the latest release suggests updating, without
+    # blocking the steps that depend on it
+    with mock.patch.multiple(
+        "main",
+        **{**_stubs(installed=True), "get_calkit_version": lambda: (98, 0)},
+    ):
+        _check_setup(window)
+        assert steps["calkit"].install_button is not None
+        assert steps["calkit"].install_button.toolTip() == "Update"
+        assert "✅ (v99.0.0 available)" in steps["calkit"].label.text()
+        assert steps["hub-login"].isEnabled()
+        assert steps["calkit"].install_command == ["calkit", "upgrade"]
+    with mock.patch.multiple("main", **_stubs(installed=True)):
+        _check_setup(window)
+        assert steps["calkit"].install_button is None
     with mock.patch.multiple("main", **_stubs(installed=False)):
         assert steps["calkit"].install_command[:3] == ["uv", "tool", "install"]
     # Platform-specific steps only appear where they apply
@@ -98,3 +135,82 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         "main.subprocess.check_output", side_effect=FileNotFoundError
     ):
         assert main.wsl_installed() is False
+    # WSL without a distribution fails to list, but any distribution counts,
+    # whatever its name, read from wsl.exe's UTF-16 output
+    with mock.patch(
+        "main.subprocess.check_output",
+        side_effect=main.subprocess.CalledProcessError(1, "wsl"),
+    ):
+        assert main.wsl_installed() is False
+    with mock.patch(
+        "main.subprocess.check_output",
+        return_value="Ubuntu-24.04\r\n".encode("utf-16"),
+    ):
+        assert main.wsl_installed() is True
+    # The WSL install elevates as a whole, including the winget install
+    with mock.patch.multiple("main", **_stubs(installed=False)):
+        cmd = main.WSLInstall().install_command
+    assert cmd[0] == "powershell" and "runAs" in cmd
+    assert cmd[-1].startswith('"/k winget install')
+    # The extensions are the ones Calkit recommends for projects, from a
+    # copy kept in sync by scripts/sync-resources.py
+    recommended = main.VSCodeExtensionsInstall.recommended
+    with open(
+        os.path.join(
+            os.path.dirname(__file__),
+            *["..", "..", "calkit", "resources", "vscode", "extensions.json"],
+        )
+    ) as f:
+        assert recommended == json.load(f)["recommendations"]
+    assert "Calkit.calkit-vscode" in recommended
+    # VS Code lists IDs lowercased, which still count as installed
+    with mock.patch(
+        "main.get_installed_vs_code_extensions",
+        return_value=[ext.lower() for ext in recommended],
+    ):
+        assert main.VSCodeExtensionsInstall().refresh() is True
+    # Otherwise the step says how many are missing and which
+    with mock.patch(
+        "main.get_installed_vs_code_extensions",
+        return_value=recommended[2:],
+    ):
+        step = main.VSCodeExtensionsInstall()
+        assert step.refresh() is False
+        assert "(2 missing)" in step.label.text()
+        assert step.label.toolTip().splitlines()[1:] == recommended[:2]
+        with mock.patch("main.shutil.which", return_value="code"):
+            assert step.install_command == [
+                "code",
+                "--install-extension",
+                recommended[0],
+                "&&",
+                "code",
+                "--install-extension",
+                recommended[1],
+            ]
+
+
+def test_get_projects(tmp_path, monkeypatch):
+    import git
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    # Projects are found in ~/calkit and ~/dev, and a project cloned in both
+    # opens from ~/calkit
+    for folder, url in [
+        ("calkit/a", "https://github.com/someone/a.git"),
+        ("dev/a", "git@github.com:someone/a.git"),
+        ("dev/b", "https://github.com/someone/b.git"),
+        ("dev/not-calkit", "https://github.com/someone/c.git"),
+    ]:
+        wdir = tmp_path / folder
+        repo = git.Repo.init(wdir)
+        repo.create_remote("origin", url)
+        if folder != "dev/not-calkit":
+            (wdir / "calkit.yaml").write_text("owner: someone\n")
+    with mock.patch("main.get_calkit_token", return_value=""):
+        projects = main.get_projects()
+    assert [(p.project_name, p.wdir) for p in projects] == [
+        ("a", str(tmp_path / "calkit" / "a")),
+        ("b", str(tmp_path / "dev" / "b")),
+    ]

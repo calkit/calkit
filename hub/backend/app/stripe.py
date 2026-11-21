@@ -1,12 +1,16 @@
 """Functionality for working with Stripe."""
 
-import uuid
-from typing import Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal, cast
 
 import stripe
 from pydantic import EmailStr
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.models import User
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -23,22 +27,62 @@ def get_customers():
     return list(stripe.Customer.list())
 
 
-def get_customer(email: EmailStr) -> stripe.Customer | None:
+def find_customers(email: EmailStr) -> list[stripe.Customer]:
+    """Return every customer with this email, oldest first.
+
+    Search lags behind writes by up to a minute, so it can miss a customer
+    just created, and there may be several from before IDs were stored.
+    """
     res = stripe.Customer.search(query=f"email: '{email}'")
-    res = list(res["data"])
-    if not res:
-        return
-    if len(res) > 1:
-        raise ValueError("There are two customers with this email")
-    return res[0]
+    customers = cast(list[stripe.Customer], res.data)
+    return sorted(customers, key=lambda c: c.created)
 
 
-def create_customer(
-    email: EmailStr, full_name: str | None, user_id: uuid.UUID
-) -> stripe.Customer:
-    return stripe.Customer.create(
-        email=email, name=full_name, metadata=dict(user_id=user_id)
-    )
+def _get_stored_customer(user: User) -> stripe.Customer | None:
+    if user.stripe_customer_id is None:
+        return None
+    try:
+        customer = stripe.Customer.retrieve(user.stripe_customer_id)
+    except stripe.InvalidRequestError as e:
+        # E.g., an ID from another Stripe account or mode
+        if e.code == "resource_missing":
+            return None
+        raise
+    return None if customer.get("deleted") else customer
+
+
+def get_user_customers(user: User) -> list[stripe.Customer]:
+    """Return every customer a user's subscriptions may be under: the one
+    stored on the user, plus any with their email.
+    """
+    customers = find_customers(user.email)
+    stored = _get_stored_customer(user)
+    if stored is not None and stored.id not in [c.id for c in customers]:
+        customers.insert(0, stored)
+    return customers
+
+
+def get_or_create_user_customer(user: User) -> stripe.Customer:
+    """Return the customer to bill a user as, creating one if needed.
+
+    Its ID is stored on the user, for the caller to commit, since search
+    can't be relied on to find a customer just created. Creation is
+    idempotent per user, so a retry within a day can't make a second.
+    """
+    customer = _get_stored_customer(user)
+    if customer is None:
+        customers = find_customers(user.email)
+        if customers:
+            customer = customers[0]
+        else:
+            customer = stripe.Customer.create(
+                email=user.email,
+                name=user.full_name or "",
+                metadata=dict(user_id=str(user.id)),
+                idempotency_key=f"customer-{user.id}",
+            )
+    user.stripe_customer_id = customer.id
+    return customer
 
 
 def interval_from_period(period: Literal["monthly", "annual"]) -> str:

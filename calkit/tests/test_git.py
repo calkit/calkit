@@ -62,6 +62,21 @@ def test_ensure_path_is_ignored(tmp_dir):
     with open(".gitignore") as f:
         gi_root = f.read()
     assert "sub/test.txt" not in gi_root.splitlines()
+    # A project in a subdirectory keeps its rules in its own .gitignore,
+    # relative to it, whether given a repo-relative or absolute path
+    os.makedirs("proj/out")
+    os.makedirs("proj/figs")
+    root = os.getcwd()
+    os.chdir("proj")
+    try:
+        calkit.git.ensure_path_is_ignored(repo, path="proj/out")
+        calkit.git.ensure_path_is_ignored(repo, path=os.path.abspath("figs"))
+    finally:
+        os.chdir(root)
+    lines = Path("proj/.gitignore").read_text().splitlines()
+    assert [ln for ln in lines if ln] == ["out", "figs"]
+    assert Path(".gitignore").read_text() == gi_root
+    assert repo.ignored("proj/out", "proj/figs") == ["proj/out", "proj/figs"]
 
 
 def test_ensure_path_is_not_ignored(tmp_dir):
@@ -402,7 +417,7 @@ def test_ensure_path_is_ignored_stale_negation_after_direct_rule(tmp_dir):
     assert "results/output.json" in lines
 
 
-def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir):
+def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir, capsys):
     # A CI checkout is usually shallow and often has only the branch being
     # built, so a comparison against another branch fails on a repo that
     # looks fine otherwise
@@ -461,6 +476,51 @@ def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir):
     # A revision that doesn't exist is reported as missing rather than
     # retried forever
     assert calkit.git.resolve_ref(repo, "nope-not-a-branch") is None
+    # A local branch is what its name means here, like for every other
+    # stage, even when a fetch shows its remote has moved on, but that's
+    # warned about, since a comparison elsewhere would differ
+    subprocess.check_call(["git", "-C", clone, "branch", "main", main_sha])
+    commit = ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit"]
+
+    def commit_to(path: str, content: str) -> str:
+        with open(os.path.join(path, "f.txt"), "w") as f:
+            f.write(content)
+        subprocess.check_call(["git", "-C", path, *commit, "-qam", content])
+        return subprocess.check_output(
+            ["git", "-C", path, "rev-parse", "HEAD"], text=True
+        ).strip()
+
+    def fetch_main() -> None:
+        subprocess.check_call(
+            [
+                "git",
+                "-C",
+                clone,
+                "fetch",
+                "-q",
+                "origin",
+                "main:refs/remotes/origin/main",
+            ]
+        )
+
+    subprocess.check_call(["git", "-C", origin, "checkout", "-q", "main"])
+    remote_sha = commit_to(origin, "three")
+    fetch_main()
+    assert calkit.git.resolve_ref(repo, "main") == main_sha
+    assert "behind its remote" in capsys.readouterr().err
+    # Commits not pushed yet are used as they are, without a warning
+    subprocess.check_call(
+        ["git", "-C", clone, "branch", "-f", "main", remote_sha]
+    )
+    subprocess.check_call(["git", "-C", clone, "checkout", "-q", "main"])
+    local_sha = commit_to(clone, "four")
+    assert calkit.git.resolve_ref(repo, "main") == local_sha
+    assert capsys.readouterr().err == ""
+    # Once both have moved, it can't be said which is meant
+    commit_to(origin, "five")
+    fetch_main()
+    assert calkit.git.resolve_ref(repo, "main") == local_sha
+    assert "diverged" in capsys.readouterr().err
 
 
 def test_check_branch_is_current(tmp_dir):
@@ -515,6 +575,73 @@ def test_check_branch_is_current(tmp_dir):
     msg = calkit.git.check_branch_is_current(repo)
     assert msg is not None
     assert f"'origin/{default_branch}'" in msg
+
+
+def test_get_set_upstream_args(tmp_dir: Path) -> None:
+    repo = git.Repo.init()
+    # Without push.autoSetupRemote, a plain push of a new branch fails
+    repo.git.config("push.autoSetupRemote", "false")
+    repo.git.config("push.default", "simple")
+    Path("a.txt").write_text("a")
+    repo.git.add("a.txt")
+    repo.git.commit(["-m", "First commit"])
+    branch = repo.active_branch.name
+    # Nowhere to push yet
+    assert calkit.git.get_set_upstream_args(repo) == []
+    # A lone remote is used whatever its name, so the first push works
+    git.Repo.init("remote.git", bare=True)
+    repo.git.remote(["add", "hub", "remote.git"])
+    args = calkit.git.get_set_upstream_args(repo)
+    assert args == ["--set-upstream", "hub", branch]
+    # Several remotes are ambiguous unless one is origin
+    git.Repo.init("other.git", bare=True)
+    repo.git.remote(["add", "other", "other.git"])
+    assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.remote(["rename", "other", "origin"])
+    args = calkit.git.get_set_upstream_args(repo)
+    assert args == ["--set-upstream", "origin", branch]
+    # Naming where to push leaves that to the caller, but flags don't
+    assert calkit.git.get_set_upstream_args(repo, ["hub"]) == []
+    assert calkit.git.get_set_upstream_args(repo, ["--force"]) == args
+    # Flags that pick their own refs would push the branch too, and a
+    # remote named with --repo would lose to the one added
+    for flag in ["--tags", "--all", "--mirror", "--delete", "--repo=hub"]:
+        assert calkit.git.get_set_upstream_args(repo, [flag]) == []
+    # Nor is the branch named where Git wouldn't push it alone
+    for push_default in ["nothing", "matching"]:
+        repo.git.config("push.default", push_default)
+        assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.config("push.default", "simple")
+    # The branch's own remote comes before origin
+    repo.git.config(f"branch.{branch}.remote", "hub")
+    hub_args = ["--set-upstream", "hub", branch]
+    assert calkit.git.get_set_upstream_args(repo) == hub_args
+    # Git pushes to a push remote it doesn't pull from without an upstream,
+    # and setting one would change where the branch pulls from
+    repo.git.config("--unset", f"branch.{branch}.remote")
+    repo.git.config("remote.pushDefault", "hub")
+    assert calkit.git.get_set_upstream_args(repo) == []
+    # Whatever case its key is written in, as Git reads it
+    repo.git.config("--unset", "remote.pushDefault")
+    repo.git.config("remote.pushdefault", "hub")
+    assert calkit.git.get_set_upstream_args(repo) == []
+    # But not to the one it does pull from
+    repo.git.config(f"branch.{branch}.pushRemote", "origin")
+    assert calkit.git.get_set_upstream_args(repo) == args
+    repo.git.config("--unset", f"branch.{branch}.pushRemote")
+    repo.git.config("--unset", "remote.pushDefault")
+    # Nor where the remote's push refspecs say what to push, e.g., a CI
+    # run force pushing a branch it rebuilds each time
+    repo.git.config("remote.origin.push", f"+HEAD:refs/heads/{branch}-data")
+    assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.config("--unset", "remote.origin.push")
+    repo.git.push(*args)
+    # Once the branch tracks one, a plain push is fine
+    assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.push()
+    # A detached HEAD has no branch to set up
+    repo.git.checkout(["--detach"])
+    assert calkit.git.get_set_upstream_args(repo) == []
 
 
 def _install_stripping_filter(repo: git.Repo, pattern: str = "*.ipynb"):
@@ -591,3 +718,32 @@ def test_ensure_path_is_not_filtered(tmp_dir):
     assert calkit.git.get_filter_driver(repo, path) is None
     rule = f"{path} -filter"
     assert attributes.read_text().splitlines().count(rule) == 1
+
+
+def test_get_staged_files_for_a_deleted_path(tmp_dir):
+    repo = git.Repo.init()
+    Path("keep.txt").write_text("keep\n")
+    Path("gone.txt").write_text("gone\n")
+    Path("other.txt").write_text("other\n")
+    repo.git.add(["keep.txt", "gone.txt", "other.txt"])
+    repo.git.commit(["-m", "First commit"])
+    os.remove("gone.txt")
+    repo.git.add(["-u"])
+    # The deleted path is a pathspec, not a ref
+    assert calkit.git.get_staged_files(path="gone.txt", repo=repo) == [
+        "gone.txt"
+    ]
+    assert calkit.git.get_staged_files_with_status(
+        path="gone.txt", repo=repo
+    ) == [{"status": "D", "path": "gone.txt"}]
+    # A path that still exists, and one with nothing staged for it
+    Path("keep.txt").write_text("changed\n")
+    repo.git.add(["keep.txt"])
+    assert calkit.git.get_staged_files(path="keep.txt", repo=repo) == [
+        "keep.txt"
+    ]
+    assert calkit.git.get_staged_files(path="other.txt", repo=repo) == []
+    assert sorted(calkit.git.get_staged_files(repo=repo)) == [
+        "gone.txt",
+        "keep.txt",
+    ]

@@ -8,11 +8,12 @@ import git
 from app.git import get_repo_tree_for_ref
 from app.models import StorageResource
 from app.pipeline import (
+    StageStatus,
     _precompute_storage_presence,
     calc_overall_pipeline_status,
+    color_mermaid_by_status,
     compute_stage_statuses,
     find_frozen_tainted_stages,
-    find_stage_for_path,
 )
 from app.storage import ProjectStorage
 
@@ -21,8 +22,8 @@ class FakeFS:
     """Minimal fsspec-like FS recording which md5s exist in object storage.
 
     Implements both access patterns the presence check uses: `find` for the
-    listing path it normally takes, and `exists` for the per-md5 fallback.
-    `find_error` forces the fallback.
+    per-directory listings it normally takes, and `exists` for the per-md5
+    fallback. `find_error` forces the fallback.
     """
 
     def __init__(
@@ -45,8 +46,13 @@ class FakeFS:
         self.find_calls += 1
         if self._find_error is not None:
             raise self._find_error
-        # Both layouts put objects at <prefix>/<idx>/<rest>.
-        return [f"{path}/{md5[:2]}/{md5[2:]}" for md5 in self._existing]
+        # Both layouts put objects at <prefix>/<idx>/<rest>, and the presence
+        # check lists one <prefix>/<idx> directory at a time
+        return [
+            f"{path}/{md5[2:]}"
+            for md5 in self._existing
+            if path.endswith(f"/{md5[:2]}")
+        ]
 
 
 def _storages(fs: FakeFS) -> list[ProjectStorage]:
@@ -584,22 +590,6 @@ def test_not_run_stage(tmp_path):
     assert calc_overall_pipeline_status(statuses) == "stale"
 
 
-def test_find_stage_for_path():
-    dvc_lock = {
-        "stages": {
-            "plot": {
-                "outs": [{"path": "figures/foo.png", "md5": "abc"}],
-            },
-            "train": {
-                "outs": [{"path": "model.pkl", "md5": "def"}],
-            },
-        }
-    }
-    assert find_stage_for_path("figures/foo.png", dvc_lock) == "plot"
-    assert find_stage_for_path("model.pkl", dvc_lock) == "train"
-    assert find_stage_for_path("missing", dvc_lock) is None
-
-
 def _simple_pipeline(script: str):
     dvc_yaml = {
         "stages": {
@@ -810,27 +800,62 @@ def test_frozen_stage_with_real_change_is_not_stale(tmp_path):
     assert statuses["run"].status == "frozen"
 
 
-def test_find_stage_for_path_directory_output():
-    """Issue 622: a figure produced into a stage's output *directory* must map
-    back to that stage, not just on an exact out-path match."""
+def test_declared_deps_and_outs_missing_from_lock(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    files = {"script.py": "print('hi')\n", "new.csv": "a\n", "out.txt": "r\n"}
+    _commit(repo, files, "init")
+    tree = get_repo_tree_for_ref(repo, None)
+    locked = {
+        "cmd": "python script.py",
+        "deps": [{"path": "script.py", "md5": _md5(files["script.py"])}],
+        "outs": [{"path": "out.txt", "md5": _md5(files["out.txt"])}],
+    }
     dvc_lock = {
         "stages": {
-            "plot": {"outs": [{"path": "figures", "md5": "abc123.dir"}]},
-            "report": {"outs": [{"path": "results/sup.json", "md5": "x"}]},
+            name: locked for name in ("added", "dropped", "frozen", "loop@a")
         }
     }
-    assert find_stage_for_path("figures/test.png", dvc_lock) == "plot"
-    assert find_stage_for_path("figures/sub/deep.png", dvc_lock) == "plot"
-    assert find_stage_for_path("results/sup.json", dvc_lock) == "report"
-    assert find_stage_for_path("other/x.png", dvc_lock) is None
-    # An exact out-path match wins over a containing-directory match.
-    dvc_lock_both = {
+    dvc_yaml = {
         "stages": {
-            "dir": {"outs": [{"path": "figures", "md5": "d.dir"}]},
-            "file": {"outs": [{"path": "figures/test.png", "md5": "f"}]},
+            # A dep and an out declared since the last run, so with no hash
+            "added": {
+                "cmd": "python script.py",
+                "deps": ["script.py", "new.csv"],
+                "outs": ["out.txt", {"extra.txt": {"cache": False}}],
+            },
+            # Dropping a declaration leaves the locked hashes to compare,
+            # which still match, so DVC doesn't call it changed
+            "dropped": {"cmd": "python script.py", "outs": ["out.txt"]},
+            "frozen": {
+                "cmd": "python script.py",
+                "deps": ["script.py", "new.csv"],
+                "outs": ["out.txt"],
+                "frozen": True,
+            },
+            # A foreach stage declares under 'do', and a templated path can't
+            # be compared without resolving it
+            "loop": {
+                "foreach": ["a"],
+                "do": {
+                    "cmd": "python script.py",
+                    "deps": ["script.py", "${item}.csv"],
+                    "outs": ["out.txt"],
+                },
+            },
         }
     }
-    assert find_stage_for_path("figures/test.png", dvc_lock_both) == "file"
+    statuses = compute_stage_statuses(
+        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+    )
+    assert statuses["added"].status == "stale"
+    assert statuses["added"].modified_inputs == ["new.csv"]
+    assert statuses["added"].modified_outputs == ["extra.txt"]
+    assert statuses["dropped"].status == "up-to-date"
+    assert statuses["loop@a"].status == "up-to-date"
+    # Frozen still reads as frozen, but its change keeps it tainted
+    assert statuses["frozen"].status == "frozen"
+    assert statuses["frozen"].modified_inputs == ["new.csv"]
+    assert "frozen" in find_frozen_tainted_stages(dvc_yaml, dvc_lock, statuses)
 
 
 def test_without_cache_token_always_recomputes(tmp_path):
@@ -861,24 +886,30 @@ def test_without_cache_token_always_recomputes(tmp_path):
 def test_precompute_storage_presence_lists_then_falls_back() -> None:
     present = "a" * 32
     absent = "b" * 32
+    dep_only = "c" * 32
     dvc_lock = {
         "stages": {
             "train": {
-                "deps": [{"path": "in.csv", "md5": present}],
-                "outs": [{"path": "out.pkl", "md5": absent}],
+                "deps": [{"path": "in.csv", "md5": dep_only}],
+                "outs": [
+                    {"path": "model.pkl", "md5": present},
+                    {"path": "out.pkl", "md5": absent},
+                ],
             }
         }
     }
-    # Normal path: one listing per layout, and no per-md5 probing at all.
-    fs = FakeFS(existing_md5s={present})
+    # Normal path: only outs are looked up, by listing the directory each
+    # md5 falls in, with the legacy layout tried only for what's still
+    # missing, and no per-md5 probing at all
+    fs = FakeFS(existing_md5s={present, dep_only})
     presence = _precompute_storage_presence(
         dvc_lock, "owner", "proj", _storages(fs)
     )
     assert presence == {present: True, absent: False}
-    assert fs.find_calls == 2
+    assert fs.find_calls == 3
     assert fs.exists_calls == 0
     # When listing fails, fall back to probing each md5 and get the same
-    # answer rather than reporting everything as missing.
+    # answer rather than reporting everything as missing
     fallback_fs = FakeFS(
         existing_md5s={present}, find_error=OSError("listing unavailable")
     )
@@ -887,7 +918,7 @@ def test_precompute_storage_presence_lists_then_falls_back() -> None:
     )
     assert fallback == presence
     assert fallback_fs.exists_calls > 0
-    # A project that has pushed nothing reports everything missing.
+    # A project that has pushed nothing reports everything missing
     empty = _precompute_storage_presence(
         dvc_lock, "owner", "proj", _storages(FakeFS())
     )
@@ -914,54 +945,95 @@ def test_precompute_storage_presence_lists_then_falls_back() -> None:
         dvc_lock, "owner", "proj", storages
     )
     assert switched == {present: True, absent: True}
-    assert hf_fs.find_calls == 1
-    assert internal_fs.find_calls == 2
+    assert hf_fs.find_calls == 2
+    assert internal_fs.find_calls == 1
     # Probing falls back through the storages the same way
     hf_fs._find_error = OSError("listing unavailable")
     probed = _precompute_storage_presence(dvc_lock, "owner", "proj", storages)
     assert probed == {present: True, absent: True}
+    # Something that isn't an md5 never makes it into a storage path
+    bad_lock = {"stages": {"s": {"outs": [{"path": "x", "md5": "../.."}]}}}
+    bad_fs = FakeFS()
+    assert _precompute_storage_presence(
+        bad_lock, "o", "p", _storages(bad_fs)
+    ) == {"../..": False}
+    assert bad_fs.find_calls == 0
 
 
-def test_find_stage_for_path_prefers_current_stages():
-    # dvc.lock keeps entries that are no longer real stages: a bare name left
-    # from before the stage became a matrix, and expansions from an older
-    # matrix shape. Staleness reporting drops both, so matching one pins a
-    # figure to a stage that can never have a status.
-    dvc_lock = {
+def test_cached_missing_outputs_are_rechecked(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    script = "print('hi')\n"
+    _commit(repo, {"script.py": script}, "init")
+    tree = get_repo_tree_for_ref(repo, None)
+    out_md5 = _md5("result\n")
+    dvc_yaml = {
         "stages": {
-            "plot": {"outs": [{"path": "figures/a.png"}]},
-            "plot@_arg00-9": {"outs": [{"path": "figures/a.png"}]},
-            "plot@_arg00": {"outs": [{"path": "figures/a.png"}]},
-            "render": {"outs": [{"path": "figures/sub"}]},
-            "render@_arg00": {"outs": [{"path": "figures/sub"}]},
-            "orphan": {"outs": [{"path": "figures/gone.png"}]},
+            "run": {
+                "cmd": "python script.py",
+                "deps": ["script.py"],
+                "outs": ["out.txt"],
+            }
         }
     }
-    current = {"plot@_arg00", "render@_arg00"}
-    # An exact match on a current expansion wins over the stale bare entry and
-    # the stale expansion, whatever order they appear in.
-    assert (
-        find_stage_for_path("figures/a.png", dvc_lock, valid_stages=current)
-        == "plot@_arg00"
+    dvc_lock = {
+        "stages": {
+            "run": {
+                "cmd": "python script.py",
+                "deps": [{"path": "script.py", "md5": _md5(script)}],
+                "outs": [{"path": "out.txt", "md5": out_md5}],
+            }
+        }
+    }
+    token = "tok-missing-recheck"
+    first = compute_stage_statuses(
+        dvc_yaml,
+        dvc_lock,
+        tree,
+        "o",
+        "p",
+        _storages(FakeFS()),
+        cache_token=token,
     )
-    # Directory outs resolve the same way, including for nested paths.
-    assert (
-        find_stage_for_path(
-            "figures/sub/deep.png", dvc_lock, valid_stages=current
-        )
-        == "render@_arg00"
+    assert first["run"].status == "stale"
+    assert first["run"].missing_outputs == ["out.txt"]
+    # A repeat call is served from the cache after looking only for the
+    # missing output, even when the inputs it would recompute from changed
+    fs = FakeFS()
+    cached = compute_stage_statuses(
+        dvc_yaml,
+        {"stages": {}},
+        tree,
+        "o",
+        "p",
+        _storages(fs),
+        cache_token=token,
     )
-    # With nothing current producing it, naming the stale stage still beats
-    # naming nothing.
-    assert (
-        find_stage_for_path("figures/gone.png", dvc_lock, valid_stages=current)
-        == "orphan"
+    assert cached["run"].missing_outputs == ["out.txt"]
+    assert fs.find_calls == 2
+    # Once the output is pushed, the next call sees it without a new token
+    pushed = compute_stage_statuses(
+        dvc_yaml,
+        dvc_lock,
+        tree,
+        "o",
+        "p",
+        _storages(FakeFS(existing_md5s={out_md5})),
+        cache_token=token,
     )
-    assert (
-        find_stage_for_path("nope.png", dvc_lock, valid_stages=current) is None
+    assert pushed["run"].status == "up-to-date"
+    # And that result is cached outright, with nothing left to look for
+    fs = FakeFS()
+    again = compute_stage_statuses(
+        dvc_yaml,
+        {"stages": {}},
+        tree,
+        "o",
+        "p",
+        _storages(fs),
+        cache_token=token,
     )
-    # Omitting valid_stages keeps the old any-match behaviour.
-    assert find_stage_for_path("figures/a.png", dvc_lock) == "plot"
+    assert again["run"].status == "up-to-date"
+    assert fs.find_calls == 0
 
 
 def test_cleaned_notebook_dep_tracks_the_notebook(tmp_path):
@@ -1087,6 +1159,28 @@ def test_find_frozen_tainted_stages() -> None:
         "clean",
         "plot",
     }
+    # A frozen stage that still matches dvc.lock taints nothing, even with
+    # its outputs missing from storage; one whose inputs moved does.
+    assert (
+        find_frozen_tainted_stages(
+            dvc_yaml,
+            dvc_lock,
+            {
+                "collect": StageStatus(
+                    status="frozen", missing_outputs=["data/raw.csv"]
+                )
+            },
+        )
+        == set()
+    )
+    for changed in (
+        StageStatus(status="frozen", modified_command=True),
+        StageStatus(status="frozen", modified_inputs=["collect.py"]),
+        StageStatus(status="frozen", modified_outputs=["data/raw.csv"]),
+    ):
+        assert find_frozen_tainted_stages(
+            dvc_yaml, dvc_lock, {"collect": changed}
+        ) == {"collect", "clean", "plot"}
     # Nothing frozen, nothing tainted -- including a cycle's worth of stages,
     # which the walk must not loop on.
     assert (
@@ -1107,3 +1201,25 @@ def test_find_frozen_tainted_stages() -> None:
         )
         == set()
     )
+
+
+def test_color_mermaid_by_status() -> None:
+    # Labels are escaped as Mermaid entity codes, which are matched decoded
+    mermaid = "\n".join(
+        [
+            "flowchart TD",
+            '\tnode1["plot"]',
+            '\tnode2["say#34;hi#34;@1"]',
+            '\tnode3["other"]',
+        ]
+    )
+    colored = color_mermaid_by_status(
+        mermaid,
+        {
+            "plot": StageStatus(status="stale"),
+            'say"hi"@1': StageStatus(status="up-to-date"),
+        },
+    )
+    assert "\tclass node1 stale" in colored
+    assert "\tclass node2 up-to-date" in colored
+    assert "node3 " not in colored.split("classDef", 1)[1]

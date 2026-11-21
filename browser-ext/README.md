@@ -152,10 +152,18 @@ don't own is the point of it.
 public/manifest.json   Extension manifest
 popup.html             Toolbar popup page, built to dist/popup.html
 options.html           Options page, built to dist/options.html
-src/background/        Service worker: auth, API calls, message routing
-src/content/           One content script per site (github, overleaf,
-                       references)
-src/core/              Hub config, storage, API client, page detection, UI
+src/worker/            Service worker: auth, API calls, message routing
+src/overleaf/          Content script for Overleaf, one module per part of
+                       the page (badge and panel in index.ts, sidebar,
+                       pdf-viewer, origins, citations), plus editor.ts,
+                       which runs in Overleaf's own world to mark problems
+                       in its editor, and review/, the page Overleaf's PDF
+                       pane shows for commenting on the PDF
+src/github/            Content script for GitHub (pr, repo-home), and
+                       viewer/, the page for a DVC-tracked artifact or diff
+src/references/        Content script for publisher and preprint pages
+src/core/              Shared by all of them: hub config, storage, API
+                       client, page detection, UI
 src/popup/             Popup script and shared page styles
 src/options/           Options script
 ```

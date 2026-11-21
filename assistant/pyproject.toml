@@ -21,6 +21,31 @@ dev = [
   "pytest-test-utils", # For tmp_dir fixture
 ]
 
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["main.py"]
+
+# Released from this monorepo as assistant/vX.Y.Z, alongside the CLI's own
+# vX.Y.Z tags, so the pattern is anchored on the prefix
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = "^assistant/v(?P<version>.+)$"
+
+[tool.hatch.version.raw-options]
+root = ".."
+git_describe_command = [
+  "git", "describe", "--dirty", "--tags", "--long",
+  "--match", "assistant/v[0-9]*",
+]
+
+# uv's build cache keys on the source tree alone, so without this it would
+# keep the version from before a release was tagged
+[tool.uv]
+cache-keys = [{ git = { commit = true, tags = true } }]
+
 # Rootdir would otherwise resolve to the monorepo's pyproject, whose
 # options need plugins this environment doesn't have
 [tool.pytest.ini_options]

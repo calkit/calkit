@@ -7,7 +7,9 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
+import git
 import pytest
 
 import calkit
@@ -70,6 +72,15 @@ def test_check_venv(tmp_dir):
     with open("lock.txt") as f:
         lock_txt_3 = f.read()
     assert "polars==1.0.0" in lock_txt_3
+    # Removing one removes it from the lock, rather than the old lock or env
+    # bringing it back
+    with open("reqs.txt", "w") as f:
+        f.write("requests")
+    subprocess.check_call(
+        ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    )
+    with open("lock.txt") as f:
+        assert "polars" not in f.read()
     # Test that if we specify a different Python or otherwise fail with an
     # existing prefix, we can still build the environment since it will be
     # deleted and recreated
@@ -85,6 +96,34 @@ def test_check_venv(tmp_dir):
             "3.11",
         ]
     )
+    # A lock resolved from the current spec is read, not rewritten
+    with open("lock.txt") as f:
+        lock_txt_4 = f.read()
+    assert calkit.environments.read_env_spec_hash(
+        "lock.txt"
+    ) == calkit.environments.env_spec_hash("reqs.txt", python="3.11")
+    with open("lock.txt", "a") as f:
+        f.write("# kept\n")
+    check_311 = [
+        "calkit",
+        "check",
+        "venv",
+        "reqs.txt",
+        "-o",
+        "lock.txt",
+        "--python",
+        "3.11",
+    ]
+    subprocess.check_call(check_311)
+    with open("lock.txt") as f:
+        assert f.read() == lock_txt_4 + "# kept\n"
+    # One that can't be installed fails rather than diverging from the env
+    with open("lock.txt", "w") as f:
+        f.write("polars==0.0.0\n")
+    result = subprocess.run(check_311, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "out of sync with its lock" in result.stderr + result.stdout
+    assert not [f for f in os.listdir() if f.startswith(("osx-", "linux-"))]
 
 
 def test_check_venv_moved(tmp_dir):
@@ -117,6 +156,29 @@ def test_check_venv_moved(tmp_dir):
     else:
         cmd = f". \"{activate_fpath}\" && python -c 'import requests'"
     subprocess.check_call(cmd, shell=True)
+    # A local package is installed from the spec rather than locked, so the
+    # lock still installs once the project has moved
+    os.makedirs(os.path.join("a", "pkg"))
+    with open(os.path.join("a", "pkg", "pyproject.toml"), "w") as f:
+        f.write(
+            '[project]\nname = "calkit-test-pkg"\nversion = "0.1.0"\n'
+            '[build-system]\nrequires = ["setuptools"]\n'
+            'build-backend = "setuptools.build_meta"\n'
+        )
+    with open(os.path.join("a", "pkg", "calkit_test_pkg.py"), "w") as f:
+        f.write("")
+    with open(os.path.join("a", "reqs.txt"), "w") as f:
+        f.write("idna\n-e ./pkg\n")
+    check = ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    subprocess.check_call(check, cwd="a")
+    with open(os.path.join("a", "lock.txt")) as f:
+        lock = f.read()
+    assert "idna==" in lock
+    assert "file:" not in lock and "calkit-test-pkg" not in lock
+    os.rename("a", "b")
+    subprocess.check_call(check, cwd="b")
+    with open(os.path.join("b", "lock.txt")) as f:
+        assert f.read() == lock
 
 
 def test_check_env_vars(tmp_dir):
@@ -141,6 +203,195 @@ def test_check_env_vars(tmp_dir):
             ["calkit", "check", "env-vars"],
             env=os.environ.copy() | {"MY_ENV_VAR": "value1"},
         )
+
+
+def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    subprocess.check_call(["calkit", "init"])
+
+    def env_var(name: str) -> dict:
+        return {"kind": "env-var", "name": name}
+
+    ck_info: dict = {
+        "requirements": [env_var("CK_PROJECT")],
+        "environments": {
+            "lab": {"kind": "system", "requirements": [env_var("CK_LAB")]},
+            "far": {
+                "kind": "system",
+                "host": "calkit-test.invalid",
+                "requirements": [env_var("CK_FAR")],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "a": {
+                    "kind": "shell-command",
+                    "command": "echo a > a.txt",
+                    "environment": "lab",
+                    "requirements": [env_var("CK_A")],
+                    "outputs": [{"path": "a.txt", "storage": "git"}],
+                },
+                "b": {
+                    "kind": "shell-command",
+                    "command": "echo b > b.txt",
+                    "environment": "_system",
+                    "requirements": [env_var("CK_B")],
+                    "outputs": [{"path": "b.txt", "storage": "git"}],
+                },
+                "remote": {
+                    "kind": "shell-command",
+                    "command": "echo r > r.txt",
+                    "environment": "far",
+                    "requirements": [env_var("CK_REMOTE")],
+                    "outputs": [{"path": "r.txt", "storage": "git"}],
+                    "frozen": True,
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CK_")} | {
+        "CK_PROJECT": "p"
+    }
+    every = env | {"CK_LAB": "l", "CK_A": "a", "CK_B": "b"}
+
+    def check(*args: str, env: dict = env) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "check", "reqs", *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            stdin=subprocess.DEVNULL,
+        )
+
+    # Every stage's and environment's are checked, except those of another
+    # machine, which are said to be checked there
+    res = check(env=every)
+    assert res.returncode == 0, res.stderr
+    assert "Not checking environment 'far' here" in res.stdout
+    assert "Not checking stage 'remote' here" in res.stdout
+    assert "CK_FAR" not in res.stdout + res.stderr
+    # Everything unmet is reported at once, by where it's declared
+    res = check()
+    assert res.returncode != 0
+    for problem in [
+        "environment 'lab': env-var 'CK_LAB' not found",
+        "stage 'a': env-var 'CK_A' not found",
+        "stage 'b': env-var 'CK_B' not found",
+    ]:
+        assert problem in res.stderr
+    res = check(env={k: v for k, v in every.items() if k != "CK_PROJECT"})
+    assert res.returncode != 0
+    assert "the project: env-var 'CK_PROJECT' not found" in res.stderr
+    # With --stale, only out-of-date stages' are, and their environments'
+    subprocess.check_call(["calkit", "run", "a", "b"], env=every)
+    res = check("--stale")
+    assert res.returncode == 0, res.stderr
+    ck_info["pipeline"]["stages"]["b"]["command"] = "echo b2 > b.txt"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check("--stale")
+    assert res.returncode != 0
+    assert "stage 'b': env-var 'CK_B' not found" in res.stderr
+    assert "CK_LAB" not in res.stderr
+    assert "CK_A" not in res.stderr
+    ck_info["pipeline"]["stages"]["a"]["command"] = "echo a2 > a.txt"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check("--stale", env=env | {"CK_B": "b"})
+    assert res.returncode != 0
+    assert "environment 'lab': env-var 'CK_LAB' not found" in res.stderr
+    assert "stage 'a': env-var 'CK_A' not found" in res.stderr
+    # A subproject's stages are checked too
+    os.makedirs("sub")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "s": {
+                            "kind": "shell-command",
+                            "command": "echo s > s.txt",
+                            "requirements": [env_var("CK_SUB")],
+                            "outputs": ["s.txt"],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check(env=every)
+    assert res.returncode != 0
+    assert "stage 'sub:s': env-var 'CK_SUB' not found" in res.stderr
+    assert check(env=every | {"CK_SUB": "s"}).returncode == 0
+    # Each unmet requirement of a declaration is reported, and a switch's
+    # option it doesn't pick here isn't checked
+    ck_info["pipeline"]["stages"]["b"]["requirements"].append(env_var("CK_B2"))
+    ck_info["environments"]["pick"] = {
+        "kind": "switch",
+        "switch": [
+            {
+                "when": [{"env_var_set": "CK_NOT_SET"}],
+                "use": {
+                    "kind": "system",
+                    "requirements": [env_var("CK_UNPICKED")],
+                },
+            },
+            {"use": "lab"},
+        ],
+    }
+    ck_info["pipeline"]["stages"]["a"]["environment"] = "pick"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check(env={k: v for k, v in every.items() if k != "CK_B"})
+    assert res.returncode != 0
+    assert (
+        "stage 'b': env-var 'CK_B' not found; env-var 'CK_B2' not found"
+    ) in res.stderr
+    assert "CK_UNPICKED" not in res.stdout + res.stderr
+    assert "CK_LAB" not in res.stderr
+    # A setup step is checked in each project that declares it
+    exists = (
+        f'"{sys.executable}" -c '
+        "\"import os, sys; sys.exit(not os.path.exists('ready'))\""
+    )
+    ready = {"kind": "setup", "name": "ready", "check_command": exists}
+    ck_info["requirements"].append(ready)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open(os.path.join("sub", "calkit.yaml")) as f:
+        sub_info = calkit.ryaml.load(f)
+    sub_info["requirements"] = [ready]
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    with open("ready", "w") as f:
+        f.write("")
+    every = every | {"CK_SUB": "s", "CK_B2": "b"}
+    res = check(env=every)
+    assert res.returncode != 0
+    assert "subproject 'sub': setup requirement 'ready'" in res.stderr
+    assert "the project:" not in res.stderr
+    with open(os.path.join("sub", "ready"), "w") as f:
+        f.write("")
+    assert check(env=every).returncode == 0, check(env=every).stderr
+    # With --stale, the projects' own are checked before what's out of date
+    # is, which checks environments that may need them
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app as calkit_app
+
+    def fail_status(*args: object, **kwargs: object) -> None:
+        raise AssertionError("status asked before project requirements")
+
+    monkeypatch.setattr(calkit.pipeline, "get_status", fail_status)
+    monkeypatch.delenv("CK_PROJECT", raising=False)
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs", "--stale"])
+    assert result.exit_code != 0
+    assert "the project: env-var 'CK_PROJECT' not found" in result.output
 
 
 @pytest.mark.skipif(
@@ -249,6 +500,7 @@ def test_check_julia_env_repairs_stale_manifest(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env(tmp_dir):
     # First create a Dockerfile with a known base image
     with open("Dockerfile", "w") as f:
@@ -338,7 +590,8 @@ def test_check_docker_env(tmp_dir):
     )
     with open("Dockerfile-lock.json", "rb") as f:
         assert f.read() == renamed_lock_bytes
-    # Now modify the image to fail to build and ensure the lock file is deleted
+    # A build that fails leaves the lock as it was, like a package manager
+    # whose resolve fails, rather than leaving the environment with none
     with open("Dockerfile", "w") as f:
         f.write("FROM non-existent-image:latest\n")
     with pytest.raises(subprocess.CalledProcessError):
@@ -354,13 +607,15 @@ def test_check_docker_env(tmp_dir):
                 "Dockerfile-lock.json",
             ]
         )
-    assert not os.path.exists("Dockerfile-lock.json")
+    with open("Dockerfile-lock.json", "rb") as f:
+        assert f.read() == renamed_lock_bytes
 
 
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_locks_every_platform(tmp_dir):
     from calkit.environments import get_docker_arch
 
@@ -401,16 +656,63 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     with open(f"locks/{arch}.json", "rb") as f:
         lock_bytes = f.read()
     subprocess.check_call(["docker", "rmi", "-f", "alpine:3.18"])
-    out = subprocess.check_output(argv, text=True)
+    out = subprocess.check_output(argv, text=True, stderr=subprocess.STDOUT)
     assert "Pulling image by digest" in out
     with open(f"locks/{arch}.json", "rb") as f:
         assert f.read() == lock_bytes
+    # A locked digest that can't be pulled fails the check rather than
+    # pulling whatever the tag points at now and relocking to it
+    gone = dict(mine, RepoDigests=["sha256:" + "0" * 64])
+    with open(f"locks/{arch}.json", "w") as f:
+        json.dump(gone, f, indent=4)
+    with open(f"locks/{arch}.json", "rb") as f:
+        gone_bytes = f.read()
+    subprocess.check_call(["docker", "rmi", "-f", "alpine:3.18"])
+    result = subprocess.run(argv, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "locked to" in result.stderr
+    assert "--rebuild" in result.stderr
+    assert "Pulling image: alpine:3.18" not in result.stderr
+    with open(f"locks/{arch}.json", "rb") as f:
+        assert f.read() == gone_bytes
+    # Asking for it is what replaces the image and its lock
+    subprocess.check_call(argv + ["--rebuild"])
+    with open(f"locks/{arch}.json") as f:
+        assert json.load(f)["RepoDigests"] == mine["RepoDigests"]
+    # The image named is the spec, so naming another one relocks rather
+    # than failing to find the old digest in the new repo, or pulling it
+    # from the same repo under a different tag
+    assert mine["Image"] == "alpine:3.18"
+    try:
+        out = subprocess.check_output(
+            [a if a != "alpine:3.18" else "alpine:3.19" for a in argv],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+        assert "Pulling image by digest" not in out
+        with open(f"locks/{arch}.json") as f:
+            relocked = json.load(f)
+        assert relocked["Image"] == "alpine:3.19"
+        assert relocked["RepoDigests"] != mine["RepoDigests"]
+    finally:
+        subprocess.run(["docker", "rmi", "alpine:3.19"], capture_output=True)
+    # A lock written before the image was recorded still pins it, and is
+    # left as it was rather than rewritten, which would rerun every stage
+    legacy = {k: v for k, v in mine.items() if k != "Image"}
+    with open(f"locks/{arch}.json", "w") as f:
+        json.dump(legacy, f, indent=4)
+    with open(f"locks/{arch}.json", "rb") as f:
+        legacy_bytes = f.read()
+    subprocess.check_call(argv)
+    with open(f"locks/{arch}.json", "rb") as f:
+        assert f.read() == legacy_bytes
 
 
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
     def get_layers() -> list[str]:
         layers: list[str] = json.loads(
@@ -473,6 +775,7 @@ def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
     container = "calkit-test-registry"
     registry = "localhost:5678"
@@ -533,17 +836,17 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         arch = calkit.environments.get_docker_arch()
         lock_fpath = f".calkit/env-locks/main/{arch}.json"
         # Checking builds the image and records the digest it will have in
-        # the registry. Where the image store keeps a manifest that digest
-        # is the build's own, and publishing is left to 'calkit push';
-        # where it doesn't, only a push can say what the digest is, so
-        # checking sends the image rather than leave the lock naming
-        # nothing to pull
-        digests_at_build = engine_records_build_digests()
-        out = subprocess.check_output(check_argv, text=True)
-        if digests_at_build:
-            assert "Pushing image" not in out
-        else:
-            assert "Pushing image" in out
+        # the registry, which is the build's own where the image store keeps
+        # a manifest. Publishing is left to 'calkit push' either way.
+        out = subprocess.check_output(
+            check_argv, text=True, stderr=subprocess.STDOUT
+        )
+        assert "Pushing image" not in out
+        if not engine_records_build_digests():
+            # Only a push could say what the digest is here, so the lock
+            # names nothing to pull, and checking says how to fix that
+            assert "containerd image store" in out
+            return
         with open(lock_fpath, "rb") as f:
             built_lock_bytes = f.read()
         built_lock = json.loads(built_lock_bytes)
@@ -555,12 +858,7 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         out = subprocess.check_output(
             ["calkit", "push", "--no-git", "--no-dvc"], text=True
         )
-        if digests_at_build:
-            assert "Pushing image for 'main'" in out
-        else:
-            # Checking already sent it, and pushing asks the registry rather
-            # than sending it a second time
-            assert "already in the registry" in out
+        assert "Pushing image for 'main'" in out
         assert "exporting layers" not in out
         with open(lock_fpath) as f:
             lock = json.load(f)
@@ -581,7 +879,9 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
                 f"{registry}/proj/{image}:latest",
             ]
         )
-        out = subprocess.check_output(check_argv, text=True)
+        out = subprocess.check_output(
+            check_argv, text=True, stderr=subprocess.STDOUT
+        )
         assert "Pulling image by digest" in out
         assert "Pushing image" not in out
         # Coming back from the registry has to leave the lock exactly as it
@@ -654,6 +954,7 @@ def test_push_does_not_reach_a_registry_with_nothing_to_send(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
     image = "calkit-unreachable-registry-test"
     subprocess.check_call(["calkit", "init"])
@@ -710,6 +1011,18 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
         assert os.path.isfile(other_lock_fpath)
         with open(other_lock_fpath, "rb") as f:
             assert f.read() == other_lock_bytes
+        # A locked image the registry can't serve fails the check, which
+        # names the command that replaces it, and that command does
+        if engine_records_build_digests():
+            subprocess.check_call(["docker", "rmi", "-f", image])
+            check_argv = ["calkit", "check", "environment", "-n", "main"]
+            result = subprocess.run(check_argv, capture_output=True, text=True)
+            assert result.returncode != 0
+            assert "'calkit update env -n main --lock'" in result.stderr
+            subprocess.check_call(
+                ["calkit", "update", "env", "-n", "main", "--lock"]
+            )
+            assert os.path.isfile(f".calkit/env-locks/main/{arch}.json")
     finally:
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
 
@@ -718,6 +1031,7 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_push_sends_docker_images_to_their_registry(tmp_dir):
     container = "calkit-test-registry-push"
     registry = "localhost:5679"
@@ -785,6 +1099,37 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
         )
         assert result.returncode != 0
         assert "Invalid target to push" in result.stderr
+        # A Git remote to push to, with everything so far already there
+        subprocess.check_call(["git", "init", "--bare", "-q", "remote.git"])
+        subprocess.check_call(["git", "remote", "add", "origin", "remote.git"])
+        subprocess.check_call(["git", "config", "push.default", "current"])
+        with open(".gitignore", "a") as f:
+            f.write("remote.git/\n")
+        subprocess.check_call(["calkit", "save", "-a", "-m", "Save"])
+        # An image that fails to push holds back the Git push, since the
+        # commit's lock would name an image nobody can pull
+        ck_info = calkit.load_calkit_info()
+        ck_info["environments"]["main"]["registry"] = "localhost:5999/nope"
+        calkit.save_calkit_info(ck_info)
+        git.Repo().git.commit(["-am", "Point at an unreachable registry"])
+        result = subprocess.run(
+            ["calkit", "push", "--no-dvc"], capture_output=True, text=True
+        )
+        assert result.returncode != 0
+        assert "not pushing to Git" in result.stderr
+        assert "Pushing to Git remote" not in result.stdout
+        # Saving still commits, since that happens before pushing
+        with open("notes.txt", "w") as f:
+            f.write("hi\n")
+        result = subprocess.run(
+            ["calkit", "save", "notes.txt", "-m", "Notes"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "not pushing to Git" in result.stderr
+        assert git.Repo().head.commit.message.strip() == "Notes"
+        assert "Pushing to Git remote" not in result.stdout
     finally:
         subprocess.run(["docker", "rm", "-f", container], capture_output=True)
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
@@ -794,6 +1139,7 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_does_not_push(tmp_dir):
     with open("Dockerfile", "w") as f:
         f.write("FROM alpine:3.18\nRUN echo unpushed > /hi.txt\n")
@@ -815,18 +1161,17 @@ def test_check_docker_env_does_not_push(tmp_dir):
         )
         with open("lock.json") as f:
             lock = json.load(f)
-        if not engine_records_build_digests():
-            # This image store gives a build no digest, so the only way to
-            # learn one is to push, and the registry isn't there. The lock
-            # still describes the image; it just can't say where to pull it
-            # from, which is reported rather than passed off as locked
-            assert "Failed to push image" in out
-            assert lock["RepoDigests"] == []
-            return
         # Publishing an image is 'calkit push', not something that happens
         # on the way to running a stage, so an unreachable registry is not
         # even contacted here
         assert "Pushing image" not in out
+        if not engine_records_build_digests():
+            # This image store gives a build no digest until it's pushed. The
+            # lock still describes the image; it just can't say where to pull
+            # it from, which is reported rather than passed off as locked
+            assert "containerd image store" in out
+            assert lock["RepoDigests"] == []
+            return
         # A manifest is content-addressed, so the digest this build has is
         # the one it will have once pushed. Recording it without contacting
         # the registry is what lets a clone pull rather than rebuild as soon
@@ -860,6 +1205,25 @@ def test_check_docker_env_does_not_push(tmp_dir):
             )
         )
         assert not [d for d in info if d.startswith("localhost:5999")]
+        # Deleting an image that was never pushed leaves nothing to pull
+        # the locked digest from, and a rebuild would lock a different
+        # image, so the check fails, says how to fix it, and keeps the lock
+        with open("lock.json", "rb") as f:
+            lock_bytes = f.read()
+        subprocess.check_call(["docker", "rmi", "-f", "calkit-unpushed-test"])
+        result = subprocess.run(argv, capture_output=True, text=True)
+        assert result.returncode != 0
+        assert "locked to" in result.stderr
+        assert "calkit push docker" in result.stderr
+        with open("lock.json", "rb") as f:
+            assert f.read() == lock_bytes
+        assert (
+            subprocess.run(
+                ["docker", "image", "inspect", "calkit-unpushed-test"],
+                capture_output=True,
+            ).returncode
+            != 0
+        )
     finally:
         subprocess.run(
             ["docker", "rmi", "-f", "calkit-unpushed-test"],
@@ -898,6 +1262,39 @@ def test_check_env_rejects_an_invalid_lock_property(tmp_dir):
     # Nothing is recorded for an environment that couldn't be locked, so a
     # stage can't depend on a half-written pin
     assert not os.path.exists(os.path.join(".calkit", "env-locks", "laptop"))
+
+
+def test_check_env_stages_the_lock_it_writes(tmp_dir, monkeypatch):
+    import calkit.dvc.core
+
+    # DVC stages dvc.lock, which records the lock's hash, so the lock is
+    # staged with it rather than left out of the commit
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"laptop": {"kind": "system", "lock": ["os"]}}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    lock_fpath = ".calkit/env-locks/laptop/info.json"
+    subprocess.check_call(["calkit", "check", "env", "-n", "laptop"])
+    repo = calkit.git.get_repo()
+    assert lock_fpath in repo.git.diff("--cached", "--name-only").split()
+    repo.git.commit("-m", "Lock")
+    # Not when the project doesn't autostage, or Calkit doesn't
+    assert calkit.dvc.autostage_enabled()
+    with monkeypatch.context() as m:
+        m.setattr(calkit.dvc.core, "AUTOSTAGE", False)
+        assert not calkit.dvc.autostage_enabled()
+        assert calkit.dvc.configure_autostage() == 0
+    subprocess.check_call(
+        ["calkit", "dvc", "config", "core.autostage", "false"]
+    )
+    assert not calkit.dvc.autostage_enabled()
+    ck_info["environments"]["laptop"]["lock"] = ["os", "machine"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "check", "envs"])
+    assert lock_fpath in repo.git.diff("--name-only").split()
+    assert lock_fpath not in repo.git.diff("--cached", "--name-only").split()
 
 
 def test_check_env_checks_system_requirements(tmp_dir):
@@ -1174,6 +1571,16 @@ def test_check_repro_literals(tmp_dir):
 def test_check_questions(tmp_dir):
     import json
 
+    def show(*args: str) -> str:
+        # With stderr, where a warning goes so the Markdown stays clean
+        proc = subprocess.run(
+            ["calkit", "show", "q", "1", *args],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return proc.stdout + proc.stderr
+
     subprocess.check_call(["calkit", "init"])
     os.makedirs("results")
     with open("results/findings.json", "w") as f:
@@ -1214,13 +1621,9 @@ def test_check_questions(tmp_dir):
     subprocess.check_call(["git", "commit", "-q", "-am", "Import it"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "Answers backed by current evidence: 1/1" in out
-    # Listing renders the placeholder from the results file
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 8 of eight do." in out
-    out = subprocess.check_output(
-        ["calkit", "list", "questions", "--raw"], text=True
-    )
-    assert "answer: {n_top} of eight do." in out
+    # Showing renders the placeholder from the results file
+    assert "**Answer:** 8 of eight do." in show()
+    assert "**Answer:** {n_top} of eight do." in show("--raw")
     # The pipeline changes the number in a later commit: the report says
     # what it was and when, without failing -- the sentence around a number
     # can still be true -- and the listing already shows 0
@@ -1265,8 +1668,7 @@ def test_check_questions(tmp_dir):
         ["calkit", "status", "-c", "questions"], text=True
     )
     assert "1 question, all answered with current evidence" in out
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 0 of eight do." in out
+    assert "**Answer:** 0 of eight do." in show()
     # Reviewing the answer is an edit to the question, which clears the
     # note about the value having moved
     ck_info = calkit.load_calkit_info()
@@ -1294,34 +1696,646 @@ def test_check_questions(tmp_dir):
     )
     assert "Questions answered: 1/1" in out
     # A placeholder that names nothing renders as written, which looks
-    # like text somebody meant literally, so the listing says so
+    # like text somebody meant literally, so showing it says so
     ck_info = calkit.load_calkit_info()
     ck_info["questions"][0]["answer"] = "It is {missing} of them."
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    out = show()
     assert "could not be filled" in out
     assert "It is {missing} of them." in out
-    # A conditional answer is listed as the branch that holds, and one with
-    # no branch holding is listed as written, with the same warning
+    # A conditional answer is shown as the branch that holds, and one with
+    # no branch holding is shown as written, with the same warning
     ck_info["questions"][0]["answer"] = {
         "if n_top > 4": "Most do.",
         "else": "{n_top} do.",
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 0 do." in out
+    out = show()
+    assert "**Answer:** 0 do." in out
     assert "could not be filled" not in out
     del ck_info["questions"][0]["answer"]["else"]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    out = show()
     assert "could not be filled" in out
-    assert "if n_top > 4: Most do." in out
+    assert "- **if** `n_top > 4`: Most do." in out
     # A project with no questions says so rather than printing nothing
     os.remove("calkit.yaml")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump({}, f)
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "No questions defined." in out
+
+
+def test_check_switch_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "pick": {
+                "kind": "switch",
+                "switch": [{"use": "here"}],
+                "lock": ["os"],
+            },
+            "never": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"app_exists": "calkit-test-no-such-app"}],
+                        "use": "here",
+                    }
+                ],
+            },
+            "here": {"kind": "system"},
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Checking a switch writes its lock and checks what it picks here
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "pick", "--verbose"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "picks 'here' here" in res.stdout
+    assert os.path.isfile(".calkit/env-locks/pick/switch.json")
+    with open(".calkit/env-locks/pick/info.json") as f:
+        assert json.load(f) == {"os": calkit.get_system_info()["os"]}
+    # One that picks nothing warns rather than failing
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "never"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    assert "picks no environment" in res.stdout + res.stderr
+    # Until a stage has run with a switch, every option's machine lock is
+    # part of its lock, even one written after compiling wrote the lock
+    envs = ck_info["environments"]
+    envs["a"] = {"kind": "system", "lock": ["os"]}
+    envs["b"] = {"kind": "system", "lock": ["machine"]}
+    envs["two"] = {
+        "kind": "switch",
+        "switch": [
+            {"when": [{"env_var_set": "CK_TEST_NO_SUCH_VAR"}], "use": "b"},
+            {"use": "a"},
+        ],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    switch_lock = calkit.environments.write_switch_env_lock("two", envs)
+    calkit.environments.write_system_env_lock(env_name="a", env=envs["a"])
+    subprocess.check_call(["calkit", "check", "env", "-n", "two"])
+    with open(switch_lock) as f:
+        assert set(json.load(f)["machine_locks"]) == {"a"}
+    # After that, one first written is a machine taking up its option
+    with open("dvc.lock", "w") as f:
+        f.write(f"deps:\n- path: {switch_lock}\n")
+    calkit.environments.write_system_env_lock(env_name="b", env=envs["b"])
+    subprocess.check_call(["calkit", "check", "env", "-n", "two"])
+    with open(switch_lock) as f:
+        assert set(json.load(f)["machine_locks"]) == {"a"}
+
+
+def test_check_pixi_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("env")
+    with open("env/pixi.toml", "w") as f:
+        f.write(
+            "[workspace]\n"
+            'name = "test"\n'
+            'channels = ["conda-forge"]\n'
+            'platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]\n'
+            "[feature.extra.dependencies]\n"
+            "[environments]\n"
+            'named = ["extra"]\n'
+        )
+    env = {"kind": "pixi", "path": "env/pixi.toml"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"px": env}}, f)
+    # Without a name, pixi installs the manifest's default env
+    subprocess.check_call(["calkit", "check", "env", "-n", "px"])
+    assert os.listdir("env/.pixi/envs") == ["default"]
+    # With one, it installs that env, as stages run it
+    shutil.rmtree("env/.pixi")
+    env["name"] = "named"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"px": env}}, f)
+    subprocess.check_call(["calkit", "check", "env", "-n", "px"])
+    assert os.listdir("env/.pixi/envs") == ["named"]
+
+
+def test_check_stage_runs(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                name: {
+                    "kind": "shell-command",
+                    "command": f"echo {name} > {name}.txt",
+                    "environment": "_system",
+                    "outputs": [{"path": f"{name}.txt", "storage": "git"}],
+                }
+                for name in ["a", "b"]
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check = ["calkit", "check", "stage-runs"]
+    subprocess.check_call(["calkit", "run"])
+    # Each run records what dvc.lock then said about the stage, with the
+    # commit it started from
+    with open(calkit.STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    lock = calkit.dvc.read_lock_stages()
+    assert stage_runs["a"]["dvc_lock_hash"] == calkit.dvc.stage_lock_hash(
+        lock["a"]
+    )
+    assert stage_runs["a"]["dvc_lock_hash"].startswith("sha256:")
+    assert stage_runs["a"]["git_rev"] == git.Repo().head.commit.hexsha
+    assert stage_runs["a"]["git_dirty"]
+    subprocess.check_call(check)
+    # An output edited and committed to dvc.lock without running the stage
+    # doesn't match
+    with open("a.txt", "w") as f:
+        f.write("edited\n")
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "a"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Stage 'a' has changed in dvc.lock" in res.stdout
+    assert "'b'" not in res.stdout
+    # Nor does a stage with no recorded run, e.g., run outside Calkit
+    with open(calkit.STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    del stage_runs["b"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'b' has no recorded run" in res.stdout
+    # Rerunning them records them again
+    subprocess.check_call(["calkit", "run", "--force"])
+    subprocess.check_call(check)
+    # A subproject's runs are kept beside its dvc.lock under their names
+    # there, so it is the same record whichever directory ran them
+    os.makedirs("sub")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "c": {
+                            "kind": "shell-command",
+                            "command": "echo c > c.txt",
+                            "environment": "_system",
+                            "outputs": [{"path": "c.txt", "storage": "git"}],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    sub_runs = calkit.read_stage_runs("sub")
+    assert list(sub_runs) == ["c"]
+    assert "sub/dvc.yaml:c" not in calkit.read_stage_runs()
+    subprocess.check_call(check)
+    subprocess.check_call(check, cwd="sub")
+    # Edited in the subproject, it's caught from the parent too
+    with open(os.path.join("sub", "c.txt"), "w") as f:
+        f.write("edited\n")
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "sub/dvc.yaml:c"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'sub/dvc.yaml:c' has changed in dvc.lock" in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "sub/dvc.yaml:c"])
+    subprocess.check_call(check)
+    # A record the parent kept under the subproject stage's name there, as
+    # it used to, still counts, and moves to the subproject when rerun. It's
+    # named as on Windows, which a run elsewhere must recognize too.
+    stage_runs = calkit.read_stage_runs()
+    stage_runs["sub\\dvc.yaml:c"] = calkit.read_stage_runs("sub")["c"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    os.remove(os.path.join("sub", calkit.STAGE_RUNS_FPATH))
+    subprocess.check_call(check)
+    subprocess.check_call(["calkit", "run", "--force", "sub/dvc.yaml:c"])
+    assert not any("dvc.yaml" in k for k in calkit.read_stage_runs())
+    assert list(calkit.read_stage_runs("sub")) == ["c"]
+    subprocess.check_call(check)
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    )
+    assert "sub/.calkit/stage-runs.json" in staged.splitlines()
+    # When both records exist, one matching is enough: here the
+    # subproject's is stale and the parent's is not
+    sub_runs = calkit.read_stage_runs("sub")
+    stage_runs = calkit.read_stage_runs()
+    stage_runs["sub/dvc.yaml:c"] = dict(sub_runs["c"])
+    sub_runs["c"]["dvc_lock_hash"] = "sha256:stale"
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    with open(os.path.join("sub", calkit.STAGE_RUNS_FPATH), "w") as f:
+        json.dump(sub_runs, f)
+    subprocess.check_call(check)
+    # A dvc.yaml that isn't a declared subproject is run and checked the
+    # same way
+    os.makedirs("tools")
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {"stages": {"t": {"cmd": "echo t > t.txt", "outs": ["t.txt"]}}},
+            f,
+        )
+    subprocess.check_call(["calkit", "run"])
+    assert list(calkit.read_stage_runs("tools")) == ["t"]
+    subprocess.check_call(check)
+    with open(os.path.join("tools", "t.txt"), "w") as f:
+        f.write("edited\n")
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "tools/dvc.yaml:t"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'tools/dvc.yaml:t' has changed in dvc.lock" in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:t"])
+    # Like DVC, it ignores the entries of stages no longer in the pipeline,
+    # each foreach item by its own name, and still checks the rest
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "t": {"cmd": "echo t > t.txt", "outs": ["t.txt"]},
+                    "f": {
+                        "foreach": ["x", "y"],
+                        "do": {"cmd": "echo ${item} > ${item}.txt"},
+                    },
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(check)
+    with open(os.path.join("tools", "dvc.yaml")) as f:
+        tools_dvc_yaml = calkit.ryaml.load(f)
+    tools_dvc_yaml["stages"]["f"]["foreach"] = ["x"]
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(tools_dvc_yaml, f)
+    ck_info["pipeline"]["stages"].pop("b")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "status"])
+    assert "b" in calkit.dvc.read_lock_stages()
+    assert "f@y" in calkit.dvc.read_lock_stages("tools")
+    stage_runs = calkit.read_stage_runs()
+    del stage_runs["b"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    tools_runs = calkit.read_stage_runs("tools")
+    del tools_runs["f@x"], tools_runs["f@y"]
+    with open(os.path.join("tools", calkit.STAGE_RUNS_FPATH), "w") as f:
+        json.dump(tools_runs, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Stage 'tools/dvc.yaml:f@x' has no recorded run" in res.stdout
+    assert "f@y" not in res.stdout
+    assert "'b'" not in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:f@x"])
+    subprocess.check_call(check)
+    # One inside a DVC repo of its own isn't, since its wrapper stage runs
+    # it without recording its stages
+    os.makedirs(os.path.join("iso", ".dvc"))
+    os.makedirs(os.path.join("iso", "inner"))
+    for fname, content in [
+        ("dvc.yaml", {"stages": {"i": {"cmd": "true"}}}),
+        ("dvc.lock", {"schema": "2.0", "stages": {"i": {"cmd": "true"}}}),
+    ]:
+        with open(os.path.join("iso", "inner", fname), "w") as f:
+            calkit.ryaml.dump(content, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout
+    assert "iso" not in res.stdout
+
+
+def test_check_env_rebuilds(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    with open("local.txt", "w") as f:
+        f.write("one\n")
+    ck_info: dict = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+                "inputs": ["local.txt"],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check = ["calkit", "check", "env", "-n", "py"]
+    subprocess.check_call(check)
+    marker = os.path.join(".venv", "marker")
+    # Checking again reuses what was built
+    open(marker, "w").close()
+    subprocess.check_call(check)
+    assert os.path.isfile(marker)
+    # --force rebuilds it from scratch
+    subprocess.check_call(check + ["--force"])
+    assert not os.path.isfile(marker)
+    assert os.path.isdir(".venv")
+    # So does an input changing
+    open(marker, "w").close()
+    with open("local.txt", "w") as f:
+        f.write("two\n")
+    subprocess.check_call(check)
+    assert not os.path.isfile(marker)
+    # An input outside the project is refused
+    ck_info["environments"]["py"]["inputs"] = ["../outside.txt"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    # A switch's own inputs rebuild what it picks
+    ck_info["environments"]["py"]["inputs"] = []
+    ck_info["environments"]["sw"] = {
+        "kind": "switch",
+        "switch": [{"use": "py"}],
+        "inputs": ["local.txt"],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check_switch = ["calkit", "check", "env", "-n", "sw"]
+    subprocess.check_call(check_switch)
+    open(marker, "w").close()
+    subprocess.check_call(check_switch)
+    assert os.path.isfile(marker)
+    with open("local.txt", "w") as f:
+        f.write("three\n")
+    subprocess.check_call(check_switch)
+    assert not os.path.isfile(marker)
+    # An renv env's library is what a rebuild removes
+    library = os.path.join("r", "renv", "library")
+    os.makedirs(library)
+    envs = {"r": {"kind": "renv", "path": "r/DESCRIPTION"}}
+    assert calkit.environments.remove_built_env("r", envs) == library
+    assert not os.path.exists(library)
+
+
+def test_check_env_locks_every_venv_platform(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    ck_info = {
+        "environments": {
+            "plain": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    lock_dir = os.path.join(".calkit", "env-locks", "plain")
+    # With uv available, a plain venv is locked for other platforms too, so
+    # another machine reads its lock as current rather than relocking
+    locks = os.listdir(lock_dir)
+    assert len(locks) > 1
+    # Without a declared Python, so machines with different ones agree
+    recorded = calkit.environments.read_env_spec_hash(
+        os.path.join(lock_dir, locks[0])
+    )
+    assert recorded == calkit.environments.env_spec_hash("requirements.txt")
+    # A matching lock with no record, e.g., from before records were kept, is
+    # adopted without relocking other platforms
+    here = calkit.environments.core._conda_venv_platform() + ".txt"
+    sibling = os.path.join(lock_dir, next(f for f in locks if f != here))
+    os.remove(sibling)
+    os.remove(calkit.environments.ENV_SPEC_HASHES_FPATH)
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    assert calkit.environments.read_env_spec_hash(sibling) == recorded
+    assert not os.path.isfile(sibling)
+    # A changed spec relocks every platform together
+    with open("requirements.txt", "a") as f:
+        f.write("certifi\n")
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    assert sorted(os.listdir(lock_dir)) == sorted(locks)
+    for fname in locks:
+        with open(os.path.join(lock_dir, fname)) as f:
+            assert "certifi==" in f.read()
+
+
+def test_check_storage(tmp_dir):
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def check(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "check", "storage", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt && echo yo > kept.txt",
+                "outputs": ["out.txt", {"path": "kept.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    for path in ["data.csv", "other.csv"]:
+        with open(path, "w") as f:
+            f.write("a,b\n")
+        subprocess.check_call(["calkit", "add", "--to", "dvc", path])
+    subprocess.check_call(["calkit", "run"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    result = check()
+    assert result.returncode == 0, result.stderr
+    assert "stored where" in result.stdout
+    # An output and a file tracked twice, a Git-stored output that's
+    # ignored, and a file tracked twice that differs from its .dvc file
+    git("add", "-f", "out.txt", "data.csv")
+    git("rm", "-q", "--cached", "kept.txt")
+    with open(".gitignore", "a") as f:
+        f.write("/kept.txt\n")
+    with open("other.csv", "a") as f:
+        f.write("1,2\n")
+    git("add", "-f", "other.csv")
+    git("commit", "-qam", "Break storage")
+    result = check()
+    assert result.returncode != 0
+    for path in ["out.txt", "data.csv", "kept.txt", "other.csv"]:
+        assert path in result.stdout
+    result = check("--json")
+    assert result.returncode != 0
+    assert len(json.loads(result.stdout)) == 4
+    assert check("--json", "--fix").returncode != 0
+    # Each is fixed but the one that's unclear, which fails the check, and
+    # the .gitignore that fixing changes is staged with the rest
+    result = check("--fix")
+    assert result.returncode != 0
+    assert "other.csv" in result.stdout
+    assert not git("ls-files", "--", "out.txt", "data.csv").strip()
+    assert git("check-ignore", "out.txt", "data.csv").split() == [
+        "out.txt",
+        "data.csv",
+    ]
+    assert git("ls-files", "--", "kept.txt").strip() == "kept.txt"
+    assert ".gitignore" in git("diff", "--cached", "--name-only").split()
+    assert ".gitignore" not in git("diff", "--name-only").split()
+    assert "up to date" in subprocess.check_output(
+        ["dvc", "status", "make"], text=True
+    )
+    # Which is left to the user
+    subprocess.check_call(
+        ["calkit", "update", "path-storage", "other.csv", "--to", "dvc"]
+    )
+    result = check()
+    assert result.returncode == 0, result.stderr
+    # An output that's tracked twice from a stage that's out of date is
+    # taken out of Git, but left for the stage to record
+    git("add", "-f", "out.txt")
+    ck_info["pipeline"]["stages"]["make"]["command"] += " && echo"
+    calkit.save_calkit_info(ck_info)
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert "Run 'make'" in result.stdout
+    assert not git("ls-files", "--", "out.txt").strip()
+    # An output ignored as a whole, with a file in it another rule ignores,
+    # is fixed in one pass
+    ck_info["pipeline"]["stages"]["whole"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "mkdir -p whole && echo w > whole/w.txt "
+        "&& echo l > whole/run.log",
+        "outputs": [{"path": "whole", "storage": "git"}],
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run", "whole"])
+    git("rm", "-r", "-q", "--cached", "whole")
+    with open(".gitignore", "a") as f:
+        f.write("\n/whole/\n*.log\n")
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "ignored"
+    assert sorted(problem["files"]) == ["whole/run.log", "whole/w.txt"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "whole").split() == [
+        "whole/run.log",
+        "whole/w.txt",
+    ]
+    result = check()
+    assert result.returncode == 0, result.stdout
+    # A directory tracked by both, with a file DVC leaves out of it that's
+    # only in Git, keeps that one in Git
+    git("commit", "-qm", "Fix")
+    with open(".dvcignore", "a") as f:
+        f.write("*.tmp\n")
+    ck_info["pipeline"]["stages"]["dir"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "mkdir -p dir && echo d > dir/d.csv && echo t > dir/t.tmp",
+        "outputs": ["dir"],
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run", "dir"])
+    git("add", "-f", "dir")
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "both"
+    assert problem["files"] == ["dir/d.csv"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "dir").split() == ["dir/t.tmp"]
+    result = check()
+    assert result.returncode == 0, result.stdout
+    # A file an output's 'ignore' leaves out, but Git still tracks, is
+    # removed from Git
+    ck_info["pipeline"]["stages"]["whole"]["outputs"][0]["ignore"] = ["*.log"]
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "status"], stdout=subprocess.DEVNULL)
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "excluded-tracked"
+    assert problem["files"] == ["whole/run.log"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "whole").split() == ["whole/w.txt"]
+    assert os.path.isfile("whole/run.log")
+    result = check()
+    assert result.returncode == 0, result.stdout
+
+
+def test_check_references(tmp_dir):
+    with open("main.tex", "w") as f:
+        f.write("\\citep{real}\n\\bibliography{refs}\n")
+    with open("refs.bib", "w") as f:
+        f.write(
+            "@article{real,\n  title = {A Real Thing},\n  year = {2020}\n}\n"
+        )
+    # `refs` is an alias, and offline nothing is looked up, so nothing fails
+    for name in ["references", "refs"]:
+        out = subprocess.check_output(
+            ["calkit", "check", name, "main.tex", "--offline", "--json"],
+            text=True,
+        )
+        document = json.loads(out)
+        assert document["references"]["real"]["status"] == "unchecked"
+    # Nothing is written unless asked
+    assert not os.path.exists(".calkit/reference-checks")
+    subprocess.check_call(
+        ["calkit", "check", "refs", "main.tex", "--offline", "-o", "out.json"]
+    )
+    with open("out.json") as f:
+        assert json.load(f)["path"] == "main.tex"
+    # Responses can be recorded in a file of their own, as a stage does
+    subprocess.check_call(
+        ["calkit", "check", "refs", "main.tex", "--offline"]
+        + ["--responses", "checks/responses.json"]
+    )
+    with open("checks/responses.json") as f:
+        assert json.load(f) == {}
+    # There's no default document to check
+    result = subprocess.run(["calkit", "check", "refs"], capture_output=True)
+    assert result.returncode != 0
+    # A citation missing from the bibliography fails
+    with open("main.tex", "a") as f:
+        f.write("\\citep{ghost}\n")
+    result = subprocess.run(
+        ["calkit", "check", "refs", "main.tex", "--offline"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "ghost" in result.stdout + result.stderr
+
+
+def test_check_storage_stage_output_dvc_file(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("fig.png", "w") as f:
+        f.write("old")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "fig.png"])
+    subprocess.check_call(["git", "commit", "-qm", "Add figure"])
+    # A stage that makes it now, in a dvc.yaml compiled elsewhere
+    with open("dvc.yaml", "w") as f:
+        f.write("stages:\n  plot:\n    cmd: x\n    outs:\n    - fig.png\n")
+    result = subprocess.run(
+        ["calkit", "check", "storage"], capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "made by stage 'plot'" in result.stderr + result.stdout
+    subprocess.check_call(["calkit", "check", "storage", "--fix"])
+    assert not os.path.isfile("fig.png.dvc")
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).split()
+    assert "fig.png.dvc" in staged

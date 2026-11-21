@@ -1,6 +1,7 @@
+/** The toolbar popup: what the active tab is, and what Calkit can do there. */
 import { getGithubRepo, getOverleafProjectId } from "../core/detect";
 import { projectUrl } from "../core/hub-url";
-import { RequestFailed, send } from "../core/messages";
+import { onAuthChange, RequestFailed, send } from "../core/messages";
 import { clear, el, errorMessage, loading } from "../core/ui";
 
 const app = document.getElementById("app") as HTMLElement;
@@ -218,9 +219,7 @@ function renderSignedOut(hubLabel: string): void {
   const signInButton = el("button", { class: "action", text: "Sign in" });
   signInButton.addEventListener("click", async () => {
     signInButton.disabled = true;
-    clear(message).append(
-      loading("Approve the request in the tab that just opened"),
-    );
+    clear(message).append(loading("Approve the request in the new tab"));
     try {
       await send({ type: "auth.signIn" });
       void render();
@@ -272,6 +271,7 @@ async function render(): Promise<void> {
 }
 
 void render();
+onAuthChange(() => void render());
 
 // The popup closes while the sign-in tab is open, so pick up the result the
 // next time it opens rather than trying to hold state across that

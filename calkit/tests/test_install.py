@@ -57,6 +57,21 @@ def test_get_installer():
         win_entry = install.get_installer("uv")
     assert win_entry is not None
     assert "powershell" in win_entry["script"].lower()
+    # gh comes from each platform's package manager, or pixi on Linux
+    for platform, expected in [
+        ("darwin", "brew"),
+        ("linux", "pixi"),
+        ("win32", "winget"),
+    ]:
+        with mock.patch("calkit.install.sys.platform", platform):
+            gh = install.get_installer("gh")
+        assert gh is not None and gh["script"].startswith(expected)
+    # make only needs installing on Windows
+    with mock.patch("calkit.install.sys.platform", "win32"):
+        make = install.get_installer("make")
+    assert make is not None and "ezwinports.make" in make["script"]
+    with mock.patch("calkit.install.sys.platform", "linux"):
+        assert install.get_installer("make") is None
 
 
 @skipif_windows_fake_binary
@@ -79,6 +94,10 @@ def test_install_and_path_injection(tmp_dir, monkeypatch):
     import shutil
 
     assert shutil.which("pixi") is None
+    # Where it's installed but not on PATH, it's still found, without
+    # changing PATH
+    assert install.find("pixi") == shutil.which("pixi", path=str(fake_bin_dir))
+    assert os.environ["PATH"] == "/usr/bin:/bin"
     assert install.install("pixi") is True
     assert str(fake_bin_dir) in os.environ["PATH"].split(os.pathsep)
     assert shutil.which("pixi") is not None
@@ -112,9 +131,93 @@ def test_prompt_and_install(monkeypatch):
         mock.patch("calkit.install.install", return_value=True),
     ):
         assert install.prompt_and_install("pixi", interactive=True) is True
+    # Under WSL, Docker Desktop on Windows is offered as the alternative to
+    # installing Docker Engine, but nowhere else, e.g., when testing on Windows
+    monkeypatch.setattr("calkit.install._current_platform", lambda: "linux")
+    for wsl in [True, False]:
+        monkeypatch.setattr("calkit.core.is_wsl", lambda: wsl)
+        with (
+            mock.patch("builtins.input", return_value="n"),
+            mock.patch("builtins.print") as m_print,
+        ):
+            install.prompt_and_install("docker", interactive=True)
+        printed = " ".join(str(c.args[0]) for c in m_print.call_args_list)
+        assert ("WSL integration" in printed) is wsl
     # Unknown app -> no installer -> False.
     monkeypatch.setattr("calkit.install.get_installer", lambda app: None)
     assert install.prompt_and_install("nope", interactive=True) is False
+
+
+def test_docker_windows_requirements(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run_wsl(stdout: bytes, returncode: int = 0) -> None:
+        monkeypatch.setattr(
+            "calkit.install.subprocess.run",
+            lambda *a, **k: subprocess.CompletedProcess(
+                a, returncode, stdout=stdout
+            ),
+        )
+
+    # WSL's version is read whether it writes UTF-8 or UTF-16, and the
+    # inbox version, or none, has no version
+    for stdout, returncode, version in [
+        (
+            "WSL version: 2.6.1.0\nKernel version: 6.6.87.2-1\n".encode(),
+            0,
+            (2, 6, 1),
+        ),
+        ("WSL-Version: 2.0.14.0\r\n".encode("utf-16-le"), 0, (2, 0, 14)),
+        (b"Usage: wsl.exe [Argument]", 1, None),
+    ]:
+        run_wsl(stdout, returncode)
+        assert install.get_wsl_version() == version
+    monkeypatch.setattr(
+        "calkit.install.subprocess.run", mock.Mock(side_effect=OSError)
+    )
+    assert install.get_wsl_version() is None
+    # Docker Desktop says what to update, Windows first
+    for build, wsl_version, expected in [
+        ("10.0.19044", (2, 6, 1), "build 19044"),
+        ("10.0.22621", (2, 6, 1), "Windows 11 23H2"),
+        ("10.0.19045", None, "inbox version"),
+        ("10.0.26100", (2, 0, 14), "is 2.0.14"),
+        ("10.0.26100", (2, 1, 5), None),
+    ]:
+        with (
+            mock.patch("platform.version", return_value=build),
+            mock.patch(
+                "calkit.install.get_wsl_version", return_value=wsl_version
+            ),
+        ):
+            message = install.get_docker_windows_message()
+        if expected is None:
+            assert message is None
+        else:
+            assert message is not None and expected in message
+    # It's shown before asking to install Docker on Windows, or before
+    # installing it with --yes
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app as calkit_app
+
+    with (
+        mock.patch("calkit.install.sys.platform", "win32"),
+        mock.patch(
+            "calkit.install.get_docker_windows_message", return_value="Old"
+        ),
+    ):
+        script = install.INSTALLERS["docker"]["windows"]["script"]
+        with (
+            mock.patch("builtins.input", return_value="n"),
+            mock.patch("builtins.print") as m_print,
+        ):
+            install.prompt_and_install("docker", interactive=True)
+        printed = [str(c.args[0]) for c in m_print.call_args_list]
+        assert printed[:2] == ["  Old", f"  {script}"]
+        with mock.patch("calkit.install.install", return_value=True):
+            result = CliRunner().invoke(
+                calkit_app, ["install", "docker", "--yes"]
+            )
+        assert "Warning: Old" in result.output
 
 
 @skipif_windows_fake_binary
@@ -213,6 +316,17 @@ def test_install_cli_command(monkeypatch):
         assert result.exit_code == 0
         m_install.assert_called_once_with("pixi")
         m_prompt.assert_not_called()
+    # Apps are installed by the binary they provide, e.g., node for nodejs
+    for alias, app in [("nodejs", "node"), ("vscode", "code")]:
+        with (
+            mock.patch("calkit.install.sys.platform", "win32"),
+            mock.patch(
+                "calkit.install.install", return_value=True
+            ) as m_install,
+        ):
+            result = runner.invoke(calkit_app, ["install", alias, "--yes"])
+            assert result.exit_code == 0, result.output
+            m_install.assert_called_once_with(app)
     # Default path delegates to ``prompt_and_install``; a False return
     # value surfaces as a non-zero exit.
     with mock.patch(
@@ -222,6 +336,103 @@ def test_install_cli_command(monkeypatch):
         assert result.exit_code != 0
         m_prompt.assert_called_once()
         assert m_prompt.call_args.args[0] == "pixi"
+    # An agent that's installed only gets Calkit's plugin, and one that
+    # isn't is installed first
+    for found in [True, False]:
+        finds = ["/bin/claude"] * 2 if found else [None, "/bin/claude"]
+        with (
+            mock.patch("calkit.install.find", side_effect=finds),
+            mock.patch("calkit.install.can_run_git", return_value=True),
+            mock.patch(
+                "calkit.install.install", return_value=True
+            ) as m_install,
+            mock.patch("calkit.install.subprocess.call", return_value=0) as m,
+        ):
+            result = runner.invoke(calkit_app, ["install", "claude", "-y"])
+            assert result.exit_code == 0, result.output
+            assert m_install.called is not found
+            assert [c.args[0] for c in m.call_args_list] == [
+                [
+                    "/bin/claude",
+                    "plugin",
+                    "marketplace",
+                    "add",
+                    "calkit/calkit",
+                ],
+                ["/bin/claude", "plugin", "install", "calkit@calkit"],
+            ]
+            assert "Added Calkit plugin" in result.output
+    # Where Git doesn't run, e.g., macOS without the Command Line Tools,
+    # it's installed before adding the plugin, and only the last plugin
+    # command has to succeed
+    with (
+        mock.patch("calkit.install.find", return_value="/bin/codex"),
+        mock.patch("calkit.install.can_run_git", return_value=False),
+        mock.patch("calkit.install.install", return_value=True) as m_install,
+        mock.patch(
+            "calkit.install.subprocess.call", side_effect=[1, 0]
+        ) as m_call,
+    ):
+        result = runner.invoke(calkit_app, ["install", "codex", "-y"])
+        assert result.exit_code == 0, result.output
+        m_install.assert_called_once_with("git")
+        assert m_call.call_args.args[0] == [
+            "/bin/codex",
+            "plugin",
+            "add",
+            "calkit@calkit",
+        ]
+    # Claude Code adds plugins only once logged in, which it says as JSON,
+    # and an agent that can't say counts as logged in
+    for agent, stdout, expected in [
+        ("claude", '{"loggedIn": false}', False),
+        ("claude", '{"loggedIn": true}', True),
+        ("claude", "error: unknown command 'auth'", True),
+        ("codex", '{"loggedIn": false}', True),
+    ]:
+        with mock.patch(
+            "calkit.install.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout=stdout),
+        ):
+            assert install.is_agent_logged_in(agent, "/bin/x") is expected
+    # Not logged in, it's offered on a terminal, otherwise said what to run
+    for tty in [False, True]:
+        with (
+            mock.patch("calkit.install.find", return_value="/bin/claude"),
+            mock.patch("calkit.install.can_run_git", return_value=True),
+            mock.patch(
+                "calkit.install.is_agent_logged_in", return_value=False
+            ),
+            mock.patch("calkit.core.is_tty", return_value=tty),
+            mock.patch("calkit.install.subprocess.call", return_value=0) as m,
+        ):
+            result = runner.invoke(calkit_app, ["install", "claude", "-y"])
+        calls = [c.args[0][1:] for c in m.call_args_list]
+        if tty:
+            assert result.exit_code == 0, result.output
+            assert calls[0] == ["auth", "login"] and len(calls) == 3
+        else:
+            assert result.exit_code != 0
+            assert "'claude auth login'" in result.output + (
+                result.stderr or ""
+            )
+            assert not calls
+    # OpenCode has no installer on Windows, but once it's installed, it
+    # still gets the plugin
+    for found in [None, "C:/oc.exe"]:
+        with (
+            mock.patch("calkit.install.sys.platform", "win32"),
+            mock.patch("calkit.install.find", return_value=found),
+            mock.patch("calkit.install.can_run_git", return_value=True),
+            mock.patch("calkit.install.subprocess.call", return_value=1),
+        ):
+            result = runner.invoke(calkit_app, ["install", "opencode", "-y"])
+        output = result.output + (result.stderr or "")
+        assert result.exit_code != 0
+        if found is None:
+            assert "npm" in output
+        else:
+            assert "Failed to add Calkit plugin" in output
 
 
 @skipif_windows_fake_binary
@@ -238,29 +449,82 @@ def test_platform_entries_prerequisites_and_record(
         assert git is not None and git.get("requires") == ["brew"]
         assert install.get_installer("choco") is None
         assert "Windows-only" in str(install.get_unsupported_message("choco"))
+        # Colima comes with the Docker CLI it's no use without, unless
+        # there's one already, e.g., from Docker Desktop
+        colima = install.get_installer("colima")
+        assert colima is not None and colima.get("requires") == ["brew"]
+        assert colima["script"] == (
+            "brew install colima && "
+            "{ command -v docker >/dev/null || brew install docker; }"
+        )
     # Linux has no single package manager, so Git says what to run
     with mock.patch("calkit.install.sys.platform", "linux"):
         assert install.get_installer("git") is None
         assert "package manager" in str(install.get_unsupported_message("git"))
         assert install.get_installer("docker") is not None
         assert install.get_installer("brew") is None
+        # Docker runs natively there, so Colima points to Docker Engine
+        assert install.get_installer("colima") is None
+        assert "Docker runs natively" in str(
+            install.get_unsupported_message("colima")
+        )
     with mock.patch("calkit.install.sys.platform", "win32"):
         choco = install.get_installer("choco")
         assert choco is not None and "chocolatey" in choco["script"]
         assert install.get_installer("brew") is None
         r = install.get_installer("R")
         assert r is not None and "*" in str(r["path_add"])
+        assert install.get_installer("colima") is None
+        assert "Docker Desktop" in str(
+            install.get_unsupported_message("colima")
+        )
+        # Docker Desktop gets Virtual Machine Platform enabled first, but
+        # only where it isn't
+        docker = install.get_installer("docker")
+        assert docker is not None
+        check, _, rest = docker["script"].partition(" -ne 1) { ")
+        assert check.endswith("'VirtualMachinePlatform').InstallState")
+        enable, _, winget = rest.partition('}" && ')
+        assert "-Verb runAs" in enable and "-NoRestart" in enable
+        assert winget == install._WINGET + "Docker.DockerDesktop"
+        # Claude Code needs Git Bash, and OpenCode comes from npm
+        claude = install.get_installer("claude")
+        assert claude is not None and claude.get("requires") == ["git"]
+        assert install.get_installer("codex") is not None
+        assert install.get_installer("opencode") is None
+        assert "npm" in str(install.get_unsupported_message("opencode"))
     # Aliases share entries by reference
     assert install.INSTALLERS["mamba"] is install.INSTALLERS["conda"]
     assert install.INSTALLERS["Rscript"] is install.INSTALLERS["R"]
+    assert install.INSTALLERS["npm"] is install.INSTALLERS["node"]
+    assert install.INSTALLERS["npx"] is install.INSTALLERS["node"]
+    # Node comes through pixi everywhere
+    for platform in ["darwin", "linux", "win32"]:
+        with mock.patch("calkit.install.sys.platform", platform):
+            node = install.get_installer("node")
+            assert node is not None and node.get("requires") == ["pixi"]
+    # Without pixi, Node asks about pixi first, and declining installs neither
+    with (
+        mock.patch("calkit.install.shutil.which", return_value=None),
+        mock.patch("builtins.input", return_value="n") as m_input,
+        mock.patch("calkit.install.install") as m_install,
+    ):
+        assert install.prompt_and_install("node", interactive=True) is False
+    assert "'pixi'" in m_input.call_args.args[0]
+    m_install.assert_not_called()
+    # LibreOffice is found by its soffice command, and on Linux comes with
+    # the Math component distributions package separately
+    assert install.INSTALLERS["soffice"] is install.INSTALLERS["libreoffice"]
+    for platform in ("darwin", "linux", "win32"):
+        with mock.patch("calkit.install.sys.platform", platform):
+            lo = install.get_installer("libreoffice")
+            assert lo is not None and lo.get("binary") == "soffice"
+            if platform == "linux":
+                assert "libreoffice-math" in lo["script"]
     # A fake registry with a prerequisite: installing the tool installs the
     # prerequisite first, both land on PATH, and both are recorded
     fake_bin = tmp_dir / "bin"
     fake_bin.mkdir()
-    for name in ("prereq", "tool"):
-        exe = fake_bin / name
-        exe.write_text("#!/bin/sh\nexit 0\n")
-        exe.chmod(0o755)
     registry: dict[str, install.Installer] = {
         "prereq": {"script": "install-prereq", "path_add": str(fake_bin)},
         "tool": {
@@ -279,6 +543,12 @@ def test_platform_entries_prerequisites_and_record(
 
     def fake_run(script: str, shell: bool) -> subprocess.CompletedProcess:
         ran.append(script)
+        # The prerequisite and tool are there once installed
+        name = script.removeprefix("install-")
+        if name in ("prereq", "tool"):
+            exe = fake_bin / name
+            exe.write_text("#!/bin/sh\nexit 0\n")
+            exe.chmod(0o755)
         return subprocess.CompletedProcess(args=[], returncode=0)
 
     with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
@@ -288,8 +558,20 @@ def test_platform_entries_prerequisites_and_record(
     assert [rec["app"] for rec in log] == ["prereq", "tool"]
     assert log[1]["script"] == "install-tool"
     assert log[1]["installed_at"]
-    # A prerequisite that's already present isn't reinstalled
+    # An app whose command is named otherwise is checked for by that name
+    registry["suite"] = {
+        "script": "install-suite",
+        "path_add": str(fake_bin),
+        "binary": "tool",
+    }
+    with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
+        assert install.install("suite") is True
+        del registry["suite"]["binary"]
+        assert install.install("suite") is False
+    # A prerequisite that's already installed isn't reinstalled, even where
+    # it isn't on PATH yet
     ran.clear()
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
     with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
         assert install.install("tool") is True
     assert ran == ["install-tool"]

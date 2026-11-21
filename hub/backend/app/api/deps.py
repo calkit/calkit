@@ -1,10 +1,12 @@
 """Dependencies to use in API routes."""
 
 import logging
+import uuid
 from collections.abc import Generator
+from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-from typing import Annotated
+from typing import Annotated, Any
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -18,8 +20,11 @@ from app import security
 from app.config import settings
 from app.core import utcnow
 from app.db import engine
-from app.models import TokenPayload, User, UserToken
-from app.security import verify_password
+from app.models import Machine, RefreshToken, TokenPayload, User, UserToken
+from app.security import (
+    hash_token_verifier,
+    verify_token_verifier,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,6 +71,22 @@ def touch_token(session: Session, token: UserToken) -> None:
         session.expire_on_commit = expire
 
 
+def verify_pat(session: Session, token: UserToken, verifier: str) -> bool:
+    """Check a personal access token's secret half.
+
+    Tokens from before hashing switched to SHA-256 have bcrypt hashes, so
+    they're rehashed on first use, and only that request pays for bcrypt.
+    """
+    hashed = token.hashed_verifier
+    if hashed is None or not verify_token_verifier(verifier, hashed):
+        return False
+    if hashed.startswith("$2"):
+        token.hashed_verifier = hash_token_verifier(verifier)
+        session.add(token)
+        session.commit()
+    return True
+
+
 def get_db() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
@@ -74,6 +95,54 @@ def get_db() -> Generator[Session, None, None]:
 SessionDep = Annotated[Session, Depends(get_db)]
 TokenDep = Annotated[str, Depends(reusable_oauth2)]
 OptionalTokenDep = Annotated[str | None, Depends(reusable_oauth2_optional)]
+
+
+def check_machine_session_token(
+    session: Session, payload: dict[str, Any], user_id: uuid.UUID
+) -> None:
+    """Refuse a token issued to a session on a linked machine once the
+    machine is unlinked or the sign-in that opened the session has ended.
+    """
+    refused = HTTPException(403, "Invalid token")
+    try:
+        machine_id = uuid.UUID(str(payload["machine_id"]))
+        sign_in = uuid.UUID(str(payload["link_sid"]))
+    except (KeyError, ValueError):
+        raise refused
+    machine = session.get(Machine, machine_id)
+    if machine is None or not machine.is_active or machine.user_id != user_id:
+        raise refused
+    live = session.exec(
+        select(RefreshToken)
+        .where(RefreshToken.session_id == sign_in)
+        .where(RefreshToken.user_id == user_id)
+        .where(RefreshToken.interactive)
+        .where(RefreshToken.is_active)
+        .where(RefreshToken.expires > utcnow())
+    ).first()
+    if live is None:
+        raise refused
+
+
+def refuse_machine_session_token(token: TokenDep) -> None:
+    """Refuse a token issued to a session on a linked machine, where a
+    route hands out a credential that would outlive it, e.g., a personal
+    access token or the user's token for another service.
+
+    The route's own authentication verifies the token, so this only reads
+    it.
+    """
+    if token.startswith("ckp_"):
+        return
+    try:
+        payload = jwt.decode(token, options={"verify_signature": False})
+    except InvalidTokenError:
+        return
+    if isinstance(payload, dict) and "machine_id" in payload:
+        raise HTTPException(403, "A hub session's token can't do this")
+
+
+NoMachineSessionToken = Depends(refuse_machine_session_token)
 
 
 def get_current_user(session: SessionDep, token: TokenDep) -> User:
@@ -97,8 +166,12 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             # Check verifier
             if token_in_db.hashed_verifier is None:
                 raise HTTPException(403, "Invalid token")
-            if not verify_password(verifier, token_in_db.hashed_verifier):
+            if not verify_pat(session, token_in_db, verifier):
                 raise HTTPException(403, "Invalid token")
+            # A scoped token, e.g., one for DVC that's written into a
+            # project's DVC config, only works where its scope is asked for
+            if token_in_db.scope is not None:
+                raise HTTPException(403, "Invalid token scope")
             touch_token(session, token_in_db)
             user = token_in_db.user
     else:
@@ -111,6 +184,10 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             token_scope = payload.get("scope")
             if token_scope is not None:
                 raise HTTPException(403, "Invalid token scope")
+            # Tokens for emailed links, e.g., to verify an address, aren't
+            # logins
+            if "purpose" in payload:
+                raise HTTPException(403, "Invalid token")
             if "token_id" in payload:
                 token_id = payload["token_id"]
                 token_in_db = session.get(UserToken, token_id)
@@ -122,6 +199,8 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                 user = token_in_db.user
             else:
                 user = session.get(User, token_data.sub)
+                if user is not None and "machine_id" in payload:
+                    check_machine_session_token(session, payload, user.id)
         except (InvalidTokenError, ValidationError):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -139,10 +218,17 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
         )
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
-    # Ensure that if this user has a paid subscription, it is valid
-    if user.subscription is not None and user.subscription.price > 0:
-        # Delete subscription if payment hasn't been received in 5 minutes
-        # since transaction started
+    # Ensure a non-free subscription is valid, including a $0 comp with an
+    # end date, since quotas read the plan without checking paid_until; a
+    # comp with no end date runs indefinitely
+    sub = user.subscription
+    if (
+        sub is not None
+        and sub.plan_id != 0
+        and not (sub.price == 0 and sub.paid_until is None)
+    ):
+        # Drop to free if payment hasn't been received in 5 minutes since
+        # the transaction started, or the paid period has lapsed
         if (
             user.subscription.paid_until is None
             and ((utcnow() - user.subscription.created).total_seconds() > 300)
@@ -151,14 +237,13 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             and user.subscription.paid_until < utcnow()
         ):
             logger.info(f"Checking subscription for {user.email}")
-            stripe_cust = stripe.get_customer(user.email)
-            if stripe_cust is not None:
-                stripe_subs = stripe.get_customer_subscriptions(
-                    customer_id=stripe_cust.id, status="active"
+            stripe_subs = [
+                sub
+                for cust in stripe.get_user_customers(user)
+                for sub in stripe.get_customer_subscriptions(
+                    customer_id=cust.id, status="active"
                 )
-            else:
-                logger.info(f"No Stripe customer exists for {user.email}")
-                stripe_subs = []
+            ]
             sub_valid = False
             for sub in stripe_subs:
                 if sub.current_period_end > utcnow().timestamp():
@@ -171,8 +256,17 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                     session.refresh(user)
                     sub_valid = True
             if not sub_valid:
-                logger.info("Deleting invalid subscription")
-                session.delete(user.subscription)
+                logger.info("Reverting invalid subscription to free")
+                # Rather than deleting, since quotas need a subscription
+                subscription = user.subscription
+                subscription.plan_id = 0
+                subscription.price = 0.0
+                subscription.period_months = 1
+                subscription.paid_until = None
+                subscription.processor = None
+                subscription.processor_product_id = None
+                subscription.processor_price_id = None
+                subscription.processor_subscription_id = None
                 session.commit()
                 session.refresh(user)
     return user
@@ -204,7 +298,7 @@ def get_current_user_with_token_scope(
             # Check scope
             if token_in_db.scope is not None and token_in_db.scope != scope:
                 raise HTTPException(403, "Invalid token scope")
-            if not verify_password(verifier, token_in_db.hashed_verifier):
+            if not verify_pat(session, token_in_db, verifier):
                 raise HTTPException(403, "Invalid token")
             touch_token(session, token_in_db)
             user = token_in_db.user
@@ -218,6 +312,10 @@ def get_current_user_with_token_scope(
             token_scope = payload.get("scope")
             if token_scope is not None and token_scope != scope:
                 raise HTTPException(403, "Invalid token scope")
+            # Tokens for emailed links, e.g., to verify an address, aren't
+            # logins
+            if "purpose" in payload:
+                raise HTTPException(403, "Invalid token")
             if "token_id" in payload:
                 token_id = payload["token_id"]
                 token_in_db = session.get(UserToken, token_id)
@@ -231,6 +329,8 @@ def get_current_user_with_token_scope(
                 user = token_in_db.user
             else:
                 user = session.get(User, token_data.sub)
+                if user is not None and "machine_id" in payload:
+                    check_machine_session_token(session, payload, user.id)
         except (InvalidTokenError, ValidationError):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -260,6 +360,61 @@ def get_current_user_optional(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+@dataclass
+class SignedIn:
+    """A person signed in through the web app, and which sign-in it is."""
+
+    user: User
+    session_id: uuid.UUID
+
+
+def get_current_session(session: SessionDep, token: TokenDep) -> SignedIn:
+    """Authenticate a person signed in through the web app.
+
+    Some actions, e.g., opening a shell on a user's machine or managing
+    their second factor, shouldn't be possible with a credential that can
+    end up in a CI secret, a config file, or a third party's hands, so only
+    access tokens from an interactive sign-in whose session is still live
+    count. Personal access tokens, CLI and CI logins, and link tokens are
+    all refused, and ending the session, e.g., by changing the password,
+    ends this too.
+    """
+    refused = HTTPException(403, "This requires signing in, not a token")
+    if token.startswith("ckp_"):
+        raise refused
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
+        )
+        session_id = uuid.UUID(payload["sid"])
+    except (InvalidTokenError, KeyError, TypeError, ValueError):
+        raise refused
+    if "token_id" in payload:
+        raise refused
+    user = get_current_user(session, token)
+    live = session.exec(
+        select(RefreshToken)
+        .where(RefreshToken.session_id == session_id)
+        .where(RefreshToken.user_id == user.id)
+        .where(RefreshToken.interactive)
+        .where(RefreshToken.is_active)
+        .where(RefreshToken.expires > utcnow())
+    ).first()
+    if live is None:
+        raise refused
+    return SignedIn(user=user, session_id=session_id)
+
+
+CurrentSession = Annotated[SignedIn, Depends(get_current_session)]
+
+
+def get_current_session_user(signed_in: CurrentSession) -> User:
+    return signed_in.user
+
+
+SessionUser = Annotated[User, Depends(get_current_session_user)]
 CurrentUserDvcScope = Annotated[
     User, Depends(partial(get_current_user_with_token_scope, scope="dvc"))
 ]

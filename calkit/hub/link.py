@@ -4248,7 +4248,9 @@ def log_to_file() -> None:
     point at a file only root may write.
     """
     global _logs_to_file
+    # Binary, since on Windows the streams already end lines with \r\n
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | NOFOLLOW
+    flags |= getattr(os, "O_BINARY", 0)
     fd = os.open(_private_log(), flags, 0o600)
     sys.stdout.flush()
     sys.stderr.flush()
@@ -4263,11 +4265,8 @@ def trim_log(fpath: str | None = None) -> None:
 
     Service managers write to it directly, so it's cut down in place rather
     than rotated, which would leave them writing to the old file. They open
-    it to append, so their next write goes at the new end, except on
-    Windows, where it's left alone.
+    it to append, so their next write goes at the new end.
     """
-    if sys.platform == "win32":
-        return
     fpath = fpath or get_log_path()
     try:
         if os.path.getsize(fpath) <= LOG_MAX_BYTES:

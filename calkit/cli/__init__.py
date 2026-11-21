@@ -28,7 +28,7 @@ def run() -> None:
         # they go nowhere until something takes their fds, e.g., a log
         for fd, name in ((1, "stdout"), (2, "stderr")):
             if getattr(sys, name) is None:
-                devnull = os.open(os.devnull, os.O_WRONLY)
+                devnull = os.open(os.devnull, os.O_WRONLY | os.O_BINARY)
                 os.dup2(devnull, fd)
                 os.close(devnull)
                 stream = open(
@@ -58,7 +58,7 @@ def run() -> None:
         import subprocess
 
         from calkit import install
-        from calkit.core import is_tty
+        from calkit.core import get_calkit_cmd, is_tty
 
         # Where Git runs, installing it won't help, e.g., since
         # GIT_PYTHON_GIT_EXECUTABLE points elsewhere
@@ -72,9 +72,7 @@ def run() -> None:
         if not install.prompt_and_install("git", interactive=is_tty()):
             sys.exit(1)
         # The command stopped partway, so run it again from the start
-        sys.exit(
-            subprocess.call([sys.executable, "-m", "calkit", *sys.argv[1:]])
-        )
+        sys.exit(subprocess.call([*get_calkit_cmd(), *sys.argv[1:]]))
 
 
 def _only_invoked(

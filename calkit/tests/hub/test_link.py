@@ -1356,7 +1356,6 @@ def test_log(tmp_path, monkeypatch):
     fpath = str(tmp_path / "hub_link.log")
     monkeypatch.setattr(hub_link, "LOG_MAX_BYTES", 100)
     monkeypatch.setattr(hub_link, "LOG_KEEP_BYTES", 50)
-    monkeypatch.setattr(hub_link.sys, "platform", "linux")
     with open(fpath, "a") as service:
         service.write("".join(f"line {i:03d}\n" for i in range(20)))
         service.flush()

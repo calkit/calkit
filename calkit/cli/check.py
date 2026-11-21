@@ -1559,7 +1559,12 @@ def check_venv(
             ln for ln in frozen.splitlines(keepends=True) if not is_local(ln)
         )
         if lock != frozen:
-            with open(lock_fpath_full, "w", encoding="utf-8") as f:
+            with open(
+                lock_fpath_full,
+                "w",
+                encoding="utf-8",
+                newline=calkit.git.get_checkout_newline(lock_fpath_full),
+            ) as f:
                 f.write(lock)
         lock_changed = lock != lock_before
         # All platforms are relocked together, so they agree; an existing

@@ -71,17 +71,42 @@ def test_values(tmp_path, monkeypatch):
             ),
             "doc.qmd",
         )
-    # The shortcode and each document's values are written beside it, and
-    # left alone when already right
+    # Without a Quarto project, the extension and values are written beside
+    # the document, and left alone when already right
     (tmp_path / "pub").mkdir()
     calkit.quarto.write_components("pub/index.ipynb", {"a\tb\t": "1"})
-    lua = tmp_path / "pub" / "_calkit" / "calkit.lua"
+    ext = tmp_path / "pub" / "_extensions" / "calkit"
+    assert (ext / "calkit.lua").read_text() == calkit.quarto.SHORTCODE_LUA
+    assert "calkit.lua" in (ext / "_extension.yml").read_text()
     values_path = tmp_path / "pub" / "_calkit" / "values" / "index.json"
-    assert lua.read_text() == calkit.quarto.SHORTCODE_LUA
     assert json.loads(values_path.read_text()) == {"a\tb\t": "1"}
     assert calkit.quarto.get_values_path("pub/index.ipynb") == (
         "pub/_calkit/values/index.json"
     )
-    mtime = lua.stat().st_mtime_ns
+    mtime = (ext / "calkit.lua").stat().st_mtime_ns
     calkit.quarto.write_components("pub/index.ipynb")
-    assert lua.stat().st_mtime_ns == mtime
+    assert (ext / "calkit.lua").stat().st_mtime_ns == mtime
+    # In one, at its root, with values at the document's path in it, like
+    # _freeze, relative to wdir
+    (tmp_path / "site" / "pages").mkdir(parents=True)
+    (tmp_path / "site" / "_quarto.yml").write_text(
+        "project:\n  type: website\n"
+    )
+    monkeypatch.chdir(tmp_path / "pub")
+    calkit.quarto.write_components(
+        "site/pages/about.qmd", {"x": "2"}, wdir=str(tmp_path)
+    )
+    assert (
+        tmp_path / "site" / "_extensions" / "calkit" / "calkit.lua"
+    ).is_file()
+    assert calkit.quarto.get_values_path(
+        "site/pages/about.qmd", wdir=str(tmp_path)
+    ) == ("site/_calkit/values/pages/about.json")
+    assert json.loads(
+        (tmp_path / "site/_calkit/values/pages/about.json").read_text()
+    ) == {"x": "2"}
+    # A Quarto project at wdir counts, and the search stops there
+    assert calkit.quarto.get_quarto_dir("site/a.qmd", str(tmp_path)) == "site"
+    (tmp_path / "_quarto.yml").write_text("")
+    assert calkit.quarto.get_quarto_dir("pub/a.qmd", str(tmp_path)) == ""
+    assert calkit.quarto.get_quarto_dir("a.qmd", str(tmp_path / "pub")) == ""

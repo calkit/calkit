@@ -1,0 +1,44 @@
+stages:
+  simulate:
+    cmd: calkit xenv -n jl --no-check -- "scripts/simulate.jl"
+    deps:
+      - scripts/simulate.jl
+      - Manifest.toml
+    outs:
+      - data/sim.csv:
+          cache: false
+          persist: false
+      - results/sim.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'simulate' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  analysis:
+    cmd: calkit quarto render -e quarto --no-check analysis.ipynb -- --execute
+    deps:
+      - .calkit/notebooks/cleaned/analysis.ipynb
+      - pixi.lock
+      - data/sim.csv
+      - results/sim.json
+    outs:
+      - analysis.html
+      - results/fit.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'analysis' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  report:
+    cmd: calkit quarto render -e quarto --no-check report.qmd
+    deps:
+      - report.qmd
+      - data/sim.csv
+      - pixi.lock
+      - results/sim.json
+      - results/fit.json
+    outs:
+      - report.html
+      - _calkit/values/report.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'report' stage in calkit.yaml.
+      Changes made here will be overwritten.

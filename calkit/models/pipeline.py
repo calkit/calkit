@@ -1877,7 +1877,8 @@ class QuartoStage(Stage):
     # The results files the document's ckvalue shortcodes read, relative to
     # the project, set by preprocess
     _value_paths: list[str] = PrivateAttr(default_factory=list)
-    _shows_values: bool = PrivateAttr(default=False)
+    # Where it writes the values they show, relative to the project
+    _values_path: str | None = PrivateAttr(default=None)
 
     @property
     def is_notebook(self) -> bool:
@@ -1918,7 +1919,7 @@ class QuartoStage(Stage):
     ) -> None:
         """Find the results files the document's ``ckvalue`` shortcodes read,
         since they're as much inputs as its source, and with
-        ``write_files``, write the shortcode beside it.
+        ``write_files``, write the Quarto extension that shows them.
 
         A malformed shortcode is left for ``calkit quarto render`` to report
         when the stage runs, rather than stopping the pipeline from
@@ -1934,7 +1935,7 @@ class QuartoStage(Stage):
         document = os.path.join(project_dir or "", self.project_target_path)
         text = calkit.quarto.read_document_text(document)
         self._value_paths = []
-        self._shows_values = False
+        self._values_path = None
         if text is None or "ckvalue" not in text:
             return
         try:
@@ -1946,7 +1947,10 @@ class QuartoStage(Stage):
             )
         except (MarkdownParseError, ValueError):
             values = []
-        self._shows_values = bool(values)
+        if values:
+            self._values_path = calkit.quarto.get_values_path(
+                self.project_target_path, wdir=project_dir
+            )
         for value in values:
             if (
                 exists(value.path)
@@ -1954,23 +1958,22 @@ class QuartoStage(Stage):
                 or is_output(value.path)
             ) and value.path not in self._value_paths:
                 self._value_paths.append(value.path)
-        if write_files and self._shows_values:
-            calkit.quarto.write_components(document)
+        if write_files and values:
+            calkit.quarto.write_components(
+                self.project_target_path, wdir=project_dir
+            )
 
     @property
     def component_outputs(self) -> list[PathOutput]:
-        """The values the stage writes beside the document for the
-        ``ckvalue`` shortcode, relative to its ``wdir``, kept in Git, like
-        the shortcode, so the document renders the same without Calkit,
-        e.g., when a site is published."""
-        import calkit.quarto
-
-        if not self._shows_values:
+        """The values the stage writes for the ``ckvalue`` shortcode,
+        relative to its ``wdir``, kept in Git, like the extension, so the
+        document renders the same without Calkit, e.g., when a site is
+        published."""
+        if self._values_path is None:
             return []
         return [
             PathOutput(
-                path=calkit.quarto.get_values_path(self.target_path),
-                storage="git",
+                path=self.path_from_wdir(self._values_path), storage="git"
             )
         ]
 

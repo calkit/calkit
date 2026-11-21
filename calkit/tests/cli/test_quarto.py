@@ -46,9 +46,8 @@ def test_render(tmp_path, monkeypatch):
     res = render("-e", "_system", "report.qmd")
     assert res.returncode == 0, res.stdout + res.stderr
     (tmp_path / "called.txt").unlink()
-    # Declared by the project, the document's values are written beside it,
-    # with the shortcode that shows them, and then it's rendered with what's
-    # passed
+    # Declared by the project, the document's values are written, with the
+    # extension that shows them, and then it's rendered with what's passed
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump({"name": "test", "requirements": ["quarto"]}, f)
     res = render(
@@ -66,7 +65,7 @@ def test_render(tmp_path, monkeypatch):
         (tmp_path / "_calkit" / "values" / "report.json").read_text()
     )
     assert values == {"results.json\trms\t.3f": "0.123"}
-    assert (tmp_path / "_calkit" / "calkit.lua").is_file()
+    assert (tmp_path / "_extensions" / "calkit" / "calkit.lua").is_file()
     # A mistake fails before rendering, naming where it is
     (tmp_path / "called.txt").unlink()
     (tmp_path / "report.qmd").write_text(
@@ -78,16 +77,22 @@ def test_render(tmp_path, monkeypatch):
     assert "report.qmd:2" in res.stdout + res.stderr
     assert not (tmp_path / "called.txt").exists()
     # From a stage's working directory, the project is found above it and
-    # values are read from there
+    # values are read from there, and written in the document's Quarto
+    # project
     (tmp_path / "pub").mkdir()
-    (tmp_path / "pub" / "index.qmd").write_text(
+    (tmp_path / "pub" / "_quarto.yml").write_text(
+        "project:\n  type: default\n"
+    )
+    (tmp_path / "pub" / "pages").mkdir()
+    (tmp_path / "pub" / "pages" / "index.qmd").write_text(
         "{{< ckvalue results.json rms .1f >}}\n"
     )
-    res = render("-e", "_system", "index.qmd", cwd="pub")
+    res = render("-e", "_system", "index.qmd", cwd="pub/pages")
     assert res.returncode == 0, res.stdout + res.stderr
     values = json.loads(
-        (tmp_path / "pub" / "_calkit" / "values" / "index.json").read_text()
+        (tmp_path / "pub/_calkit/values/pages/index.json").read_text()
     )
+    assert (tmp_path / "pub/_extensions/calkit/calkit.lua").is_file()
     assert values == {"results.json\trms\t.1f": "0.1"}
     # And in an environment, which is defined relative to the project, with
     # Quarto from the environment
@@ -109,7 +114,7 @@ def test_render(tmp_path, monkeypatch):
     (tmp_path / "requirements.txt").write_text("")
     subprocess.check_call([sys.executable, "-m", "venv", ".venv"])
     # The machine's isn't, unless allowed, e.g., by a stage requiring it
-    res = render("-e", "py", "--no-check", "index.qmd", cwd="pub")
+    res = render("-e", "py", "--no-check", "index.qmd", cwd="pub/pages")
     assert res.returncode != 0
     assert "'quarto' isn't in environment 'py'" in res.stdout + res.stderr
     assert not (tmp_path / "called.txt").exists()
@@ -119,14 +124,14 @@ def test_render(tmp_path, monkeypatch):
         "--no-check",
         "--allow-machine-quarto",
         "index.qmd",
-        cwd="pub",
+        cwd="pub/pages",
     )
     assert res.returncode == 0, res.stdout + res.stderr
     (tmp_path / "called.txt").unlink()
     env_quarto = tmp_path / ".venv" / "bin" / "quarto"
     env_quarto.write_text(quarto.read_text())
     env_quarto.chmod(0o755)
-    res = render("-e", "py", "--no-check", "index.qmd", cwd="pub")
+    res = render("-e", "py", "--no-check", "index.qmd", cwd="pub/pages")
     assert res.returncode == 0, res.stdout + res.stderr
     assert (tmp_path / "called.txt").read_text().split() == [
         "render",

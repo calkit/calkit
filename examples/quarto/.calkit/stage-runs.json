@@ -1,0 +1,59 @@
+{
+  "analysis": {
+    "start_time": "2026-11-21T16:12:33.769000",
+    "end_time": "2026-11-21T16:12:40.557000",
+    "environment": "quarto",
+    "git_rev": "54e0d8de86a649e72c736cd579cd6c25d3f1b27d",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:26b0f66112cbffefb658404282b80fa0369529d262352b5dd1078d47b5e6aad3",
+    "calkit_version": "0.52.3.dev18+g54e0d8de8.d20261121",
+    "calkit_git_rev": "54e0d8de86a649e72c736cd579cd6c25d3f1b27d",
+    "system": {
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.2.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
+    }
+  },
+  "report": {
+    "start_time": "2026-11-21T16:12:40.557000",
+    "end_time": "2026-11-21T16:12:46.867000",
+    "environment": "quarto",
+    "git_rev": "54e0d8de86a649e72c736cd579cd6c25d3f1b27d",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:b66d015b2971ba052fc0d322fa59fc9c690db627349d6ccd537b7a7e97bcf9fa",
+    "calkit_version": "0.52.3.dev18+g54e0d8de8.d20261121",
+    "calkit_git_rev": "54e0d8de86a649e72c736cd579cd6c25d3f1b27d",
+    "system": {
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.2.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
+    }
+  },
+  "simulate": {
+    "start_time": "2026-11-21T16:12:32.737000",
+    "end_time": "2026-11-21T16:12:33.769000",
+    "environment": "jl",
+    "git_rev": "54e0d8de86a649e72c736cd579cd6c25d3f1b27d",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:9045db3dc976396f06b3666f1c86884fac7ddfbb9771536bf2d6bb71b08dbeb8",
+    "calkit_version": "0.52.3.dev18+g54e0d8de8.d20261121",
+    "calkit_git_rev": "54e0d8de86a649e72c736cd579cd6c25d3f1b27d",
+    "system": {
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.2.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
+    }
+  }
+}

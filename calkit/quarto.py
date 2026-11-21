@@ -10,13 +10,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# Beside the document, like LaTeX's components. Quarto skips files and
-# folders starting with an underscore when it renders a project.
-COMPONENTS_DIR = "_calkit"
-SHORTCODE_FNAME = "calkit.lua"
-# One file per document, named for its stem, since a notebook is rendered
-# from an intermediate copy, e.g., analysis.quarto_ipynb
-VALUES_DIRNAME = "values"
+# A Quarto extension, so documents use the shortcode without listing it,
+# written where Quarto looks for one: the Quarto project's folder, or the
+# document's without one
+EXTENSION_DIR = "_extensions/calkit"
+EXTENSION_YML = """# Written by Calkit; changes are overwritten when the pipeline compiles
+title: Calkit
+author: Calkit
+version: 1.0.0
+quarto-required: ">=1.4.0"
+contributes:
+  shortcodes:
+    - calkit.lua
+"""
+# The values each document shows, beside the extension, at the document's
+# path like Quarto's _freeze, which Quarto skips when rendering a project
+VALUES_DIR = "_calkit/values"
 # A shortcode written {{</* ckvalue */>}} is Quarto's escaped form, shown
 # literally, so it doesn't match
 _SHORTCODE_RE = re.compile(r"\{\{<\s*ckvalue\s+(?P<args>.*?)\s*>\}\}")
@@ -24,16 +33,19 @@ _SHORTCODE_RE = re.compile(r"\{\{<\s*ckvalue\s+(?P<args>.*?)\s*>\}\}")
 # Looks each value up by what its shortcode says, the same way the Python
 # side keys them, so the two only have to agree on the raw arguments.
 # Quarto gives a missing keyword argument as an empty string.
-SHORTCODE_LUA = r"""-- Written by Calkit: shows values from pipeline results with
--- {{< ckvalue results.json key .2f >}}. Each document's values are resolved
--- into values/<document name>.json beside this file each time the pipeline
--- renders it.
+SHORTCODE_LUA = r"""-- Written by Calkit; changes are overwritten when the pipeline compiles.
+-- Shows values from pipeline results with
+-- {{< ckvalue results.json key .2f >}}, which Calkit resolves into
+-- _calkit/values/<document path>.json each time the pipeline renders it.
 
 local function read_values()
   local input = quarto.doc.input_file
-  local stem = pandoc.path.split_extension(pandoc.path.filename(input))
-  local dir = pandoc.path.directory(input)
-  local fpath = pandoc.path.join({dir, "_calkit", "values", stem .. ".json"})
+  local root = quarto.project.directory or pandoc.path.directory(input)
+  -- A notebook is rendered from a copy, e.g., analysis.quarto_ipynb
+  local stem = pandoc.path.split_extension(
+    pandoc.path.make_relative(input, root)
+  )
+  local fpath = pandoc.path.join({root, "_calkit", "values", stem .. ".json"})
   local f = io.open(fpath, "r")
   if f == nil then
     return {}
@@ -197,44 +209,71 @@ def resolve_values(
     return resolved
 
 
-def get_shortcode_path(document_path: str) -> str:
-    """Where the shortcode is written beside a document, as a POSIX path
-    relative to whatever the document's path is."""
-    folder = posixpath.dirname(Path(document_path).as_posix())
-    return posixpath.join(folder, COMPONENTS_DIR, SHORTCODE_FNAME)
+def get_quarto_dir(document_path: str, wdir: str | None = None) -> str:
+    """Where Quarto looks for the extension and values for a document: the
+    nearest folder at or above it with a ``_quarto.yml``, i.e., its Quarto
+    project, or else its own.
+
+    ``document_path`` is relative to ``wdir``, which bounds the search, and
+    so is the returned POSIX path, which is ``""`` for ``wdir`` itself.
+    """
+    folder = posixpath.dirname(
+        posixpath.normpath(Path(document_path).as_posix())
+    )
+    candidate = folder
+    while True:
+        for fname in ("_quarto.yml", "_quarto.yaml"):
+            if os.path.isfile(os.path.join(wdir or "", candidate, fname)):
+                return candidate
+        parent = posixpath.dirname(candidate)
+        if candidate in ("", ".") or parent == candidate:
+            return folder
+        candidate = parent
 
 
-def get_values_path(document_path: str) -> str:
-    """Where the values a document shows are written beside it, as a POSIX
-    path relative to whatever the document's path is."""
-    document_path = Path(document_path).as_posix()
-    stem = posixpath.splitext(posixpath.basename(document_path))[0]
+def get_extension_dir(document_path: str, wdir: str | None = None) -> str:
+    """Where the extension is written for a document, as a POSIX path
+    relative to ``wdir``."""
+    return posixpath.join(get_quarto_dir(document_path, wdir), EXTENSION_DIR)
+
+
+def get_values_path(document_path: str, wdir: str | None = None) -> str:
+    """Where the values a document shows are written, as a POSIX path
+    relative to ``wdir``, mirroring the document's path in its Quarto
+    project."""
+    document_path = posixpath.normpath(Path(document_path).as_posix())
+    quarto_dir = get_quarto_dir(document_path, wdir)
+    rel = posixpath.relpath(document_path, quarto_dir or ".")
     return posixpath.join(
-        posixpath.dirname(document_path),
-        COMPONENTS_DIR,
-        VALUES_DIRNAME,
-        stem + ".json",
+        quarto_dir, VALUES_DIR, posixpath.splitext(rel)[0] + ".json"
     )
 
 
 def write_components(
-    document_path: str, resolved: dict[str, str] | None = None
+    document_path: str,
+    resolved: dict[str, str] | None = None,
+    wdir: str | None = None,
 ) -> None:
-    """Write the shortcode beside a document, and with ``resolved``, the
-    values it shows, leaving files whose content is already right alone so
-    their timestamps don't change.
+    """Write the extension for a document, and with ``resolved``, the values
+    it shows, leaving files whose content is already right alone so their
+    timestamps don't change.
 
-    The shortcode is the same for every document, so it's written whenever
+    The extension is the same for every document, so it's written whenever
     the pipeline is compiled and kept in Git; the values are a stage's
     output.
     """
-    contents = {get_shortcode_path(document_path): SHORTCODE_LUA}
+    ext_dir = get_extension_dir(document_path, wdir)
+    contents = {
+        posixpath.join(ext_dir, "_extension.yml"): EXTENSION_YML,
+        posixpath.join(ext_dir, "calkit.lua"): SHORTCODE_LUA,
+    }
     if resolved is not None:
-        contents[get_values_path(document_path)] = (
+        contents[get_values_path(document_path, wdir)] = (
             json.dumps(resolved, indent=2, sort_keys=True, ensure_ascii=False)
             + "\n"
         )
-    for fpath, content in contents.items():
+    for rel_path, content in contents.items():
+        fpath = os.path.join(wdir or "", rel_path)
         try:
             with open(fpath, encoding="utf-8") as f:
                 if f.read() == content:

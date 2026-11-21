@@ -64,11 +64,6 @@ a results file, or the name of a declared result, a key, and optionally a
 Python format spec, positionally or by name.
 
 ```markdown
----
-shortcodes:
-  - _calkit/calkit.lua
----
-
 The RMS is {{< ckvalue results/metrics.json rms .3f >}}
 over {{< ckvalue results/metrics.json key=fit.n >}} samples.
 ```
@@ -76,14 +71,29 @@ over {{< ckvalue results/metrics.json key=fit.n >}} samples.
 Paths are relative to the project.
 Results files can be JSON, YAML, or TOML,
 and keys are separated by dots to reach into nested values.
+The results files are inputs to the stage,
+so a change to a value renders the document again.
 
-Calkit writes the shortcode to `_calkit/calkit.lua` beside the document
-when the pipeline is compiled,
-and the values the document shows to `_calkit/values/` each time the stage
-runs, which Quarto skips when rendering a project, since they start with an
-underscore.
+When the pipeline is compiled,
+Calkit writes the shortcode as a Quarto extension in `_extensions/calkit/`,
+so documents can use it without listing it.
+Each time the stage runs,
+it writes the values the document shows to `_calkit/values/`,
+at the document's path, as Quarto does with `_freeze/`.
+Both go in the Quarto project's folder, i.e., where `_quarto.yml` is,
+or beside the document if there isn't one.
 Both are kept in Git,
 so the document renders the same without Calkit, e.g., when a site is
 published by `quarto publish` or a CI workflow.
-The results files are inputs to the stage,
-so a change to a value renders the document again.
+
+<!-- TODO: needs human review -->
+
+A document that runs code can also show values with Quarto's inline
+expressions, e.g., `` `{python} f"{rms:.3f}"` ``,
+but then its results files have to be listed as the stage's `inputs`,
+and Calkit can't trace the numbers back to them.
+
+See [`examples/quarto`](https://github.com/calkit/calkit/tree/main/examples/quarto)
+for a project that uses both:
+a Julia simulation, a Python notebook that fits it,
+and an R report that shows values from each.

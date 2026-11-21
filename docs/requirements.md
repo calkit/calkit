@@ -341,6 +341,8 @@ non-zero.
 Installing is always opt-in: nothing runs without a yes at the prompt
 or `--yes` on the command line.
 
+<!-- TODO: needs human review: gh and make rows -->
+
 Apps currently in the registry:
 
 | Name                 | Installer                                                                                                                 |
@@ -352,6 +354,8 @@ Apps currently in the registry:
 | `nix`                | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows                        |
 | `conda`, `mamba`     | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                                        |
 | `git`                | Homebrew on macOS, `winget` on Windows                                                                                    |
+| `gh`                 | Homebrew on macOS, `pixi global install gh` on Linux, `winget` on Windows                                                 |
+| `make`               | `winget` on Windows; comes with the developer tools elsewhere                                                             |
 | `docker`             | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows, enabling Virtual Machine Platform first if needed |
 | `colima`             | Homebrew on macOS, with the Docker CLI unless one is already installed                                                    |
 | `code`               | VS Code's own download on macOS, `winget` on Windows; also `calkit install vscode`                                        |

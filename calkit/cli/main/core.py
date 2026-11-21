@@ -705,7 +705,8 @@ def get_status(
                             ck_info=req_info, interactive=interactive
                         )
         except Exception as e:
-            return str(e)
+            # E.g., typer.Exit, which says nothing
+            return str(e) or "Unmet requirements"
         finally:
             if interactive and isinstance(spinner, Status):
                 spinner.start()

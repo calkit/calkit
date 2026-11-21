@@ -786,9 +786,163 @@ class VenvEnvironment(ComposableEnvironment):
     )
 
 
+_OsName = Literal["linux", "macos", "windows"]
+_EnvVarSetting = Annotated[str, Field(pattern=r"^[^=]+=")]
+_GpuVendor = Literal["amd", "nvidia", "apple"]
+
+
+class AppExistsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    app_exists: str | list[str] = Field(
+        description="App that must be on PATH, e.g., 'sbatch'."
+    )
+
+
+class EnvVarSetCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    env_var_set: str | list[str] = Field(
+        description="Environmental variable that must be set."
+    )
+
+
+class EnvVarExistsCondition(Model):
+    """The old name for ``env_var_set``, still honored."""
+
+    model_config = ConfigDict(extra="forbid")
+    env_var_exists: str | list[str] = Field(
+        description="Deprecated alias for 'env_var_set'.",
+        json_schema_extra={"deprecated": True},
+    )
+
+
+class EnvVarEqualsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    env_var_equals: _EnvVarSetting | list[_EnvVarSetting] = Field(
+        description="'NAME=value' an environmental variable must be set to, "
+        "e.g., 'NERSC_HOST=perlmutter'."
+    )
+
+
+class HostnameMatchesCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    hostname_matches: str | list[str] = Field(
+        description="Glob the hostname must match, case-insensitively, "
+        "e.g., '*.cluster.edu'."
+    )
+
+
+class OsIsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    os_is: _OsName | list[_OsName] = Field(
+        description="Operating system: 'linux', 'macos' or 'windows'."
+    )
+
+
+class MachineIdEqualsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    machine_id_equals: str | list[str] = Field(
+        description="ID of the machine, as 'calkit describe system' shows "
+        "it, ignoring case and dashes."
+    )
+
+
+class GpuVendorIsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    gpu_vendor_is: _GpuVendor | list[_GpuVendor] = Field(
+        description="Vendor of one of the machine's GPUs: 'amd', 'nvidia' "
+        "or 'apple'."
+    )
+
+
+class GpuArchIsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    gpu_arch_is: str | list[str] = Field(
+        description="Architecture of one of the machine's GPUs, ignoring "
+        "case, e.g., 'gfx1201' for an AMD Radeon RX 9070 or 'sm_89' for an "
+        "NVIDIA RTX 4090."
+    )
+
+
+class GpuNameMatchesCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    gpu_name_matches: str | list[str] = Field(
+        description="Glob the name of one of the machine's GPUs must match, "
+        "case-insensitively, e.g., '*RTX 40*'."
+    )
+
+
+_SWITCH_CONDITIONS: list[type[Model]] = [
+    AppExistsCondition,
+    EnvVarSetCondition,
+    EnvVarEqualsCondition,
+    HostnameMatchesCondition,
+    OsIsCondition,
+    MachineIdEqualsCondition,
+    GpuVendorIsCondition,
+    GpuArchIsCondition,
+    GpuNameMatchesCondition,
+]
+
+
+def _switch_condition_name(value: object) -> str | None:
+    # A condition is a one-key map, and the key says which it is
+    if isinstance(value, Model):
+        return next(iter(type(value).model_fields))
+    if isinstance(value, dict) and len(value) == 1:
+        return str(next(iter(value)))
+    return None
+
+
+SwitchCondition = Annotated[
+    Annotated[AppExistsCondition, Tag("app_exists")]
+    | Annotated[EnvVarSetCondition, Tag("env_var_set")]
+    | Annotated[EnvVarExistsCondition, Tag("env_var_exists")]
+    | Annotated[EnvVarEqualsCondition, Tag("env_var_equals")]
+    | Annotated[HostnameMatchesCondition, Tag("hostname_matches")]
+    | Annotated[OsIsCondition, Tag("os_is")]
+    | Annotated[MachineIdEqualsCondition, Tag("machine_id_equals")]
+    | Annotated[GpuVendorIsCondition, Tag("gpu_vendor_is")]
+    | Annotated[GpuArchIsCondition, Tag("gpu_arch_is")]
+    | Annotated[GpuNameMatchesCondition, Tag("gpu_name_matches")],
+    Discriminator(
+        _switch_condition_name,
+        custom_error_type="switch_condition",
+        custom_error_message="A condition is one 'name: value' pair, "
+        "e.g., 'os_is: linux', named one of: "
+        + ", ".join(next(iter(c.model_fields)) for c in _SWITCH_CONDITIONS)
+        + "; list several to require all of them",
+    ),
+]
+
+
+class UvExtra(Model):
+    """An extra of a uv project, installed only on the machines it's for.
+
+    For a dependency built for particular hardware, e.g., a PyTorch for one
+    GPU architecture. ``when`` takes the conditions a switch environment's
+    options do, and the extra is installed where all of them hold. One that
+    doesn't hold here is left out rather than reported, since it describes a
+    different machine, not a problem with this one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(description="Name of the extra in pyproject.toml.")
+    when: Annotated[list[SwitchCondition], Field(min_length=1)] = Field(
+        description="Conditions this machine must all meet for the extra to "
+        "be installed, e.g., 'gpu_arch_is: gfx1201'. To always install it, "
+        "list it by name instead."
+    )
+
+
 class UvEnvironment(ComposableEnvironment):
     kind: Literal["uv"] = "uv"
     path: str = Field(description="Path to the uv project's pyproject.toml.")
+    extras: list[str | UvExtra] = Field(
+        default=[],
+        description="Extras of the project to install, each named or given "
+        "with the machines it's for. They're passed to both 'uv sync' and "
+        "'uv run', since running without one would uninstall it.",
+    )
 
 
 class UvVenvEnvironment(ComposableEnvironment):
@@ -1330,103 +1484,6 @@ class SystemEnvironment(Environment):
     )
 
 
-_OsName = Literal["linux", "macos", "windows"]
-_EnvVarSetting = Annotated[str, Field(pattern=r"^[^=]+=")]
-
-
-class AppExistsCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    app_exists: str | list[str] = Field(
-        description="App that must be on PATH, e.g., 'sbatch'."
-    )
-
-
-class EnvVarSetCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    env_var_set: str | list[str] = Field(
-        description="Environmental variable that must be set."
-    )
-
-
-class EnvVarExistsCondition(Model):
-    """The old name for ``env_var_set``, still honored."""
-
-    model_config = ConfigDict(extra="forbid")
-    env_var_exists: str | list[str] = Field(
-        description="Deprecated alias for 'env_var_set'.",
-        json_schema_extra={"deprecated": True},
-    )
-
-
-class EnvVarEqualsCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    env_var_equals: _EnvVarSetting | list[_EnvVarSetting] = Field(
-        description="'NAME=value' an environmental variable must be set to, "
-        "e.g., 'NERSC_HOST=perlmutter'."
-    )
-
-
-class HostnameMatchesCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    hostname_matches: str | list[str] = Field(
-        description="Glob the hostname must match, case-insensitively, "
-        "e.g., '*.cluster.edu'."
-    )
-
-
-class OsIsCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    os_is: _OsName | list[_OsName] = Field(
-        description="Operating system: 'linux', 'macos' or 'windows'."
-    )
-
-
-class MachineIdEqualsCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    machine_id_equals: str | list[str] = Field(
-        description="ID of the machine, as 'calkit describe system' shows "
-        "it, ignoring case and dashes."
-    )
-
-
-_SWITCH_CONDITIONS: list[type[Model]] = [
-    AppExistsCondition,
-    EnvVarSetCondition,
-    EnvVarEqualsCondition,
-    HostnameMatchesCondition,
-    OsIsCondition,
-    MachineIdEqualsCondition,
-]
-
-
-def _switch_condition_name(value: object) -> str | None:
-    # A condition is a one-key map, and the key says which it is
-    if isinstance(value, Model):
-        return next(iter(type(value).model_fields))
-    if isinstance(value, dict) and len(value) == 1:
-        return str(next(iter(value)))
-    return None
-
-
-SwitchCondition = Annotated[
-    Annotated[AppExistsCondition, Tag("app_exists")]
-    | Annotated[EnvVarSetCondition, Tag("env_var_set")]
-    | Annotated[EnvVarExistsCondition, Tag("env_var_exists")]
-    | Annotated[EnvVarEqualsCondition, Tag("env_var_equals")]
-    | Annotated[HostnameMatchesCondition, Tag("hostname_matches")]
-    | Annotated[OsIsCondition, Tag("os_is")]
-    | Annotated[MachineIdEqualsCondition, Tag("machine_id_equals")],
-    Discriminator(
-        _switch_condition_name,
-        custom_error_type="switch_condition",
-        custom_error_message="A condition is one 'name: value' pair, "
-        "e.g., 'os_is: linux', named one of: "
-        + ", ".join(next(iter(c.model_fields)) for c in _SWITCH_CONDITIONS)
-        + "; list several to require all of them",
-    ),
-]
-
-
 # Any environment but a switch, for one a switch defines in place
 InlineEnvironment = Annotated[
     CondaEnvironment
@@ -1478,6 +1535,12 @@ class SwitchEnvironment(Environment):
     - ``os_is``: ``linux``, ``macos`` or ``windows``.
     - ``machine_id_equals``: this machine's ID, as
       ``calkit describe system`` shows it.
+    - ``gpu_vendor_is``: ``amd``, ``nvidia`` or ``apple``, for one of the
+      machine's GPUs.
+    - ``gpu_arch_is``: one of the machine's GPUs' architecture, e.g.,
+      ``gfx1201`` or ``sm_89``.
+    - ``gpu_name_matches``: a glob one of the machine's GPUs' names
+      matches, ignoring case.
 
     A list of values means any one of them. To pick an environment when
     either of two conditions holds, list it as two options. For example:

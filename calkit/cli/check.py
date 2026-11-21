@@ -587,6 +587,8 @@ def check_environment(
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--directory", env_dir]
+        for extra in calkit.environments.get_uv_extras(env):
+            cmd += ["--extra", extra]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

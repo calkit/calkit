@@ -140,13 +140,19 @@ requirements:
     version_spec: ">=3.11"
 ```
 
+<!-- TODO: needs human review -->
+
 `cpu-count` and `memory-gb` take `min` and/or `max`.
 Everything else takes `equals`---matched case-insensitively, and a list
 means any one of them will do---`matches`, a glob like `*.cluster.edu`
 that is matched the same way, or a `version_spec` for properties that
 are versions.
 The properties available are the machine-describing ones from the table
-in [environments](environments.md#system);
+in [environments](environments.md#system),
+plus `gpu-name`, `gpu-vendor` (`amd`, `nvidia` or `apple`) and `gpu-arch`
+(e.g., `gfx1201` or `sm_89`), which are met when any of the machine's GPUs
+meets them, so an integrated GPU beside a discrete one doesn't get in the
+way;
 versions of installed tools are reached as an `app` requirement with a
 `version_spec` instead, which is one way to say it rather than two.
 

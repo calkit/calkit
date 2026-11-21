@@ -557,6 +557,40 @@ def test_run_in_env_by_path(tmp_dir):
     assert len(envs) == 3
 
 
+def test_run_in_env_uv_extras(tmp_dir):
+    subprocess.check_call(["uv", "init", "--bare"])
+    subprocess.check_call(["uv", "add", "--optional", "accel", "six"])
+    # Adding it installs it, so start from an environment without it
+    subprocess.check_call(["uv", "sync"])
+    cmd = ["calkit", "xenv", "-n", "main", "--", "python", "-c", "import six"]
+
+    def write_extras(extras: list) -> None:
+        env = {"kind": "uv", "path": "pyproject.toml", "extras": extras}
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"environments": {"main": env}}, f)
+
+    # An extra meant for another machine, e.g., one with a GPU this one
+    # lacks, is neither installed nor an error
+    write_extras(
+        [{"name": "accel", "when": [{"gpu_arch_is": "calkit-test-no-such"}]}]
+    )
+    assert subprocess.call(cmd) != 0
+    # One meant for this machine is installed by 'uv run', which would
+    # otherwise sync it away, even when the environment isn't checked first
+    any_os = ["linux", "macos", "windows"]
+    write_extras([{"name": "accel", "when": [{"os_is": any_os}]}])
+    subprocess.check_call(cmd[:4] + ["--no-check"] + cmd[4:])
+    # And by checking the environment, as is one given by name alone
+    subprocess.check_call(["uv", "sync"])
+    write_extras(["accel"])
+    subprocess.check_call(
+        ["calkit", "check", "environment", "-n", "main", "--force"]
+    )
+    subprocess.check_call(
+        ["uv", "run", "--no-sync", "python", "-c", "import six"]
+    )
+
+
 def test_run_in_env_detect_default(tmp_dir):
     # Check that if we don't specify an environment, we'll find a default one
     # and add it to the project

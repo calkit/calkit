@@ -693,17 +693,21 @@ def update_agent_skills(
             typer.echo(f"Updated {len(skill_names)} skills in {dest_root}")
         return
     # Update the plugin in each agent found
+    n_found = 0
     n_updated = 0
     for agent in install.AGENT_PLUGIN_CMDS:
         binary_path = install.find(agent)
         if binary_path is None:
             continue
+        n_found += 1
         if not quiet:
             typer.echo(f"Updating Calkit plugin in '{agent}'")
         if install.update_agent_plugin(agent, binary_path):
             n_updated += 1
         else:
             warn(f"Failed to update Calkit plugin in '{agent}'")
+    if n_found and not n_updated:
+        raise_error("Failed to update Calkit plugin in any coding agent")
     if not n_updated:
         warn(
             "No coding agents updated; install one with, e.g., "

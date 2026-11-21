@@ -671,6 +671,47 @@ def get_status(
             if isinstance(spinner, Status):
                 spinner.start()
 
+    def get_pipeline_status() -> calkit.pipeline.PipelineStatus:
+        return calkit.pipeline.get_status(
+            ck_info=ck_info,
+            targets=targets,
+            check_environments=not no_check_envs,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+            with_data_status="dvc" in (categories or []),
+            with_storage_problems="dvc" in (categories or []),
+            quiet_environment_checks=True,
+            progress=step,
+            start_docker=start_docker if can_ask else None,
+        )
+
+    def get_requirements_problem(interactive: bool) -> str | None:
+        # What the project's requirements need that this machine lacks,
+        # offering to install it with the spinner out of the way
+        import contextlib
+        import io
+
+        if interactive and isinstance(spinner, Status):
+            spinner.stop()
+        try:
+            # Quiet unless asking, keeping stdout clean for --json
+            out = sys.stderr if interactive else io.StringIO()
+            with contextlib.redirect_stdout(out):
+                for req_wdir, req_info in calkit.iter_projects(
+                    ck_info=ck_info
+                ):
+                    with calkit.in_project(req_wdir):
+                        calkit.check_requirements(
+                            ck_info=req_info, interactive=interactive
+                        )
+        except Exception as e:
+            # E.g., typer.Exit, which says nothing
+            return str(e) or "Unmet requirements"
+        finally:
+            if interactive and isinstance(spinner, Status):
+                spinner.start()
+        return None
+
     def get_dvc_data_status() -> dict:
         # Reuse what the pipeline status computed under the same DVC lock
         if (
@@ -807,23 +848,28 @@ def get_status(
             # reporting status
             step("Syncing zip files")
             calkit.dvc.zip.sync_all(direction="to-zip")
-            pipeline_status = calkit.pipeline.get_status(
-                ck_info=ck_info,
-                targets=targets,
-                check_environments=not no_check_envs,
-                clean_notebooks=True,
-                compile_to_dvc=True,
-                with_data_status="dvc" in categories,
-                with_storage_problems="dvc" in categories,
-                quiet_environment_checks=True,
-                progress=step,
-                start_docker=start_docker if can_ask else None,
-            )
+            pipeline_status = get_pipeline_status()
+            unmet = None
+            if pipeline_status.failed_environment_checks:
+                # One may fail to build for an app the project requires,
+                # e.g., Node.js, which is offered as 'calkit run' does
+                step("Checking requirements")
+                unmet = get_requirements_problem(interactive=False)
+                if unmet is not None and can_ask:
+                    unmet = get_requirements_problem(interactive=True)
+                    if unmet is None:
+                        pipeline_status = get_pipeline_status()
             if pipeline_status.failed_environment_checks:
                 warn(
                     "Failed pipeline environment checks for: "
                     + ", ".join(pipeline_status.failed_environment_checks)
-                    + ". Run 'calkit check env -n <name>' for details.",
+                    + ". Run 'calkit check env -n <name>' for details."
+                    + (
+                        f"\n{unmet}\nRun 'calkit check reqs' to install or "
+                        "set up what's missing."
+                        if unmet is not None
+                        else ""
+                    ),
                     err=as_json,
                 )
         # Checking questions needs to know which stages are stale, which is the

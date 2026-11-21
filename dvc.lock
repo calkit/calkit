@@ -271,8 +271,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 88b32dbae28ca457020146cb7ab49cf3
-      size: 13383
+      md5: fc89fe88f8b0ef813695be57a74f9495
+      size: 13523
     - path: docs/img/2027-budget.png
       hash: md5
       md5: f4cebb77c9a0a98fa433ac90258bc0cd

@@ -24,6 +24,17 @@ def run() -> None:
 
         from calkit.core import is_mintty
 
+        # pythonw, e.g., the hub link started at login, has no streams, so
+        # they go nowhere until something takes their fds, e.g., a log
+        for fd, name in ((1, "stdout"), (2, "stderr")):
+            if getattr(sys, name) is None:
+                devnull = os.open(os.devnull, os.O_WRONLY | os.O_BINARY)
+                os.dup2(devnull, fd)
+                os.close(devnull)
+                stream = open(
+                    fd, "w", encoding="utf-8", buffering=1, closefd=False
+                )
+                setattr(sys, name, stream)
         # mintty shows UTF-8, so emoji needn't be replaced, and output is
         # line buffered as it would be to a terminal
         for stream in (sys.stdout, sys.stderr):
@@ -47,7 +58,7 @@ def run() -> None:
         import subprocess
 
         from calkit import install
-        from calkit.core import is_tty
+        from calkit.core import get_calkit_cmd, is_tty
 
         # Where Git runs, installing it won't help, e.g., since
         # GIT_PYTHON_GIT_EXECUTABLE points elsewhere
@@ -61,9 +72,7 @@ def run() -> None:
         if not install.prompt_and_install("git", interactive=is_tty()):
             sys.exit(1)
         # The command stopped partway, so run it again from the start
-        sys.exit(
-            subprocess.call([sys.executable, "-m", "calkit", *sys.argv[1:]])
-        )
+        sys.exit(subprocess.call([*get_calkit_cmd(), *sys.argv[1:]]))
 
 
 def _only_invoked(

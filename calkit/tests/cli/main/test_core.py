@@ -1517,6 +1517,61 @@ def test_status(tmp_dir):
     assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
 
 
+def test_status_offers_requirements_for_failed_env_check(
+    tmp_dir, monkeypatch: pytest.MonkeyPatch
+):
+    from typer.testing import CliRunner
+
+    from calkit.pipeline import PipelineStatus
+
+    with open("calkit.yaml", "w") as f:
+        yaml.safe_dump({"requirements": ["fake-node"]}, f)
+    failed = PipelineStatus(
+        has_pipeline=True, environment_checks={"dev": {"success": False}}
+    )
+    ok = PipelineStatus(has_pipeline=True)
+    statuses: list[PipelineStatus] = []
+    asked: list[bool] = []
+    installs: list[bool] = []
+
+    def check_requirements(ck_info=None, interactive=None, **kwargs):
+        asked.append(bool(interactive))
+        if not (interactive and installs.pop(0)):
+            raise ValueError("app 'fake-node' not found on this machine")
+
+    monkeypatch.setattr(
+        calkit.pipeline, "get_status", lambda **kwargs: statuses.pop(0)
+    )
+    monkeypatch.setattr(calkit, "check_requirements", check_requirements)
+    runner = CliRunner()
+    # Without a terminal, what's missing is named, but nothing is offered
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    statuses[:] = [failed]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False]
+    assert "app 'fake-node' not found" in res.output
+    assert "'calkit check reqs'" in res.output
+    # With one, it's offered, and once installed the status is checked again
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    asked.clear()
+    statuses[:] = [failed, ok]
+    installs[:] = [True]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False, True] and not statuses
+    assert "Failed pipeline environment checks" not in res.output
+    # Declined, it's reported as without a terminal
+    asked.clear()
+    statuses[:] = [failed]
+    installs[:] = [False]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False, True]
+    assert "Failed pipeline environment checks for: dev" in res.output
+    assert "app 'fake-node' not found" in res.output
+
+
 def test_no_dvc_repo(tmp_dir, tmp_path):
     # A project with no pipeline, e.g., a website showing imported results,
     # needn't become a DVC repo to run or pull

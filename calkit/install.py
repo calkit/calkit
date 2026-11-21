@@ -223,6 +223,35 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "%ProgramFiles%\\Git\\cmd",
         },
     },
+    "gh": {
+        "mac": {
+            "script": "brew install gh",
+            "path_add": _BREW_BINS,
+            "requires": ["brew"],
+        },
+        # GitHub's own apt and dnf repos take several steps to add
+        "linux": {
+            "script": "pixi global install gh",
+            "path_add": "~/.pixi/bin",
+            "requires": ["pixi"],
+        },
+        "windows": {
+            "script": _WINGET + "GitHub.cli --source winget",
+            "path_add": "%ProgramFiles%\\GitHub CLI",
+        },
+    },
+    # Comes with the developer tools on macOS and Linux
+    "make": {
+        "windows": {
+            "script": _WINGET + "ezwinports.make --source winget",
+            # Where winget unpacks it, which it adds to PATH, rather than
+            # linking it, without Developer Mode
+            "path_add": (
+                "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\"
+                "ezwinports.make_*\\bin"
+            ),
+        },
+    },
     "docker": {
         "mac": {
             "script": "brew install --cask docker",
@@ -777,6 +806,10 @@ def install(app: str, entry: Installer | None = None) -> bool:
     if entry is None:
         return False
     for req in entry.get("requires", []):
+        # One installed but not on PATH yet, e.g., in this shell, is used
+        req_entry = get_installer(req)
+        if find(req) is not None and req_entry is not None:
+            _add_to_path(req_entry)
         if shutil.which(req) is None and not install(req):
             return False
     # capture=False so installers can stream their own progress output

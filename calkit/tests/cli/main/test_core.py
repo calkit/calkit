@@ -572,14 +572,13 @@ def test_run_in_env_uv_extras(tmp_dir):
     # An extra meant for another machine, e.g., one with a GPU this one
     # lacks, is neither installed nor an error
     write_extras(
-        [{"name": "accel", "when": [{"kind": "gpu-vendor", "equals": "x"}]}]
+        [{"name": "accel", "when": [{"gpu_arch_is": "calkit-test-no-such"}]}]
     )
     assert subprocess.call(cmd) != 0
     # One meant for this machine is installed by 'uv run', which would
     # otherwise sync it away, even when the environment isn't checked first
-    write_extras(
-        [{"name": "accel", "when": [{"kind": "cpu-count", "min": 1}]}]
-    )
+    any_os = ["linux", "macos", "windows"]
+    write_extras([{"name": "accel", "when": [{"os_is": any_os}]}])
     subprocess.check_call(cmd[:4] + ["--no-check"] + cmd[4:])
     # And by checking the environment, as is one given by name alone
     subprocess.check_call(["uv", "sync"])

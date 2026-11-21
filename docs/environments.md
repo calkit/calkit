@@ -604,9 +604,9 @@ A uv project environment can install
 of its `pyproject.toml`,
 which Calkit passes to both `uv sync` and `uv run`,
 since running without one would uninstall it.
-An extra can also be meant only for machines with certain properties,
-given under `when` the way [machine requirements](requirements.md#machine-requirements)
-are, e.g., a PyTorch built for one GPU architecture:
+An extra can also be meant only for certain machines,
+given under `when` with the conditions a [switch](#switch) option takes,
+e.g., a PyTorch built for one GPU architecture:
 
 ```yaml
 environments:
@@ -617,11 +617,10 @@ environments:
       - plots
       - name: rocm-gfx1201
         when:
-          - kind: gpu-arch
-            equals: gfx1201
+          - gpu_arch_is: gfx1201
 ```
 
-An extra is installed where all of its `when` properties hold,
+An extra is installed where all of its `when` conditions hold,
 and left out elsewhere rather than reported,
 since it describes a different machine, not a problem with this one.
 Since the stages' results may then depend on which machine ran them,
@@ -1644,6 +1643,12 @@ pair:
 - `os_is`: `linux`, `macos` or `windows`.
 - `machine_id_equals`: this machine's ID, as
   `calkit describe system` shows it.
+- `gpu_vendor_is`: `amd`, `nvidia` or `apple`, for one of the
+  machine's GPUs.
+- `gpu_arch_is`: one of the machine's GPUs' architecture, e.g.,
+  `gfx1201` or `sm_89`.
+- `gpu_name_matches`: a glob one of the machine's GPUs' names
+  matches, ignoring case.
 
 A list of values means any one of them. To pick an environment when
 either of two conditions holds, list it as two options. For example:

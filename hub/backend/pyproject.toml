@@ -11,7 +11,7 @@ dependencies = [
   "passlib[bcrypt]<2.0.0,>=1.7.4",
   "tenacity<9.0.0,>=8.2.3",
   "pydantic>2.0",
-  "emails<1.0,>=0.6",
+  "emails>=0.6,<2.0",
   "jinja2<4.0.0,>=3.1.4",
   "alembic<2.0.0,>=1.12.1",
   "httpx<1.0.0,>=0.25.1",

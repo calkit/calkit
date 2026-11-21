@@ -1779,7 +1779,7 @@ export type FsOpBatchRequest = {
   /**
    * Operation
    */
-  operation: "exists" | "info"
+  operation: "exists" | "info" | "register"
   /**
    * Paths
    */
@@ -1788,6 +1788,12 @@ export type FsOpBatchRequest = {
    * Include
    */
   include?: Array<"exists" | "info" | "content"> | null
+  /**
+   * Xet Hashes
+   */
+  xet_hashes?: {
+    [key: string]: string
+  } | null
 }
 
 /**
@@ -1835,7 +1841,7 @@ export type FsOpRequest = {
   /**
    * Operation
    */
-  operation: "get" | "put" | "exists" | "list" | "find" | "info" | "register"
+  operation: "get" | "put" | "exists" | "list" | "find" | "info"
   /**
    * Path
    */
@@ -1852,10 +1858,6 @@ export type FsOpRequest = {
    * Detail
    */
   detail?: boolean
-  /**
-   * Xet Hash
-   */
-  xet_hash?: string | null
 }
 
 /**
@@ -8055,9 +8057,10 @@ export type WorkspaceInfo = {
  * Access to Hugging Face storage through the Xet protocol.
  *
  * The client uploads or downloads content with ``hf_xet`` using this
- * short-lived token. After an upload, the client sends a ``register``
- * operation with the returned Xet hash so the hub can add the path to the
- * bucket, which the token alone can't do.
+ * short-lived token, which covers the whole bucket, so a client can reuse
+ * it until it expires. After uploads, the client sends a batch
+ * ``register`` operation with their Xet hashes so the hub can add the
+ * paths to the bucket, which the token alone can't do.
  */
 export type XetAccess = {
   /**

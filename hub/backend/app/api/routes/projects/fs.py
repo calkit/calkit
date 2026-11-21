@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 import app
 import app.projects
@@ -24,6 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 RETURN_CONTENT_SIZE_LIMIT = 1_000_000
+XET_HASH_RE = r"^[0-9a-f]{64}$"
 # Shared by every batch request, so concurrent requests can't multiply the
 # threads and storage connections a worker holds
 _batch_op_pool = ThreadPoolExecutor(
@@ -91,9 +92,10 @@ class XetAccess(BaseModel):
     """Access to Hugging Face storage through the Xet protocol.
 
     The client uploads or downloads content with ``hf_xet`` using this
-    short-lived token. After an upload, the client sends a ``register``
-    operation with the returned Xet hash so the hub can add the path to the
-    bucket, which the token alone can't do.
+    short-lived token, which covers the whole bucket, so a client can reuse
+    it until it expires. After uploads, the client sends a batch
+    ``register`` operation with their Xet hashes so the hub can add the
+    paths to the bucket, which the token alone can't do.
     """
 
     kind: Literal["hf-xet"] = "hf-xet"
@@ -152,15 +154,11 @@ class FsOpResponse(BaseModel):
 
 
 class FsOpRequest(BaseModel):
-    operation: Literal[
-        "get", "put", "exists", "list", "find", "info", "register"
-    ]
+    operation: Literal["get", "put", "exists", "list", "find", "info"]
     path: str
     content_length: int | None = None
     content_type: str | None = None
     detail: bool = False
-    # For register, after a Xet upload
-    xet_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 def _get_time_modified(info: dict[str, Any]) -> str | None:
@@ -368,32 +366,6 @@ def post_project_fs_op(
     target = storage.get_project_storage(session, project)
     backend = target.backend
     full_path = target.make_project_path(owner_name, project_name, path)
-    if operation == "register":
-        if target.backend != "hf":
-            raise HTTPException(
-                400, "Register is only needed for Hugging Face storage"
-            )
-        if req.xet_hash is None:
-            raise HTTPException(422, "xet_hash is required for register")
-        try:
-            storage.post_hf_bucket_batch(
-                target,
-                [
-                    {
-                        "type": "addFile",
-                        "path": full_path.removeprefix(
-                            f"{target.data_prefix}/"
-                        ),
-                        "xetHash": req.xet_hash,
-                    }
-                ],
-            )
-        except Exception:
-            logger.exception(f"Failed to register {full_path}")
-            raise HTTPException(502, "Failed to register uploaded file")
-        return FsOpResponse(
-            backend=backend, result=OperationResult(success=True)
-        )
     # We are doing a PUT if we've made it this far
     assert operation == "put"
     if target.backend == "hf":
@@ -484,9 +456,14 @@ def post_project_fs_op(
 
 
 class FsOpBatchRequest(BaseModel):
-    operation: Literal["exists", "info"]
+    operation: Literal["exists", "info", "register"]
     paths: list[str]
     include: list[Literal["exists", "info", "content"]] | None = None
+    # For register, each path's Xet hash after an upload
+    xet_hashes: (
+        dict[str, Annotated[str, StringConstraints(pattern=XET_HASH_RE)]]
+        | None
+    ) = None
 
 
 class FsOpBatchResult(BaseModel):
@@ -548,6 +525,9 @@ def post_project_fs_batch_op(
                     "type": info_dict.get("type", "file"),
                     "time_modified": _get_time_modified(info_dict),
                 }
+                # So clients can download from HF without asking per file
+                if info_dict.get("xet_hash"):
+                    path_result["info"]["xet_hash"] = info_dict["xet_hash"]
         # Handle content (if requested via include)
         if "content" in include and info_dict is not None:
             path_result["content_base64"] = None
@@ -599,6 +579,32 @@ def post_project_fs_batch_op(
         current_user=current_user,
         min_access_level=min_access,
     )
+    if operation == "register":
+        # Many uploads' paths added with one call to HF
+        target = storage.get_project_storage(session, project)
+        if target.backend != "hf":
+            raise HTTPException(
+                400, "Register is only needed for Hugging Face storage"
+            )
+        xet_hashes = req.xet_hashes or {}
+        if set(paths) != set(xet_hashes):
+            raise HTTPException(422, "Every path needs a xet_hash")
+        ops = [
+            {
+                "type": "addFile",
+                "path": target.make_project_path(
+                    owner_name, project_name, path
+                ).removeprefix(f"{target.data_prefix}/"),
+                "xetHash": xet_hashes[path],
+            }
+            for path in paths
+        ]
+        try:
+            storage.post_hf_bucket_batch(target, ops)
+        except Exception:
+            logger.exception(f"Failed to register {len(ops)} files")
+            raise HTTPException(502, "Failed to register uploaded files")
+        return FsOpBatchResponse(backend=target.backend, results={})
     storages = storage.get_project_storages(session, project)
     backend = storages[0].backend
     for st in storages:

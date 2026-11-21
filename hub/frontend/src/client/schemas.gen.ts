@@ -3099,7 +3099,7 @@ export const FsOpBatchRequestSchema = {
   properties: {
     operation: {
       type: "string",
-      enum: ["exists", "info"],
+      enum: ["exists", "info", "register"],
       title: "Operation",
     },
     paths: {
@@ -3123,6 +3123,21 @@ export const FsOpBatchRequestSchema = {
         },
       ],
       title: "Include",
+    },
+    xet_hashes: {
+      anyOf: [
+        {
+          additionalProperties: {
+            type: "string",
+            pattern: "^[0-9a-f]{64}$",
+          },
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Xet Hashes",
     },
   },
   type: "object",
@@ -3196,7 +3211,7 @@ export const FsOpRequestSchema = {
   properties: {
     operation: {
       type: "string",
-      enum: ["get", "put", "exists", "list", "find", "info", "register"],
+      enum: ["get", "put", "exists", "list", "find", "info"],
       title: "Operation",
     },
     path: {
@@ -3229,18 +3244,6 @@ export const FsOpRequestSchema = {
       type: "boolean",
       title: "Detail",
       default: false,
-    },
-    xet_hash: {
-      anyOf: [
-        {
-          type: "string",
-          pattern: "^[0-9a-f]{64}$",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Xet Hash",
     },
   },
   type: "object",
@@ -14183,7 +14186,7 @@ export const XetAccessSchema = {
   required: ["operation", "cas_url", "access_token", "expires_at_unix"],
   title: "XetAccess",
   description:
-    "Access to Hugging Face storage through the Xet protocol.\n\nThe client uploads or downloads content with ``hf_xet`` using this\nshort-lived token. After an upload, the client sends a ``register``\noperation with the returned Xet hash so the hub can add the path to the\nbucket, which the token alone can't do.",
+    "Access to Hugging Face storage through the Xet protocol.\n\nThe client uploads or downloads content with ``hf_xet`` using this\nshort-lived token, which covers the whole bucket, so a client can reuse\nit until it expires. After uploads, the client sends a batch\n``register`` operation with their Xet hashes so the hub can add the\npaths to the bucket, which the token alone can't do.",
 } as const
 
 export const ZoteroAuthFinishSchema = {

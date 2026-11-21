@@ -311,14 +311,12 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
             "size": None,
         }
         get_xet_token.assert_called_with(hf, "write")
-        # Then the hub adds the path with the owner's credential
+        # Then the hub adds the paths with the owner's credential, in one
+        # call to HF however many there are
+        register = {"operation": "register", "paths": ["files/md5/cc/x"]}
         response = client.post(
-            FS_OPS_URL,
-            json={
-                "operation": "register",
-                "path": "files/md5/cc/x",
-                "xet_hash": "b" * 64,
-            },
+            f"{FS_OPS_URL}/batch",
+            json=register | {"xet_hashes": {"files/md5/cc/x": "b" * 64}},
         )
         assert response.status_code == 200
         batch.assert_called_once_with(
@@ -331,14 +329,10 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
                 }
             ],
         )
-        for bad_hash in [None, "not-a-hash"]:
+        for bad_hashes in [None, {}, {"files/md5/cc/x": "not-a-hash"}]:
             response = client.post(
-                FS_OPS_URL,
-                json={
-                    "operation": "register",
-                    "path": "files/md5/cc/x",
-                    "xet_hash": bad_hash,
-                },
+                f"{FS_OPS_URL}/batch",
+                json=register | {"xet_hashes": bad_hashes},
             )
             assert response.status_code == 422
         # The batch endpoint falls back too
@@ -355,6 +349,9 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         assert results[old_path]["info"]["size"] == 1
         assert results[new_path]["info"]["size"] == 4
         assert results[new_path]["content_base64"] == "bmV3IQ=="
+        # HF objects come with what a client needs to download them
+        assert results[new_path]["info"]["xet_hash"] == "a" * 64
+        assert "xet_hash" not in results[old_path]["info"]
     # A project on the hub's storage has nothing to register
     with (
         patch(
@@ -371,11 +368,11 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         ),
     ):
         response = client.post(
-            FS_OPS_URL,
+            f"{FS_OPS_URL}/batch",
             json={
                 "operation": "register",
-                "path": "files/md5/cc/x",
-                "xet_hash": "b" * 64,
+                "paths": ["files/md5/cc/x"],
+                "xet_hashes": {"files/md5/cc/x": "b" * 64},
             },
         )
         assert response.status_code == 400

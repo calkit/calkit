@@ -1445,6 +1445,8 @@ def test_service_files(tmp_path, monkeypatch):
     # It writes its own log, since one cmd redirects to can't be opened again
     assert "cmd /c" not in script and '""--log-file""' in script
     assert hub_link.get_log_path() not in script
+    # In a hidden console, so what it runs doesn't each open a window
+    assert "pythonw" not in script and script.rstrip().endswith(", 0, False")
     unit = hub_link._systemd_unit()
     expected = shlex.join(command).replace("\\", "\\\\")
     assert f"ExecStart={expected}" in unit

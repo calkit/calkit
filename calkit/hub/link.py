@@ -4418,11 +4418,12 @@ def _windows_startup_path(key: str | None = None) -> str:
 
 
 def _windows_startup_script() -> str:
-    # pythonw has no console window, and a VBScript can start it hidden
+    # python, not pythonw, in a console the VBScript hides, which what the
+    # link runs shares rather than each opening a window of its own
     exe = sys.executable
-    pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
-    if os.path.isfile(pythonw):
-        exe = pythonw
+    python = os.path.join(os.path.dirname(exe), "python.exe")
+    if os.path.isfile(python):
+        exe = python
     # The link writes its own log, since one cmd redirects to can't be
     # opened by anything else, e.g., the link restarting itself
     cmd = [exe, *_service_command()[1:], "--log-file"]

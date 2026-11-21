@@ -473,6 +473,17 @@
         "title": "Reopen as Text",
         "category": "Calkit",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.markCellOutput",
+        "title": "Save as Output",
+        "category": "Calkit",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "calkit-vscode.cellOutputActions",
+        "title": "Cell Output Actions",
+        "category": "Calkit"
       }
     ],
     "menus": {
@@ -1021,6 +1032,14 @@
         {
           "command": "calkit-vscode.resolveOverleafConflict",
           "when": "false"
+        },
+        {
+          "command": "calkit-vscode.cellOutputActions",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.markCellOutput",
+          "when": "notebookType == 'jupyter-notebook'"
         }
       ],
       "webview/context": [
@@ -1033,6 +1052,13 @@
           "command": "calkit-vscode.pdfGoToSourceToSide",
           "when": "webviewId == 'calkit.pdfReview'",
           "group": "navigation@2"
+        }
+      ],
+      "notebook/cell/title": [
+        {
+          "command": "calkit-vscode.markCellOutput",
+          "when": "notebookType == 'jupyter-notebook' && notebookCellType == 'code'",
+          "group": "inline@90"
         }
       ]
     },

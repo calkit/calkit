@@ -100,6 +100,7 @@ CONCURRENT_REQUEST_TYPES = (
     "publication.synctex",
     "publication.source",
     "project.originSuggestions",
+    "project.printedNumbers",
     "folder.choose",
     "job.get",
     "job.log",
@@ -411,6 +412,30 @@ def get_result(msg: dict) -> Any:
         path = get_project_path(paths[0], msg.get("path"), "file")
         result = get_origin_suggestions(
             path, get_content_paths(paths[0]), wdir=paths[0]
+        )
+    elif kind == "project.printedNumbers":
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        result = get_printed_numbers(paths[0])
+    elif kind == "project.markCellOutput":
+        from calkit.notebooks import add_cell_output
+
+        owner, name = split_project(msg.get("project"))
+        paths = get_checkout_paths(owner, name)
+        if not paths:
+            raise ValueError(f"{owner}/{name} isn't on this machine")
+        notebook = get_project_path(paths[0], msg.get("notebook"), "notebook")
+        result = add_cell_output(
+            notebook,
+            {
+                "kind": "value",
+                "cell_id": msg.get("cell_id"),
+                "variable_name": msg.get("variable_name"),
+            },
+            stage=msg.get("stage"),
+            wdir=paths[0],
         )
     elif kind in ("publication.pdf", "publication.synctex"):
         owner, name = split_project(msg.get("project"))
@@ -1788,6 +1813,51 @@ def get_stage_status(stale: list, has_run: bool) -> dict:
             dict.fromkeys(p for s in stale for p in s.stale_outputs)
         ),
     }
+
+
+def get_printed_numbers(wdir: str) -> list[dict]:
+    """Numbers the pipeline's notebooks printed, by notebook and cell, from
+    their saved outputs, or the copy the pipeline ran if they're saved
+    without, which a number typed into a document may have been copied from.
+    """
+    import calkit.notebooks
+
+    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    found = []
+    for name, stage in stages.items():
+        # A parameterized notebook's values are cited by file, not notebook
+        if (
+            not isinstance(stage, dict)
+            or stage.get("kind") != "jupyter-notebook"
+            or stage.get("parameters")
+            or not isinstance(stage.get("notebook_path"), str)
+        ):
+            continue
+        notebook = calkit.notebooks.get_stage_notebook_path(stage)
+        executed = calkit.notebooks.get_executed_notebook_path(
+            stage["notebook_path"], "notebook"
+        )
+        for path in (
+            notebook,
+            os.path.join(stage.get("wdir") or "", executed),
+        ):
+            fpath = os.path.join(wdir, path)
+            try:
+                if os.path.getsize(fpath) > MAX_VALUE_FILE_BYTES * 5:
+                    continue
+                with open(fpath, encoding="utf-8") as f:
+                    printed = calkit.notebooks.find_printed_numbers(
+                        json.load(f)
+                    )
+            except (OSError, ValueError):
+                continue
+            if printed:
+                found += [
+                    {"notebook": notebook, "stage": name} | p for p in printed
+                ]
+                break
+    return found
 
 
 def get_content_paths(wdir: str) -> list[str]:

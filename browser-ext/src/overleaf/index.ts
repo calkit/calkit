@@ -20,9 +20,11 @@ import {
 } from "../core/local";
 import {
   type Citation,
+  type PrintedNumbers,
   type ResultValue,
   type TableFile,
   citationCandidates,
+  notebookOfValuesPath,
   resultValues,
   tableFile,
 } from "../core/latex";
@@ -212,12 +214,40 @@ export function projectValues(
       paths.map((path) => provenanceFor(link, path).catch(() => null)),
     );
     return files.flatMap((file, i) =>
-      file && !file.value_error ? resultValues(paths[i], file.value) : [],
+      file && !file.value_error
+        ? resultValues(notebookOfValuesPath(paths[i]) ?? paths[i], file.value)
+        : [],
     );
   })();
   values.catch(() => valuesCache.delete(cacheKey));
   valuesCache.set(cacheKey, { at: Date.now(), values });
   return values;
+}
+
+const printedCache = new Map<
+  string,
+  { at: number; printed: Promise<PrintedNumbers[]> }
+>();
+
+/**
+ * Numbers the pipeline's notebooks printed, which a typed number may be a
+ * copy of, read on this machine, or none when the project isn't here.
+ */
+export function projectPrintedNumbers(
+  link: OverleafLinkPublic,
+): Promise<PrintedNumbers[]> {
+  const cacheKey = `${link.project_owner_name}/${link.project_name}`;
+  const cached = printedCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.printed;
+  }
+  const printed = send({
+    type: "project.printedNumbers",
+    owner: link.project_owner_name,
+    project: link.project_name,
+  }).catch(() => [] as PrintedNumbers[]);
+  printedCache.set(cacheKey, { at: Date.now(), printed });
+  return printed;
 }
 
 const tablesCache = new Map<
@@ -460,6 +490,9 @@ export async function syncOverleaf(
 /** Look again at what's synced and shown, now that a sync changed it. */
 function afterSync(): void {
   provenanceCache.clear();
+  // A run saves values, e.g., a notebook's, that typed numbers can link to
+  valuesCache.clear();
+  printedCache.clear();
   checkingAfterSync = true;
   drawStatusParts();
   drawRail();

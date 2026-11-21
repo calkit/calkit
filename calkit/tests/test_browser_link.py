@@ -1670,3 +1670,54 @@ def test_choose_folder(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.run", missing)
     with pytest.raises(ValueError, match="no folder dialog"):
         choose_folder("Select")
+
+
+def test_get_printed_numbers(tmp_path):
+    from calkit.browser_link import get_printed_numbers
+
+    printed = {
+        "cell_type": "code",
+        "id": "a",
+        "source": "k = 0.0309\nprint(k)",
+        "outputs": [{"output_type": "stream", "text": "0.0309\n"}],
+    }
+    cleaned = printed | {"outputs": []}
+    (tmp_path / "fit.ipynb").write_text(json.dumps({"cells": [printed]}))
+    # A notebook saved without outputs is read from the copy the pipeline
+    # ran, and one with parameters is left out
+    (tmp_path / "clean.ipynb").write_text(json.dumps({"cells": [cleaned]}))
+    executed = tmp_path / ".calkit" / "notebooks" / "executed"
+    executed.mkdir(parents=True)
+    (executed / "clean.ipynb").write_text(json.dumps({"cells": [printed]}))
+    (tmp_path / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    fit:\n"
+        "      kind: jupyter-notebook\n"
+        "      notebook_path: fit.ipynb\n"
+        "      environment: py\n"
+        "    clean:\n"
+        "      kind: jupyter-notebook\n"
+        "      notebook_path: clean.ipynb\n"
+        "      environment: py\n"
+        "    swept:\n"
+        "      kind: jupyter-notebook\n"
+        "      notebook_path: fit.ipynb\n"
+        "      environment: py\n"
+        "      parameters:\n"
+        "        t: 25\n"
+        "    missing:\n"
+        "      kind: jupyter-notebook\n"
+        "      notebook_path: missing.ipynb\n"
+        "      environment: py\n"
+    )
+    found = {
+        "cell": "a",
+        "cell_index": 0,
+        "numbers": ["0.0309"],
+        "variables": ["k"],
+    }
+    assert get_printed_numbers(str(tmp_path)) == [
+        {"notebook": "fit.ipynb", "stage": "fit"} | found,
+        {"notebook": "clean.ipynb", "stage": "clean"} | found,
+    ]

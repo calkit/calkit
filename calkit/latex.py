@@ -877,6 +877,12 @@ def component_candidates(
         exts = _GRAPHICS_EXTS if component.kind == "figure" else [".tex"]
         if posixpath.splitext(rel)[1].lower() not in exts:
             return [rel + ext for ext in exts] + [rel], None
+    # A value cited from a notebook is one its cells make, which the
+    # pipeline saves beside it
+    elif rel.lower().endswith(".ipynb"):
+        from calkit.notebooks import get_notebook_values_path
+
+        return [get_notebook_values_path(rel)], None
     return [rel], None
 
 
@@ -892,6 +898,11 @@ def component_path(
     for candidate in candidates:
         if exists(candidate):
             return candidate, None
+    if component.kind == "value" and component.path.lower().endswith(".ipynb"):
+        return None, (
+            f"No values saved from {component.path} yet; add it as a cell "
+            "output and run the pipeline"
+        )
     return None, f"{component.path} is not in the project yet"
 
 

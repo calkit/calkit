@@ -1,23 +1,39 @@
-/* Cell output marker button styling */
+/* Labels on cells for the values, figures, and tables they're marked to make */
 
-.calkit-output-marked {
-  color: var(--jp-brand-color1) !important;
+.calkit-cell-output-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0 2px var(--jp-cell-prompt-width, 64px);
 }
 
-/* Visual indicators for cells with marked outputs */
-
-.calkit-output-figure {
-  border-left: 3px solid var(--jp-success-color1);
+.calkit-cell-output-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 10px;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-ui-font-size0);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.calkit-output-dataset {
-  border-left: 3px solid var(--jp-info-color1);
+.calkit-cell-output-label:hover {
+  border-color: var(--jp-brand-color1);
 }
 
-.calkit-output-result {
-  border-left: 3px solid var(--jp-warn-color1);
+.calkit-cell-output-label-icon {
+  display: inline-flex;
 }
 
-.calkit-output-table {
-  border-left: 3px solid var(--jp-error-color1);
+.calkit-cell-output-label-icon svg {
+  width: 12px;
+  height: 12px;
 }

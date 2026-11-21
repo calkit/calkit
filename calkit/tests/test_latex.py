@@ -258,6 +258,7 @@ def test_ck_components(tmp_dir):
                     "figures/fit_1.5.pdf",
                     "tables/summary.tex",
                     "results/m.json",
+                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json",
                 }
             ),
         )
@@ -284,6 +285,17 @@ def test_ck_components(tmp_dir):
     # A dot in a name isn't taken for an extension
     assert component_path("figures/fit_1.5", "figure")[0] == (
         "figures/fit_1.5.pdf"
+    )
+    # A value cited from a notebook is one its cells make, saved beside it,
+    # which says what to do before it's been saved
+    assert component_path("nbs/fit.ipynb") == (
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json",
+        None,
+    )
+    assert component_path("other.ipynb") == (
+        None,
+        "No values saved from other.ipynb yet; add it as a cell output "
+        "and run the pipeline",
     )
     # The same can be worked out without the files on disk, e.g., from the
     # hub's copy of a repo, with figures stored with DVC fetched by name

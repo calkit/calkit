@@ -118,10 +118,10 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   history: false,
   setup: false,
   notebookToolbar: true,
+  cellOutputMarking: true,
 
   // Incomplete features - disabled by default
   advancedEnvironments: false,
-  cellOutputMarking: false,
   fileBrowserMenu: false,
   figures: false,
   datasets: false,

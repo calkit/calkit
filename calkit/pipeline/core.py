@@ -2088,6 +2088,35 @@ def get_map_paths_outputs(stage: dict) -> list[str]:
     ]
 
 
+def get_cell_output_paths(
+    stage: dict, ck_info: dict | None = None
+) -> list[str]:
+    """Where a notebook stage saves what its cells are marked to make,
+    relative to the project, which it declares under ``cell_outputs``
+    rather than ``outputs``: its values file, and each figure and table.
+    The project's parameters, in ``ck_info``, name the values file of a
+    stage whose parameters use them.
+    """
+    from calkit.notebooks import get_stage_values_path
+
+    if stage.get("kind") != "jupyter-notebook":
+        return []
+    marks = [o for o in stage.get("cell_outputs") or [] if isinstance(o, dict)]
+    paths = []
+    if any(o.get("kind") == "value" for o in marks) and isinstance(
+        stage.get("notebook_path"), str
+    ):
+        paths.append(get_stage_values_path(stage, ck_info))
+    paths += [
+        posixpath.normpath(
+            posixpath.join(stage.get("wdir") or "", str(o["output_path"]))
+        )
+        for o in marks
+        if o.get("kind") in ("figure", "table") and o.get("output_path")
+    ]
+    return paths
+
+
 def get_figure_paths_with_origins(ck_info: dict) -> list[str]:
     """Images calkit.yaml says the origin of, wherever they are: those a
     stage makes, and those recorded under ``misc`` as imported or created
@@ -2119,6 +2148,7 @@ def get_figure_paths_with_origins(ck_info: dict) -> list[str]:
             candidates.append(
                 out.get("path") if isinstance(out, dict) else out
             )
+        candidates += get_cell_output_paths(stage, ck_info)
     candidates += [
         entry.get("path")
         for entry in ck_info.get("misc") or []
@@ -2325,7 +2355,10 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
             posixpath.normpath(posixpath.join(wdir, Path(p).as_posix()))
             for p in declared
             if p and isinstance(p, str)
-        ] + get_map_paths_outputs(stage)
+        ]
+        outs += get_map_paths_outputs(stage) + get_cell_output_paths(
+            stage, ck_info
+        )
         for out in outs:
             if target == out:
                 return str(name)
@@ -4107,10 +4140,19 @@ def stages_by_output(
             prefix = posixpath.join(
                 "" if project == "." else project, stage.get("wdir") or ""
             )
-            for path in paths:
+            # Cell outputs' paths already include the stage's wdir
+            cell_outputs = [
+                posixpath.join("" if project == "." else project, p)
+                for p in get_cell_output_paths(stage, info)
+            ]
+            for path in paths + cell_outputs:
                 if not isinstance(path, str) or not path:
                     continue
-                full = posixpath.normpath(posixpath.join(prefix, path))
+                full = (
+                    posixpath.normpath(path)
+                    if path in cell_outputs
+                    else posixpath.normpath(posixpath.join(prefix, path))
+                )
                 qualified = calkit.qualify_with_project(project, name)
                 out.setdefault(full, []).append(qualified)
     return out

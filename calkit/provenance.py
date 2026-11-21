@@ -1906,6 +1906,7 @@ def get_path_provenance(
 
     import calkit.environments
     import calkit.export
+    import calkit.notebooks
     import calkit.pipeline
     import calkit.questions
 
@@ -1964,6 +1965,9 @@ def get_path_provenance(
             return None, f"{key or path} is too big to show"
         return json.loads(encoded), None
 
+    # A value cited from a notebook is one its cells make, saved beside it
+    if key is not None and path.lower().endswith(".ipynb"):
+        path = calkit.notebooks.get_notebook_values_path(path)
     lock_stages = dvc_lock.get("stages") or {}
     yaml_stages = dvc_yaml.get("stages") or {}
     lock_outs = {

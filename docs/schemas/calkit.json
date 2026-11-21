@@ -3244,6 +3244,15 @@
           "title": "Always Run",
           "type": "boolean"
         },
+        "cell_outputs": {
+          "default": [],
+          "description": "Values, figures, and tables the notebook's cells make, saved by Calkit when the notebook runs, so it doesn't have to write them. Only for Python notebooks.",
+          "items": {
+            "$ref": "#/$defs/NotebookCellOutput"
+          },
+          "title": "Cell Outputs",
+          "type": "array"
+        },
         "cleaned_ipynb_storage": {
           "anyOf": [
             {
@@ -6161,6 +6170,112 @@
         "path"
       ],
       "title": "Notebook",
+      "type": "object"
+    },
+    "NotebookCellOutput": {
+      "additionalProperties": false,
+      "description": "A value, figure, or table one of a notebook's cells makes, which\nCalkit saves when the pipeline runs the notebook, so the notebook\ndoesn't have to write it itself.",
+      "properties": {
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID of the cell it's saved after, which Jupyter and VS Code keep on the cell as it moves. A value with none is saved after the last cell.",
+          "title": "Cell Id"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Python format spec for a table's numbers, e.g., '.3f'.",
+          "title": "Format"
+        },
+        "kind": {
+          "description": "What it is: a value, cited by the notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}, or a figure or table, saved to 'output_path'.",
+          "enum": [
+            "value",
+            "figure",
+            "table"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "output_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where a figure or table is saved, in the format its extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as LaTeX (.tex), CSV, Markdown, or JSON.",
+          "title": "Output Path"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where to store a figure or table; by its extension if not set, as for other outputs.",
+          "title": "Storage"
+        },
+        "variable_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the variable it's saved from: a value's name, e.g., a number or a dict of them, a figure, e.g., a Matplotlib figure, or a table, e.g., a DataFrame. A figure without one is the image the cell shows.",
+          "title": "Variable Name"
+        },
+        "variable_names": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Names of several variables to save as values after the same cell, each cited by its own name, instead of 'variable_name'.",
+          "title": "Variable Names"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "NotebookCellOutput",
       "type": "object"
     },
     "OsIsCondition": {

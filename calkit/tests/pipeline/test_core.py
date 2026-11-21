@@ -5695,6 +5695,30 @@ def test_get_figure_paths_with_origins(tmp_dir):
                         }
                     ],
                 },
+                "fit": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "fit.ipynb",
+                    "environment": "py",
+                    "wdir": "nbs",
+                    "cell_outputs": [
+                        {
+                            "kind": "value",
+                            "cell_id": "a",
+                            "variable_name": "k",
+                        },
+                        {
+                            "kind": "figure",
+                            "cell_id": "b",
+                            "output_path": "figs/fit.pdf",
+                        },
+                        {
+                            "kind": "table",
+                            "cell_id": "c",
+                            "variable_name": "df",
+                            "output_path": "t.tex",
+                        },
+                    ],
+                },
             }
         },
         "publications": [{"path": "paper/main.pdf"}],
@@ -5708,8 +5732,32 @@ def test_get_figure_paths_with_origins(tmp_dir):
     assert calkit.pipeline.get_figure_paths_with_origins(ck_info) == [
         "plot.png",
         "paper/exported.png",
+        "nbs/figs/fit.pdf",
         "paper/drawn.png",
     ]
+    # What a notebook's cells are marked to make is the stage's output too
+    fit = ck_info["pipeline"]["stages"]["fit"]
+    assert calkit.pipeline.get_cell_output_paths(fit) == [
+        "nbs/.calkit/notebooks/outputs/fit.ipynb/values.json",
+        "nbs/figs/fit.pdf",
+        "nbs/t.tex",
+    ]
+    by_output = calkit.pipeline.stages_by_output(ck_info=ck_info)
+    assert by_output["nbs/t.tex"] == ["fit"]
+    assert by_output[
+        "nbs/.calkit/notebooks/outputs/fit.ipynb/values.json"
+    ] == ["fit"]
+    # Named for the parameters the pipeline fills in from the project's
+    templated = fit | {"parameters": {"t": "{temp}"}}
+    assert calkit.pipeline.get_cell_output_paths(
+        templated, {"parameters": {"temp": 25}}
+    )[0] == ("nbs/.calkit/notebooks/outputs/fit.ipynb/t-25/values.json")
+    assert (
+        calkit.pipeline.get_cell_output_paths(
+            ck_info["pipeline"]["stages"]["plot"]
+        )
+        == []
+    )
     # Listed among the project's figures, after those detected by folder
     subprocess.check_call(["git", "init", "-q"])
     os.makedirs("figures")
@@ -5721,6 +5769,7 @@ def test_get_figure_paths_with_origins(tmp_dir):
         "figures/a.png",
         "plot.png",
         "paper/exported.png",
+        "nbs/figs/fit.pdf",
         "paper/drawn.png",
     ]
 

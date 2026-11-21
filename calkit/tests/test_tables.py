@@ -1,5 +1,6 @@
 """Tests for ``tables``."""
 
+import json
 import os
 
 import git
@@ -167,3 +168,90 @@ def test_list_tables(tmp_dir):
     tables = {t["path"]: t for t in calkit.tables.list_tables()}
     assert tables["results/extra.csv"]["detected"] is True
     assert "stages" not in tables["results/extra.csv"]
+    # A table a notebook's cell is marked to make is listed in any format
+    ck_info["pipeline"]["stages"]["fit"] = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "fit.ipynb",
+        "environment": "py",
+        "cell_outputs": [
+            {
+                "kind": "table",
+                "cell_id": "a",
+                "variable_name": "df",
+                "output_path": "tables/k.tex",
+            }
+        ],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    tables = {t["path"]: t for t in calkit.tables.list_tables()}
+    assert tables["tables/k.tex"]["stages"] == ["fit"]
+    assert tables["tables/k.tex"]["exists"] is False
+    assert "tables/k.tex" not in [
+        t["path"] for t in calkit.tables.list_tables(declared_only=True)
+    ]
+
+
+def test_write_table(tmp_dir):
+    table = {
+        "columns": ["T (°C)", "k_obs", "note"],
+        "index": None,
+        "index_name": None,
+        "data": [
+            [25, 0.030912, "50% & up"],
+            [35, -0.0616, None],
+            [45, 1.5e-05, [1, 2]],
+        ],
+    }
+    calkit.tables.write_table("tables/rates.tex", table, ".3f")
+    with open("tables/rates.tex", encoding="utf-8") as f:
+        tex = f.read()
+    # Numbers right, text left, with booktabs' rules or plain lines
+    assert r"\begin{tabular}{rrl}" in tex
+    assert r"\providecommand{\toprule}{\hline}" in tex
+    assert r"T (°C) & k\_obs & note \\" in tex
+    assert r"25 & 0.031 & 50\% \& up \\" in tex
+    assert r"35 & $-$0.062 &  \\" in tex
+    assert r"45 & 0.000 & 1, 2 \\" in tex
+    calkit.tables.write_table("rates.csv", table)
+    with open("rates.csv", encoding="utf-8") as f:
+        assert f.read().splitlines() == [
+            "T (°C),k_obs,note",
+            "25,0.030912,50% & up",
+            "35,-0.0616,",
+            '45,1.5e-05,"1, 2"',
+        ]
+    calkit.tables.write_table("rates.md", table)
+    with open("rates.md", encoding="utf-8") as f:
+        assert f.read().splitlines()[:3] == [
+            "| T (°C) | k_obs | note |",
+            "|---|---|---|",
+            "| 25 | 0.030912 | 50% & up |",
+        ]
+    # An index is the first column, named for the index
+    indexed = table | {"index": ["a", "b", "c"], "index_name": "run"}
+    calkit.tables.write_table("rates.json", indexed)
+    with open("rates.json", encoding="utf-8") as f:
+        records = json.load(f)
+    assert records[0] == {
+        "run": "a",
+        "T (°C)": 25,
+        "k_obs": 0.030912,
+        "note": "50% & up",
+    }
+    calkit.tables.write_table("indexed.tex", indexed)
+    with open("indexed.tex", encoding="utf-8") as f:
+        assert r"run & T (°C) & k\_obs & note \\" in f.read()
+    # Formatted numbers are escaped too
+    calkit.tables.write_table(
+        "pct.tex", {"columns": ["f"], "data": [[0.123]]}, ".1%"
+    )
+    calkit.tables.write_table(
+        "big.tex", {"columns": ["n"], "data": [[-1234.5]]}, "_.1f"
+    )
+    with open("pct.tex", encoding="utf-8") as f:
+        assert r"12.3\% \\" in f.read()
+    with open("big.tex", encoding="utf-8") as f:
+        assert r"$-$1\_234.5 \\" in f.read()
+    with pytest.raises(ValueError, match="'.xlsx'"):
+        calkit.tables.write_table("rates.xlsx", table)

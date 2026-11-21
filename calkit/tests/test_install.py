@@ -132,7 +132,8 @@ def test_prompt_and_install(monkeypatch):
     ):
         assert install.prompt_and_install("pixi", interactive=True) is True
     # Under WSL, Docker Desktop on Windows is offered as the alternative to
-    # installing Docker Engine, but nowhere else
+    # installing Docker Engine, but nowhere else, e.g., when testing on Windows
+    monkeypatch.setattr("calkit.install._current_platform", lambda: "linux")
     for wsl in [True, False]:
         monkeypatch.setattr("calkit.core.is_wsl", lambda: wsl)
         with (

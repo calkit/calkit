@@ -786,9 +786,34 @@ class VenvEnvironment(ComposableEnvironment):
     )
 
 
+class UvExtra(Model):
+    """An extra of a uv project, installed on the machines it's meant for.
+
+    For a dependency built for particular hardware, e.g., a PyTorch for one
+    GPU architecture: ``when`` lists properties of the machine, in the form
+    requirements give them, and the extra is installed where all of them
+    hold. One that doesn't hold here is left out rather than reported, since
+    it describes a different machine, not a problem with this one.
+    """
+
+    name: str = Field(description="Name of the extra in pyproject.toml.")
+    when: list[SystemNumberRequirement | SystemValueRequirement] = Field(
+        default=[],
+        description="Properties of the machine that must all hold for the "
+        "extra to be installed, e.g., '{kind: gpu-arch, equals: gfx1201}'. "
+        "With none, it always is.",
+    )
+
+
 class UvEnvironment(ComposableEnvironment):
     kind: Literal["uv"] = "uv"
     path: str = Field(description="Path to the uv project's pyproject.toml.")
+    extras: list[str | UvExtra] = Field(
+        default=[],
+        description="Extras of the project to install, each named or given "
+        "with the machines it's for. They're passed to both 'uv sync' and "
+        "'uv run', since running without one would uninstall it.",
+    )
 
 
 class UvVenvEnvironment(ComposableEnvironment):

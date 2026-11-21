@@ -455,6 +455,44 @@ def test_get_venv_activate_cmd():
     )
 
 
+def test_get_uv_extras(monkeypatch):
+    from calkit.environments import get_uv_extras
+
+    gpus = (
+        {"name": "AMD Radeon RX 9070 XT", "vendor": "amd", "arch": "gfx1201"},
+    )
+    monkeypatch.setattr("calkit.core.get_gpus", lambda: gpus)
+    env = {
+        "kind": "uv",
+        "path": "pyproject.toml",
+        "extras": [
+            "plots",
+            {"name": "always"},
+            {
+                "name": "rocm",
+                "when": [{"kind": "gpu-arch", "equals": "gfx1201"}],
+            },
+            {
+                "name": "cuda",
+                "when": [{"kind": "gpu-vendor", "equals": "nvidia"}],
+            },
+            # Every property must hold, not just one
+            {
+                "name": "big-rocm",
+                "when": [
+                    {"kind": "gpu-vendor", "equals": "amd"},
+                    {"kind": "cpu-count", "min": 1_000_000},
+                ],
+            },
+        ],
+    }
+    assert get_uv_extras(env) == ["plots", "always", "rocm"]
+    # On a machine without that GPU, the extra is left out, not an error
+    monkeypatch.setattr("calkit.core.get_gpus", lambda: ())
+    assert get_uv_extras(env) == ["plots", "always"]
+    assert get_uv_extras({"kind": "uv", "path": "pyproject.toml"}) == []
+
+
 def test_get_default_venv_prefix():
     get_default_venv_prefix = calkit.environments.get_default_venv_prefix
     # With no existing environments, default to .venv next to the spec file

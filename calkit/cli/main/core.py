@@ -5390,7 +5390,12 @@ def run_in_env(
             raise_error("Failed to run in Pixi environment")
     elif env["kind"] == "uv":
         env_dir = os.path.dirname(os.path.abspath(env["path"]))
-        cmd = ["uv", "run", "--project", env_dir] + cmd
+        extras = calkit.environments.get_uv_extras(env)
+        cmd = (
+            ["uv", "run", "--project", env_dir]
+            + [arg for extra in extras for arg in ("--extra", extra)]
+            + cmd
+        )
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

@@ -1068,6 +1068,27 @@ def get_composed_env_vars(
     return env_vars
 
 
+def get_uv_extras(env: dict) -> list[str]:
+    """Get the extras of a uv environment to install on this machine.
+
+    One given with ``when`` is included only where all of the machine
+    properties it lists hold.
+    """
+    extras = []
+    for extra in env.get("extras") or []:
+        if isinstance(extra, str):
+            extras.append(extra)
+            continue
+        try:
+            calkit.check_requirements(
+                requirements=extra.get("when") or [], interactive=False
+            )
+        except ValueError:
+            continue
+        extras.append(extra["name"])
+    return extras
+
+
 def get_env(name: str, envs: dict) -> dict | None:
     """An environment by name, including one a switch defines in place.
 

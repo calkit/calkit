@@ -595,6 +595,38 @@ However, if you add it in there,
 calling the above command again will succeed because Calkit
 automatically checks or syncs the environment before execution.
 
+<!-- TODO: needs human review -->
+
+#### Extras for particular machines
+
+A uv project environment can install
+[extras](https://docs.astral.sh/uv/concepts/projects/dependencies/#optional-dependencies)
+of its `pyproject.toml`,
+which Calkit passes to both `uv sync` and `uv run`,
+since running without one would uninstall it.
+An extra can also be meant only for machines with certain properties,
+given under `when` the way [machine requirements](requirements.md#machine-requirements)
+are, e.g., a PyTorch built for one GPU architecture:
+
+```yaml
+environments:
+  main:
+    kind: uv
+    path: pyproject.toml
+    extras:
+      - plots
+      - name: rocm-gfx1201
+        when:
+          - kind: gpu-arch
+            equals: gfx1201
+```
+
+An extra is installed where all of its `when` properties hold,
+and left out elsewhere rather than reported,
+since it describes a different machine, not a problem with this one.
+Since the stages' results may then depend on which machine ran them,
+pin the machine with a [`system` environment](#system) when that matters.
+
 ### venv
 
 A `venv` environment,
@@ -1797,6 +1829,7 @@ Model class: `UvEnvironment`
 | inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
 | with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
 | path        | str                      | yes      | Path to the uv project's pyproject.toml.                                                                                                                                                |
+| extras      | list[str \| UvExtra]     | no       | Extras of the project to install, each named or given with the machines it's for. They're passed to both 'uv sync' and 'uv run', since running without one would uninstall it.          |
 | description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `uv-venv`

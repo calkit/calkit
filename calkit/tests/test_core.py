@@ -543,6 +543,103 @@ def test_check_property_requirement():
         check(
             {"kind": "cpu-count", "min": 16}, info, described_as="host 'box'"
         )
+    # A GPU property is met when any GPU meets it, e.g., the discrete one
+    # beside an integrated one
+    info["gpus"] = [
+        {
+            "name": "AMD Radeon(TM) Graphics",
+            "vendor": "amd",
+            "arch": "gfx1036",
+        },
+        {"name": "AMD Radeon RX 9070 XT", "vendor": "amd", "arch": "gfx1201"},
+    ]
+    check({"kind": "gpu-arch", "equals": "gfx1201"}, info)
+    check({"kind": "gpu-name", "matches": "*rx 90?0*"}, info)
+    check({"kind": "gpu-vendor", "equals": ["nvidia", "AMD"]}, info)
+    with pytest.raises(ValueError, match="No GPU on this machine meets") as e:
+        check({"kind": "gpu-arch", "equals": "sm_89"}, info)
+    assert "'gfx1036'" in str(e.value) and "'gfx1201'" in str(e.value)
+    # With one GPU, its own mismatch is the whole story
+    info["gpus"] = info["gpus"][1:]
+    with pytest.raises(ValueError, match="'gfx1201', which doesn't match"):
+        check({"kind": "gpu-arch", "matches": "sm_*"}, info)
+    # A GPU that doesn't report a property can't meet it, and neither can
+    # a machine with no GPU, but a machine that reports no GPU list at all
+    # is unanswered
+    info["gpus"] = [{"name": "Apple M4 Pro", "vendor": "apple", "arch": None}]
+    with pytest.raises(ValueError, match="has no GPU that reports it"):
+        check({"kind": "gpu-arch", "equals": "gfx1201"}, info)
+    info["gpus"] = []
+    with pytest.raises(ValueError, match="has no GPU that reports it"):
+        check({"kind": "gpu-vendor", "equals": "amd"}, info)
+    with pytest.raises(ValueError, match="doesn't report it"):
+        check({"kind": "gpu-vendor", "equals": "amd"}, {})
+
+
+def test_get_gpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import calkit.core
+
+    # A Linux machine using ROCm wheels has no HIP runtime installed, so
+    # its AMD GPUs are read from the kernel, skipping the CPU's node
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        "ctypes.CDLL", mock.Mock(side_effect=OSError("not found"))
+    )
+    nodes = {"0": 0, "1": 120001, "2": 90010}
+    for node, version in nodes.items():
+        (tmp_path / node).mkdir()
+        (tmp_path / node / "properties").write_text(
+            f"cpu_cores_count 8\ngfx_target_version {version}\n"
+        )
+    real_glob = calkit.core.glob.glob
+    monkeypatch.setattr(
+        calkit.core.glob,
+        "glob",
+        lambda pattern: (
+            real_glob(str(tmp_path / "*" / "properties"))
+            if pattern.startswith("/sys/class/kfd")
+            else real_glob(pattern)
+        ),
+    )
+    assert calkit.core._get_amd_gpus() == [
+        {"name": None, "vendor": "amd", "arch": "gfx1201"},
+        {"name": None, "vendor": "amd", "arch": "gfx90a"},
+    ]
+    # NVIDIA GPUs come from nvidia-smi, whose names can hold commas
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        calkit.core.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 0, stdout="NVIDIA GeForce RTX 4090, 8.9\nA, B, 9.0\n"
+        ),
+    )
+    assert calkit.core._get_nvidia_gpus() == [
+        {
+            "name": "NVIDIA GeForce RTX 4090",
+            "vendor": "nvidia",
+            "arch": "sm_89",
+        },
+        {"name": "A, B", "vendor": "nvidia", "arch": "sm_90"},
+    ]
+    # A driver that fails to answer is a machine without that GPU
+    monkeypatch.setattr(
+        calkit.core.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 9, ""),
+    )
+    assert calkit.core._get_nvidia_gpus() == []
+    monkeypatch.setattr(
+        calkit.core,
+        "_get_amd_gpus",
+        mock.Mock(side_effect=OSError("driver crashed")),
+    )
+    monkeypatch.setattr(calkit.core.platform, "system", lambda: "Linux")
+    calkit.core.get_gpus.cache_clear()
+    try:
+        assert calkit.core.get_gpus() == ()
+    finally:
+        calkit.core.get_gpus.cache_clear()
 
 
 def test_check_requirements_checks_machine_properties(tmp_dir):

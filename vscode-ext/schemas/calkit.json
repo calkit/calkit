@@ -12049,7 +12049,7 @@
       "type": "object"
     },
     "SystemValueRequirement": {
-      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
+      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\n``gpu-name``, ``gpu-vendor`` ('amd', 'nvidia' or 'apple') and\n``gpu-arch`` (e.g., 'gfx1201' or 'sm_89') describe the machine's GPUs,\nand are met when any one of them meets the constraint.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
       "properties": {
         "description": {
           "anyOf": [
@@ -12093,7 +12093,10 @@
             "hostname",
             "machine-id",
             "calkit-python-version",
-            "python-implementation"
+            "python-implementation",
+            "gpu-name",
+            "gpu-vendor",
+            "gpu-arch"
           ],
           "title": "Kind",
           "type": "string"
@@ -12350,6 +12353,22 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "extras": {
+          "default": [],
+          "description": "Extras of the project to install, each named or given with the machines it's for. They're passed to both 'uv sync' and 'uv run', since running without one would uninstall it.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/UvExtra"
+              }
+            ]
+          },
+          "title": "Extras",
+          "type": "array"
+        },
         "inputs": {
           "anyOf": [
             {
@@ -12398,6 +12417,37 @@
         "path"
       ],
       "title": "UvEnvironment",
+      "type": "object"
+    },
+    "UvExtra": {
+      "description": "An extra of a uv project, installed on the machines it's meant for.\n\nFor a dependency built for particular hardware, e.g., a PyTorch for one\nGPU architecture: ``when`` lists properties of the machine, in the form\nrequirements give them, and the extra is installed where all of them\nhold. One that doesn't hold here is left out rather than reported, since\nit describes a different machine, not a problem with this one.",
+      "properties": {
+        "name": {
+          "description": "Name of the extra in pyproject.toml.",
+          "title": "Name",
+          "type": "string"
+        },
+        "when": {
+          "default": [],
+          "description": "Properties of the machine that must all hold for the extra to be installed, e.g., '{kind: gpu-arch, equals: gfx1201}'. With none, it always is.",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              }
+            ]
+          },
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "UvExtra",
       "type": "object"
     },
     "UvVenvEnvironment": {

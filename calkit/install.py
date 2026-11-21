@@ -240,6 +240,18 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "%ProgramFiles%\\GitHub CLI",
         },
     },
+    # Comes with the developer tools on macOS and Linux
+    "make": {
+        "windows": {
+            "script": _WINGET + "ezwinports.make --source winget",
+            # Where winget unpacks it, which it adds to PATH, rather than
+            # linking it, without Developer Mode
+            "path_add": (
+                "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\"
+                "ezwinports.make_*\\bin"
+            ),
+        },
+    },
     "docker": {
         "mac": {
             "script": "brew install --cask docker",

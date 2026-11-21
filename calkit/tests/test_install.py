@@ -66,6 +66,12 @@ def test_get_installer():
         with mock.patch("calkit.install.sys.platform", platform):
             gh = install.get_installer("gh")
         assert gh is not None and gh["script"].startswith(expected)
+    # make only needs installing on Windows
+    with mock.patch("calkit.install.sys.platform", "win32"):
+        make = install.get_installer("make")
+    assert make is not None and "ezwinports.make" in make["script"]
+    with mock.patch("calkit.install.sys.platform", "linux"):
+        assert install.get_installer("make") is None
 
 
 @skipif_windows_fake_binary

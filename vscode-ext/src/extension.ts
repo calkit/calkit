@@ -46,10 +46,12 @@ import type {
 import { dvcStageOutputPaths } from "./pipeline/core";
 import {
   collectSubprojects,
+  findProjectDir,
   findUndeclaredProjectDir,
   mergeSubprojectConfigs,
   mergeSubprojectDvcYaml,
   qualifyEnvDescriptions,
+  qualifyName,
   rebaseStages,
   splitQualifiedName,
   splitSubprojectPath,
@@ -359,19 +361,20 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_EDIT_NOTEBOOK_ENV, async () => {
       const workspaceRoot = getWorkspaceRoot();
-      if (!workspaceRoot) {
+      const projectRoot = getNotebookProjectRoot();
+      if (!workspaceRoot || !projectRoot) {
         void vscode.window.showErrorMessage(
           "Open a workspace folder to edit Calkit environments.",
         );
         return;
       }
-      const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+      const notebookRelativePath = getActiveNotebookRelativePath(projectRoot);
       if (!notebookRelativePath) {
         void vscode.window.showErrorMessage("No active notebook.");
         return;
       }
       const candidate = await getConfiguredCandidateForNotebookPath(
-        workspaceRoot,
+        projectRoot,
         notebookRelativePath,
       );
       if (!candidate) {
@@ -381,10 +384,26 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      await openEnvironmentEditor(
+      // Named as the root sees it, unless the root doesn't declare its project
+      const dir =
+        path.relative(workspaceRoot, projectRoot).replace(/\\/g, "/") || ".";
+      if (dir === "." || currentSubprojectDirs.includes(dir)) {
+        await openEnvironmentEditor(
+          context,
+          workspaceRoot,
+          qualifyName(dir, candidate.innerEnvironment),
+        );
+        return;
+      }
+      const env = (await readCalkitConfig(projectRoot))?.environments?.[
+        candidate.innerEnvironment
+      ];
+      await showEnvCreatorWebview(
         context,
-        workspaceRoot,
+        projectRoot,
         candidate.innerEnvironment,
+        env,
+        typeof env?.path === "string" ? env.path : undefined,
       );
     }),
   );
@@ -1592,7 +1611,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RUN_NOTEBOOK_STAGE, async () => {
-      const workspaceRoot = getWorkspaceRoot();
+      const workspaceRoot = getNotebookProjectRoot();
       if (!workspaceRoot) {
         return;
       }
@@ -1615,7 +1634,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_EDIT_NOTEBOOK_STAGE, async () => {
-      const workspaceRoot = getWorkspaceRoot();
+      const workspaceRoot = getNotebookProjectRoot();
       if (!workspaceRoot) {
         return;
       }
@@ -1660,27 +1679,27 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!notebookUri) {
           return;
         }
-        const project = projectForPath(
-          workspaceRoot,
-          path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
-        );
+        const projectDir = getNotebookProjectRoot(notebookUri) ?? workspaceRoot;
+        const project = {
+          projectDir,
+          path: path
+            .relative(projectDir, notebookUri.fsPath)
+            .replace(/\\/g, "/"),
+        };
         // The notebooks section is authoritative, then the kernel chosen in VS
-        // Code, which is only usable if it's declared in the notebook's project
+        // Code, which is only usable if it's declared in the notebook's
+        // project, where it was chosen
         const projectConfig = await readCalkitConfig(project.projectDir);
         const profile = getLaunchProfileForNotebookUri(
           context,
           notebookUri.toString(),
         );
-        const env = profile?.environmentName
-          ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
-          : undefined;
         const envName =
           (projectConfig &&
             resolveNotebookEnvironmentName(projectConfig, project.path)) ||
-          (env &&
-          path.resolve(workspaceRoot, env.dir) ===
-            path.resolve(project.projectDir)
-            ? env.name
+          (profile?.environmentName &&
+          projectConfig?.environments?.[profile.environmentName]
+            ? profile.environmentName
             : undefined);
         const prefillStage = envName
           ? { kind: "jupyter-notebook", environment: envName }
@@ -2749,6 +2768,20 @@ async function refreshPipelineOutputContext(
       typeof stage.notebook_path === "string"
     ) {
       pipelineNotebookUris.add(path.join(workspaceRoot, stage.notebook_path));
+    }
+    // A notebook Quarto renders, relative to the stage's wdir
+    if (
+      stage.kind === "quarto" &&
+      typeof stage.target_path === "string" &&
+      stage.target_path.endsWith(".ipynb")
+    ) {
+      pipelineNotebookUris.add(
+        path.join(
+          workspaceRoot,
+          typeof stage.wdir === "string" ? stage.wdir : "",
+          stage.target_path,
+        ),
+      );
     }
   }
   // For explorer menus; resourcePath's form varies by platform, so list both
@@ -4726,7 +4759,7 @@ function isPlotlyJsonText(text: string): boolean {
 async function selectCalkitEnvironment(
   context: vscode.ExtensionContext,
 ): Promise<string | undefined> {
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot();
   if (!workspaceRoot) {
     void vscode.window.showErrorMessage(
       "Open a workspace folder to use Calkit notebook environments.",
@@ -7226,6 +7259,29 @@ function getNotebookRelativePathForUri(
   return relativePath.replace(/\\/g, "/");
 }
 
+// The project a notebook runs in: the nearest folder above it with a
+// calkit.yaml, declared as a subproject or not, or else the workspace root.
+// Its environments and stages are found, and its commands run, from there.
+function getNotebookProjectRoot(
+  notebookUri?: vscode.Uri | string,
+): string | undefined {
+  const workspaceRoot = getWorkspaceRoot();
+  const uri =
+    typeof notebookUri === "string"
+      ? vscode.Uri.parse(notebookUri)
+      : notebookUri ?? vscode.window.activeNotebookEditor?.notebook.uri;
+  if (!workspaceRoot || !uri) {
+    return workspaceRoot;
+  }
+  const relPath = path.relative(workspaceRoot, uri.fsPath).replace(/\\/g, "/");
+  return path.join(
+    workspaceRoot,
+    findProjectDir(relPath, (d) =>
+      fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml")),
+    ),
+  );
+}
+
 function getActiveNotebookRelativePath(
   workspaceRoot: string,
 ): string | undefined {
@@ -7342,7 +7398,7 @@ async function getConfiguredCandidateForNotebookPath(
 async function autoSelectEnvironmentForActiveNotebook(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot();
   if (!workspaceRoot) {
     return;
   }
@@ -8788,7 +8844,7 @@ async function startSlurmJobForActiveNotebook(
   context: vscode.ExtensionContext,
   notebookUri?: string,
 ): Promise<boolean> {
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot(notebookUri);
   if (!workspaceRoot) {
     void vscode.window.showErrorMessage(
       "Open a workspace folder to start a Calkit Jupyter SLURM job.",
@@ -8968,7 +9024,7 @@ async function stopSlurmJobForActiveNotebook(
   // Actively select the inner environment's local kernel to break the
   // "Reconnecting to the kernel..." loop. Using the inner environment from the
   // launch profile gives the best chance of landing on the right kernel.
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot(stoppedNotebookUri);
   const stoppedProfile = stoppedNotebookUri
     ? getLaunchProfileForNotebookUri(context, stoppedNotebookUri)
     : undefined;
@@ -9167,7 +9223,7 @@ async function refreshNotebookToolbarContext(
   const hasResumableSlurm = Boolean(profile?.outerSlurmEnvironment);
   const isRunningSlurm = hasRunningServerSession("slurm");
   const isRunningDocker = hasRunningServerSession("docker");
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot();
   const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
   let notebookHasStage = false;
   let notebookHasEnvironment = false;

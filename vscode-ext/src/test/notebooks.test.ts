@@ -55,6 +55,29 @@ test("resolveNotebookEnvironmentName uses jupyter pipeline stages directly", () 
     ),
     "clima:main",
   );
+  // As do quarto stages rendering one, by its path from their wdir, but
+  // not ones rendering something else
+  config.pipeline!.stages = {
+    report: {
+      kind: "quarto",
+      target_path: "report.qmd",
+      environment: "docs",
+    },
+    analysis: {
+      kind: "quarto",
+      target_path: "analysis.ipynb",
+      environment: "quarto",
+      wdir: "pub",
+    },
+  };
+  assert.equal(
+    resolveNotebookEnvironmentName(config, "pub/analysis.ipynb"),
+    "quarto",
+  );
+  assert.equal(
+    resolveNotebookEnvironmentName(config, "analysis.ipynb"),
+    undefined,
+  );
 });
 
 test("resolveNotebookEnvironmentName resolves the notebooks-section sources", () => {

@@ -36,20 +36,31 @@ export function getExecutedNotebookHtmlPath(
   return path.join(".calkit", "notebooks", "html", rel);
 }
 
-// Environment of the pipeline stage whose notebook_path matches this notebook.
-// Any stage that references the notebook counts; we don't require a specific
-// "kind", since the notebook_path is what ties the stage to the notebook.
+// Environment of the pipeline stage that runs this notebook, i.e., a
+// notebook stage, or a quarto stage rendering it, by its path relative to the
+// stage's wdir. Any stage referencing the notebook counts, since the path is
+// what ties the stage to it.
 function getNotebookEnvironmentFromPipelineStages(
   stages: Record<string, PipelineStage>,
   normalizedPath: string,
 ): string | undefined {
   for (const stage of Object.values(stages)) {
-    const stagePath = stage.notebook_path ?? stage.script_path ?? stage.path;
-    if (
-      typeof stagePath === "string" &&
-      normalizeNotebookPath(stagePath) === normalizedPath &&
-      stage.environment
-    ) {
+    const stagePath =
+      stage.notebook_path ??
+      stage.script_path ??
+      stage.path ??
+      (stage.kind === "quarto" ? stage.target_path : undefined);
+    if (typeof stagePath !== "string" || !stage.environment) {
+      continue;
+    }
+    const wdir = typeof stage.wdir === "string" ? stage.wdir : "";
+    const projectPath = path.posix.normalize(
+      path.posix.join(
+        normalizeNotebookPath(wdir),
+        normalizeNotebookPath(stagePath),
+      ),
+    );
+    if (projectPath === normalizedPath) {
       return stage.environment;
     }
   }
@@ -77,7 +88,7 @@ export function resolveNotebookEnvironmentName(
     }
   }
 
-  // 2. From the pipeline stage whose notebook_path matches this notebook.
+  // 2. From the pipeline stage that runs this notebook.
   return getNotebookEnvironmentFromPipelineStages(stages, normalizedPath);
 }
 

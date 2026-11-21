@@ -1395,10 +1395,10 @@ def check_dep_exists(
         exe = find_conda_exe() if name == "conda" else find_mamba_exe()
         return exe is not None
     # Apps that aren't run by their name, or not on every OS
-    if name == "word":
-        from calkit.docx import word_installed
+    if name in ("word", "excel", "powerpoint"):
+        from calkit.office import is_office_app_installed
 
-        return word_installed()
+        return is_office_app_installed(name)
     if name == "libreoffice":
         from calkit.docx import find_soffice
 

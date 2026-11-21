@@ -35,6 +35,8 @@ import subprocess
 import sys
 from typing import Literal, TypedDict
 
+from calkit.office import OFFICE_APPS
+
 
 class _InstallerRequired(TypedDict):
     script: str
@@ -354,6 +356,27 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "binary": "soffice",
         },
     },
+    **{
+        app: {
+            "mac": {
+                "script": f"brew install --cask microsoft-{app}",
+                "path_add": f"/Applications/{bundle}.app/Contents/MacOS",
+                "requires": ["brew"],
+                "binary": bundle,
+            },
+            # Microsoft 365 Apps, the only Office winget has, installs
+            # Word, Excel, and PowerPoint together
+            "windows": {
+                "script": _WINGET + "Microsoft.Office --source winget",
+                "path_add": [
+                    "%ProgramFiles%\\Microsoft Office\\root\\Office16",
+                    "%ProgramFiles(x86)%\\Microsoft Office\\root\\Office16",
+                ],
+                "binary": exe,
+            },
+        }
+        for app, (exe, bundle) in OFFICE_APPS.items()
+    },
     # Converts equations for Word exports of LaTeX documents
     "pandoc": {
         "mac": {
@@ -484,6 +507,14 @@ _PLATFORM_UNSUPPORTED: dict[str, dict[Platform, str]] = {
     },
 }
 _PLATFORM_UNSUPPORTED["Rscript"] = _PLATFORM_UNSUPPORTED["R"]
+for _app in OFFICE_APPS:
+    _PLATFORM_UNSUPPORTED[_app] = {
+        "linux": (
+            "Microsoft Office doesn't run on Linux; for converting "
+            "documents, install LibreOffice with "
+            "'calkit install libreoffice'."
+        ),
+    }
 _PLATFORM_UNSUPPORTED["opencode"] = {
     "windows": (
         "Install OpenCode with npm, e.g., "

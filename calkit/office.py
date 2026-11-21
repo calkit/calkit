@@ -1,6 +1,44 @@
 """Functionality for working with Microsoft Office."""
 
 import os
+import sys
+
+# Each app's executable, which it registers the path of on Windows, and
+# its app bundle's name on macOS
+OFFICE_APPS = {
+    "word": ("Winword.exe", "Microsoft Word"),
+    "excel": ("excel.exe", "Microsoft Excel"),
+    "powerpoint": ("powerpnt.exe", "Microsoft PowerPoint"),
+}
+
+
+def is_office_app_installed(app: str) -> bool:
+    """Whether an Office app, e.g., Word, is installed, which only it can
+    tell on Windows, through the path it registers."""
+    exe, bundle = OFFICE_APPS[app]
+    if sys.platform == "darwin":
+        return any(
+            os.path.isdir(os.path.expanduser(f"{d}/{bundle}.app"))
+            for d in ("/Applications", "~/Applications")
+        )
+    if sys.platform == "win32":
+        import winreg
+
+        # Machine-wide, else for this user, as Office installs either way
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                winreg.CloseKey(
+                    winreg.OpenKey(
+                        hive,
+                        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion"
+                        f"\\App Paths\\{exe}",
+                    )
+                )
+            except OSError:
+                continue
+            return True
+        return False
+    return False
 
 
 def excel_chart_to_image(

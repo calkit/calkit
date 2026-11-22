@@ -153,46 +153,67 @@ def describe_storage(
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ) -> None:
-    """Describe where the project's large files are stored on the hub."""
+    """Describe where the project's files are stored.
 
-    def get_storage_name(resource: dict | None) -> str:
+    Projects have two kinds of storage: Git, i.e., the project's Git remote,
+    e.g., on GitHub, and DVC, which the hub says where to find.
+    """
+
+    def get_dvc_storage_name(resource: dict | None) -> str:
         if resource is None:
             return "Calkit Hub storage"
         if resource.get("kind") == "hf-bucket":
             return f"Hugging Face bucket {resource['bucket']}"
         return str(resource["bucket"])
 
+    def get_git_storage_name(url: str | None) -> str | None:
+        if url is None:
+            return None
+        owner_and_name = calkit.get_owner_and_name_from_git_url(url)
+        if "github.com" in url and owner_and_name is not None:
+            return f"GitHub repo {'/'.join(owner_and_name)}"
+        return url
+
+    def format_gb(gb: float) -> str:
+        return f"{gb * 1000:.1f} MB" if gb < 1 else f"{gb:.2f} GB"
+
     project = calkit.detect_project_name()
+    try:
+        git_url: str | None = calkit.git.get_repo().remote().url
+    except Exception:
+        git_url = None
     try:
         settings = calkit.hub.get(f"/projects/{project}/storage")
         usage = calkit.hub.get(f"/projects/{project}/storage/usage")
     except Exception as e:
         raise_error(f"Couldn't get storage for {project}: {e}")
     # Reads fall back through earlier storage, then the hub's own
-    previous = [get_storage_name(r) for r in settings["previous"]]
+    previous = [get_dvc_storage_name(r) for r in settings["previous"]]
     if settings["dvc"] is not None:
-        previous.append(get_storage_name(None))
+        previous.append(get_dvc_storage_name(None))
     account = usage.get("account")
+    git_storage = get_git_storage_name(git_url)
+    dvc_storage = get_dvc_storage_name(settings["dvc"])
     desc = {
         "project": project,
-        "storage": get_storage_name(settings["dvc"]),
-        "previous_storage": previous,
-        "hub_used_gb": usage["project_used_gb"],
-        "account_hub_used_gb": account["used_gb"] if account else None,
-        "account_hub_limit_gb": account["limit_gb"] if account else None,
+        "git": {"storage": git_storage, "url": git_url},
+        "dvc": {
+            "storage": dvc_storage,
+            "previous_storage": previous,
+            "hub_used_gb": usage["project_used_gb"],
+            "account_hub_used_gb": account["used_gb"] if account else None,
+            "account_hub_limit_gb": account["limit_gb"] if account else None,
+        },
     }
     if json_output:
         echo_json(desc)
         return
-
-    def format_gb(gb: float) -> str:
-        return f"{gb * 1000:.1f} MB" if gb < 1 else f"{gb:.2f} GB"
-
     _echo_description(
         {
             "project": project,
-            "storage": desc["storage"],
-            "also read from": ", ".join(previous) or None,
+            "git storage": git_storage,
+            "dvc storage": dvc_storage,
+            "dvc also read from": ", ".join(previous) or None,
             "hub storage used": format_gb(usage["project_used_gb"]),
             "account hub storage used": (
                 f"{format_gb(account['used_gb'])} of "

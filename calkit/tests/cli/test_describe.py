@@ -3,7 +3,7 @@
 import json
 import os
 import subprocess
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -182,29 +182,40 @@ def test_describe_storage():
             "account": {"used_gb": 3.0, "limit_gb": 10},
         },
     }
+    repo = MagicMock()
+    repo.remote.return_value.url = "git@github.com:someone/proj.git"
     with (
         patch.object(
             calkit, "detect_project_name", return_value="someone/proj"
         ),
+        patch.object(calkit.git, "get_repo", return_value=repo),
         patch.object(calkit.hub, "get", side_effect=responses.get),
     ):
         result = runner.invoke(app, ["describe", "storage", "--json"])
         assert result.exit_code == 0, result.output
         assert json.loads(result.output) == {
             "project": "someone/proj",
-            "storage": "Hugging Face bucket someone/proj",
-            "previous_storage": ["Calkit Hub storage"],
-            "hub_used_gb": 0.25,
-            "account_hub_used_gb": 3.0,
-            "account_hub_limit_gb": 10,
+            "git": {
+                "storage": "GitHub repo someone/proj",
+                "url": "git@github.com:someone/proj.git",
+            },
+            "dvc": {
+                "storage": "Hugging Face bucket someone/proj",
+                "previous_storage": ["Calkit Hub storage"],
+                "hub_used_gb": 0.25,
+                "account_hub_used_gb": 3.0,
+                "account_hub_limit_gb": 10,
+            },
         }
         result = runner.invoke(app, ["describe", "storage"])
-        assert "storage: Hugging Face bucket someone/proj" in result.output
-        assert "also read from: Calkit Hub storage" in result.output
+        assert "git storage: GitHub repo someone/proj" in result.output
+        assert "dvc storage: Hugging Face bucket someone/proj" in result.output
+        assert "dvc also read from: Calkit Hub storage" in result.output
         assert "hub storage used: 250.0 MB" in result.output
         assert "account hub storage used: 3.00 GB of 10 GB" in result.output
         # Someone who doesn't manage the account only sees the project's,
-        # and a project on the hub's own storage reads from nothing else
+        # a project on the hub's own storage reads from nothing else, and a
+        # remote elsewhere is shown as is
         responses["/projects/someone/proj/storage"] = {
             "dvc": None,
             "previous": [],
@@ -213,8 +224,10 @@ def test_describe_storage():
             "project_used_gb": 1.5,
             "account": None,
         }
+        repo.remote.return_value.url = "https://gitlab.com/someone/proj"
         result = runner.invoke(app, ["describe", "storage"])
-        assert "storage: Calkit Hub storage" in result.output
+        assert "git storage: https://gitlab.com/someone/proj" in result.output
+        assert "dvc storage: Calkit Hub storage" in result.output
         assert "also read from" not in result.output
         assert "hub storage used: 1.50 GB" in result.output
         assert "account hub storage used" not in result.output

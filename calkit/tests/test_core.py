@@ -652,7 +652,8 @@ def test_check_requirements_offers_an_apps_setup_command(
         mock.patch(
             "calkit.install.prompt_and_install", return_value=False
         ) as m_prompt,
-        pytest.raises(ValueError, match="app 'code' not found"),
+        # Named as the project declares it
+        pytest.raises(ValueError, match="app 'vscode' not found"),
     ):
         calkit.check_requirements(
             requirements=[{"kind": "app", "name": "vscode"}],
@@ -800,9 +801,7 @@ def test_check_dep_exists_conda_off_path(monkeypatch):
     import calkit.office
 
     for found in [True, False]:
-        monkeypatch.setattr(
-            calkit.office, "is_office_app_installed", lambda app: found
-        )
+        monkeypatch.setattr(calkit.office, "app_installed", lambda app: found)
         monkeypatch.setattr(
             calkit.docx,
             "find_soffice",
@@ -1106,6 +1105,11 @@ def test_get_version_checked_app_names():
     assert calkit.get_version_checked_app_names(
         ck_info, stage_names={"s"}
     ) == ["jq", "ffmpeg"]
+    # Apps are asked as the binary they provide, e.g., code for vscode
+    ck_info["requirements"].append("vscode>=1.80")
+    assert calkit.get_version_checked_app_names(
+        ck_info, stage_names=set()
+    ) == ["jq", "code"]
     # A malformed requirement says how to write one
     ck_info["environments"]["ml"]["requirements"] = [{"app": "sbatch"}]
     with pytest.raises(ValueError, match="list an app by name"):

@@ -116,6 +116,18 @@ caller at the top.
 
 Start function names with a verb, e.g., `get_evidence_kind` rather than
 `evidence_kind`.
+
+<!-- TODO: needs human review -->
+
+A function returning a bool may drop its verb when its name reads as a
+statement, e.g., `app_installed`, short for `app_is_installed`.
+
+<!-- TODO: needs human review -->
+
+Don't repeat a module's name in its functions, since they're called through
+it, e.g., `calkit.office.app_installed`, not
+`calkit.office.office_app_installed`.
+
 Name functions for what they return,
 e.g., `get_image_name` rather than `get_image`,
 which could just as well return an image.

@@ -2834,9 +2834,7 @@ def to_docx(
         raise_error(f"{output} already exists; use --force to overwrite it")
     if engine is None:
         engine = (
-            "word"
-            if calkit.office.is_office_app_installed("word")
-            else "libreoffice"
+            "word" if calkit.office.app_installed("word") else "libreoffice"
         )
     # Converted beside the output, then read in and removed, so a failed
     # export doesn't leave the bare conversion where the export goes

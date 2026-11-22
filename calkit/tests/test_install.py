@@ -82,6 +82,8 @@ def test_get_installer():
         with mock.patch("calkit.install.sys.platform", "darwin"):
             mac = install.get_installer(app)
         assert mac is not None and mac["script"].endswith(cask)
+        # Homebrew can put it in ~/Applications
+        assert any(p.startswith("~/Applications") for p in mac["path_add"])
         with mock.patch("calkit.install.sys.platform", "win32"):
             win = install.get_installer(app)
         assert win is not None and "Microsoft.Office" in win["script"]

@@ -360,7 +360,11 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
         app: {
             "mac": {
                 "script": f"brew install --cask microsoft-{app}",
-                "path_add": f"/Applications/{bundle}.app/Contents/MacOS",
+                # Homebrew's --appdir can put it in ~/Applications
+                "path_add": [
+                    f"{d}/{bundle}.app/Contents/MacOS"
+                    for d in ("/Applications", "~/Applications")
+                ],
                 "requires": ["brew"],
                 "binary": bundle,
             },
@@ -510,8 +514,8 @@ _PLATFORM_UNSUPPORTED["Rscript"] = _PLATFORM_UNSUPPORTED["R"]
 for _app in OFFICE_APPS:
     _PLATFORM_UNSUPPORTED[_app] = {
         "linux": (
-            "Microsoft Office doesn't run on Linux; for converting "
-            "documents, install LibreOffice with "
+            "Microsoft Office doesn't run on Linux; to convert documents "
+            "here, require 'libreoffice' instead and install it with "
             "'calkit install libreoffice'."
         ),
     }

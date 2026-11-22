@@ -35,6 +35,8 @@ import subprocess
 import sys
 from typing import Literal, TypedDict
 
+from calkit.office import OFFICE_APPS
+
 
 class _InstallerRequired(TypedDict):
     script: str
@@ -223,6 +225,35 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "%ProgramFiles%\\Git\\cmd",
         },
     },
+    "gh": {
+        "mac": {
+            "script": "brew install gh",
+            "path_add": _BREW_BINS,
+            "requires": ["brew"],
+        },
+        # GitHub's own apt and dnf repos take several steps to add
+        "linux": {
+            "script": "pixi global install gh",
+            "path_add": "~/.pixi/bin",
+            "requires": ["pixi"],
+        },
+        "windows": {
+            "script": _WINGET + "GitHub.cli --source winget",
+            "path_add": "%ProgramFiles%\\GitHub CLI",
+        },
+    },
+    # Comes with the developer tools on macOS and Linux
+    "make": {
+        "windows": {
+            "script": _WINGET + "ezwinports.make --source winget",
+            # Where winget unpacks it, which it adds to PATH, rather than
+            # linking it, without Developer Mode
+            "path_add": (
+                "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\"
+                "ezwinports.make_*\\bin"
+            ),
+        },
+    },
     "docker": {
         "mac": {
             "script": "brew install --cask docker",
@@ -240,7 +271,21 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "/usr/bin",
         },
         "windows": {
-            "script": _WINGET + "Docker.DockerDesktop",
+            # Docker Desktop's WSL 2 backend needs Virtual Machine Platform,
+            # which isn't always enabled, and enabling it needs an elevated
+            # shell (with a UAC prompt) and a restart
+            "script": (
+                'powershell -ExecutionPolicy ByPass -c "if ((Get-CimInstance '
+                "Win32_OptionalFeature | Where-Object Name -eq "
+                "'VirtualMachinePlatform').InstallState -ne 1) { "
+                "Start-Process powershell -Verb runAs -Wait -ErrorAction Stop "
+                "-ArgumentList '-NoProfile','-Command','Enable-Windows"
+                "OptionalFeature -Online -FeatureName VirtualMachinePlatform "
+                "-NoRestart'; Write-Host 'Restart Windows to finish enabling "
+                "Virtual Machine Platform' }\" && "
+                + _WINGET
+                + "Docker.DockerDesktop"
+            ),
             "path_add": "%ProgramFiles%\\Docker\\Docker\\resources\\bin",
         },
     },
@@ -311,6 +356,31 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "binary": "soffice",
         },
     },
+    **{
+        app: {
+            "mac": {
+                "script": f"brew install --cask microsoft-{app}",
+                # Homebrew's --appdir can put it in ~/Applications
+                "path_add": [
+                    f"{d}/{bundle}.app/Contents/MacOS"
+                    for d in ("/Applications", "~/Applications")
+                ],
+                "requires": ["brew"],
+                "binary": bundle,
+            },
+            # Microsoft 365 Apps, the only Office winget has, installs
+            # Word, Excel, and PowerPoint together
+            "windows": {
+                "script": _WINGET + "Microsoft.Office --source winget",
+                "path_add": [
+                    "%ProgramFiles%\\Microsoft Office\\root\\Office16",
+                    "%ProgramFiles(x86)%\\Microsoft Office\\root\\Office16",
+                ],
+                "binary": exe,
+            },
+        }
+        for app, (exe, bundle) in OFFICE_APPS.items()
+    },
     # Converts equations for Word exports of LaTeX documents
     "pandoc": {
         "mac": {
@@ -321,6 +391,49 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
         "windows": {
             "script": _WINGET + "JohnMacFarlane.Pandoc",
             "path_add": "%LOCALAPPDATA%\\Pandoc",
+        },
+    },
+    # Coding agents, with their own installers; ``calkit install`` also
+    # adds Calkit's plugin to them
+    "claude": {
+        "unix": {
+            "script": "curl -fsSL https://claude.ai/install.sh | bash",
+            "path_add": "~/.local/bin",
+        },
+        "windows": {
+            "script": (
+                "powershell -ExecutionPolicy ByPass -c "
+                '"irm https://claude.ai/install.ps1 | iex"'
+            ),
+            "path_add": "~\\.local\\bin",
+            # Calkit's plugin is added with Git, and Claude Code uses Git
+            # Bash there when it can
+            "requires": ["git"],
+        },
+    },
+    "codex": {
+        "unix": {
+            # Without asking to start Codex, which would hold up adding the
+            # plugin until it exits
+            "script": (
+                "curl -fsSL https://chatgpt.com/codex/install.sh "
+                "| CODEX_NON_INTERACTIVE=1 sh"
+            ),
+            "path_add": "~/.local/bin",
+        },
+        "windows": {
+            "script": (
+                "powershell -ExecutionPolicy ByPass -c "
+                "\"$env:CODEX_NON_INTERACTIVE='1'; "
+                'irm https://chatgpt.com/codex/install.ps1 | iex"'
+            ),
+            "path_add": "%LOCALAPPDATA%\\Programs\\OpenAI\\Codex\\bin",
+        },
+    },
+    "opencode": {
+        "unix": {
+            "script": "curl -fsSL https://opencode.ai/v2/install | bash",
+            "path_add": "~/.opencode/bin",
         },
     },
 }
@@ -335,7 +448,7 @@ INSTALLERS["npm"] = _NODE_INSTALLER
 INSTALLERS["npx"] = _NODE_INSTALLER
 # Names an app goes by that aren't a binary it provides, which is what an
 # install is checked for afterward
-NAME_ALIASES = {"nodejs": "node"}
+NAME_ALIASES = {"nodejs": "node", "vscode": "code"}
 
 
 # Apps that are known to be unsupported on a given platform, mapped to the
@@ -398,6 +511,21 @@ _PLATFORM_UNSUPPORTED: dict[str, dict[Platform, str]] = {
     },
 }
 _PLATFORM_UNSUPPORTED["Rscript"] = _PLATFORM_UNSUPPORTED["R"]
+for _app in OFFICE_APPS:
+    _PLATFORM_UNSUPPORTED[_app] = {
+        "linux": (
+            "Microsoft Office doesn't run on Linux; to convert documents "
+            "here, require 'libreoffice' instead and install it with "
+            "'calkit install libreoffice'."
+        ),
+    }
+_PLATFORM_UNSUPPORTED["opencode"] = {
+    "windows": (
+        "Install OpenCode with npm, e.g., "
+        "'npm i -g @opencode/cli@latest', then run 'calkit install opencode' "
+        "again to add Calkit's plugin."
+    ),
+}
 
 
 def get_unsupported_message(app: str) -> str | None:
@@ -506,6 +634,58 @@ def _add_to_path(entry: Installer) -> None:
             os.environ["PATH"] = path_add + os.pathsep + current_path
 
 
+def get_wsl_version() -> tuple[int, ...] | None:
+    """Return the version of WSL on this Windows machine, or None where
+    it's missing or the inbox version, which doesn't know its version.
+    """
+    try:
+        p = subprocess.run(
+            ["wsl", "--version"],
+            capture_output=True,
+            # It writes UTF-16 otherwise, at least in older versions
+            env=os.environ | {"WSL_UTF8": "1"},
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode != 0:
+        return None
+    # The first line has WSL's own version, whatever the language
+    out = p.stdout.decode("utf-8", errors="ignore").replace("\x00", "")
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+    return tuple(int(n) for n in match.groups()) if match else None
+
+
+def get_docker_windows_message() -> str | None:
+    """Return what Docker Desktop needs that this Windows machine lacks,
+    and how to get it, if anything.
+    """
+    import platform
+
+    # Windows 10 22H2 or Windows 11 23H2 or later; Windows 11's builds
+    # start at 22000
+    build = int(platform.version().split(".")[-1])
+    if build < 19045 or 22000 <= build < 22631:
+        return (
+            "Docker Desktop needs Windows 10 22H2 or Windows 11 23H2 or "
+            f"later, but this is build {build}; update Windows first."
+        )
+    wsl_version = get_wsl_version()
+    if wsl_version is not None and wsl_version >= (2, 1, 5):
+        return None
+    found = (
+        "isn't installed or is the inbox version"
+        if wsl_version is None
+        else "is " + ".".join(str(n) for n in wsl_version)
+    )
+    return (
+        f"Docker Desktop needs WSL 2.1.5 or later, which {found}. "
+        "To get it, run 'wsl --install --no-distribution', or "
+        "'wsl --update' where WSL is installed, in an admin terminal, "
+        "then restart Windows."
+    )
+
+
 def find(app: str) -> str | None:
     """Find an app's binary on ``PATH``, or where its installer puts it.
 
@@ -562,6 +742,119 @@ def add_vscode_recs(code: str) -> None:
         json.dump(recommended | current, f, indent=2)
 
 
+def can_run_git() -> bool:
+    """Whether Git runs, which on macOS it doesn't before the Command Line
+    Tools are installed, though ``git`` is on ``PATH``.
+    """
+    try:
+        return (
+            subprocess.run(
+                ["git", "--version"], capture_output=True
+            ).returncode
+            == 0
+        )
+    except OSError:
+        return False
+
+
+# Commands that add Calkit's plugin to each coding agent, after its binary
+AGENT_PLUGIN_CMDS: dict[str, list[list[str]]] = {
+    "claude": [
+        ["plugin", "marketplace", "add", "calkit/calkit"],
+        ["plugin", "install", "calkit@calkit"],
+    ],
+    "codex": [
+        [
+            "plugin",
+            "marketplace",
+            "add",
+            "calkit/calkit",
+            "--sparse",
+            ".agents/plugins",
+            "--sparse",
+            "agent-plugin",
+        ],
+        ["plugin", "add", "calkit@calkit"],
+    ],
+    "opencode": [
+        [
+            "plugin",
+            "add",
+            "git+https://github.com/calkit/calkit.git#main::path:agent-plugin",
+        ],
+    ],
+}
+
+
+# Commands that update Calkit's plugin in each coding agent
+AGENT_PLUGIN_UPDATE_CMDS: dict[str, list[list[str]]] = {
+    "claude": [
+        ["plugin", "marketplace", "update", "calkit"],
+        ["plugin", "update", "calkit@calkit"],
+    ],
+    # Upgrading the marketplace succeeds without the plugin, which adding
+    # installs, or updates where it's there
+    "codex": [
+        ["plugin", "marketplace", "upgrade", "calkit"],
+        ["plugin", "add", "calkit@calkit"],
+    ],
+    "opencode": [["plugin", "update"]],
+}
+# Agents that read skills from ``~/.agents/skills``, where copies of
+# Calkit's would duplicate or shadow its plugin's
+AGENTS_READING_SKILL_COPIES = ["codex", "opencode"]
+
+
+def is_agent_logged_in(agent: str, binary_path: str) -> bool:
+    """Whether a coding agent is logged in, which Claude Code needs to be
+    to add plugins.
+
+    One that can't say, e.g., an older version, counts as logged in, so its
+    plugin commands say what's wrong instead.
+    """
+    if agent != "claude":
+        return True
+    try:
+        p = subprocess.run(
+            [binary_path, "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return bool(json.loads(p.stdout).get("loggedIn", True))
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        return True
+
+
+def run_agent_cmds(
+    agent: str, binary_path: str, cmds: list[list[str]]
+) -> bool:
+    """Run an agent's plugin commands, returning whether the last one
+    succeeded, since, e.g., adding a marketplace that's already there fails.
+    """
+    import shlex
+
+    returncode = 0
+    for args in cmds:
+        print(f"  {shlex.join([agent, *args])}")
+        returncode = subprocess.call([binary_path, *args])
+    return returncode == 0
+
+
+def add_agent_plugin(agent: str, binary_path: str) -> bool:
+    """Add Calkit's plugin to a coding agent, returning whether it worked."""
+    return run_agent_cmds(agent, binary_path, AGENT_PLUGIN_CMDS[agent])
+
+
+def update_agent_plugin(agent: str, binary_path: str) -> bool:
+    """Update Calkit's plugin in a coding agent, adding it if that fails,
+    e.g., since it was never added.
+    """
+    if run_agent_cmds(agent, binary_path, AGENT_PLUGIN_UPDATE_CMDS[agent]):
+        return True
+    return add_agent_plugin(agent, binary_path)
+
+
 def install(app: str, entry: Installer | None = None) -> bool:
     """Run the registered install script for ``app`` and update ``PATH``.
 
@@ -577,6 +870,10 @@ def install(app: str, entry: Installer | None = None) -> bool:
     if entry is None:
         return False
     for req in entry.get("requires", []):
+        # One installed but not on PATH yet, e.g., in this shell, is used
+        req_entry = get_installer(req)
+        if find(req) is not None and req_entry is not None:
+            _add_to_path(req_entry)
         if shutil.which(req) is None and not install(req):
             return False
     # capture=False so installers can stream their own progress output
@@ -622,9 +919,13 @@ def prompt_and_install(
     if app == "docker":
         from calkit.core import is_wsl
 
+        if _current_platform() == "windows":
+            docker_message = get_docker_windows_message()
+            if docker_message:
+                print(f"  {docker_message}")
         # Docker Desktop on Windows can serve WSL too, and then the same
         # Docker works on both sides
-        if is_wsl():
+        elif is_wsl():
             print(
                 "  Docker Desktop on Windows can also provide Docker here: "
                 "install it in Windows, then enable this distro in its "

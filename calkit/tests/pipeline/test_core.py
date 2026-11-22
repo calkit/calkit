@@ -5178,7 +5178,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
     monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
     monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-no-soffice"])
-    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-no-powerpoint"])
+    monkeypatch.setattr(POWERPOINT, "locate", None)
     gated, errors = calkit.pipeline.get_gated_stages(
         ck_info, stage_names=["drawn", "photo", "slide"], interactive=False
     )

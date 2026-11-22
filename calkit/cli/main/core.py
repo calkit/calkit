@@ -427,6 +427,7 @@ def clone(
     ] = False,
 ) -> None:
     """Clone or download a copy of a project."""
+    from calkit import install
     from calkit.config import normalize_hub_url
 
     def hub_url(hub: str) -> str:
@@ -468,17 +469,48 @@ def clone(
     # given by its repo URL
     if hub is not None:
         calkit.config.set_hub(hub_url(hub))
+    # A new machine may not have Git yet
+    if not install.can_run_git() and not install.prompt_and_install(
+        "git", interactive=calkit.core.is_tty()
+    ):
+        raise_error(
+            install.get_unsupported_message("git") or "Git is required"
+        )
     # Use SSH for GitHub when it's set up, unless asked for one or the other,
     # so pushing later needs no token
+    ssh_given = use_ssh is True
     if use_ssh is False and url.startswith("git@github.com:"):
         url = "https://github.com/" + url.removeprefix("git@github.com:")
     on_github = url.startswith("https://github.com/")
+    ssh_ok = False
     if use_ssh is None:
-        use_ssh = on_github and calkit.github.can_use_ssh()
+        use_ssh = ssh_ok = on_github and calkit.github.can_use_ssh()
         if use_ssh:
             typer.echo("Cloning over SSH, which is set up for GitHub")
     if use_ssh and on_github:
         url = url.replace("https://github.com/", "git@github.com:")
+    # Cloning over SSH needs a key GitHub accepts, so offer to add one
+    if (
+        url.startswith("git@github.com:")
+        and not ssh_ok
+        and calkit.core.is_tty()
+        and not calkit.github.can_use_ssh()
+    ):
+        if typer.confirm(
+            "SSH not set up for GitHub. Set up now?", default=True
+        ):
+            from calkit.cli.config import config_github_ssh
+
+            # It exits early if SSH works after all, e.g., once GitHub's
+            # host key is trusted, or if setting it up fails
+            try:
+                config_github_ssh()
+            except typer.Exit:
+                pass
+            ssh_ok = calkit.github.can_use_ssh(interactive=True)
+        if not ssh_ok and not ssh_given:
+            typer.echo("Cloning over HTTPS")
+            url = "https://github.com/" + url.removeprefix("git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
     if not non_recursive:
@@ -639,6 +671,47 @@ def get_status(
             if isinstance(spinner, Status):
                 spinner.start()
 
+    def get_pipeline_status() -> calkit.pipeline.PipelineStatus:
+        return calkit.pipeline.get_status(
+            ck_info=ck_info,
+            targets=targets,
+            check_environments=not no_check_envs,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+            with_data_status="dvc" in (categories or []),
+            with_storage_problems="dvc" in (categories or []),
+            quiet_environment_checks=True,
+            progress=step,
+            start_docker=start_docker if can_ask else None,
+        )
+
+    def get_requirements_problem(interactive: bool) -> str | None:
+        # What the project's requirements need that this machine lacks,
+        # offering to install it with the spinner out of the way
+        import contextlib
+        import io
+
+        if interactive and isinstance(spinner, Status):
+            spinner.stop()
+        try:
+            # Quiet unless asking, keeping stdout clean for --json
+            out = sys.stderr if interactive else io.StringIO()
+            with contextlib.redirect_stdout(out):
+                for req_wdir, req_info in calkit.iter_projects(
+                    ck_info=ck_info
+                ):
+                    with calkit.in_project(req_wdir):
+                        calkit.check_requirements(
+                            ck_info=req_info, interactive=interactive
+                        )
+        except Exception as e:
+            # E.g., typer.Exit, which says nothing
+            return str(e) or "Unmet requirements"
+        finally:
+            if interactive and isinstance(spinner, Status):
+                spinner.start()
+        return None
+
     def get_dvc_data_status() -> dict:
         # Reuse what the pipeline status computed under the same DVC lock
         if (
@@ -775,23 +848,28 @@ def get_status(
             # reporting status
             step("Syncing zip files")
             calkit.dvc.zip.sync_all(direction="to-zip")
-            pipeline_status = calkit.pipeline.get_status(
-                ck_info=ck_info,
-                targets=targets,
-                check_environments=not no_check_envs,
-                clean_notebooks=True,
-                compile_to_dvc=True,
-                with_data_status="dvc" in categories,
-                with_storage_problems="dvc" in categories,
-                quiet_environment_checks=True,
-                progress=step,
-                start_docker=start_docker if can_ask else None,
-            )
+            pipeline_status = get_pipeline_status()
+            unmet = None
+            if pipeline_status.failed_environment_checks:
+                # One may fail to build for an app the project requires,
+                # e.g., Node.js, which is offered as 'calkit run' does
+                step("Checking requirements")
+                unmet = get_requirements_problem(interactive=False)
+                if unmet is not None and can_ask:
+                    unmet = get_requirements_problem(interactive=True)
+                    if unmet is None:
+                        pipeline_status = get_pipeline_status()
             if pipeline_status.failed_environment_checks:
                 warn(
                     "Failed pipeline environment checks for: "
                     + ", ".join(pipeline_status.failed_environment_checks)
-                    + ". Run 'calkit check env -n <name>' for details.",
+                    + ". Run 'calkit check env -n <name>' for details."
+                    + (
+                        f"\n{unmet}\nRun 'calkit check reqs' to install or "
+                        "set up what's missing."
+                        if unmet is not None
+                        else ""
+                    ),
                     err=as_json,
                 )
         # Checking questions needs to know which stages are stale, which is the
@@ -4348,7 +4426,7 @@ def run(
     # Create a file handler for dvc.stage.run logger. Append mode matters:
     # stage output is teed into this file through a second handle, and a
     # truncating handle would overwrite it.
-    file_handler = logging.FileHandler(log_fpath, mode="a")
+    file_handler = logging.FileHandler(log_fpath, mode="a", encoding="utf-8")
     run_history_length = calkit.config.read().run_history_length
     # Keep the private log directory bounded; the new log counts toward the
     # cap and is protected so it can never be pruned out from under this run.
@@ -4434,7 +4512,7 @@ def run(
         os.environ.pop("CALKIT_FORCE", None)
         dvc.stage.run._run = orig_run
     # Parse log to get timing and which stages ran
-    with open(log_fpath, "r") as f:
+    with open(log_fpath, encoding="utf-8", errors="replace") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(
             log_content, run_finished=True
@@ -5773,14 +5851,15 @@ def run_in_env(
     name="install",
     help=(
         "Install a registered native dependency (e.g., pixi, uv) via its "
-        "upstream installer for the current platform."
+        "upstream installer for the current platform. For a coding agent "
+        "(claude, codex, opencode), also add Calkit's plugin."
     ),
 )
 def install_app(
     name: Annotated[
         str,
         typer.Argument(
-            help="The app to install (e.g., 'pixi', 'uv').",
+            help="The app to install (e.g., 'pixi', 'uv', 'claude').",
         ),
     ],
     yes: Annotated[
@@ -5793,30 +5872,65 @@ def install_app(
     ] = False,
 ) -> None:
     from calkit import install as _install
+    from calkit.core import is_tty
 
     name = _install.NAME_ALIASES.get(name, name)
-    # Surface a platform-specific "use X instead" message before the
-    # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
-    unsupported = _install.get_unsupported_message(name)
-    if unsupported:
-        raise_error(unsupported)
-    entry = _install.get_installer(name)
-    if entry is None:
-        raise_error(
-            f"No registered installer for '{name}'. Known apps: "
-            + ", ".join(sorted(_install.INSTALLERS))
-        )
-    # ``--yes`` makes this scriptable (CI, provisioning) without losing
-    # the safety prompt for plain interactive use.
-    if yes:
-        ok = _install.install(name)
-    else:
-        from calkit.core import is_tty
-
-        ok = _install.prompt_and_install(name, interactive=is_tty())
-    if not ok:
-        raise_error(f"Failed to install '{name}'")
-    calkit.echo(f"✅ Installed '{name}'")
+    is_agent = name in _install.AGENT_PLUGIN_CMDS
+    # An agent that's already installed only needs Calkit's plugin
+    binary_path = _install.find(name) if is_agent else None
+    if binary_path is None:
+        # Surface a platform-specific "use X instead" message before the
+        # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
+        unsupported = _install.get_unsupported_message(name)
+        if unsupported:
+            raise_error(unsupported)
+        if _install.get_installer(name) is None:
+            raise_error(
+                f"No registered installer for '{name}'. Known apps: "
+                + ", ".join(sorted(_install.INSTALLERS))
+            )
+        # ``--yes`` makes this scriptable (CI, provisioning) without losing
+        # the safety prompt for plain interactive use, which says what
+        # Docker needs on Windows itself
+        if yes:
+            if name == "docker" and sys.platform == "win32":
+                docker_message = _install.get_docker_windows_message()
+                if docker_message:
+                    warn(docker_message)
+            ok = _install.install(name)
+        else:
+            ok = _install.prompt_and_install(name, interactive=is_tty())
+        if not ok:
+            raise_error(f"Failed to install '{name}'")
+        calkit.echo(f"✅ Installed '{name}'")
+    if not is_agent:
+        return
+    binary_path = _install.find(name)
+    if binary_path is None:
+        raise_error(f"'{name}' not found on PATH; restart your shell")
+    # Plugin marketplaces are cloned with Git
+    if not _install.can_run_git():
+        if yes:
+            ok = _install.install("git")
+        else:
+            ok = _install.prompt_and_install("git", interactive=is_tty())
+        if not ok:
+            raise_error(
+                _install.get_unsupported_message("git")
+                or "Git is required to add Calkit's plugin"
+            )
+    # Claude Code adds plugins only once logged in, which a new install isn't
+    if not _install.is_agent_logged_in(name, binary_path):
+        login_cmd = [binary_path, "auth", "login"]
+        if not is_tty() or subprocess.call(login_cmd) != 0:
+            raise_error(
+                f"Log in with '{name} auth login', then run "
+                f"'calkit install {name}' again to add Calkit's plugin"
+            )
+    calkit.echo(f"Adding Calkit plugin to '{name}'")
+    if not _install.add_agent_plugin(name, binary_path):
+        raise_error(f"Failed to add Calkit plugin to '{name}'")
+    calkit.echo(f"✅ Added Calkit plugin to '{name}'")
 
 
 @app.command(name="xproc|runproc", help="Execute a procedure.")

@@ -608,6 +608,16 @@ def update_markdown(
 
 @update_app.command(name="agent-skills")
 def update_agent_skills(
+    copy: Annotated[
+        bool,
+        typer.Option(
+            "--copy",
+            help=(
+                "Copy the skills to `~/.agents/skills` instead, for agents "
+                "without Calkit's plugin."
+            ),
+        ),
+    ] = False,
     quiet: Annotated[
         bool,
         typer.Option(
@@ -616,8 +626,33 @@ def update_agent_skills(
             help="Suppress non-essential output.",
         ),
     ] = False,
-):
-    """Copy packaged Calkit agent skills to `~/.agents/skills`."""
+) -> None:
+    """Update Calkit's plugin in each coding agent on this machine.
+
+    Copies of the skills in `~/.agents/skills` are removed, since they
+    shadow or duplicate the plugin's.
+    """
+    import re
+
+    from calkit import install
+
+    def fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
+        skill_md = os.path.join(dest_dir, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            return
+        with open(skill_md) as f:
+            content = f.read()
+        content = re.sub(
+            r"^(name:\s*)(.+)$",
+            f"\\g<1>{prefixed_name}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        with open(skill_md, "w") as f:
+            f.write(content)
+
+    # Find the skills, packaged or, in a dev install, in the repo
     source = resources.files("calkit").joinpath("agent_skills")
     source_repo = os.path.abspath(
         os.path.join(
@@ -631,50 +666,72 @@ def update_agent_skills(
     use_packaged = source.is_dir()
     if not use_packaged and not os.path.isdir(source_repo):
         raise_error("Bundled agent skills are missing from this installation")
-    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
-    os.makedirs(dest_root, exist_ok=True)
-
-    def _fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
-        skill_md = os.path.join(dest_dir, "SKILL.md")
-        if not os.path.isfile(skill_md):
-            return
-        with open(skill_md) as f:
-            content = f.read()
-        import re
-
-        content = re.sub(
-            r"^(name:\s*)(.+)$",
-            f"\\g<1>{prefixed_name}",
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        with open(skill_md, "w") as f:
-            f.write(content)
-
-    copied = 0
     if use_packaged:
-        for entry in source.iterdir():
-            if not entry.is_dir():
-                continue
-            prefixed = f"calkit-{entry.name}"
-            dest = os.path.join(dest_root, prefixed)
-            with resources.as_file(entry) as source_dir:
-                shutil.copytree(source_dir, dest, dirs_exist_ok=True)
-            _fix_skill_name(dest, prefixed)
-            copied += 1
+        skill_names = [e.name for e in source.iterdir() if e.is_dir()]
     else:
-        for name in os.listdir(source_repo):
-            source_dir = os.path.join(source_repo, name)
-            if not os.path.isdir(source_dir):
-                continue
+        skill_names = [
+            name
+            for name in os.listdir(source_repo)
+            if os.path.isdir(os.path.join(source_repo, name))
+        ]
+    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
+    # Copy for agents without the plugin
+    if copy:
+        os.makedirs(dest_root, exist_ok=True)
+        for name in skill_names:
             prefixed = f"calkit-{name}"
             dest = os.path.join(dest_root, prefixed)
-            shutil.copytree(source_dir, dest, dirs_exist_ok=True)
-            _fix_skill_name(dest, prefixed)
-            copied += 1
-    if not quiet:
-        typer.echo(f"Updated {copied} skills in {dest_root}")
+            if use_packaged:
+                with resources.as_file(source.joinpath(name)) as source_dir:
+                    shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            else:
+                shutil.copytree(
+                    os.path.join(source_repo, name), dest, dirs_exist_ok=True
+                )
+            fix_skill_name(dest, prefixed)
+        if not quiet:
+            typer.echo(f"Updated {len(skill_names)} skills in {dest_root}")
+        return
+    # Update the plugin in each agent found
+    n_found = 0
+    updated = []
+    for agent in install.AGENT_PLUGIN_CMDS:
+        binary_path = install.find(agent)
+        if binary_path is None:
+            continue
+        n_found += 1
+        if not install.is_agent_logged_in(agent, binary_path):
+            warn(
+                f"'{agent}' not logged in, so its Calkit plugin can't be "
+                f"updated; run '{agent} auth login'"
+            )
+            continue
+        if not quiet:
+            typer.echo(f"Updating Calkit plugin in '{agent}'")
+        if install.update_agent_plugin(agent, binary_path):
+            updated.append(agent)
+        else:
+            warn(f"Failed to update Calkit plugin in '{agent}'")
+    if n_found and not updated:
+        raise_error("Failed to update Calkit plugin in any coding agent")
+    if not updated:
+        warn(
+            "No coding agents updated; install one with, e.g., "
+            "'calkit install claude', or use '--copy' for other agents"
+        )
+        return
+    # Remove copies, which only now have a plugin to stand in for them, in
+    # an agent that reads them
+    if not set(updated) & set(install.AGENTS_READING_SKILL_COPIES):
+        return
+    n_removed = 0
+    for name in skill_names:
+        copy_path = os.path.join(dest_root, f"calkit-{name}")
+        if os.path.isdir(copy_path):
+            shutil.rmtree(copy_path)
+            n_removed += 1
+    if n_removed and not quiet:
+        typer.echo(f"Removed {n_removed} copied skills from {dest_root}")
 
 
 def _load_env(env_name: str) -> tuple[dict, dict]:

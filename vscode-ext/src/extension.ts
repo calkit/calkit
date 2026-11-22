@@ -123,6 +123,7 @@ const COMMAND_EDIT_STAGE = "calkit-vscode.editStage";
 const COMMAND_DEFINE_PROVENANCE = "calkit-vscode.defineProvenance";
 const COMMAND_DEFINE_ARTIFACT_STAGE = "calkit-vscode.defineArtifactStage";
 const COMMAND_DEFINE_ARTIFACT_IMPORT = "calkit-vscode.defineArtifactImport";
+const COMMAND_DEFINE_ARTIFACT_CREATED = "calkit-vscode.defineArtifactCreated";
 const COMMAND_RUN_ARTIFACT_STAGE = "calkit-vscode.runArtifactStage";
 const COMMAND_RUN_NOTEBOOK_STAGE = "calkit-vscode.runNotebookStage";
 const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
@@ -1577,6 +1578,27 @@ export function activate(context: vscode.ExtensionContext): void {
           void vscode.window.showErrorMessage(
             (err.stderr ?? err.message ?? String(error)).trim(),
           );
+        }
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_ARTIFACT_CREATED,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot || !item?.nodeId) {
+          return;
+        }
+        const project = projectForArtifact(workspaceRoot, item.nodeId);
+        const marked = await markCreatedByMe(
+          project.projectDir,
+          item.nodeKind === "dataset" ? "dataset" : "figure",
+          project.path,
+        );
+        if (marked) {
+          void refreshPipelineOutputContext(context);
         }
       },
     ),
@@ -3318,6 +3340,63 @@ function buildDagHtml(nonce: string): string {
 </html>`;
 }
 
+/**
+ * Record a figure or dataset as created by whoever Git commits as, e.g.,
+ * drawn or measured by them, asking for an email if Git has none.
+ */
+async function markCreatedByMe(
+  projectDir: string,
+  artifactKind: "figure" | "dataset",
+  relPath: string,
+): Promise<boolean> {
+  const getGitConfig = async (key: string): Promise<string> => {
+    try {
+      const { stdout } = await execFileAsync("git", ["config", key], {
+        cwd: projectDir,
+      });
+      return stdout.trim();
+    } catch {
+      return "";
+    }
+  };
+  const name = await getGitConfig("user.name");
+  const email =
+    (await getGitConfig("user.email")) ||
+    (await vscode.window.showInputBox({
+      title: "Created by me",
+      prompt: "Your email",
+      validateInput: (v) => (v.includes("@") ? undefined : "Not an email"),
+    }));
+  if (!email) {
+    return false;
+  }
+  try {
+    await execFileAsync(
+      "calkit",
+      [
+        "update",
+        artifactKind,
+        relPath,
+        "--created-by-email",
+        email,
+        ...(name ? ["--created-by-name", name] : []),
+      ],
+      { cwd: projectDir },
+    );
+  } catch (err) {
+    const stderr = (err as { stderr?: string }).stderr;
+    void vscode.window.showErrorMessage(
+      stderr?.trim().replace(/^Error: /, "") ||
+        `Failed to update ${artifactKind}: ${String(err)}`,
+    );
+    return false;
+  }
+  void vscode.window.showInformationMessage(
+    `Marked '${path.basename(relPath)}' as created by ${name || email}`,
+  );
+  return true;
+}
+
 async function defineProvenance(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
@@ -3334,19 +3413,28 @@ async function defineProvenance(
 
   const choiceStage = "$(play) Produced by a script or notebook";
   const choiceImported = "$(cloud-download) Imported from an external source";
+  const choiceCreated =
+    artifactKind === "dataset"
+      ? "$(person) Collected or measured by me"
+      : "$(person) Drawn or made by me";
   const notebookChoiceStage =
     "$(play) Run this notebook and record as a pipeline stage";
 
   const picked = await vscode.window.showQuickPick(
     isNotebook
       ? [notebookChoiceStage, choiceImported]
-      : [choiceStage, choiceImported],
+      : [choiceStage, choiceImported, choiceCreated],
     {
       title: `Define source for ${path.basename(fileUri.fsPath)}`,
       placeHolder: "How is this file produced?",
     },
   );
   if (!picked) {
+    return;
+  }
+
+  if (picked === choiceCreated) {
+    await markCreatedByMe(workspaceRoot, artifactKind, relPath);
     return;
   }
 

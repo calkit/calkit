@@ -956,6 +956,7 @@ Options:
 | `--out`                  | list[str] | no       |         | Path to stage output. Figure path will be added automatically.                            |
 | `--deps-from-stage-outs` | str       | no       |         | Stage name from which to add outputs as dependencies.                                     |
 | `--created-by-email`     | str       | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage. |
+| `--created-by-name`      | str       | no       |         | Their name.                                                                               |
 | `--created-by-orcid`     | str       | no       |         | ORCID of whoever made this figure.                                                        |
 | `--created-with-ai`      | list[str] | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                   |
 | `--no-commit`            | boolean   | no       | False   |                                                                                           |
@@ -1203,6 +1204,7 @@ Options:
 | `--out`                  | list[str] | no       |         | Path to stage output. Dataset path will be added automatically.                                                   |
 | `--deps-from-stage-outs` | str       | no       |         | Stage name from which to add outputs as dependencies.                                                             |
 | `--created-by-email`     | str       | no       |         | Email of whoever collected this data for the project, which marks it as primary rather than imported or computed. |
+| `--created-by-name`      | str       | no       |         | Their name.                                                                                                       |
 | `--created-by-orcid`     | str       | no       |         | ORCID of whoever collected this data.                                                                             |
 | `--created-with-ai`      | list[str] | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                           |
 | `--no-commit`            | boolean   | no       | False   |                                                                                                                   |
@@ -3694,11 +3696,15 @@ Arguments:
 
 Options:
 
-| Option                | Type | Required | Default | Description                                                                                                                                                                           |
-| --------------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
-| `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
-| `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+| Option                | Type      | Required | Default | Description                                                                                                                                                                           |
+| --------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from`     | str       | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
+| `--imported-from-url` | str       | no       |         | URL the figure was imported from.                                                                                                                                                     |
+| `--stage`             | str       | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+| `--created-by-email`  | str       | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage.                                                                                             |
+| `--created-by-name`   | str       | no       |         | Name of whoever made this figure.                                                                                                                                                     |
+| `--created-by-orcid`  | str       | no       |         | ORCID of whoever made this figure.                                                                                                                                                    |
+| `--created-with-ai`   | list[str] | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                                                                                               |
 
 <a id="subcommand-update-question"></a>
 
@@ -3778,16 +3784,20 @@ Arguments:
 
 Options:
 
-| Option                     | Type     | Required | Default | Description                                                                                                                                                                           |
-| -------------------------- | -------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--imported-from`          | str      | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
-| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                                                                                                                    |
-| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                                                                                                                             |
-| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                                                                                                                              |
-| `--imported-from-git-ref`  | str      | no       |         | Branch, tag, or commit to follow, e.g. 'main'. The commit it resolves to is recorded in .calkit/imports.json by 'calkit sync import', not here.                                       |
-| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
-| `--imported-from-date`     | %Y-%m-%d | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                                                                |
-| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                                                                                                                                |
+| Option                     | Type      | Required | Default | Description                                                                                                                                                                           |
+| -------------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from`          | str       | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
+| `--imported-from-url`      | str       | no       |         | URL the dataset was imported from.                                                                                                                                                    |
+| `--imported-from-doi`      | str       | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                                                                                                                             |
+| `--imported-from-git-url`  | str       | no       |         | Clone URL of the Git repo the dataset was imported from.                                                                                                                              |
+| `--imported-from-git-ref`  | str       | no       |         | Branch, tag, or commit to follow, e.g. 'main'. The commit it resolves to is recorded in .calkit/imports.json by 'calkit sync import', not here.                                       |
+| `--imported-from-git-path` | str       | no       |         | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
+| `--imported-from-date`     | %Y-%m-%d  | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                                                                |
+| `--stage`                  | str       | no       |         | Name of the pipeline stage that produces this dataset.                                                                                                                                |
+| `--created-by-email`       | str       | no       |         | Email of whoever collected this data, for one collected for the project rather than imported or computed.                                                                             |
+| `--created-by-name`        | str       | no       |         | Name of whoever collected this data.                                                                                                                                                  |
+| `--created-by-orcid`       | str       | no       |         | ORCID of whoever collected this data.                                                                                                                                                 |
+| `--created-with-ai`        | list[str] | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                                                                                               |
 
 <a id="subcommand-update-hub"></a>
 

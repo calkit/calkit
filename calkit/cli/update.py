@@ -1604,14 +1604,60 @@ def update_figure(
             help="Name of the pipeline stage that produces this figure.",
         ),
     ] = None,
+    created_by_email: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-email",
+            help="Email of whoever made this figure, for one drawn by hand rather than produced by a stage.",
+        ),
+    ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-name", help="Name of whoever made this figure."
+        ),
+    ] = None,
+    created_by_orcid: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-orcid", help="ORCID of whoever made this figure."
+        ),
+    ] = None,
+    created_with_ai: Annotated[
+        list[str],
+        typer.Option(
+            "--created-with-ai",
+            help=(
+                "Generative AI tool they used, e.g. 'Claude Opus 5'. "
+                "Repeat for several."
+            ),
+        ),
+    ] = [],
 ) -> None:
     """Update a figure entry in calkit.yaml."""
+    from pydantic import ValidationError
+
+    from calkit.cli.new import _person_from_options
+    from calkit.models.core import Figure
+
     if imported_from is not None and imported_from_url is not None:
         raise_error(
             "--imported-from says where this came from on its own, so it "
             "can't be combined with --imported-from-url."
         )
-    if imported_from is None and imported_from_url is None and stage is None:
+    created_by = _person_from_options(
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
+    )
+    if (
+        imported_from is None
+        and imported_from_url is None
+        and stage is None
+        and created_by is None
+    ):
         raise_error("No updates specified.")
     source_dict = None
     if imported_from is not None:
@@ -1622,19 +1668,24 @@ def update_figure(
     figures = ck_info.get("figures", [])
     for fig in figures:
         if fig.get("path") == path:
-            if source_dict is not None:
-                fig["imported_from"] = source_dict
-            if stage is not None:
-                fig["stage"] = stage
             break
     else:
-        entry: dict = {"path": path}
-        if source_dict is not None:
-            entry["imported_from"] = source_dict
-        if stage is not None:
-            entry["stage"] = stage
-        figures.append(entry)
+        fig = {"path": path}
+        figures.append(fig)
         ck_info["figures"] = figures
+    if source_dict is not None:
+        fig["imported_from"] = source_dict
+    if stage is not None:
+        fig["stage"] = stage
+    if created_by is not None:
+        fig["created_by"] = created_by
+    try:
+        Figure.model_validate(fig)
+    except ValidationError as e:
+        raise_error(
+            "Invalid figure: "
+            + "; ".join(str(err["msg"]) for err in e.errors())
+        )
     calkit.save_calkit_info(ck_info)
 
 
@@ -2118,10 +2169,40 @@ def update_dataset(
             help="Name of the pipeline stage that produces this dataset.",
         ),
     ] = None,
+    created_by_email: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-email",
+            help="Email of whoever collected this data, for one collected for the project rather than imported or computed.",
+        ),
+    ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-name", help="Name of whoever collected this data."
+        ),
+    ] = None,
+    created_by_orcid: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-orcid", help="ORCID of whoever collected this data."
+        ),
+    ] = None,
+    created_with_ai: Annotated[
+        list[str],
+        typer.Option(
+            "--created-with-ai",
+            help=(
+                "Generative AI tool they used, e.g. 'Claude Opus 5'. "
+                "Repeat for several."
+            ),
+        ),
+    ] = [],
 ) -> None:
     """Update a dataset entry in calkit.yaml."""
     from pydantic import ValidationError
 
+    from calkit.cli.new import _person_from_options
     from calkit.models.core import (
         Dataset,
         _ImportedFromDoi,
@@ -2164,7 +2245,14 @@ def update_dataset(
             "recorded in .calkit/imports.json by 'calkit sync import'. Use "
             "--imported-from-git-ref to say what to follow."
         )
-    if not sources_given and stage is None:
+    created_by = _person_from_options(
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
+    )
+    if not sources_given and stage is None and created_by is None:
         raise_error("No updates specified.")
     source_dict: dict | None = None
     if sources_given:
@@ -2211,6 +2299,8 @@ def update_dataset(
         ds["imported_from"] = source_dict
     if stage is not None:
         ds["stage"] = stage
+    if created_by is not None:
+        ds["created_by"] = created_by
     # Checked as a whole, so an import added to a dataset someone collected
     # is refused here rather than left for the next validation to find
     try:

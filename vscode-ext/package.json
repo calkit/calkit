@@ -365,6 +365,12 @@
         "icon": "$(cloud-download)"
       },
       {
+        "command": "calkit-vscode.defineArtifactCreated",
+        "title": "Created by Me",
+        "category": "Calkit",
+        "icon": "$(person)"
+      },
+      {
         "command": "calkit-vscode.runArtifactStage",
         "title": "Run Stage",
         "category": "Calkit",
@@ -656,6 +662,11 @@
           "group": "inline@2"
         },
         {
+          "command": "calkit-vscode.defineArtifactCreated",
+          "when": "view == calkit-sidebar && (viewItem == figure-no-provenance || viewItem == dataset-no-provenance)",
+          "group": "inline@3"
+        },
+        {
           "command": "calkit-vscode.editStage",
           "when": "view == calkit-sidebar && viewItem == notebook-stage-prop",
           "group": "inline"
@@ -918,6 +929,9 @@
         },
         {
           "command": "calkit-vscode.defineArtifactImport"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactCreated"
         },
         {
           "command": "calkit-vscode.runArtifactStage"

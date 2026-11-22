@@ -515,24 +515,40 @@ def post_project_fs_batch_op(
         full_path = storages[0].make_project_path(
             owner_name, project_name, path
         )
-        for st in storages:
+        # What HF said about the path, if it's in HF storage
+        hf_info = None
+        for i, st in enumerate(storages):
             candidate = st.make_project_path(owner_name, project_name, path)
+            if i in hf_infos:
+                hf_info = hf_infos[i].get(
+                    st.make_container_path(owner_name, project_name, path)
+                )
+                if hf_info is not None or len(storages) == 1:
+                    found, full_path = st, candidate
+                    break
+                continue
             if len(storages) == 1 or st.fs.exists(candidate):
                 found, full_path = st, candidate
                 break
         fs = found.fs
+        from_hf = storages.index(found) in hf_infos
         path_result: dict[str, Any] = {}
         # Handle exists
         if operation == "exists" or "exists" in include:
-            try:
-                res = fs.ls(full_path, detail=False)
-                exists = len(res) > 0
-            except FileNotFoundError:
-                exists = False
+            if from_hf:
+                exists = hf_info is not None
+            else:
+                try:
+                    res = fs.ls(full_path, detail=False)
+                    exists = len(res) > 0
+                except FileNotFoundError:
+                    exists = False
             path_result["exists"] = exists
         # Handle info, which content needs for its size check anyway
-        info_dict = None
-        if operation == "info" or "info" in include or "content" in include:
+        info_dict = hf_info
+        if not from_hf and (
+            operation == "info" or "info" in include or "content" in include
+        ):
             try:
                 info_dict = fs.info(full_path)
             except FileNotFoundError:
@@ -655,7 +671,24 @@ def post_project_fs_batch_op(
             and not st.fs.exists(st.data_prefix)
         ):
             st.fs.makedir(st.data_prefix)
-    # Each path is a round trip to object storage, and a DVC push asks
-    # about hundreds of them, so they're made concurrently
+    # HF looks up files in batches, rather than a request per path. Only
+    # files are found that way, which is all DVC's objects are.
+    hf_infos: dict[int, dict[str, dict[str, Any]]] = {}
+    for i, st in enumerate(storages):
+        if st.backend != "hf":
+            continue
+        try:
+            hf_infos[i] = storage.get_hf_paths_info(
+                st,
+                [
+                    st.make_container_path(owner_name, project_name, path)
+                    for path in paths
+                ],
+            )
+        except Exception:
+            # Then each path is looked up on its own, as for other storage
+            logger.exception("Failed to get HF paths info in a batch")
+    # Each other path is a round trip to object storage, and a DVC push
+    # asks about hundreds of them, so they're made concurrently
     results = dict(zip(paths, _batch_op_pool.map(get_result, paths)))
     return FsOpBatchResponse(backend=backend, results=results)

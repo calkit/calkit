@@ -147,6 +147,63 @@ def describe_subprojects(
         _echo_description(desc, indent="    ")
 
 
+@describe_app.command(name="storage")
+def describe_storage(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """Describe where the project's large files are stored on the hub."""
+
+    def get_storage_name(resource: dict | None) -> str:
+        if resource is None:
+            return "Calkit Hub storage"
+        if resource.get("kind") == "hf-bucket":
+            return f"Hugging Face bucket {resource['bucket']}"
+        return str(resource["bucket"])
+
+    project = calkit.detect_project_name()
+    try:
+        settings = calkit.hub.get(f"/projects/{project}/storage")
+        usage = calkit.hub.get(f"/projects/{project}/storage/usage")
+    except Exception as e:
+        raise_error(f"Couldn't get storage for {project}: {e}")
+    # Reads fall back through earlier storage, then the hub's own
+    previous = [get_storage_name(r) for r in settings["previous"]]
+    if settings["dvc"] is not None:
+        previous.append(get_storage_name(None))
+    account = usage.get("account")
+    desc = {
+        "project": project,
+        "storage": get_storage_name(settings["dvc"]),
+        "previous_storage": previous,
+        "hub_used_gb": usage["project_used_gb"],
+        "account_hub_used_gb": account["used_gb"] if account else None,
+        "account_hub_limit_gb": account["limit_gb"] if account else None,
+    }
+    if json_output:
+        echo_json(desc)
+        return
+
+    def format_gb(gb: float) -> str:
+        return f"{gb * 1000:.1f} MB" if gb < 1 else f"{gb:.2f} GB"
+
+    _echo_description(
+        {
+            "project": project,
+            "storage": desc["storage"],
+            "also read from": ", ".join(previous) or None,
+            "hub storage used": format_gb(usage["project_used_gb"]),
+            "account hub storage used": (
+                f"{format_gb(account['used_gb'])} of "
+                f"{account['limit_gb']:g} GB"
+                if account
+                else None
+            ),
+        }
+    )
+
+
 @describe_app.command(name="schema")
 def describe_schema(
     output: Annotated[

@@ -254,3 +254,37 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
         )
         is None
     )
+
+
+def test_get_hf_paths_info() -> None:
+    from datetime import datetime
+
+    target = storage.ProjectStorage(
+        backend="hf",
+        fs=None,
+        data_prefix="buckets/ns/bkt",
+        resource=SimpleNamespace(  # type: ignore[arg-type]
+            bucket="ns/bkt", project_id=None
+        ),
+        token="hf-token",
+    )
+    found = SimpleNamespace(
+        path="a/b", size=3, xet_hash="h" * 64, mtime=datetime(2026, 1, 1)
+    )
+    with patch("huggingface_hub.HfApi") as api:
+        api.return_value.get_bucket_paths_info.return_value = [found]
+        infos = storage.get_hf_paths_info(target, ["a/b", "missing"])
+    api.assert_called_once_with(token="hf-token")
+    api.return_value.get_bucket_paths_info.assert_called_once_with(
+        "ns/bkt", ["a/b", "missing"]
+    )
+    # Missing paths are left out, like FileNotFoundError from fs.info
+    assert infos == {
+        "a/b": {
+            "name": "buckets/ns/bkt/a/b",
+            "size": 3,
+            "type": "file",
+            "mtime": datetime(2026, 1, 1),
+            "xet_hash": "h" * 64,
+        }
+    }

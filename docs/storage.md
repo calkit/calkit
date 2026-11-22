@@ -6,12 +6,11 @@ small text files like code and LaTeX source go to the project's Git repo,
 and everything else,
 e.g., datasets, figures, and simulation results,
 goes to the Calkit Hub (calkit.io).
-You can also send some or all of those files somewhere else,
-e.g., your lab's Hugging Face or S3 storage:
 
-```sh
-calkit add data/raw --to big-data
-```
+<!-- TODO: needs human review -->
+
+You can also send those files somewhere else,
+e.g., a Hugging Face bucket of the project's own.
 
 Either way,
 you work with your files the same way,
@@ -37,234 +36,88 @@ This also means:
 
 ## Connecting your own storage
 
-Storage is connected to your account, not to a single project,
-so you can connect it once and use it for any of your projects.
-Every account starts with the Calkit Hub's built-in storage,
-which is what projects use unless you choose otherwise.
-
-To connect storage,
-visit the storage section of your
-[hub account settings](https://calkit.io/settings).
-Organizations can also connect storage,
-which is available to all projects owned by that organization.
-
-To list the storage available to you:
-
-```sh
-calkit hub list storage
-```
-
-To use one of your connected storage options for a project's files
-instead of the built-in storage:
-
-```sh
-calkit update storage --name dvc my-hf-bucket
-```
-
-which adds this to `calkit.yaml`:
-
-```yaml
-storage:
-  dvc:
-    kind: calkit # optional
-    hub: calkit.io # optional
-    name: my-hf-bucket
-```
-
-This can move a lot of data,
-so read [Changing where files are stored](#changing-where-files-are-stored)
-first.
-
 <!-- TODO: needs human review -->
 
-Depending on the service,
-each project gets its own bucket, e.g., on Hugging Face,
-or its own folder in shared storage,
-e.g., an S3 bucket or a `Calkit` folder in Box,
-so you can use the same storage for many projects.
+Every account starts with the Calkit Hub's built-in storage,
+which is what projects use unless you choose otherwise.
+To send a project's files somewhere else instead:
 
-## Choosing storage per path
+1. Connect the service in your
+   [hub account settings](https://calkit.io/settings),
+   under connected accounts.
+2. In the project's settings on the hub,
+   choose where its files go,
+   or create a new place for them, e.g., a Hugging Face bucket.
 
-Not everything in a project needs to go to the same place.
-For example,
-you might want one big dataset on Hugging Face,
-while figures stay on calkit.io.
-To do this,
-give the storage a name in `calkit.yaml`,
-and use that name for the paths that should go there:
+To see where a project's files are stored,
+and how much Calkit Hub storage it uses,
+run this in the project:
 
-```yaml
-storage:
-  big-data:
-    name: my-hf-bucket
-
-datasets:
-  - path: data/raw
-    storage: big-data
-
-pipeline:
-  stages:
-    run-sim:
-      kind: python-script
-      script_path: scripts/run_sim.py
-      outputs:
-        - path: results
-          storage: big-data
+```sh
+calkit describe storage
 ```
 
-`git` and `dvc` are the names of the built-in storage,
-so they can't be used for your own.
-You can point `dvc` at your own storage, though, as shown above.
-
-If you already use Git LFS on GitHub,
-`storage: git-lfs` works too,
-and stores those files with GitHub's LFS.
-If Git LFS isn't set up on your computer yet,
-Calkit will offer to set it up for you.
-Keep in mind that GitHub limits how much LFS storage and download
-bandwidth you get,
-and removing LFS files from GitHub later means deleting the repo or
-contacting GitHub support.
+Choosing new storage for a project only affects files pushed after that;
+see [Changing where files are stored](#changing-where-files-are-stored).
 
 ## Hugging Face
-
-### Buckets
 
 A [Hugging Face (HF) bucket](https://huggingface.co/docs/hub/en/storage-buckets)
 is a simple place to keep large files,
 with a free allowance and low-cost storage beyond that.
 Usage is billed by HF and doesn't count against your Calkit plan.
-There are two ways to connect one.
-
-#### Option 1: Connecting your HF account
-
-Visit your [hub account settings](https://calkit.io/settings)
-and click the connect button next to Hugging Face.
-Then add Hugging Face storage,
-choosing your HF account or one of your HF organizations.
+Changing part of a large file only uploads the part that changed.
 
 <!-- TODO: needs human review -->
 
-Calkit will create a bucket there for each project that uses it,
-named after the project, and manage it for you.
+Click the connect button next to Hugging Face in your
+[hub account settings](https://calkit.io/settings),
+or start from a project's settings,
+which will ask you to connect if you haven't.
+Then, in the project's settings,
+create a Hugging Face bucket for it,
+choosing your HF account or one of your HF organizations.
+Calkit will name the bucket after the project and manage it for you.
+
 A bucket is public if its project is,
 so making a project public makes its bucket public too,
 including files from earlier versions.
 To remove files the project no longer uses, see `dvc gc`,
 or keep the project private and publish a release.
 
-<!-- TODO: needs human review -->
-
 If you disconnect your HF account while projects store files with it,
 you'll choose whether to transfer those files to Calkit Hub storage,
 delete them,
 or leave them on HF, where those projects can no longer reach them.
 
-This is the easiest option,
-but it does give Calkit access to everything in that HF account or
-organization.
-If you'd rather limit Calkit to a single bucket,
-use Option 2.
-
-#### Option 2: Connecting a single bucket
-
-1. [Create a bucket](https://huggingface.co/new-bucket) under your HF
-   account or organization, e.g., `my-username/calkit`.
-2. [Create a fine-grained access token](https://huggingface.co/settings/tokens)
-   with write access to only that bucket.
-3. In the token's dropdown menu,
-   choose "Generate S3 credentials."
-4. Add S3 storage in your hub account settings,
-   choose Hugging Face as the provider,
-   and enter the bucket name and the credentials from step 3.
-
-Calkit can then only ever touch that bucket,
-and nothing else in your HF account.
-The trade-off is speed:
-with Option 1,
-changing part of a large file only uploads the part that changed,
-while with Option 2,
-the whole file is uploaded again.
-
-### Datasets
-
-HF Datasets are how many researchers share datasets,
-with a page describing the dataset, a preview of the data, and search.
-You can send a specific path in your project to an HF Dataset,
-e.g., a dataset you want others to find and use.
-Calkit keeps the files at the same paths they have in your project,
-so it's easy to browse,
-and keeps its history in step with your project's.
-
-HF Datasets keep every version of every file,
-so they're better suited to finished datasets than to everything a
-project produces along the way.
-
-## S3 storage
-
-If your lab or institution already has storage that works with Amazon S3,
-e.g., Amazon S3 itself, Cloudflare R2, Wasabi, or MinIO,
-you can connect a bucket there with its address and an access key.
-When you add it,
-the hub checks that the key works,
-and gives you instructions for creating one that can only access that
-bucket, if needed.
+Connecting your HF account gives Calkit access to everything in that HF
+account or organization.
 
 ## Changing where files are stored
 
-You can change where files are stored at any time
-by editing the `storage` section of `calkit.yaml`,
-or the `storage` of a path.
-Since that means moving files,
-`calkit push` will first show you how many files and how much data will be
-moved,
-and ask you to confirm.
-Only the project owner can do this,
+<!-- TODO: needs human review -->
+
+Only the project owner can change where its files are stored,
 since it uses their storage.
+New files go to the new storage right away,
+and nothing is moved:
+files pushed before the change stay where they are,
+and Calkit keeps finding them there,
+so you and your collaborators don't need to do anything.
 
-The move then happens on calkit.io, in the background,
-so you don't need to download and re-upload anything,
-and you can close your laptop.
-
-- New files go to the new storage right away.
-- Until the move is finished,
-  Calkit will look in both places,
-  so you and your collaborators can keep working the whole time.
-- Nothing is deleted from the old storage when the move is done.
-  You can delete those files yourself once you've checked everything made
-  it over.
-
-Moving a path into or out of the project's Git repo is different,
-since it changes how the project's history is kept.
-That happens on your computer the next time you commit.
-
-## Forks
-
-In Calkit, a project has a single home,
-and collaborators work on it there,
-rather than in copies of it.
-A fork is a new project based on another one,
-which will go its own way.
-
-A fork's `calkit.yaml` starts out with the same storage names,
-but they now refer to the new owner's account,
-so the first `calkit push` will ask you to choose your own storage for
-them.
-Files from before the fork can still be downloaded from the original
-project's storage,
-as long as you have access to it.
+When you delete a project,
+you can choose to delete its files from storage too.
 
 ## Using your storage without Calkit
 
+<!-- TODO: needs human review -->
+
 Your files are always stored in a standard layout that DVC understands,
 so you're never locked in to Calkit.
-If you ever want to download them without Calkit,
-you can do so with DVC directly,
-using your own login for that storage:
-
-```sh
-dvc pull -r hf
-```
+To get them without Calkit,
+download them with the storage service's own tools,
+using your own login,
+into the project's DVC cache.
 
 ## Public archival
 
@@ -276,10 +129,19 @@ to hydrate the DVC cache and make checking them out seamless.
 
 ## On the roadmap
 
+<!-- TODO: needs human review -->
+
 - Google Drive
 - OneDrive
 - Box
+- S3 and storage that works with it,
+  e.g., Amazon S3, Cloudflare R2, Wasabi, or MinIO
 - Connecting AWS without creating access keys
+- Connecting a single HF bucket with a token limited to it
+- Choosing storage per path, e.g., one dataset on HF and the rest on
+  calkit.io, in `calkit.yaml`
+- Moving files to new storage when a project's storage changes
+- Choosing storage for a fork
 - Releasing to HF Datasets
 - Keeping the project's Git repo on GitLab, Codeberg, HF, or calkit.io
   ([#1254](https://github.com/calkit/calkit/issues/1254))

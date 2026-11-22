@@ -2617,6 +2617,7 @@ Describe things.
 | [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
 | [`subprojects`](#subcommand-describe-desc-subprojects)              | Describe subprojects, including nested ones.                       |
+| [`storage`](#subcommand-describe-desc-storage)                      | Describe where the project's large files are stored on the hub.    |
 | [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
@@ -2687,6 +2688,24 @@ Usage:
 
 ```text
 calkit describe|desc subprojects [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-storage"></a>
+
+#### `calkit describe|desc storage`
+
+Describe where the project's large files are stored on the hub.
+
+Usage:
+
+```text
+calkit describe|desc storage [OPTIONS]
 ```
 
 Options:

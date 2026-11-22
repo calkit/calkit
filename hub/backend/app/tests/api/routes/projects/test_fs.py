@@ -371,15 +371,36 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         assert response.status_code == 422
         assert "1 of 1 files: files/md5/cc/x" in response.json()["detail"]
         batch.side_effect = None
-        # The batch endpoint falls back too
-        response = client.post(
-            f"{FS_OPS_URL}/batch",
-            json={
-                "operation": "info",
-                "paths": [old_path, new_path],
-                "include": ["exists", "content"],
-            },
-        )
+        # The batch endpoint falls back too, looking up all of a batch's
+        # paths in HF at once rather than one at a time
+
+        def get_hf_paths_info(st, paths):
+            infos = {}
+            for path in paths:
+                full = f"{st.data_prefix}/{path}"
+                if st.fs.isfile(full):
+                    infos[path] = st.fs.info(full)
+            return infos
+
+        with (
+            patch(
+                "app.api.routes.projects.fs.storage.get_hf_paths_info",
+                side_effect=get_hf_paths_info,
+            ) as paths_info,
+            patch.object(
+                hf.fs, "exists", side_effect=AssertionError("per path")
+            ),
+        ):
+            response = client.post(
+                f"{FS_OPS_URL}/batch",
+                json={
+                    "operation": "info",
+                    "paths": [old_path, new_path],
+                    "include": ["exists", "content"],
+                },
+            )
+        assert response.status_code == 200, response.text
+        paths_info.assert_called_once()
         results = response.json()["results"]
         assert results[old_path]["exists"] is True
         assert results[old_path]["info"]["size"] == 1

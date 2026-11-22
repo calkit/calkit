@@ -755,6 +755,31 @@ def put_project_objects(
             remove_gcs_content_type(fpath)
 
 
+def get_hf_paths_info(
+    storage: ProjectStorage, paths: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Get info for many files in an HF bucket, up to 1000 per request.
+
+    Paths are relative to the bucket. Returns info like ``fs.info`` gives,
+    by path, for those that exist.
+    """
+    from huggingface_hub import HfApi
+
+    assert storage.resource is not None
+    infos = {}
+    for f in HfApi(token=storage.token).get_bucket_paths_info(
+        storage.resource.bucket, paths
+    ):
+        infos[f.path] = {
+            "name": f"{storage.data_prefix}/{f.path}",
+            "size": f.size,
+            "type": "file",
+            "mtime": f.mtime,
+            "xet_hash": f.xet_hash,
+        }
+    return infos
+
+
 def get_hf_object_url(storage: ProjectStorage, fpath: str) -> str:
     """Get a short-lived URL a browser can download an HF bucket object from.
 

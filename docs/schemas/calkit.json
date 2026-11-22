@@ -2040,6 +2040,91 @@
       "title": "GimpExportStage",
       "type": "object"
     },
+    "GpuArchIsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_arch_is": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Architecture of one of the machine's GPUs, ignoring case, e.g., 'gfx1201' for an AMD Radeon RX 9070 or 'sm_89' for an NVIDIA RTX 4090.",
+          "title": "Gpu Arch Is"
+        }
+      },
+      "required": [
+        "gpu_arch_is"
+      ],
+      "title": "GpuArchIsCondition",
+      "type": "object"
+    },
+    "GpuNameMatchesCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_name_matches": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Glob the name of one of the machine's GPUs must match, case-insensitively, e.g., '*RTX 40*'.",
+          "title": "Gpu Name Matches"
+        }
+      },
+      "required": [
+        "gpu_name_matches"
+      ],
+      "title": "GpuNameMatchesCondition",
+      "type": "object"
+    },
+    "GpuVendorIsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_vendor_is": {
+          "anyOf": [
+            {
+              "enum": [
+                "amd",
+                "nvidia",
+                "apple"
+              ],
+              "type": "string"
+            },
+            {
+              "items": {
+                "enum": [
+                  "amd",
+                  "nvidia",
+                  "apple"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Vendor of one of the machine's GPUs: 'amd', 'nvidia' or 'apple'.",
+          "title": "Gpu Vendor Is"
+        }
+      },
+      "required": [
+        "gpu_vendor_is"
+      ],
+      "title": "GpuVendorIsCondition",
+      "type": "object"
+    },
     "HostnameMatchesCondition": {
       "additionalProperties": false,
       "properties": {
@@ -11645,7 +11730,7 @@
       "type": "object"
     },
     "SwitchEnvironment": {
-      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_set``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.\n\nAn option's ``lock`` is part of the switch's too, so relocking the\noption, with ``relock: auto`` or ``calkit update env --lock``, reruns\nthe switch's stages. The first time a switch is checked, its options\nwith a ``host`` are locked from there. An option without one is locked\nthe first time it's checked on its own machine, which reruns nothing,\nsince only a machine taking up its option has changed.",
+      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_set``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n- ``gpu_vendor_is``: ``amd``, ``nvidia`` or ``apple``, for one of the\n  machine's GPUs.\n- ``gpu_arch_is``: one of the machine's GPUs' architecture, e.g.,\n  ``gfx1201`` or ``sm_89``.\n- ``gpu_name_matches``: a glob one of the machine's GPUs' names\n  matches, ignoring case.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.\n\nAn option's ``lock`` is part of the switch's too, so relocking the\noption, with ``relock: auto`` or ``calkit update env --lock``, reruns\nthe switch's stages. The first time a switch is checked, its options\nwith a ``host`` are locked from there. An option without one is locked\nthe first time it's checked on its own machine, which reruns nothing,\nsince only a machine taking up its option has changed.",
       "properties": {
         "description": {
           "anyOf": [
@@ -11859,6 +11944,15 @@
                   },
                   {
                     "$ref": "#/$defs/MachineIdEqualsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuVendorIsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuArchIsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuNameMatchesCondition"
                   }
                 ]
               },
@@ -12164,7 +12258,7 @@
       "type": "object"
     },
     "SystemValueRequirement": {
-      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
+      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\n``gpu-name``, ``gpu-vendor`` ('amd', 'nvidia' or 'apple') and\n``gpu-arch`` (e.g., 'gfx1201' or 'sm_89') describe the machine's GPUs,\nand are met when any one of them meets the constraint.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
       "properties": {
         "description": {
           "anyOf": [
@@ -12208,7 +12302,10 @@
             "hostname",
             "machine-id",
             "calkit-python-version",
-            "python-implementation"
+            "python-implementation",
+            "gpu-name",
+            "gpu-vendor",
+            "gpu-arch"
           ],
           "title": "Kind",
           "type": "string"
@@ -12465,6 +12562,22 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "extras": {
+          "default": [],
+          "description": "Extras of the project to install, each named or given with the machines it's for. They're passed to both 'uv sync' and 'uv run', so they're installed even when the environment isn't checked first.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/UvExtra"
+              }
+            ]
+          },
+          "title": "Extras",
+          "type": "array"
+        },
         "inputs": {
           "anyOf": [
             {
@@ -12513,6 +12626,63 @@
         "path"
       ],
       "title": "UvEnvironment",
+      "type": "object"
+    },
+    "UvExtra": {
+      "additionalProperties": false,
+      "description": "An extra of a uv project, installed only on the machines it's for.\n\nFor a dependency built for particular hardware, e.g., a PyTorch for one\nGPU architecture. ``when`` takes the conditions a switch environment's\noptions do, and the extra is installed where all of them hold. One that\ndoesn't hold here is left out rather than reported, since it describes a\ndifferent machine, not a problem with this one.",
+      "properties": {
+        "name": {
+          "description": "Name of the extra in pyproject.toml.",
+          "title": "Name",
+          "type": "string"
+        },
+        "when": {
+          "description": "Conditions this machine must all meet for the extra to be installed, e.g., 'gpu_arch_is: gfx1201'. To always install it, list it by name instead.",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AppExistsCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarSetCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarExistsCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarEqualsCondition"
+              },
+              {
+                "$ref": "#/$defs/HostnameMatchesCondition"
+              },
+              {
+                "$ref": "#/$defs/OsIsCondition"
+              },
+              {
+                "$ref": "#/$defs/MachineIdEqualsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuVendorIsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuArchIsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuNameMatchesCondition"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "when"
+      ],
+      "title": "UvExtra",
       "type": "object"
     },
     "UvVenvEnvironment": {

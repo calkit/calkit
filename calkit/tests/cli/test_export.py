@@ -270,7 +270,7 @@ def test_export_slides(
         assert not [p for p in os.listdir(".calkit") if p.startswith("tmp-")]
     # It says what's missing when nothing that exports slides is installed
     monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-test-no-soffice"])
-    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-test-no-ppt"])
+    monkeypatch.setattr(POWERPOINT, "locate", None)
     with pytest.raises(ValueError, match="needs LibreOffice or PowerPoint"):
         calkit.cli.export.export_slides("slides.pptx", [(None, "a.pdf")])
 

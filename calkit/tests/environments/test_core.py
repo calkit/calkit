@@ -455,6 +455,47 @@ def test_get_venv_activate_cmd():
     )
 
 
+def test_get_uv_extras(monkeypatch):
+    from calkit.environments import get_uv_extras
+
+    gpus = (
+        {"name": "AMD Radeon RX 9070 XT", "vendor": "amd", "arch": "gfx1201"},
+    )
+    monkeypatch.setattr("calkit.core.get_gpus", lambda: gpus)
+    env = {
+        "kind": "uv",
+        "path": "pyproject.toml",
+        "extras": [
+            "plots",
+            {"name": "rocm", "when": [{"gpu_arch_is": "gfx1201"}]},
+            {"name": "cuda", "when": [{"gpu_vendor_is": "nvidia"}]},
+            # Every condition must hold, not just one
+            {
+                "name": "rocm-on-cluster",
+                "when": [
+                    {"gpu_vendor_is": "amd"},
+                    {"env_var_set": "CK_TEST_UNSET"},
+                ],
+            },
+        ],
+    }
+    monkeypatch.delenv("CK_TEST_UNSET", raising=False)
+    assert get_uv_extras(env) == ["plots", "rocm"]
+    # On a machine without that GPU, the extra is left out, not an error
+    monkeypatch.setattr("calkit.core.get_gpus", lambda: ())
+    assert get_uv_extras(env) == ["plots"]
+    assert get_uv_extras({"kind": "uv", "path": "pyproject.toml"}) == []
+    # A mistake is an error, rather than leaving the extra out
+    for bad in [
+        {"name": "rocm"},
+        {"name": "rocm", "when": []},
+        {"name": "rocm", "when": [{"kind": "gpu-arch", "equals": "gfx1201"}]},
+        {"name": "rocm", "when": [{"gpu_arch_is": "gfx1201"}], "if": "x"},
+    ]:
+        with pytest.raises(ValueError, match="is invalid"):
+            get_uv_extras({"kind": "uv", "path": "x", "extras": [bad]})
+
+
 def test_get_default_venv_prefix():
     get_default_venv_prefix = calkit.environments.get_default_venv_prefix
     # With no existing environments, default to .venv next to the spec file
@@ -2369,7 +2410,24 @@ def test_switch_env(tmp_dir, monkeypatch):
         ([{"machine_id_equals": ["ef"]}], False),
         ([{"os_is": "macos"}, {"app_exists": "git"}], True),
         ([{"os_is": "macos"}, {"os_is": "linux"}], False),
+        # A GPU condition holds when any of the machine's GPUs meets it
+        ([{"gpu_vendor_is": "amd"}], True),
+        ([{"gpu_vendor_is": ["nvidia", "apple"]}], False),
+        ([{"gpu_arch_is": "GFX1201"}], True),
+        ([{"gpu_arch_is": ["sm_89", "gfx1036"]}], True),
+        ([{"gpu_arch_is": "gfx90a"}], False),
+        ([{"gpu_name_matches": "*rx 9070*"}], True),
+        ([{"gpu_name_matches": "*RTX*"}], False),
     ]
+    gpus = (
+        {
+            "name": "AMD Radeon(TM) Graphics",
+            "vendor": "amd",
+            "arch": "gfx1036",
+        },
+        {"name": "AMD Radeon RX 9070 XT", "vendor": "amd", "arch": "gfx1201"},
+    )
+    monkeypatch.setattr(calkit.core, "get_gpus", lambda: gpus)
     for when, held in cases:
         envs_def["one"] = {"kind": "switch", "switch": [option("here", *when)]}
         picked = envs.resolve_switch("one", envs_def)

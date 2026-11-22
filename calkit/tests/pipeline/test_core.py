@@ -4297,7 +4297,21 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
     # Recompiling replaces the managed block rather than stacking copies
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open(".gitattributes") as f:
-        assert f.read().count("/.calkit/** text eol=lf") == 1
+        gitattributes = f.read()
+    assert gitattributes.count("/.calkit/** text eol=lf") == 1
+    # dvc.yaml is written with the line ending Git checks it out with, so
+    # the compiled pipeline doesn't show as modified, e.g., an LF rule on
+    # Windows, where Git for Windows defaults to core.autocrlf=true
+    subprocess.run(["git", "config", "core.autocrlf", "true"], check=True)
+    for eol in ["lf", "crlf"]:
+        with open(".gitattributes", "w") as f:
+            f.write(f"dvc.yaml text eol={eol}\n" + gitattributes)
+        os.remove("dvc.yaml")
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        with open("dvc.yaml", "rb") as f:
+            raw = f.read()
+        n_crlf = raw.count(b"\n") if eol == "crlf" else 0
+        assert raw.count(b"\r\n") == n_crlf, eol
 
 
 def test_get_stage_for_output_reads_map_paths_destinations():
@@ -5164,7 +5178,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
     monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
     monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-no-soffice"])
-    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-no-powerpoint"])
+    monkeypatch.setattr(POWERPOINT, "locate", None)
     gated, errors = calkit.pipeline.get_gated_stages(
         ck_info, stage_names=["drawn", "photo", "slide"], interactive=False
     )

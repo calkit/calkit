@@ -1996,7 +1996,11 @@ def check_requirements(
             )
         raise ValueError(msg)
     for req in buckets["app"]:
-        req_name = req["name"]
+        from calkit import install as _install
+
+        # Checked and installed as the binary it provides, e.g., code for
+        # vscode
+        req_name = _install.NAME_ALIASES.get(req["name"], req["name"])
         # The ``calkit`` app is always satisfied by the running process,
         # but a declared ``version_spec`` (e.g. ``calkit>=0.38``) is
         # checked against the installed version so projects can pin a
@@ -2020,8 +2024,6 @@ def check_requirements(
             continue
         # Offer the project's own way to install it, or else the registered
         # native installer when we have one
-        from calkit import install as _install
-
         setup_command = req.get("setup_command")
         description = (req.get("description") or "").strip()
         registered = _install.get_installer(req_name)

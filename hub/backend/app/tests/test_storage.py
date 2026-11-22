@@ -236,18 +236,29 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
     resource_id = resource.id
     project_id = project.id
     # A failed copy leaves everything as it was, to try again
-    with patch.object(
-        storage, "copy_resource_to_internal", side_effect=OSError("HF down")
+    with (
+        patch.object(
+            storage,
+            "copy_resource_to_internal",
+            side_effect=OSError("HF down"),
+        ),
+        patch("app.mixpanel.user_transferred_storage") as tracked,
     ):
         with pytest.raises(OSError):
             storage.transfer_storage_and_disconnect(str(user.id))
+    assert tracked.call_args.kwargs == {"succeeded": False}
     db.expire_all()
     assert db.get(StorageResource, resource_id) is not None
-    with patch.object(
-        storage, "copy_resource_to_internal", return_value=3
-    ) as copy:
+    with (
+        patch.object(
+            storage, "copy_resource_to_internal", return_value=3
+        ) as copy,
+        patch("app.mixpanel.user_transferred_storage") as tracked,
+    ):
         storage.transfer_storage_and_disconnect(str(user.id))
     copy.assert_called_once()
+    assert tracked.call_args.args[1:] == (1, 3)
+    assert tracked.call_args.kwargs == {"succeeded": True}
     db.expire_all()
     assert db.get(StorageResource, resource_id) is None
     # Its project went to the hub's own storage before the copy

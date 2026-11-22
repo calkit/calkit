@@ -97,6 +97,7 @@ def test_storage_resources_and_project_storage(
     with (
         patch("app.users.get_huggingface_token", return_value="hf-token"),
         patch("huggingface_hub.create_bucket") as create_bucket,
+        patch("app.api.routes.storage.mixpanel") as mp,
     ):
         response = client.post(
             bucket_url, headers=owner_headers, json={"bucket": "no-namespace"}
@@ -106,6 +107,15 @@ def test_storage_resources_and_project_storage(
         assert response.status_code == 200, response.text
         create_bucket.assert_called_once_with(
             bucket["bucket"], private=False, token="hf-token"
+        )
+        # So we know how much it's used
+        created = mp.user_created_project_storage.call_args.kwargs
+        assert created["kind"] == "hf-bucket"
+        assert created["is_public"] is True
+        changed = mp.user_changed_project_storage.call_args.kwargs
+        assert (changed["from_kind"], changed["to_kind"]) == (
+            "hub",
+            "hf-bucket",
         )
         # Someone else's bucket, or one made by hand, isn't taken over
         from huggingface_hub.errors import HfHubHTTPError

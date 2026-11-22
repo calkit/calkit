@@ -20,6 +20,7 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
 import type { AxiosError } from "axios"
 import { useEffect, useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
@@ -259,10 +260,14 @@ function ProjectSettings() {
     : undefined
   // Comes back here with the bucket form open once connected
   const connectMutation = useMutation({
-    mutationFn: () =>
-      startHuggingFaceAuth(
+    mutationFn: () => {
+      mixpanel.track("Clicked connect Hugging Face", {
+        from: "project settings",
+      })
+      return startHuggingFaceAuth(
         `/${accountName}/${projectName}/settings?add_storage=true`,
-      ),
+      )
+    },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
@@ -369,9 +374,12 @@ function ProjectSettings() {
               </Button>
               <Button
                 flexShrink={0}
-                onClick={() =>
+                onClick={() => {
+                  mixpanel.track("Clicked new Hugging Face bucket", {
+                    hf_connected: hfConnected,
+                  })
                   hfConnected ? openAddStorage() : connectMutation.mutate()
-                }
+                }}
                 isLoading={connectMutation.isPending}
                 isDisabled={hfConnected === undefined}
               >

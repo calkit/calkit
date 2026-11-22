@@ -1154,9 +1154,16 @@ def post_user_huggingface_auth(
             f"Hugging Face auth failed: {resp.status_code} {resp.text[:200]}"
         )
         raise HTTPException(400, "Failed to authenticate with Hugging Face")
+    first = (
+        users.get_external_credential(
+            session=session, user=current_user, provider="huggingface"
+        )
+        is None
+    )
     users.save_huggingface_token(
         session=session, user=current_user, hf_resp=resp.json()
     )
+    mixpanel.user_connected_huggingface(current_user, first=first)
     return Message(message="success")
 
 
@@ -1445,6 +1452,21 @@ def delete_user_external_credential(
     if resources and storage_action is None:
         raise HTTPException(
             409, "Storage uses this account; transfer, delete, or orphan it"
+        )
+    if resources:
+        assert storage_action is not None
+        mixpanel.user_disconnected_with_storage(
+            current_user,
+            provider,
+            storage_action,
+            n_storage=len(resources),
+            n_projects=len(
+                {
+                    p.id
+                    for r in resources
+                    for p in app.storage.get_resource_projects(session, r)
+                }
+            ),
         )
     if resources and storage_action == "transfer":
         # Everything has to fit in each owner's plan

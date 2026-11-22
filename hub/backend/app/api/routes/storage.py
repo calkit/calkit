@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 import app.projects
 import app.tasks
-from app import storage, users
+from app import mixpanel, storage, users
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.models import (
     Account,
@@ -350,7 +350,17 @@ def put_project_storage(
             raise HTTPException(
                 409, "Storage being transferred to Calkit Hub storage"
             )
+    from_kind = (
+        project.dvc_storage.kind if project.dvc_storage is not None else "hub"
+    )
     set_project_storage(session, project, resource)
+    mixpanel.user_changed_project_storage(
+        current_user,
+        project.owner_account_name,
+        project.name,
+        from_kind=from_kind,
+        to_kind=resource.kind if resource is not None else "hub",
+    )
     return get_project_storage_settings(project)
 
 
@@ -405,5 +415,25 @@ def post_project_hf_bucket(
     )
     resource.credential_user = current_user
     session.add(resource)
+    from_kind = (
+        project.dvc_storage.kind if project.dvc_storage is not None else "hub"
+    )
     set_project_storage(session, project, resource)
+    credential = current_user.get_external_credential(provider="huggingface")
+    hf_username = credential.provider_account_id if credential else None
+    mixpanel.user_created_project_storage(
+        current_user,
+        project.owner_account_name,
+        project.name,
+        kind="hf-bucket",
+        is_public=project.is_public,
+        in_org=req.bucket.split("/")[0] != hf_username,
+    )
+    mixpanel.user_changed_project_storage(
+        current_user,
+        project.owner_account_name,
+        project.name,
+        from_kind=from_kind,
+        to_kind="hf-bucket",
+    )
     return get_project_storage_settings(project)

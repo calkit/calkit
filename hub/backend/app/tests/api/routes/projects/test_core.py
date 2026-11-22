@@ -6346,13 +6346,18 @@ def test_project_storage_follows_project(
         assert db.get(Project, project_id) is not None
         delete_objects.side_effect = None
         delete_objects.reset_mock()
-        response = client.delete(
-            f"/projects/{project_id}",
-            headers=headers,
-            params={"delete_storage": True},
-        )
+        with patch("app.api.routes.projects.core.mixpanel") as mp:
+            response = client.delete(
+                f"/projects/{project_id}",
+                headers=headers,
+                params={"delete_storage": True},
+            )
         assert response.status_code == 200
         delete_objects.assert_called_once()
+        assert mp.user_deleted_project.call_args.kwargs == {
+            "delete_storage": True,
+            "n_external_storage": 0,
+        }
         db.expire_all()
         assert db.get(Project, project_id) is None
     other, headers = _make_owner_with_project(db, client)

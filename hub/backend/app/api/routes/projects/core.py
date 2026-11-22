@@ -1486,7 +1486,7 @@ def patch_project(
         # Buckets dedicated to the project follow its visibility, and go
         # first, so one that can't be reached stops GitHub changing too
         try:
-            app.storage.set_project_bucket_visibility(
+            n_buckets = app.storage.set_project_bucket_visibility(
                 session, project, req.is_public
             )
         except app.storage.UnreachableStorageError as e:
@@ -1529,6 +1529,13 @@ def patch_project(
                 resp.status_code, "Failed to change GitHub repo visibility"
             )
         project.is_public = req.is_public
+        mixpanel.user_changed_project_visibility(
+            current_user,
+            owner_name,
+            project_name,
+            is_public=req.is_public,
+            n_buckets=n_buckets,
+        )
     session.commit()
     session.refresh(project)
     return ProjectPublic.model_validate(project)
@@ -1554,6 +1561,13 @@ def delete_project(
     )
     if delete_storage:
         _delete_project_objects(session, project)
+    mixpanel.user_deleted_project(
+        current_user,
+        project.owner_account_name,
+        project.name,
+        delete_storage=delete_storage,
+        n_external_storage=len(project.storage_history),
+    )
     session.delete(project)
     session.commit()
     return Message(message="success")
@@ -1592,6 +1606,13 @@ def delete_project_by_id(
         raise HTTPException(403)
     if delete_storage:
         _delete_project_objects(session, project)
+    mixpanel.user_deleted_project(
+        current_user,
+        project.owner_account_name,
+        project.name,
+        delete_storage=delete_storage,
+        n_external_storage=len(project.storage_history),
+    )
     session.delete(project)
     session.commit()
     return Message(message="success")

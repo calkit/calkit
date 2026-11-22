@@ -488,8 +488,9 @@ def find_project_object(
 
 def set_project_bucket_visibility(
     session: "Session", project: "Project", is_public: bool
-) -> None:
-    """Make the buckets dedicated to a project public or private.
+) -> int:
+    """Make the buckets dedicated to a project public or private, returning
+    how many there are.
 
     Raises ``UnreachableStorageError`` before changing any if one can't be
     reached.
@@ -514,6 +515,7 @@ def set_project_bucket_visibility(
         HfApi(token=target.token).update_bucket_settings(
             target.resource.bucket, private=not is_public
         )
+    return len(targets)
 
 
 def delete_objects_from(
@@ -662,6 +664,7 @@ def transfer_storage_and_disconnect(user_id: str) -> None:
 
     from sqlmodel import Session
 
+    import app.mixpanel
     import app.users
     from app.db import engine
     from app.models import User
@@ -670,33 +673,48 @@ def transfer_storage_and_disconnect(user_id: str) -> None:
         user = session.get(User, uuid.UUID(user_id))
         if user is None:
             return
-        # Checked again after each pass, in case any was added meanwhile
-        for _ in range(10):
-            resources = get_credential_resources(session, user.id)
-            if not resources:
-                break
-            for resource in resources:
-                for project in get_resource_projects(session, resource):
-                    if project.dvc_storage_id == resource.id:
-                        project.dvc_storage = None
-                        project.dvc_storage_id = None
-                        session.add(project)
-                session.commit()
-                n_copied = copy_resource_to_internal(session, resource)
-                logger.info(
-                    f"Copied {n_copied} objects from {resource.bucket} to "
-                    "the hub's storage"
+        n_storage = 0
+        n_objects = 0
+        try:
+            # Checked again after each pass, in case any was added meanwhile
+            for _ in range(10):
+                resources = get_credential_resources(session, user.id)
+                if not resources:
+                    break
+                for resource in resources:
+                    for project in get_resource_projects(session, resource):
+                        if project.dvc_storage_id == resource.id:
+                            project.dvc_storage = None
+                            project.dvc_storage_id = None
+                            session.add(project)
+                    session.commit()
+                    n_copied = copy_resource_to_internal(session, resource)
+                    logger.info(
+                        f"Copied {n_copied} objects from {resource.bucket} "
+                        "to the hub's storage"
+                    )
+                    session.delete(resource)
+                    session.commit()
+                    n_storage += 1
+                    n_objects += n_copied
+            else:
+                raise RuntimeError(
+                    "Storage kept being added during the transfer"
                 )
-                session.delete(resource)
-                session.commit()
-        else:
-            raise RuntimeError("Storage kept being added during the transfer")
+        except Exception:
+            app.mixpanel.user_transferred_storage(
+                user, n_storage, n_objects, succeeded=False
+            )
+            raise
         credential = app.users.get_external_credential(
             session=session, user=user, provider="huggingface"
         )
         if credential is not None:
             session.delete(credential)
             session.commit()
+        app.mixpanel.user_transferred_storage(
+            user, n_storage, n_objects, succeeded=True
+        )
 
 
 def get_xet_token(

@@ -152,7 +152,9 @@ function ConnectedAccounts() {
   })
   const connectHuggingFaceMutation = useMutation({
     mutationFn: () => {
-      mixpanel.track("Clicked connect Hugging Face")
+      mixpanel.track("Clicked connect Hugging Face", {
+        from: "connected accounts",
+      })
       return startHuggingFaceAuth("/settings?tab=connected-accounts")
     },
     onError: (err: AxiosError) => {

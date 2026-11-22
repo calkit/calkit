@@ -353,6 +353,11 @@ def post_project_fs_op(
             except Exception:
                 logger.exception(f"Failed to get Xet read token for {path}")
                 raise HTTPException(502, "Failed to get download access")
+            # Once per pull, since clients reuse the access for the rest
+            if current_user is not None:
+                mixpanel.user_performed_fs_op(
+                    current_user, owner_name, project_name, "get", backend="hf"
+                )
             return FsOpResponse(
                 backend=st.backend,
                 access=XetAccess(
@@ -468,7 +473,7 @@ def post_project_fs_op(
         )
     if current_user is not None:
         mixpanel.user_performed_fs_op(
-            current_user, owner_name, project_name, operation
+            current_user, owner_name, project_name, operation, backend=backend
         )
     return FsOpResponse(backend=backend, access=access)
 
@@ -661,6 +666,14 @@ def post_project_fs_batch_op(
         except Exception:
             logger.exception(f"Failed to register {len(ops)} files")
             raise HTTPException(502, "Failed to register uploaded files")
+        if current_user is not None:
+            mixpanel.user_pushed_to_external_storage(
+                current_user,
+                owner_name,
+                project_name,
+                kind="hf-bucket",
+                n_files=len(ops),
+            )
         return FsOpBatchResponse(backend=target.backend, results={})
     storages = storage.get_project_storages(session, project)
     backend = storages[0].backend

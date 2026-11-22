@@ -2266,10 +2266,16 @@ def test_disconnect_huggingface_with_storage(
     assert response.status_code == 409
     assert is_connected()
     # Orphaned storage is forgotten, and its project goes back to the hub's
-    response = client.delete(
-        url, headers=headers, params={"storage_action": "orphan"}
-    )
+    with patch("app.api.routes.users.mixpanel") as mp:
+        response = client.delete(
+            url, headers=headers, params={"storage_action": "orphan"}
+        )
     assert response.status_code == 200
+    assert mp.user_disconnected_with_storage.call_args.args[2] == "orphan"
+    assert mp.user_disconnected_with_storage.call_args.kwargs == {
+        "n_storage": 1,
+        "n_projects": 1,
+    }
     assert not is_connected()
     assert db.get(StorageResource, resource_id) is None
     project = db.get(Project, project_id)

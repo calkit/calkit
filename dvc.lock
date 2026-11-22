@@ -235,16 +235,16 @@ stages:
       size: 96885
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: 570c437a70ca9bc83a398cc7d69b364c
-      size: 173888
+      md5: 6a04754199f6a394429ca0c07e4ecda6
+      size: 173896
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: 570c437a70ca9bc83a398cc7d69b364c
-      size: 173888
+      md5: 6a04754199f6a394429ca0c07e4ecda6
+      size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 591b44b84d2f3d1dbfcee36076d5399c
-      size: 36986
+      md5: b42d272daf2d32f06a80341dd598fc8d
+      size: 36379
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: 53cbdd1fe8da4d6897b3b0856b749857
@@ -256,8 +256,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: 3d5ffeb9b6f9d396c3e1d15d3e9185fa
-      size: 277494
+      md5: e26e6d8161aee299460812cd7efbaa0d
+      size: 202869
   one-pager/pdf:
     cmd: calkit latex from-markdown docs/one-pager/main.md -o 
       docs/one-pager/main.pdf -e tex --no-check --template 
@@ -316,8 +316,8 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 394d99dedd9d9d04083d8164884a7d33
-      size: 199890
+      md5: 7fb3fcd5c7cf17ff389f4749d778dbc1
+      size: 199856
     - path: calkit/docx.py
       hash: md5
       md5: 83e04bd9da02144e6bcb80a5a749767d
@@ -361,16 +361,16 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: 570c437a70ca9bc83a398cc7d69b364c
-      size: 173888
+      md5: 6a04754199f6a394429ca0c07e4ecda6
+      size: 173896
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: 570c437a70ca9bc83a398cc7d69b364c
-      size: 173888
+      md5: 6a04754199f6a394429ca0c07e4ecda6
+      size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 591b44b84d2f3d1dbfcee36076d5399c
-      size: 36986
+      md5: b42d272daf2d32f06a80341dd598fc8d
+      size: 36379
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit

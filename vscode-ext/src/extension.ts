@@ -2022,7 +2022,29 @@ export function activate(context: vscode.ExtensionContext): void {
 
   sidebarProvider = new CalkitSidebarProvider();
   registerOverleaf(context, sidebarProvider, getWorkspaceRoot);
-  registerCellOutputs(context, getWorkspaceRoot);
+  // Documents cell outputs can be inserted in: what document stages build,
+  // and the files they read, e.g., a thesis's chapters
+  registerCellOutputs(context, getWorkspaceRoot, () => {
+    const root = getWorkspaceRoot();
+    const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+    const documents: string[] = [];
+    for (const [name, stage] of Object.entries(stages)) {
+      if (!["latex", "quarto", "markdown"].includes(String(stage.kind))) {
+        continue;
+      }
+      if (typeof stage.target_path === "string") {
+        const wdir = typeof stage.wdir === "string" ? stage.wdir : "";
+        documents.push(path.posix.join(wdir, stage.target_path));
+      }
+      for (const dep of currentDvcYaml?.stages?.[name]?.deps ?? []) {
+        const depPath = typeof dep === "string" ? dep : Object.keys(dep)[0];
+        if (depPath && /\.(tex|qmd|md)$/i.test(depPath)) {
+          documents.push(depPath);
+        }
+      }
+    }
+    return root ? documents.map((d) => path.join(root, d)) : [];
+  });
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
     showCollapseAll: true,

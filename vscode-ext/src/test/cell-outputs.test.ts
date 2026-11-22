@@ -6,6 +6,7 @@ import {
   getAssignedNames,
   getDefaultOutputPath,
   getAddOutputArgs,
+  getCellOutputInsertText,
   getCellOutputLabel,
   getCellOutputsForCell,
   getRemoveOutputArgs,
@@ -234,4 +235,50 @@ test("getCellOutputsForCell finds a cell's cellOutputs by ID or position", () =>
 test("hasImageOutput spots an image a figure can be saved from", () => {
   assert.equal(hasImageOutput(["text/plain", "image/png"]), true);
   assert.equal(hasImageOutput(["text/plain"]), false);
+});
+
+test("getCellOutputInsertText writes each kind for each document", () => {
+  const base = {
+    stage: "fit",
+    cell_id: "a",
+    cell_index: 0,
+    variable_name: null,
+    format: null,
+  };
+  const value: CellOutput = {
+    ...base,
+    kind: "value",
+    variable_name: "k_25",
+    output_path: null,
+    citation: "\\ckvalue{nbs/fit.ipynb}{k_25}",
+  };
+  const figure: CellOutput = {
+    ...base,
+    kind: "figure",
+    output_path: "figures/fit.pdf",
+    citation: "\\ckfigure{figures/fit.pdf}",
+  };
+  const mdTable: CellOutput = {
+    ...base,
+    kind: "table",
+    output_path: "tables/t.md",
+    citation: null,
+  };
+  const csvTable: CellOutput = { ...mdTable, output_path: "tables/t.csv" };
+  for (const [output, doc, expected] of [
+    [value, "paper/main.tex", "\\ckvalue{nbs/fit.ipynb}{k_25}"],
+    [value, "paper/paper.qmd", "{{< ckvalue nbs/fit.ipynb k_25 >}}"],
+    [value, "README.md", "<!-- ckvalue nbs/fit.ipynb k_25 -->"],
+    [figure, "paper/main.tex", "\\ckfigure{figures/fit.pdf}"],
+    [figure, "paper/paper.qmd", "![](../figures/fit.pdf)"],
+    [figure, "README.md", "![](figures/fit.pdf)"],
+    [mdTable, "paper/paper.qmd", "{{< include ../tables/t.md >}}"],
+    // What a document can't show, or isn't a document
+    [mdTable, "README.md", null],
+    [csvTable, "paper/paper.qmd", null],
+    [csvTable, "paper/main.tex", null],
+    [value, "notes.txt", null],
+  ] as [CellOutput, string, string | null][]) {
+    assert.equal(getCellOutputInsertText(output, doc), expected, doc);
+  }
 });

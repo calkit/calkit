@@ -14,6 +14,7 @@ import {
   getAddOutputArgs,
   getCellOutputLabel,
   getCellOutputsForCell,
+  getCellOutputInsertText,
   getCellOutputTarget,
   getRemoveOutputArgs,
   hasImageOutput,
@@ -23,6 +24,8 @@ import {
 
 const cellOutputsByNotebook = new Map<string, CellOutput[]>();
 const cellOutputsChanged = new vscode.EventEmitter<void>();
+// The project's documents, as absolute paths, set when registered
+let getDocumentPaths: () => string[] = () => [];
 
 /** What Calkit printed, and whether it worked. */
 function runCalkit(
@@ -269,16 +272,35 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
   await loadCellOutputs(root, cell.notebook);
 }
 
-/** What to do with an output, from its label: copy how to cite it, or stop saving it. */
+/** What to do with an output, from its label: copy how to cite it, insert
+ * it in a document, or stop saving it.
+ */
 async function showCellOutputActions(
   root: string,
   notebookUri: vscode.Uri,
   output: CellOutput,
 ): Promise<void> {
+  // Open documents first, the visible ones at their cursors
+  const documents = [
+    ...vscode.window.visibleTextEditors.map((e) => e.document.uri),
+    ...vscode.workspace.textDocuments.map((d) => d.uri),
+  ]
+    .filter((u) => u.scheme === "file")
+    .map((u) => u.fsPath)
+    .concat(getDocumentPaths())
+    .filter((p, i, all) => all.indexOf(p) === i)
+    .map((fsPath) => ({
+      fsPath,
+      relPath: path.relative(root, fsPath).replace(/\\/g, "/"),
+    }))
+    .filter((d) => !d.relPath.startsWith("../") && !path.isAbsolute(d.relPath))
+    .map((d) => ({ ...d, text: getCellOutputInsertText(output, d.relPath) }))
+    .filter((d) => d.text !== null);
   const copy = output.citation ? `$(copy) Copy ${output.citation}` : undefined;
+  const insert = documents.length ? "$(insert) Insert in document" : undefined;
   const remove = "$(close) Stop saving";
   const picked = await vscode.window.showQuickPick(
-    [...(copy ? [copy] : []), remove],
+    [...(copy ? [copy] : []), ...(insert ? [insert] : []), remove],
     { title: getCellOutputTarget(output) },
   );
   if (picked === copy && output.citation) {
@@ -287,6 +309,27 @@ async function showCellOutputActions(
       `$(check) Copied ${output.citation}`,
       4000,
     );
+  } else if (picked === insert) {
+    const document = await vscode.window.showQuickPick(
+      documents.map((d) => ({
+        label: d.relPath,
+        description: d.text ?? "",
+        document: d,
+      })),
+      { title: "Insert in" },
+    );
+    if (!document) {
+      return;
+    }
+    const uri = vscode.Uri.file(document.document.fsPath);
+    const editor = await vscode.window.showTextDocument(uri, {
+      viewColumn:
+        vscode.window.visibleTextEditors.find(
+          (e) => e.document.uri.fsPath === uri.fsPath,
+        )?.viewColumn ?? vscode.ViewColumn.Beside,
+    });
+    const text = document.document.text ?? "";
+    await editor.edit((edit) => edit.replace(editor.selection, text));
   } else if (picked === remove) {
     const notebookPath = getNotebookPath(root, notebookUri);
     if (!notebookPath) {
@@ -314,7 +357,9 @@ async function showCellOutputActions(
 export function registerCellOutputs(
   context: vscode.ExtensionContext,
   getWorkspaceRoot: () => string | undefined,
+  getProjectDocumentPaths: () => string[],
 ): void {
+  getDocumentPaths = getProjectDocumentPaths;
   const withRoot =
     <T extends unknown[]>(fn: (root: string, ...args: T) => Promise<void>) =>
     async (...args: T) => {

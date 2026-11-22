@@ -4,6 +4,7 @@
  * `calkit nb outputs --json` lists them, and the labels and commands for
  * them.
  */
+import * as path from "node:path";
 
 export type CellOutputKind = "value" | "figure" | "table";
 
@@ -277,4 +278,42 @@ export function hasImageOutput(mimeTypes: string[]): boolean {
   return mimeTypes.some((m) =>
     ["image/png", "image/svg+xml", "image/jpeg", "application/pdf"].includes(m),
   );
+}
+
+/**
+ * How a document at a project path shows an output, from its LaTeX
+ * citation, or null if it can't, e.g., a CSV table. Values are named from
+ * the project, as in LaTeX, and Markdown paths from the document.
+ */
+export function getCellOutputInsertText(
+  output: CellOutput,
+  documentPath: string,
+): string | null {
+  const ext = path.posix.extname(documentPath).toLowerCase();
+  if (ext === ".tex") {
+    return output.citation;
+  }
+  const quarto = ext === ".qmd";
+  if (!quarto && ext !== ".md" && ext !== ".markdown") {
+    return null;
+  }
+  const cited = output.citation?.match(/^\\ck\w+\{([^}]*)\}(?:\{([^}]*)\})?$/);
+  if (output.kind === "value") {
+    if (!cited?.[2]) {
+      return null;
+    }
+    return quarto
+      ? `{{< ckvalue ${cited[1]} ${cited[2]} >}}`
+      : `<!-- ckvalue ${cited[1]} ${cited[2]} -->`;
+  }
+  const target = cited?.[1] ?? output.output_path;
+  if (!target) {
+    return null;
+  }
+  // Relative to the document, as Markdown and Quarto read paths
+  const rel = path.posix.relative(path.posix.dirname(documentPath), target);
+  if (output.kind === "figure") {
+    return `![](${rel})`;
+  }
+  return quarto && /\.md$/i.test(rel) ? `{{< include ${rel} >}}` : null;
 }

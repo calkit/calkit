@@ -333,7 +333,7 @@ async function showCellOutputActions(
       viewColumn:
         vscode.window.visibleTextEditors.find(
           (e) => e.document.uri.fsPath === uri.fsPath,
-        )?.viewColumn ?? vscode.ViewColumn.Beside,
+        )?.viewColumn ?? vscode.ViewColumn.Active,
     });
     const text = document.document.text ?? "";
     await editor.edit((edit) => edit.replace(editor.selection, text));

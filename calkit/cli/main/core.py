@@ -6506,7 +6506,16 @@ def run_jupyter(
         from calkit.cli.scheduler import record_interactive_job
 
         record_interactive_job("jupyter")
-    process = subprocess.run([sys.executable, "-m", "jupyter"] + args)
+    # Jupyter runs a subcommand, e.g., jupyter-lab, from the first one on
+    # PATH, which may be another install without Calkit's extensions, so
+    # this Python's come first
+    import sysconfig
+
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join(
+        [sysconfig.get_path("scripts"), env.get("PATH", "")]
+    )
+    process = subprocess.run([sys.executable, "-m", "jupyter"] + args, env=env)
     sys.exit(process.returncode)
 
 

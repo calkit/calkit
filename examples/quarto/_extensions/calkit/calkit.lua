@@ -173,10 +173,10 @@ local function load_toml(text)
     if multiline then
       skip_first_newline()
     end
-    local stop = text:find(quote, pos, true)
-    if stop == nil then
-      fail("unterminated string")
-    end
+    local stop = assert(
+      text:find(quote, pos, true),
+      "TOML: unterminated string at character " .. pos
+    )
     local out = {text:sub(pos, stop - 1)}
     pos = stop
     if multiline then
@@ -430,8 +430,8 @@ local function repr_float(v)
       break
     end
   end
-  local sign, int, frac, exp = s:match("^(-?)(%d)%.?(%d*)e([-+]%d+)$")
-  exp = tonumber(exp)
+  local sign, int, frac, exp_text = s:match("^(-?)(%d)%.?(%d*)e([-+]%d+)$")
+  local exp = tonumber(exp_text) or 0
   local digits = (int .. frac):gsub("0+$", "")
   if digits == "" then
     digits = "0"

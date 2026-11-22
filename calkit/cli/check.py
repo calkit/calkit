@@ -2051,50 +2051,6 @@ def check_stage_runs() -> None:
     typer.echo("Every stage in dvc.lock matches its recorded run")
 
 
-@check_app.command(name="app")
-def check_app_in_environment(
-    name: Annotated[str, typer.Argument(help="App, e.g., 'quarto'.")],
-    environment: Annotated[
-        str,
-        typer.Option(
-            "--environment",
-            "-e",
-            help="Environment that should provide it.",
-        ),
-    ],
-    stage_name: Annotated[
-        str | None,
-        typer.Option(
-            "--stage",
-            help="Pipeline stage using it, whose requirements count.",
-        ),
-    ] = None,
-) -> None:
-    """Check that an environment provides an app, rather than one
-    installed on this machine being used.
-
-    An app a stage runs belongs in its environment, so every machine runs
-    the same version, unless the project or stage lists it as a
-    requirement. Environments whose commands don't run locally, e.g.,
-    Docker ones, aren't checked.
-    """
-    import calkit.environments
-
-    ck_info = calkit.load_calkit_info(read_only=True)
-    stage = (ck_info.get("pipeline", {}).get("stages") or {}).get(
-        stage_name or ""
-    )
-    problem = calkit.environments.check_app_in_env(
-        name,
-        environment,
-        ck_info,
-        stage=stage if isinstance(stage, dict) else None,
-    )
-    if problem is not None:
-        raise_error(problem)
-    typer.echo(f"'{name}' is OK for environment '{environment}'")
-
-
 @check_app.command(name="env-vars")
 def check_env_vars(
     verbose: Annotated[

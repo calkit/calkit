@@ -69,7 +69,7 @@ over {{< ckvalue results/metrics.json key=fit.n >}} samples.
 ```
 
 Paths are relative to the project.
-Results files can be JSON or YAML,
+Results files can be JSON, YAML, or TOML,
 and keys are separated by dots to reach into nested values.
 Formats take a sign, a `,` or `_` separator, and a precision and type,
 e.g., `.2f`, `,d`, or `.1%`, or a template, e.g., `{value:.1f} m/s`.

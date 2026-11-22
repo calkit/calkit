@@ -71,9 +71,7 @@ def test_values(tmp_path, monkeypatch):
             "doc.qmd",
         )
     # As are what the shortcode can't read or format the way Python does
-    (tmp_path / "metrics.toml").write_text("speed = 3.25\n")
     for text, match in [
-        ("{{< ckvalue metrics.toml speed >}}", "reads JSON and YAML"),
         ("{{< ckvalue results.json rms ' .2f' >}}", "can't format"),
         ("{{< ckvalue results.json rms 8.2f >}}", "can't format"),
         ("{{< ckvalue results.json rms '{x:.2f}' >}}", "can't format"),
@@ -150,6 +148,24 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
     (tmp_path / "calkit.yaml").write_text(
         "results:\n  - name: metrics\n    path: results/m.yaml\n"
     )
+    (tmp_path / "results" / "t.toml").write_text(
+        "# Results\n"
+        'title = "Run \\"A\\" \\u00e9"\n'
+        "path = 'C:\\data'\n"
+        "n = 1_234\n"
+        "mask = 0xff\n"
+        "rate = 6.5e-3  # per second\n"
+        "whole = 2.0\n"
+        "big = inf\n"
+        "on = true\n"
+        "fit.r2 = 0.987\n"
+        'notes = """\nfirst\nsecond"""\n'
+        "coeffs = [\n  1.5, # a\n  -2,\n]\n"
+        "point = { x = 1, y.z = 2.5 }\n"
+        "\n[case.'quoted']\nspeed = 12.25\n"
+        "\n[[runs]]\nscore = 0.5\n"
+        "\n[[runs]]\nscore = 0.75\n[runs.meta]\nseed = 7\n"
+    )
     cases = [
         ("results/r.json", "rms", f)
         for f in ["", ".2f", ".3e", ".1%", "+.2f", "g", ".3g", "E", "%"]
@@ -168,6 +184,20 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
         ("results/r.json", "name", "s"),
         ("results/r.json", "x", "{value:.1f} m/s"),
         ("results/r.json", "x", "{0:.0f} and {value:,.2f}"),
+        ("results/t.toml", "title", ""),
+        ("results/t.toml", "path", ""),
+        ("results/t.toml", "n", ",d"),
+        ("results/t.toml", "mask", ""),
+        ("results/t.toml", "rate", ".2e"),
+        ("results/t.toml", "whole", ""),
+        ("results/t.toml", "big", ""),
+        ("results/t.toml", "on", ""),
+        ("results/t.toml", "fit.r2", ".2f"),
+        ("results/t.toml", "coeffs.1", ""),
+        ("results/t.toml", "point.y.z", ""),
+        ("results/t.toml", "case.quoted.speed", ".1f"),
+        ("results/t.toml", "runs.1.score", ".0%"),
+        ("results/t.toml", "runs.1.meta.seed", ""),
         ("metrics", "speed", ".1f"),
         ("metrics", "count", ",d"),
         ("metrics", "nested.list.1", ".2f"),

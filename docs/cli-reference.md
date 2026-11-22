@@ -3783,7 +3783,6 @@ Check things.
 | [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
 | [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that this machine meets the project's requirements.                                                    |
 | [`stage-runs`](#subcommand-check-stage-runs)                | Check each stage in dvc.lock matches the recorded run that made it.                                          |
-| [`app`](#subcommand-check-app)                              | Check that an environment provides an app, rather than one installed on this machine being used.             |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
@@ -4075,33 +4074,6 @@ Usage:
 ```text
 calkit check stage-runs
 ```
-
-<a id="subcommand-check-app"></a>
-
-#### `calkit check app`
-
-Check that an environment provides an app, rather than one installed on this machine being used.
-
-An app a stage runs belongs in its environment, so every machine runs the same version, unless the project or stage lists it as a requirement. Environments whose commands don't run locally, e.g., Docker ones, aren't checked.
-
-Usage:
-
-```text
-calkit check app [OPTIONS] NAME
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description          |
-| -------- | ---- | -------- | ------- | -------------------- |
-| `name`   | str  | yes      |         | App, e.g., 'quarto'. |
-
-Options:
-
-| Option                | Type | Required | Default | Description                                        |
-| --------------------- | ---- | -------- | ------- | -------------------------------------------------- |
-| `--environment`, `-e` | str  | yes      |         | Environment that should provide it.                |
-| `--stage`             | str  | no       |         | Pipeline stage using it, whose requirements count. |
 
 <a id="subcommand-check-env-vars"></a>
 

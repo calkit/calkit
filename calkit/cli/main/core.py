@@ -4428,7 +4428,7 @@ def run(
     # Create a file handler for dvc.stage.run logger. Append mode matters:
     # stage output is teed into this file through a second handle, and a
     # truncating handle would overwrite it.
-    file_handler = logging.FileHandler(log_fpath, mode="a")
+    file_handler = logging.FileHandler(log_fpath, mode="a", encoding="utf-8")
     run_history_length = calkit.config.read().run_history_length
     # Keep the private log directory bounded; the new log counts toward the
     # cap and is protected so it can never be pruned out from under this run.
@@ -4527,7 +4527,7 @@ def run(
         os.environ.pop("CALKIT_FORCE", None)
         dvc.stage.run._run = orig_run
     # Parse log to get timing and which stages ran
-    with open(log_fpath, "r") as f:
+    with open(log_fpath, encoding="utf-8", errors="replace") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(
             log_content, run_finished=True

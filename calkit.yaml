@@ -138,6 +138,8 @@ pipeline:
       args:
         - --engine=libreoffice
       environment: dev
+      requirements:
+        - libreoffice
       description: >-
         Export the LaTeX/Word example to Word and merge it back, with no
         edits, and count what went out and came back.

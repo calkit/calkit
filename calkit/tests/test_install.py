@@ -72,6 +72,26 @@ def test_get_installer():
     assert make is not None and "ezwinports.make" in make["script"]
     with mock.patch("calkit.install.sys.platform", "linux"):
         assert install.get_installer("make") is None
+    # Office apps come one at a time on macOS but together on Windows, and
+    # point Linux at LibreOffice
+    for app, cask, exe in [
+        ("word", "microsoft-word", "Winword.exe"),
+        ("excel", "microsoft-excel", "excel.exe"),
+        ("powerpoint", "microsoft-powerpoint", "powerpnt.exe"),
+    ]:
+        with mock.patch("calkit.install.sys.platform", "darwin"):
+            mac = install.get_installer(app)
+        assert mac is not None and mac["script"].endswith(cask)
+        # Homebrew can put it in ~/Applications
+        assert any(p.startswith("~/Applications") for p in mac["path_add"])
+        with mock.patch("calkit.install.sys.platform", "win32"):
+            win = install.get_installer(app)
+        assert win is not None and "Microsoft.Office" in win["script"]
+        assert win["binary"] == exe
+        with mock.patch("calkit.install.sys.platform", "linux"):
+            assert install.get_installer(app) is None
+            message = install.get_unsupported_message(app)
+        assert message is not None and "libreoffice" in message
 
 
 @skipif_windows_fake_binary

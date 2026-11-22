@@ -2532,7 +2532,7 @@ def _dump_yaml_if_changed(data, fpath: str, verbose: bool = False) -> bool:
             pass
     if verbose:
         typer.echo(f"Writing to {os.path.basename(fpath)}")
-    with open(fpath, "w") as f:
+    with open(fpath, "w", newline=calkit.git.get_checkout_newline(fpath)) as f:
         calkit.ryaml.dump(data, f)
     return True
 

@@ -673,6 +673,44 @@ def test_get_filter_driver(tmp_dir):
     assert calkit.git.get_filter_driver(repo, "notes.txt") is None
 
 
+def test_get_checkout_newline(tmp_dir):
+    get = calkit.git.get_checkout_newline
+    # Outside a repo there's nothing to respect
+    assert get("dvc.yaml") is None
+    repo = git.Repo.init()
+    # Set locally so the machine's own config, e.g., Git for Windows'
+    # system-wide core.autocrlf=true, doesn't leak in
+    repo.git.config("core.autocrlf", "false")
+    # With nothing configured, Git leaves line endings alone
+    assert get("dvc.yaml") is None
+    repo.git.config("core.autocrlf", "true")
+    assert get("dvc.yaml") == "\r\n"
+    repo.git.config("core.autocrlf", "input")
+    assert get("dvc.yaml") == "\n"
+    # Attributes outrank core.autocrlf, and apply in subdirectories
+    repo.git.config("core.autocrlf", "true")
+    os.makedirs("sub")
+    Path(".gitattributes").write_text(
+        "*.yaml text eol=lf\n*.txt eol=crlf\n*.bin -text\n*.md text\n"
+    )
+    assert get("dvc.yaml") == "\n"
+    assert get(os.path.join("sub", "dvc.yaml")) == "\n"
+    assert get(os.path.abspath("dvc.yaml")) == "\n"
+    assert get("notes.txt") == "\r\n"
+    # Unset text turns conversion off, whatever core.autocrlf says
+    assert get("data.bin") is None
+    # Marked as text, a file follows core.eol once core.autocrlf is off
+    repo.git.config("core.autocrlf", "false")
+    assert get("notes.md") == os.linesep
+    repo.git.config("core.eol", "crlf")
+    assert get("notes.md") == "\r\n"
+    repo.git.config("core.eol", "lf")
+    assert get("notes.md") == "\n"
+    # but doesn't apply to files not marked as text
+    repo.git.config("core.eol", "crlf")
+    assert get("main.py") is None
+
+
 def test_ensure_path_is_not_filtered(tmp_dir):
     repo = git.Repo.init()
     repo.git.config("user.email", "test@example.com")

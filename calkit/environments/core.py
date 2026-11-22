@@ -1068,6 +1068,30 @@ def get_composed_env_vars(
     return env_vars
 
 
+def get_uv_extras(env: dict) -> list[str]:
+    """Get the extras of a uv environment to install on this machine.
+
+    One given with ``when`` is included only where all of its conditions
+    hold.
+    """
+    from pydantic import ValidationError
+
+    from calkit.models.core import UvExtra
+
+    extras = []
+    for extra in env.get("extras") or []:
+        if isinstance(extra, str):
+            extras.append(extra)
+            continue
+        try:
+            uv_extra = UvExtra.model_validate(extra)
+        except ValidationError as e:
+            raise ValueError(f"Extra {extra!r} is invalid: {e}") from None
+        if all(check_condition(c) for c in uv_extra.when):
+            extras.append(uv_extra.name)
+    return extras
+
+
 def get_env(name: str, envs: dict) -> dict | None:
     """An environment by name, including one a switch defines in place.
 
@@ -1171,13 +1195,18 @@ def _load_switch(env_name: str, envs: dict) -> list["SwitchOption"]:
 _FQDNS: dict[str, str] = {}
 
 
-def resolve_switch(env_name: str, envs: dict) -> str | None:
-    """The environment a switch picks on this machine, or None."""
+def check_condition(condition: object) -> bool:
+    """Check whether a switch condition, e.g., ``os_is: linux``, holds on
+    this machine.
+    """
     from calkit.models.core import (
         AppExistsCondition,
         EnvVarEqualsCondition,
         EnvVarExistsCondition,
         EnvVarSetCondition,
+        GpuArchIsCondition,
+        GpuNameMatchesCondition,
+        GpuVendorIsCondition,
         HostnameMatchesCondition,
         MachineIdEqualsCondition,
         OsIsCondition,
@@ -1186,49 +1215,61 @@ def resolve_switch(env_name: str, envs: dict) -> str | None:
     def any_of(value: str | list) -> list:
         return value if isinstance(value, list) else [value]
 
-    def holds(condition: object) -> bool:
-        if isinstance(condition, AppExistsCondition):
-            return any(
-                shutil.which(a) is not None
-                for a in any_of(condition.app_exists)
-            )
-        if isinstance(condition, EnvVarSetCondition):
-            return any(n in os.environ for n in any_of(condition.env_var_set))
-        if isinstance(condition, EnvVarExistsCondition):
-            return any(
-                n in os.environ for n in any_of(condition.env_var_exists)
-            )
-        if isinstance(condition, EnvVarEqualsCondition):
-            settings = [
-                s.split("=", 1) for s in any_of(condition.env_var_equals)
-            ]
-            return any(os.environ.get(n) == v for n, v in settings)
-        if isinstance(condition, HostnameMatchesCondition):
-            patterns = [p.lower() for p in any_of(condition.hostname_matches)]
-            hostname = socket.gethostname().lower()
-            if any(fnmatch.fnmatchcase(hostname, p) for p in patterns):
-                return True
-            # Cluster nodes often report a short name, so the qualified one
-            # is tried too, which can take a slow reverse DNS lookup
-            if hostname not in _FQDNS:
-                _FQDNS[hostname] = socket.getfqdn().lower()
-            return any(
-                fnmatch.fnmatchcase(_FQDNS[hostname], p) for p in patterns
-            )
-        if isinstance(condition, OsIsCondition):
-            names = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
-            return names.get(platform.system()) in any_of(condition.os_is)
-        if isinstance(condition, MachineIdEqualsCondition):
-            here = calkit.get_machine_id()
-            return any(
-                calkit.machine_ids_match(here, m)
-                for m in any_of(condition.machine_id_equals)
-            )
-        raise TypeError(f"Unknown switch condition: {condition!r}")
+    if isinstance(condition, AppExistsCondition):
+        return any(
+            shutil.which(a) is not None for a in any_of(condition.app_exists)
+        )
+    if isinstance(condition, EnvVarSetCondition):
+        return any(n in os.environ for n in any_of(condition.env_var_set))
+    if isinstance(condition, EnvVarExistsCondition):
+        return any(n in os.environ for n in any_of(condition.env_var_exists))
+    if isinstance(condition, EnvVarEqualsCondition):
+        settings = [s.split("=", 1) for s in any_of(condition.env_var_equals)]
+        return any(os.environ.get(n) == v for n, v in settings)
+    if isinstance(condition, HostnameMatchesCondition):
+        patterns = [p.lower() for p in any_of(condition.hostname_matches)]
+        hostname = socket.gethostname().lower()
+        if any(fnmatch.fnmatchcase(hostname, p) for p in patterns):
+            return True
+        # Cluster nodes often report a short name, so the qualified one
+        # is tried too, which can take a slow reverse DNS lookup
+        if hostname not in _FQDNS:
+            _FQDNS[hostname] = socket.getfqdn().lower()
+        return any(fnmatch.fnmatchcase(_FQDNS[hostname], p) for p in patterns)
+    if isinstance(condition, OsIsCondition):
+        names = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
+        return names.get(platform.system()) in any_of(condition.os_is)
+    if isinstance(condition, MachineIdEqualsCondition):
+        here = calkit.get_machine_id()
+        return any(
+            calkit.machine_ids_match(here, m)
+            for m in any_of(condition.machine_id_equals)
+        )
+    # A GPU condition holds when any one of the machine's GPUs meets it
+    if isinstance(condition, GpuVendorIsCondition):
+        vendors = any_of(condition.gpu_vendor_is)
+        return any(g.get("vendor") in vendors for g in calkit.core.get_gpus())
+    if isinstance(condition, GpuArchIsCondition):
+        archs = [a.lower() for a in any_of(condition.gpu_arch_is)]
+        return any(
+            str(g.get("arch") or "").lower() in archs
+            for g in calkit.core.get_gpus()
+        )
+    if isinstance(condition, GpuNameMatchesCondition):
+        patterns = [p.lower() for p in any_of(condition.gpu_name_matches)]
+        return any(
+            fnmatch.fnmatchcase(str(g.get("name") or "").lower(), p)
+            for g in calkit.core.get_gpus()
+            for p in patterns
+        )
+    raise TypeError(f"Unknown switch condition: {condition!r}")
 
+
+def resolve_switch(env_name: str, envs: dict) -> str | None:
+    """The environment a switch picks on this machine, or None."""
     get_switch_options(env_name, envs)
     for n, option in enumerate(_load_switch(env_name, envs), start=1):
-        if option.when is None or all(holds(c) for c in option.when):
+        if option.when is None or all(check_condition(c) for c in option.when):
             if isinstance(option.use, str):
                 return option.use
             return f"{env_name}.{n}"

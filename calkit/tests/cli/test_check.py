@@ -124,6 +124,21 @@ def test_check_venv(tmp_dir):
     assert result.returncode != 0
     assert "out of sync with its lock" in result.stderr + result.stdout
     assert not [f for f in os.listdir() if f.startswith(("osx-", "linux-"))]
+    # A new lock gets the line ending Git checks it out with, whichever one
+    # the installer froze it with
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "config", "core.autocrlf", "false"])
+    for eol, reqs in [("crlf", "requests\nsix\n"), ("lf", "requests\n")]:
+        with open(".gitattributes", "w") as f:
+            f.write(f"lock.txt text eol={eol}\n")
+        with open("reqs.txt", "w") as f:
+            f.write(reqs)
+        subprocess.check_call(check_311)
+        with open("lock.txt", "rb") as f:
+            raw = f.read()
+        assert b"requests==" in raw
+        n_crlf = raw.count(b"\n") if eol == "crlf" else 0
+        assert raw.count(b"\r\n") == n_crlf, eol
 
 
 def test_check_venv_moved(tmp_dir):

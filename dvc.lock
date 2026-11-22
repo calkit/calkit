@@ -385,8 +385,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: e26e6d8161aee299460812cd7efbaa0d
-      size: 202869
+      md5: 4fe3ce138256ac7afe59da4506c442db
+      size: 271287
   latex-word-round-trip:
     cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
       --engine=libreoffice

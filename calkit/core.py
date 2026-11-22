@@ -1432,17 +1432,24 @@ def system_property_requirement_kinds() -> dict[str, str]:
     These constrain something about the machine rather than requiring a
     thing to be present, so they carry no name: ``cpu-count`` is the whole
     identity of the entry. The values are the keys
-    :func:`get_system_info` reports them under.
+    :func:`get_system_info` reports them under, which for the GPU
+    properties is the list of GPUs they're read from.
     """
     from typing import get_args
 
     from calkit.environments import SYSTEM_LOCK_PROPERTIES
     from calkit.models.core import SystemNumberProperty, SystemValueProperty
+    from calkit.models.requirements import GPU_PROPERTY_FIELDS
 
     props = list(get_args(SystemNumberProperty)) + list(
         get_args(SystemValueProperty)
     )
-    return {prop: SYSTEM_LOCK_PROPERTIES[prop] for prop in props}
+    return {
+        prop: "gpus"
+        if prop in GPU_PROPERTY_FIELDS
+        else SYSTEM_LOCK_PROPERTIES[prop]
+        for prop in props
+    }
 
 
 def _numeric_property_kinds() -> tuple[str, ...]:
@@ -1601,8 +1608,89 @@ def check_property_requirement(
     A property the machine can't report is an error too, rather than a
     silent pass: an unanswerable question isn't a satisfied one.
     """
-    from packaging.specifiers import SpecifierSet
-    from packaging.version import InvalidVersion, Version
+    from calkit.models.requirements import GPU_PROPERTY_FIELDS
+
+    def check_value(value: Any) -> None:
+        """Check one value of the property against the requirement."""
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import InvalidVersion, Version
+
+        # Numeric properties are bounded; everything else is matched or
+        # compared as a version.
+        if prop in _numeric_property_kinds():
+            minimum = req.get("min")
+            maximum = req.get("max")
+            if minimum is None and maximum is None:
+                raise ValueError(
+                    f"Requirement on '{prop}' needs a 'min' or a 'max'; to "
+                    "depend on its value rather than constrain it, add it to "
+                    "the environment's 'lock'"
+                )
+            if minimum is not None and value < minimum:
+                raise ValueError(
+                    f"{described_as} has {prop} {_fmt_prop(value)}, but at "
+                    f"least {_fmt_prop(minimum)} is required"
+                )
+            if maximum is not None and value > maximum:
+                raise ValueError(
+                    f"{described_as} has {prop} {_fmt_prop(value)}, but at "
+                    f"most {_fmt_prop(maximum)} is required"
+                )
+            return
+        equals = req.get("equals")
+        spec = req.get("version_spec")
+        patterns = req.get("matches")
+        if equals is None and spec is None and patterns is None:
+            raise ValueError(
+                f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
+                "'version_spec'; to depend on its value rather than constrain "
+                "it, add it to the environment's 'lock'"
+            )
+        if patterns is not None:
+            import fnmatch
+
+            globs = [patterns] if isinstance(patterns, str) else list(patterns)
+            if not any(
+                fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
+                for g in globs
+            ):
+                wanted = " or ".join(f"'{g}'" for g in globs)
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', which doesn't "
+                    f"match {wanted}"
+                )
+        if equals is not None:
+            allowed = [equals] if isinstance(equals, str) else list(equals)
+            # Matched case-insensitively because the same machine is 'Darwin'
+            # or 'darwin' depending on who is writing it down, and nobody means
+            # those to be different answers.
+            if str(value).lower() not in [str(a).lower() for a in allowed]:
+                wanted = " or ".join(f"'{a}'" for a in allowed)
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', but {wanted} is "
+                    "required"
+                )
+        if spec is not None:
+            try:
+                spec_set = SpecifierSet(
+                    spec if spec[0] in "<>=!~" else f"=={spec}"
+                )
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid version_spec '{spec}' for {prop}: {e}"
+                )
+            try:
+                parsed = Version(str(value))
+            except InvalidVersion:
+                raise ValueError(
+                    f"{described_as} reports {prop} '{value}', which can't be "
+                    f"read as a version to compare against '{spec}'"
+                )
+            if parsed not in spec_set:
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', but '{spec}' is "
+                    "required"
+                )
 
     prop = req["kind"]
     key = system_property_requirement_kinds()[prop]
@@ -1612,80 +1700,28 @@ def check_property_requirement(
             f"Requirement on '{prop}' can't be checked because "
             f"{described_as} doesn't report it"
         )
-    # Numeric properties are bounded; everything else is matched or
-    # compared as a version.
-    if prop in _numeric_property_kinds():
-        minimum = req.get("min")
-        maximum = req.get("max")
-        if minimum is None and maximum is None:
+    if prop in GPU_PROPERTY_FIELDS:
+        field = GPU_PROPERTY_FIELDS[prop]
+        values = [gpu[field] for gpu in value if gpu.get(field)]
+        if not values:
             raise ValueError(
-                f"Requirement on '{prop}' needs a 'min' or a 'max'; to "
-                "depend on its value rather than constrain it, add it to "
-                "the environment's 'lock'"
+                f"Requirement on '{prop}' isn't met because {described_as} "
+                "has no GPU that reports it"
             )
-        if minimum is not None and value < minimum:
-            raise ValueError(
-                f"{described_as} has {prop} {_fmt_prop(value)}, but at least "
-                f"{_fmt_prop(minimum)} is required"
-            )
-        if maximum is not None and value > maximum:
-            raise ValueError(
-                f"{described_as} has {prop} {_fmt_prop(value)}, but at most "
-                f"{_fmt_prop(maximum)} is required"
-            )
-        return
-    equals = req.get("equals")
-    spec = req.get("version_spec")
-    patterns = req.get("matches")
-    if equals is None and spec is None and patterns is None:
+        problems = []
+        for gpu_value in values:
+            try:
+                check_value(gpu_value)
+                return
+            except ValueError as e:
+                problems.append(str(e))
+        if len(problems) == 1:
+            raise ValueError(problems[0])
         raise ValueError(
-            f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
-            "'version_spec'; to depend on its value rather than constrain "
-            "it, add it to the environment's 'lock'"
+            f"No GPU on {described_as} meets the requirement on '{prop}': "
+            + "; ".join(problems)
         )
-    if patterns is not None:
-        import fnmatch
-
-        globs = [patterns] if isinstance(patterns, str) else list(patterns)
-        if not any(
-            fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
-            for g in globs
-        ):
-            wanted = " or ".join(f"'{g}'" for g in globs)
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', which doesn't match "
-                f"{wanted}"
-            )
-    if equals is not None:
-        allowed = [equals] if isinstance(equals, str) else list(equals)
-        # Matched case-insensitively because the same machine is 'Darwin'
-        # or 'darwin' depending on who is writing it down, and nobody means
-        # those to be different answers.
-        if str(value).lower() not in [str(a).lower() for a in allowed]:
-            wanted = " or ".join(f"'{a}'" for a in allowed)
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', but {wanted} is "
-                "required"
-            )
-    if spec is not None:
-        try:
-            spec_set = SpecifierSet(
-                spec if spec[0] in "<>=!~" else f"=={spec}"
-            )
-        except Exception as e:
-            raise ValueError(f"Invalid version_spec '{spec}' for {prop}: {e}")
-        try:
-            parsed = Version(str(value))
-        except InvalidVersion:
-            raise ValueError(
-                f"{described_as} reports {prop} '{value}', which can't be "
-                f"read as a version to compare against '{spec}'"
-            )
-        if parsed not in spec_set:
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', but '{spec}' is "
-                "required"
-            )
+    check_value(value)
 
 
 def _fmt_prop(value: float) -> str:
@@ -1978,6 +2014,12 @@ def check_requirements(
             if system_info is not None
             else get_machine_properties()
         )
+        # GPUs likewise, since finding them can start a GPU runtime
+        gpu_kinds = [k for k, v in property_kinds.items() if v == "gpus"]
+        if "gpus" not in info and any(
+            req["kind"] in gpu_kinds for req in buckets["_property"]
+        ):
+            info = {**info, "gpus": [dict(g) for g in get_gpus()]}
         for req in buckets["_property"]:
             check_property_requirement(req, info, described_as=described_as)
     for req in buckets["env-var"]:
@@ -2534,6 +2576,160 @@ def get_machine_properties() -> dict:
     }
 
 
+@functools.cache
+def get_gpus() -> tuple[dict, ...]:
+    """Get this machine's GPUs, each with a ``name``, ``vendor`` and ``arch``.
+
+    They're read from what the drivers install rather than from a framework
+    like PyTorch, so this works before any environment is built: the HIP
+    runtime for AMD, ``nvidia-smi`` for NVIDIA, and the chip itself on Apple
+    silicon. ``arch`` is what a build targets, e.g., 'gfx1201' or 'sm_89',
+    or None where there's no such thing. Cached, since this can start a GPU
+    runtime, and a machine's GPUs don't change while a command runs.
+    """
+
+    def get_apple_gpus() -> list[dict]:
+        if platform.system() != "Darwin" or platform.machine() != "arm64":
+            return []
+        res = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if res.returncode != 0 or not res.stdout.strip():
+            return []
+        return [{"name": res.stdout.strip(), "vendor": "apple", "arch": None}]
+
+    gpus = []
+    for get in (_get_amd_gpus, _get_nvidia_gpus, get_apple_gpus):
+        # A broken driver is a machine with no usable GPU, not a crash
+        try:
+            gpus += get()
+        except (
+            OSError,
+            AttributeError,
+            ValueError,
+            subprocess.SubprocessError,
+        ):
+            pass
+    return tuple(gpus)
+
+
+def _get_amd_gpus() -> list[dict]:
+    """Get AMD GPUs from the HIP runtime, falling back to Linux's KFD.
+
+    Windows drivers install the runtime, while on Linux it comes with a
+    ROCm install that a machine using ROCm wheels needn't have, so there
+    the kernel's description of each GPU is read instead.
+    """
+    import ctypes
+
+    if sys.platform == "win32":
+        candidates = ["amdhip64_7.dll", "amdhip64_6.dll"]
+    else:
+        candidates = ["libamdhip64.so", "/opt/rocm/lib/libamdhip64.so"]
+    for candidate in candidates:
+        try:
+            if sys.platform == "win32":
+                hip = ctypes.WinDLL(candidate)
+            else:
+                hip = ctypes.CDLL(candidate)
+        except OSError:
+            continue
+        count = ctypes.c_int()
+        if hip.hipGetDeviceCount(ctypes.byref(count)) != 0:
+            return []
+        get_props = getattr(hip, "hipGetDevicePropertiesR0600", None)
+        if get_props is None:
+            get_props = hip.hipGetDeviceProperties
+        gpus = []
+        for i in range(count.value):
+            # The properties struct starts with the name, but where the
+            # architecture sits has moved between releases, so it's found
+            # by its shape in a buffer bigger than any release's struct
+            props = ctypes.create_string_buffer(8192)
+            if get_props(props, i) != 0:
+                continue
+            raw = props.raw
+            name = raw[:256].split(b"\0")[0].decode(errors="replace")
+            arch = re.search(rb"gfx[0-9a-f]{3,5}(?=[\0:])", raw[256:])
+            gpus.append(
+                {
+                    "name": name or None,
+                    "vendor": "amd",
+                    "arch": arch.group().decode() if arch else None,
+                }
+            )
+        return gpus
+    gpus = []
+    nodes = glob.glob("/sys/class/kfd/kfd/topology/nodes/*/properties")
+    for path in sorted(nodes):
+        with open(path) as f:
+            node_props = dict(
+                line.split(maxsplit=1) for line in f if len(line.split()) == 2
+            )
+        # Zero for a CPU node, else major, minor and stepping as decimal
+        # pairs, e.g., 120001 for gfx1201 or 90010 for gfx90a
+        version = int(node_props.get("gfx_target_version", "0"))
+        if version:
+            major, minor, step = (
+                version // 10000,
+                version // 100 % 100,
+                version % 100,
+            )
+            gpus.append(
+                {
+                    "name": None,
+                    "vendor": "amd",
+                    "arch": f"gfx{major}{minor:x}{step:x}",
+                }
+            )
+    return gpus
+
+
+def _get_nvidia_gpus() -> list[dict]:
+    """Get NVIDIA GPUs from ``nvidia-smi``, which the driver installs."""
+    import shutil
+
+    if shutil.which("nvidia-smi") is None:
+        return []
+    # Drivers older than 510 can't report compute_cap, so they're asked for
+    # names alone
+    for fields in ("name,compute_cap", "name"):
+        res = subprocess.run(
+            [
+                "nvidia-smi",
+                f"--query-gpu={fields}",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            break
+    else:
+        return []
+    gpus = []
+    for line in res.stdout.splitlines():
+        if fields == "name":
+            name, cap = line, ""
+        else:
+            name, _, cap = line.rpartition(",")
+        if name.strip():
+            gpus.append(
+                {
+                    "name": name.strip(),
+                    "vendor": "nvidia",
+                    "arch": f"sm_{cap.strip().replace('.', '')}"
+                    if cap.strip()
+                    else None,
+                }
+            )
+    return gpus
+
+
 # Apps whose versions 'calkit describe system' reports on every OS
 ALWAYS_REPORTED_APPS = (
     "python",
@@ -2550,15 +2746,23 @@ ALWAYS_REPORTED_APPS = (
 
 
 def get_system_info(
-    apps: list[str] | None = None, all_apps: bool = True
+    apps: list[str] | None = None,
+    all_apps: bool = True,
+    gpus: bool | None = None,
 ) -> dict:
     """Get information about the system on which we're currently running.
 
     ``apps`` are reported with a version each, beyond the ones always
     reported, e.g., the apps a project's requirements name. Without
     ``all_apps``, only ``apps`` are, since each costs a subprocess.
+    ``gpus`` reports the machine's GPUs too, which can mean starting a GPU
+    runtime, so it defaults to ``all_apps``.
     """
     system_info = get_machine_properties()
+    if gpus is None:
+        gpus = all_apps
+    if gpus:
+        system_info["gpus"] = [dict(g) for g in get_gpus()]
     os_name = system_info["os"]
     node_id = uuid.getnode()
     # The multicast bit is the 40th bit from the right (0-indexed)

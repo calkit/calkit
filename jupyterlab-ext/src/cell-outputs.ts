@@ -29,6 +29,7 @@ export interface IVariableChoice {
 }
 
 export const SHOWN_IMAGE_LABEL = "Image this cell shows";
+export const SHOWN_RESULT_LABEL = "Result this cell shows";
 export const OTHER_VARIABLE_LABEL = "Other variable…";
 
 /** Extensions each kind of file can be saved as, by kind. */
@@ -205,17 +206,28 @@ export function rankNamesForKind(
 export function getVariableChoices(
   source: string,
   kind: CellOutputKind,
-  hasImage: boolean,
+  isShown: boolean,
 ): IVariableChoice[] {
   const names = rankNamesForKind(getAssignedNames(source), kind);
+  const shown = kind === "figure" ? SHOWN_IMAGE_LABEL : SHOWN_RESULT_LABEL;
   return [
-    ...(kind === "figure" && hasImage ? [{ label: SHOWN_IMAGE_LABEL }] : []),
+    ...(kind !== "value" && isShown ? [{ label: shown }] : []),
     ...names.map((n) => ({ label: n, variable: n })),
     { label: OTHER_VARIABLE_LABEL, isOther: true },
-    ...(kind === "figure" && !hasImage
-      ? [{ label: `${SHOWN_IMAGE_LABEL} (run cell first)` }]
+    ...(kind !== "value" && !isShown
+      ? [{ label: `${shown} (run cell first)` }]
       : []),
   ];
+}
+
+/** Whether a cell's outputs include the result of its last line. */
+export function hasResultOutput(outputs: unknown[]): boolean {
+  return outputs.some(
+    (o) =>
+      typeof o === "object" &&
+      o !== null &&
+      (o as { output_type?: unknown }).output_type === "execute_result",
+  );
 }
 
 /**

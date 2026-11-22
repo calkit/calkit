@@ -27,7 +27,17 @@ def test_clean_notebook_outputs(tmp_dir):
         "notebook.ipynb"
     )
     with open(cleaned_fpath, "rb") as f:
-        assert b"\r\n" not in f.read()
+        cleaned = f.read()
+    assert b"\r\n" not in cleaned
+    # Nor on the order an editor writes keys in
+    with open("notebook.ipynb", encoding="utf-8") as f:
+        nb = json.load(f)
+    nb["cells"] = [dict(reversed(c.items())) for c in nb["cells"]]
+    with open("notebook.ipynb", "w", encoding="utf-8") as f:
+        json.dump(dict(reversed(nb.items())), f)
+    subprocess.check_call(["calkit", "nb", "clean", "notebook.ipynb"])
+    with open(cleaned_fpath, "rb") as f:
+        assert f.read() == cleaned
 
 
 def test_clean_notebook_is_invariant_to_cell_ids():

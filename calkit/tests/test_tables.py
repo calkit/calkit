@@ -221,6 +221,11 @@ def test_write_table(tmp_dir):
             "35,-0.0616,",
             '45,1.5e-05,"1, 2"',
         ]
+    calkit.tables.write_table(
+        "full.csv", {"columns": ["k"], "data": [[1 / 3]]}
+    )
+    with open("full.csv", encoding="utf-8") as f:
+        assert f.read().splitlines()[1] == "0.3333333333333333"
     calkit.tables.write_table("rates.md", table)
     with open("rates.md", encoding="utf-8") as f:
         assert f.read().splitlines()[:3] == [

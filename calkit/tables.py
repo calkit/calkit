@@ -422,9 +422,15 @@ def write_table(
         with open(path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f, lineterminator="\n")
             writer.writerow(columns)
+            # Numbers in full unless formatted, since a CSV is data to read
             for row in rows:
                 writer.writerow(
-                    [format_table_cell(v, number_format) for v in row]
+                    [
+                        repr(v)
+                        if isinstance(v, float) and number_format is None
+                        else format_table_cell(v, number_format)
+                        for v in row
+                    ]
                 )
         return
     if suffix == ".tex":

@@ -1052,7 +1052,8 @@ def add_cell_output(
             "--variable-name",
             "-v",
             help="Variable it's saved from, which can be given several times "
-            "for values; for a figure, the image the cell shows if not given.",
+            "for values; if not given, what the cell shows: a figure's image or "
+            "a table's result, e.g., df.head() on its last line.",
         ),
     ] = None,
     output_path: Annotated[

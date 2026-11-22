@@ -144,7 +144,7 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
       {
         label: "Table",
         description: "\\cktable",
-        detail: "A DataFrame, or a list of rows",
+        detail: "A DataFrame the cell shows or holds, or a list of rows",
         outputKind: "table" as CellOutputKind,
       },
     ],
@@ -154,21 +154,27 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
     return;
   }
   const kind = kindPick.outputKind;
-  // The variable it's saved from, or for a figure, what the cell shows
-  const shown = "$(file-media) Image this cell shows";
+  // The variable it's saved from, or for a figure or table, what the cell
+  // shows: its image, or the result of its last line, e.g., df.head()
+  const shown =
+    kind === "figure"
+      ? "$(file-media) Image this cell shows"
+      : "$(table) Result this cell shows";
   const other = "$(edit) Other variable…";
   const names = rankNamesForKind(
     getAssignedNames(cell.document.getText()),
     kind,
   );
   const mimeTypes = cell.outputs.flatMap((o) => o.items.map((i) => i.mime));
+  const isShown =
+    kind === "figure"
+      ? hasImageOutput(mimeTypes)
+      : cell.outputs.some((o) => o.metadata?.outputType === "execute_result");
   const items: vscode.QuickPickItem[] = [
-    ...(kind === "figure" && hasImageOutput(mimeTypes)
-      ? [{ label: shown }]
-      : []),
+    ...(kind !== "value" && isShown ? [{ label: shown }] : []),
     ...names.map((n) => ({ label: n })),
     { label: other },
-    ...(kind === "figure" && !hasImageOutput(mimeTypes)
+    ...(kind !== "value" && !isShown
       ? [{ label: shown, detail: "Run the cell first to see it here" }]
       : []),
   ];
@@ -342,7 +348,7 @@ export function registerCellOutputs(
           ).map((output) => {
             const { text, tooltip } = getCellOutputLabel(output);
             const item = new vscode.NotebookCellStatusBarItem(
-              text,
+              `$(pin) Calkit: ${text}`,
               vscode.NotebookCellStatusBarAlignment.Left,
             );
             item.tooltip = tooltip;

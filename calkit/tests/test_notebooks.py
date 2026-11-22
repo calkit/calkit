@@ -267,6 +267,17 @@ def test_capture_cells():
                 assert json.load(f) == expected
         with open(os.path.join(tables, "4.json")) as f:
             assert json.load(f)["data"] == [[25, 0.031]]
+        # A table can be the result the cell shows, which IPython keeps by
+        # the number of the cell before the saving one
+        namespace["In"] = ["", "rows", "save()"]
+        namespace["Out"] = {1: namespace["rows"]}
+        shown = {"kind": "table", "output_path": "t.tex"}
+        save("cell a", [[5, shown]], values, tables)
+        with open(os.path.join(tables, "5.json")) as f:
+            assert json.load(f) == expected
+        namespace["Out"] = {0: namespace["rows"]}
+        with pytest.raises(ValueError, match="doesn't show a result"):
+            save("cell a", [[5, shown]], values, tables)
         failures = [
             (
                 {"kind": "value", "variable_name": "missing"},

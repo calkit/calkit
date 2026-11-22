@@ -206,6 +206,24 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
                 )
         name = names[0]
         what = f"'{name}'"
+        # A table can be the result the cell shows, e.g., df.head(), which
+        # IPython keeps by the cell's number, the one before this cell's in
+        # its history of inputs
+        if name is None and out["kind"] == "table":
+            n = len(user.get("In", [])) - 2
+            if n not in user.get("Out", {}):
+                raise ValueError(
+                    f"Calkit: {where} doesn't show a result to save as "
+                    f"{out['output_path']}; end it with the table, e.g., "
+                    "df.head(), or name the variable holding it"
+                )
+            table = to_table(user["Out"][n], "the result it shows")
+            os.makedirs(tables_dir, exist_ok=True)
+            with open(
+                os.path.join(tables_dir, f"{i}.json"), "w", encoding="utf-8"
+            ) as f:
+                json.dump(table, f)
+            continue
         if name is None:
             continue
         if out["kind"] == "value":
@@ -1089,7 +1107,8 @@ def clean_notebook_outputs(path: str):
         except json.JSONDecodeError as e:
             raise ValueError(f"Error decoding JSON from notebook: {e}")
     with open(fpath_out, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(clean_notebook(nb), f, indent=2)
+        # Sorted, since editors write keys in their own orders
+        json.dump(clean_notebook(nb), f, indent=2, sort_keys=True)
 
 
 def clean_all_in_pipeline(ck_info: dict | None = None) -> list[str]:

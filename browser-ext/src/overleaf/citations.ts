@@ -505,7 +505,7 @@ function renderTyped(
           class: "dim small",
           style: { marginTop: "6px" },
           text:
-            "If a notebook computes it, use Save as Output on its cell in " +
+            "If a notebook computes it, use Save as Calkit Output on its cell in " +
             "VS Code. A script can save it to a results file, e.g., " +
             "results.json.",
         }),

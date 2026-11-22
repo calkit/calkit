@@ -2007,15 +2007,15 @@ Arguments:
 
 Options:
 
-| Option                  | Type      | Required | Default | Description                                                                                                                 |
-| ----------------------- | --------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `--cell-id`             | str       | no       |         | ID of the cell it's saved after.                                                                                            |
-| `--cell-index`          | int       | no       |         | Position of the cell it's saved after, from 0, for a notebook whose cells have no IDs yet, which gives them some.           |
-| `--variable-name`, `-v` | list[str] | no       |         | Variable it's saved from, which can be given several times for values; for a figure, the image the cell shows if not given. |
-| `--output-path`, `-o`   | str       | no       |         | Where to save a figure or table, e.g., figures/fit.pdf or tables/rates.tex.                                                 |
-| `--format`              | str       | no       |         | Format for a table's numbers, e.g., '.3f'.                                                                                  |
-| `--stage`               | str       | no       |         | Stage running the notebook, if several do.                                                                                  |
-| `--json`                | boolean   | no       | False   | Print the result as JSON.                                                                                                   |
+| Option                  | Type      | Required | Default | Description                                                                                                                                                                       |
+| ----------------------- | --------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--cell-id`             | str       | no       |         | ID of the cell it's saved after.                                                                                                                                                  |
+| `--cell-index`          | int       | no       |         | Position of the cell it's saved after, from 0, for a notebook whose cells have no IDs yet, which gives them some.                                                                 |
+| `--variable-name`, `-v` | list[str] | no       |         | Variable it's saved from, which can be given several times for values; if not given, what the cell shows: a figure's image or a table's result, e.g., df.head() on its last line. |
+| `--output-path`, `-o`   | str       | no       |         | Where to save a figure or table, e.g., figures/fit.pdf or tables/rates.tex.                                                                                                       |
+| `--format`              | str       | no       |         | Format for a table's numbers, e.g., '.3f'.                                                                                                                                        |
+| `--stage`               | str       | no       |         | Stage running the notebook, if several do.                                                                                                                                        |
+| `--json`                | boolean   | no       | False   | Print the result as JSON.                                                                                                                                                         |
 
 <a id="subcommand-notebooks-nb-remove-output"></a>
 

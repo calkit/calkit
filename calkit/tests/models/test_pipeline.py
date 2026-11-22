@@ -712,6 +712,9 @@ def test_jupyternotebookstage():
         format=".1%",
     )
     assert NotebookCellOutput.from_arg(pct.to_arg()) == pct
+    # A table without a variable is the result its cell shows
+    shown = NotebookCellOutput(kind="table", cell_id="a", output_path="t.tex")
+    assert NotebookCellOutput.from_arg(shown.to_arg()) == shown
     # What can't be saved
     figure = {"kind": "figure", "cell_id": "a"}
     table = {"kind": "table", "cell_id": "a", "variable_name": "d"}
@@ -739,8 +742,8 @@ def test_jupyternotebookstage():
         ),
         (figure | {"output_path": "f.png", "format": ".2f"}, "only applies"),
         (
-            table | {"variable_name": None, "output_path": "t.tex"},
-            "Name the variable",
+            {"kind": "table", "output_path": "t.tex"},
+            "Name the cell that shows t.tex",
         ),
         (table | {"output_path": "t.xlsx"}, "not '.xlsx'"),
         (table | {"output_path": "t.tex", "format": "q"}, "format"),

@@ -2646,7 +2646,8 @@ class NotebookCellOutput(Model):
         description="Name of the variable it's saved from: a value's name, "
         "e.g., a number or a dict of them, a figure, e.g., a Matplotlib "
         "figure, or a table, e.g., a DataFrame. A figure without one is "
-        "the image the cell shows.",
+        "the image the cell shows, and a table the result it shows, e.g., "
+        "df.head() on its last line.",
     )
     variable_names: list[str] | None = Field(
         default=None,
@@ -2746,9 +2747,10 @@ class NotebookCellOutput(Model):
                 f"A table is saved as one of "
                 f"{', '.join(CELL_OUTPUT_TABLE_EXTS)}, not '{ext}'"
             )
-        if self.variable_name is None:
+        if self.variable_name is None and self.cell_id is None:
             raise ValueError(
-                f"Name the variable holding the table for {self.output_path}"
+                f"Name the cell that shows {self.output_path}, or the variable "
+                "holding it"
             )
         if self.format:
             # Commas separate the fields of its command line argument

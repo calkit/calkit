@@ -12,6 +12,7 @@ import {
   getRemoveOutputQuery,
   getVariableChoices,
   hasImageOutput,
+  hasResultOutput,
   isVariableName,
   rankNamesForKind,
 } from "../cell-outputs";
@@ -139,6 +140,30 @@ describe("cell outputs", () => {
       "Other variable…",
       "Image this cell shows (run cell first)",
     ]);
+    // A table can be the result the cell's last line shows
+    expect(getVariableChoices("df = load()\ndf.head()", "table", true)).toEqual(
+      [
+        { label: "Result this cell shows" },
+        { label: "df", variable: "df" },
+        { label: "Other variable…", isOther: true },
+      ],
+    );
+    expect(
+      getVariableChoices("df = load()", "table", false).map((c) => c.label),
+    ).toEqual([
+      "df",
+      "Other variable…",
+      "Result this cell shows (run cell first)",
+    ]);
+    expect(
+      hasResultOutput([
+        { output_type: "stream", text: "hi" },
+        { output_type: "execute_result", data: { "text/html": "<table>" } },
+      ]),
+    ).toBe(true);
+    expect(hasResultOutput([{ output_type: "display_data" }, null])).toBe(
+      false,
+    );
     expect(getVariableChoices("", "value", true)).toEqual([
       { label: "Other variable…", isOther: true },
     ]);

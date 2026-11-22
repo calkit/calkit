@@ -476,7 +476,7 @@
       },
       {
         "command": "calkit-vscode.addCellOutput",
-        "title": "Save as Output",
+        "title": "Save as Calkit Output",
         "category": "Calkit",
         "icon": "$(pin)"
       },

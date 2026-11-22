@@ -190,13 +190,14 @@ and Calkit saves it whenever the pipeline runs the notebook:
 - A figure, from the variable holding it, e.g., a Matplotlib figure,
   in whatever format its path says, e.g., a PDF that stays sharp in a
   paper, or else the image the cell shows.
-- A table, from a DataFrame or a list of rows, as LaTeX (`.tex`) for
-  `\cktable`, CSV, Markdown, or JSON.
+- A table, from a DataFrame or a list of rows, or else the result the
+  cell shows, e.g., `df.head()` on its last line,
+  as LaTeX (`.tex`) for `\cktable`, CSV, Markdown, or JSON.
 
-In VS Code or JupyterLab, click **Save as Output** in a
+In VS Code or JupyterLab, click **Save as Calkit Output** in a
 cell's toolbar.
 Each cell with outputs gets a label saying what it saves, e.g.,
-`k_25 = 0.0309` after a run; click it to copy the command that shows it in
+`Calkit: k_25 = 0.0309` after a run; click it to copy the command that shows it in
 a document.
 From a terminal, or for an agent, use `calkit nb add-output`,
 giving `--variable-name` again for each value saved after the same cell:

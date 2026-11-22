@@ -36,6 +36,7 @@ import {
   getRemoveOutputQuery,
   getVariableChoices,
   hasImageOutput,
+  hasResultOutput,
   isVariableName,
 } from "./cell-outputs";
 import { calkitIcon } from "./icons";
@@ -201,12 +202,15 @@ async function addCellOutput(
 ): Promise<void> {
   const title = `Save ${kind}`;
   const notebookPath = panel.context.path;
-  // The variable it's saved from, or for a figure, what the cell shows
+  // The variable it's saved from, or for a figure or table, what the cell
+  // shows: its image, or the result of its last line, e.g., df.head()
   const outputs = (cell.model as ICodeCellModel).outputs?.toJSON() ?? [];
   const choices = getVariableChoices(
     cell.model.sharedModel.getSource(),
     kind,
-    hasImageOutput(getOutputMimeTypes(outputs)),
+    kind === "figure"
+      ? hasImageOutput(getOutputMimeTypes(outputs))
+      : hasResultOutput(outputs),
   );
   // Several values can be saved after one cell at once
   let variableNames: string[] = [];
@@ -349,7 +353,7 @@ function createAddOutputButton(
   }
   const button = new ToolbarButton({
     icon: calkitIcon,
-    tooltip: trans.__("Save as output"),
+    tooltip: trans.__("Save as Calkit output"),
     onClick: () => {
       const rect = button.node.getBoundingClientRect();
       menu.open(rect.left, rect.bottom);

@@ -558,17 +558,16 @@ def test_run_in_env_by_path(tmp_dir):
 
 
 def test_run_in_env_uv_extras(tmp_dir):
-    subprocess.check_call(["uv", "init", "--bare"])
-    subprocess.check_call(["uv", "add", "--optional", "accel", "six"])
-    # Adding it installs it, so start from an environment without it
-    subprocess.check_call(["uv", "sync"])
-    cmd = ["calkit", "xenv", "-n", "main", "--", "python", "-c", "import six"]
-
     def write_extras(extras: list) -> None:
         env = {"kind": "uv", "path": "pyproject.toml", "extras": extras}
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump({"environments": {"main": env}}, f)
 
+    subprocess.check_call(["uv", "init", "--bare"])
+    subprocess.check_call(["uv", "add", "--optional", "accel", "six"])
+    # Adding it installs it, so start from an environment without it
+    subprocess.check_call(["uv", "sync"])
+    cmd = ["calkit", "xenv", "-n", "main", "--", "python", "-c", "import six"]
     # An extra meant for another machine, e.g., one with a GPU this one
     # lacks, is neither installed nor an error
     write_extras(

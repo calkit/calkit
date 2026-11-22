@@ -1610,6 +1610,88 @@ def check_property_requirement(
     """
     from calkit.models.requirements import GPU_PROPERTY_FIELDS
 
+    def check_value(value: Any) -> None:
+        """Check one value of the property against the requirement."""
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import InvalidVersion, Version
+
+        # Numeric properties are bounded; everything else is matched or
+        # compared as a version.
+        if prop in _numeric_property_kinds():
+            minimum = req.get("min")
+            maximum = req.get("max")
+            if minimum is None and maximum is None:
+                raise ValueError(
+                    f"Requirement on '{prop}' needs a 'min' or a 'max'; to "
+                    "depend on its value rather than constrain it, add it to "
+                    "the environment's 'lock'"
+                )
+            if minimum is not None and value < minimum:
+                raise ValueError(
+                    f"{described_as} has {prop} {_fmt_prop(value)}, but at "
+                    f"least {_fmt_prop(minimum)} is required"
+                )
+            if maximum is not None and value > maximum:
+                raise ValueError(
+                    f"{described_as} has {prop} {_fmt_prop(value)}, but at "
+                    f"most {_fmt_prop(maximum)} is required"
+                )
+            return
+        equals = req.get("equals")
+        spec = req.get("version_spec")
+        patterns = req.get("matches")
+        if equals is None and spec is None and patterns is None:
+            raise ValueError(
+                f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
+                "'version_spec'; to depend on its value rather than constrain "
+                "it, add it to the environment's 'lock'"
+            )
+        if patterns is not None:
+            import fnmatch
+
+            globs = [patterns] if isinstance(patterns, str) else list(patterns)
+            if not any(
+                fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
+                for g in globs
+            ):
+                wanted = " or ".join(f"'{g}'" for g in globs)
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', which doesn't "
+                    f"match {wanted}"
+                )
+        if equals is not None:
+            allowed = [equals] if isinstance(equals, str) else list(equals)
+            # Matched case-insensitively because the same machine is 'Darwin'
+            # or 'darwin' depending on who is writing it down, and nobody means
+            # those to be different answers.
+            if str(value).lower() not in [str(a).lower() for a in allowed]:
+                wanted = " or ".join(f"'{a}'" for a in allowed)
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', but {wanted} is "
+                    "required"
+                )
+        if spec is not None:
+            try:
+                spec_set = SpecifierSet(
+                    spec if spec[0] in "<>=!~" else f"=={spec}"
+                )
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid version_spec '{spec}' for {prop}: {e}"
+                )
+            try:
+                parsed = Version(str(value))
+            except InvalidVersion:
+                raise ValueError(
+                    f"{described_as} reports {prop} '{value}', which can't be "
+                    f"read as a version to compare against '{spec}'"
+                )
+            if parsed not in spec_set:
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', but '{spec}' is "
+                    "required"
+                )
+
     prop = req["kind"]
     key = system_property_requirement_kinds()[prop]
     value = system_info.get(key)
@@ -1629,7 +1711,7 @@ def check_property_requirement(
         problems = []
         for gpu_value in values:
             try:
-                _check_property_value(req, gpu_value, described_as)
+                check_value(gpu_value)
                 return
             except ValueError as e:
                 problems.append(str(e))
@@ -1639,89 +1721,7 @@ def check_property_requirement(
             f"No GPU on {described_as} meets the requirement on '{prop}': "
             + "; ".join(problems)
         )
-    _check_property_value(req, value, described_as)
-
-
-def _check_property_value(req: dict, value: Any, described_as: str) -> None:
-    """Check one value of a machine property against a requirement on it."""
-    from packaging.specifiers import SpecifierSet
-    from packaging.version import InvalidVersion, Version
-
-    prop = req["kind"]
-    # Numeric properties are bounded; everything else is matched or
-    # compared as a version.
-    if prop in _numeric_property_kinds():
-        minimum = req.get("min")
-        maximum = req.get("max")
-        if minimum is None and maximum is None:
-            raise ValueError(
-                f"Requirement on '{prop}' needs a 'min' or a 'max'; to "
-                "depend on its value rather than constrain it, add it to "
-                "the environment's 'lock'"
-            )
-        if minimum is not None and value < minimum:
-            raise ValueError(
-                f"{described_as} has {prop} {_fmt_prop(value)}, but at least "
-                f"{_fmt_prop(minimum)} is required"
-            )
-        if maximum is not None and value > maximum:
-            raise ValueError(
-                f"{described_as} has {prop} {_fmt_prop(value)}, but at most "
-                f"{_fmt_prop(maximum)} is required"
-            )
-        return
-    equals = req.get("equals")
-    spec = req.get("version_spec")
-    patterns = req.get("matches")
-    if equals is None and spec is None and patterns is None:
-        raise ValueError(
-            f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
-            "'version_spec'; to depend on its value rather than constrain "
-            "it, add it to the environment's 'lock'"
-        )
-    if patterns is not None:
-        import fnmatch
-
-        globs = [patterns] if isinstance(patterns, str) else list(patterns)
-        if not any(
-            fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
-            for g in globs
-        ):
-            wanted = " or ".join(f"'{g}'" for g in globs)
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', which doesn't match "
-                f"{wanted}"
-            )
-    if equals is not None:
-        allowed = [equals] if isinstance(equals, str) else list(equals)
-        # Matched case-insensitively because the same machine is 'Darwin'
-        # or 'darwin' depending on who is writing it down, and nobody means
-        # those to be different answers.
-        if str(value).lower() not in [str(a).lower() for a in allowed]:
-            wanted = " or ".join(f"'{a}'" for a in allowed)
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', but {wanted} is "
-                "required"
-            )
-    if spec is not None:
-        try:
-            spec_set = SpecifierSet(
-                spec if spec[0] in "<>=!~" else f"=={spec}"
-            )
-        except Exception as e:
-            raise ValueError(f"Invalid version_spec '{spec}' for {prop}: {e}")
-        try:
-            parsed = Version(str(value))
-        except InvalidVersion:
-            raise ValueError(
-                f"{described_as} reports {prop} '{value}', which can't be "
-                f"read as a version to compare against '{spec}'"
-            )
-        if parsed not in spec_set:
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', but '{spec}' is "
-                "required"
-            )
+    check_value(value)
 
 
 def _fmt_prop(value: float) -> str:

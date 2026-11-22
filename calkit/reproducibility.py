@@ -437,6 +437,31 @@ def find_scripts_not_in_pipeline(
     """
     from git.exc import InvalidGitRepositoryError
 
+    def get_stage_io_paths(pipeline: dict, ck_info: dict) -> list[str]:
+        """The paths the pipeline's stages read and write, relative to the
+        project."""
+        paths = []
+        for stage in (pipeline.get("stages") or {}).values():
+            if not isinstance(stage, dict):
+                continue
+            wdir = stage.get("wdir") or ""
+            for item in (stage.get("deps") or []) + (stage.get("outs") or []):
+                for path in item if isinstance(item, dict) else [item]:
+                    if isinstance(path, str):
+                        paths.append(posixpath.join(wdir, path))
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        for stage in stages.values():
+            if not isinstance(stage, dict):
+                continue
+            wdir = stage.get("wdir") or ""
+            for item in (stage.get("inputs") or []) + (
+                stage.get("outputs") or []
+            ):
+                path = item.get("path") if isinstance(item, dict) else item
+                if isinstance(path, str):
+                    paths.append(posixpath.join(wdir, path))
+        return [p for p in paths if p.strip()]
+
     try:
         repo = calkit.git.get_repo(wdir)
     except InvalidGitRepositoryError:
@@ -458,9 +483,16 @@ def find_scripts_not_in_pipeline(
     # One string to search rather than a set of paths, since a command
     # names its script somewhere inside it and a dependency may be written
     # with a leading ./
-    referenced = "\n".join(
-        _strings_in(pipeline.get("stages", {}))
-        + _strings_in(ck_info.get("pipeline", {}))
+    strings = _strings_in(pipeline.get("stages", {})) + _strings_in(
+        ck_info.get("pipeline", {})
+    )
+    referenced = "\n".join(strings)
+    # A folder a stage reads or writes covers what's in it, e.g., a package's
+    # modules under an input 'src', or generated data under an output, but
+    # not one that's only named, e.g., by an environment
+    referenced_dirs = tuple(
+        posixpath.normpath(p) + "/"
+        for p in get_stage_io_paths(pipeline, ck_info)
     )
     # Tracked paths are relative to the repo root, which may be above wdir
     # when checking a subproject, so make them relative to wdir
@@ -482,7 +514,7 @@ def find_scripts_not_in_pipeline(
             path == p or path.startswith(p + "/") for p in env_prefixes
         ):
             continue
-        if path not in referenced:
+        if path not in referenced and not path.startswith(referenced_dirs):
             scripts.append(path)
     return scripts
 

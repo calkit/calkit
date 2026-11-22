@@ -5606,3 +5606,40 @@ def test_run_untracks_git_tracked_outputs(tmp_dir):
     ).strip()
     with open("fig.txt") as f:
         assert f.read() == "made\n"
+
+
+@pytest.mark.xdist_group("conda")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Conda environments need Windows debugging"
+)
+def test_xenv_conda_env_first_on_path(tmp_dir, monkeypatch):
+    conda_name = "calkit-test-" + calkit.to_kebab_case(
+        os.path.basename(os.getcwd())
+    )
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "conda-env", "-n", "py", "--conda-name", conda_name]
+        + ["python=3.12"]
+    )
+    try:
+        # A program installed elsewhere and earlier on PATH, e.g., by Homebrew
+        # or Pixi, doesn't win over the environment's own, even though
+        # activating it puts it where Conda's base is on PATH, if there
+        decoy = Path("decoy")
+        decoy.mkdir()
+        (decoy / "python").write_text("#!/bin/sh\necho decoy\n")
+        (decoy / "python").chmod(0o755)
+        monkeypatch.setenv(
+            "PATH", str(decoy.absolute()) + os.pathsep + os.environ["PATH"]
+        )
+        out = subprocess.check_output(
+            ["calkit", "xenv", "-n", "py", "--", "python", "-c"]
+            + ["import sys; print(sys.prefix)"],
+            text=True,
+        )
+        assert out.strip().splitlines()[-1].endswith(conda_name)
+    finally:
+        subprocess.call(
+            [calkit.conda.find_conda_exe() or "conda", "env", "remove"]
+            + ["-y", "-n", conda_name]
+        )

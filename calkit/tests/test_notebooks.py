@@ -607,3 +607,46 @@ def test_add_cell_output(tmp_path):
     assert remove("fit.ipynb", variable_name="k", wdir=wdir) == 1
     assert remove("fit.ipynb", cell_id=ids[0], wdir=wdir) == 2
     assert "cell_outputs" not in (tmp_path / "calkit.yaml").read_text()
+
+
+def test_clean_all_in_pipeline(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    nb = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "execution_count": 1,
+                "outputs": [{"output_type": "stream", "text": "4"}],
+                "source": "print(2 + 2)",
+            }
+        ],
+        "metadata": {},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    os.makedirs("pub")
+    for path in ["analysis.ipynb", "pub/index.ipynb", "shown.ipynb"]:
+        with open(path, "w") as f:
+            json.dump(nb, f)
+    stages = {
+        "nb": {"kind": "jupyter-notebook", "notebook_path": "analysis.ipynb"},
+        # Quarto rendering a notebook with --execute writes its outputs back
+        # into it, so it's cleaned too, from the stage's working directory
+        "pub": {
+            "kind": "quarto",
+            "target_path": "index.ipynb",
+            "wdir": "pub",
+            "args": ["--execute"],
+        },
+        # Rendered from the outputs saved in it, so it isn't cleaned
+        "shown": {"kind": "quarto", "target_path": "shown.ipynb"},
+        "report": {"kind": "quarto", "target_path": "report.qmd"},
+        "missing": {"kind": "quarto", "target_path": "gone.ipynb"},
+    }
+    cleaned = calkit.notebooks.clean_all_in_pipeline(
+        ck_info={"pipeline": {"stages": stages}}
+    )
+    assert cleaned == ["analysis.ipynb", "pub/index.ipynb"]
+    with open(".calkit/notebooks/cleaned/pub/index.ipynb") as f:
+        assert json.load(f)["cells"][0]["outputs"] == []

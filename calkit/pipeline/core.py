@@ -3623,6 +3623,8 @@ def to_dvc(
                 outputs += stage.app_outputs
             elif stage.kind == "references-check":
                 outputs += stage.check_outputs
+            elif stage.kind == "quarto":
+                outputs += stage.notebook_outputs
             sched_log = stage.scheduler_log_output
             if sched_log is not None:
                 outputs.append(sched_log)

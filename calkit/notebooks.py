@@ -1029,6 +1029,12 @@ def clean_notebook(nb: dict) -> dict:
         # the source had been through a clean filter, which differs between a
         # working tree and a fresh clone of the same commit.
         cell.pop("id", None)
+        # A cell's source may be one string or a list of lines, which tools
+        # rewrite between, e.g., Quarto when rendering with --execute
+        source = cell.get("source", "")
+        if isinstance(source, list):
+            source = "".join(source)
+        cell["source"] = source.splitlines(keepends=True)
         # Clean metadata but keep tags
         if "tags" in cell.get("metadata", {}):
             cell["metadata"] = {"tags": cell["metadata"]["tags"]}
@@ -1071,6 +1077,18 @@ def clean_all_in_pipeline(ck_info: dict | None = None) -> list[str]:
         if stage.get("kind") == "jupyter-notebook":
             path = stage.get("notebook_path")
             if path:
+                clean_notebook_outputs(path)
+                cleaned.append(path)
+        # Quarto writes a notebook's outputs back into it when rendering it
+        # with --execute, so it's depended on stripped of them too
+        elif stage.get("kind") == "quarto":
+            target = stage.get("target_path") or ""
+            path = posixpath.normpath(
+                posixpath.join(stage.get("wdir") or "", target)
+            )
+            args = stage.get("args") or []
+            executes = "--execute" in args and "--no-execute" not in args
+            if target.endswith(".ipynb") and executes and os.path.isfile(path):
                 clean_notebook_outputs(path)
                 cleaned.append(path)
     return cleaned

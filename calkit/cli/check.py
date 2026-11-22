@@ -566,6 +566,7 @@ def check_environment(
             alt_lock_fpaths=alt_lock_fpaths,
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
+            prefix=env.get("prefix"),
         )
     elif env["kind"] == "pixi":
         cmd = ["pixi", "install"]
@@ -1333,6 +1334,13 @@ def check_conda_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
+    prefix: Annotated[
+        str | None,
+        typer.Option(
+            "--prefix",
+            help="Where the environment is kept, overriding the spec's.",
+        ),
+    ] = None,
 ) -> None:
     log_func: Callable[..., None]
     if quiet:
@@ -1348,6 +1356,7 @@ def check_conda_env(
             log_func=log_func,
             relaxed=relaxed,
             verbose=not quiet,
+            prefix=prefix,
         )
     except Exception as e:
         warn_app_control(output=str(e), maybe=True)
@@ -2013,10 +2022,18 @@ def check_stage_runs() -> None:
     problems = []
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
+        # DVC writes a frozen stage's entry whenever it verifies the stage's
+        # outputs rather than running it, so there's no run to match
+        try:
+            frozen = calkit.pipeline.frozen_stage_base_names(wdir=lock_dir)
+        except Exception:
+            frozen = set()
         for lock_name, locked in sorted(lock_stages.items()):
             if not isinstance(locked, dict) or lock_name in removed.get(
                 lock_dir, set()
             ):
+                continue
+            if lock_name.split("@")[0] in frozen:
                 continue
             name = (
                 lock_name

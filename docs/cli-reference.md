@@ -50,6 +50,7 @@
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
+| [`quarto`](#command-group-quarto)                | Work with Quarto.                                                                                            |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
@@ -4070,6 +4071,7 @@ Options:
 | `--input-delete` | list[str] | no       |                 | Alternative lock file input paths to delete after use.                                                                                                        |
 | `--relaxed`      | boolean   | no       | False           | Treat conda and pip dependencies as equivalent.                                                                                                               |
 | `--quiet`, `-q`  | boolean   | no       | False           | Be quiet.                                                                                                                                                     |
+| `--prefix`       | str       | no       |                 | Where the environment is kept, overriding the spec's.                                                                                                         |
 
 <a id="subcommand-check-venv"></a>
 
@@ -4633,6 +4635,46 @@ Options:
 | --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
+
+<a id="command-group-quarto"></a>
+
+### `calkit quarto`
+
+Work with Quarto.
+
+| Command                               | Description                                 |
+| ------------------------------------- | ------------------------------------------- |
+| [`render`](#subcommand-quarto-render) | Render a Quarto document in an environment. |
+
+<a id="subcommand-quarto-render"></a>
+
+#### `calkit quarto render`
+
+Render a Quarto document in an environment.
+
+Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. The values the document shows with the 'ckvalue' shortcode are checked first, and the Quarto extension that reads them from their results files is written.
+
+Usage:
+
+```text
+calkit quarto render [OPTIONS] TARGET-PATH [QUARTO-ARGS...]
+```
+
+Arguments:
+
+| Argument      | Type      | Required | Default | Description                                                            |
+| ------------- | --------- | -------- | ------- | ---------------------------------------------------------------------- |
+| `target_path` | str       | yes      |         | Path to the Quarto document to render.                                 |
+| `quarto_args` | list[str] | no       |         | Extra arguments for 'quarto render', after '--', e.g., '-- --execute'. |
+
+Options:
+
+| Option                   | Type    | Required | Default | Description                                                                                                                   |
+| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto, or `_system` for Quarto installed on this machine. There's no default. |
+| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.         |
+| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                     |
+| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                        |
 
 <a id="command-group-overleaf-ol"></a>
 

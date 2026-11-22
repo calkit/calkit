@@ -33,7 +33,8 @@ import {
 } from "./environments";
 import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
-  getExecutedNotebookHtmlPath,
+  getNotebookHtmlPath,
+  getStageNotebookPath,
   resolveNotebookEnvironmentName,
 } from "./notebooks";
 import type {
@@ -46,10 +47,12 @@ import type {
 import { dvcStageOutputPaths } from "./pipeline/core";
 import {
   collectSubprojects,
+  findProjectDir,
   findUndeclaredProjectDir,
   mergeSubprojectConfigs,
   mergeSubprojectDvcYaml,
   qualifyEnvDescriptions,
+  qualifyName,
   rebaseStages,
   splitQualifiedName,
   splitSubprojectPath,
@@ -360,19 +363,20 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_EDIT_NOTEBOOK_ENV, async () => {
       const workspaceRoot = getWorkspaceRoot();
-      if (!workspaceRoot) {
+      const projectRoot = getNotebookProjectRoot();
+      if (!workspaceRoot || !projectRoot) {
         void vscode.window.showErrorMessage(
           "Open a workspace folder to edit Calkit environments.",
         );
         return;
       }
-      const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+      const notebookRelativePath = getActiveNotebookRelativePath(projectRoot);
       if (!notebookRelativePath) {
         void vscode.window.showErrorMessage("No active notebook.");
         return;
       }
       const candidate = await getConfiguredCandidateForNotebookPath(
-        workspaceRoot,
+        projectRoot,
         notebookRelativePath,
       );
       if (!candidate) {
@@ -382,10 +386,26 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      await openEnvironmentEditor(
+      // Named as the root sees it, unless the root doesn't declare its project
+      const dir =
+        path.relative(workspaceRoot, projectRoot).replace(/\\/g, "/") || ".";
+      if (dir === "." || currentSubprojectDirs.includes(dir)) {
+        await openEnvironmentEditor(
+          context,
+          workspaceRoot,
+          qualifyName(dir, candidate.innerEnvironment),
+        );
+        return;
+      }
+      const env = (await readCalkitConfig(projectRoot))?.environments?.[
+        candidate.innerEnvironment
+      ];
+      await showEnvCreatorWebview(
         context,
-        workspaceRoot,
+        projectRoot,
         candidate.innerEnvironment,
+        env,
+        typeof env?.path === "string" ? env.path : undefined,
       );
     }),
   );
@@ -1593,7 +1613,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RUN_NOTEBOOK_STAGE, async () => {
-      const workspaceRoot = getWorkspaceRoot();
+      const workspaceRoot = getNotebookProjectRoot();
       if (!workspaceRoot) {
         return;
       }
@@ -1608,15 +1628,19 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
-      terminal.show(true);
-      terminal.sendText(`calkit run ${stageName}`);
+      // The stage name is the project's own, so the CLI is pointed there,
+      // since the terminal may be reused from somewhere else
+      runStageInTerminal(
+        getWorkspaceRoot() ?? workspaceRoot,
+        stageName,
+        workspaceRoot,
+      );
     }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_EDIT_NOTEBOOK_STAGE, async () => {
-      const workspaceRoot = getWorkspaceRoot();
+      const workspaceRoot = getNotebookProjectRoot();
       if (!workspaceRoot) {
         return;
       }
@@ -1661,27 +1685,27 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!notebookUri) {
           return;
         }
-        const project = projectForPath(
-          workspaceRoot,
-          path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
-        );
+        const projectDir = getNotebookProjectRoot(notebookUri) ?? workspaceRoot;
+        const project = {
+          projectDir,
+          path: path
+            .relative(projectDir, notebookUri.fsPath)
+            .replace(/\\/g, "/"),
+        };
         // The notebooks section is authoritative, then the kernel chosen in VS
-        // Code, which is only usable if it's declared in the notebook's project
+        // Code, which is only usable if it's declared in the notebook's
+        // project, where it was chosen
         const projectConfig = await readCalkitConfig(project.projectDir);
         const profile = getLaunchProfileForNotebookUri(
           context,
           notebookUri.toString(),
         );
-        const env = profile?.environmentName
-          ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
-          : undefined;
         const envName =
           (projectConfig &&
             resolveNotebookEnvironmentName(projectConfig, project.path)) ||
-          (env &&
-          path.resolve(workspaceRoot, env.dir) ===
-            path.resolve(project.projectDir)
-            ? env.name
+          (profile?.environmentName &&
+          projectConfig?.environments?.[profile.environmentName]
+            ? profile.environmentName
             : undefined);
         const prefillStage = envName
           ? { kind: "jupyter-notebook", environment: envName }
@@ -1708,24 +1732,28 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         // From the sidebar we receive the notebook's relative path; from the
         // notebook toolbar we fall back to the active notebook editor.
-        let relPath = nbPath;
-        if (!relPath) {
-          const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
-          if (!notebookUri) {
-            return;
-          }
-          relPath = path
-            .relative(workspaceRoot, notebookUri.fsPath)
-            .replace(/\\/g, "/");
+        const notebookUri = nbPath
+          ? vscode.Uri.file(path.join(workspaceRoot, nbPath))
+          : vscode.window.activeNotebookEditor?.notebook.uri;
+        if (!notebookUri) {
+          return;
         }
-        // Under the .calkit of the project its stage runs in
-        const nbStage = Object.values(
-          currentCalkitConfig?.pipeline?.stages ?? {},
-        ).find((s) => s.notebook_path === relPath);
-        const htmlRelPath = getExecutedNotebookHtmlPath(
-          relPath,
-          nbStage?.subproject_wdir ??
-            splitSubprojectPath(relPath, currentSubprojectDirs).dir,
+        // Found from the project it runs in, declared by the root or not
+        const projectRoot =
+          getNotebookProjectRoot(notebookUri) ?? workspaceRoot;
+        const relPath = path
+          .relative(projectRoot, notebookUri.fsPath)
+          .replace(/\\/g, "/");
+        const { config } = await readMergedProject(projectRoot);
+        const nbStage = Object.values(config?.pipeline?.stages ?? {}).find(
+          (s) => getStageNotebookPath(s) === relPath,
+        );
+        const htmlRelPath = path.relative(
+          workspaceRoot,
+          path.join(
+            projectRoot,
+            getNotebookHtmlPath(relPath, nbStage, nbStage?.subproject_wdir),
+          ),
         );
         if (!(await fileExists(path.join(workspaceRoot, htmlRelPath)))) {
           void vscode.window.showInformationMessage(
@@ -2606,9 +2634,18 @@ async function scanDetectedFiles(
   }
   const toRel = (u: vscode.Uri): string =>
     path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
+  // A nested project the root doesn't declare has its own notebooks, as a
+  // submodule does
+  const isProject = (d: string) =>
+    fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml"));
   currentDetectedNotebooks = notebookUris
     .map(toRel)
-    .filter((rel) => !isUnderAnyDir(rel, submodulePaths))
+    .filter(
+      (rel) =>
+        !isUnderAnyDir(rel, submodulePaths) &&
+        findUndeclaredProjectDir(rel, isProject, currentSubprojectDirs) ===
+          undefined,
+    )
     .sort();
   currentDetectedFigures = detectedFigures;
   currentDetectedDatasets = detectedDatasets;
@@ -2746,11 +2783,13 @@ async function refreshPipelineOutputContext(
     }
   }
   for (const stage of Object.values(calkitConfig?.pipeline?.stages ?? {})) {
+    // Run as a notebook, or rendered by Quarto
+    const stageNbPath = getStageNotebookPath(stage);
     if (
-      stage.kind === "jupyter-notebook" &&
-      typeof stage.notebook_path === "string"
+      stageNbPath &&
+      (stage.kind === "jupyter-notebook" || stage.kind === "quarto")
     ) {
-      pipelineNotebookUris.add(path.join(workspaceRoot, stage.notebook_path));
+      pipelineNotebookUris.add(path.join(workspaceRoot, stageNbPath));
     }
   }
   // For explorer menus; resourcePath's form varies by platform, so list both
@@ -4728,7 +4767,7 @@ function isPlotlyJsonText(text: string): boolean {
 async function selectCalkitEnvironment(
   context: vscode.ExtensionContext,
 ): Promise<string | undefined> {
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot();
   if (!workspaceRoot) {
     void vscode.window.showErrorMessage(
       "Open a workspace folder to use Calkit notebook environments.",
@@ -5316,20 +5355,41 @@ async function openNotebookHtmlPreview(
   htmlRelPath: string,
   title: string,
 ): Promise<void> {
+  const absUri = vscode.Uri.file(path.join(workspaceRoot, htmlRelPath));
+  const dirUri = vscode.Uri.joinPath(absUri, "..");
   const panel = vscode.window.createWebviewPanel(
     "calkit.notebookHtml",
     title,
     vscode.ViewColumn.Active,
-    { enableScripts: true },
+    // The workspace too, since a Quarto website keeps its libraries at the
+    // output root, e.g., ../site_libs from a notebook in a subfolder
+    {
+      enableScripts: true,
+      localResourceRoots: [dirUri, vscode.Uri.file(workspaceRoot)],
+    },
   );
   context.subscriptions.push(panel);
-  const absUri = vscode.Uri.file(path.join(workspaceRoot, htmlRelPath));
   // nbconvert output is a self-contained document (inline styles, base64
   // images, scripts from CDNs), so render it as the webview's own content.
   // Loading it via an iframe + asWebviewUri renders blank, so embed it directly.
+  // Quarto's links its libraries in a folder beside it, so relative URLs
+  // resolve from there. That base would make in-page links, e.g., a table of
+  // contents, navigate away, so they scroll instead.
   try {
     const bytes = await vscode.workspace.fs.readFile(absUri);
-    panel.webview.html = Buffer.from(bytes).toString("utf8");
+    const base =
+      `<base href="${panel.webview.asWebviewUri(dirUri)}/">` +
+      "<script>document.addEventListener('click', (e) => {" +
+      "const a = e.target.closest && e.target.closest('a[href^=\"#\"]');" +
+      "if (!a) return; e.preventDefault();" +
+      "const id = decodeURIComponent(a.getAttribute('href').slice(1));" +
+      "const el = id && document.getElementById(id);" +
+      "if (el) el.scrollIntoView(); else if (!id) window.scrollTo(0, 0);" +
+      "});</script>";
+    const html = Buffer.from(bytes).toString("utf8");
+    panel.webview.html = /<head[^>]*>/i.test(html)
+      ? html.replace(/<head[^>]*>/i, (head) => head + base)
+      : base + html;
   } catch {
     panel.webview.html = `<!DOCTYPE html><body style="font-family: var(--vscode-font-family); padding: 16px;">Could not read ${escHtml(
       htmlRelPath,
@@ -7228,6 +7288,29 @@ function getNotebookRelativePathForUri(
   return relativePath.replace(/\\/g, "/");
 }
 
+// The project a notebook runs in: the nearest folder above it with a
+// calkit.yaml, declared as a subproject or not, or else the workspace root.
+// Its environments and stages are found, and its commands run, from there.
+function getNotebookProjectRoot(
+  notebookUri?: vscode.Uri | string,
+): string | undefined {
+  const workspaceRoot = getWorkspaceRoot();
+  const uri =
+    typeof notebookUri === "string"
+      ? vscode.Uri.parse(notebookUri)
+      : notebookUri ?? vscode.window.activeNotebookEditor?.notebook.uri;
+  if (!workspaceRoot || !uri) {
+    return workspaceRoot;
+  }
+  const relPath = path.relative(workspaceRoot, uri.fsPath).replace(/\\/g, "/");
+  return path.join(
+    workspaceRoot,
+    findProjectDir(relPath, (d) =>
+      fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml")),
+    ),
+  );
+}
+
 function getActiveNotebookRelativePath(
   workspaceRoot: string,
 ): string | undefined {
@@ -7344,7 +7427,7 @@ async function getConfiguredCandidateForNotebookPath(
 async function autoSelectEnvironmentForActiveNotebook(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot();
   if (!workspaceRoot) {
     return;
   }
@@ -8790,7 +8873,7 @@ async function startSlurmJobForActiveNotebook(
   context: vscode.ExtensionContext,
   notebookUri?: string,
 ): Promise<boolean> {
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot(notebookUri);
   if (!workspaceRoot) {
     void vscode.window.showErrorMessage(
       "Open a workspace folder to start a Calkit Jupyter SLURM job.",
@@ -8970,7 +9053,7 @@ async function stopSlurmJobForActiveNotebook(
   // Actively select the inner environment's local kernel to break the
   // "Reconnecting to the kernel..." loop. Using the inner environment from the
   // launch profile gives the best chance of landing on the right kernel.
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot(stoppedNotebookUri);
   const stoppedProfile = stoppedNotebookUri
     ? getLaunchProfileForNotebookUri(context, stoppedNotebookUri)
     : undefined;
@@ -9169,7 +9252,7 @@ async function refreshNotebookToolbarContext(
   const hasResumableSlurm = Boolean(profile?.outerSlurmEnvironment);
   const isRunningSlurm = hasRunningServerSession("slurm");
   const isRunningDocker = hasRunningServerSession("docker");
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = getNotebookProjectRoot();
   const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
   let notebookHasStage = false;
   let notebookHasEnvironment = false;

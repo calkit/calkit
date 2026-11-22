@@ -32,7 +32,7 @@ def test_post_project_misc(
     (wdir / "notes.txt").write_bytes(b"notes")
     (wdir / "box.csv").write_bytes(b"a,b")
     (wdir / "sheet.csv").write_bytes(b"c,d")
-    (wdir / "map.png").write_bytes(b"map")
+    (wdir / "sketch.jpg").write_bytes(b"sketch")
     with open(wdir / "calkit.yaml", "w") as f:
         ryaml.dump(
             {
@@ -241,14 +241,14 @@ def test_post_project_misc(
         people = [{"email": "a@example.com"}, {"email": "b@example.com"}]
         resp = client.post(
             URL,
-            json={"path": "map.png", "created_by": people},
+            json={"path": "sketch.jpg", "created_by": people},
             headers=normal_user_token_headers,
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["created_by"] == people
         with open(wdir / "calkit.yaml") as f:
             assert ryaml.load(f)["misc"][-1] == {
-                "path": "map.png",
+                "path": "sketch.jpg",
                 "created_by": people,
             }
         # A path that isn't in the project can't be attributed

@@ -113,13 +113,11 @@ def test_post_project_misc(
             {
                 "path": "photo.jpg",
                 "title": "Site photo",
-                "created_by": [
-                    {
-                        "email": "a@example.com",
-                        "name": "A",
-                        "with_ai": ["Claude"],
-                    }
-                ],
+                "created_by": {
+                    "email": "a@example.com",
+                    "name": "A",
+                    "with_ai": ["Claude"],
+                },
             },
             {
                 "path": "logo.png",
@@ -225,7 +223,7 @@ def test_post_project_misc(
                 },
                 {
                     "path": "sheet.csv",
-                    "created_by": [{"email": "a@example.com"}],
+                    "created_by": {"email": "a@example.com"},
                 },
             ]
         # Once it's checkable, it's edited as what it is

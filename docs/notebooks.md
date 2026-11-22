@@ -182,7 +182,9 @@ Add what a cell makes as an output instead,
 and Calkit saves it whenever the pipeline runs the notebook:
 
 - A value, e.g., a fitted constant, which a LaTeX document shows with
-  `\ckvalue{notebook.ipynb}{name}`.
+  `\ckvalue{notebook.ipynb}{name}`, and a Quarto or Markdown one with
+  `{{< ckvalue notebook.ipynb name >}}` or
+  `<!-- ckvalue notebook.ipynb name -->`.
   Numbers, text, and lists and dicts of them can be saved, up to 100 kB,
   and a key reaches into a dict, e.g., `{rates.25C}`.
 - A figure, from the variable holding it, e.g., a Matplotlib figure,

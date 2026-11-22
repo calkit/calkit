@@ -1681,6 +1681,15 @@ def test_compact_value_markers(tmp_path, monkeypatch):
     assert "Nested: <!-- ckvalue metrics fit.coeffs.0 -->1.974" in new
     assert "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->" in new
     assert set_values(new, "README.md", results=declared) == (new, False)
+    # A notebook stands for the values its cells save
+    values_path = tmp_path / ".calkit/notebooks/outputs/fit.ipynb/values.json"
+    values_path.parent.mkdir(parents=True)
+    values_path.write_text('{"k_25": 0.030912}')
+    nb_text = "k is <!-- ckvalue fit.ipynb k_25 .3f -->?<!-- /ckvalue -->\n"
+    assert extract_values(nb_text, "README.md")[0].path == (
+        ".calkit/notebooks/outputs/fit.ipynb/values.json"
+    )
+    assert "-->0.031<!--" in set_values(nb_text, "README.md")[0]
 
     # Source, key and format read like a Python call: positional in that
     # order, or by name, or positional then keyword

@@ -53,6 +53,18 @@ def test_values(tmp_path, monkeypatch):
         "3.2 m/s",
         "150.0%",
     ]
+    # A notebook stands for the values its cells save
+    fit_values = calkit.quarto.extract_values(
+        "{{< ckvalue nbs/fit.ipynb k_25 .3f >}}", "doc.qmd"
+    )
+    assert fit_values[0].path == (
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+    )
+    with pytest.raises(MarkdownParseError, match="No values saved from"):
+        calkit.quarto.check_values(fit_values, "doc.qmd")
+    (tmp_path / fit_values[0].path).parent.mkdir(parents=True)
+    (tmp_path / fit_values[0].path).write_text(json.dumps({"k_25": 0.030912}))
+    assert calkit.quarto.check_values(fit_values, "doc.qmd") == ["0.031"]
     # Mistakes name their line
     with pytest.raises(MarkdownParseError, match="names no key"):
         calkit.quarto.extract_values("\n{{< ckvalue a.json >}}", "doc.qmd")
@@ -194,7 +206,14 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
         ("results/r.json", key, "")
         for key in ["neg", "big", "fifteen", "whole", "flag", "negzero"]
     ]
+    nb_values_path = tmp_path / ".calkit/notebooks/outputs/nbs/fit.ipynb"
+    nb_values_path.mkdir(parents=True)
+    (nb_values_path / "values.json").write_text(
+        json.dumps({"k_25": 0.030912, "rates": {"25": 0.031}})
+    )
     cases += [
+        ("nbs/fit.ipynb", "k_25", ".3f"),
+        ("nbs/fit.ipynb", "rates.25", ".1%"),
         ("results/r.json", "fit.coeffs.0", ".1%"),
         ("results/r.json", "fit.coeffs.-1", ""),
         ("results/r.json", "fit.25", ".3f"),

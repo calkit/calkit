@@ -590,6 +590,20 @@ def test_add_cell_output(tmp_path):
             )
     with pytest.raises(ValueError, match="isn't in the pipeline yet"):
         calkit.notebooks.add_cell_output("other.ipynb", value, wdir=wdir)
+    # Quarto saves what a notebook it renders makes its own way
+    quarto_info = {
+        "pipeline": {
+            "stages": {
+                "pub": {
+                    "kind": "quarto",
+                    "target_path": "index.ipynb",
+                    "wdir": "pub",
+                }
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="Quarto stage 'pub'"):
+        calkit.notebooks.get_notebook_stage(quarto_info, "pub/index.ipynb")
     # Several values at once, each cited by its own name
     added = calkit.notebooks.add_cell_output(
         "fit.ipynb",

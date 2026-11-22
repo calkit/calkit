@@ -670,6 +670,25 @@ def get_notebook_stage(
             raise ValueError(f"Stage '{stage}' doesn't run {notebook_path}")
         return stage
     if not names:
+        # Quarto saves what a notebook makes its own way
+        path = Path(notebook_path).as_posix()
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        for name, s in stages.items():
+            if (
+                isinstance(s, dict)
+                and s.get("kind") == "quarto"
+                and posixpath.normpath(
+                    posixpath.join(
+                        s.get("wdir") or "", str(s.get("target_path", ""))
+                    )
+                )
+                == path
+            ):
+                raise ValueError(
+                    f"{notebook_path} is rendered by Quarto stage '{name}', "
+                    "which can't save cell outputs; use Quarto's embed "
+                    "shortcode or inline code instead"
+                )
         raise ValueError(
             f"{notebook_path} isn't in the pipeline yet; add it first, e.g., "
             f"with 'calkit xr {notebook_path}'"

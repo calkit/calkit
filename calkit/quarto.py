@@ -432,10 +432,16 @@ local function get_results_path(source, kind)
       end
     end
   end
+  local path = source
   if kind ~= "path" and result_paths[source] ~= nil then
-    return result_paths[source]
+    path = result_paths[source]
   end
-  return source
+  -- A notebook stands for the values the pipeline saves from its cells
+  if path:lower():match("%.ipynb$") then
+    path = ".calkit/notebooks/outputs/" .. (path:gsub("^%./", ""))
+      .. "/values.json"
+  end
+  return path
 end
 
 -- A dotted key, e.g., fit.coeffs.0, with numbers indexing lists from 0
@@ -732,6 +738,7 @@ def check_values(
         format_value,
         lookup_value,
     )
+    from calkit.notebooks import get_notebook_of_values_path
     from calkit.results import load_result
 
     def check_format(value: QuartoValue) -> None:
@@ -762,9 +769,14 @@ def check_values(
         fpath = os.path.join(wdir, value.path) if wdir else value.path
         if value.path not in data_by_path:
             if not os.path.isfile(fpath):
+                notebook_path = get_notebook_of_values_path(value.path)
                 raise MarkdownParseError(
-                    f"Results file '{value.path}' for value '{value.key}' "
-                    "doesn't exist; is it an output of a stage that has run?",
+                    f"No values saved from {notebook_path} yet; add "
+                    f"'{value.key}' as a cell output and run the pipeline"
+                    if notebook_path
+                    else f"Results file '{value.path}' for value "
+                    f"'{value.key}' doesn't exist; is it an output of a "
+                    "stage that has run?",
                     path=document_path,
                     line=value.line,
                 )

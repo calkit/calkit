@@ -105,8 +105,11 @@ Judgment, done here:
 
    When a notebook in the pipeline computes the number, e.g., it's in a
    cell's printed output, save the variable holding it instead of changing
-   the notebook: `calkit nb add-output <notebook> value --cell-id <id> --variable-name <name>`,
-   then cite it as `\ckvalue{<notebook>}{<name>}`. See the conventions
+   the notebook:
+   `calkit nb add-output <notebook> value --cell-id <id> --variable-name <name>`,
+   then cite it as `\ckvalue{<notebook>}{<name>}`. The value is saved as it
+   is right after cell `<id>` runs, so use the cell that printed it, not
+   the last one, if the variable changes further down. See the conventions
    skill's section on notebook cells.
 
 5. **Run the pipeline** (`calkit run`) and check again. Do not run the

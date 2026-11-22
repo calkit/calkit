@@ -170,11 +170,14 @@ calkit nb outputs analysis.ipynb --json
 A value is cited by the notebook, e.g.,
 `\ckvalue[.3f]{analysis.ipynb}{k_25}`, or a key inside a dict,
 `{rates.25C}`; figures and tables by their paths.
+Each is saved as it is right after its cell runs, not at the end of the
+notebook, so a variable changed further down still saves what that cell
+made.
 They're saved when the pipeline runs the notebook, not when it's run by
 hand, so run `calkit run` after adding them. Several values saved after
 one cell are kept in one entry, under `variable_names`; each is still cited
 by its own name. `calkit nb remove-output` stops saving one.
-Don't also list a marked figure or table in the stage's `outputs`.
+Don't also list a saved figure or table in the stage's `outputs`.
 
 ### Outputs: Git vs. DVC storage
 

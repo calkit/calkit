@@ -191,7 +191,8 @@ There are three kinds of outputs:
   `\ckvalue{notebook.ipynb}{name}`,
   in Quarto with `{{< ckvalue notebook.ipynb name >}}`,
   or in Markdown with `<!-- ckvalue notebook.ipynb name -->`.
-  To get a single item out of a dict, use a dot, e.g., `rates.25C`.
+  To get a single item out of a dict or pandas Series, use a dot,
+  e.g., `rates.25C`, or for a list, its index, e.g., `ks.0`.
 - **Figure:** A figure the cell displays, or a Matplotlib figure in a
   variable.
   It's saved in the format of the path you give it,
@@ -238,7 +239,10 @@ pipeline:
       cell_outputs:
         - kind: value
           cell_id: 3f9a1c2e
-          variable_names: [k_25, k_35]
+          variable_name: k_25
+        - kind: value
+          cell_id: 3f9a1c2e
+          variable_name: k_35
         - kind: figure
           cell_id: 8b77d0aa
           variable_name: fig
@@ -249,10 +253,6 @@ pipeline:
           output_path: tables/rates.tex
           format: .3f
 ```
-
-Use `variable_name` for a single value.
-With `variable_names`, each value is still cited by its own name,
-e.g., `\ckvalue{fit-rates.ipynb}{k_35}`.
 
 A value is saved right after its cell runs,
 so if a later cell changes the variable,

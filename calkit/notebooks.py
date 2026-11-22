@@ -239,14 +239,12 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
 
     user = globals()
     for i, out in outputs:
-        names = out.get("variable_names") or [out.get("variable_name")]
-        for name in names:
-            if name is not None and name not in user:
-                raise NameError(
-                    f"Calkit: there's no variable '{name}' after {where} to "
-                    f"save as {out.get('output_path') or 'a value'}"
-                )
-        name = names[0]
+        name = out.get("variable_name")
+        if name is not None and name not in user:
+            raise NameError(
+                f"Calkit: there's no variable '{name}' after {where} to "
+                f"save as {out.get('output_path') or 'a value'}"
+            )
         what = f"'{name}'"
         # A table can be the result the cell shows, e.g., df.head(), which
         # IPython keeps by the cell's number, the one before this cell's in
@@ -287,17 +285,16 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
             if os.path.isfile(values_path):
                 with open(values_path, encoding="utf-8") as f:
                     values = json.load(f)
-            for name in names:
-                values[name] = to_data(user[name], f"'{name}'")
-                # The values file is kept in Git, so a big array belongs in
-                # a file of its own
-                n_kb = len(json.dumps(values[name])) // 1000
-                if n_kb > 100:
-                    raise ValueError(
-                        f"Calkit: can't save '{name}' after {where} as a "
-                        f"value, since it's {n_kb} kB; save it as a table, "
-                        "or write it to a file the stage outputs"
-                    )
+            values[name] = to_data(user[name], what)
+            # The values file is kept in Git, so a big array belongs in a
+            # file of its own
+            n_kb = len(json.dumps(values[name])) // 1000
+            if n_kb > 100:
+                raise ValueError(
+                    f"Calkit: can't save {what} after {where} as a value, "
+                    f"since it's {n_kb} kB; save it as a table, or write it "
+                    "to a file the stage outputs"
+                )
             os.makedirs(os.path.dirname(values_path) or ".", exist_ok=True)
             with open(values_path, "w", encoding="utf-8") as f:
                 json.dump(values, f, indent=2)
@@ -570,62 +567,24 @@ def get_normalized_output_path(path: str) -> str:
     return posixpath.normpath(path.replace("\\", "/"))
 
 
-def get_value_names(output: dict) -> list[str]:
-    """The variables a value output is saved from, whether it names one or
-    several.
-    """
-    names = output.get("variable_names")
-    if names is None:
-        names = [output.get("variable_name")]
-    return [str(n) for n in names if n is not None]
-
-
-def get_value_output_with_names(output: dict, names: list[str]) -> dict:
-    """A value output saving these variables, named as ``variable_name``
-    if there's one, and ``variable_names`` if there are several.
-    """
-    new = {
-        k: v
-        for k, v in output.items()
-        if k not in ("variable_name", "variable_names")
-    }
-    if len(names) == 1:
-        new["variable_name"] = names[0]
-    else:
-        new["variable_names"] = names
-    return new
-
-
 def get_cell_outputs_with(outputs: list[dict], new: dict) -> list[dict]:
-    """A stage's cell outputs with one added: values join the others saved
-    after the same cell, and move from wherever else they're saved, and a
-    figure or table replaces one saved to the same path.
+    """A stage's cell outputs with one added, replacing a value saved from
+    the same variable, or a figure or table saved to the same path.
     """
-    if new.get("kind") == "value":
-        names = get_value_names(new)
-        out = []
-        merged = False
-        for existing in outputs:
-            if existing.get("kind") != "value":
-                out.append(existing)
-                continue
-            rest = [n for n in get_value_names(existing) if n not in names]
-            if existing.get("cell_id") == new.get("cell_id") and not merged:
-                out.append(get_value_output_with_names(existing, rest + names))
-                merged = True
-            elif rest:
-                out.append(get_value_output_with_names(existing, rest))
-        if not merged:
-            out.append(new)
-        return out
-    path = get_normalized_output_path(str(new.get("output_path")))
+
+    def get_key(output: dict) -> tuple:
+        if output.get("kind") == "value":
+            return ("value", output.get("variable_name"))
+        return (
+            "file",
+            get_normalized_output_path(str(output.get("output_path"))),
+        )
+
+    key = get_key(new)
     replaced = False
     out = []
     for existing in outputs:
-        if existing.get("kind") != "value" and (
-            get_normalized_output_path(str(existing.get("output_path")))
-            == path
-        ):
+        if get_key(existing) == key:
             if not replaced:
                 out.append(new)
                 replaced = True
@@ -656,13 +615,12 @@ def get_cell_outputs_without(
             == get_normalized_output_path(output_path)
         ):
             continue
-        if variable_name is not None and o.get("kind") == "value":
-            names = get_value_names(o)
-            if variable_name in names:
-                rest = [n for n in names if n != variable_name]
-                if rest:
-                    out.append(get_value_output_with_names(o, rest))
-                continue
+        if (
+            variable_name is not None
+            and o.get("kind") == "value"
+            and o.get("variable_name") == variable_name
+        ):
+            continue
         out.append(o)
     return out
 
@@ -737,40 +695,30 @@ def describe_cell_outputs(
     values: dict | None = None,
     ck_info: dict | None = None,
 ) -> list[dict]:
-    """A stage's cell outputs as editors show them, one for each value even
-    if saved with others: what each saves, the cell it's after and that
-    cell's position, how a document cites it, and for a value, what the
-    last run saved, from ``values``.
+    """A stage's cell outputs as editors show them: what each saves, the
+    cell it's after and that cell's position, how a document cites it, and
+    for a value, what the last run saved, from ``values``.
     """
     ids = get_cell_ids(nb) if nb is not None else []
     described = []
     for output in stage.get("cell_outputs") or []:
-        singles = (
-            [
-                get_value_output_with_names(output, [name])
-                for name in get_value_names(output)
-            ]
-            if output.get("kind") == "value"
-            else [output]
-        )
-        for single in singles:
-            cell_id = single.get("cell_id")
-            name = single.get("variable_name")
-            item = {
-                "stage": stage_name,
-                "kind": single.get("kind"),
-                "cell_id": cell_id,
-                "cell_index": ids.index(cell_id) if cell_id in ids else None,
-                "variable_name": name,
-                "output_path": single.get("output_path"),
-                "format": single.get("format"),
-                "citation": get_cell_output_citation(single, stage, ck_info),
-                "citations": get_cell_output_citations(single, stage, ck_info),
-            }
-            if item["kind"] == "value" and values is not None:
-                if name in values:
-                    item["saved_value"] = values[name]
-            described.append(item)
+        cell_id = output.get("cell_id")
+        name = output.get("variable_name")
+        item = {
+            "stage": stage_name,
+            "kind": output.get("kind"),
+            "cell_id": cell_id,
+            "cell_index": ids.index(cell_id) if cell_id in ids else None,
+            "variable_name": name,
+            "output_path": output.get("output_path"),
+            "format": output.get("format"),
+            "citation": get_cell_output_citation(output, stage, ck_info),
+            "citations": get_cell_output_citations(output, stage, ck_info),
+        }
+        if item["kind"] == "value" and values is not None:
+            if name in values:
+                item["saved_value"] = values[name]
+        described.append(item)
     return described
 
 
@@ -818,23 +766,22 @@ def get_notebook_stage(
     return names[0]
 
 
-def add_cell_output(
+def add_cell_outputs(
     notebook_path: str,
-    output: dict,
+    outputs: list[dict],
     stage: str | None = None,
     cell_index: int | None = None,
     wdir: str | None = None,
 ) -> dict:
-    """Add a value, figure, or table a notebook's cell makes to the outputs
+    """Add values, figures, or tables a notebook's cells make to the outputs
     of the stage running it in ``calkit.yaml``, to be saved whenever the
-    pipeline runs it, as ``get_cell_outputs_with`` adds it.
+    pipeline runs it, as ``get_cell_outputs_with`` adds them.
 
-    ``output`` is as ``NotebookCellOutput`` takes it. A cell named by
+    Each output is as ``NotebookCellOutput`` takes it. A cell named by
     ``cell_index`` instead of its ID gets one written into the notebook,
     with the rest of its cells, if they have none. Returns the stage, the
-    output as given, how a document cites each value, figure, or table it
-    saves, and a warning, if any. Raises a ``ValueError`` saying what's
-    wrong.
+    outputs as given, how a document cites each, and a warning, if any.
+    Raises a ``ValueError`` saying what's wrong, without adding any.
     """
     from pydantic import ValidationError
 
@@ -848,8 +795,13 @@ def add_cell_output(
 
     notebook_path = Path(notebook_path).as_posix()
     fpath = os.path.join(wdir or ".", notebook_path)
-    output = {k: v for k, v in output.items() if v is not None}
-    if cell_index is not None and output.get("cell_id") is not None:
+    outputs = [
+        {k: v for k, v in output.items() if v is not None}
+        for output in outputs
+    ]
+    if not outputs:
+        raise ValueError("Give an output to add")
+    if cell_index is not None and any(o.get("cell_id") for o in outputs):
         raise ValueError("Name the cell by its ID or position, not both")
     ck_info = calkit.load_calkit_info(wdir=wdir)
     name = get_notebook_stage(ck_info, notebook_path, stage)
@@ -869,28 +821,34 @@ def add_cell_output(
             with open(fpath, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(nb, f, indent=1, sort_keys=True, ensure_ascii=False)
                 f.write("\n")
-        output["cell_id"] = get_cell_ids(nb)[cell_index]
-    elif output.get("cell_id") is not None and output[
-        "cell_id"
-    ] not in get_cell_ids(nb):
-        raise ValueError(f"{notebook_path} has no cell {output['cell_id']}")
+        for output in outputs:
+            output["cell_id"] = get_cell_ids(nb)[cell_index]
+    for output in outputs:
+        cell_id = output.get("cell_id")
+        if cell_id is not None and cell_id not in get_cell_ids(nb):
+            raise ValueError(f"{notebook_path} has no cell {cell_id}")
     try:
-        new = NotebookCellOutput.model_validate(output).model_dump(
-            exclude_none=True
-        )
+        added = [
+            NotebookCellOutput.model_validate(o).model_dump(exclude_none=True)
+            for o in outputs
+        ]
     except ValidationError as e:
         raise ValueError(get_message(e))
+    saved = [o.get("output_path") or o.get("variable_name") for o in added]
+    for item in saved:
+        if saved.count(item) > 1:
+            raise ValueError(f"'{item}' is given twice")
     stage_dict = ck_info["pipeline"]["stages"][name]
-    outputs = get_cell_outputs_with(
-        [dict(o) for o in stage_dict.get("cell_outputs") or []], new
-    )
+    updated = [dict(o) for o in stage_dict.get("cell_outputs") or []]
+    for output in added:
+        updated = get_cell_outputs_with(updated, output)
     try:
         JupyterNotebookStage.model_validate(
-            dict(stage_dict) | {"cell_outputs": outputs}
+            dict(stage_dict) | {"cell_outputs": updated}
         )
     except ValidationError as e:
         raise ValueError(get_message(e))
-    stage_dict["cell_outputs"] = outputs
+    stage_dict["cell_outputs"] = updated
     calkit.save_calkit_info(ck_info, wdir=wdir)
     warning = (
         f"{notebook_path}'s cell IDs look renumbered by nbstripout, so "
@@ -899,18 +857,13 @@ def add_cell_output(
         if has_ordinal_cell_ids(nb)
         else None
     )
-    singles = (
-        [get_value_output_with_names(new, [n]) for n in get_value_names(new)]
-        if new["kind"] == "value"
-        else [new]
-    )
     citations = [
-        get_cell_output_citation(single, stage_dict, ck_info)
-        for single in singles
+        get_cell_output_citation(output, stage_dict, ck_info)
+        for output in added
     ]
     return {
         "stage": name,
-        "output": new,
+        "outputs": added,
         "citations": [c for c in citations if c is not None],
         "warning": warning,
     }
@@ -932,12 +885,6 @@ def remove_cell_outputs(
     """
     import calkit
 
-    def count_saved(outputs: list[dict]) -> int:
-        return sum(
-            len(get_value_names(o)) if o.get("kind") == "value" else 1
-            for o in outputs
-        )
-
     notebook_path = Path(notebook_path).as_posix()
     if not any((variable_name, output_path, cell_id)):
         raise ValueError("Give a variable, output path, or cell ID")
@@ -951,7 +898,7 @@ def remove_cell_outputs(
         output_path=output_path,
         cell_id=cell_id,
     )
-    n_removed = count_saved(before) - count_saved(after)
+    n_removed = len(before) - len(after)
     if not n_removed:
         raise ValueError(f"No matching cell output in {notebook_path}")
     if after:

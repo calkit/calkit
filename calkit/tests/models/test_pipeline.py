@@ -754,24 +754,13 @@ def test_jupyternotebookstage():
             NotebookCellOutput.model_validate(
                 {k: v for k, v in fields.items() if v is not None}
             )
-    # Several values after one cell
-    several = NotebookCellOutput(
-        kind="value", cell_id="a", variable_names=["k_25", "k_35"]
-    )
-    assert several.to_arg() == "kind=value,cell_id=a,variable_names=k_25 k_35"
-    assert NotebookCellOutput.from_arg(several.to_arg()) == several
     for fields, message in [
-        ({"variable_name": "a", "variable_names": ["b"]}, "not both"),
-        ({"variable_names": ["a", "a"]}, "named twice"),
-        ({"variable_names": ["a", "b c"]}, "isn't a variable"),
-        ({"variable_names": []}, "Name the variable"),
+        ({"variable_name": "b c"}, "isn't a variable"),
+        ({}, "Name the variable"),
+        ({"variable_names": ["a", "b"]}, "Extra inputs"),
     ]:
         with pytest.raises(ValidationError, match=message):
             NotebookCellOutput.model_validate({"kind": "value"} | fields)
-    with pytest.raises(ValidationError, match="takes one 'variable_name'"):
-        NotebookCellOutput.model_validate(
-            figure | {"variable_names": ["f"], "output_path": "f.png"}
-        )
     with pytest.raises(ValueError, match="give it as"):
         NotebookCellOutput.from_arg("value")
     with pytest.raises(ValueError, match="given twice"):
@@ -779,11 +768,6 @@ def test_jupyternotebookstage():
     value = {"kind": "value", "variable_name": "a"}
     bad_stages = [
         ([value, value | {"cell_id": "x"}], {}, "more than once"),
-        (
-            [value, {"kind": "value", "variable_names": ["b", "a"]}],
-            {},
-            "more than once",
-        ),
         (
             [
                 figure | {"output_path": "f.png"},

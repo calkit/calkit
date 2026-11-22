@@ -495,14 +495,16 @@ class NotebookCellOutputsRouteHandler(APIHandler):
         body = self.get_json_body()
         if not body or not body.get("path"):
             return self.error(400, "Request body must include 'path'")
-        # The notebook's path, and the output as calkit.yaml has it
-        output = body.get("output")
-        if not isinstance(output, dict):
-            return self.error(400, "Request body must include 'output'")
+        # The notebook's path, and the outputs as calkit.yaml has them
+        outputs = body.get("outputs")
+        if not isinstance(outputs, list) or not all(
+            isinstance(o, dict) for o in outputs
+        ):
+            return self.error(400, "Request body must include 'outputs'")
         try:
-            added = calkit.notebooks.add_cell_output(
+            added = calkit.notebooks.add_cell_outputs(
                 body["path"],
-                output,
+                outputs,
                 stage=body.get("stage"),
                 cell_index=body.get("cell_index"),
             )

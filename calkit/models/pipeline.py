@@ -2659,11 +2659,6 @@ class NotebookCellOutput(Model):
         "the image the cell shows, and a table the result it shows, e.g., "
         "df.head() on its last line.",
     )
-    variable_names: list[str] | None = Field(
-        default=None,
-        description="Names of several variables to save as values after the "
-        "same cell, each cited by its own name, instead of 'variable_name'.",
-    )
     output_path: str | None = Field(
         default=None,
         description="Where a figure or table is saved, in the format its "
@@ -2695,32 +2690,22 @@ class NotebookCellOutput(Model):
             CELL_OUTPUT_TABLE_EXTS,
         )
 
-        if self.variable_name is not None and self.variable_names is not None:
-            raise ValueError(
-                "Give 'variable_name' or 'variable_names', not both"
-            )
-        for name in self.variable_names_saved:
-            if not name.isidentifier():
-                raise ValueError(f"'{name}' isn't a variable name")
+        name = self.variable_name
+        if name is not None and not name.isidentifier():
+            raise ValueError(f"'{name}' isn't a variable name")
         if self.cell_id is not None and not re.fullmatch(
             r"[A-Za-z0-9_-]+", self.cell_id
         ):
             raise ValueError(f"'{self.cell_id}' isn't a cell ID")
         if self.kind == "value":
-            if not self.variable_names_saved:
+            if name is None:
                 raise ValueError("Name the variable to save as a value")
-            names = self.variable_names_saved
-            for name in set(names):
-                if names.count(name) > 1:
-                    raise ValueError(f"Value '{name}' is named twice")
             if self.output_path or self.format or self.storage:
                 raise ValueError(
                     "'output_path', 'format', and 'storage' don't apply to "
                     "values"
                 )
             return self
-        if self.variable_names is not None:
-            raise ValueError(f"A {self.kind} takes one 'variable_name'")
         if self.output_path is None:
             raise ValueError(f"A {self.kind} needs an 'output_path'")
         check_path_relative_and_child_of_cwd(self.output_path)
@@ -2782,26 +2767,12 @@ class NotebookCellOutput(Model):
         ext = os.path.splitext(str(self.output_path))[1].lower()
         return "dvc" if ext in DVC_EXTENSIONS else "git"
 
-    @property
-    def variable_names_saved(self) -> list[str]:
-        """The variables it's saved from, whether named once or as a list."""
-        if self.variable_names is not None:
-            return list(self.variable_names)
-        return [] if self.variable_name is None else [self.variable_name]
-
     def to_arg(self) -> str:
-        """This output as ``calkit nb execute --output`` takes it, with
-        several variables' names separated by spaces.
-        """
+        """This output as ``calkit nb execute --output`` takes it."""
         fields = {
             "kind": self.kind,
             "cell_id": self.cell_id,
             "variable_name": self.variable_name,
-            "variable_names": (
-                None
-                if self.variable_names is None
-                else " ".join(self.variable_names)
-            ),
             "output_path": self.output_path,
             "format": self.format,
         }
@@ -2824,8 +2795,6 @@ class NotebookCellOutput(Model):
             if key in fields:
                 raise ValueError(f"'{key}' is given twice in '{arg}'")
             fields[key] = val.strip()
-        if "variable_names" in fields:
-            fields["variable_names"] = fields["variable_names"].split()
         return cls.model_validate(fields)
 
 
@@ -2896,10 +2865,7 @@ class JupyterNotebookStage(Stage):
     @model_validator(mode="after")
     def check_cell_outputs(self) -> "JupyterNotebookStage":
         values = [
-            name
-            for o in self.cell_outputs
-            if o.kind == "value"
-            for name in o.variable_names_saved
+            o.variable_name for o in self.cell_outputs if o.kind == "value"
         ]
         for name in set(values):
             if values.count(name) > 1:

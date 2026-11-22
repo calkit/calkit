@@ -220,12 +220,14 @@ describe("cell outputs", () => {
       }),
     ).toEqual({
       path: "fit.ipynb",
-      output: {
-        kind: "figure",
-        cell_id: "c2",
-        variable_name: "fig",
-        output_path: "figures/fit.pdf",
-      },
+      outputs: [
+        {
+          kind: "figure",
+          cell_id: "c2",
+          variable_name: "fig",
+          output_path: "figures/fit.pdf",
+        },
+      ],
     });
     // A value has no path of its own
     expect(
@@ -239,18 +241,21 @@ describe("cell outputs", () => {
       }),
     ).toEqual({
       path: "fit.ipynb",
-      output: { kind: "value", cell_id: "c0", variable_name: "k" },
+      outputs: [{ kind: "value", cell_id: "c0", variable_name: "k" }],
       stage: "fit-2",
     });
-    // Several values at once
+    // Several values at once, each its own output
     expect(
       getAddOutputRequestBody({
         notebookPath: "fit.ipynb",
         cellId: "c0",
         kind: "value",
         variableNames: ["k", "j"],
-      }).output,
-    ).toEqual({ kind: "value", cell_id: "c0", variable_names: ["k", "j"] });
+      }).outputs,
+    ).toEqual([
+      { kind: "value", cell_id: "c0", variable_name: "k" },
+      { kind: "value", cell_id: "c0", variable_name: "j" },
+    ]);
     // A table keeps its number format
     expect(
       getAddOutputRequestBody({
@@ -259,13 +264,15 @@ describe("cell outputs", () => {
         kind: "table",
         outputPath: "tables/t.tex",
         format: ".3f",
-      }).output,
-    ).toEqual({
-      kind: "table",
-      cell_id: "c4",
-      output_path: "tables/t.tex",
-      format: ".3f",
-    });
+      }).outputs,
+    ).toEqual([
+      {
+        kind: "table",
+        cell_id: "c4",
+        output_path: "tables/t.tex",
+        format: ".3f",
+      },
+    ]);
     expect(getRemoveOutputQuery("nbs/fit rates.ipynb", figure)).toBe(
       "path=nbs%2Ffit+rates.ipynb&output_path=figures%2Ffit.pdf&stage=fit",
     );

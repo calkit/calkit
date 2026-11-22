@@ -268,7 +268,7 @@ export function getOutputPathError(
 
 /**
  * The body of a request to add a cell's output: the notebook's path, and
- * the output as calkit.yaml has it, which can save several values at once.
+ * the outputs as calkit.yaml has them, one for each value if several.
  */
 export function getAddOutputRequestBody(options: {
   notebookPath: string;
@@ -279,25 +279,26 @@ export function getAddOutputRequestBody(options: {
   format?: string | null;
   stage?: string;
 }): Record<string, unknown> {
-  const output: Record<string, unknown> = {
-    kind: options.kind,
-    cell_id: options.cellId,
-  };
   const names = options.variableNames ?? [];
-  if (names.length === 1) {
-    output.variable_name = names[0];
-  } else if (names.length > 1) {
-    output.variable_names = names;
-  }
-  if (options.outputPath && options.kind !== "value") {
-    output.output_path = options.outputPath;
-  }
-  if (options.format && options.kind === "table") {
-    output.format = options.format;
-  }
+  const outputs = (names.length ? names : [undefined]).map((name) => {
+    const output: Record<string, unknown> = {
+      kind: options.kind,
+      cell_id: options.cellId,
+    };
+    if (name) {
+      output.variable_name = name;
+    }
+    if (options.outputPath && options.kind !== "value") {
+      output.output_path = options.outputPath;
+    }
+    if (options.format && options.kind === "table") {
+      output.format = options.format;
+    }
+    return output;
+  });
   return {
     path: options.notebookPath,
-    output,
+    outputs,
     ...(options.stage ? { stage: options.stage } : {}),
   };
 }

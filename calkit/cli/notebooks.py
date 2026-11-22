@@ -1083,17 +1083,23 @@ def add_cell_output(
     runs the notebook.
     """
     names = variable_names or []
+    if len(names) > 1 and kind != "value":
+        raise_error(f"A {kind} is saved from one variable")
+    # What the cell shows, if no variable is named
+    saved_from: list[str | None] = [*names] or [None]
     try:
-        added = calkit.notebooks.add_cell_output(
+        added = calkit.notebooks.add_cell_outputs(
             path,
-            {
-                "kind": kind,
-                "cell_id": cell_id,
-                "variable_name": names[0] if len(names) == 1 else None,
-                "variable_names": names if len(names) > 1 else None,
-                "output_path": output_path,
-                "format": number_format,
-            },
+            [
+                {
+                    "kind": kind,
+                    "cell_id": cell_id,
+                    "variable_name": name,
+                    "output_path": output_path,
+                    "format": number_format,
+                }
+                for name in saved_from
+            ],
             stage=stage,
             cell_index=cell_index,
         )

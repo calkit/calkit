@@ -6339,22 +6339,6 @@
           "default": null,
           "description": "Name of the variable it's saved from: a value's name, e.g., a number or a dict of them, a figure, e.g., a Matplotlib figure, or a table, e.g., a DataFrame. A figure without one is the image the cell shows, and a table the result it shows, e.g., df.head() on its last line.",
           "title": "Variable Name"
-        },
-        "variable_names": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Names of several variables to save as values after the same cell, each cited by its own name, instead of 'variable_name'.",
-          "title": "Variable Names"
         }
       },
       "required": [

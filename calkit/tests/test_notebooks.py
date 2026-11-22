@@ -384,7 +384,7 @@ def test_cell_output_marks():
     # over from another output saved to it
     moved = value | {"cell_id": "c"}
     marked = calkit.notebooks.get_cell_outputs_with(outputs, moved)
-    assert marked == [figure, table, moved]
+    assert marked == [moved, figure, table]
     replacing = {
         "kind": "figure",
         "cell_id": "c",
@@ -395,21 +395,7 @@ def test_cell_output_marks():
     assert marked == [value, figure, replacing]
     added = {"kind": "value", "variable_name": "j"}
     assert calkit.notebooks.get_cell_outputs_with(outputs, added)[-1] == added
-    # Values saved after the same cell are kept together
-    joined = calkit.notebooks.get_cell_outputs_with(
-        outputs, {"kind": "value", "cell_id": "a", "variable_name": "j"}
-    )
-    assert joined[0] == {
-        "kind": "value",
-        "cell_id": "a",
-        "variable_names": ["k", "j"],
-    }
     without = calkit.notebooks.get_cell_outputs_without
-    assert without(joined, variable_name="k")[0] == {
-        "kind": "value",
-        "cell_id": "a",
-        "variable_name": "j",
-    }
     assert without(outputs, variable_name="k") == [figure, table]
     assert without(outputs, variable_name="df") == outputs
     assert without(outputs, output_path="t.tex") == [value, figure]
@@ -590,7 +576,7 @@ def test_find_printed_numbers():
     ]
 
 
-def test_add_cell_output(tmp_path):
+def test_add_cell_outputs(tmp_path):
     nb = {
         "nbformat": 4,
         "nbformat_minor": 4,
@@ -613,8 +599,8 @@ def test_add_cell_output(tmp_path):
     wdir = str(tmp_path)
     # A cell named by position gets an ID, as do the rest
     value = {"kind": "value", "variable_name": "k"}
-    marked = calkit.notebooks.add_cell_output(
-        "fit.ipynb", value, cell_index=0, wdir=wdir
+    marked = calkit.notebooks.add_cell_outputs(
+        "fit.ipynb", [value], cell_index=0, wdir=wdir
     )
     text = (tmp_path / "fit.ipynb").read_text(encoding="utf-8")
     assert "# μs" in text
@@ -623,18 +609,22 @@ def test_add_cell_output(tmp_path):
     assert all(ids) and saved["nbformat_minor"] == 5
     assert marked == {
         "stage": "fit",
-        "output": {"kind": "value", "cell_id": ids[0], "variable_name": "k"},
+        "outputs": [
+            {"kind": "value", "cell_id": ids[0], "variable_name": "k"}
+        ],
         "citations": [r"\ckvalue{fit.ipynb}{k}"],
         "warning": None,
     }
-    calkit.notebooks.add_cell_output(
+    calkit.notebooks.add_cell_outputs(
         "fit.ipynb",
-        {
-            "kind": "figure",
-            "cell_id": ids[1],
-            "variable_name": "fig",
-            "output_path": "f.pdf",
-        },
+        [
+            {
+                "kind": "figure",
+                "cell_id": ids[1],
+                "variable_name": "fig",
+                "output_path": "f.pdf",
+            }
+        ],
         wdir=wdir,
     )
     text = (tmp_path / "calkit.yaml").read_text()
@@ -653,11 +643,17 @@ def test_add_cell_output(tmp_path):
         ({"kind": "value", "cell_id": ids[0]}, {}, "Name the variable"),
     ]:
         with pytest.raises(ValueError, match=message):
-            calkit.notebooks.add_cell_output(
-                "fit.ipynb", args, wdir=wdir, **kwargs
+            calkit.notebooks.add_cell_outputs(
+                "fit.ipynb", [args], wdir=wdir, **kwargs
             )
+    for outputs, message in [
+        ([], "Give an output"),
+        ([on_first, on_first], "'k' is given twice"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            calkit.notebooks.add_cell_outputs("fit.ipynb", outputs, wdir=wdir)
     with pytest.raises(ValueError, match="isn't in the pipeline yet"):
-        calkit.notebooks.add_cell_output("other.ipynb", value, wdir=wdir)
+        calkit.notebooks.add_cell_outputs("other.ipynb", [value], wdir=wdir)
     # Quarto saves what a notebook it renders makes its own way
     quarto_info = {
         "pipeline": {
@@ -672,10 +668,13 @@ def test_add_cell_output(tmp_path):
     }
     with pytest.raises(ValueError, match="Quarto stage 'pub'"):
         calkit.notebooks.get_notebook_stage(quarto_info, "pub/index.ipynb")
-    # Several values at once, each cited by its own name
-    added = calkit.notebooks.add_cell_output(
+    # Several values at once, each its own output
+    added = calkit.notebooks.add_cell_outputs(
         "fit.ipynb",
-        {"kind": "value", "cell_id": ids[0], "variable_names": ["a", "b"]},
+        [
+            {"kind": "value", "cell_id": ids[0], "variable_name": name}
+            for name in ["a", "b"]
+        ],
         wdir=wdir,
     )
     assert added["citations"] == [
@@ -683,7 +682,7 @@ def test_add_cell_output(tmp_path):
         r"\ckvalue{fit.ipynb}{b}",
     ]
     listed = calkit.notebooks.list_cell_outputs("fit.ipynb", wdir=wdir)
-    assert [m["variable_name"] for m in listed] == ["k", "a", "b", "fig"]
+    assert [m["variable_name"] for m in listed] == ["k", "fig", "a", "b"]
     remove = calkit.notebooks.remove_cell_outputs
     assert remove("fit.ipynb", cell_id=ids[1], wdir=wdir) == 1
     with pytest.raises(ValueError, match="No matching cell output"):

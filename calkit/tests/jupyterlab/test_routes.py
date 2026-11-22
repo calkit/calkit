@@ -74,11 +74,13 @@ async def test_notebook_cell_outputs(
     assert json.loads(response.body) == []
     # Adding one says how to cite it
     value = {"kind": "value", "cell_id": ids[0], "variable_name": "k_25"}
-    response = await fetch("POST", body={"path": "fit.ipynb", "output": value})
+    response = await fetch(
+        "POST", body={"path": "fit.ipynb", "outputs": [value]}
+    )
     assert response.code == 200
     assert json.loads(response.body) == {
         "stage": "fit",
-        "output": value,
+        "outputs": [value],
         "citations": [r"\ckvalue{fit.ipynb}{k_25}"],
         "warning": None,
     }
@@ -89,10 +91,10 @@ async def test_notebook_cell_outputs(
     }
     response = await fetch(
         "POST",
-        body={"path": "fit.ipynb", "cell_index": 1, "output": figure},
+        body={"path": "fit.ipynb", "cell_index": 1, "outputs": [figure]},
     )
     assert response.code == 200
-    assert json.loads(response.body)["output"]["cell_id"] == ids[1]
+    assert json.loads(response.body)["outputs"][0]["cell_id"] == ids[1]
     # Listing shows each by its cell, with a saved value once there's one
     os.makedirs(".calkit/notebooks/outputs/fit.ipynb")
     with open(".calkit/notebooks/outputs/fit.ipynb/values.json", "w") as f:
@@ -107,10 +109,11 @@ async def test_notebook_cell_outputs(
     # What can't be added or removed says why
     elsewhere = value | {"cell_id": "nope"}
     for method, body, params, message in [
-        ("POST", {"path": "fit.ipynb", "output": elsewhere}, {}, "no cell"),
-        ("POST", {"path": "other.ipynb", "output": value}, {}, "yet"),
-        ("POST", {"path": "fit.ipynb"}, {}, "must include 'output'"),
-        ("POST", {"output": value}, {}, "must include 'path'"),
+        ("POST", {"path": "fit.ipynb", "outputs": [elsewhere]}, {}, "no cell"),
+        ("POST", {"path": "other.ipynb", "outputs": [value]}, {}, "yet"),
+        ("POST", {"path": "fit.ipynb"}, {}, "must include 'outputs'"),
+        ("POST", {"path": "fit.ipynb", "outputs": value}, {}, "'outputs'"),
+        ("POST", {"outputs": [value]}, {}, "must include 'path'"),
         (
             "DELETE",
             None,

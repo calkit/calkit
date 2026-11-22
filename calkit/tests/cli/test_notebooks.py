@@ -540,7 +540,8 @@ def test_cell_outputs(tmp_dir):
             "import pandas as pd\n"
             "import matplotlib.pyplot as plt\n"
             "rates = {'25C': 0.0309, '35C': np.float64(0.0616)}\n"
-            "k_25 = rates['25C']"
+            "k_25 = rates['25C']\n"
+            "k_35 = rates['35C']"
         ),
         nbformat.v4.new_markdown_cell("# Plots"),
         nbformat.v4.new_code_cell(
@@ -581,11 +582,13 @@ def test_cell_outputs(tmp_dir):
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == {
         "stage": "fit",
-        "output": {
-            "kind": "value",
-            "cell_id": ids[0],
-            "variable_name": "k_25",
-        },
+        "outputs": [
+            {
+                "kind": "value",
+                "cell_id": ids[0],
+                "variable_name": "k_25",
+            }
+        ],
         "citations": [r"\ckvalue{fit.ipynb}{k_25}"],
         "warning": None,
     }
@@ -598,7 +601,7 @@ def test_cell_outputs(tmp_dir):
         "--output-path",
     ]
     for args in [
-        ["value", "--cell-id", ids[0], "--variable-name", "rates"],
+        ["value", "--cell-id", ids[0], "-v", "rates", "-v", "k_35"],
         ["value", "--variable-name", "last"],
         [
             "figure",
@@ -638,6 +641,10 @@ def test_cell_outputs(tmp_dir):
             "apply",
         ),
         (["plot", *first, "--variable-name", "x"], "Input should be"),
+        (
+            ["figure", *first, "-v", "a", "-v", "b", "--output-path", "f.pdf"],
+            "saved from one variable",
+        ),
         (["figure", *first, "--output-path", "fit.pdf"], "can't be in"),
     ]:
         if "can't be in" in message:
@@ -675,11 +682,15 @@ def test_cell_outputs(tmp_dir):
             "rates.csv",
         ]
     )
-    # Values saved after the same cell are kept together
+    # Each value is its own output, even if added with others
     ck_info = calkit.load_calkit_info()
     saved = ck_info["pipeline"]["stages"]["fit"]["cell_outputs"]
-    assert len(saved) == 5
-    assert saved[0]["variable_names"] == ["k_25", "rates"]
+    assert len(saved) == 7
+    assert saved[2] == {
+        "kind": "value",
+        "cell_id": ids[0],
+        "variable_name": "k_35",
+    }
     # Running saves each, the value as it was right after its cell, and
     # leaves no sign of the cells that saved them
     subprocess.check_call(["calkit", "run"])
@@ -688,6 +699,7 @@ def test_cell_outputs(tmp_dir):
         assert json.load(f) == {
             "k_25": 0.0309,
             "rates": {"25C": 0.0309, "35C": 0.0616},
+            "k_35": 0.0616,
             "last": "done",
         }
     with open("figures/fit.pdf", "rb") as f:
@@ -712,6 +724,7 @@ def test_cell_outputs(tmp_dir):
         )
     )
     assert [(d["kind"], d["cell_index"]) for d in listed] == [
+        ("value", 0),
         ("value", 0),
         ("value", 0),
         ("value", None),

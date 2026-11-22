@@ -446,8 +446,8 @@ export interface ResponseMap {
   "project.printedNumbers": PrintedNumbers[];
   "project.addCellOutput": {
     stage: string;
-    output: Record<string, string>;
-    citation: string | null;
+    outputs: Record<string, string>[];
+    citations: string[];
     warning: string | null;
   };
   "local.createProject": { path: string; project: string };

@@ -420,20 +420,22 @@ def get_result(msg: dict) -> Any:
             raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_printed_numbers(paths[0])
     elif kind == "project.addCellOutput":
-        from calkit.notebooks import add_cell_output
+        from calkit.notebooks import add_cell_outputs
 
         owner, name = split_project(msg.get("project"))
         paths = get_checkout_paths(owner, name)
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this machine")
         notebook = get_project_path(paths[0], msg.get("notebook"), "notebook")
-        result = add_cell_output(
+        result = add_cell_outputs(
             notebook,
-            {
-                "kind": "value",
-                "cell_id": msg.get("cell_id"),
-                "variable_name": msg.get("variable_name"),
-            },
+            [
+                {
+                    "kind": "value",
+                    "cell_id": msg.get("cell_id"),
+                    "variable_name": msg.get("variable_name"),
+                }
+            ],
             stage=msg.get("stage"),
             wdir=paths[0],
         )

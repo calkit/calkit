@@ -1,5 +1,5 @@
 /**
- * What a notebook's cells are marked to make for documents, i.e., values,
+ * What a notebook's cells save for documents, i.e., values,
  * figures, and tables Calkit saves when the pipeline runs the notebook, as
  * the server's `notebook/cell/outputs` route lists them, and the labels,
  * choices, and requests for them.
@@ -7,7 +7,7 @@
 
 export type CellOutputKind = "value" | "figure" | "table";
 
-export interface ICellOutputMark {
+export interface ICellOutput {
   stage: string;
   kind: CellOutputKind;
   cell_id: string | null;
@@ -32,13 +32,13 @@ export const SHOWN_IMAGE_LABEL = "Image this cell shows";
 export const OTHER_VARIABLE_LABEL = "Other variable…";
 
 /** Extensions each kind of file can be saved as, by kind. */
-export const MARK_EXTENSIONS: Record<"figure" | "table", string[]> = {
+export const OUTPUT_EXTENSIONS: Record<"figure" | "table", string[]> = {
   figure: [".pdf", ".png", ".svg", ".jpg", ".jpeg"],
   table: [".tex", ".csv", ".md", ".json"],
 };
 
-/** Marks from the server's response, or none if it isn't a list of them. */
-export function filterCellOutputMarks(data: unknown): ICellOutputMark[] {
+/** Cell outputs from the server's response, or none if it isn't a list of them. */
+export function filterCellOutputs(data: unknown): ICellOutput[] {
   return Array.isArray(data)
     ? data.filter(
         (m) =>
@@ -49,9 +49,11 @@ export function filterCellOutputMarks(data: unknown): ICellOutputMark[] {
     : [];
 }
 
-/** What a mark saves: a value's name, or a figure or table's path. */
-export function getMarkTarget(mark: ICellOutputMark): string {
-  return (mark.kind === "value" ? mark.variable_name : mark.output_path) ?? "";
+/** What an output saves: a value's name, or a figure or table's path. */
+export function getCellOutputTarget(output: ICellOutput): string {
+  return (
+    (output.kind === "value" ? output.variable_name : output.output_path) ?? ""
+  );
 }
 
 /** A saved value as short text, e.g., `0.03091` or `{3 keys}`. */
@@ -78,31 +80,31 @@ export function formatSavedValue(value: unknown): string {
   return String(value);
 }
 
-/** The label on a cell for one of its marks, and its tooltip. */
-export function getMarkLabel(mark: ICellOutputMark): {
+/** The label on a cell for one of its outputs, and its tooltip. */
+export function getCellOutputLabel(output: ICellOutput): {
   text: string;
   tooltip: string;
 } {
-  let text = getMarkTarget(mark);
-  if (mark.kind === "value") {
+  let text = getCellOutputTarget(output);
+  if (output.kind === "value") {
     text +=
-      "saved_value" in mark
-        ? ` = ${formatSavedValue(mark.saved_value)}`
+      "saved_value" in output
+        ? ` = ${formatSavedValue(output.saved_value)}`
         : " (not saved yet)";
-  } else if (mark.variable_name) {
-    text += ` from ${mark.variable_name}`;
+  } else if (output.variable_name) {
+    text += ` from ${output.variable_name}`;
   }
   const lines = [
-    mark.kind === "value"
-      ? `Value saved after this cell when stage '${mark.stage}' runs`
-      : `${mark.kind === "figure" ? "Figure" : "Table"} saved ${
-          mark.variable_name
-            ? `from '${mark.variable_name}'`
+    output.kind === "value"
+      ? `Value saved after this cell when stage '${output.stage}' runs`
+      : `${output.kind === "figure" ? "Figure" : "Table"} saved ${
+          output.variable_name
+            ? `from '${output.variable_name}'`
             : "from what this cell shows"
-        } when stage '${mark.stage}' runs`,
+        } when stage '${output.stage}' runs`,
   ];
-  if (mark.citation) {
-    lines.push(`Show it in a document with ${mark.citation}`);
+  if (output.citation) {
+    lines.push(`Show it in a document with ${output.citation}`);
   }
   return { text, tooltip: lines.join("\n") };
 }
@@ -179,7 +181,7 @@ export function isVariableName(name: string): boolean {
 }
 
 /**
- * Names a mark of a kind is most likely saved from first, e.g., `fig` for a
+ * Names an output of a kind is most likely saved from first, e.g., `fig` for a
  * figure and `df` for a table, then the rest as the cell assigns them.
  */
 export function rankNamesForKind(
@@ -196,7 +198,7 @@ export function rankNamesForKind(
 }
 
 /**
- * What a mark can be saved from, most likely first: for a figure, the image
+ * What an output can be saved from, most likely first: for a figure, the image
  * the cell shows if it shows one, then the cell's variables, then another
  * variable, and last, the image, if the cell hasn't shown it yet.
  */
@@ -222,7 +224,7 @@ export function getVariableChoices(
  * a variable, which stays sharp in a paper, and otherwise the PNG a cell
  * shows.
  */
-export function getDefaultMarkPath(
+export function getDefaultOutputPath(
   kind: "figure" | "table",
   notebookPath: string,
   variable?: string,
@@ -242,21 +244,21 @@ export function getDefaultMarkPath(
 }
 
 /** What's wrong with a path to save a figure or table to, if anything. */
-export function getMarkPathError(
+export function getOutputPathError(
   kind: "figure" | "table",
   path: string,
 ): string | null {
-  const exts = MARK_EXTENSIONS[kind];
+  const exts = OUTPUT_EXTENSIONS[kind];
   return exts.some((e) => path.trim().toLowerCase().endsWith(e))
     ? null
     : `Use ${exts.join(", ")}`;
 }
 
 /**
- * The body of a request to mark a cell's output: the notebook's path, and
+ * The body of a request to add a cell's output: the notebook's path, and
  * the output as calkit.yaml has it, which can save several values at once.
  */
-export function getMarkRequestBody(options: {
+export function getAddOutputRequestBody(options: {
   notebookPath: string;
   cellId: string;
   kind: CellOutputKind;
@@ -284,30 +286,30 @@ export function getMarkRequestBody(options: {
   };
 }
 
-/** The query of a request to unmark a mark. */
-export function getUnmarkQuery(
+/** The query of a request to remove an output. */
+export function getRemoveOutputQuery(
   notebookPath: string,
-  mark: ICellOutputMark,
+  output: ICellOutput,
 ): string {
   return new URLSearchParams({
     path: notebookPath,
-    [mark.kind === "value" ? "variable_name" : "output_path"]:
-      getMarkTarget(mark),
-    stage: mark.stage,
+    [output.kind === "value" ? "variable_name" : "output_path"]:
+      getCellOutputTarget(output),
+    stage: output.stage,
   }).toString();
 }
 
 /**
- * Marks on the cell at a position, or with an ID, and for the last cell,
+ * Outputs saved from the cell at a position, or with an ID, and for the last cell,
  * those saved after it because they name no cell.
  */
-export function getMarksForCell(
-  marks: ICellOutputMark[],
+export function getCellOutputsForCell(
+  cellOutputs: ICellOutput[],
   cellIndex: number,
   cellId: string | undefined,
   isLast: boolean,
-): ICellOutputMark[] {
-  return marks.filter((m) => {
+): ICellOutput[] {
+  return cellOutputs.filter((m) => {
     if (m.cell_id === null) {
       return isLast;
     }

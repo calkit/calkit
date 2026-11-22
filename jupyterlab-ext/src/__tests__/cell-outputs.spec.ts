@@ -1,22 +1,22 @@
 import {
-  type ICellOutputMark,
-  filterCellOutputMarks,
+  type ICellOutput,
+  filterCellOutputs,
   formatSavedValue,
   getAssignedNames,
-  getDefaultMarkPath,
-  getMarkLabel,
-  getMarkPathError,
-  getMarkRequestBody,
-  getMarksForCell,
+  getDefaultOutputPath,
+  getCellOutputLabel,
+  getOutputPathError,
+  getAddOutputRequestBody,
+  getCellOutputsForCell,
   getOutputMimeTypes,
-  getUnmarkQuery,
+  getRemoveOutputQuery,
   getVariableChoices,
   hasImageOutput,
   isVariableName,
   rankNamesForKind,
 } from "../cell-outputs";
 
-const value: ICellOutputMark = {
+const value: ICellOutput = {
   stage: "fit",
   kind: "value",
   cell_id: "c0",
@@ -27,7 +27,7 @@ const value: ICellOutputMark = {
   citation: "\\ckvalue{fit.ipynb}{k_25}",
   saved_value: 0.030912,
 };
-const figure: ICellOutputMark = {
+const figure: ICellOutput = {
   stage: "fit",
   kind: "figure",
   cell_id: "c2",
@@ -39,10 +39,10 @@ const figure: ICellOutputMark = {
 };
 
 describe("cell outputs", () => {
-  it("labels marks with what's saved and how to cite it", () => {
-    expect(filterCellOutputMarks([value, figure])).toEqual([value, figure]);
-    expect(filterCellOutputMarks([{ kind: "x" }, null])).toEqual([]);
-    expect(filterCellOutputMarks({ error: "nope" })).toEqual([]);
+  it("labels cellOutputs with what's saved and how to cite it", () => {
+    expect(filterCellOutputs([value, figure])).toEqual([value, figure]);
+    expect(filterCellOutputs([{ kind: "x" }, null])).toEqual([]);
+    expect(filterCellOutputs({ error: "nope" })).toEqual([]);
     // Saved values are kept short
     expect(formatSavedValue(0.030912)).toBe("0.03091");
     expect(formatSavedValue(25)).toBe("25");
@@ -52,7 +52,7 @@ describe("cell outputs", () => {
     expect(formatSavedValue({ a: 1, b: 2 })).toBe("{2 keys}");
     expect(formatSavedValue([1])).toBe("[1 item]");
     expect(formatSavedValue(null)).toBe("null");
-    expect(getMarkLabel(value)).toEqual({
+    expect(getCellOutputLabel(value)).toEqual({
       text: "k_25 = 0.03091",
       tooltip:
         "Value saved after this cell when stage 'fit' runs\n" +
@@ -60,10 +60,10 @@ describe("cell outputs", () => {
     });
     const unsaved = { ...value };
     delete unsaved.saved_value;
-    expect(getMarkLabel(unsaved).text).toBe("k_25 (not saved yet)");
-    expect(getMarkLabel(figure).text).toBe("figures/fit.pdf from fig");
+    expect(getCellOutputLabel(unsaved).text).toBe("k_25 (not saved yet)");
+    expect(getCellOutputLabel(figure).text).toBe("figures/fit.pdf from fig");
     expect(
-      getMarkLabel({ ...figure, variable_name: null, citation: null }),
+      getCellOutputLabel({ ...figure, variable_name: null, citation: null }),
     ).toEqual({
       text: "figures/fit.pdf",
       tooltip: "Figure saved from what this cell shows when stage 'fit' runs",
@@ -169,22 +169,22 @@ describe("cell outputs", () => {
 
   it("suggests and checks paths to save figures and tables to", () => {
     expect(
-      getDefaultMarkPath("figure", "nbs/Fit Rates.ipynb", "decay_fig"),
+      getDefaultOutputPath("figure", "nbs/Fit Rates.ipynb", "decay_fig"),
     ).toBe("figures/fit-rates-decay-fig.pdf");
-    expect(getDefaultMarkPath("figure", "fit.ipynb")).toBe("figures/fit.png");
-    expect(getDefaultMarkPath("table", "fit.ipynb", "df")).toBe(
+    expect(getDefaultOutputPath("figure", "fit.ipynb")).toBe("figures/fit.png");
+    expect(getDefaultOutputPath("table", "fit.ipynb", "df")).toBe(
       "tables/fit-df.tex",
     );
-    expect(getMarkPathError("figure", "figures/fit.PDF")).toBeNull();
-    expect(getMarkPathError("table", " tables/rates.csv ")).toBeNull();
-    expect(getMarkPathError("table", "tables/rates.pdf")).toBe(
+    expect(getOutputPathError("figure", "figures/fit.PDF")).toBeNull();
+    expect(getOutputPathError("table", " tables/rates.csv ")).toBeNull();
+    expect(getOutputPathError("table", "tables/rates.pdf")).toBe(
       "Use .tex, .csv, .md, .json",
     );
   });
 
-  it("makes requests to mark and unmark", () => {
+  it("makes requests to add and remove outputs", () => {
     expect(
-      getMarkRequestBody({
+      getAddOutputRequestBody({
         notebookPath: "fit.ipynb",
         cellId: "c2",
         kind: "figure",
@@ -202,7 +202,7 @@ describe("cell outputs", () => {
     });
     // A value has no path of its own
     expect(
-      getMarkRequestBody({
+      getAddOutputRequestBody({
         notebookPath: "fit.ipynb",
         cellId: "c0",
         kind: "value",
@@ -217,33 +217,38 @@ describe("cell outputs", () => {
     });
     // Several values at once
     expect(
-      getMarkRequestBody({
+      getAddOutputRequestBody({
         notebookPath: "fit.ipynb",
         cellId: "c0",
         kind: "value",
         variableNames: ["k", "j"],
       }).output,
     ).toEqual({ kind: "value", cell_id: "c0", variable_names: ["k", "j"] });
-    expect(getUnmarkQuery("nbs/fit rates.ipynb", figure)).toBe(
+    expect(getRemoveOutputQuery("nbs/fit rates.ipynb", figure)).toBe(
       "path=nbs%2Ffit+rates.ipynb&output_path=figures%2Ffit.pdf&stage=fit",
     );
-    expect(getUnmarkQuery("fit.ipynb", value)).toBe(
+    expect(getRemoveOutputQuery("fit.ipynb", value)).toBe(
       "path=fit.ipynb&variable_name=k_25&stage=fit",
     );
   });
 
-  it("finds a cell's marks by ID or position", () => {
+  it("finds a cell's cellOutputs by ID or position", () => {
     const atEnd = {
       ...value,
       variable_name: "last",
       cell_id: null,
       cell_index: null,
     };
-    const marks = [value, figure, atEnd];
-    expect(getMarksForCell(marks, 0, "c0", false)).toEqual([value]);
+    const cellOutputs = [value, figure, atEnd];
+    expect(getCellOutputsForCell(cellOutputs, 0, "c0", false)).toEqual([value]);
     // An ID wins over a position, e.g., once cells have moved
-    expect(getMarksForCell(marks, 0, "c2", false)).toEqual([figure]);
-    expect(getMarksForCell(marks, 2, undefined, true)).toEqual([figure, atEnd]);
-    expect(getMarksForCell(marks, 1, "x", false)).toEqual([]);
+    expect(getCellOutputsForCell(cellOutputs, 0, "c2", false)).toEqual([
+      figure,
+    ]);
+    expect(getCellOutputsForCell(cellOutputs, 2, undefined, true)).toEqual([
+      figure,
+      atEnd,
+    ]);
+    expect(getCellOutputsForCell(cellOutputs, 1, "x", false)).toEqual([]);
   });
 });

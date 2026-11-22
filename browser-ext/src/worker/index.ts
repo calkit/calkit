@@ -877,9 +877,9 @@ async function handle(
       }
       return askLocal({ type: "project.printedNumbers", project: local });
     }
-    case "project.markCellOutput":
+    case "project.addCellOutput":
       return askLocal({
-        type: "project.markCellOutput",
+        type: "project.addCellOutput",
         project: `${message.owner}/${message.project}`,
         notebook: message.notebook,
         stage: message.stage,

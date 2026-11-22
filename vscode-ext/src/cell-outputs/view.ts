@@ -1,6 +1,6 @@
 /**
- * Labels on notebook cells for the values, figures, and tables they're
- * marked to make, and the commands marking them, through
+ * Labels on notebook cells for the values, figures, and tables saved from
+ * them, and the commands adding and removing them, through
  * `calkit nb add-output`.
  */
 import { execFile } from "node:child_process";
@@ -8,21 +8,21 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   type CellOutputKind,
-  type CellOutputMark,
+  type CellOutput,
   getAssignedNames,
-  getDefaultMarkPath,
-  getMarkArgs,
-  getMarkLabel,
-  getMarksForCell,
-  getMarkTarget,
-  getUnmarkArgs,
+  getDefaultOutputPath,
+  getAddOutputArgs,
+  getCellOutputLabel,
+  getCellOutputsForCell,
+  getCellOutputTarget,
+  getRemoveOutputArgs,
   hasImageOutput,
   parseCellOutputs,
   rankNamesForKind,
 } from "./core";
 
-const marksByNotebook = new Map<string, CellOutputMark[]>();
-const marksChanged = new vscode.EventEmitter<void>();
+const cellOutputsByNotebook = new Map<string, CellOutput[]>();
+const cellOutputsChanged = new vscode.EventEmitter<void>();
 
 /** What Calkit printed, and whether it worked. */
 function runCalkit(
@@ -59,8 +59,8 @@ function getNotebookPath(root: string, uri: vscode.Uri): string | undefined {
   return rel.split(path.sep).join("/");
 }
 
-/** Read what a notebook's cells are marked to make, and relabel them. */
-async function loadMarks(
+/** Read what a notebook's cells save, and relabel them. */
+async function loadCellOutputs(
   root: string,
   notebook: vscode.NotebookDocument,
 ): Promise<void> {
@@ -74,13 +74,13 @@ async function loadMarks(
     notebookPath,
     "--json",
   ]);
-  marksByNotebook.set(notebook.uri.toString(), parseCellOutputs(stdout));
-  marksChanged.fire();
+  cellOutputsByNotebook.set(notebook.uri.toString(), parseCellOutputs(stdout));
+  cellOutputsChanged.fire();
 }
 
 function reloadAll(root: string): void {
   for (const notebook of vscode.workspace.notebookDocuments) {
-    void loadMarks(root, notebook);
+    void loadCellOutputs(root, notebook);
   }
 }
 
@@ -116,7 +116,7 @@ async function askVariableName(kindLabel: string): Promise<string | undefined> {
 }
 
 /** Ask what a cell makes for documents, and save it on each run. */
-async function markCellOutput(root: string, arg: unknown): Promise<void> {
+async function addCellOutput(root: string, arg: unknown): Promise<void> {
   const cell = getCommandCell(arg);
   if (!cell || cell.kind !== vscode.NotebookCellKind.Code) {
     void vscode.window.showErrorMessage("Select a code cell");
@@ -133,19 +133,19 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
         label: "Value",
         description: "\\ckvalue",
         detail: "A number or text, e.g., a fitted constant",
-        markKind: "value" as CellOutputKind,
+        outputKind: "value" as CellOutputKind,
       },
       {
         label: "Figure",
         description: "\\ckfigure",
         detail: "A plot, from its variable or the image the cell shows",
-        markKind: "figure" as CellOutputKind,
+        outputKind: "figure" as CellOutputKind,
       },
       {
         label: "Table",
         description: "\\cktable",
         detail: "A DataFrame, or a list of rows",
-        markKind: "table" as CellOutputKind,
+        outputKind: "table" as CellOutputKind,
       },
     ],
     { title: "Save as", placeHolder: "What this cell makes for documents" },
@@ -153,7 +153,7 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
   if (!kindPick) {
     return;
   }
-  const kind = kindPick.markKind;
+  const kind = kindPick.outputKind;
   // The variable it's saved from, or for a figure, what the cell shows
   const shown = "$(file-media) Image this cell shows";
   const other = "$(edit) Other variable…";
@@ -222,7 +222,7 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
         kind === "figure"
           ? "Path to save it to; PDF stays sharp in a paper"
           : "Path to save it to; .tex for \\cktable",
-      value: getDefaultMarkPath(kind, notebookPath, variable),
+      value: getDefaultOutputPath(kind, notebookPath, variable),
       validateInput: (v) =>
         exts.some((e) => v.toLowerCase().endsWith(e))
           ? undefined
@@ -241,7 +241,7 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
     typeof cell.metadata?.id === "string" ? cell.metadata.id : undefined;
   const result = await runCalkit(
     root,
-    getMarkArgs({
+    getAddOutputArgs({
       notebookPath,
       cellId,
       cellIndex: cell.index,
@@ -260,30 +260,36 @@ async function markCellOutput(root: string, arg: unknown): Promise<void> {
     `$(check) Saving ${target} on each run`,
     4000,
   );
-  await loadMarks(root, cell.notebook);
+  await loadCellOutputs(root, cell.notebook);
 }
 
-/** What to do with a mark, from its label: copy how to cite it, or stop saving it. */
-async function showMarkActions(
+/** What to do with an output, from its label: copy how to cite it, or stop saving it. */
+async function showCellOutputActions(
   root: string,
   notebookUri: vscode.Uri,
-  mark: CellOutputMark,
+  output: CellOutput,
 ): Promise<void> {
-  const copy = mark.citation ? `$(copy) Copy ${mark.citation}` : undefined;
-  const unmark = "$(close) Stop saving";
+  const copy = output.citation ? `$(copy) Copy ${output.citation}` : undefined;
+  const remove = "$(close) Stop saving";
   const picked = await vscode.window.showQuickPick(
-    [...(copy ? [copy] : []), unmark],
-    { title: getMarkTarget(mark) },
+    [...(copy ? [copy] : []), remove],
+    { title: getCellOutputTarget(output) },
   );
-  if (picked === copy && mark.citation) {
-    await vscode.env.clipboard.writeText(mark.citation);
-    vscode.window.setStatusBarMessage(`$(check) Copied ${mark.citation}`, 4000);
-  } else if (picked === unmark) {
+  if (picked === copy && output.citation) {
+    await vscode.env.clipboard.writeText(output.citation);
+    vscode.window.setStatusBarMessage(
+      `$(check) Copied ${output.citation}`,
+      4000,
+    );
+  } else if (picked === remove) {
     const notebookPath = getNotebookPath(root, notebookUri);
     if (!notebookPath) {
       return;
     }
-    const result = await runCalkit(root, getUnmarkArgs(notebookPath, mark));
+    const result = await runCalkit(
+      root,
+      getRemoveOutputArgs(notebookPath, output),
+    );
     if (!result.ok) {
       void vscode.window.showErrorMessage(
         getErrorText(result.stderr, result.stdout),
@@ -293,12 +299,12 @@ async function showMarkActions(
       (n) => n.uri.toString() === notebookUri.toString(),
     );
     if (notebook) {
-      await loadMarks(root, notebook);
+      await loadCellOutputs(root, notebook);
     }
   }
 }
 
-/** Register the cell labels and commands for marking cell outputs. */
+/** Register the cell labels and commands for adding cell outputs. */
 export function registerCellOutputs(
   context: vscode.ExtensionContext,
   getWorkspaceRoot: () => string | undefined,
@@ -315,10 +321,12 @@ export function registerCellOutputs(
     vscode.notebooks.registerNotebookCellStatusBarItemProvider(
       "jupyter-notebook",
       {
-        onDidChangeCellStatusBarItems: marksChanged.event,
+        onDidChangeCellStatusBarItems: cellOutputsChanged.event,
         provideCellStatusBarItems: (cell) => {
-          const marks = marksByNotebook.get(cell.notebook.uri.toString());
-          if (!marks?.length) {
+          const cellOutputs = cellOutputsByNotebook.get(
+            cell.notebook.uri.toString(),
+          );
+          if (!cellOutputs?.length) {
             return [];
           }
           const cellId =
@@ -326,45 +334,48 @@ export function registerCellOutputs(
               ? cell.metadata.id
               : undefined;
           const isLast = cell.index === cell.notebook.cellCount - 1;
-          return getMarksForCell(marks, cell.index, cellId, isLast).map(
-            (mark) => {
-              const { text, tooltip } = getMarkLabel(mark);
-              const item = new vscode.NotebookCellStatusBarItem(
-                text,
-                vscode.NotebookCellStatusBarAlignment.Left,
-              );
-              item.tooltip = tooltip;
-              item.command = {
-                command: "calkit-vscode.cellOutputActions",
-                title: "Cell output",
-                arguments: [cell.notebook.uri, mark],
-              };
-              return item;
-            },
-          );
+          return getCellOutputsForCell(
+            cellOutputs,
+            cell.index,
+            cellId,
+            isLast,
+          ).map((output) => {
+            const { text, tooltip } = getCellOutputLabel(output);
+            const item = new vscode.NotebookCellStatusBarItem(
+              text,
+              vscode.NotebookCellStatusBarAlignment.Left,
+            );
+            item.tooltip = tooltip;
+            item.command = {
+              command: "calkit-vscode.cellOutputActions",
+              title: "Cell output",
+              arguments: [cell.notebook.uri, output],
+            };
+            return item;
+          });
         },
       },
     ),
     vscode.commands.registerCommand(
-      "calkit-vscode.markCellOutput",
-      withRoot(markCellOutput),
+      "calkit-vscode.addCellOutput",
+      withRoot(addCellOutput),
     ),
     vscode.commands.registerCommand(
       "calkit-vscode.cellOutputActions",
-      withRoot(showMarkActions),
+      withRoot(showCellOutputActions),
     ),
     vscode.workspace.onDidOpenNotebookDocument((notebook) => {
       const root = getWorkspaceRoot();
       if (root) {
-        void loadMarks(root, notebook);
+        void loadCellOutputs(root, notebook);
       }
     }),
     vscode.workspace.onDidCloseNotebookDocument((notebook) => {
-      marksByNotebook.delete(notebook.uri.toString());
+      cellOutputsByNotebook.delete(notebook.uri.toString());
     }),
-    marksChanged,
+    cellOutputsChanged,
   );
-  // Marks change with calkit.yaml, and saved values with each run
+  // Outputs change with calkit.yaml, and saved values with each run
   for (const pattern of [
     "**/calkit.yaml",
     "**/.calkit/notebooks/outputs/**/values.json",

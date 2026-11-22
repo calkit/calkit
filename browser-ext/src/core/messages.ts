@@ -354,8 +354,8 @@ export type Request =
       project: string;
     }
   | {
-      /** Mark a variable a notebook's cell makes as a value to save. */
-      type: "project.markCellOutput";
+      /** Add a variable a notebook's cell makes as a value to save. */
+      type: "project.addCellOutput";
       owner: string;
       project: string;
       notebook: string;
@@ -444,7 +444,7 @@ export interface ResponseMap {
     writes?: string;
   }[];
   "project.printedNumbers": PrintedNumbers[];
-  "project.markCellOutput": {
+  "project.addCellOutput": {
     stage: string;
     output: Record<string, string>;
     citation: string | null;

@@ -234,6 +234,7 @@ def test_capture_cells():
         cols={"T": [25, 35], "k": [0.031, 0.062]},
         grid=[["T", "k"], [25, 0.031]],
         bad=object(),
+        big=list(range(30_000)),
     )
     with tempfile.TemporaryDirectory() as tmp:
         values = os.path.join(tmp, "v", "values.json")
@@ -278,6 +279,7 @@ def test_capture_cells():
                 "since it's a object",
             ),
             ({"kind": "table", "variable_name": "k"}, TypeError, "as a table"),
+            ({"kind": "value", "variable_name": "big"}, ValueError, "kB"),
             (
                 {
                     "kind": "figure",

@@ -215,6 +215,15 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
                     values = json.load(f)
             for name in names:
                 values[name] = to_data(user[name], f"'{name}'")
+                # The values file is kept in Git, so a big array belongs in
+                # a file of its own
+                n_kb = len(json.dumps(values[name])) // 1000
+                if n_kb > 100:
+                    raise ValueError(
+                        f"Calkit: can't save '{name}' after {where} as a "
+                        f"value, since it's {n_kb} kB; save it as a table, "
+                        "or write it to a file the stage outputs"
+                    )
             os.makedirs(os.path.dirname(values_path) or ".", exist_ok=True)
             with open(values_path, "w", encoding="utf-8") as f:
                 json.dump(values, f, indent=2)
@@ -749,7 +758,7 @@ def add_cell_output(
     warning = (
         f"{notebook_path}'s cell IDs count up from 0, as nbstripout writes "
         "them without --keep-id, so they change when cells are added; "
-        "install it with --keep-id so marks stay on their cells"
+        "install it with --keep-id so outputs stay on their cells"
         if has_ordinal_cell_ids(nb)
         else None
     )
@@ -819,7 +828,7 @@ def remove_cell_outputs(
 def list_cell_outputs(
     notebook_path: str, wdir: str | None = None
 ) -> list[dict]:
-    """What a notebook's cells are marked to make, from each stage running
+    """What a notebook's cells save, from each stage running
     it, as ``describe_cell_outputs`` gives them, with the values the last
     run saved.
     """

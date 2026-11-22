@@ -475,7 +475,7 @@
         "icon": "$(go-to-file)"
       },
       {
-        "command": "calkit-vscode.markCellOutput",
+        "command": "calkit-vscode.addCellOutput",
         "title": "Save as Output",
         "category": "Calkit",
         "icon": "$(pin)"
@@ -1038,7 +1038,7 @@
           "when": "false"
         },
         {
-          "command": "calkit-vscode.markCellOutput",
+          "command": "calkit-vscode.addCellOutput",
           "when": "notebookType == 'jupyter-notebook'"
         }
       ],
@@ -1056,7 +1056,7 @@
       ],
       "notebook/cell/title": [
         {
-          "command": "calkit-vscode.markCellOutput",
+          "command": "calkit-vscode.addCellOutput",
           "when": "notebookType == 'jupyter-notebook' && notebookCellType == 'code'",
           "group": "inline@90"
         }

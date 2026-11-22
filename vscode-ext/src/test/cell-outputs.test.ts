@@ -1,20 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  type CellOutputMark,
+  type CellOutput,
   formatSavedValue,
   getAssignedNames,
-  getDefaultMarkPath,
-  getMarkArgs,
-  getMarkLabel,
-  getMarksForCell,
-  getUnmarkArgs,
+  getDefaultOutputPath,
+  getAddOutputArgs,
+  getCellOutputLabel,
+  getCellOutputsForCell,
+  getRemoveOutputArgs,
   hasImageOutput,
   parseCellOutputs,
   rankNamesForKind,
 } from "../cell-outputs/core";
 
-const value: CellOutputMark = {
+const value: CellOutput = {
   stage: "fit",
   kind: "value",
   cell_id: "c0",
@@ -25,7 +25,7 @@ const value: CellOutputMark = {
   citation: "\\ckvalue{fit.ipynb}{k_25}",
   saved_value: 0.030912,
 };
-const figure: CellOutputMark = {
+const figure: CellOutput = {
   stage: "fit",
   kind: "figure",
   cell_id: "c2",
@@ -57,8 +57,8 @@ test("formatSavedValue keeps a value short", () => {
   assert.equal(formatSavedValue(null), "null");
 });
 
-test("getMarkLabel says what's saved, and how to cite it", () => {
-  assert.deepEqual(getMarkLabel(value), {
+test("getCellOutputLabel says what's saved, and how to cite it", () => {
+  assert.deepEqual(getCellOutputLabel(value), {
     text: "$(symbol-number) k_25 = 0.03091",
     tooltip:
       "Value saved after this cell when stage 'fit' runs\n" +
@@ -67,12 +67,15 @@ test("getMarkLabel says what's saved, and how to cite it", () => {
   const unsaved = { ...value };
   delete unsaved.saved_value;
   assert.equal(
-    getMarkLabel(unsaved).text,
+    getCellOutputLabel(unsaved).text,
     "$(symbol-number) k_25 (not saved yet)",
   );
-  assert.equal(getMarkLabel(figure).text, "$(graph) figures/fit.pdf from fig");
+  assert.equal(
+    getCellOutputLabel(figure).text,
+    "$(graph) figures/fit.pdf from fig",
+  );
   const shown = { ...figure, variable_name: null, citation: null };
-  assert.deepEqual(getMarkLabel(shown), {
+  assert.deepEqual(getCellOutputLabel(shown), {
     text: "$(graph) figures/fit.pdf",
     tooltip: "Figure saved from what this cell shows when stage 'fit' runs",
   });
@@ -137,21 +140,21 @@ test("rankNamesForKind puts the likely variable first", () => {
   ]);
 });
 
-test("getDefaultMarkPath names a file after the notebook", () => {
+test("getDefaultOutputPath names a file after the notebook", () => {
   assert.equal(
-    getDefaultMarkPath("figure", "nbs/Fit Rates.ipynb", "decay_fig"),
+    getDefaultOutputPath("figure", "nbs/Fit Rates.ipynb", "decay_fig"),
     "figures/fit-rates-decay-fig.pdf",
   );
-  assert.equal(getDefaultMarkPath("figure", "fit.ipynb"), "figures/fit.png");
+  assert.equal(getDefaultOutputPath("figure", "fit.ipynb"), "figures/fit.png");
   assert.equal(
-    getDefaultMarkPath("table", "fit.ipynb", "df"),
+    getDefaultOutputPath("table", "fit.ipynb", "df"),
     "tables/fit-df.tex",
   );
 });
 
-test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
+test("getAddOutputArgs and getRemoveOutputArgs make the CLI's arguments", () => {
   assert.deepEqual(
-    getMarkArgs({
+    getAddOutputArgs({
       notebookPath: "fit.ipynb",
       cellId: "c2",
       cellIndex: 2,
@@ -175,7 +178,7 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
   );
   // A cell without an ID is named by its position
   assert.deepEqual(
-    getMarkArgs({
+    getAddOutputArgs({
       notebookPath: "fit.ipynb",
       cellIndex: 0,
       kind: "value",
@@ -198,7 +201,7 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
       "--json",
     ],
   );
-  assert.deepEqual(getUnmarkArgs("fit.ipynb", figure), [
+  assert.deepEqual(getRemoveOutputArgs("fit.ipynb", figure), [
     "nb",
     "remove-output",
     "fit.ipynb",
@@ -209,18 +212,23 @@ test("getMarkArgs and getUnmarkArgs make the CLI's arguments", () => {
   ]);
 });
 
-test("getMarksForCell finds a cell's marks by ID or position", () => {
+test("getCellOutputsForCell finds a cell's cellOutputs by ID or position", () => {
   const atEnd = {
     ...value,
     variable_name: "last",
     cell_id: null,
     cell_index: null,
   };
-  const marks = [value, figure, atEnd];
-  assert.deepEqual(getMarksForCell(marks, 0, "c0", false), [value]);
+  const cellOutputs = [value, figure, atEnd];
+  assert.deepEqual(getCellOutputsForCell(cellOutputs, 0, "c0", false), [value]);
   // An ID wins over a position, e.g., once cells have moved
-  assert.deepEqual(getMarksForCell(marks, 0, "c2", false), [figure]);
-  assert.deepEqual(getMarksForCell(marks, 2, undefined, true), [figure, atEnd]);
+  assert.deepEqual(getCellOutputsForCell(cellOutputs, 0, "c2", false), [
+    figure,
+  ]);
+  assert.deepEqual(getCellOutputsForCell(cellOutputs, 2, undefined, true), [
+    figure,
+    atEnd,
+  ]);
 });
 
 test("hasImageOutput spots an image a figure can be saved from", () => {

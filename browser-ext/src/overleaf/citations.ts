@@ -403,7 +403,7 @@ function renderTyped(
     ]);
   };
   // A notebook's printed number is linked once the variable holding it is
-  // marked as a value and the pipeline has saved it, since the variable may
+  // added as a value and the pipeline has saved it, since the variable may
   // hold more than this number, e.g., a dict of them, whose key the saved
   // value then shows
   const printedRow = (match: PrintedMatch) => {
@@ -429,7 +429,7 @@ function renderTyped(
       useIt.disabled = true;
       try {
         await send({
-          type: "project.markCellOutput",
+          type: "project.addCellOutput",
           owner: link.project_owner_name,
           project: link.project_name,
           notebook: match.notebook,
@@ -505,7 +505,7 @@ function renderTyped(
           class: "dim small",
           style: { marginTop: "6px" },
           text:
-            "If a notebook computes it, mark the variable as a value in " +
+            "If a notebook computes it, use Save as Output on its cell in " +
             "VS Code. A script can save it to a results file, e.g., " +
             "results.json.",
         }),

@@ -45,8 +45,8 @@ export interface IFeatureFlags {
   /** ML models tracking */
   models: boolean;
 
-  /** Cell output marking in notebooks */
-  cellOutputMarking: boolean;
+  /** Saving values, figures, and tables from notebook cells */
+  cellOutputs: boolean;
 
   /** File browser context menu items */
   fileBrowserMenu: boolean;
@@ -89,7 +89,7 @@ export interface IFeatureFlags {
  * - notebooks: Notebook lifecycle management
  * - history: Git operations and commit history
  * - setup: Dependency checks and setup guidance
- * - cellOutputMarking: Mark notebook cell outputs
+ * - cellOutputs: Save values, figures, and tables from notebook cells
  * - fileBrowserMenu: File browser context menus
  * - notebookToolbar: Notebook toolbar items
  *
@@ -118,7 +118,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   history: false,
   setup: false,
   notebookToolbar: true,
-  cellOutputMarking: true,
+  cellOutputs: true,
 
   // Incomplete features - disabled by default
   advancedEnvironments: false,

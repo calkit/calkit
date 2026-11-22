@@ -419,7 +419,7 @@ def get_result(msg: dict) -> Any:
         if not paths:
             raise ValueError(f"{owner}/{name} isn't on this machine")
         result = get_printed_numbers(paths[0])
-    elif kind == "project.markCellOutput":
+    elif kind == "project.addCellOutput":
         from calkit.notebooks import add_cell_output
 
         owner, name = split_project(msg.get("project"))

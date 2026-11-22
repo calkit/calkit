@@ -473,8 +473,8 @@ class NotebookStageRouteHandler(APIHandler):
 
 
 class NotebookCellOutputsRouteHandler(APIHandler):
-    """Values, figures, and tables a notebook's cells are marked to make,
-    which the pipeline saves when it runs the notebook.
+    """Values, figures, and tables saved from a notebook's cells when the
+    pipeline runs it.
     """
 
     @tornado.web.authenticated
@@ -498,7 +498,7 @@ class NotebookCellOutputsRouteHandler(APIHandler):
         if not isinstance(output, dict):
             return self.error(400, "Request body must include 'output'")
         try:
-            marked = calkit.notebooks.add_cell_output(
+            added = calkit.notebooks.add_cell_output(
                 body["path"],
                 output,
                 stage=body.get("stage"),
@@ -506,7 +506,7 @@ class NotebookCellOutputsRouteHandler(APIHandler):
             )
         except ValueError as e:
             return self.error(400, str(e))
-        self.finish(json.dumps(marked))
+        self.finish(json.dumps(added))
 
     @tornado.web.authenticated
     def delete(self) -> None:

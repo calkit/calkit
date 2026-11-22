@@ -23,7 +23,7 @@ import { IFileBrowserFactory } from "@jupyterlab/filebrowser";
 
 import { IMainMenu } from "@jupyterlab/mainmenu";
 
-import { registerCellOutputMarking } from "./cell-output-marker";
+import { registerCellOutputs } from "./cell-output-view";
 import { showCommitDialog } from "./components/commit-dialog";
 import { createNotebookToolbar } from "./components/notebook-toolbar";
 import { PipelineStatusWidget } from "./components/pipeline-status-bar";
@@ -114,13 +114,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
       },
     });
 
-    // Register cell toolbar button for marking outputs, and cell labels
-    if (
-      notebookTracker &&
-      toolbarRegistry &&
-      isFeatureEnabled("cellOutputMarking")
-    ) {
-      registerCellOutputMarking(
+    // Register cell toolbar button for adding outputs, and cell labels
+    if (notebookTracker && toolbarRegistry && isFeatureEnabled("cellOutputs")) {
+      registerCellOutputs(
         notebookTracker,
         toolbarRegistry,
         translator || undefined,

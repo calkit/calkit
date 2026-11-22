@@ -183,7 +183,7 @@ and Calkit saves it whenever the pipeline runs the notebook:
 
 - A value, e.g., a fitted constant, which a LaTeX document shows with
   `\ckvalue{notebook.ipynb}{name}`.
-  Numbers, text, and lists and dicts of them can be saved,
+  Numbers, text, and lists and dicts of them can be saved, up to 100 kB,
   and a key reaches into a dict, e.g., `{rates.25C}`.
 - A figure, from the variable holding it, e.g., a Matplotlib figure,
   in whatever format its path says, e.g., a PDF that stays sharp in a

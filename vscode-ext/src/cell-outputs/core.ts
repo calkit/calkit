@@ -1,5 +1,5 @@
 /**
- * What a notebook's cells are marked to make for documents, i.e., values,
+ * What a notebook's cells save for documents, i.e., values,
  * figures, and tables Calkit saves when the pipeline runs the notebook, as
  * `calkit nb outputs --json` lists them, and the labels and commands for
  * them.
@@ -7,7 +7,7 @@
 
 export type CellOutputKind = "value" | "figure" | "table";
 
-export interface CellOutputMark {
+export interface CellOutput {
   stage: string;
   kind: CellOutputKind;
   cell_id: string | null;
@@ -19,8 +19,8 @@ export interface CellOutputMark {
   saved_value?: unknown;
 }
 
-/** Marks from `calkit nb outputs --json`, or none if it can't be read. */
-export function parseCellOutputs(stdout: string): CellOutputMark[] {
+/** Cell outputs from `calkit nb outputs --json`, or none if it can't be read. */
+export function parseCellOutputs(stdout: string): CellOutput[] {
   try {
     const parsed = JSON.parse(stdout);
     return Array.isArray(parsed)
@@ -36,9 +36,11 @@ export function parseCellOutputs(stdout: string): CellOutputMark[] {
   }
 }
 
-/** What a mark saves: a value's variable, or a figure or table's path. */
-export function getMarkTarget(mark: CellOutputMark): string {
-  return (mark.kind === "value" ? mark.variable_name : mark.output_path) ?? "";
+/** What an output saves: a value's variable, or a figure or table's path. */
+export function getCellOutputTarget(output: CellOutput): string {
+  return (
+    (output.kind === "value" ? output.variable_name : output.output_path) ?? ""
+  );
 }
 
 /** A saved value as short text, e.g., `0.03091` or `{3 keys}`. */
@@ -65,35 +67,35 @@ export function formatSavedValue(value: unknown): string {
   return String(value);
 }
 
-/** The label on a cell for one of its marks, and its tooltip. */
-export function getMarkLabel(mark: CellOutputMark): {
+/** The label on a cell for one of its outputs, and its tooltip. */
+export function getCellOutputLabel(output: CellOutput): {
   text: string;
   tooltip: string;
 } {
   const icon = { value: "symbol-number", figure: "graph", table: "table" }[
-    mark.kind
+    output.kind
   ];
-  const target = getMarkTarget(mark);
+  const target = getCellOutputTarget(output);
   let text = `$(${icon}) ${target}`;
-  if (mark.kind === "value") {
+  if (output.kind === "value") {
     text +=
-      "saved_value" in mark
-        ? ` = ${formatSavedValue(mark.saved_value)}`
+      "saved_value" in output
+        ? ` = ${formatSavedValue(output.saved_value)}`
         : " (not saved yet)";
-  } else if (mark.variable_name) {
-    text += ` from ${mark.variable_name}`;
+  } else if (output.variable_name) {
+    text += ` from ${output.variable_name}`;
   }
   const lines = [
-    mark.kind === "value"
-      ? `Value saved after this cell when stage '${mark.stage}' runs`
-      : `${mark.kind === "figure" ? "Figure" : "Table"} saved ${
-          mark.variable_name
-            ? `from '${mark.variable_name}'`
+    output.kind === "value"
+      ? `Value saved after this cell when stage '${output.stage}' runs`
+      : `${output.kind === "figure" ? "Figure" : "Table"} saved ${
+          output.variable_name
+            ? `from '${output.variable_name}'`
             : "from what this cell shows"
-        } when stage '${mark.stage}' runs`,
+        } when stage '${output.stage}' runs`,
   ];
-  if (mark.citation) {
-    lines.push(`Show it in a document with ${mark.citation}`);
+  if (output.citation) {
+    lines.push(`Show it in a document with ${output.citation}`);
   }
   return { text, tooltip: lines.join("\n") };
 }
@@ -164,7 +166,7 @@ export function getAssignedNames(source: string): string[] {
 }
 
 /**
- * Names a mark of a kind is most likely saved from first, e.g., `fig` for a
+ * Names an output of a kind is most likely saved from first, e.g., `fig` for a
  * figure and `df` for a table, then the rest as the cell assigns them.
  */
 export function rankNamesForKind(
@@ -186,7 +188,7 @@ export function rankNamesForKind(
  * a variable, which stays sharp in a paper, and otherwise the PNG a cell
  * shows.
  */
-export function getDefaultMarkPath(
+export function getDefaultOutputPath(
   kind: "figure" | "table",
   notebookPath: string,
   variable?: string,
@@ -206,10 +208,10 @@ export function getDefaultMarkPath(
 }
 
 /**
- * The arguments to `calkit nb add-output` for a mark, which can save
+ * The arguments to `calkit nb add-output` for an output, which can save
  * several values at once.
  */
-export function getMarkArgs(options: {
+export function getAddOutputArgs(options: {
   notebookPath: string;
   cellId?: string;
   cellIndex: number;
@@ -236,33 +238,33 @@ export function getMarkArgs(options: {
   return [...args, "--json"];
 }
 
-/** The arguments to `calkit nb remove-output` for a mark. */
-export function getUnmarkArgs(
+/** The arguments to `calkit nb remove-output` for an output. */
+export function getRemoveOutputArgs(
   notebookPath: string,
-  mark: CellOutputMark,
+  output: CellOutput,
 ): string[] {
   return [
     "nb",
     "remove-output",
     notebookPath,
-    mark.kind === "value" ? "--variable-name" : "--output-path",
-    getMarkTarget(mark),
+    output.kind === "value" ? "--variable-name" : "--output-path",
+    getCellOutputTarget(output),
     "--stage",
-    mark.stage,
+    output.stage,
   ];
 }
 
 /**
- * Marks on the cell at a position, or with an ID, and for the last cell,
+ * Outputs saved from the cell at a position, or with an ID, and for the last cell,
  * those saved after it because they name no cell.
  */
-export function getMarksForCell(
-  marks: CellOutputMark[],
+export function getCellOutputsForCell(
+  cellOutputs: CellOutput[],
   cellIndex: number,
   cellId: string | undefined,
   isLast: boolean,
-): CellOutputMark[] {
-  return marks.filter((m) => {
+): CellOutput[] {
+  return cellOutputs.filter((m) => {
     if (m.cell_id === null) {
       return isLast;
     }

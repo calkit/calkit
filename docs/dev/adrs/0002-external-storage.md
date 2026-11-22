@@ -75,18 +75,20 @@ follow, so the model has to fit all of them.
 A service may offer the other kind as an option,
 e.g., a dedicated S3 bucket when the credential can create one.
 
-### Names
+### Layout
 
 Names in storage stay human readable,
-so people can find their files with the service's own tools,
-without Calkit:
+so storage can be used with the service's own tools:
 
 - A dedicated bucket is named after its project,
-  e.g., `{hf-namespace}/{project}` on HF.
-- In a namespace resource, each project's folder is
+  e.g., `{hf-namespace}/{project}` on HF,
+  and holds the project's objects at its root.
+- In a namespace resource, each project's objects are under
   `{owner}/{project}/`.
 - Objects keep DVC's layout under that,
   i.e., `files/md5/{2 characters}/{rest of hash}`.
+- Clients always see paths as `{owner}/{project}/...`,
+  whichever kind of resource the objects are in.
 
 Projects are rarely renamed today.
 Renaming a project or moving it to another owner will have to rename its
@@ -96,31 +98,21 @@ That's left for when renaming is supported.
 
 ### Visibility
 
-A dedicated resource's visibility follows its project's:
-a public project gets a public bucket,
-and making a project public or private changes its bucket to match.
-A namespace resource is always private,
+The hub keeps a dedicated resource's visibility in sync with its
+project's, wherever the service supports it.
+A namespace resource stays private,
 since it holds other projects too,
 so the hub gives out access to a public project's objects itself.
 
-A public bucket exposes every object the project has ever pushed,
-not only those its current version uses.
-Users who don't want that can remove old objects with `dvc gc`,
-or keep the project private and publish a release.
+### Access
 
-### Permissions
-
-- Adding or removing a connection takes the right to manage the Calkit
-  account, i.e., being the user, or an owner or admin of the org.
-- A project owner can create a dedicated resource for their project
-  under a connection belonging to the account that owns the project.
-- Collaborators never get a connection's credential.
-  The hub gives clients short-lived access scoped to a project's storage,
-  e.g., a Xet token for one HF bucket,
-  and clients reuse it and batch transfers until it nearly expires.
-  Anything the scoped access can't do,
-  e.g., adding paths to an HF bucket,
-  the client asks the hub to do in batches.
+Clients never get a connection's credential.
+The hub gives them short-lived access scoped to a project's storage,
+e.g., a Xet token for one HF bucket,
+and they reuse it and batch transfers until it nearly expires.
+Anything the scoped access can't do,
+e.g., adding paths to an HF bucket,
+clients ask the hub to do in batches.
 
 ### Changing storage
 
@@ -128,13 +120,6 @@ Changing a project's storage only affects new objects.
 Reads fall back through the current resource,
 then each previous one, newest first, then the hub's own storage,
 so nothing has to move.
-
-### Deleting
-
-Deleting a project offers to delete its storage too:
-its dedicated resource,
-or its folder in a namespace resource.
-Leaving it in place is also an option.
 
 ### Released datasets
 
@@ -166,9 +151,8 @@ which only make sense to DVC.
 - Each provider needs code for creating resources,
   changing their visibility where it applies,
   and handing out scoped access.
-- HF projects get per-project buckets,
-  so their usage shows up per project in HF's own billing,
-  and a public project's data can be fetched straight from HF.
+- A public project's objects in a dedicated public bucket can be fetched
+  straight from the service, without the hub.
 - Renaming or moving projects gets harder,
   since storage carries their names.
 

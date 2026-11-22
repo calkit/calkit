@@ -636,6 +636,30 @@ def test_check_requirements_offers_an_apps_setup_command(
         "app 'colima' not found on this machine; Colima isn't needed on Linux"
     )
     assert str(e.value).endswith("\n  VMs")
+    # Names apps go by are checked and installed as the binary they provide
+    checked = []
+    monkeypatch.setattr(
+        "calkit.core.check_dep_exists",
+        lambda name, *args, **kwargs: checked.append(name) or False,
+    )
+    monkeypatch.setattr(
+        "calkit.install.get_installer",
+        lambda app: (
+            {"script": "true", "path_add": []} if app == "code" else None
+        ),
+    )
+    with (
+        mock.patch(
+            "calkit.install.prompt_and_install", return_value=False
+        ) as m_prompt,
+        pytest.raises(ValueError, match="app 'code' not found"),
+    ):
+        calkit.check_requirements(
+            requirements=[{"kind": "app", "name": "vscode"}],
+            interactive=True,
+        )
+    assert checked == ["code"]
+    assert m_prompt.call_args.args == ("code",)
 
 
 @pytest.mark.skipif(

@@ -205,7 +205,7 @@ in the cell's toolbar.
 The cell will then show a label like `Calkit: k_25 = 0.0309`.
 Click the label to copy the command that cites it,
 insert it into one of the project's documents,
-or stop saving it.
+edit it, or stop saving it.
 
 From the command line (or for an agent), use `calkit nb add-output`.
 To save multiple values from the same cell,

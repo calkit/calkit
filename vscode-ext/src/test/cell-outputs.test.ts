@@ -177,6 +177,18 @@ test("getAddOutputArgs and getRemoveOutputArgs make the CLI's arguments", () => 
       "--json",
     ],
   );
+  // A table keeps its number format when edited
+  assert.deepEqual(
+    getAddOutputArgs({
+      notebookPath: "fit.ipynb",
+      cellId: "c2",
+      cellIndex: 2,
+      kind: "table",
+      outputPath: "tables/t.tex",
+      format: ".3f",
+    }).slice(-4),
+    ["tables/t.tex", "--format", ".3f", "--json"],
+  );
   // A cell without an ID is named by its position
   assert.deepEqual(
     getAddOutputArgs({

@@ -119,7 +119,12 @@ async function askVariableName(kindLabel: string): Promise<string | undefined> {
 }
 
 /** Ask what a cell makes for documents, and save it on each run. */
-async function addCellOutput(root: string, arg: unknown): Promise<void> {
+/** Add an output to a cell, or with `editing`, change one it has. */
+async function addCellOutput(
+  root: string,
+  arg: unknown,
+  editing?: CellOutput,
+): Promise<void> {
   const cell = getCommandCell(arg);
   if (!cell || cell.kind !== vscode.NotebookCellKind.Code) {
     void vscode.window.showErrorMessage("Select a code cell");
@@ -130,33 +135,41 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
     void vscode.window.showErrorMessage("Notebook isn't in this project");
     return;
   }
-  const kindPick = await vscode.window.showQuickPick(
-    [
-      {
-        label: "Value",
-        description: "\\ckvalue",
-        detail: "Number or text, e.g., a fitted constant",
-        outputKind: "value" as CellOutputKind,
-      },
-      {
-        label: "Figure",
-        description: "\\ckfigure",
-        detail: "Plot or image",
-        outputKind: "figure" as CellOutputKind,
-      },
-      {
-        label: "Table",
-        description: "\\cktable",
-        detail: "DataFrame or list of rows",
-        outputKind: "table" as CellOutputKind,
-      },
-    ],
-    { title: "Save as", placeHolder: "Select kind" },
+  const kinds = [
+    {
+      label: "Value",
+      description: "\\ckvalue",
+      detail: "Number or text, e.g., a fitted constant",
+      outputKind: "value" as CellOutputKind,
+    },
+    {
+      label: "Figure",
+      description: "\\ckfigure",
+      detail: "Plot or image",
+      outputKind: "figure" as CellOutputKind,
+    },
+    {
+      label: "Table",
+      description: "\\cktable",
+      detail: "DataFrame or list of rows",
+      outputKind: "table" as CellOutputKind,
+    },
+  ];
+  // What's being edited first
+  kinds.sort(
+    (a, b) =>
+      Number(b.outputKind === editing?.kind) -
+      Number(a.outputKind === editing?.kind),
   );
+  const kindPick = await vscode.window.showQuickPick(kinds, {
+    title: editing ? "Edit" : "Save as",
+    placeHolder: "Select kind",
+  });
   if (!kindPick) {
     return;
   }
   const kind = kindPick.outputKind;
+  const current = editing?.kind === kind ? editing : undefined;
   // The variable it's saved from, or for a figure or table, what the cell
   // shows: its image, or the result of its last line, e.g., df.head()
   const shown =
@@ -164,20 +177,26 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
       ? "$(file-media) Image this cell shows"
       : "$(table) Result this cell shows";
   const other = "$(edit) Other variable…";
-  const names = rankNamesForKind(
+  const ranked = rankNamesForKind(
     getAssignedNames(cell.document.getText()),
     kind,
   );
+  const currentName = current?.variable_name;
+  const names = currentName
+    ? [currentName, ...ranked.filter((n) => n !== currentName)]
+    : ranked;
   const mimeTypes = cell.outputs.flatMap((o) => o.items.map((i) => i.mime));
   const isShown =
     kind === "figure"
       ? hasImageOutput(mimeTypes)
       : cell.outputs.some((o) => o.metadata?.outputType === "execute_result");
+  // What the cell shows comes first if it shows it, or it's what's saved
+  const shownFirst = isShown || (current && !currentName);
   const items: vscode.QuickPickItem[] = [
-    ...(kind !== "value" && isShown ? [{ label: shown }] : []),
-    ...names.map((n) => ({ label: n })),
+    ...(kind !== "value" && shownFirst ? [{ label: shown }] : []),
+    ...names.map((n) => ({ label: n, picked: n === currentName })),
     { label: other },
-    ...(kind !== "value" && !isShown
+    ...(kind !== "value" && !shownFirst
       ? [{ label: shown, detail: "Run the cell first to see it here" }]
       : []),
   ];
@@ -231,7 +250,9 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
         kind === "figure"
           ? "Path to save it to; PDF stays sharp in a paper"
           : "Path to save it to; .tex for \\cktable",
-      value: getDefaultOutputPath(kind, notebookPath, variable),
+      value:
+        current?.output_path ??
+        getDefaultOutputPath(kind, notebookPath, variable),
       validateInput: (v) =>
         exts.some((e) => v.toLowerCase().endsWith(e))
           ? undefined
@@ -248,6 +269,19 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
   }
   const cellId =
     typeof cell.metadata?.id === "string" ? cell.metadata.id : undefined;
+  // An edit replaces the output, which is put back if the new one fails
+  if (editing) {
+    const removed = await runCalkit(
+      root,
+      getRemoveOutputArgs(notebookPath, editing),
+    );
+    if (!removed.ok) {
+      void vscode.window.showErrorMessage(
+        getErrorText(removed.stderr, removed.stdout),
+      );
+      return;
+    }
+  }
   const result = await runCalkit(
     root,
     getAddOutputArgs({
@@ -257,9 +291,27 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
       kind,
       variableNames,
       outputPath: kind === "value" ? undefined : target,
+      format: current?.format,
+      stage: editing?.stage,
     }),
   );
   if (!result.ok) {
+    if (editing) {
+      await runCalkit(
+        root,
+        getAddOutputArgs({
+          notebookPath,
+          cellId,
+          cellIndex: cell.index,
+          kind: editing.kind,
+          variableNames: editing.variable_name ? [editing.variable_name] : [],
+          outputPath: editing.output_path ?? undefined,
+          format: editing.format,
+          stage: editing.stage,
+        }),
+      );
+      await loadCellOutputs(root, cell.notebook);
+    }
     void vscode.window.showErrorMessage(
       getErrorText(result.stderr, result.stdout),
     );
@@ -305,9 +357,10 @@ async function showCellOutputActions(
     .filter((d) => d.text !== null);
   const copy = output.citation ? `$(copy) Copy ${output.citation}` : undefined;
   const insert = documents.length ? "$(insert) Insert in document" : undefined;
+  const edit = "$(edit) Edit";
   const remove = "$(close) Stop saving";
   const picked = await vscode.window.showQuickPick(
-    [...(copy ? [copy] : []), ...(insert ? [insert] : []), remove],
+    [...(copy ? [copy] : []), ...(insert ? [insert] : []), edit, remove],
     { title: getCellOutputTarget(output) },
   );
   if (picked === copy && output.citation) {
@@ -360,6 +413,19 @@ async function showCellOutputActions(
     } else {
       await editor.edit((edit) => edit.replace(editor.selection, text));
     }
+  } else if (picked === edit) {
+    const notebook = vscode.workspace.notebookDocuments.find(
+      (n) => n.uri.toString() === notebookUri.toString(),
+    );
+    const cell =
+      output.cell_index !== null
+        ? notebook?.cellAt(output.cell_index)
+        : undefined;
+    if (!cell) {
+      void vscode.window.showErrorMessage("Cell not found");
+      return;
+    }
+    await addCellOutput(root, cell, output);
   } else if (picked === remove) {
     const notebookPath = getNotebookPath(root, notebookUri);
     if (!notebookPath) {

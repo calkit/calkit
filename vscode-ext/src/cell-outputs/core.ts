@@ -217,6 +217,7 @@ export function getAddOutputArgs(options: {
   kind: CellOutputKind;
   variableNames?: string[];
   outputPath?: string;
+  format?: string | null;
   stage?: string;
 }): string[] {
   const args = ["nb", "add-output", options.notebookPath, options.kind];
@@ -230,6 +231,9 @@ export function getAddOutputArgs(options: {
   }
   if (options.outputPath) {
     args.push("--output-path", options.outputPath);
+  }
+  if (options.format) {
+    args.push("--format", options.format);
   }
   if (options.stage) {
     args.push("--stage", options.stage);

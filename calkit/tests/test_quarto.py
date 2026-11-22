@@ -70,12 +70,26 @@ def test_values(tmp_path, monkeypatch):
             ),
             "doc.qmd",
         )
-    # As are what the shortcode can't read or format the way Python does
+    # As are what the shortcode can't read or format the way Python does,
+    # including YAML text that Pandoc, which reads it, would change
+    (tmp_path / "text.yaml").write_text(
+        "version: '1.50'\nemphasis: a *b*\npath: 'C:\\data'\nname: run_a\n"
+    )
+    assert calkit.quarto.check_values(
+        calkit.quarto.extract_values(
+            "{{< ckvalue text.yaml name >}}", "doc.qmd"
+        ),
+        "doc.qmd",
+    ) == ["run_a"]
     for text, match in [
         ("{{< ckvalue results.json rms ' .2f' >}}", "can't format"),
         ("{{< ckvalue results.json rms 8.2f >}}", "can't format"),
         ("{{< ckvalue results.json rms '{x:.2f}' >}}", "can't format"),
         ("{{< ckvalue results.json rms d >}}", "Can't format 'rms'"),
+        ("{{< ckvalue results.json fit >}}", "list or table"),
+        ("{{< ckvalue text.yaml version >}}", "looks like a number"),
+        ("{{< ckvalue text.yaml emphasis >}}", "reads as Markdown"),
+        ("{{< ckvalue text.yaml path >}}", "reads as Markdown"),
     ]:
         with pytest.raises(MarkdownParseError, match=match):
             calkit.quarto.check_values(
@@ -142,11 +156,14 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
             }
         )
     )
+    # With what Pandoc, which reads YAML for Quarto, sees differently, e.g.,
+    # a document marker, or numbers it rewrites
     (tmp_path / "results" / "m.yaml").write_text(
-        "speed: 3.25\ncount: 401\nnested:\n  list: [1, 2.5]\n"
+        "\n---\nspeed: 3.25\ncount: 401\nnested:\n  list: [1, 2.5]\n"
+        "trailing: 1.50\nsmall: 1.0e-3\nbig: .inf\nlabel: it's -- done...\n"
     )
     (tmp_path / "calkit.yaml").write_text(
-        "results:\n  - name: metrics\n    path: results/m.yaml\n"
+        "\n# Project\nresults:\n  - name: metrics\n    path: results/m.yaml\n"
     )
     (tmp_path / "results" / "t.toml").write_text(
         "# Results\n"
@@ -201,6 +218,11 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
         ("metrics", "speed", ".1f"),
         ("metrics", "count", ",d"),
         ("metrics", "nested.list.1", ".2f"),
+        ("metrics", "trailing", ""),
+        ("metrics", "trailing", "+"),
+        ("metrics", "small", ""),
+        ("metrics", "big", ""),
+        ("metrics", "label", ""),
     ]
     # In a folder below the project, since paths are relative to it
     (tmp_path / "docs").mkdir()

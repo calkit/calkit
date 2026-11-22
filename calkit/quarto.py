@@ -26,6 +26,9 @@ contributes:
 # The part of Python's format spec the shortcode formats the way Python
 # does, e.g., "+,.2f", without a space for a sign, which Quarto trims
 FORMAT_SPEC_RE = re.compile(r"^[+\-]?[,_]?(\.\d+[fFeEgG%]|[fFeEgGd%s]?)$")
+# Text the shortcode would show changed, since Pandoc reads YAML strings as
+# Markdown, e.g., *emphasis*, a backslash escape, HTML, or math
+_YAML_MARKDOWN_RE = re.compile(r"[*\\<>`$^]|~~|\]\(|  |^\s|\s$")
 # A field of a format written as a template, e.g., "{value:.1f} m/s"
 _FORMAT_FIELD_RE = re.compile(r"\{([^{}]*)\}")
 # A shortcode written {{</* ckvalue */>}} is Quarto's escaped form, shown
@@ -38,7 +41,8 @@ _EMBED_RE = re.compile(r"\{\{<\s*embed\s+[\"']?(?P<path>[^\s#\"'>]+)")
 # Reads each value from its results file when the document renders, finding
 # declared results' names in calkit.yaml, and formats it as Python would,
 # which ``check_values`` makes sure of before the pipeline renders.
-SHORTCODE_LUA = r"""-- Written by Calkit; changes are overwritten when the pipeline compiles.
+SHORTCODE_LUA = r"""---@diagnostic disable: undefined-global
+-- Written by Calkit; changes are overwritten when the pipeline compiles.
 -- Shows values from pipeline results with
 -- {{< ckvalue results/metrics.json key .2f >}}, read from the results file
 -- each time the document renders.
@@ -69,6 +73,25 @@ local function find_project_dir()
   end
 end
 
+-- A number as YAML writes it, which Pandoc's metadata gives as text
+local yaml_specials = {
+  [".inf"] = math.huge, ["+.inf"] = math.huge, ["-.inf"] = -math.huge,
+  [".nan"] = 0 / 0,
+}
+local function get_yaml_number(text)
+  local special = yaml_specials[text:lower()]
+  if special ~= nil then
+    return special
+  end
+  if text:match("^[-+]?[%d_]+$") then
+    return math.tointeger(tonumber((text:gsub("_", ""))))
+  end
+  if text:match("^[-+]?[%d_]*%.?[%d_]*[eE]?[-+]?%d*$") and text:match("%d") then
+    return tonumber((text:gsub("_", "")))
+  end
+  return nil
+end
+
 -- Plain Lua values from Pandoc's metadata, which reads YAML
 local function from_meta(value)
   local kind = pandoc.utils.type(value)
@@ -89,12 +112,19 @@ local function from_meta(value)
     end
     return out
   end
-  return pandoc.utils.stringify(value)
+  local text = pandoc.utils.stringify(value)
+  local n = get_yaml_number(text)
+  if n ~= nil then
+    return n
+  end
+  return text
 end
 
 local function load_yaml(content)
+  -- Pandoc only reads metadata starting on the first line
+  content = content:gsub("^%s*\n", ""):gsub("^%-%-%-[^\n]*\n", "")
   local ok, doc = pcall(
-    pandoc.read, "---\n" .. content .. "\n---\n", "markdown"
+    pandoc.read, "---\n" .. content .. "\n---\n", "markdown-smart"
   )
   if not ok then
     return nil
@@ -749,6 +779,35 @@ def check_values(
         except KeyError:
             raise MarkdownParseError(
                 f"'{value.path}' has no key '{value.key}'",
+                path=document_path,
+                line=value.line,
+            )
+        problem = None
+        if isinstance(raw, (dict, list)):
+            problem = "is a list or table, not one value; name a key in it"
+        elif isinstance(raw, str) and value.path.lower().endswith(
+            (".yaml", ".yml")
+        ):
+            if re.fullmatch(
+                r"(?=\D*\d)[-+]?[\d_]*\.?[\d_]*([eE][-+]?\d+)?"
+                r"|[-+]?\.(inf|nan)",
+                raw,
+                flags=re.IGNORECASE,
+            ):
+                problem = (
+                    "is text that looks like a number, which reads as one "
+                    "from YAML in a Quarto document"
+                )
+            elif _YAML_MARKDOWN_RE.search(raw):
+                problem = (
+                    "is text that reads as Markdown from YAML in a Quarto "
+                    "document, so it wouldn't show as written"
+                )
+            if problem is not None:
+                problem += "; keep it in a JSON or TOML results file"
+        if problem is not None:
+            raise MarkdownParseError(
+                f"'{value.key}' in '{value.path}' {problem}",
                 path=document_path,
                 line=value.line,
             )

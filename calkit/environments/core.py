@@ -4352,7 +4352,7 @@ def relock(env_name: str, env: dict) -> None:
 
 # Kinds whose commands run as local processes with the environment's PATH,
 # where Calkit's own interpreter can be run to see what that PATH resolves
-_APP_CHECK_ENV_KINDS = ("uv", "uv-venv", "venv", "conda", "pixi")
+APP_CHECK_ENV_KINDS = ("uv", "uv-venv", "venv", "conda", "pixi")
 
 
 def is_app_required(
@@ -4375,35 +4375,13 @@ def is_app_required(
     return False
 
 
-def _path_outside_active_env() -> str:
-    """PATH without the environment active in this process, if any, e.g.,
-    under 'uv run' or 'pixi run', or in a shell that activated it, so an app
-    from it isn't mistaken for one installed on the machine."""
-    active = [
-        os.environ.get("VIRTUAL_ENV"),
-        os.environ.get("PIXI_PROJECT_ROOT") and os.environ.get("CONDA_PREFIX"),
-    ]
-    if os.environ.get("CONDA_DEFAULT_ENV") not in (None, "base"):
-        active.append(os.environ.get("CONDA_PREFIX"))
-    prefixes = [os.path.realpath(p) for p in active if p]
-    dirs = os.environ.get("PATH", "").split(os.pathsep)
-    return os.pathsep.join(
-        d
-        for d in dirs
-        if not any(
-            os.path.realpath(d) == p
-            or os.path.realpath(d).startswith(p + os.sep)
-            for p in prefixes
-        )
-    )
-
-
 def check_app_in_env(
     app: str,
     env_name: str,
     ck_info: dict,
     stage: dict | None = None,
     wdir: str | None = None,
+    check_env: bool = False,
 ) -> str | None:
     """Return what's wrong with where an app comes from in an environment,
     or None if nothing is.
@@ -4415,13 +4393,39 @@ def check_app_in_env(
     it somewhere other than PATH outside it does, which also sees through a
     launcher, e.g., Pixi's for a global install. Only environments that run
     commands locally are checked. The '_system' environment is this
-    machine, so there it only has to be installed.
+    machine, so there it only has to be installed, which counts one in an
+    environment active here, since that's what runs. With ``check_env``,
+    the environment is checked first, which creates it if it's missing.
     """
+
+    def get_path_outside_active_env() -> str:
+        """PATH without the environment active in this process, if any,
+        e.g., under 'uv run' or 'pixi run', or in a shell that activated it,
+        so an app from it isn't mistaken for one installed on the machine.
+        """
+        active = [
+            os.environ.get("VIRTUAL_ENV"),
+            os.environ.get("PIXI_PROJECT_ROOT")
+            and os.environ.get("CONDA_PREFIX"),
+        ]
+        if os.environ.get("CONDA_DEFAULT_ENV") not in (None, "base"):
+            active.append(os.environ.get("CONDA_PREFIX"))
+        prefixes = [os.path.realpath(p) for p in active if p]
+        dirs = os.environ.get("PATH", "").split(os.pathsep)
+        return os.pathsep.join(
+            d
+            for d in dirs
+            if not any(
+                os.path.realpath(d) == p
+                or os.path.realpath(d).startswith(p + os.sep)
+                for p in prefixes
+            )
+        )
+
     if is_app_required(app, ck_info, stage):
         return None
-    system_path = shutil.which(app, path=_path_outside_active_env())
     if env_name == "_system":
-        if system_path is None:
+        if shutil.which(app) is None:
             return (
                 f"'{app}' isn't installed on this machine; install it, or "
                 "use an environment that provides it"
@@ -4433,13 +4437,15 @@ def check_app_in_env(
     )
     env = (ck_info.get("environments") or {}).get(env_name)
     if not isinstance(env, dict) or env.get("kind") not in (
-        _APP_CHECK_ENV_KINDS
+        APP_CHECK_ENV_KINDS
     ):
         return None
     where = f"isn't in environment '{env_name}'"
+    system_path = shutil.which(app, path=get_path_outside_active_env())
     res = subprocess.run(
         [sys.executable, "-m", "calkit", "xenv", "-n", env_name]
-        + ["--no-check", "--", sys.executable, "-c"]
+        + ([] if check_env else ["--no-check"])
+        + ["--", sys.executable, "-c"]
         + ["import shutil, sys; print(shutil.which(sys.argv[1]) or '')"]
         + [app],
         capture_output=True,

@@ -109,34 +109,51 @@ def find_conda_exe() -> str | None:
 
 
 def find_named_env_prefix(name: str, conda_exe: str) -> str | None:
-    """Where a named environment is kept, found without running Conda.
+    """Where ``conda run -n`` finds a named environment, without running
+    Conda, which is slow to start.
 
-    Named environments are usually in the envs folder of Conda's root, which
-    holds its executable in bin, condabin, or Scripts, but may be in another
-    envs folder, e.g., ~/.conda/envs on a shared install, which Conda's
-    record of the environments it made, ~/.conda/environments.txt, lists.
+    Conda looks in its envs folders in order: those set by
+    ``CONDA_ENVS_DIRS`` or ``CONDA_ENVS_PATH``, then those its config files
+    list, most specific first, then its root's and the user's, the user's
+    first if the root can't be written to, e.g., a shared install.
     """
+    import calkit
+
+    home = os.path.expanduser("~")
     root = os.path.dirname(os.path.dirname(os.path.realpath(conda_exe)))
-    envs_dirs = [os.path.join(root, "envs")]
-    for var in ("CONDA_ENVS_PATH", "CONDA_ENVS_DIRS"):
+    envs_dirs = []
+    for var in ("CONDA_ENVS_DIRS", "CONDA_ENVS_PATH"):
         envs_dirs += [
             d for d in os.environ.get(var, "").split(os.pathsep) if d
         ]
-    envs_dirs.append(os.path.join(os.path.expanduser("~"), ".conda", "envs"))
-    candidates = [os.path.join(d, name) for d in envs_dirs]
-    record = os.path.join(
-        os.path.expanduser("~"), ".conda", "environments.txt"
-    )
-    try:
-        with open(record, encoding="utf-8") as f:
-            candidates += [
-                line.strip()
-                for line in f
-                if os.path.basename(line.strip().rstrip("/\\")) == name
-            ]
-    except OSError:
-        pass
-    for candidate in candidates:
+    condarc_paths = [os.environ.get("CONDARC", "")] + [
+        os.path.join(home, ".condarc"),
+        os.path.join(home, ".conda", ".condarc"),
+        os.path.join(home, ".config", "conda", ".condarc"),
+        os.path.join(home, ".config", "conda", "condarc"),
+        os.path.join(root, ".condarc"),
+        os.path.join(root, "condarc"),
+    ]
+    for condarc_path in condarc_paths:
+        if not condarc_path or not os.path.isfile(condarc_path):
+            continue
+        try:
+            with open(condarc_path, encoding="utf-8") as f:
+                config = calkit.ryaml.load(f)
+        except Exception:
+            continue
+        dirs = config.get("envs_dirs") if isinstance(config, dict) else None
+        envs_dirs += [
+            os.path.expandvars(os.path.expanduser(str(d))) for d in dirs or []
+        ]
+    defaults = [
+        os.path.join(root, "envs"),
+        os.path.join(home, ".conda", "envs"),
+    ]
+    if not os.access(root, os.W_OK):
+        defaults.reverse()
+    for envs_dir in envs_dirs + defaults:
+        candidate = os.path.join(envs_dir, name)
         if os.path.isdir(os.path.join(candidate, "conda-meta")):
             return candidate
     return None
@@ -499,7 +516,7 @@ def check_env(
     If it doesn't match, recreate it.
 
     ``prefix`` is where the environment is kept, e.g., from calkit.yaml,
-    when the spec doesn't say.
+    overriding the spec's own.
 
     Note that this only works with exact or no version specification.
     Using greater than and less than operators is not supported.

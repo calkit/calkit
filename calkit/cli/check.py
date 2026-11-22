@@ -1332,7 +1332,7 @@ def check_conda_env(
         str | None,
         typer.Option(
             "--prefix",
-            help="Where the environment is kept, if the spec doesn't say.",
+            help="Where the environment is kept, overriding the spec's.",
         ),
     ] = None,
 ) -> None:

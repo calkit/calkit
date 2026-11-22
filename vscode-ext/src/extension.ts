@@ -1627,9 +1627,13 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
-      terminal.show(true);
-      terminal.sendText(`calkit run ${stageName}`);
+      // The stage name is the project's own, so the CLI is pointed there,
+      // since the terminal may be reused from somewhere else
+      runStageInTerminal(
+        getWorkspaceRoot() ?? workspaceRoot,
+        stageName,
+        workspaceRoot,
+      );
     }),
   );
 
@@ -5355,17 +5359,31 @@ async function openNotebookHtmlPreview(
     "calkit.notebookHtml",
     title,
     vscode.ViewColumn.Active,
-    { enableScripts: true, localResourceRoots: [dirUri] },
+    // The workspace too, since a Quarto website keeps its libraries at the
+    // output root, e.g., ../site_libs from a notebook in a subfolder
+    {
+      enableScripts: true,
+      localResourceRoots: [dirUri, vscode.Uri.file(workspaceRoot)],
+    },
   );
   context.subscriptions.push(panel);
   // nbconvert output is a self-contained document (inline styles, base64
   // images, scripts from CDNs), so render it as the webview's own content.
   // Loading it via an iframe + asWebviewUri renders blank, so embed it directly.
   // Quarto's links its libraries in a folder beside it, so relative URLs
-  // resolve from there.
+  // resolve from there. That base would make in-page links, e.g., a table of
+  // contents, navigate away, so they scroll instead.
   try {
     const bytes = await vscode.workspace.fs.readFile(absUri);
-    const base = `<base href="${panel.webview.asWebviewUri(dirUri)}/">`;
+    const base =
+      `<base href="${panel.webview.asWebviewUri(dirUri)}/">` +
+      "<script>document.addEventListener('click', (e) => {" +
+      "const a = e.target.closest && e.target.closest('a[href^=\"#\"]');" +
+      "if (!a) return; e.preventDefault();" +
+      "const id = decodeURIComponent(a.getAttribute('href').slice(1));" +
+      "const el = id && document.getElementById(id);" +
+      "if (el) el.scrollIntoView(); else if (!id) window.scrollTo(0, 0);" +
+      "});</script>";
     const html = Buffer.from(bytes).toString("utf8");
     panel.webview.html = /<head[^>]*>/i.test(html)
       ? html.replace(/<head[^>]*>/i, (head) => head + base)

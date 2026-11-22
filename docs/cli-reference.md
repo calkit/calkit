@@ -3985,7 +3985,7 @@ Options:
 | `--input-delete` | list[str] | no       |                 | Alternative lock file input paths to delete after use.                                                                                                        |
 | `--relaxed`      | boolean   | no       | False           | Treat conda and pip dependencies as equivalent.                                                                                                               |
 | `--quiet`, `-q`  | boolean   | no       | False           | Be quiet.                                                                                                                                                     |
-| `--prefix`       | str       | no       |                 | Where the environment is kept, if the spec doesn't say.                                                                                                       |
+| `--prefix`       | str       | no       |                 | Where the environment is kept, overriding the spec's.                                                                                                         |
 
 <a id="subcommand-check-venv"></a>
 

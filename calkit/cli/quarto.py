@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import typer
 from typing_extensions import Annotated
@@ -106,7 +107,11 @@ def render(
         None
         if allow_machine_quarto
         else calkit.environments.check_app_in_env(
-            "quarto", environment, ck_info, wdir=project_dir
+            "quarto",
+            environment,
+            ck_info,
+            wdir=project_dir,
+            check_env=not no_check,
         )
     )
     if problem is not None and problem.startswith("Couldn't"):
@@ -143,12 +148,26 @@ def render(
     else:
         # The environment is defined relative to the project, but the
         # document and args are relative to where this was run, e.g., a
-        # stage's working directory, so Calkit's own interpreter goes back
-        # there inside the environment to run Quarto
+        # stage's working directory. Locally, Calkit's own interpreter goes
+        # back there inside the environment to run Quarto, finding it on
+        # PATH as a shell would; elsewhere, e.g., in a container, that's
+        # the working directory relative to the project
         wdir = os.getcwd()
-        cmd = [sys.executable, "-c", _RUN_IN_DIR, wdir] + cmd
+        env_kind = (
+            (ck_info.get("environments") or {})
+            .get(environment, {})
+            .get("kind")
+        )
+        run_wdir = None
+        if env_kind in calkit.environments.APP_CHECK_ENV_KINDS:
+            cmd = [sys.executable, "-c", _RUN_IN_DIR, wdir] + cmd
+        else:
+            run_wdir = Path(os.path.relpath(wdir, project_dir)).as_posix()
+            run_wdir = None if run_wdir == "." else run_wdir
         os.chdir(project_dir)
         try:
-            run_in_env(cmd, env_name=environment, no_check=no_check)
+            run_in_env(
+                cmd, env_name=environment, wdir=run_wdir, no_check=no_check
+            )
         finally:
             os.chdir(wdir)

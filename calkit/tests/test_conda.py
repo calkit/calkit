@@ -990,12 +990,18 @@ def test_find_named_env_prefix(tmp_path, monkeypatch):
     # In the user's, e.g., on a shared install
     expected = make_env(home / ".conda" / "envs" / "b")
     assert find_named_env_prefix("b", str(conda_exe)) == expected
-    # In one set by the environment
+    # In one set by the environment, which comes first, as it does for Conda
     other = tmp_path / "other"
     monkeypatch.setenv("CONDA_ENVS_PATH", str(other))
-    expected = make_env(other / "c")
-    assert find_named_env_prefix("c", str(conda_exe)) == expected
-    # Anywhere else Conda recorded making it
-    expected = make_env(tmp_path / "elsewhere" / "d")
-    (home / ".conda" / "environments.txt").write_text(expected + "\n")
-    assert find_named_env_prefix("d", str(conda_exe)) == expected
+    expected = make_env(other / "a")
+    assert find_named_env_prefix("a", str(conda_exe)) == expected
+    # Or by a config file, before the defaults
+    listed = tmp_path / "listed"
+    (home / ".condarc").write_text(f"envs_dirs:\n  - {listed}\n")
+    expected = make_env(listed / "b")
+    assert find_named_env_prefix("b", str(conda_exe)) == expected
+    # One Conda only recorded making, e.g., at a project's prefix, isn't
+    # found by name, since 'conda run -n' wouldn't find it either
+    elsewhere = make_env(tmp_path / "elsewhere" / "d")
+    (home / ".conda" / "environments.txt").write_text(elsewhere + "\n")
+    assert find_named_env_prefix("d", str(conda_exe)) is None

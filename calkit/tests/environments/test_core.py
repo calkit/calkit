@@ -2905,6 +2905,33 @@ def test_check_app_in_env(tmp_path, monkeypatch):
         problem = check_app_in_env("myapp", "py", ck_info)
         assert problem is not None and "machine" in problem
         make_app(venv_bin)
+    # For '_system', one in an active environment counts, since it's what
+    # runs
+    with monkeypatch.context() as m:
+        m.setenv("PATH", venv_bin + os.pathsep + os.environ["PATH"])
+        m.setenv("VIRTUAL_ENV", str(tmp_path / ".venv"))
+        assert (
+            check_app_in_env("venv-only-app", "_system", ck_info) is not None
+        )
+        make_app(venv_bin)
+        os.rename(
+            os.path.join(venv_bin, "myapp"),
+            os.path.join(venv_bin, "venv-only-app"),
+        )
+        assert check_app_in_env("venv-only-app", "_system", ck_info) is None
+    # An environment that hasn't been created is only created when asked
+    ck_info["environments"]["new"] = {
+        "kind": "venv",
+        "path": "requirements.txt",
+        "prefix": ".venv-new",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    problem = check_app_in_env("myapp", "new", ck_info)
+    assert problem is not None and problem.startswith("Couldn't")
+    problem = check_app_in_env("myapp", "new", ck_info, check_env=True)
+    assert problem is not None and "isn't in environment 'new'" in problem
+    assert os.path.isdir(".venv-new")
     # Environments whose commands don't run here aren't checked
     ck_info["environments"]["img"] = {"kind": "docker", "image": "x"}
     assert check_app_in_env("myapp", "img", ck_info) is None

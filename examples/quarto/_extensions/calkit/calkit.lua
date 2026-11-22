@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global
 -- Written by Calkit; changes are overwritten when the pipeline compiles.
 -- Shows values from pipeline results with
 -- {{< ckvalue results/metrics.json key .2f >}}, read from the results file
@@ -29,6 +30,25 @@ local function find_project_dir()
   end
 end
 
+-- A number as YAML writes it, which Pandoc's metadata gives as text
+local yaml_specials = {
+  [".inf"] = math.huge, ["+.inf"] = math.huge, ["-.inf"] = -math.huge,
+  [".nan"] = 0 / 0,
+}
+local function get_yaml_number(text)
+  local special = yaml_specials[text:lower()]
+  if special ~= nil then
+    return special
+  end
+  if text:match("^[-+]?[%d_]+$") then
+    return math.tointeger(tonumber((text:gsub("_", ""))))
+  end
+  if text:match("^[-+]?[%d_]*%.?[%d_]*[eE]?[-+]?%d*$") and text:match("%d") then
+    return tonumber((text:gsub("_", "")))
+  end
+  return nil
+end
+
 -- Plain Lua values from Pandoc's metadata, which reads YAML
 local function from_meta(value)
   local kind = pandoc.utils.type(value)
@@ -49,17 +69,285 @@ local function from_meta(value)
     end
     return out
   end
-  return pandoc.utils.stringify(value)
+  local text = pandoc.utils.stringify(value)
+  local n = get_yaml_number(text)
+  if n ~= nil then
+    return n
+  end
+  return text
 end
 
 local function load_yaml(content)
+  -- Pandoc only reads metadata starting on the first line
+  content = content:gsub("^%s*\n", ""):gsub("^%-%-%-[^\n]*\n", "")
   local ok, doc = pcall(
-    pandoc.read, "---\n" .. content .. "\n---\n", "markdown"
+    pandoc.read, "---\n" .. content .. "\n---\n", "markdown-smart"
   )
   if not ok then
     return nil
   end
   return from_meta(doc.meta)
+end
+
+-- TOML, which Quarto's Lua has no reader for, with dates kept as text
+local function load_toml(text)
+  local pos, len = 1, #text
+  local root = {}
+  local current = root
+  -- Written this way so Calkit's Python source can hold it
+  local triple_double = string.rep('"', 3)
+  local escapes = {
+    b = "\b", t = "\t", n = "\n", f = "\f", r = "\r",
+    ['"'] = '"', ["\\"] = "\\",
+  }
+  local function fail(msg)
+    error("TOML: " .. msg .. " at character " .. pos)
+  end
+  local function skip_space()
+    pos = text:find("[^ \t]", pos) or len + 1
+  end
+  local function skip_blank()
+    while pos <= len do
+      local c = text:sub(pos, pos)
+      if c == "#" then
+        pos = (text:find("\n", pos, true) or len) + 1
+      elseif c:match("[ \t\r\n]") then
+        pos = pos + 1
+      else
+        return
+      end
+    end
+  end
+  -- Up to two quotes before a closing triple are the string's
+  local function close_multiline(quote, out)
+    local run = text:match("^" .. quote .. "+", pos)
+    out[#out + 1] = string.rep(quote, math.min(#run - 3, 2))
+    pos = pos + math.min(#run, 5)
+  end
+  local function skip_first_newline()
+    if text:sub(pos, pos) == "\n" then
+      pos = pos + 1
+    elseif text:sub(pos, pos + 1) == "\r\n" then
+      pos = pos + 2
+    end
+  end
+  local function parse_basic(multiline)
+    local out = {}
+    if multiline then
+      skip_first_newline()
+    end
+    while true do
+      if pos > len then
+        fail("unterminated string")
+      end
+      local c = text:sub(pos, pos)
+      if multiline and text:sub(pos, pos + 2) == triple_double then
+        close_multiline('"', out)
+        return table.concat(out)
+      elseif c == '"' and not multiline then
+        pos = pos + 1
+        return table.concat(out)
+      elseif c == "\\" then
+        local e = text:sub(pos + 1, pos + 1)
+        if multiline and e:match("[ \t\r\n]") then
+          pos = text:find("[^ \t\r\n]", pos + 1) or len + 1
+        elseif escapes[e] then
+          out[#out + 1] = escapes[e]
+          pos = pos + 2
+        elseif e == "u" or e == "U" then
+          local n = e == "u" and 4 or 8
+          local code = tonumber(text:sub(pos + 2, pos + 1 + n), 16)
+          out[#out + 1] = utf8.char(code)
+          pos = pos + 2 + n
+        else
+          fail("bad escape")
+        end
+      else
+        out[#out + 1] = c
+        pos = pos + 1
+      end
+    end
+  end
+  local function parse_literal(multiline)
+    local quote = multiline and "'''" or "'"
+    if multiline then
+      skip_first_newline()
+    end
+    local stop = text:find(quote, pos, true)
+    if stop == nil then
+      fail("unterminated string")
+    end
+    local out = {text:sub(pos, stop - 1)}
+    pos = stop
+    if multiline then
+      close_multiline("'", out)
+    else
+      pos = pos + 1
+    end
+    return table.concat(out)
+  end
+  local function parse_key()
+    local parts = {}
+    while true do
+      skip_space()
+      local c = text:sub(pos, pos)
+      if c == '"' then
+        pos = pos + 1
+        parts[#parts + 1] = parse_basic(false)
+      elseif c == "'" then
+        pos = pos + 1
+        parts[#parts + 1] = parse_literal(false)
+      else
+        local s, e = text:find("^[%w_%-]+", pos)
+        if s == nil then
+          fail("expected a key")
+        end
+        parts[#parts + 1] = text:sub(s, e)
+        pos = e + 1
+      end
+      skip_space()
+      if text:sub(pos, pos) ~= "." then
+        return parts
+      end
+      pos = pos + 1
+    end
+  end
+  -- The table at the first n parts of a dotted key, made if it isn't there,
+  -- going into the last of an array of tables
+  local function get_table(tbl, keys, n)
+    for i = 1, n do
+      if tbl[keys[i]] == nil then
+        tbl[keys[i]] = {}
+      end
+      tbl = tbl[keys[i]]
+      if #tbl > 0 and type(tbl[#tbl]) == "table" then
+        tbl = tbl[#tbl]
+      end
+    end
+    return tbl
+  end
+  local function expect(token)
+    skip_space()
+    if text:sub(pos, pos + #token - 1) ~= token then
+      fail("expected " .. token)
+    end
+    pos = pos + #token
+  end
+  local parse_value
+  local function parse_array()
+    local items = {}
+    while true do
+      skip_blank()
+      if text:sub(pos, pos) == "]" then
+        pos = pos + 1
+        return items
+      end
+      items[#items + 1] = parse_value()
+      skip_blank()
+      local c = text:sub(pos, pos)
+      pos = pos + 1
+      if c == "]" then
+        return items
+      elseif c ~= "," then
+        fail("expected , or ]")
+      end
+    end
+  end
+  local function parse_inline_table()
+    local tbl = {}
+    while true do
+      skip_blank()
+      if text:sub(pos, pos) == "}" then
+        pos = pos + 1
+        return tbl
+      end
+      local keys = parse_key()
+      expect("=")
+      get_table(tbl, keys, #keys - 1)[keys[#keys]] = parse_value()
+      skip_blank()
+      local c = text:sub(pos, pos)
+      pos = pos + 1
+      if c == "}" then
+        return tbl
+      elseif c ~= "," then
+        fail("expected , or }")
+      end
+    end
+  end
+  local specials = {
+    ["true"] = true, ["false"] = false,
+    inf = math.huge, ["+inf"] = math.huge, ["-inf"] = -math.huge,
+    nan = 0 / 0, ["+nan"] = 0 / 0, ["-nan"] = 0 / 0,
+  }
+  local bases = {x = 16, o = 8, b = 2}
+  parse_value = function()
+    skip_space()
+    local c = text:sub(pos, pos)
+    if text:sub(pos, pos + 2) == triple_double then
+      pos = pos + 3
+      return parse_basic(true)
+    elseif c == '"' then
+      pos = pos + 1
+      return parse_basic(false)
+    elseif text:sub(pos, pos + 2) == "'''" then
+      pos = pos + 3
+      return parse_literal(true)
+    elseif c == "'" then
+      pos = pos + 1
+      return parse_literal(false)
+    elseif c == "[" then
+      pos = pos + 1
+      return parse_array()
+    elseif c == "{" then
+      pos = pos + 1
+      return parse_inline_table()
+    end
+    local s, e = text:find("^[^%s,%]}#]+", pos)
+    if s == nil then
+      fail("expected a value")
+    end
+    -- A date and time can be separated by a space
+    if text:sub(s, e):match("^%d%d%d%d%-%d%d%-%d%d$")
+      and text:sub(e + 1, e + 4):match("^ %d%d:") then
+      e = select(2, text:find("^[^%s,%]}#]+", e + 2))
+    end
+    local token = text:sub(s, e)
+    pos = e + 1
+    if specials[token] ~= nil then
+      return specials[token]
+    end
+    local plain = token:gsub("_", "")
+    local base = bases[plain:match("^0([xob])") or ""]
+    if base ~= nil then
+      return math.tointeger(tonumber(plain:sub(3), base))
+    end
+    return tonumber(plain) or token
+  end
+  while true do
+    skip_blank()
+    if pos > len then
+      return root
+    end
+    if text:sub(pos, pos + 1) == "[[" then
+      pos = pos + 2
+      local keys = parse_key()
+      expect("]]")
+      local parent = get_table(root, keys, #keys - 1)
+      local items = parent[keys[#keys]] or {}
+      parent[keys[#keys]] = items
+      current = {}
+      items[#items + 1] = current
+    elseif text:sub(pos, pos) == "[" then
+      pos = pos + 1
+      local keys = parse_key()
+      expect("]")
+      current = get_table(root, keys, #keys)
+    else
+      local keys = parse_key()
+      expect("=")
+      get_table(current, keys, #keys - 1)[keys[#keys]] = parse_value()
+    end
+  end
 end
 
 local project_dir = nil
@@ -73,8 +361,15 @@ local function load_data(path)
       return nil
     end
     local _, ext = pandoc.path.split_extension(path)
+    ext = ext:lower()
     if ext == ".json" then
       data_by_path[path] = quarto.json.decode(content)
+    elseif ext == ".toml" then
+      local ok, data = pcall(load_toml, content)
+      if not ok then
+        quarto.log.warning("Can't read " .. path .. ": " .. data)
+      end
+      data_by_path[path] = ok and data or {}
     else
       data_by_path[path] = load_yaml(content) or {}
     end

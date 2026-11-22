@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   collectSubprojects,
   envRefParts,
+  findProjectDir,
   findUndeclaredProjectDir,
   mergeSubprojectConfigs,
   mergeSubprojectDvcYaml,
@@ -397,6 +398,17 @@ test("a document in a project the root doesn't declare maps to its PDF", () => {
       undefined,
     );
   }
+  // Any project counts for where a file runs, declared or not, or the root
+  assert.equal(
+    findProjectDir("subs/declared/nb/analysis.ipynb", isProject),
+    "subs/declared",
+  );
+  assert.equal(
+    findProjectDir("examples/basic/analysis.ipynb", isProject),
+    "examples/basic",
+  );
+  assert.equal(findProjectDir("nb/analysis.ipynb", isProject), ".");
+  assert.equal(findProjectDir("D:/basic/main.tex", isProject), ".");
   // Its stages, rebased, map its document and PDF in the root's frame
   const stages = rebaseStages("examples/basic", {
     "build-paper": { kind: "latex", target_path: "paper/main.tex" },

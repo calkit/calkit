@@ -2902,3 +2902,94 @@ def test_composed_envs(tmp_dir, texlive_user_home, monkeypatch):
     assert lock is not None
     assert lock["added"] == calkit.environments.MATPLOTLIB_TEX_PACKAGES
     assert add_host_tex_packages("py", envs["py"], "tex", envs["tex"]) == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Uses shell scripts")
+def test_check_app_in_env(tmp_path, monkeypatch):
+    from calkit.environments.core import check_app_in_env, is_app_required
+
+    monkeypatch.chdir(tmp_path)
+
+    def make_app(folder: str) -> None:
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "myapp")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\necho hi\n")
+        os.chmod(path, 0o755)
+
+    # Installed on this machine only
+    make_app("machine")
+    monkeypatch.setenv(
+        "PATH", str(tmp_path / "machine") + os.pathsep + os.environ["PATH"]
+    )
+    ck_info: dict = {
+        "environments": {
+            "py": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    (tmp_path / "requirements.txt").write_text("")
+    subprocess.check_call([sys.executable, "-m", "venv", ".venv"])
+    problem = check_app_in_env("myapp", "py", ck_info)
+    assert problem is not None
+    assert "isn't in environment 'py'" in problem
+    assert str(tmp_path / "machine" / "myapp") in problem
+    # The '_system' environment is this machine, so it only has to be
+    # installed
+    assert check_app_in_env("myapp", "_system", ck_info) is None
+    problem = check_app_in_env("missing-app", "_system", ck_info)
+    assert problem is not None and "isn't installed" in problem
+    assert is_app_required("myapp", {}, stage={"requirements": ["myapp"]})
+    assert not is_app_required("myapp", {"requirements": ["docker"]})
+    required = ck_info | {"requirements": ["myapp>=1"]}
+    assert check_app_in_env("myapp", "_system", required) is None
+    assert check_app_in_env("myapp", "py", required) is None
+    # Provided by the environment, it wins over this machine's
+    make_app(os.path.join(".venv", "bin"))
+    assert check_app_in_env("myapp", "py", ck_info) is None
+    # Even when the environment is already active, e.g., under 'uv run'
+    with monkeypatch.context() as m:
+        venv_bin = str(tmp_path / ".venv" / "bin")
+        m.setenv("PATH", venv_bin + os.pathsep + os.environ["PATH"])
+        m.setenv("VIRTUAL_ENV", str(tmp_path / ".venv"))
+        m.delenv("CONDA_DEFAULT_ENV", raising=False)
+        assert check_app_in_env("myapp", "py", ck_info) is None
+        os.remove(os.path.join(venv_bin, "myapp"))
+        problem = check_app_in_env("myapp", "py", ck_info)
+        assert problem is not None and "machine" in problem
+        make_app(venv_bin)
+    # For '_system', one in an active environment counts, since it's what
+    # runs
+    with monkeypatch.context() as m:
+        m.setenv("PATH", venv_bin + os.pathsep + os.environ["PATH"])
+        m.setenv("VIRTUAL_ENV", str(tmp_path / ".venv"))
+        assert (
+            check_app_in_env("venv-only-app", "_system", ck_info) is not None
+        )
+        make_app(venv_bin)
+        os.rename(
+            os.path.join(venv_bin, "myapp"),
+            os.path.join(venv_bin, "venv-only-app"),
+        )
+        assert check_app_in_env("venv-only-app", "_system", ck_info) is None
+    # An environment that hasn't been created is only created when asked
+    ck_info["environments"]["new"] = {
+        "kind": "venv",
+        "path": "requirements.txt",
+        "prefix": ".venv-new",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    problem = check_app_in_env("myapp", "new", ck_info)
+    assert problem is not None and problem.startswith("Couldn't")
+    problem = check_app_in_env("myapp", "new", ck_info, check_env=True)
+    assert problem is not None and "isn't in environment 'new'" in problem
+    assert os.path.isdir(".venv-new")
+    # Environments whose commands don't run here aren't checked
+    ck_info["environments"]["img"] = {"kind": "docker", "image": "x"}
+    assert check_app_in_env("myapp", "img", ck_info) is None

@@ -2019,7 +2019,7 @@ def check_requirements(
         if "gpus" not in info and any(
             req["kind"] in gpu_kinds for req in buckets["_property"]
         ):
-            info = {**info, "gpus": list(get_gpus())}
+            info = {**info, "gpus": [dict(g) for g in get_gpus()]}
         for req in buckets["_property"]:
             check_property_requirement(req, info, described_as=described_as)
     for req in buckets["env-var"]:
@@ -2587,8 +2587,22 @@ def get_gpus() -> tuple[dict, ...]:
     or None where there's no such thing. Cached, since this can start a GPU
     runtime, and a machine's GPUs don't change while a command runs.
     """
+
+    def get_apple_gpus() -> list[dict]:
+        if platform.system() != "Darwin" or platform.machine() != "arm64":
+            return []
+        res = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if res.returncode != 0 or not res.stdout.strip():
+            return []
+        return [{"name": res.stdout.strip(), "vendor": "apple", "arch": None}]
+
     gpus = []
-    for get in (_get_amd_gpus, _get_nvidia_gpus):
+    for get in (_get_amd_gpus, _get_nvidia_gpus, get_apple_gpus):
         # A broken driver is a machine with no usable GPU, not a crash
         try:
             gpus += get()
@@ -2599,16 +2613,6 @@ def get_gpus() -> tuple[dict, ...]:
             subprocess.SubprocessError,
         ):
             pass
-    if platform.system() == "Darwin" and platform.machine() == "arm64":
-        res = subprocess.run(
-            ["sysctl", "-n", "machdep.cpu.brand_string"],
-            capture_output=True,
-            text=True,
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            gpus.append(
-                {"name": res.stdout.strip(), "vendor": "apple", "arch": None}
-            )
     return tuple(gpus)
 
 
@@ -2690,20 +2694,29 @@ def _get_nvidia_gpus() -> list[dict]:
 
     if shutil.which("nvidia-smi") is None:
         return []
-    res = subprocess.run(
-        [
-            "nvidia-smi",
-            "--query-gpu=name,compute_cap",
-            "--format=csv,noheader",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if res.returncode != 0:
+    # Drivers older than 510 can't report compute_cap, so they're asked for
+    # names alone
+    for fields in ("name,compute_cap", "name"):
+        res = subprocess.run(
+            [
+                "nvidia-smi",
+                f"--query-gpu={fields}",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            break
+    else:
         return []
     gpus = []
     for line in res.stdout.splitlines():
-        name, _, cap = line.rpartition(",")
+        if fields == "name":
+            name, cap = line, ""
+        else:
+            name, _, cap = line.rpartition(",")
         if name.strip():
             gpus.append(
                 {
@@ -2749,7 +2762,7 @@ def get_system_info(
     if gpus is None:
         gpus = all_apps
     if gpus:
-        system_info["gpus"] = list(get_gpus())
+        system_info["gpus"] = [dict(g) for g in get_gpus()]
     os_name = system_info["os"]
     node_id = uuid.getnode()
     # The multicast bit is the 40th bit from the right (0-indexed)

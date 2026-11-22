@@ -573,9 +573,16 @@ def test_run_in_env_uv_extras(tmp_dir):
     write_extras(
         [{"name": "accel", "when": [{"gpu_arch_is": "calkit-test-no-such"}]}]
     )
-    assert subprocess.call(cmd) != 0
-    # One meant for this machine is installed by 'uv run', which would
-    # otherwise sync it away, even when the environment isn't checked first
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "No module named 'six'" in res.stderr
+    # A mistake in one is a clean error, not a traceback
+    write_extras([{"name": "accel", "when": [{"gpu_arch": "gfx1201"}]}])
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "is invalid" in res.stderr and "Traceback" not in res.stderr
+    # One meant for this machine is installed by 'uv run', even when the
+    # environment isn't checked first
     any_os = ["linux", "macos", "windows"]
     write_extras([{"name": "accel", "when": [{"os_is": any_os}]}])
     subprocess.check_call(cmd[:4] + ["--no-check"] + cmd[4:])

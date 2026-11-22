@@ -941,7 +941,8 @@ class UvEnvironment(ComposableEnvironment):
         default=[],
         description="Extras of the project to install, each named or given "
         "with the machines it's for. They're passed to both 'uv sync' and "
-        "'uv run', since running without one would uninstall it.",
+        "'uv run', so they're installed even when the environment isn't "
+        "checked first.",
     )
 
 

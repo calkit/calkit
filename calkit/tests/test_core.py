@@ -622,6 +622,23 @@ def test_get_gpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         },
         {"name": "A, B", "vendor": "nvidia", "arch": "sm_90"},
     ]
+    # A driver too old to report compute_cap still reports names
+    monkeypatch.setattr(
+        calkit.core.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args,
+            *(
+                (2, "")
+                if "compute_cap" in args[1]
+                else (0, "Tesla K80\nTesla K80\n")
+            ),
+        ),
+    )
+    assert (
+        calkit.core._get_nvidia_gpus()
+        == [{"name": "Tesla K80", "vendor": "nvidia", "arch": None}] * 2
+    )
     # A driver that fails to answer is a machine without that GPU
     monkeypatch.setattr(
         calkit.core.subprocess,

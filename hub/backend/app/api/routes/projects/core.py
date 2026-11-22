@@ -55,6 +55,7 @@ from TexSoup import TexSoup
 import app.imports
 import app.index
 import app.projects
+import app.storage
 import app.tasks
 import calkit
 import calkit.core
@@ -1501,6 +1502,17 @@ def patch_project(
             raise HTTPException(
                 resp.status_code, "Failed to change GitHub repo visibility"
             )
+        # Buckets dedicated to the project follow its visibility
+        try:
+            app.storage.set_project_bucket_visibility(session, project)
+        except Exception:
+            logger.exception(
+                f"Failed to change bucket visibility for {owner_name}/"
+                f"{project_name}"
+            )
+            raise HTTPException(
+                502, "Failed to change Hugging Face bucket visibility"
+            )
     session.commit()
     session.refresh(project)
     return ProjectPublic.model_validate(project)
@@ -1512,7 +1524,11 @@ def delete_project(
     project_name: str,
     session: SessionDep,
     current_user: CurrentUser,
+    delete_storage: bool = False,
 ) -> Message:
+    """Delete a project, and optionally its DVC objects in every storage it
+    has used.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -1520,9 +1536,20 @@ def delete_project(
         current_user=current_user,
         min_access_level="owner",
     )
+    if delete_storage:
+        _delete_project_objects(session, project)
     session.delete(project)
     session.commit()
     return Message(message="success")
+
+
+def _delete_project_objects(session: Session, project: Project) -> None:
+    # Before the project itself, so a failure leaves it to try again
+    try:
+        app.storage.delete_project_objects(session, project)
+    except Exception:
+        logger.exception(f"Failed to delete storage for {project.name}")
+        raise HTTPException(502, "Failed to delete project storage")
 
 
 @router.delete("/projects/{project_id}")
@@ -1530,13 +1557,19 @@ def delete_project_by_id(
     project_id: uuid.UUID,
     session: SessionDep,
     current_user: CurrentUser,
+    delete_storage: bool = False,
 ) -> Message:
+    """Delete a project, and optionally its DVC objects in every storage it
+    has used.
+    """
     project = session.get(Project, project_id)
     if project is None:
         raise HTTPException(404)
     # TODO: Check for collaborator access
     if project.owner != current_user:
         raise HTTPException(403)
+    if delete_storage:
+        _delete_project_objects(session, project)
     session.delete(project)
     session.commit()
     return Message(message="success")

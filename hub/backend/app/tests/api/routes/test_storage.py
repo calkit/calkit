@@ -1,7 +1,7 @@
 """Tests for app.api.routes.storage endpoints."""
 
 import uuid
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session
@@ -69,8 +69,10 @@ def test_storage_resources_and_project_storage(
             base, headers=owner_headers, json=post | {"name": "unused"}
         )
         assert response.status_code == 200
-    names = [r["name"] for r in client.get(base, headers=owner_headers).json()]
-    assert names == ["hf", "unused"]
+    listed = client.get(base, headers=owner_headers).json()
+    assert [r["name"] for r in listed] == ["hf", "unused"]
+    assert not any(r["dedicated"] for r in listed)
+    hf_id = listed[0]["id"]
     # Switching a project's storage
     project = Project(
         name=f"storage-{uuid.uuid4().hex[:8]}",
@@ -86,25 +88,81 @@ def test_storage_resources_and_project_storage(
     response = client.get(project_url, headers=owner_headers)
     assert response.json() == {"dvc": None, "previous": []}
     response = client.put(
-        project_url, headers=other_headers, json={"dvc_storage_name": "hf"}
+        project_url, headers=other_headers, json={"dvc_storage_id": hf_id}
     )
     assert response.status_code in (403, 404)
     response = client.put(
-        project_url, headers=owner_headers, json={"dvc_storage_name": "nope"}
+        project_url,
+        headers=owner_headers,
+        json={"dvc_storage_id": str(uuid.uuid4())},
     )
     assert response.status_code == 404
     response = client.put(
-        project_url, headers=owner_headers, json={"dvc_storage_name": "hf"}
+        project_url, headers=owner_headers, json={"dvc_storage_id": hf_id}
     )
     assert response.status_code == 200
     assert response.json()["dvc"]["name"] == "hf"
     assert response.json()["previous"] == []
     # Switching back keeps the old storage around for reads
     response = client.put(
-        project_url, headers=owner_headers, json={"dvc_storage_name": None}
+        project_url, headers=owner_headers, json={"dvc_storage_id": None}
     )
     assert response.json()["dvc"] is None
     assert [r["name"] for r in response.json()["previous"]] == ["hf"]
+    # A bucket of its own, made with the owner's HF account, public like the
+    # project, which other users can't make
+    bucket_url = f"{project_url}/hf-bucket"
+    bucket = {"bucket": f"someone/{project.name}"}
+    response = client.post(bucket_url, headers=other_headers, json=bucket)
+    assert response.status_code in (403, 404)
+    with (
+        patch("app.users.get_huggingface_token", return_value="hf-token"),
+        patch("huggingface_hub.create_bucket") as create_bucket,
+    ):
+        response = client.post(
+            bucket_url, headers=owner_headers, json={"bucket": "no-namespace"}
+        )
+        assert response.status_code == 422
+        response = client.post(bucket_url, headers=owner_headers, json=bucket)
+        assert response.status_code == 200, response.text
+        create_bucket.assert_called_once_with(
+            bucket["bucket"], private=False, token="hf-token"
+        )
+        # Someone else's bucket, or one made by hand, isn't taken over
+        from huggingface_hub.errors import HfHubHTTPError
+
+        create_bucket.side_effect = HfHubHTTPError(
+            "exists", response=MagicMock(status_code=409)
+        )
+        response = client.post(
+            bucket_url, headers=owner_headers, json={"bucket": "someone/taken"}
+        )
+        assert response.status_code == 409
+    dedicated = client.get(project_url, headers=owner_headers).json()
+    assert dedicated["dvc"]["bucket"] == bucket["bucket"]
+    assert dedicated["dvc"]["dedicated"] is True
+    assert dedicated["dvc"]["name"] is None
+    assert [r["name"] for r in dedicated["previous"]] == ["hf"]
+    # It's only listed for its project, not the account
+    listed = client.get(base, headers=owner_headers).json()
+    assert [r["name"] for r in listed] == ["hf", "unused"]
+    # Another project can't use it
+    other_project = Project(
+        name=f"storage-{uuid.uuid4().hex[:8]}",
+        title="Other storage project",
+        git_repo_url="https://github.com/someone/other",
+        owner_account_id=owner.account.id,
+        owner_account=owner.account,
+        is_public=True,
+    )
+    db.add(other_project)
+    db.commit()
+    response = client.put(
+        f"/projects/{account_name}/{other_project.name}/storage",
+        headers=owner_headers,
+        json={"dvc_storage_id": dedicated["dvc"]["id"]},
+    )
+    assert response.status_code == 404
     # Storage a project has used can't be disconnected, but unused can
     response = client.delete(f"{base}/hf", headers=owner_headers)
     assert response.status_code == 409

@@ -2,6 +2,7 @@
 
 import logging
 import re
+import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
@@ -30,9 +31,13 @@ HF_BUCKET_RE = re.compile(r"^[\w.-]{2,96}/[\w.-]{2,96}$")
 
 
 class StorageResourcePublic(BaseModel):
-    name: str
+    id: uuid.UUID
+    # Only for storage shared by an account's projects
+    name: str | None
     kind: str
     bucket: str
+    # Whether it holds one project, e.g., an HF bucket of its own
+    dedicated: bool
     created: datetime
     connected_by: str
 
@@ -48,9 +53,11 @@ class StorageResourcePost(BaseModel):
 
 def to_public(resource: StorageResource) -> StorageResourcePublic:
     return StorageResourcePublic(
+        id=resource.id,
         name=resource.name,
         kind=resource.kind,
         bucket=resource.bucket,
+        dedicated=resource.project_id is not None,
         created=resource.created,
         connected_by=resource.credential_user.account.name,
     )
@@ -86,9 +93,13 @@ def get_account_storage(
     account = get_storage_account(
         session, current_user, account_name, manage=False
     )
+    # Storage dedicated to a project is only listed for that project
     resources = session.exec(
         select(StorageResource)
-        .where(StorageResource.owner_account_id == account.id)
+        .where(
+            StorageResource.owner_account_id == account.id,
+            StorageResource.project_id.is_(None),  # type: ignore[union-attr]
+        )
         .order_by(StorageResource.name)
     ).all()
     return [to_public(r) for r in resources]
@@ -198,9 +209,37 @@ class ProjectStorageSettings(BaseModel):
 
 
 class ProjectStoragePut(BaseModel):
-    # The name of a storage resource of the project owner's account, or null
-    # for the hub's own storage
-    dvc_storage_name: str | None
+    # The ID of storage the project owner's account shares among its
+    # projects, or that's dedicated to this one, or null for the hub's own
+    # storage
+    dvc_storage_id: uuid.UUID | None
+
+
+class ProjectHfBucketPost(BaseModel):
+    # ``{namespace}/{bucket_name}``, where the namespace is the user's HF
+    # username or one of their HF orgs
+    bucket: str
+
+
+def set_project_storage(
+    session: Session, project: Project, resource: StorageResource | None
+) -> None:
+    """Send a project's new DVC objects to storage, keeping a record of every
+    storage it has used so reads can fall back through them.
+    """
+    project.dvc_storage = resource
+    project.dvc_storage_id = resource.id if resource is not None else None
+    if resource is not None and not any(
+        r.storage_resource_id == resource.id for r in project.storage_history
+    ):
+        session.add(
+            ProjectStorageHistory(
+                project_id=project.id, storage_resource_id=resource.id
+            )
+        )
+    session.add(project)
+    session.commit()
+    session.refresh(project)
 
 
 def get_project_storage_settings(project: Project) -> ProjectStorageSettings:
@@ -317,33 +356,64 @@ def put_project_storage(
         current_user=current_user,
         min_access_level="owner",
     )
-    if req.dvc_storage_name is None:
-        project.dvc_storage_id = None
-        project.dvc_storage = None
-    else:
-        resource = session.exec(
-            select(StorageResource).where(
-                StorageResource.owner_account_id == project.owner_account_id,
-                StorageResource.name == req.dvc_storage_name,
-            )
-        ).first()
-        if resource is None:
-            raise HTTPException(
-                404,
-                f"Storage '{req.dvc_storage_name}' not found for "
-                f"{project.owner_account_name}",
-            )
-        project.dvc_storage = resource
-        if not any(
-            r.storage_resource_id == resource.id
-            for r in project.storage_history
+    resource = None
+    if req.dvc_storage_id is not None:
+        resource = session.get(StorageResource, req.dvc_storage_id)
+        if (
+            resource is None
+            or resource.owner_account_id != project.owner_account_id
+            or resource.project_id not in (None, project.id)
         ):
-            session.add(
-                ProjectStorageHistory(
-                    project_id=project.id, storage_resource_id=resource.id
-                )
-            )
-    session.add(project)
-    session.commit()
-    session.refresh(project)
+            raise HTTPException(404, "Storage not found")
+    set_project_storage(session, project, resource)
+    return get_project_storage_settings(project)
+
+
+@router.post("/projects/{owner_name}/{project_name}/storage/hf-bucket")
+def post_project_hf_bucket(
+    owner_name: str,
+    project_name: str,
+    req: ProjectHfBucketPost,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ProjectStorageSettings:
+    """Create an HF bucket dedicated to a project, with the current user's
+    HF account, and send the project's new DVC objects there.
+
+    The bucket is public if the project is, and its visibility follows the
+    project's from then on.
+    """
+    from huggingface_hub import create_bucket
+    from huggingface_hub.errors import HfHubHTTPError
+
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="owner",
+    )
+    if not HF_BUCKET_RE.match(req.bucket):
+        raise HTTPException(422, "Bucket must be like 'namespace/name'")
+    token = users.get_huggingface_token(session=session, user=current_user)
+    try:
+        create_bucket(req.bucket, private=not project.is_public, token=token)
+    except HfHubHTTPError as e:
+        status_code = (
+            e.response.status_code if e.response is not None else None
+        )
+        logger.info(f"Failed to create HF bucket {req.bucket}: {e}")
+        if status_code == 409:
+            raise HTTPException(409, f"Bucket '{req.bucket}' already exists")
+        raise HTTPException(400, f"Couldn't create bucket '{req.bucket}'")
+    resource = StorageResource(
+        owner_account_id=project.owner_account_id,
+        project_id=project.id,
+        kind="hf-bucket",
+        bucket=req.bucket,
+        credential_user_id=current_user.id,
+    )
+    resource.credential_user = current_user
+    session.add(resource)
+    set_project_storage(session, project, resource)
     return get_project_storage_settings(project)

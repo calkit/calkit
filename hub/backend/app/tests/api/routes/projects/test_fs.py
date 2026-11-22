@@ -226,7 +226,9 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         backend="hf",
         fs=FakeHfFileSystem(),
         data_prefix="/buckets/ns/bkt",
-        resource=SimpleNamespace(bucket="ns/bkt"),  # type: ignore[arg-type]
+        resource=SimpleNamespace(  # type: ignore[arg-type]
+            bucket="ns/bkt", project_id=None
+        ),
         token="hf-owner-token",
     )
     internal = ProjectStorage(
@@ -411,6 +413,55 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
             },
         )
         assert response.status_code == 400
+    # A bucket dedicated to the project holds it at its root, though clients
+    # see the same paths as anywhere else
+    dedicated = ProjectStorage(
+        backend="hf",
+        fs=FakeHfFileSystem(),
+        data_prefix="/buckets/ns/proj",
+        resource=SimpleNamespace(  # type: ignore[arg-type]
+            bucket="ns/proj", project_id="project-id"
+        ),
+        token="hf-owner-token",
+    )
+    dedicated.fs.pipe(f"/buckets/ns/proj/{new_path}", b"new!")
+    with (
+        patch(
+            "app.api.routes.projects.fs.app.projects.get_project",
+            return_value=_fake_project(),
+        ),
+        patch(
+            "app.api.routes.projects.fs.storage.get_project_storages",
+            return_value=[dedicated, internal],
+        ),
+        patch(
+            "app.api.routes.projects.fs.storage.get_project_storage",
+            return_value=dedicated,
+        ),
+        patch(
+            "app.api.routes.projects.fs.storage.post_hf_bucket_batch"
+        ) as batch,
+    ):
+        response = client.post(
+            FS_OPS_URL, json={"operation": "find", "path": "files/md5"}
+        )
+        assert sorted(response.json()["result"]["paths"]) == [
+            f"{OWNER}/{PROJECT}/{old_path}",
+            f"{OWNER}/{PROJECT}/{new_path}",
+        ]
+        register = {
+            "operation": "register",
+            "paths": ["files/md5/cc/x"],
+            "xet_hashes": {"files/md5/cc/x": "b" * 64},
+        }
+        response = client.post(f"{FS_OPS_URL}/batch", json=register)
+        assert response.status_code == 200
+        assert batch.call_args.args[1][0]["path"] == "files/md5/cc/x"
+        batch.side_effect = HfBucketBatchError(
+            [{"path": "files/md5/cc/x", "error": "Unknown xet hash"}]
+        )
+        response = client.post(f"{FS_OPS_URL}/batch", json=register)
+        assert "1 of 1 files: files/md5/cc/x" in response.json()["detail"]
 
 
 def test_batch_op_answers_every_path(client: TestClient):

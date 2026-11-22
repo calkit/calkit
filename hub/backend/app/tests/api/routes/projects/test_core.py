@@ -5905,7 +5905,9 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
         backend="hf",
         fs=None,
         data_prefix="buckets/someone/bucket",
-        resource=SimpleNamespace(bucket="someone/bucket"),  # type: ignore[arg-type]
+        resource=SimpleNamespace(  # type: ignore[arg-type]
+            bucket="someone/bucket", project_id=None
+        ),
         token="hf-token",
     )
     with patch("huggingface_hub.HfApi") as api:
@@ -6264,3 +6266,59 @@ def test_get_user_overleaf_sync_scans_lazily(
     resp = _lookup(refresh=True)
     assert resp.status_code == 200
     assert resp.json()["projects_scanned"] == 1
+
+
+def test_project_storage_follows_project(
+    client: TestClient, db: Session
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    project_id = project.id
+    # Its buckets change visibility with it
+    with (
+        patch("app.users.get_github_token", return_value="gh-token"),
+        patch(
+            "app.api.routes.projects.core.requests.patch",
+            return_value=SimpleNamespace(status_code=200, text=""),
+        ),
+        patch("app.storage.set_project_bucket_visibility") as set_visibility,
+    ):
+        response = client.patch(
+            base, headers=headers, json={"is_public": True}
+        )
+        assert response.status_code == 200, response.text
+        set_visibility.assert_called_once()
+        # Not just a title change
+        client.patch(base, headers=headers, json={"title": "New title"})
+        set_visibility.assert_called_once()
+    # Deleting it deletes its storage only when asked, and if that fails,
+    # the project stays so it can be tried again
+    with patch("app.storage.delete_project_objects") as delete_objects:
+        delete_objects.side_effect = RuntimeError("HF down")
+        response = client.delete(
+            f"/projects/{project_id}",
+            headers=headers,
+            params={"delete_storage": True},
+        )
+        assert response.status_code == 502
+        db.expire_all()
+        assert db.get(Project, project_id) is not None
+        delete_objects.side_effect = None
+        delete_objects.reset_mock()
+        response = client.delete(
+            f"/projects/{project_id}",
+            headers=headers,
+            params={"delete_storage": True},
+        )
+        assert response.status_code == 200
+        delete_objects.assert_called_once()
+        db.expire_all()
+        assert db.get(Project, project_id) is None
+    other, headers = _make_owner_with_project(db, client)
+    with patch("app.storage.delete_project_objects") as delete_objects:
+        response = client.delete(
+            f"/projects/{other.owner_account.name}/{other.name}",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        delete_objects.assert_not_called()

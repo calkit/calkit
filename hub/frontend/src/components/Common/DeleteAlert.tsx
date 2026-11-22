@@ -6,13 +6,20 @@ import {
   AlertDialogHeader,
   AlertDialogOverlay,
   Button,
+  Checkbox,
+  Text,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { AxiosError } from "axios"
 import React from "react"
 import { useForm } from "react-hook-form"
 
-import { OrgsService, ProjectsService, UsersService } from "../../client"
+import {
+  OrgsService,
+  ProjectsService,
+  StorageService,
+  UsersService,
+} from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -50,11 +57,33 @@ const Delete = ({
     handleSubmit,
     formState: { isSubmitting },
   } = useForm()
+  // A project's files in storage can go with it
+  const [deleteStorage, setDeleteStorage] = React.useState(false)
+  const storageQuery = useQuery({
+    queryKey: ["projects", projectOwner, projectName, "storage"],
+    queryFn: () =>
+      StorageService.getProjectStorage({
+        owner_name: projectOwner as string,
+        project_name: projectName as string,
+      }).then((response) => response.data),
+    enabled: isOpen && type === "Project" && !!projectOwner && !!projectName,
+  })
+  const storageLocations = storageQuery.data
+    ? [
+        ...(storageQuery.data.dvc ? [storageQuery.data.dvc] : []),
+        ...storageQuery.data.previous,
+      ].map((r) =>
+        r.dedicated
+          ? `Hugging Face bucket ${r.bucket}`
+          : `Project folder in Hugging Face bucket ${r.bucket}`,
+      )
+    : []
 
   const deleteEntity = async (id: string) => {
     if (type === "Project") {
       await ProjectsService.deleteProjectById({
         project_id: id,
+        delete_storage: deleteStorage,
       }).then((response) => response.data)
     } else if (type === "User") {
       await UsersService.deleteUser({ user_id: id }).then(
@@ -167,6 +196,22 @@ const Delete = ({
                 </span>
               )}
               Are you sure? You will not be able to undo this action.
+              {type === "Project" && (
+                <>
+                  <Checkbox
+                    mt={4}
+                    isChecked={deleteStorage}
+                    onChange={(e) => setDeleteStorage(e.target.checked)}
+                  >
+                    Delete stored files too
+                  </Checkbox>
+                  {deleteStorage && (
+                    <Text mt={2} fontSize="sm" color="ui.dim">
+                      {["Calkit Hub storage", ...storageLocations].join(", ")}
+                    </Text>
+                  )}
+                </>
+              )}
             </AlertDialogBody>
             <AlertDialogFooter gap={3}>
               <Button

@@ -7481,6 +7481,18 @@ export const ProjectCommentPostSchema = {
   title: "ProjectCommentPost",
 } as const
 
+export const ProjectHfBucketPostSchema = {
+  properties: {
+    bucket: {
+      type: "string",
+      title: "Bucket",
+    },
+  },
+  type: "object",
+  required: ["bucket"],
+  title: "ProjectHfBucketPost",
+} as const
+
 export const ProjectInvitationCreatedSchema = {
   properties: {
     id: {
@@ -8451,20 +8463,21 @@ export const ProjectStatusPostSchema = {
 
 export const ProjectStoragePutSchema = {
   properties: {
-    dvc_storage_name: {
+    dvc_storage_id: {
       anyOf: [
         {
           type: "string",
+          format: "uuid",
         },
         {
           type: "null",
         },
       ],
-      title: "Dvc Storage Name",
+      title: "Dvc Storage Id",
     },
   },
   type: "object",
-  required: ["dvc_storage_name"],
+  required: ["dvc_storage_id"],
   title: "ProjectStoragePut",
 } as const
 
@@ -12375,8 +12388,20 @@ export const StorageResourcePostSchema = {
 
 export const StorageResourcePublicSchema = {
   properties: {
-    name: {
+    id: {
       type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Name",
     },
     kind: {
@@ -12386,6 +12411,10 @@ export const StorageResourcePublicSchema = {
     bucket: {
       type: "string",
       title: "Bucket",
+    },
+    dedicated: {
+      type: "boolean",
+      title: "Dedicated",
     },
     created: {
       type: "string",
@@ -12398,7 +12427,15 @@ export const StorageResourcePublicSchema = {
     },
   },
   type: "object",
-  required: ["name", "kind", "bucket", "created", "connected_by"],
+  required: [
+    "id",
+    "name",
+    "kind",
+    "bucket",
+    "dedicated",
+    "created",
+    "connected_by",
+  ],
   title: "StorageResourcePublic",
 } as const
 

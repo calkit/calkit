@@ -4403,6 +4403,16 @@ export type ProjectCommentPost = {
 }
 
 /**
+ * ProjectHfBucketPost
+ */
+export type ProjectHfBucketPost = {
+  /**
+   * Bucket
+   */
+  bucket: string
+}
+
+/**
  * ProjectInvitationCreated
  */
 export type ProjectInvitationCreated = {
@@ -4881,9 +4891,9 @@ export type ProjectStatusPost = {
  */
 export type ProjectStoragePut = {
   /**
-   * Dvc Storage Name
+   * Dvc Storage Id
    */
-  dvc_storage_name: string | null
+  dvc_storage_id: string | null
 }
 
 /**
@@ -7068,9 +7078,13 @@ export type StorageResourcePost = {
  */
 export type StorageResourcePublic = {
   /**
+   * Id
+   */
+  id: string
+  /**
    * Name
    */
-  name: string
+  name: string | null
   /**
    * Kind
    */
@@ -7079,6 +7093,10 @@ export type StorageResourcePublic = {
    * Bucket
    */
   bucket: string
+  /**
+   * Dedicated
+   */
+  dedicated: boolean
   /**
    * Created
    */
@@ -11058,7 +11076,12 @@ export type DeleteProjectData = {
      */
     project_name: string
   }
-  query?: never
+  query?: {
+    /**
+     * Delete Storage
+     */
+    delete_storage?: boolean
+  }
   url: "/projects/{owner_name}/{project_name}"
 }
 
@@ -11167,7 +11190,12 @@ export type DeleteProjectByIdData = {
      */
     project_id: string
   }
-  query?: never
+  query?: {
+    /**
+     * Delete Storage
+     */
+    delete_storage?: boolean
+  }
   url: "/projects/{project_id}"
 }
 
@@ -17671,6 +17699,42 @@ export type GetProjectStorageUsageResponses = {
 
 export type GetProjectStorageUsageResponse =
   GetProjectStorageUsageResponses[keyof GetProjectStorageUsageResponses]
+
+export type PostProjectHfBucketData = {
+  body: ProjectHfBucketPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage/hf-bucket"
+}
+
+export type PostProjectHfBucketErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectHfBucketError =
+  PostProjectHfBucketErrors[keyof PostProjectHfBucketErrors]
+
+export type PostProjectHfBucketResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectStorageSettings
+}
+
+export type PostProjectHfBucketResponse =
+  PostProjectHfBucketResponses[keyof PostProjectHfBucketResponses]
 
 export type GetMachinesData = {
   body?: never

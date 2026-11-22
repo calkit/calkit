@@ -413,6 +413,8 @@ import type {
   PostProjectFsOpResponses,
   PostProjectGithubReleaseErrors,
   PostProjectGithubReleaseResponses,
+  PostProjectHfBucketErrors,
+  PostProjectHfBucketResponses,
   PostProjectImportUpdateErrors,
   PostProjectImportUpdateResponses,
   PostProjectInvitationErrors,
@@ -500,6 +502,7 @@ import type {
   PostVerifyEmailResponses,
   ProjectCommentPatch,
   ProjectCommentPost,
+  ProjectHfBucketPost,
   ProjectInvitationPost,
   ProjectPatch,
   ProjectPost,
@@ -3312,11 +3315,15 @@ export class ProjectsService {
 
   /**
    * Delete Project
+   *
+   * Delete a project, and optionally its DVC objects in every storage it
+   * has used.
    */
   public static deleteProject<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
+      delete_storage?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<DeleteProjectResponses, DeleteProjectErrors, ThrowOnError> {
@@ -3327,6 +3334,7 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
+            { in: "query", key: "delete_storage" },
           ],
         },
       ],
@@ -3425,10 +3433,14 @@ export class ProjectsService {
 
   /**
    * Delete Project By Id
+   *
+   * Delete a project, and optionally its DVC objects in every storage it
+   * has used.
    */
   public static deleteProjectById<ThrowOnError extends boolean = true>(
     parameters: {
       project_id: string
+      delete_storage?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3438,7 +3450,14 @@ export class ProjectsService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "project_id" }] }],
+      [
+        {
+          args: [
+            { in: "path", key: "project_id" },
+            { in: "query", key: "delete_storage" },
+          ],
+        },
+      ],
     )
     return (options?.client ?? client).delete<
       DeleteProjectByIdResponses,
@@ -10688,6 +10707,57 @@ export class StorageService {
       url: "/projects/{owner_name}/{project_name}/storage/usage",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Post Project Hf Bucket
+   *
+   * Create an HF bucket dedicated to a project, with the current user's
+   * HF account, and send the project's new DVC objects there.
+   *
+   * The bucket is public if the project is, and its visibility follows the
+   * project's from then on.
+   */
+  public static postProjectHfBucket<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      projectHfBucketPost: ProjectHfBucketPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectHfBucketResponses,
+    PostProjectHfBucketErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "projectHfBucketPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectHfBucketResponses,
+      PostProjectHfBucketErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/storage/hf-bucket",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

@@ -331,7 +331,8 @@ class ProjectStorage:
     """Where a project's DVC objects live in one storage backend.
 
     A project's objects are under ``{data_prefix}/{owner}/{project}`` in
-    ``fs``.
+    ``fs``, or right under ``data_prefix`` if the storage is dedicated to
+    the project.
     """
 
     backend: Literal["s3", "gcs", "hf"]
@@ -341,13 +342,30 @@ class ProjectStorage:
     # Owner's credential for the backend, when the hub holds one
     token: str | None = None
 
+    @property
+    def is_dedicated(self) -> bool:
+        return (
+            self.resource is not None and self.resource.project_id is not None
+        )
+
     def make_project_path(
         self, owner_name: str, project_name: str, path: str = ""
     ) -> str:
         base = (
-            f"{self.data_prefix}/{owner_name.lower()}/{project_name.lower()}"
+            self.data_prefix
+            if self.is_dedicated
+            else f"{self.data_prefix}/{owner_name.lower()}/{project_name.lower()}"
         )
         return f"{base}/{path}" if path else base
+
+    def make_container_path(
+        self, owner_name: str, project_name: str, path: str = ""
+    ) -> str:
+        """Make a path relative to the bucket or folder, e.g., for HF's
+        batch API.
+        """
+        full = self.make_project_path(owner_name, project_name, path)
+        return full.removeprefix(self.data_prefix).lstrip("/")
 
 
 def get_internal_storage() -> ProjectStorage:
@@ -452,6 +470,58 @@ def find_project_object(
         if storage.fs.exists(fpath):
             return storage, fpath
     return None
+
+
+def set_project_bucket_visibility(
+    session: "Session", project: "Project"
+) -> None:
+    """Make the buckets dedicated to a project match its visibility."""
+    from huggingface_hub import HfApi
+    from sqlmodel import select
+
+    from app.models import StorageResource
+
+    resources = session.exec(
+        select(StorageResource).where(StorageResource.project_id == project.id)
+    ).all()
+    for resource in resources:
+        target = get_resource_storage(session, resource)
+        HfApi(token=target.token).update_bucket_settings(
+            resource.bucket, private=not project.is_public
+        )
+
+
+def delete_project_objects(session: "Session", project: "Project") -> None:
+    """Delete a project's DVC objects from every storage it has used.
+
+    Buckets dedicated to the project are deleted, and its folders in other
+    storage, including the hub's own, are removed. Storage that can't be
+    reached is skipped.
+    """
+    from huggingface_hub import HfApi
+
+    owner_name = project.owner_account_name
+    for target in get_project_storages(session, project):
+        if target.is_dedicated:
+            assert target.resource is not None
+            HfApi(token=target.token).delete_bucket(
+                target.resource.bucket, missing_ok=True
+            )
+            continue
+        base = target.make_project_path(owner_name, project.name)
+        if target.backend == "hf":
+            assert target.resource is not None
+            paths = [
+                p.removeprefix(f"{target.data_prefix}/")
+                for p in target.fs.find(base)
+            ]
+            if paths:
+                HfApi(token=target.token).batch_bucket_files(
+                    target.resource.bucket, delete=paths
+                )
+        elif target.fs.exists(base):
+            target.fs.rm(base, recursive=True)
+    invalidate_storage_usage_cache(owner_name)
 
 
 def get_xet_token(

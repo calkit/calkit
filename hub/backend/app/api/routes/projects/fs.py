@@ -305,23 +305,32 @@ def post_project_fs_op(
                     if req.detail
                     else list(found.keys())
                 )
+            # Paths go back as if in a namespace, even from dedicated
+            # storage, i.e., under ``{owner}/{project}``
+            data_prefix = st.data_prefix
+            project_prefix = ""
+            if st.is_dedicated:
+                project_prefix = f"{owner_name}/{project_name}/"
             for item in found:
                 if req.detail:
                     if isinstance(item, str):
                         item = {"name": item, "Key": item}
-                    name = _strip_data_prefix(
-                        item.get("name", ""), st.data_prefix
+                    name = project_prefix + _strip_data_prefix(
+                        item.get("name", ""), data_prefix
                     )
                     item = item | {
                         "name": name,
-                        "Key": _strip_data_prefix(
+                        "Key": project_prefix
+                        + _strip_data_prefix(
                             item.get("Key", item.get("name", "")),
-                            st.data_prefix,
+                            data_prefix,
                         ),
                     }
                     merged.setdefault(name, item)
                 else:
-                    name = _strip_data_prefix(item, st.data_prefix)
+                    name = project_prefix + _strip_data_prefix(
+                        item, data_prefix
+                    )
                     merged.setdefault(name, name)
         return FsOpResponse(
             backend=backend,
@@ -610,9 +619,9 @@ def post_project_fs_batch_op(
         ops = [
             {
                 "type": "addFile",
-                "path": target.make_project_path(
+                "path": target.make_container_path(
                     owner_name, project_name, path
-                ).removeprefix(f"{target.data_prefix}/"),
+                ),
                 "xetHash": xet_hashes[path],
             }
             for path in paths
@@ -621,9 +630,10 @@ def post_project_fs_batch_op(
             storage.post_hf_bucket_batch(target, ops)
         except storage.HfBucketBatchError as e:
             logger.error(f"Failed to register files: {e}")
-            prefix = f"{owner_name}/{project_name}/"
+            base = target.make_container_path(owner_name, project_name)
             failed = [
-                str(f.get("path", "")).partition(prefix)[2] for f in e.failures
+                str(f.get("path", "")).removeprefix(base).lstrip("/")
+                for f in e.failures
             ]
             # Not 502, since retrying won't help, and the CLI retries those
             raise HTTPException(

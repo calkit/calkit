@@ -843,7 +843,10 @@ class Project(ProjectBase, table=True):
     )
     # Relationships
     owner_account: Account = Relationship(back_populates="owned_projects")
-    dvc_storage: Union["StorageResource", None] = Relationship()
+    # Storage dedicated to a project points back at it, so the key is named
+    dvc_storage: Union["StorageResource", None] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[Project.dvc_storage_id]"}
+    )
     storage_history: list["ProjectStorageHistory"] = Relationship(
         back_populates="project", cascade_delete=True
     )
@@ -1122,8 +1125,10 @@ class ProjectDvcPush(SQLModel, table=True):
 class StorageResource(SQLModel, table=True):
     """External storage connected to an account, e.g., an HF bucket.
 
-    Projects owned by the account can use it for their DVC objects, each
-    under its own ``{owner}/{project}`` folder. The credential used to reach
+    Storage dedicated to one project, e.g., an HF bucket of its own, has a
+    ``project_id``, and holds that project's DVC objects at its root.
+    Otherwise, it's a namespace that projects owned by the account can use,
+    each under its own ``{owner}/{project}`` folder. The credential used to reach
     it is the external credential of the user who connected it, so it's
     deleted with that user, since it can't be reached without them.
     """
@@ -1139,7 +1144,11 @@ class StorageResource(SQLModel, table=True):
     owner_account_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
-    name: str = Field(min_length=2, max_length=64)
+    project_id: uuid.UUID | None = Field(
+        default=None, foreign_key="project.id", index=True, ondelete="CASCADE"
+    )
+    # Only namespace storage has a name, which projects select it by
+    name: str | None = Field(default=None, min_length=2, max_length=64)
     # Only "hf-bucket" for now
     kind: str = Field(max_length=32)
     # For HF buckets, the bucket ID, i.e., ``{namespace}/{bucket_name}``

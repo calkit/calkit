@@ -21,10 +21,11 @@ def upgrade():
         'storageresource',
         sa.Column('id', sa.Uuid(), nullable=False),
         sa.Column('owner_account_id', sa.Uuid(), nullable=False),
+        sa.Column('project_id', sa.Uuid(), nullable=True),
         sa.Column(
             'name',
             sqlmodel.sql.sqltypes.AutoString(length=64),
-            nullable=False,
+            nullable=True,
         ),
         sa.Column(
             'kind',
@@ -42,6 +43,9 @@ def upgrade():
             ['owner_account_id'], ['account.id'], ondelete='CASCADE'
         ),
         sa.ForeignKeyConstraint(
+            ['project_id'], ['project.id'], ondelete='CASCADE'
+        ),
+        sa.ForeignKeyConstraint(
             ['credential_user_id'], ['user.id'], ondelete='CASCADE'
         ),
         sa.PrimaryKeyConstraint('id'),
@@ -55,6 +59,12 @@ def upgrade():
         op.f('ix_storageresource_owner_account_id'),
         'storageresource',
         ['owner_account_id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_storageresource_project_id'),
+        'storageresource',
+        ['project_id'],
         unique=False,
     )
     op.add_column(
@@ -89,6 +99,10 @@ def downgrade():
         'project_dvc_storage_id_fkey', 'project', type_='foreignkey'
     )
     op.drop_column('project', 'dvc_storage_id')
+    op.drop_index(
+        op.f('ix_storageresource_project_id'),
+        table_name='storageresource',
+    )
     op.drop_index(
         op.f('ix_storageresource_owner_account_id'),
         table_name='storageresource',

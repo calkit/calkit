@@ -26,7 +26,7 @@ import { type SubmitHandler, useForm } from "react-hook-form"
 import { z } from "zod"
 
 import {
-  type StorageResourcePost,
+  type StorageResourcePublic,
   StorageService,
   UsersService,
 } from "../../../../../client"
@@ -46,8 +46,9 @@ export const Route = createFileRoute(
   validateSearch: (search) => settingsSearchSchema.parse(search),
 })
 
-interface AddStorageProps {
+interface NewHfBucketProps {
   accountName: string
+  projectName: string
   isOpen: boolean
   onClose: () => void
   hfConnected: boolean | undefined
@@ -55,14 +56,20 @@ interface AddStorageProps {
   isConnecting: boolean
 }
 
-const AddStorage = ({
+interface NewHfBucketForm {
+  namespace: string
+  name: string
+}
+
+const NewHfBucket = ({
   accountName,
+  projectName,
   isOpen,
   onClose,
   hfConnected,
   onConnect,
   isConnecting,
-}: AddStorageProps) => {
+}: NewHfBucketProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
   const hfAccountQuery = useQuery({
@@ -79,24 +86,30 @@ const AddStorage = ({
     reset,
     setValue,
     formState: { errors },
-  } = useForm<StorageResourcePost>({
+  } = useForm<NewHfBucketForm>({
     mode: "onBlur",
-    defaultValues: { name: "hf", kind: "hf-bucket", bucket: "" },
+    defaultValues: { namespace: "", name: projectName },
   })
+  // The user's HF account, then their orgs
   const hfUsername = hfAccountQuery.data?.username
+  const namespaces = [
+    ...(hfUsername ? [hfUsername] : []),
+    ...(hfAccountQuery.data?.orgs ?? []),
+  ]
   useEffect(() => {
     if (hfUsername) {
-      setValue("bucket", `${hfUsername}/calkit`)
+      setValue("namespace", hfUsername)
     }
   }, [hfUsername, setValue])
   const mutation = useMutation({
-    mutationFn: (data: StorageResourcePost) =>
-      StorageService.postAccountStorage({
-        account_name: accountName,
-        storageResourcePost: data,
+    mutationFn: (data: NewHfBucketForm) =>
+      StorageService.postProjectHfBucket({
+        owner_name: accountName,
+        project_name: projectName,
+        projectHfBucketPost: { bucket: `${data.namespace}/${data.name}` },
       }).then((response) => response.data),
     onSuccess: () => {
-      showToast("Success!", "Storage added.", "success")
+      showToast("Success!", "Bucket created.", "success")
       reset()
       onClose()
     },
@@ -105,11 +118,11 @@ const AddStorage = ({
     },
     onSettled: () => {
       queryClient.invalidateQueries({
-        queryKey: ["accounts", accountName, "storage"],
+        queryKey: ["projects", accountName, projectName, "storage"],
       })
     },
   })
-  const onSubmit: SubmitHandler<StorageResourcePost> = (data) => {
+  const onSubmit: SubmitHandler<NewHfBucketForm> = (data) => {
     mutation.mutate(data)
   }
 
@@ -131,54 +144,44 @@ const AddStorage = ({
         data-1p-ignore
         data-lpignore="true"
       >
-        <ModalHeader>Add Hugging Face bucket</ModalHeader>
+        <ModalHeader>New Hugging Face bucket</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={6}>
-          {hfConnected === undefined ? (
+          {hfConnected === undefined ||
+          (hfConnected && hfAccountQuery.isPending) ? (
             <SkeletonText noOfLines={2} />
           ) : !hfConnected ? (
             <Text>Hugging Face not connected</Text>
           ) : (
             <>
-              <FormControl isInvalid={!!errors.name}>
-                <FormLabel htmlFor="name">Name</FormLabel>
+              <FormControl>
+                <FormLabel htmlFor="namespace">Hugging Face account</FormLabel>
+                <Select id="namespace" {...register("namespace")}>
+                  {namespaces.map((namespace) => (
+                    <option key={namespace} value={namespace}>
+                      {namespace}
+                    </option>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl mt={4} isInvalid={!!errors.name}>
+                <FormLabel htmlFor="bucket-name">Bucket name</FormLabel>
                 <Input
-                  id="name"
+                  id="bucket-name"
                   autoComplete="off"
                   data-form-type="other"
                   data-1p-ignore
                   data-lpignore="true"
                   {...register("name", {
-                    required: "Name is required",
+                    required: "Bucket name is required",
                     pattern: {
-                      value: /^[a-z0-9][a-z0-9-]*$/,
-                      message: "Use lowercase letters, numbers, and dashes",
+                      value: /^[\w.-]{2,96}$/,
+                      message: "Use letters, numbers, dashes, and dots",
                     },
                   })}
                 />
                 {errors.name && (
                   <FormErrorMessage>{errors.name.message}</FormErrorMessage>
-                )}
-              </FormControl>
-              <FormControl mt={4} isInvalid={!!errors.bucket}>
-                <FormLabel htmlFor="bucket">Bucket</FormLabel>
-                <Input
-                  id="bucket"
-                  autoComplete="off"
-                  data-form-type="other"
-                  data-1p-ignore
-                  data-lpignore="true"
-                  placeholder="namespace/bucket-name"
-                  {...register("bucket", {
-                    required: "Bucket is required",
-                    pattern: {
-                      value: /^[\w.-]+\/[\w.-]+$/,
-                      message: "Use the form namespace/bucket-name",
-                    },
-                  })}
-                />
-                {errors.bucket && (
-                  <FormErrorMessage>{errors.bucket.message}</FormErrorMessage>
                 )}
               </FormControl>
             </>
@@ -198,9 +201,9 @@ const AddStorage = ({
               variant="primary"
               type="submit"
               isLoading={mutation.isPending}
-              isDisabled={!hfConnected}
+              isDisabled={!hfConnected || namespaces.length === 0}
             >
-              Add
+              Create
             </Button>
           )}
           <Button onClick={onClose}>Cancel</Button>
@@ -267,17 +270,17 @@ function ProjectSettings() {
   const openAddStorage = () =>
     navigate({ search: (prev) => ({ ...prev, add_storage: true }) })
   // An empty string means the hub's own storage
-  const current = storageQuery.data?.dvc?.name ?? ""
+  const current = storageQuery.data?.dvc?.id ?? ""
   const [selected, setSelected] = useState(current)
   useEffect(() => {
     setSelected(current)
   }, [current])
   const mutation = useMutation({
-    mutationFn: (name: string) =>
+    mutationFn: (id: string) =>
       StorageService.putProjectStorage({
         owner_name: accountName,
         project_name: projectName,
-        projectStoragePut: { dvc_storage_name: name || null },
+        projectStoragePut: { dvc_storage_id: id || null },
       }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Storage updated.", "success")
@@ -291,8 +294,14 @@ function ProjectSettings() {
       })
     },
   })
-  const describe = (name: string, bucket: string) =>
-    `${name} (Hugging Face bucket ${bucket})`
+  const describe = (r: StorageResourcePublic) =>
+    r.kind === "hf-bucket" ? `Hugging Face bucket ${r.bucket}` : r.bucket
+  // What the project can use: its own, and what its account shares
+  const options = [
+    ...(storageQuery.data?.dvc ? [storageQuery.data.dvc] : []),
+    ...(storageQuery.data?.previous ?? []),
+    ...(accountStorageQuery.data ?? []),
+  ].filter((r, i, all) => all.findIndex((o) => o.id === r.id) === i)
 
   return (
     <Box>
@@ -307,10 +316,7 @@ function ProjectSettings() {
           <Text>
             Large files are stored in{" "}
             {storageQuery.data?.dvc
-              ? describe(
-                  storageQuery.data.dvc.name,
-                  storageQuery.data.dvc.bucket,
-                )
+              ? describe(storageQuery.data.dvc)
               : "Calkit Hub storage"}
             .
           </Text>
@@ -336,9 +342,7 @@ function ProjectSettings() {
           {storageQuery.data && storageQuery.data.previous.length > 0 && (
             <Text mt={2} color="ui.dim">
               Files pushed earlier are still read from{" "}
-              {storageQuery.data.previous
-                .map((r) => describe(r.name, r.bucket))
-                .join(", ")}
+              {storageQuery.data.previous.map((r) => describe(r)).join(", ")}
               {storageQuery.data.dvc ? " and Calkit Hub storage" : ""}.
             </Text>
           )}
@@ -350,9 +354,9 @@ function ProjectSettings() {
                 isDisabled={accountStorageQuery.isPending}
               >
                 <option value="">Calkit Hub storage</option>
-                {accountStorageQuery.data?.map((r) => (
-                  <option key={r.name} value={r.name}>
-                    {describe(r.name, r.bucket)}
+                {options.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {describe(r)}
                   </option>
                 ))}
               </Select>
@@ -372,15 +376,16 @@ function ProjectSettings() {
                 isLoading={connectMutation.isPending}
                 isDisabled={hfConnected === undefined}
               >
-                Add Hugging Face bucket
+                New Hugging Face bucket
               </Button>
             </HStack>
           )}
         </>
       )}
       {isOwner && (
-        <AddStorage
+        <NewHfBucket
           accountName={accountName}
+          projectName={projectName}
           isOpen={!!add_storage}
           onClose={() =>
             navigate({

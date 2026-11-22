@@ -1513,7 +1513,7 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
     )
     assert entry["path"] == "figures/photo.jpg"
     ck_info = calkit.load_calkit_info(wdir=str(project))
-    assert ck_info["misc"][0]["created_by"][0]["email"] == "pat@example.com"
+    assert ck_info["misc"][0]["created_by"]["email"] == "pat@example.com"
     committed = repo.git.show("--name-only", "--format=", "HEAD").split()
     assert committed == ["calkit.yaml"]
     for msg, error in [
@@ -1562,9 +1562,10 @@ def test_record_origin_and_add_export_stage(tmp_path, monkeypatch):
         "manual-step"
     )
     made = [m for m in ck_info["misc"] if m["path"] == "drawings/setup.psd"]
-    assert made[0]["created_by"] == [
-        {"email": "test@example.com", "name": "Test"}
-    ]
+    assert made[0]["created_by"] == {
+        "email": "test@example.com",
+        "name": "Test",
+    }
     committed = repo.git.show("--name-only", "--format=", "HEAD").split()
     assert {"calkit.yaml", "dvc.yaml", "drawings/setup.psd"} <= set(committed)
     assert repo.git.status("--porcelain") == " M notes.txt"

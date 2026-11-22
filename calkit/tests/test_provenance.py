@@ -1413,7 +1413,15 @@ def test_add_origin_and_add_creator():
         ck_info, "drawings/c.svg", created_by=[person], title="C"
     )
     assert ck_info["misc"] == [
-        {"path": "drawings/c.svg", "title": "C", "created_by": [person]}
+        {"path": "drawings/c.svg", "title": "C", "created_by": person}
+    ]
+    # Several people stay a list
+    ck_info, _ = add_origin(
+        ck_info, "drawings/g.svg", created_by=[person, {"email": "me@x.org"}]
+    )
+    assert ck_info["misc"].pop()["created_by"] == [
+        person,
+        {"email": "me@x.org"},
     ]
     for path, kwargs, error in [
         ("figures/b.png", {"imported_from": url}, "already declared"),
@@ -1433,14 +1441,14 @@ def test_add_origin_and_add_creator():
         {"email": "me@x.org"},
     )
     assert before["misc"][1] == {"path": "./drawings/f.psd"}
-    assert ck_info["misc"][0]["created_by"] == [person]
+    assert ck_info["misc"][0]["created_by"] == person
     assert ck_info["misc"][1] == {
         "path": "./drawings/f.psd",
-        "created_by": [{"email": "me@x.org"}],
+        "created_by": {"email": "me@x.org"},
     }
     assert ck_info["misc"][2] == {
         "path": "drawings/e.psd",
-        "created_by": [{"email": "me@x.org"}],
+        "created_by": {"email": "me@x.org"},
     }
     assert len(ck_info["misc"]) == 3
 

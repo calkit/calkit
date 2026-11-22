@@ -12,11 +12,15 @@ goes to the Calkit Hub (calkit.io).
 You can also send them somewhere else,
 e.g., a Hugging Face bucket.
 
+<!-- TODO: needs human review -->
+
 Either way,
 you work with your files the same way,
 and Calkit takes care of getting them where they need to go.
 Under the hood, Calkit uses Git and DVC,
 so `git` and `dvc` commands still work on the project if you need them.
+To send and get files, though, use `calkit push` and `calkit pull`,
+which reach everywhere the project's files are stored.
 
 ## One login for everything
 
@@ -91,6 +95,31 @@ or leave them on HF, where those projects can no longer reach them.
 
 Connecting your HF account gives Calkit access to everything in that HF
 account or organization.
+
+### Already using DVC?
+
+<!-- TODO: needs human review -->
+
+DVC has no Hugging Face remote of its own,
+but a DVC project can use one through Calkit:
+
+1. [Install Calkit](installation.md) and log in with `calkit hub login`.
+2. In the project, run `calkit init`,
+   which keeps your existing Git and DVC setup.
+3. Run `calkit update hub`,
+   which adds the project to the Calkit Hub with its existing Git repo
+   and makes the hub its DVC remote.
+   Any remote you already had stays configured.
+4. In the project's settings on the hub,
+   click "New Hugging Face bucket."
+5. Run `calkit push`,
+   which sends the files on this machine to the bucket.
+   If some are only on your old remote,
+   run `dvc pull -r {old remote}` first.
+
+From then on, use `calkit push` and `calkit pull`.
+A `dvc` installed separately from Calkit can't reach the hub,
+so `dvc push` and `dvc pull` may not work.
 
 ## Changing where files are stored
 

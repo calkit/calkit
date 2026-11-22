@@ -83,6 +83,18 @@ def test_values(tmp_path, monkeypatch):
             calkit.quarto.check_values(
                 calkit.quarto.extract_values(text, "doc.qmd"), "doc.qmd"
             )
+    # Embedded documents are found relative to the document, or to its
+    # Quarto project with a leading slash, which is its folder without one
+    text = (
+        "{{< embed ../analysis.ipynb#fig-decay >}}\n"
+        '{{< embed "/analysis.ipynb#tbl-fit" >}}\n'
+        "{{< embed notes.qmd >}} {{</* embed escaped.ipynb */>}}\n"
+    )
+    assert calkit.quarto.extract_embedded_paths(text, "pub/doc.qmd") == [
+        "analysis.ipynb",
+        "pub/analysis.ipynb",
+        "pub/notes.qmd",
+    ]
     # Without a Quarto project, the extension is written beside the
     # document, and left alone when already right
     (tmp_path / "pub").mkdir()

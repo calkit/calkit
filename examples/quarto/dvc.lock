@@ -51,6 +51,14 @@ stages:
   report:
     cmd: calkit quarto render -e quarto --no-check report.qmd
     deps:
+    - path: analysis.html
+      hash: md5
+      md5: 82abf199a8a5a6c29db0a24b8955ad4e
+      size: 1283168
+    - path: analysis.ipynb
+      hash: md5
+      md5: cea69c63ed708f59296ab3fe4a6d60ed
+      size: 77748
     - path: data/sim.csv
       hash: md5
       md5: 05a12e0f23928d3253961d6ed3a6c3af
@@ -61,8 +69,8 @@ stages:
       size: 357380
     - path: report.qmd
       hash: md5
-      md5: 54db09a3bbcc72ed47aa9600b77a2909
-      size: 459
+      md5: 4d8df41702e9eebf0e925d526c9df95d
+      size: 604
     - path: results/fit.json
       hash: md5
       md5: 7af7f73ca345a9d998b30cfd4f6bf32a
@@ -74,5 +82,5 @@ stages:
     outs:
     - path: report.html
       hash: md5
-      md5: 17dd8ce447611cf3e4a02cbfda5c8a84
-      size: 1383864
+      md5: 6f54a89c6f3e63c7e635d47897610964
+      size: 1459883

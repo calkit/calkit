@@ -6,7 +6,12 @@ The Julia simulation used a damping ratio of
 $\zeta = {{< ckvalue results/sim.json zeta >}}$.
 Fitting the decay of its peaks in the [analysis](analysis.html) gives
 $\zeta = {{< ckvalue results/fit.json zeta .4f >}}$
-from {{< ckvalue results/fit.json n_peaks >}} peaks.
+from {{< ckvalue results/fit.json n_peaks >}} peaks,
+whose envelope is shown in @fig-decay.
+
+{{< embed analysis.ipynb#fig-decay >}}
+
+The simulation's phase portrait (@fig-phase) spirals in to rest.
 
 ```{r}
 #| label: fig-phase

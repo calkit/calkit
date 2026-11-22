@@ -35,6 +35,8 @@ stages:
       - pixi.lock
       - results/sim.json
       - results/fit.json
+      - analysis.ipynb
+      - analysis.html
     outs:
       - report.html
     desc: Automatically generated from the 'report' stage in calkit.yaml.

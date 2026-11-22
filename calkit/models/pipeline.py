@@ -1877,7 +1877,9 @@ class QuartoStage(Stage):
     # The results files the document's ckvalue shortcodes read, relative to
     # the project, set by preprocess
     _value_paths: list[str] = PrivateAttr(default_factory=list)
-    # Where it writes the values they show, relative to the project
+    # The documents it embeds cells' outputs from, and outputs of the stages
+    # that execute them, so it renders after them, relative to the project
+    _embedded_paths: list[str] = PrivateAttr(default_factory=list)
 
     @property
     def is_notebook(self) -> bool:
@@ -1917,8 +1919,9 @@ class QuartoStage(Stage):
         is_exact_output: Callable[[str], bool] | None = None,
     ) -> None:
         """Find the results files the document's ``ckvalue`` shortcodes read,
-        since they're as much inputs as its source, and with
-        ``write_files``, write the Quarto extension that shows them.
+        and the documents it embeds cells' outputs from, since they're as
+        much inputs as its source, and with ``write_files``, write the
+        Quarto extension that shows the values.
 
         A malformed shortcode is left for ``calkit quarto render`` to report
         when the stage runs, rather than stopping the pipeline from
@@ -1934,7 +1937,18 @@ class QuartoStage(Stage):
         document = os.path.join(project_dir or "", self.project_target_path)
         text = calkit.quarto.read_document_text(document)
         self._value_paths = []
-        if text is None or "ckvalue" not in text:
+        self._embedded_paths = []
+        if text is None:
+            return
+        if "embed" in text:
+            self._embedded_paths = [
+                p
+                for p in calkit.quarto.extract_embedded_paths(
+                    text, self.project_target_path, wdir=project_dir
+                )
+                if exists(p) or is_output(p)
+            ]
+        if "ckvalue" not in text:
             return
         try:
             ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
@@ -2009,7 +2023,7 @@ class QuartoStage(Stage):
             else self.target_path
         )
         deps = [document] + super().dvc_deps
-        for path in self._value_paths:
+        for path in self._value_paths + self._embedded_paths:
             path = self.path_from_wdir(path)
             if path not in deps:
                 deps.append(path)
@@ -3862,6 +3876,24 @@ class Pipeline(Model):
                 write_files=write_files,
                 is_exact_output=outputs.__contains__,
             )
+        # A Quarto document embedding a notebook another stage executes waits
+        # for that stage, which writes outputs into it without declaring it
+        # as an output, through one it does declare
+        executed: dict[str, str] = {}
+        for stage in self.stages.values():
+            if isinstance(stage, QuartoStage) and stage.executes_notebook:
+                for out in stage.outputs:
+                    path = out if isinstance(out, str) else out.path
+                    executed[stage.project_target_path] = posixpath.normpath(
+                        posixpath.join(stage.wdir or "", path)
+                    )
+                    break
+        for stage in self.stages.values():
+            if isinstance(stage, QuartoStage):
+                for path in list(stage._embedded_paths):
+                    out = executed.get(path)
+                    if out is not None and out not in stage._embedded_paths:
+                        stage._embedded_paths.append(out)
 
     def resolve_procedure_paths(self, procedures: dict) -> None:
         """Tell procedure stages where their procedure is written down.

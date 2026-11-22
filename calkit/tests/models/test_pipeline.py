@@ -534,6 +534,46 @@ def test_quartostage(tmp_path):
     (tmp_path / "report" / "report.qmd").write_text("No values.\n")
     s.preprocess(str(tmp_path), lambda p: False, write_files=True)
     assert s.dvc_deps == ["report.qmd"]
+    # The notebooks it embeds cells' outputs from are inputs too, and one
+    # another stage executes makes it wait for that stage through one of
+    # its outputs, since the notebook itself isn't one
+    (tmp_path / "_quarto.yml").unlink()
+    (tmp_path / "analysis.ipynb").write_text("{}")
+    (tmp_path / "report" / "report.qmd").write_text(
+        "{{< embed ../analysis.ipynb#fig-decay >}}\n\n"
+        "{{< embed '/analysis.ipynb#tbl-fit' >}}\n\n"
+        "{{< embed missing.ipynb#fig-x >}}\n"
+    )
+    pipeline = Pipeline(
+        stages={
+            "analysis": QuartoStage(
+                name="analysis",
+                environment="analysis",
+                target_path="analysis.ipynb",
+                args=["--execute"],
+                outputs=["analysis.html"],
+            ),
+            "report": QuartoStage(
+                name="report",
+                environment="analysis",
+                target_path="report.qmd",
+                wdir="report",
+            ),
+        }
+    )
+    pipeline.preprocess_stages(str(tmp_path))
+    assert pipeline.stages["report"].dvc_deps == [
+        "report.qmd",
+        "../analysis.ipynb",
+        "../analysis.html",
+    ]
+    # One rendered without executing has nothing to wait for
+    pipeline.stages["analysis"].args = []
+    pipeline.preprocess_stages(str(tmp_path))
+    assert pipeline.stages["report"].dvc_deps == [
+        "report.qmd",
+        "../analysis.ipynb",
+    ]
 
 
 def test_jupyternotebookstage():

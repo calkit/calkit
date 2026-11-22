@@ -34,6 +34,9 @@ _FORMAT_FIELD_RE = re.compile(r"\{([^{}]*)\}")
 # A shortcode written {{</* ckvalue */>}} is Quarto's escaped form, shown
 # literally, so it doesn't match
 _SHORTCODE_RE = re.compile(r"\{\{<\s*ckvalue\s+(?P<args>.*?)\s*>\}\}")
+# Quarto's own shortcode for a cell's output from another document, e.g.,
+# {{< embed analysis.ipynb#fig-decay >}}
+_EMBED_RE = re.compile(r"\{\{<\s*embed\s+[\"']?(?P<path>[^\s#\"'>]+)")
 
 # Reads each value from its results file when the document renders, finding
 # declared results' names in calkit.yaml, and formats it as Python would,
@@ -392,6 +395,30 @@ def extract_values(
                 )
             )
     return values
+
+
+def extract_embedded_paths(
+    text: str, document_path: str, wdir: str | None = None
+) -> list[str]:
+    """The documents a document embeds cells' outputs from, in order, as
+    POSIX paths relative to ``wdir``, like ``document_path``.
+
+    Quarto reads an embedded path relative to the document, or to the
+    Quarto project if it starts with a ``/``.
+    """
+    document_path = posixpath.normpath(Path(document_path).as_posix())
+    paths = []
+    for m in _EMBED_RE.finditer(text):
+        path = m.group("path")
+        if path.startswith("/"):
+            base = get_quarto_dir(document_path, wdir)
+            path = path.lstrip("/")
+        else:
+            base = posixpath.dirname(document_path)
+        path = posixpath.normpath(posixpath.join(base, path))
+        if path not in paths:
+            paths.append(path)
+    return paths
 
 
 def check_values(

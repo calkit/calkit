@@ -10,8 +10,9 @@ each in its own language and environment:
 2. `analysis.ipynb` fits the damping ratio from the simulation in Python,
    writing `results/fit.json`,
    and shows the fit with Quarto's inline `{python}` expressions.
-3. `report.qmd` plots the simulation in R
-   and shows values from both results files with the `ckvalue` shortcode,
+3. `report.qmd` plots the simulation in R,
+   shows values from both results files with the `ckvalue` shortcode,
+   and embeds the notebook's figure with Quarto's `embed` shortcode,
    which makes those files inputs to its stage automatically.
 
 Run it with:

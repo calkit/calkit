@@ -98,7 +98,17 @@ expressions, e.g., `` `{python} f"{rms:.3f}"` ``,
 but then its results files have to be listed as the stage's `inputs`,
 and Calkit can't trace the numbers back to them.
 
+<!-- TODO: needs human review -->
+
+A figure or table from a notebook can go in another document with
+Quarto's `embed` shortcode, e.g.,
+`{{< embed analysis.ipynb#fig-decay >}}`,
+which shows the output saved in the notebook for the cell with that label.
+The notebook is an input to the document's stage,
+and if another stage renders it with `--execute`,
+the document renders after that stage.
+
 See [`examples/quarto`](https://github.com/calkit/calkit/tree/main/examples/quarto)
-for a project that uses both:
+for a project that does all of these:
 a Julia simulation, a Python notebook that fits it,
-and an R report that shows values from each.
+and an R report that shows values from each and the notebook's figure.

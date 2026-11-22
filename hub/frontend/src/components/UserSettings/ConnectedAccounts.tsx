@@ -28,10 +28,7 @@ import {
   getGoogleAuthUrl,
   getGoogleRedirectUri,
 } from "../../lib/google"
-import {
-  createHuggingFaceOAuthState,
-  saveHuggingFaceRedirectUri,
-} from "../../lib/huggingface"
+import { startHuggingFaceAuth } from "../../lib/huggingface"
 import {
   getZenodoAuthUrl,
   getZenodoRedirectUri,
@@ -72,16 +69,10 @@ function ConnectedAccounts() {
       handleError(err, showToast)
     },
   })
-  // The backend holds the client ID, so it builds the authorization URL
   const connectHuggingFaceMutation = useMutation({
-    mutationFn: () =>
-      UsersService.postUserHuggingfaceAuthStart({
-        huggingFaceAuthStartRequest: { state: createHuggingFaceOAuthState() },
-      }).then((response) => response.data),
-    onSuccess: (data) => {
+    mutationFn: () => {
       mixpanel.track("Clicked connect Hugging Face")
-      saveHuggingFaceRedirectUri(data.redirect_uri)
-      location.href = data.authorize_url
+      return startHuggingFaceAuth("/settings?tab=connected-accounts")
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)

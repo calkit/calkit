@@ -4898,6 +4898,17 @@ export type ProjectStorageSettings = {
 }
 
 /**
+ * ProjectStorageUsage
+ */
+export type ProjectStorageUsage = {
+  /**
+   * Project Used Gb
+   */
+  project_used_gb: number
+  account?: StorageUsage | null
+}
+
+/**
  * ProjectsPublic
  */
 export type ProjectsPublic = {
@@ -17624,6 +17635,42 @@ export type PutProjectStorageResponses = {
 
 export type PutProjectStorageResponse =
   PutProjectStorageResponses[keyof PutProjectStorageResponses]
+
+export type GetProjectStorageUsageData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage/usage"
+}
+
+export type GetProjectStorageUsageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectStorageUsageError =
+  GetProjectStorageUsageErrors[keyof GetProjectStorageUsageErrors]
+
+export type GetProjectStorageUsageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectStorageUsage
+}
+
+export type GetProjectStorageUsageResponse =
+  GetProjectStorageUsageResponses[keyof GetProjectStorageUsageResponses]
 
 export type GetMachinesData = {
   body?: never

@@ -235,6 +235,8 @@ import type {
   GetProjectsResponses,
   GetProjectStorageErrors,
   GetProjectStorageResponses,
+  GetProjectStorageUsageErrors,
+  GetProjectStorageUsageResponses,
   GetProjectTablesErrors,
   GetProjectTablesResponses,
   GetProjectWorkspacesErrors,
@@ -10643,6 +10645,49 @@ export class StorageService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Project Storage Usage
+   *
+   * Get how much of the hub's storage a project and its owner use.
+   *
+   * It's separate from the project's storage settings since it's slow to
+   * measure.
+   */
+  public static getProjectStorageUsage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectStorageUsageResponses,
+    GetProjectStorageUsageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectStorageUsageResponses,
+      GetProjectStorageUsageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/storage/usage",
+      ...options,
+      ...params,
     })
   }
 }

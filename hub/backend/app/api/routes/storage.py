@@ -16,8 +16,10 @@ from app.models import (
     Project,
     ProjectStorageHistory,
     StorageResource,
+    StorageUsage,
     User,
 )
+from app.subscriptions import get_storage_limit
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -235,6 +237,64 @@ def get_project_storage(
         min_access_level="read",
     )
     return get_project_storage_settings(project)
+
+
+class ProjectStorageUsage(BaseModel):
+    # In the hub's own storage, which is what counts toward plan limits
+    project_used_gb: float
+    # Only for those who can manage the owner account's storage
+    account: StorageUsage | None = None
+
+
+@router.get("/projects/{owner_name}/{project_name}/storage/usage")
+def get_project_storage_usage(
+    owner_name: str,
+    project_name: str,
+    session: SessionDep,
+    current_user: CurrentUserOptional,
+) -> ProjectStorageUsage:
+    """Get how much of the hub's storage a project and its owner use.
+
+    It's separate from the project's storage settings since it's slow to
+    measure.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    owner_name = project.owner_account_name
+    usage = ProjectStorageUsage(
+        project_used_gb=storage.get_storage_usage(
+            owner_name, project_name=project.name
+        )
+    )
+    if current_user is None:
+        return usage
+    try:
+        account = get_storage_account(
+            session, current_user, owner_name, manage=True
+        )
+    except HTTPException:
+        return usage
+    subscription = (
+        account.user.subscription
+        if account.user is not None
+        else account.org.subscription
+        if account.org is not None
+        else None
+    )
+    usage.account = StorageUsage(
+        limit_gb=(
+            subscription.storage_limit
+            if subscription is not None
+            else get_storage_limit("free")
+        ),
+        used_gb=storage.get_storage_usage(owner_name),
+    )
+    return usage
 
 
 @router.put("/projects/{owner_name}/{project_name}/storage")

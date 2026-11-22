@@ -7,7 +7,6 @@ import {
   HStack,
   Heading,
   Input,
-  Link,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -20,11 +19,7 @@ import {
   Text,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  Link as RouterLink,
-  createFileRoute,
-  useNavigate,
-} from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import { useEffect, useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
@@ -38,6 +33,7 @@ import {
 import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
 import { handleError } from "../../../../../lib/errors"
+import { startHuggingFaceAuth } from "../../../../../lib/huggingface"
 
 const settingsSearchSchema = z.object({
   add_storage: z.boolean().optional(),
@@ -54,25 +50,28 @@ interface AddStorageProps {
   accountName: string
   isOpen: boolean
   onClose: () => void
+  hfConnected: boolean | undefined
+  onConnect: () => void
+  isConnecting: boolean
 }
 
-const AddStorage = ({ accountName, isOpen, onClose }: AddStorageProps) => {
+const AddStorage = ({
+  accountName,
+  isOpen,
+  onClose,
+  hfConnected,
+  onConnect,
+  isConnecting,
+}: AddStorageProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const connectedAccountsQuery = useQuery({
-    queryKey: ["user", "connected-accounts"],
-    queryFn: () =>
-      UsersService.getUserConnectedAccounts().then((response) => response.data),
-    enabled: isOpen,
-  })
-  const hfConnected = Boolean(connectedAccountsQuery.data?.huggingface)
   const hfAccountQuery = useQuery({
     queryKey: ["user", "huggingface-account"],
     queryFn: () =>
       UsersService.getUserHuggingfaceAccount().then(
         (response) => response.data,
       ),
-    enabled: isOpen && hfConnected,
+    enabled: isOpen && !!hfConnected,
   })
   const {
     register,
@@ -123,25 +122,22 @@ const AddStorage = ({ accountName, isOpen, onClose }: AddStorageProps) => {
       motionPreset="none"
     >
       <ModalOverlay />
-      <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>
+      <ModalContent
+        as="form"
+        onSubmit={handleSubmit(onSubmit)}
+        autoComplete="off"
+        // Per-field opt-outs alone don't stop Dashlane
+        data-form-type="other"
+        data-1p-ignore
+        data-lpignore="true"
+      >
         <ModalHeader>Add Hugging Face bucket</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={6}>
-          {connectedAccountsQuery.isPending ? (
+          {hfConnected === undefined ? (
             <SkeletonText noOfLines={2} />
           ) : !hfConnected ? (
-            <Text>
-              First, connect your Hugging Face account in your{" "}
-              <Link
-                as={RouterLink}
-                to="/settings"
-                search={{ tab: "connected-accounts" } as any}
-                variant="blue"
-              >
-                account settings
-              </Link>
-              .
-            </Text>
+            <Text>Hugging Face not connected</Text>
           ) : (
             <>
               <FormControl isInvalid={!!errors.name}>
@@ -150,6 +146,7 @@ const AddStorage = ({ accountName, isOpen, onClose }: AddStorageProps) => {
                   id="name"
                   autoComplete="off"
                   data-form-type="other"
+                  data-1p-ignore
                   data-lpignore="true"
                   {...register("name", {
                     required: "Name is required",
@@ -169,6 +166,7 @@ const AddStorage = ({ accountName, isOpen, onClose }: AddStorageProps) => {
                   id="bucket"
                   autoComplete="off"
                   data-form-type="other"
+                  data-1p-ignore
                   data-lpignore="true"
                   placeholder="namespace/bucket-name"
                   {...register("bucket", {
@@ -187,14 +185,24 @@ const AddStorage = ({ accountName, isOpen, onClose }: AddStorageProps) => {
           )}
         </ModalBody>
         <ModalFooter gap={3}>
-          <Button
-            variant="primary"
-            type="submit"
-            isLoading={mutation.isPending}
-            isDisabled={!hfConnected}
-          >
-            Add
-          </Button>
+          {hfConnected === false ? (
+            <Button
+              variant="primary"
+              onClick={onConnect}
+              isLoading={isConnecting}
+            >
+              Connect Hugging Face
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              type="submit"
+              isLoading={mutation.isPending}
+              isDisabled={!hfConnected}
+            >
+              Add
+            </Button>
+          )}
           <Button onClick={onClose}>Cancel</Button>
         </ModalFooter>
       </ModalContent>
@@ -226,6 +234,38 @@ function ProjectSettings() {
       ),
     enabled: isOwner,
   })
+  // Separate from the settings, since it's slow to measure
+  const usageQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "storage", "usage"],
+    queryFn: () =>
+      StorageService.getProjectStorageUsage({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+  })
+  const formatGb = (gb: number) =>
+    gb < 1 ? `${(gb * 1000).toFixed(1)} MB` : `${gb.toFixed(2)} GB`
+  const connectedAccountsQuery = useQuery({
+    queryKey: ["user", "connected-accounts"],
+    queryFn: () =>
+      UsersService.getUserConnectedAccounts().then((response) => response.data),
+    enabled: isOwner,
+  })
+  const hfConnected = connectedAccountsQuery.data
+    ? Boolean(connectedAccountsQuery.data.huggingface)
+    : undefined
+  // Comes back here with the bucket form open once connected
+  const connectMutation = useMutation({
+    mutationFn: () =>
+      startHuggingFaceAuth(
+        `/${accountName}/${projectName}/settings?add_storage=true`,
+      ),
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+  })
+  const openAddStorage = () =>
+    navigate({ search: (prev) => ({ ...prev, add_storage: true }) })
   // An empty string means the hub's own storage
   const current = storageQuery.data?.dvc?.name ?? ""
   const [selected, setSelected] = useState(current)
@@ -274,6 +314,25 @@ function ProjectSettings() {
               : "Calkit Hub storage"}
             .
           </Text>
+          {usageQuery.isPending ? (
+            <SkeletonText mt={2} noOfLines={2} maxW="xs" />
+          ) : (
+            usageQuery.data && (
+              <Box mt={2}>
+                <Text>
+                  Calkit Hub storage used by project:{" "}
+                  {formatGb(usageQuery.data.project_used_gb)}
+                </Text>
+                {usageQuery.data.account && (
+                  <Text>
+                    Calkit Hub storage used by {accountName}:{" "}
+                    {formatGb(usageQuery.data.account.used_gb)} of{" "}
+                    {usageQuery.data.account.limit_gb} GB
+                  </Text>
+                )}
+              </Box>
+            )
+          )}
           {storageQuery.data && storageQuery.data.previous.length > 0 && (
             <Text mt={2} color="ui.dim">
               Files pushed earlier are still read from{" "}
@@ -308,10 +367,10 @@ function ProjectSettings() {
               <Button
                 flexShrink={0}
                 onClick={() =>
-                  navigate({
-                    search: (prev) => ({ ...prev, add_storage: true }),
-                  })
+                  hfConnected ? openAddStorage() : connectMutation.mutate()
                 }
+                isLoading={connectMutation.isPending}
+                isDisabled={hfConnected === undefined}
               >
                 Add Hugging Face bucket
               </Button>
@@ -328,6 +387,9 @@ function ProjectSettings() {
               search: (prev) => ({ ...prev, add_storage: undefined }),
             })
           }
+          hfConnected={hfConnected}
+          onConnect={() => connectMutation.mutate()}
+          isConnecting={connectMutation.isPending}
         />
       )}
     </Box>

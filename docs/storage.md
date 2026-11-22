@@ -75,7 +75,12 @@ This can move a lot of data,
 so read [Changing where files are stored](#changing-where-files-are-stored)
 first.
 
-Each project gets its own folder in your storage,
+<!-- TODO: needs human review -->
+
+Depending on the service,
+each project gets its own bucket, e.g., on Hugging Face,
+or its own folder in shared storage,
+e.g., an S3 bucket or a `Calkit` folder in Box,
 so you can use the same storage for many projects.
 
 ## Choosing storage per path
@@ -137,10 +142,16 @@ Visit your [hub account settings](https://calkit.io/settings)
 and click the connect button next to Hugging Face.
 Then add Hugging Face storage,
 choosing your HF account or one of your HF organizations.
-Calkit will create a private bucket named `calkit` there and manage it
-for you.
-It stays private,
-even if some of the projects stored in it are public.
+
+<!-- TODO: needs human review -->
+
+Calkit will create a bucket there for each project that uses it,
+named after the project, and manage it for you.
+A bucket is public if its project is,
+so making a project public makes its bucket public too,
+including files from earlier versions.
+To remove files the project no longer uses, see `dvc gc`,
+or keep the project private and publish a release.
 
 This is the easiest option,
 but it does give Calkit access to everything in that HF account or
@@ -548,8 +559,8 @@ This section is for the design phase and will be removed.
   If it works,
   the Option 1 warning in the user docs goes away,
   and Option 2 becomes a fallback.
-- One resource per account rather than one bucket per project,
-  so the credentials never need to create buckets on the fly.
+- How storage is organized, e.g., a bucket per project on HF,
+  is in [ADR 0002](dev/adrs/0002-external-storage.md).
 - For `s3`, the hub signs URLs itself with the stored credentials.
   Signing is local, so there's no HF API call per file,
   and the client's existing `presigned-url` and `presigned-multipart`

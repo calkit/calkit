@@ -112,3 +112,24 @@ def test_storage_resources_and_project_storage(
     assert response.status_code == 200
     response = client.delete(f"{base}/unused", headers=owner_headers)
     assert response.status_code == 404
+
+    # How much of the hub's storage the project and its owner use, with the
+    # account's only for those who manage it
+    def get_storage_usage(owner_name, project_name=None):
+        assert owner_name == account_name
+        return 0.25 if project_name == project.name else 3.0
+
+    with patch(
+        "app.api.routes.storage.storage.get_storage_usage",
+        side_effect=get_storage_usage,
+    ):
+        response = client.get(f"{project_url}/usage", headers=owner_headers)
+        assert response.status_code == 200
+        db.refresh(owner)
+        limit = owner.subscription.storage_limit if owner.subscription else 10
+        assert response.json() == {
+            "project_used_gb": 0.25,
+            "account": {"used_gb": 3.0, "limit_gb": limit},
+        }
+        response = client.get(f"{project_url}/usage", headers=other_headers)
+        assert response.json() == {"project_used_gb": 0.25, "account": None}

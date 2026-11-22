@@ -664,10 +664,18 @@ def get_multipart_upload_info(
 
 
 def get_storage_usage(
-    owner_name: str, fs: s3fs.S3FileSystem | gcsfs.GCSFileSystem | None = None
+    owner_name: str,
+    fs: s3fs.S3FileSystem | gcsfs.GCSFileSystem | None = None,
+    project_name: str | None = None,
 ) -> float:
-    """Get storage usage in GB for a given owner."""
+    """Get the hub's storage usage in GB for an owner, or one of their
+    projects.
+    """
     cache_key = f"{settings.ENVIRONMENT}:{owner_name}"
+    prefix = get_data_prefix_for_owner(owner_name)
+    if project_name is not None:
+        cache_key += f"/{project_name.lower()}"
+        prefix += f"/{project_name.lower()}"
     use_cache = fs is None
     if use_cache:
         cached = _storage_usage_cache.get(cache_key)
@@ -675,7 +683,10 @@ def get_storage_usage(
             return cached
         fs = get_object_fs()
     assert fs is not None
-    usage = fs.du(get_data_prefix_for_owner(owner_name))
+    try:
+        usage = fs.du(prefix)
+    except FileNotFoundError:
+        usage = 0
     if isinstance(usage, dict):
         usage = sum(float(v) for v in usage.values())
     usage_gb = float(usage) / 1e9
@@ -689,7 +700,11 @@ def invalidate_storage_usage_cache(owner_name: str | None = None) -> None:
     if owner_name is None:
         _storage_usage_cache.clear()
         return
-    _storage_usage_cache.pop(f"{settings.ENVIRONMENT}:{owner_name}", None)
+    # The owner's and each of their projects'
+    key = f"{settings.ENVIRONMENT}:{owner_name}"
+    for cached_key in list(_storage_usage_cache):
+        if cached_key == key or cached_key.startswith(f"{key}/"):
+            _storage_usage_cache.pop(cached_key, None)
 
 
 def migrate_legacy_dvc_paths(dry_run=True):

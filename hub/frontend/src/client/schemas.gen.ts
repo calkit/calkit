@@ -8493,6 +8493,28 @@ export const ProjectStorageSettingsSchema = {
   title: "ProjectStorageSettings",
 } as const
 
+export const ProjectStorageUsageSchema = {
+  properties: {
+    project_used_gb: {
+      type: "number",
+      title: "Project Used Gb",
+    },
+    account: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StorageUsage",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  required: ["project_used_gb"],
+  title: "ProjectStorageUsage",
+} as const
+
 export const ProjectsPublicSchema = {
   properties: {
     data: {

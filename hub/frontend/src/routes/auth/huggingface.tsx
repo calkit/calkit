@@ -30,19 +30,23 @@ function HuggingFaceAuth() {
     mutationFn: ({
       code,
       redirectUri,
-    }: { code: string; redirectUri: string }) =>
+    }: { code: string; redirectUri: string; returnTo: string | null }) =>
       UsersService.postUserHuggingfaceAuth({
         appApiRoutesUsersOAuthCodeExchange: {
           code,
           redirect_uri: redirectUri,
         },
       }).then((response) => response.data),
-    onSuccess: () => {
+    onSuccess: (_data, { returnTo }) => {
       showToast("Success!", "Hugging Face account connected.", "success")
       queryClient.invalidateQueries({
         queryKey: ["user", "connected-accounts"],
       })
-      goToSettings()
+      if (returnTo) {
+        navigate({ href: returnTo })
+      } else {
+        goToSettings()
+      }
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
@@ -61,7 +65,11 @@ function HuggingFaceAuth() {
     // The returned state must match the one this browser stored
     const expected = consumeHuggingFaceOAuthState()
     if (expected.state && expected.redirectUri && state === expected.state) {
-      mutation.mutate({ code, redirectUri: expected.redirectUri })
+      mutation.mutate({
+        code,
+        redirectUri: expected.redirectUri,
+        returnTo: expected.returnTo,
+      })
     } else {
       showToast(
         "Connection failed",

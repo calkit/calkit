@@ -109,7 +109,7 @@ def get_bucket_name() -> str:
     return root.split("/")[0]
 
 
-def remove_gcs_content_type(fpath):
+def remove_gcs_content_type(fpath: str) -> None:
     client = get_gcs_client()
     # Derived from the configured prefix rather than the environment name,
     # so a self-hosted instance can use a bucket of its own naming
@@ -491,37 +491,165 @@ def set_project_bucket_visibility(
         )
 
 
-def delete_project_objects(session: "Session", project: "Project") -> None:
-    """Delete a project's DVC objects from every storage it has used.
+def delete_objects_from(
+    target: ProjectStorage, owner_name: str, project_name: str
+) -> None:
+    """Delete a project's DVC objects from one storage.
 
-    Buckets dedicated to the project are deleted, and its folders in other
-    storage, including the hub's own, are removed. Storage that can't be
-    reached is skipped.
+    Storage dedicated to the project is deleted entirely, e.g., its HF
+    bucket, and otherwise the project's folder is removed.
     """
     from huggingface_hub import HfApi
 
+    if target.is_dedicated:
+        assert target.resource is not None
+        HfApi(token=target.token).delete_bucket(
+            target.resource.bucket, missing_ok=True
+        )
+        return
+    base = target.make_project_path(owner_name, project_name)
+    if target.backend == "hf":
+        assert target.resource is not None
+        paths = [
+            p.removeprefix(f"{target.data_prefix}/")
+            for p in target.fs.find(base)
+        ]
+        if paths:
+            HfApi(token=target.token).batch_bucket_files(
+                target.resource.bucket, delete=paths
+            )
+    elif target.fs.exists(base):
+        target.fs.rm(base, recursive=True)
+
+
+def delete_project_objects(session: "Session", project: "Project") -> None:
+    """Delete a project's DVC objects from every storage it has used,
+    including the hub's own. Storage that can't be reached is skipped.
+    """
     owner_name = project.owner_account_name
     for target in get_project_storages(session, project):
-        if target.is_dedicated:
-            assert target.resource is not None
-            HfApi(token=target.token).delete_bucket(
-                target.resource.bucket, missing_ok=True
-            )
-            continue
-        base = target.make_project_path(owner_name, project.name)
-        if target.backend == "hf":
-            assert target.resource is not None
-            paths = [
-                p.removeprefix(f"{target.data_prefix}/")
-                for p in target.fs.find(base)
-            ]
-            if paths:
-                HfApi(token=target.token).batch_bucket_files(
-                    target.resource.bucket, delete=paths
-                )
-        elif target.fs.exists(base):
-            target.fs.rm(base, recursive=True)
+        delete_objects_from(target, owner_name, project.name)
     invalidate_storage_usage_cache(owner_name)
+
+
+def get_credential_resources(
+    session: "Session", user_id: Any
+) -> list["StorageResource"]:
+    """Get the storage reached with a user's credential, e.g., their HF
+    account, whichever account owns it.
+    """
+    from sqlmodel import select
+
+    from app.models import StorageResource
+
+    return list(
+        session.exec(
+            select(StorageResource).where(
+                StorageResource.credential_user_id == user_id
+            )
+        ).all()
+    )
+
+
+def get_resource_projects(
+    session: "Session", resource: "StorageResource"
+) -> list["Project"]:
+    """Get every project that has used a storage resource."""
+    from sqlmodel import select
+
+    from app.models import Project, ProjectStorageHistory
+
+    return list(
+        session.exec(
+            select(Project)
+            .join(ProjectStorageHistory)
+            .where(ProjectStorageHistory.storage_resource_id == resource.id)
+        ).all()
+    )
+
+
+def get_resource_usage(
+    session: "Session", resource: "StorageResource"
+) -> dict[str, float]:
+    """Get how many GB of each owner account's projects a storage resource
+    holds.
+    """
+    source = get_resource_storage(session, resource)
+    usage: dict[str, float] = {}
+    for project in get_resource_projects(session, resource):
+        owner_name = project.owner_account_name
+        base = source.make_project_path(owner_name, project.name)
+        try:
+            size = source.fs.du(base)
+        except FileNotFoundError:
+            size = 0
+        usage[owner_name] = usage.get(owner_name, 0) + float(size) / 1e9
+    return usage
+
+
+def copy_resource_to_internal(
+    session: "Session", resource: "StorageResource"
+) -> int:
+    """Copy every project's DVC objects in a storage resource into the hub's
+    own storage. Objects already there are skipped, so it can be rerun.
+    Returns how many objects were copied.
+    """
+    source = get_resource_storage(session, resource)
+    internal = get_internal_storage()
+    n_copied = 0
+    for project in get_resource_projects(session, resource):
+        owner_name = project.owner_account_name
+        base = source.make_project_path(owner_name, project.name)
+        for fpath in source.fs.find(base):
+            dest = internal.make_project_path(
+                owner_name,
+                project.name,
+                fpath.removeprefix(f"{base}/"),
+            )
+            if internal.fs.exists(dest):
+                continue
+            with (
+                source.fs.open(fpath, "rb") as f_in,
+                internal.fs.open(dest, "wb") as f_out,
+            ):
+                shutil.copyfileobj(f_in, f_out)
+            if settings.ENVIRONMENT != "local":
+                remove_gcs_content_type(dest)
+            n_copied += 1
+        invalidate_storage_usage_cache(owner_name)
+    return n_copied
+
+
+def transfer_storage_and_disconnect(user_id: str) -> None:
+    """Move the storage reached with a user's HF account into the hub's own
+    storage, then disconnect the account. Run on the worker.
+    """
+    import uuid
+
+    from sqlmodel import Session
+
+    import app.users
+    from app.db import engine
+    from app.models import User
+
+    with Session(engine) as session:
+        user = session.get(User, uuid.UUID(user_id))
+        if user is None:
+            return
+        for resource in get_credential_resources(session, user.id):
+            n_copied = copy_resource_to_internal(session, resource)
+            logger.info(
+                f"Copied {n_copied} objects from {resource.bucket} to the "
+                "hub's storage"
+            )
+            session.delete(resource)
+            session.commit()
+        credential = app.users.get_external_credential(
+            session=session, user=user, provider="huggingface"
+        )
+        if credential is not None:
+            session.delete(credential)
+            session.commit()
 
 
 def get_xet_token(

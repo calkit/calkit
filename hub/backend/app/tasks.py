@@ -85,6 +85,27 @@ def enqueue_warm(
     return True
 
 
+def enqueue_storage_transfer(user_id: str) -> bool:
+    """Queue moving the storage reached with a user's HF account into the
+    hub's own storage, then disconnecting it. True if it was queued.
+    """
+    queue = get_queue()
+    if queue is None:
+        return False
+    try:
+        queue.enqueue(
+            "app.storage.transfer_storage_and_disconnect",
+            user_id,
+            job_id=f"storage-transfer-{user_id}",
+            # Copying a project's data can take much longer than a warm
+            job_timeout=6 * 3600,
+        )
+    except Exception as e:
+        logger.warning(f"Could not queue a storage transfer: {e}")
+        return False
+    return True
+
+
 def enqueue_startup_warms(limit: int) -> int:
     """Queue warms for the projects most likely to be opened next.
 

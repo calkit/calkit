@@ -16,7 +16,9 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import Field, col, func, or_, select
 
 import app.projects
+import app.storage
 import app.stripe
+import app.tasks
 from app import mixpanel, users, zotero
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
@@ -74,7 +76,12 @@ from app.security import (
     verify_password,
 )
 from app.storage import get_storage_usage
-from app.subscriptions import PLAN_IDS, get_monthly_price, get_storage_limit
+from app.subscriptions import (
+    PLAN_IDS,
+    get_account_storage_limit,
+    get_monthly_price,
+    get_storage_limit,
+)
 from app.zenodo import AUTH_URL as ZENODO_AUTH_URL
 from calkit.overleaf import AuthError, WebClient
 
@@ -1405,13 +1412,87 @@ def get_user_overleaf_token(
 
 @router.delete("/user/external-credentials/{provider}")
 def delete_user_external_credential(
-    session: SessionDep, current_user: CurrentUser, provider: str
+    session: SessionDep,
+    current_user: CurrentUser,
+    provider: str,
+    storage_action: Literal["transfer", "delete", "orphan"] | None = None,
 ) -> Message:
-    """Disconnect an external account by deleting its credential."""
+    """Disconnect an external account by deleting its credential.
+
+    Storage reached with the account, e.g., HF buckets, would become
+    unreachable, so if there is any, ``storage_action`` says what to do with
+    it: ``transfer`` its objects to the hub's own storage first, which
+    happens on the worker, with the account disconnected once it's done,
+    ``delete`` them, or ``orphan`` them, i.e., leave them where they are,
+    out of reach of their projects.
+    """
     if provider == "github":
         raise HTTPException(
             403, "Cannot disconnect GitHub as it is your login method"
         )
+    resources = (
+        app.storage.get_credential_resources(session, current_user.id)
+        if provider == "huggingface"
+        else []
+    )
+    if resources and storage_action is None:
+        raise HTTPException(
+            409, "Storage uses this account; choose what to do with it"
+        )
+    if resources and storage_action == "transfer":
+        # Everything has to fit in each owner's plan
+        needed: dict[str, float] = {}
+        for resource in resources:
+            for owner_name, gb in app.storage.get_resource_usage(
+                session, resource
+            ).items():
+                needed[owner_name] = needed.get(owner_name, 0) + gb
+        for resource in resources:
+            account = resource.owner_account
+            if account.name not in needed:
+                continue
+            used = get_storage_usage(account.name)
+            limit = get_account_storage_limit(account)
+            if used + needed[account.name] > limit:
+                raise HTTPException(
+                    413,
+                    f"{needed[account.name]:.2f} GB from Hugging Face "
+                    f"won't fit in {account.name}'s Calkit Hub storage "
+                    f"({used:.2f} of {limit} GB used)",
+                )
+        # New objects go to the hub while the old ones are copied, and
+        # reads fall back to HF until then
+        for resource in resources:
+            for project in app.storage.get_resource_projects(
+                session, resource
+            ):
+                if project.dvc_storage_id == resource.id:
+                    project.dvc_storage = None
+                    project.dvc_storage_id = None
+                    session.add(project)
+        session.commit()
+        if not app.tasks.enqueue_storage_transfer(str(current_user.id)):
+            raise HTTPException(503, "Transfers aren't available right now")
+        return Message(
+            message="Transferring files to Calkit Hub storage. Hugging "
+            "Face will be disconnected when it's done."
+        )
+    for resource in resources:
+        if storage_action == "delete":
+            try:
+                target = app.storage.get_resource_storage(session, resource)
+                for project in app.storage.get_resource_projects(
+                    session, resource
+                ):
+                    app.storage.delete_objects_from(
+                        target, project.owner_account_name, project.name
+                    )
+            except Exception:
+                logger.exception(f"Failed to delete {resource.bucket}")
+                raise HTTPException(
+                    502, f"Failed to delete files in {resource.bucket}"
+                )
+        session.delete(resource)
     credential = users.get_external_credential(
         session=session,
         user=current_user,

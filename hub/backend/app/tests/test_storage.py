@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 import requests
+from sqlmodel import Session
 
 from app import storage
 
@@ -139,3 +140,117 @@ def test_dedicated_storage() -> None:
     )
     assert not internal.fs.exists("/internal/data/someone/my-project")
     assert internal.fs.exists(f"/internal/data/someone/other/{path}")
+
+
+def test_copy_resource_to_internal() -> None:
+    from fsspec.implementations.memory import (  # type: ignore[import-untyped]
+        MemoryFileSystem,
+    )
+
+    projects = [
+        SimpleNamespace(owner_account_name="someone", name="one"),
+        SimpleNamespace(owner_account_name="someone", name="two"),
+    ]
+    shared = storage.ProjectStorage(
+        backend="hf",
+        fs=MemoryFileSystem(),
+        data_prefix="/buckets/someone/calkit",
+        resource=SimpleNamespace(  # type: ignore[arg-type]
+            bucket="someone/calkit", project_id=None
+        ),
+    )
+    internal = storage.ProjectStorage(
+        backend="s3", fs=MemoryFileSystem(), data_prefix="/internal/data"
+    )
+    path = "files/md5/ab/cd"
+    for project in projects:
+        shared.fs.pipe(
+            shared.make_project_path("someone", project.name, path),
+            project.name.encode(),
+        )
+    # Already copied, e.g., by an earlier run that stopped partway
+    internal.fs.pipe(
+        internal.make_project_path("someone", "one", path), b"one"
+    )
+    with (
+        patch.object(storage, "get_resource_storage", return_value=shared),
+        patch.object(storage, "get_internal_storage", return_value=internal),
+        patch.object(storage, "get_resource_projects", return_value=projects),
+        patch("app.config.settings.ENVIRONMENT", "local"),
+    ):
+        assert storage.get_resource_usage(None, None) == {  # type: ignore[arg-type]
+            "someone": 6 / 1e9
+        }
+        assert storage.copy_resource_to_internal(None, None) == 1  # type: ignore[arg-type]
+    for project in projects:
+        assert (
+            internal.fs.cat(
+                internal.make_project_path("someone", project.name, path)
+            )
+            == project.name.encode()
+        )
+
+
+def test_transfer_storage_and_disconnect(db: Session) -> None:
+    import uuid
+    from datetime import timedelta
+
+    from app import users
+    from app.core import utcnow
+    from app.models import Project, ProjectStorageHistory, StorageResource
+    from app.tests import create_random_user
+
+    user = create_random_user(db)
+    users.save_external_credential(
+        session=db,
+        user=user,
+        provider="huggingface",
+        secret_payload=json.dumps({"access_token": "hf"}),
+        expires=utcnow() + timedelta(hours=1),
+    )
+    project = Project(
+        name=f"hf-{uuid.uuid4().hex[:8]}",
+        title="HF project",
+        git_repo_url="https://github.com/someone/hf",
+        owner_account_id=user.account.id,
+        owner_account=user.account,
+    )
+    db.add(project)
+    db.commit()
+    resource = StorageResource(
+        owner_account_id=user.account.id,
+        project_id=project.id,
+        kind="hf-bucket",
+        bucket=f"someone/{project.name}",
+        credential_user_id=user.id,
+    )
+    db.add(resource)
+    db.commit()
+    db.add(
+        ProjectStorageHistory(
+            project_id=project.id, storage_resource_id=resource.id
+        )
+    )
+    db.commit()
+    resource_id = resource.id
+    # A failed copy leaves everything as it was, to try again
+    with patch.object(
+        storage, "copy_resource_to_internal", side_effect=OSError("HF down")
+    ):
+        with pytest.raises(OSError):
+            storage.transfer_storage_and_disconnect(str(user.id))
+    db.expire_all()
+    assert db.get(StorageResource, resource_id) is not None
+    with patch.object(
+        storage, "copy_resource_to_internal", return_value=3
+    ) as copy:
+        storage.transfer_storage_and_disconnect(str(user.id))
+    copy.assert_called_once()
+    db.expire_all()
+    assert db.get(StorageResource, resource_id) is None
+    assert (
+        users.get_external_credential(
+            session=db, user=user, provider="huggingface"
+        )
+        is None
+    )

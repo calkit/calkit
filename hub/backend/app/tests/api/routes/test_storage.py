@@ -191,3 +191,15 @@ def test_storage_resources_and_project_storage(
         }
         response = client.get(f"{project_url}/usage", headers=other_headers)
         assert response.json() == {"project_used_gb": 0.25, "account": None}
+    # What disconnecting HF would affect: everything connected with it, and
+    # the projects that have used each
+    response = client.get("/user/huggingface/storage", headers=owner_headers)
+    assert response.status_code == 200
+    by_bucket = {r["bucket"]: r for r in response.json()}
+    assert set(by_bucket) == {"someone/calkit", bucket["bucket"]}
+    assert by_bucket[bucket["bucket"]]["dedicated"] is True
+    assert by_bucket[bucket["bucket"]]["projects"] == [
+        f"{account_name}/{project.name}"
+    ]
+    response = client.get("/user/huggingface/storage", headers=other_headers)
+    assert response.json() == []

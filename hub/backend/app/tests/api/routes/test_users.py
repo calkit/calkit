@@ -13,6 +13,7 @@ from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
 from app.tests import (
+    authentication_token_from_email,
     random_email,
     random_lower_string,
     user_authentication_headers,
@@ -2187,3 +2188,147 @@ def test_end_other_sessions(
         .where(RefreshToken.is_active)
     ).all()
     assert live == []
+
+
+def test_disconnect_huggingface_with_storage(
+    client: TestClient, db: Session
+) -> None:
+    import json
+    from datetime import timedelta
+
+    from app.core import utcnow
+    from app.models import Project, ProjectStorageHistory, StorageResource
+
+    email = random_email()
+    headers = authentication_token_from_email(
+        client=client, email=email, db=db
+    )
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    url = "/user/external-credentials/huggingface"
+
+    def connect() -> None:
+        users.save_external_credential(
+            session=db,
+            user=user,
+            provider="huggingface",
+            secret_payload=json.dumps({"access_token": "hf"}),
+            expires=utcnow() + timedelta(hours=1),
+        )
+
+    def is_connected() -> bool:
+        db.expire_all()
+        return (
+            users.get_external_credential(
+                session=db, user=user, provider="huggingface"
+            )
+            is not None
+        )
+
+    def add_bucket() -> tuple[uuid.UUID, uuid.UUID]:
+        project = Project(
+            name=f"hf-{uuid.uuid4().hex[:8]}",
+            title="HF project",
+            git_repo_url="https://github.com/someone/hf",
+            owner_account_id=user.account.id,
+            owner_account=user.account,
+        )
+        db.add(project)
+        db.commit()
+        resource = StorageResource(
+            owner_account_id=user.account.id,
+            project_id=project.id,
+            kind="hf-bucket",
+            bucket=f"someone/{project.name}",
+            credential_user_id=user.id,
+        )
+        db.add(resource)
+        db.commit()
+        db.add(
+            ProjectStorageHistory(
+                project_id=project.id, storage_resource_id=resource.id
+            )
+        )
+        project.dvc_storage_id = resource.id
+        db.add(project)
+        db.commit()
+        return project.id, resource.id
+
+    # Without storage, it's a plain disconnect
+    connect()
+    response = client.delete(url, headers=headers)
+    assert response.status_code == 200
+    assert not is_connected()
+    # With storage, it has to be told what to do with it
+    connect()
+    project_id, resource_id = add_bucket()
+    response = client.delete(url, headers=headers)
+    assert response.status_code == 409
+    assert is_connected()
+    # Orphaned storage is forgotten, and its project goes back to the hub's
+    response = client.delete(
+        url, headers=headers, params={"storage_action": "orphan"}
+    )
+    assert response.status_code == 200
+    assert not is_connected()
+    assert db.get(StorageResource, resource_id) is None
+    project = db.get(Project, project_id)
+    assert project is not None and project.dvc_storage_id is None
+    # Deleted storage is deleted on HF first
+    connect()
+    project_id, resource_id = add_bucket()
+    with (
+        patch("app.storage.get_resource_storage"),
+        patch("app.storage.delete_objects_from") as delete_objects,
+    ):
+        response = client.delete(
+            url, headers=headers, params={"storage_action": "delete"}
+        )
+    assert response.status_code == 200
+    delete_objects.assert_called_once()
+    assert not is_connected()
+    assert db.get(StorageResource, resource_id) is None
+    # Transferred storage has to fit in the plan, and its project uses the
+    # hub's storage right away, while HF stays connected until the copy is
+    # done on the worker
+    connect()
+    project_id, resource_id = add_bucket()
+    with (
+        patch(
+            "app.storage.get_resource_usage",
+            return_value={user.account.name: 9.0},
+        ),
+        patch("app.api.routes.users.get_storage_usage", return_value=2.0),
+        patch("app.tasks.enqueue_storage_transfer", return_value=True) as q,
+    ):
+        response = client.delete(
+            url, headers=headers, params={"storage_action": "transfer"}
+        )
+        assert response.status_code == 413
+        q.assert_not_called()
+        db.expire_all()
+        project = db.get(Project, project_id)
+        assert project is not None and project.dvc_storage_id == resource_id
+        with patch(
+            "app.storage.get_resource_usage",
+            return_value={user.account.name: 1.0},
+        ):
+            response = client.delete(
+                url, headers=headers, params={"storage_action": "transfer"}
+            )
+        assert response.status_code == 200
+        q.assert_called_once_with(str(user.id))
+    assert is_connected()
+    project = db.get(Project, project_id)
+    assert project is not None and project.dvc_storage_id is None
+    assert db.get(StorageResource, resource_id) is not None
+    # Without a worker, nothing changes hands
+    with (
+        patch("app.storage.get_resource_usage", return_value={}),
+        patch("app.tasks.enqueue_storage_transfer", return_value=False),
+    ):
+        response = client.delete(
+            url, headers=headers, params={"storage_action": "transfer"}
+        )
+    assert response.status_code == 503
+    assert is_connected()

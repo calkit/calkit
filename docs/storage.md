@@ -153,6 +153,13 @@ including files from earlier versions.
 To remove files the project no longer uses, see `dvc gc`,
 or keep the project private and publish a release.
 
+<!-- TODO: needs human review -->
+
+If you disconnect your HF account while projects store files with it,
+you'll choose whether to transfer those files to Calkit Hub storage,
+delete them,
+or leave them on HF, where those projects can no longer reach them.
+
 This is the easiest option,
 but it does give Calkit access to everything in that HF account or
 organization.

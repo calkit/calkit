@@ -121,6 +121,22 @@ Reads fall back through the current resource,
 then each previous one, newest first, then the hub's own storage,
 so nothing has to move.
 
+### Removing a connection
+
+Removing a connection would make its resources unreachable,
+so the hub refuses until it's told what to do with them:
+transfer their objects to the hub's own storage,
+delete them,
+or leave them where they are and forget the resources.
+A transfer runs on the worker,
+since it can take as long as the data takes to copy.
+The hub keeps the credential until the copy is done,
+and switches the affected projects to its own storage right away,
+so new objects land there while reads still fall back to the old
+resource.
+The copy skips objects already copied,
+so a failed transfer can be rerun.
+
 ### Released datasets
 
 Publishing a dataset,
@@ -132,11 +148,6 @@ which only make sense to DVC.
 
 ### Open questions
 
-- What happens to a connection's resources,
-  and the projects using them,
-  when the connection is removed.
-  Today, storage a project has used can't be removed,
-  but the credential behind it can, which makes it unreachable.
 - What happens to an org's connection when the member who connected it
   leaves the org, for services like HF where the credential is that
   member's own.

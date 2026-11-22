@@ -1215,6 +1215,39 @@ export const CreatorPostSchema = {
     "Someone credited with creating a dataset.\n\nEverything is optional here; that a person needs an email or an ORCID\nis enforced by the calkit model this is validated through, so the rule\nlives in one place rather than being restated and left to drift.",
 } as const
 
+export const CredentialStoragePublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    bucket: {
+      type: "string",
+      title: "Bucket",
+    },
+    dedicated: {
+      type: "boolean",
+      title: "Dedicated",
+    },
+    owner: {
+      type: "string",
+      title: "Owner",
+    },
+    projects: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Projects",
+    },
+  },
+  type: "object",
+  required: ["id", "bucket", "dedicated", "owner", "projects"],
+  title: "CredentialStoragePublic",
+  description: "Storage reached with the current user's account on a service.",
+} as const
+
 export const DVCImportSchema = {
   properties: {
     outs: {

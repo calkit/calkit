@@ -20,7 +20,7 @@ from app.models import (
     StorageUsage,
     User,
 )
-from app.subscriptions import get_storage_limit
+from app.subscriptions import get_account_storage_limit
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -208,6 +208,39 @@ class ProjectStorageSettings(BaseModel):
     previous: list[StorageResourcePublic]
 
 
+class CredentialStoragePublic(BaseModel):
+    """Storage reached with the current user's account on a service."""
+
+    id: uuid.UUID
+    bucket: str
+    dedicated: bool
+    owner: str
+    # Every project that has used it, as ``{owner}/{name}``
+    projects: list[str]
+
+
+@router.get("/user/huggingface/storage")
+def get_user_huggingface_storage(
+    session: SessionDep, current_user: CurrentUser
+) -> list[CredentialStoragePublic]:
+    """Get the storage reached with the current user's HF account, which
+    disconnecting it would make unreachable.
+    """
+    return [
+        CredentialStoragePublic(
+            id=r.id,
+            bucket=r.bucket,
+            dedicated=r.project_id is not None,
+            owner=r.owner_account.name,
+            projects=[
+                f"{p.owner_account_name}/{p.name}"
+                for p in storage.get_resource_projects(session, r)
+            ],
+        )
+        for r in storage.get_credential_resources(session, current_user.id)
+    ]
+
+
 class ProjectStoragePut(BaseModel):
     # The ID of storage the project owner's account shares among its
     # projects, or that's dedicated to this one, or null for the hub's own
@@ -318,19 +351,8 @@ def get_project_storage_usage(
         )
     except HTTPException:
         return usage
-    subscription = (
-        account.user.subscription
-        if account.user is not None
-        else account.org.subscription
-        if account.org is not None
-        else None
-    )
     usage.account = StorageUsage(
-        limit_gb=(
-            subscription.storage_limit
-            if subscription is not None
-            else get_storage_limit("free")
-        ),
+        limit_gb=get_account_storage_limit(account),
         used_gb=storage.get_storage_usage(owner_name),
     )
     return usage

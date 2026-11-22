@@ -680,6 +680,34 @@ export type CreatorPost = {
 }
 
 /**
+ * CredentialStoragePublic
+ *
+ * Storage reached with the current user's account on a service.
+ */
+export type CredentialStoragePublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Bucket
+   */
+  bucket: string
+  /**
+   * Dedicated
+   */
+  dedicated: boolean
+  /**
+   * Owner
+   */
+  owner: string
+  /**
+   * Projects
+   */
+  projects: Array<string>
+}
+
+/**
  * DVCImport
  *
  * The necessary information to import a DVC object, which can be saved to
@@ -10308,7 +10336,12 @@ export type DeleteUserExternalCredentialData = {
      */
     provider: string
   }
-  query?: never
+  query?: {
+    /**
+     * Storage Action
+     */
+    storage_action?: "transfer" | "delete" | "orphan" | null
+  }
   url: "/user/external-credentials/{provider}"
 }
 
@@ -17591,6 +17624,25 @@ export type DeleteAccountStorageResponses = {
    */
   200: unknown
 }
+
+export type GetUserHuggingfaceStorageData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/huggingface/storage"
+}
+
+export type GetUserHuggingfaceStorageResponses = {
+  /**
+   * Response Storage-Get User Huggingface Storage
+   *
+   * Successful Response
+   */
+  200: Array<CredentialStoragePublic>
+}
+
+export type GetUserHuggingfaceStorageResponse =
+  GetUserHuggingfaceStorageResponses[keyof GetUserHuggingfaceStorageResponses]
 
 export type GetProjectStorageData = {
   body?: never

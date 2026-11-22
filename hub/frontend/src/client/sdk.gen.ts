@@ -270,6 +270,7 @@ import type {
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
   GetUserHuggingfaceAccountResponses,
+  GetUserHuggingfaceStorageResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
   GetUserOverleafSessionResponses,
@@ -2438,12 +2439,20 @@ export class UsersService {
    * Delete User External Credential
    *
    * Disconnect an external account by deleting its credential.
+   *
+   * Storage reached with the account, e.g., HF buckets, would become
+   * unreachable, so if there is any, ``storage_action`` says what to do with
+   * it: ``transfer`` its objects to the hub's own storage first, which
+   * happens on the worker, with the account disconnected once it's done,
+   * ``delete`` them, or ``orphan`` them, i.e., leave them where they are,
+   * out of reach of their projects.
    */
   public static deleteUserExternalCredential<
     ThrowOnError extends boolean = true,
   >(
     parameters: {
       provider: string
+      storage_action?: "transfer" | "delete" | "orphan" | null
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -2453,7 +2462,14 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "provider" }] }],
+      [
+        {
+          args: [
+            { in: "path", key: "provider" },
+            { in: "query", key: "storage_action" },
+          ],
+        },
+      ],
     )
     return (options?.client ?? client).delete<
       DeleteUserExternalCredentialResponses,
@@ -10576,6 +10592,27 @@ export class StorageService {
       url: "/accounts/{account_name}/storage/{storage_name}",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get User Huggingface Storage
+   *
+   * Get the storage reached with the current user's HF account, which
+   * disconnecting it would make unreachable.
+   */
+  public static getUserHuggingfaceStorage<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserHuggingfaceStorageResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserHuggingfaceStorageResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/huggingface/storage",
+      ...options,
     })
   }
 

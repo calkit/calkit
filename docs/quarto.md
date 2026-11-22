@@ -78,9 +78,10 @@ so a change to a value renders the document again.
 
 <!-- TODO: needs human review -->
 
-A notebook in place of a results file shows a value saved from one of its
-cells, e.g., `{{< ckvalue fit.ipynb k_25 .3f >}}`; see
-[saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells).
+To show a value saved from a notebook cell, use the notebook's path
+instead of a results file, e.g., `{{< ckvalue fit.ipynb k_25 .3f >}}`.
+See [saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells)
+for more info.
 
 <!-- TODO: needs human review -->
 

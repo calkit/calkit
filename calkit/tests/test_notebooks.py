@@ -629,7 +629,7 @@ def test_add_cell_output(tmp_path):
     assert [m["variable_name"] for m in listed] == ["k", "a", "b", "fig"]
     remove = calkit.notebooks.remove_cell_outputs
     assert remove("fit.ipynb", cell_id=ids[1], wdir=wdir) == 1
-    with pytest.raises(ValueError, match="Nothing like that"):
+    with pytest.raises(ValueError, match="No matching cell output"):
         remove("fit.ipynb", variable_name="z", wdir=wdir)
     assert remove("fit.ipynb", variable_name="k", wdir=wdir) == 1
     assert remove("fit.ipynb", cell_id=ids[0], wdir=wdir) == 2

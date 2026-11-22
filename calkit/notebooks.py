@@ -703,9 +703,8 @@ def get_notebook_stage(
                 == path
             ):
                 raise ValueError(
-                    f"{notebook_path} is rendered by Quarto stage '{name}', "
-                    "which can't save cell outputs; use Quarto's embed "
-                    "shortcode or inline code instead"
+                    f"{notebook_path} is rendered by Quarto stage '{name}'; "
+                    "use Quarto's embed shortcode or inline code instead"
                 )
         raise ValueError(
             f"{notebook_path} isn't in the pipeline yet; add it first, e.g., "
@@ -840,7 +839,7 @@ def remove_cell_outputs(
 
     notebook_path = Path(notebook_path).as_posix()
     if not any((variable_name, output_path, cell_id)):
-        raise ValueError("Name a value, a figure or table's path, or a cell")
+        raise ValueError("Give a variable, output path, or cell ID")
     ck_info = calkit.load_calkit_info(wdir=wdir)
     name = get_notebook_stage(ck_info, notebook_path, stage)
     stage_dict = ck_info["pipeline"]["stages"][name]
@@ -853,7 +852,7 @@ def remove_cell_outputs(
     )
     n_removed = count_saved(before) - count_saved(after)
     if not n_removed:
-        raise ValueError(f"Nothing like that is saved from {notebook_path}")
+        raise ValueError(f"No matching cell output in {notebook_path}")
     if after:
         stage_dict["cell_outputs"] = after
     else:

@@ -88,28 +88,27 @@ indicating that all notebooks and outputs are up-to-date.
 
 ## Saving values, figures, and tables from cells
 
-A notebook doesn't have to write its results to files for a paper to show
-them.
-Instead, mark what a cell makes,
-and Calkit saves it whenever the pipeline runs the notebook;
+Calkit can save values, figures, and tables from a notebook's cells
+every time the pipeline runs it,
+so the notebook doesn't need to write them to files;
 see [saving values, figures, and tables from cells](notebooks.md#saving-values-figures-and-tables-from-cells)
-for what can be saved.
+for details.
 
 <!-- prettier-ignore -->
 !!! note
-    The notebook needs a pipeline stage first, which you can assign with
-    the pipeline badge in its toolbar.
+    The notebook needs a pipeline stage first,
+    which you can set with the pipeline badge in its toolbar.
 
-To mark a cell, click the Calkit button in its toolbar
-and select **Value**, **Figure**, or **Table**.
-Then select the variable it's saved from, e.g., `fig` for a figure or `df`
-for a table, or for a figure, the image the cell shows.
-For a figure or table, also enter the path to save it to, e.g.,
+To save something from a cell, click **Save as Calkit output**
+in its toolbar and select **Value**, **Figure**, or **Table**.
+Then select the variable to save, e.g., `fig` for a figure or `df` for a
+table, or **Result this cell shows** to save what the cell displays.
+For a figure or table, also enter a path, e.g.,
 `figures/fit-rates-fig.pdf`.
-The notebook is saved first, so the mark stays with its cell as cells move.
+Calkit saves the notebook first so the output stays with its cell.
 
-Each marked cell gets a label under its code saying what it saves, e.g.,
-`k_25 = 0.03091` after a run, `k_25 (not saved yet)` before one,
-or `figures/fit.pdf from fig`.
-Click a label to copy the command that shows it in a LaTeX document,
-e.g., `\ckvalue{fit-rates.ipynb}{k_25}`, or to unmark it.
+The cell then gets a label like `Calkit: k_25 = 0.03091`
+(or `Calkit: k_25 (not saved yet)` before the pipeline has run),
+or `Calkit: figures/fit.pdf from fig`.
+Click it to copy the LaTeX command that shows it,
+e.g., `\ckvalue{fit-rates.ipynb}{k_25}`, or to stop saving it.

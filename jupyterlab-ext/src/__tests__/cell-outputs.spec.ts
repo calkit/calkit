@@ -56,8 +56,8 @@ describe("cell outputs", () => {
     expect(getCellOutputLabel(value)).toEqual({
       text: "k_25 = 0.03091",
       tooltip:
-        "Value saved after this cell when stage 'fit' runs\n" +
-        "Show it in a document with \\ckvalue{fit.ipynb}{k_25}",
+        "Saved after this cell by stage 'fit'\n" +
+        "Cite with \\ckvalue{fit.ipynb}{k_25}",
     });
     const unsaved = { ...value };
     delete unsaved.saved_value;
@@ -67,7 +67,7 @@ describe("cell outputs", () => {
       getCellOutputLabel({ ...figure, variable_name: null, citation: null }),
     ).toEqual({
       text: "figures/fit.pdf",
-      tooltip: "Figure saved from what this cell shows when stage 'fit' runs",
+      tooltip: "Saved from cell display by stage 'fit'",
     });
   });
 

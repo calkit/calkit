@@ -135,23 +135,23 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
       {
         label: "Value",
         description: "\\ckvalue",
-        detail: "A number or text, e.g., a fitted constant",
+        detail: "Number or text, e.g., a fitted constant",
         outputKind: "value" as CellOutputKind,
       },
       {
         label: "Figure",
         description: "\\ckfigure",
-        detail: "A plot, from its variable or the image the cell shows",
+        detail: "Plot or image",
         outputKind: "figure" as CellOutputKind,
       },
       {
         label: "Table",
         description: "\\cktable",
-        detail: "A DataFrame the cell shows or holds, or a list of rows",
+        detail: "DataFrame or list of rows",
         outputKind: "table" as CellOutputKind,
       },
     ],
-    { title: "Save as", placeHolder: "What this cell makes for documents" },
+    { title: "Save as", placeHolder: "Select kind" },
   );
   if (!kindPick) {
     return;
@@ -186,7 +186,7 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
   if (kind === "value") {
     const picks = await vscode.window.showQuickPick(items, {
       title: `Save ${kindPick.label.toLowerCase()}`,
-      placeHolder: "Variables it's saved from",
+      placeHolder: "Select variables",
       canPickMany: true,
     });
     if (!picks?.length) {
@@ -203,7 +203,7 @@ async function addCellOutput(root: string, arg: unknown): Promise<void> {
   } else {
     const variablePick = await vscode.window.showQuickPick(items, {
       title: `Save ${kindPick.label.toLowerCase()}`,
-      placeHolder: "Variable it's saved from",
+      placeHolder: "Select variable",
     });
     if (!variablePick) {
       return;

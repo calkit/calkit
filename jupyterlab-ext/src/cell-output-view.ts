@@ -138,7 +138,7 @@ function createLabelNode(
   node.className = "calkit-cell-output-label";
   node.title = tooltip;
   const textNode = document.createElement("span");
-  textNode.textContent = text;
+  textNode.textContent = `Calkit: ${text}`;
   node.append(
     KIND_ICONS[output.kind].element({
       tag: "span",
@@ -231,7 +231,7 @@ async function addCellOutput(
   if (kind === "value") {
     const picked = await InputDialog.getMultipleItems({
       title,
-      label: "Variables it's saved from",
+      label: "Variables",
       items: choices.map((c) => c.label),
       defaults: [choices[0].label],
     });
@@ -254,7 +254,7 @@ async function addCellOutput(
     if (choices.length > 1) {
       const picked = await InputDialog.getItem({
         title,
-        label: "Variable it's saved from",
+        label: "Variable",
         items: choices.map((c) => c.label),
         current: 0,
       });

@@ -88,15 +88,13 @@ export function getCellOutputLabel(output: CellOutput): {
   }
   const lines = [
     output.kind === "value"
-      ? `Value saved after this cell when stage '${output.stage}' runs`
-      : `${output.kind === "figure" ? "Figure" : "Table"} saved ${
-          output.variable_name
-            ? `from '${output.variable_name}'`
-            : "from what this cell shows"
-        } when stage '${output.stage}' runs`,
+      ? `Saved after this cell by stage '${output.stage}'`
+      : `Saved from ${
+          output.variable_name ? `'${output.variable_name}'` : "cell display"
+        } by stage '${output.stage}'`,
   ];
   if (output.citation) {
-    lines.push(`Show it in a document with ${output.citation}`);
+    lines.push(`Cite with ${output.citation}`);
   }
   return { text, tooltip: lines.join("\n") };
 }

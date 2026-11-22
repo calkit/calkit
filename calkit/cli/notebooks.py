@@ -516,10 +516,10 @@ def execute_notebook(
             "--output",
             "-o",
             help=(
-                "A value, figure, or table a cell makes, to save after it "
-                "runs, e.g., 'kind=value,cell_id=3f9a1c2e,variable=k' or "
-                "'kind=figure,cell_id=8b77d0aa,variable=fig,"
-                "path=figures/fit.pdf'. Can be given more than once."
+                "Value, figure, or table to save after a cell runs, e.g., "
+                "'kind=value,cell_id=3f9a1c2e,variable_name=k' or "
+                "'kind=figure,cell_id=8b77d0aa,variable_name=fig,"
+                "output_path=figures/fit.pdf'. Can be repeated."
             ),
         ),
     ] = [],
@@ -759,9 +759,9 @@ def execute_notebook(
             source_nb = json.load(f)
         if calkit.notebooks.has_ordinal_cell_ids(source_nb):
             warn(
-                f"{path}'s cell IDs count up from 0, as nbstripout writes "
-                "them without --keep-id, so they change when cells are "
-                "added; a cell output may be saved after the wrong cell"
+                f"{path}'s cell IDs look renumbered by nbstripout, so "
+                "outputs may be saved after the wrong cell (install "
+                "nbstripout with --keep-id)"
             )
         try:
             capture_nb = calkit.notebooks.add_capture_cells(
@@ -783,10 +783,7 @@ def execute_notebook(
                 tables_dir=from_kernel(os.path.join(scratch_dir, "tables")),
             )
         except ValueError as e:
-            raise_error(
-                f"{e}, which calkit.yaml saves a cell output after; add it "
-                "again in the notebook"
-            )
+            raise_error(f"{e}; add its outputs again")
         if os.path.isdir(scratch_dir):
             shutil.rmtree(scratch_dir)
         os.makedirs(scratch_dir)
@@ -1032,18 +1029,18 @@ def add_cell_output(
     path: Annotated[str, typer.Argument(help="Path to the notebook.")],
     kind: Annotated[
         str,
-        typer.Argument(help="What it is: 'value', 'figure', or 'table'."),
+        typer.Argument(help="Kind: 'value', 'figure', or 'table'."),
     ],
     cell_id: Annotated[
         str | None,
-        typer.Option("--cell-id", help="ID of the cell it's saved after."),
+        typer.Option("--cell-id", help="ID of cell to save after."),
     ] = None,
     cell_index: Annotated[
         int | None,
         typer.Option(
             "--cell-index",
-            help="Position of the cell it's saved after, from 0, for a "
-            "notebook whose cells have no IDs yet, which gives them some.",
+            help="Index of cell to save after, starting at 0 (adds cell IDs "
+            "if the notebook has none).",
         ),
     ] = None,
     variable_names: Annotated[
@@ -1051,9 +1048,8 @@ def add_cell_output(
         typer.Option(
             "--variable-name",
             "-v",
-            help="Variable it's saved from, which can be given several times "
-            "for values; if not given, what the cell shows: a figure's image or "
-            "a table's result, e.g., df.head() on its last line.",
+            help="Variable to save (can be repeated for values). If not "
+            "given, saves what the cell displays, e.g., a plot or df.head().",
         ),
     ] = None,
     output_path: Annotated[
@@ -1061,28 +1057,28 @@ def add_cell_output(
         typer.Option(
             "--output-path",
             "-o",
-            help="Where to save a figure or table, e.g., figures/fit.pdf or "
+            help="Figure or table path, e.g., figures/fit.pdf or "
             "tables/rates.tex.",
         ),
     ] = None,
     number_format: Annotated[
         str | None,
         typer.Option(
-            "--format", help="Format for a table's numbers, e.g., '.3f'."
+            "--format", help="Number format for tables, e.g., '.3f'."
         ),
     ] = None,
     stage: Annotated[
         str | None,
         typer.Option(
-            "--stage", help="Stage running the notebook, if several do."
+            "--stage", help="Stage name, if several run the notebook."
         ),
     ] = None,
     json_output: Annotated[
         bool, typer.Option("--json", help="Print the result as JSON.")
     ] = False,
 ) -> None:
-    """Save a value, figure, or table a notebook's cell makes whenever the
-    pipeline runs it.
+    """Save a value, figure, or table from a cell each time the pipeline
+    runs the notebook.
     """
     names = variable_names or []
     try:
@@ -1112,7 +1108,7 @@ def add_cell_output(
         f"Saving {saved} from {path} when stage '{added['stage']}' runs"
     )
     for citation in added["citations"]:
-        typer.echo(f"Once it's run, show it in a document with {citation}")
+        typer.echo(f"Cite with {citation} once it runs")
 
 
 @notebooks_app.command("remove-output")
@@ -1132,12 +1128,14 @@ def remove_cell_output(
     ] = None,
     cell_id: Annotated[
         str | None,
-        typer.Option("--cell-id", help="Cell to stop saving anything after."),
+        typer.Option(
+            "--cell-id", help="Stop saving everything after this cell."
+        ),
     ] = None,
     stage: Annotated[
         str | None,
         typer.Option(
-            "--stage", help="Stage running the notebook, if several do."
+            "--stage", help="Stage name, if several run the notebook."
         ),
     ] = None,
 ) -> None:
@@ -1164,15 +1162,15 @@ def list_cell_outputs(
         bool, typer.Option("--json", help="Print them as JSON.")
     ] = False,
 ) -> None:
-    """List the values, figures, and tables saved from a notebook's cells,
-    and how a document shows each.
+    """List values, figures, and tables saved from a notebook's cells, and
+    how to cite each.
     """
     described = calkit.notebooks.list_cell_outputs(path)
     if json_output:
         typer.echo(json.dumps(described))
         return
     if not described:
-        typer.echo(f"Nothing is saved from {path}'s cells")
+        typer.echo(f"No cell outputs in {path}")
         return
     for item in described:
         where = (

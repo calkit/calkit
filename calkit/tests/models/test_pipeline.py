@@ -729,7 +729,7 @@ def test_jupyternotebookstage():
         ),
         ({"kind": "value", "cell_id": "a b", "variable_name": "a"}, "cell ID"),
         ({"kind": "value", "variable_name": "a", "figure": "f.png"}, "Extra"),
-        (figure, "Give the path to save the figure to"),
+        (figure, "A figure needs an 'output_path'"),
         (figure | {"output_path": "f.gif"}, "not '.gif'"),
         ({"kind": "figure", "output_path": "f.png"}, "Name the cell"),
         (figure | {"output_path": os.path.abspath("f.png")}, "relative"),
@@ -768,7 +768,7 @@ def test_jupyternotebookstage():
     ]:
         with pytest.raises(ValidationError, match=message):
             NotebookCellOutput.model_validate({"kind": "value"} | fields)
-    with pytest.raises(ValidationError, match="from one variable"):
+    with pytest.raises(ValidationError, match="takes one 'variable_name'"):
         NotebookCellOutput.model_validate(
             figure | {"variable_names": ["f"], "output_path": "f.png"}
         )

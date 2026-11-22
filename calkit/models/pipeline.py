@@ -2715,17 +2715,14 @@ class NotebookCellOutput(Model):
                     raise ValueError(f"Value '{name}' is named twice")
             if self.output_path or self.format or self.storage:
                 raise ValueError(
-                    "A value is saved with the notebook's other values, so "
-                    "'output_path', 'format', and 'storage' don't apply"
+                    "'output_path', 'format', and 'storage' don't apply to "
+                    "values"
                 )
             return self
         if self.variable_names is not None:
-            raise ValueError(
-                f"A {self.kind} is saved from one variable; give "
-                "'variable_name'"
-            )
+            raise ValueError(f"A {self.kind} takes one 'variable_name'")
         if self.output_path is None:
-            raise ValueError(f"Give the path to save the {self.kind} to")
+            raise ValueError(f"A {self.kind} needs an 'output_path'")
         check_path_relative_and_child_of_cwd(self.output_path)
         if "," in self.output_path:
             raise ValueError(f"'{self.output_path}' can't include a comma")

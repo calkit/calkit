@@ -152,13 +152,13 @@ The stage depends on everything included this way, so don't add
 
 ### Values, figures, and tables from notebook cells
 
-A `jupyter-notebook` stage can save what its cells make without the
-notebook writing files, which is what to offer someone who'd rather not
-add `json.dump` or `savefig` calls.
-Add them with `calkit nb add-output`, which records them under the stage's
-`cell_outputs` by cell ID (read IDs from the `.ipynb`, or use
-`--cell-index`, which adds IDs if the notebook has none), each with a
-`kind` of `value`, `figure`, or `table`:
+A `jupyter-notebook` stage can save values, figures, and tables from its
+cells, so the notebook doesn't need to write files.
+Offer this to anyone who'd rather not add `json.dump` or `savefig` calls.
+Add them with `calkit nb add-output`, which stores them under the stage's
+`cell_outputs` by cell ID.
+Read IDs from the `.ipynb`, or use `--cell-index`, which adds IDs if the
+notebook has none.
 
 ```sh
 calkit nb add-output analysis.ipynb value --cell-id 3f9a1c2e --variable-name k_25 --variable-name k_35
@@ -167,16 +167,15 @@ calkit nb add-output analysis.ipynb table --cell-id 1d2e4c0b --variable-name df 
 calkit nb outputs analysis.ipynb --json
 ```
 
-A value is cited by the notebook, e.g.,
-`\ckvalue[.3f]{analysis.ipynb}{k_25}`, or a key inside a dict,
-`{rates.25C}`; figures and tables by their paths.
-Each is saved as it is right after its cell runs, not at the end of the
-notebook, so a variable changed further down still saves what that cell
-made.
-They're saved when the pipeline runs the notebook, not when it's run by
-hand, so run `calkit run` after adding them. Several values saved after
-one cell are kept in one entry, under `variable_names`; each is still cited
-by its own name. `calkit nb remove-output` stops saving one.
+Cite a value with the notebook's path, e.g.,
+`\ckvalue[.3f]{analysis.ipynb}{k_25}`, or `{rates.25C}` for a key in a
+dict.
+Cite figures and tables by their paths.
+Each output is saved right after its cell runs,
+so if a later cell changes the variable, the saved one doesn't change.
+Outputs are only saved when the pipeline runs the notebook,
+so run `calkit run` after adding them.
+`calkit nb remove-output` stops saving one.
 Don't also list a saved figure or table in the stage's `outputs`.
 
 ### Outputs: Git vs. DVC storage

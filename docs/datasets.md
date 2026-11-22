@@ -76,11 +76,12 @@ datasets:
 
 <!-- TODO: needs human review -->
 
-In VS Code, right-click the file and select **Define Source**, then
-**Collected or measured by me**, which credits the name and email Git
-commits with, or click the person button on the dataset in the Calkit
+In VS Code, you can right-click the file, select **Define Source**,
+then **Collected or measured by me**.
+You can also click the person button next to the dataset in the Calkit
 sidebar.
-From a terminal, use
+Either way, Calkit uses the name and email from your Git config.
+From the command line, run
 `calkit update dataset data/raw.csv --created-by-email me@myorg.edu`.
 
 `created_by` can be a list, since data is usually collected by more than

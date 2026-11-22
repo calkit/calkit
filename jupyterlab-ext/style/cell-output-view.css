@@ -4,7 +4,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 2px 0 2px var(--jp-cell-prompt-width, 64px);
+  /* Lined up with the cell's input, past its collapser and prompt */
+  padding: 2px 0 2px
+    calc(
+      var(--jp-cell-collapser-width, 8px) + var(--jp-cell-prompt-width, 64px)
+    );
 }
 
 .calkit-cell-output-label {

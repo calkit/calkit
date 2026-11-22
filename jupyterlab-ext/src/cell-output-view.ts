@@ -52,6 +52,22 @@ const KIND_ICONS: Record<CellOutputKind, LabIcon> = {
 };
 
 const cellOutputsByPanel = new WeakMap<NotebookPanel, ICellOutput[]>();
+const loadListeners = new Set<(panel: NotebookPanel) => void>();
+
+/** What a notebook's cells save, as last loaded. */
+export function getLoadedCellOutputs(panel: NotebookPanel): ICellOutput[] {
+  return cellOutputsByPanel.get(panel) ?? [];
+}
+
+/** Call `listener` with each notebook whose cell outputs load, until the
+ * returned function is called.
+ */
+export function onCellOutputsLoaded(
+  listener: (panel: NotebookPanel) => void,
+): () => void {
+  loadListeners.add(listener);
+  return () => loadListeners.delete(listener);
+}
 const loadCountByPanel = new WeakMap<NotebookPanel, number>();
 const labelsByCell = new WeakMap<Cell, Widget>();
 
@@ -77,6 +93,7 @@ async function loadCellOutputs(panel: NotebookPanel): Promise<void> {
   }
   cellOutputsByPanel.set(panel, cellOutputs);
   relabelCells(panel);
+  loadListeners.forEach((listener) => listener(panel));
 }
 
 /** Label each cell with its outputs, matching cells by ID. */

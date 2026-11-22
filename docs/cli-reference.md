@@ -2617,7 +2617,7 @@ Describe things.
 | [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
 | [`subprojects`](#subcommand-describe-desc-subprojects)              | Describe subprojects, including nested ones.                       |
-| [`storage`](#subcommand-describe-desc-storage)                      | Describe where the project's files are stored.                     |
+| [`storage`](#subcommand-describe-desc-storage)                      | Describe project's Git and DVC storage.                            |
 | [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
@@ -2700,9 +2700,9 @@ Options:
 
 #### `calkit describe|desc storage`
 
-Describe where the project's files are stored.
+Describe project's Git and DVC storage.
 
-Projects have two kinds of storage: Git, i.e., the project's Git remote, e.g., on GitHub, and DVC, which the hub says where to find.
+Git storage is the project's Git remote, e.g., on GitHub, and DVC storage is set in the project's settings on the hub.
 
 Usage:
 

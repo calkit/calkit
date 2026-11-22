@@ -1209,10 +1209,8 @@ def get_huggingface_token(session: Session, user: User) -> str:
     if not get_needs_refresh(credential):
         tokens = json.loads(decrypt_secret(credential.secret_payload))
         return str(tokens["access_token"])
-    # Requests that need a refresh at once take turns under the row lock,
-    # like in `get_github_token`, and the rest use the token the first got,
-    # since HF may not accept a refresh token twice, and a rejected refresh
-    # disconnects the account
+    # Concurrent refreshes take turns under a row lock, like in
+    # `get_github_token`, since a rejected refresh disconnects the account
     credential_id = credential.id
     session.expire(credential)
     credential = session.exec(

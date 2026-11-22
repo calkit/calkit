@@ -27,8 +27,8 @@ from app.storage import (
 router = APIRouter()
 
 EXTERNAL_STORAGE_MESSAGE = (
-    "This project's DVC storage isn't on this server, so the HTTP remote "
-    "can't be used; switch the project's DVC remote to ck://"
+    "Project's DVC storage isn't on this hub, so HTTP remote won't work; "
+    "switch DVC remote to ck://{owner}/{project}"
 )
 
 logging.basicConfig(level=logging.INFO)

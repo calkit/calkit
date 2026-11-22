@@ -73,7 +73,7 @@ function HuggingFaceAuth() {
     } else {
       showToast(
         "Connection failed",
-        "Could not verify the Hugging Face request. Please try again.",
+        "Couldn't verify Hugging Face request; try again",
         "error",
       )
       goToSettings()

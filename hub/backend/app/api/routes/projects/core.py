@@ -4041,9 +4041,7 @@ def _build_tables(
     tables += sorted(auto, key=lambda t: t["path"])
     if not tables:
         return []
-    # See ``_resolve_figures``: these lazy-loading attributes and the
-    # storages are resolved on the calling thread, since the Session behind
-    # them isn't safe to touch from the pool below.
+    # Resolved here, since the Session isn't safe to use from the pool below
     _ = project.owner_account_name
     _ = len(project.file_locks)
     storages = app.projects.get_storages_for_project(project)

@@ -1350,9 +1350,7 @@ def get_contents_from_tree(
                     found[1],
                     fname=os.path.basename(dvc_fpath or path),
                 )
-            # No fs.exists() guard: find_out_object only returns a path it
-            # has already confirmed exists, so re-checking is a wasted round
-            # trip on every artifact.
+            # No fs.exists(), since find_out_object only returns paths that exist
             if (
                 size is not None
                 and size <= RETURN_CONTENT_SIZE_LIMIT

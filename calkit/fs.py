@@ -278,9 +278,8 @@ class CalkitFileSystem(AbstractFileSystem):
         super().__init__(*args, **kwargs)
         self._session = requests.Session()
         self._base_url = kwargs.get("endpoint_url")
-        # Xet access by (owner, project, "put" or "get", bucket), which
-        # covers the whole bucket, so it's reused until it's about to expire.
-        # Puts go to the project's current storage, so their bucket is None.
+        # Xet access by (owner, project, "put" or "get", bucket), reused until
+        # it nearly expires; puts always go to current storage, so no bucket
         self._xet_access: dict[
             tuple[str, str, str, str | None], dict[str, Any]
         ] = {}

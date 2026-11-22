@@ -484,13 +484,11 @@ function ConnectedAccounts() {
                     >
                       <Stack>
                         <Radio value="transfer">
-                          Transfer files to Calkit Hub storage
+                          Transfer to Calkit Hub storage
                         </Radio>
-                        <Radio value="delete">
-                          Delete files on Hugging Face
-                        </Radio>
+                        <Radio value="delete">Delete from Hugging Face</Radio>
                         <Radio value="orphan">
-                          Leave files on Hugging Face, out of reach of projects
+                          Leave on Hugging Face (projects lose access)
                         </Radio>
                       </Stack>
                     </RadioGroup>

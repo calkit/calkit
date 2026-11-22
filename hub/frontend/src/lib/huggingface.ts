@@ -18,8 +18,7 @@ const createHuggingFaceOAuthState = (): string => {
 }
 
 // Send the browser to Hugging Face to connect, coming back to `returnTo`, a
-// path in this app, once connected. The backend holds the client ID, so it
-// builds the authorization URL.
+// path in this app; the backend builds the URL, since it holds the client ID
 export const startHuggingFaceAuth = async (returnTo: string) => {
   const response = await UsersService.postUserHuggingfaceAuthStart({
     huggingFaceAuthStartRequest: { state: createHuggingFaceOAuthState() },

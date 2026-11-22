@@ -153,10 +153,10 @@ def describe_storage(
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ) -> None:
-    """Describe where the project's files are stored.
+    """Describe project's Git and DVC storage.
 
-    Projects have two kinds of storage: Git, i.e., the project's Git remote,
-    e.g., on GitHub, and DVC, which the hub says where to find.
+    Git storage is the project's Git remote, e.g., on GitHub, and DVC storage
+    is set in the project's settings on the hub.
     """
 
     def get_dvc_storage_name(resource: dict | None) -> str:

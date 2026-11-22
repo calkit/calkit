@@ -173,7 +173,7 @@ const NewHfBucket = ({
                   data-1p-ignore
                   data-lpignore="true"
                   {...register("name", {
-                    required: "Bucket name is required",
+                    required: "Bucket name required",
                     pattern: {
                       value: /^[\w.-]{2,96}$/,
                       message: "Use letters, numbers, dashes, and dots",
@@ -314,11 +314,10 @@ function ProjectSettings() {
       ) : (
         <>
           <Text>
-            Large files are stored in{" "}
+            Large files:{" "}
             {storageQuery.data?.dvc
               ? describe(storageQuery.data.dvc)
               : "Calkit Hub storage"}
-            .
           </Text>
           {usageQuery.isPending ? (
             <SkeletonText mt={2} noOfLines={2} maxW="xs" />
@@ -326,12 +325,12 @@ function ProjectSettings() {
             usageQuery.data && (
               <Box mt={2}>
                 <Text>
-                  Calkit Hub storage used by project:{" "}
+                  Project's Calkit Hub storage:{" "}
                   {formatGb(usageQuery.data.project_used_gb)}
                 </Text>
                 {usageQuery.data.account && (
                   <Text>
-                    Calkit Hub storage used by {accountName}:{" "}
+                    {accountName}'s Calkit Hub storage:{" "}
                     {formatGb(usageQuery.data.account.used_gb)} of{" "}
                     {usageQuery.data.account.limit_gb} GB
                   </Text>
@@ -341,9 +340,9 @@ function ProjectSettings() {
           )}
           {storageQuery.data && storageQuery.data.previous.length > 0 && (
             <Text mt={2} color="ui.dim">
-              Files pushed earlier are still read from{" "}
+              Older files also read from:{" "}
               {storageQuery.data.previous.map((r) => describe(r)).join(", ")}
-              {storageQuery.data.dvc ? " and Calkit Hub storage" : ""}.
+              {storageQuery.data.dvc ? ", Calkit Hub storage" : ""}
             </Text>
           )}
           {isOwner && (

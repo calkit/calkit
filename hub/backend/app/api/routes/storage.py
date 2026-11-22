@@ -195,7 +195,7 @@ def delete_account_storage(
     if used is not None:
         raise HTTPException(
             409,
-            "This storage has been used by a project, so it's still needed",
+            "Storage used by a project can't be removed",
         )
     session.delete(resource)
     session.commit()

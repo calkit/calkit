@@ -9,8 +9,8 @@ goes to the Calkit Hub (calkit.io).
 
 <!-- TODO: needs human review -->
 
-You can also send those files somewhere else,
-e.g., a Hugging Face bucket of the project's own.
+You can also send them somewhere else,
+e.g., a Hugging Face bucket.
 
 Either way,
 you work with your files the same way,
@@ -40,16 +40,16 @@ This also means:
 
 Every account starts with the Calkit Hub's built-in storage,
 which is what projects use unless you choose otherwise.
-To send a project's files somewhere else instead:
+To use your own instead:
 
 1. Connect the service in your
    [hub account settings](https://calkit.io/settings),
    under connected accounts.
 2. In the project's settings on the hub,
-   choose where its files go,
-   or create a new place for them, e.g., a Hugging Face bucket.
+   select where its files go,
+   or create a new Hugging Face bucket for it.
 
-To see where a project's files are stored,
+To see where a project's files are stored
 and how much Calkit Hub storage it uses,
 run this in the project:
 
@@ -57,7 +57,7 @@ run this in the project:
 calkit describe storage
 ```
 
-Choosing new storage for a project only affects files pushed after that;
+Changing a project's storage only affects files pushed after the change;
 see [Changing where files are stored](#changing-where-files-are-stored).
 
 ## Hugging Face
@@ -70,19 +70,18 @@ Changing part of a large file only uploads the part that changed.
 
 <!-- TODO: needs human review -->
 
-Click the connect button next to Hugging Face in your
-[hub account settings](https://calkit.io/settings),
-or start from a project's settings,
-which will ask you to connect if you haven't.
-Then, in the project's settings,
-create a Hugging Face bucket for it,
-choosing your HF account or one of your HF organizations.
-Calkit will name the bucket after the project and manage it for you.
+In the project's settings on the hub,
+click "New Hugging Face bucket,"
+connecting your HF account if asked.
+Select your HF account or one of your HF organizations,
+and Calkit will create a bucket there named after the project
+and manage it for you.
 
-A bucket is public if its project is,
-so making a project public makes its bucket public too,
-including files from earlier versions.
-To remove files the project no longer uses, see `dvc gc`,
+A project's bucket is public if the project is,
+and changes with it,
+so making a project public also makes files from its earlier versions
+public.
+To remove files it no longer uses, see `dvc gc`,
 or keep the project private and publish a release.
 
 If you disconnect your HF account while projects store files with it,
@@ -102,7 +101,7 @@ since it uses their storage.
 New files go to the new storage right away,
 and nothing is moved:
 files pushed before the change stay where they are,
-and Calkit keeps finding them there,
+and Calkit still finds them there,
 so you and your collaborators don't need to do anything.
 
 When you delete a project,

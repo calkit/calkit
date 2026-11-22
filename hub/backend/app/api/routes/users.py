@@ -1099,9 +1099,8 @@ class HuggingFaceAuthStart(BaseModel):
     redirect_uri: str
 
 
-# Enough to create and write to the bucket Calkit uses. To verify:
-# ``contribute-repos`` would limit this to repos Calkit creates, if it
-# covers buckets.
+# Enough to create buckets; ``contribute-repos`` would be narrower if it
+# covers buckets
 HF_OAUTH_SCOPES = "openid profile manage-repos"
 
 
@@ -1437,7 +1436,7 @@ def delete_user_external_credential(
     )
     if resources and storage_action is None:
         raise HTTPException(
-            409, "Storage uses this account; choose what to do with it"
+            409, "Storage uses this account; transfer, delete, or orphan it"
         )
     if resources and storage_action == "transfer":
         # Everything has to fit in each owner's plan
@@ -1472,10 +1471,10 @@ def delete_user_external_credential(
                     session.add(project)
         session.commit()
         if not app.tasks.enqueue_storage_transfer(str(current_user.id)):
-            raise HTTPException(503, "Transfers aren't available right now")
+            raise HTTPException(503, "Transfers unavailable")
         return Message(
-            message="Transferring files to Calkit Hub storage. Hugging "
-            "Face will be disconnected when it's done."
+            message="Transferring files to Calkit Hub storage; Hugging Face "
+            "disconnects when done"
         )
     for resource in resources:
         if storage_action == "delete":

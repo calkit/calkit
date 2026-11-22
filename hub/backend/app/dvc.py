@@ -333,9 +333,8 @@ def expand_dvc_lock_outs(
             logger.warning(f"Failed to read {path}: {e}")
             return None
 
-    # Read candidates in rounds, in parallel within each, so a later
-    # candidate is only tried for md5s every earlier one missed, and we never
-    # pay a serial existence check per candidate per directory
+    # Candidates are read in parallel rounds, each only for md5s earlier ones
+    # missed
     md5_to_contents: dict[str, list[dict[str, Any]]] = {}
     missing = sorted(dir_md5s)
     n_candidates = max((len(c) for c in md5_to_candidates.values()), default=0)

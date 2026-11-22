@@ -4257,6 +4257,10 @@ def log_to_file() -> None:
     os.dup2(fd, 1)
     os.dup2(fd, 2)
     os.close(fd)
+    # On Windows, streams on a console write to it directly, not the fds
+    if sys.platform == "win32":
+        sys.stdout = open(1, "w", encoding="utf-8", buffering=1, closefd=False)
+        sys.stderr = open(2, "w", encoding="utf-8", buffering=1, closefd=False)
     _logs_to_file = True
 
 

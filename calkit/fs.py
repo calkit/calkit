@@ -278,12 +278,17 @@ class CalkitFileSystem(AbstractFileSystem):
         super().__init__(*args, **kwargs)
         self._session = requests.Session()
         self._base_url = kwargs.get("endpoint_url")
-        # Xet access by (owner, project, "put" or "get"), which covers the
-        # whole bucket, so it's reused until it's about to expire
-        self._xet_access: dict[tuple[str, str, str], dict[str, Any]] = {}
-        # (xet_hash, size) by (owner, project, path), from info, so a
+        # Xet access by (owner, project, "put" or "get", bucket), which
+        # covers the whole bucket, so it's reused until it's about to expire.
+        # Puts go to the project's current storage, so their bucket is None.
+        self._xet_access: dict[
+            tuple[str, str, str, str | None], dict[str, Any]
+        ] = {}
+        # (bucket, xet_hash, size) by (owner, project, path), from info, so a
         # download needn't ask the hub for them
-        self._xet_objects: dict[tuple[str, str, str], tuple[str, int]] = {}
+        self._xet_objects: dict[
+            tuple[str, str, str], tuple[str | None, str, int]
+        ] = {}
         # Projects known to be in HF storage
         self._xet_projects: set[tuple[str, str]] = set()
         # Batches concurrent transfers by (owner, project, "put" or "get")
@@ -781,12 +786,16 @@ class CalkitFileSystem(AbstractFileSystem):
             raise ValueError(f"Unsupported access kind: {kind}")
 
     def _get_xet_access(
-        self, owner: str, project: str, operation: str
+        self,
+        owner: str,
+        project: str,
+        operation: str,
+        bucket: str | None = None,
     ) -> dict[str, Any] | None:
         """Get a project's Xet access from an earlier operation, if it's
         not about to expire.
         """
-        access = self._xet_access.get((owner, project, operation))
+        access = self._xet_access.get((owner, project, operation, bucket))
         if access is None or access["expires_at_unix"] < time.time() + 60:
             return None
         return access
@@ -794,7 +803,8 @@ class CalkitFileSystem(AbstractFileSystem):
     def _set_xet_access(
         self, owner: str, project: str, operation: str, access: dict[str, Any]
     ) -> None:
-        self._xet_access[(owner, project, operation)] = access
+        bucket = access.get("bucket") if operation == "get" else None
+        self._xet_access[(owner, project, operation, bucket)] = access
         self._xet_projects.add((owner, project))
 
     def _get_xet_batcher(
@@ -826,35 +836,35 @@ class CalkitFileSystem(AbstractFileSystem):
                 # Records the Xet hash of each that's in HF
                 self.info_many(unknown, content=False)
             outcomes: list[Any] = [_NOT_XET] * len(items)
-            known = [
-                (n, item)
-                for n, item in enumerate(items)
-                if (owner, project, item[0]) in self._xet_objects
-            ]
-            if not known:
-                return outcomes
-            access = self._get_xet_access(owner, project, "get")
-            if access is None:
-                info = self._get_fs_op_info(
-                    owner, project, known[0][1][0], "get"
-                )
-                access = info.get("access") or {}
-                if access.get("kind") != "hf-xet":
-                    return outcomes
-                self._set_xet_access(owner, project, "get", access)
-            errors = self._xet_download(
-                owner,
-                project,
-                access,
-                [
-                    (file_path, lpath)
-                    + self._xet_objects[(owner, project, file_path)]
-                    + (callback,)
-                    for _, (file_path, lpath, callback) in known
-                ],
-            )
-            for (n, _), error in zip(known, errors):
-                outcomes[n] = error
+            # A project's objects can be in more than one bucket, each with
+            # its own token
+            by_bucket: dict[str | None, list[int]] = {}
+            for n, (file_path, _, _) in enumerate(items):
+                obj = self._xet_objects.get((owner, project, file_path))
+                if obj is not None:
+                    by_bucket.setdefault(obj[0], []).append(n)
+            for bucket, ns in by_bucket.items():
+                access = self._get_xet_access(owner, project, "get", bucket)
+                if access is None:
+                    info = self._get_fs_op_info(
+                        owner, project, items[ns[0]][0], "get"
+                    )
+                    access = info.get("access") or {}
+                    if access.get("kind") != "hf-xet":
+                        continue
+                    self._set_xet_access(owner, project, "get", access)
+                downloads = []
+                for n in ns:
+                    file_path, lpath, callback = items[n]
+                    _, xet_hash, size = self._xet_objects[
+                        (owner, project, file_path)
+                    ]
+                    downloads.append(
+                        (file_path, lpath, xet_hash, size, callback)
+                    )
+                errors = self._xet_download(owner, project, access, downloads)
+                for n, error in zip(ns, errors):
+                    outcomes[n] = error
             return outcomes
 
         key = (owner, project, operation)
@@ -927,15 +937,23 @@ class CalkitFileSystem(AbstractFileSystem):
             )
             for (file_path, _, _), info in zip(datas, infos):
                 xet_hashes[file_path] = info.hash
-        calkit.hub.post(
-            f"/projects/{owner}/{project}/fs/ops/batch",
-            json={
-                "operation": "register",
-                "paths": list(xet_hashes),
-                "xet_hashes": xet_hashes,
-            },
-            base_url=self.base_url,
-        )
+        try:
+            calkit.hub.post(
+                f"/projects/{owner}/{project}/fs/ops/batch",
+                json={
+                    "operation": "register",
+                    "paths": list(xet_hashes),
+                    "xet_hashes": xet_hashes,
+                    "bucket": access.get("bucket"),
+                },
+                base_url=self.base_url,
+            )
+        except HTTPError as e:
+            # The project's storage changed, so the next upload needs new
+            # access
+            if e.response is not None and e.response.status_code == 409:
+                self._xet_access.pop((owner, project, "put", None), None)
+            raise
 
     def _xet_download(
         self,
@@ -1249,6 +1267,7 @@ class CalkitFileSystem(AbstractFileSystem):
                         info = self._normalize_info(file_path, info_payload)
                         if isinstance(info_payload.get("xet_hash"), str):
                             self._xet_objects[(owner, project, file_path)] = (
+                                info_payload.get("bucket"),
                                 info_payload["xet_hash"],
                                 info["size"],
                             )

@@ -1794,6 +1794,10 @@ export type FsOpBatchRequest = {
   xet_hashes?: {
     [key: string]: string
   } | null
+  /**
+   * Bucket
+   */
+  bucket?: string | null
 }
 
 /**
@@ -8071,6 +8075,10 @@ export type XetAccess = {
    * Operation
    */
   operation: "upload" | "download"
+  /**
+   * Bucket
+   */
+  bucket?: string | null
   /**
    * Cas Url
    */

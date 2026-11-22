@@ -38,8 +38,12 @@ def upgrade():
         ),
         sa.Column('credential_user_id', sa.Uuid(), nullable=False),
         sa.Column('created', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['owner_account_id'], ['account.id']),
-        sa.ForeignKeyConstraint(['credential_user_id'], ['user.id']),
+        sa.ForeignKeyConstraint(
+            ['owner_account_id'], ['account.id'], ondelete='CASCADE'
+        ),
+        sa.ForeignKeyConstraint(
+            ['credential_user_id'], ['user.id'], ondelete='CASCADE'
+        ),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint(
             'owner_account_id',
@@ -62,15 +66,18 @@ def upgrade():
         'storageresource',
         ['dvc_storage_id'],
         ['id'],
+        ondelete='SET NULL',
     )
     op.create_table(
         'projectstoragehistory',
         sa.Column('project_id', sa.Uuid(), nullable=False),
         sa.Column('storage_resource_id', sa.Uuid(), nullable=False),
         sa.Column('first_used', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['project_id'], ['project.id']),
         sa.ForeignKeyConstraint(
-            ['storage_resource_id'], ['storageresource.id']
+            ['project_id'], ['project.id'], ondelete='CASCADE'
+        ),
+        sa.ForeignKeyConstraint(
+            ['storage_resource_id'], ['storageresource.id'], ondelete='CASCADE'
         ),
         sa.PrimaryKeyConstraint('project_id', 'storage_resource_id'),
     )

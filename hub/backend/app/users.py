@@ -1192,6 +1192,13 @@ def save_huggingface_token(
 
 def get_huggingface_token(session: Session, user: User) -> str:
     """Get a user's Hugging Face access token, refreshing it if needed."""
+
+    def get_needs_refresh(credential: UserExternalCredential) -> bool:
+        return (
+            credential.expires is not None
+            and (utcnow() + timedelta(minutes=5)) >= credential.expires
+        )
+
     credential = get_external_credential(
         session=session, user=user, provider="huggingface"
     )
@@ -1199,12 +1206,26 @@ def get_huggingface_token(session: Session, user: User) -> str:
         raise HTTPException(
             401, "User needs to authenticate with Hugging Face"
         )
+    if not get_needs_refresh(credential):
+        tokens = json.loads(decrypt_secret(credential.secret_payload))
+        return str(tokens["access_token"])
+    # Requests that need a refresh at once take turns under the row lock,
+    # like in `get_github_token`, and the rest use the token the first got,
+    # since HF may not accept a refresh token twice, and a rejected refresh
+    # disconnects the account
+    credential_id = credential.id
+    session.expire(credential)
+    credential = session.exec(
+        select(UserExternalCredential)
+        .where(UserExternalCredential.id == credential_id)
+        .with_for_update()
+    ).first()
+    if credential is None:
+        raise HTTPException(
+            401, "User needs to authenticate with Hugging Face"
+        )
     tokens = json.loads(decrypt_secret(credential.secret_payload))
-    needs_refresh = (
-        credential.expires is not None
-        and (utcnow() + timedelta(minutes=5)) >= credential.expires
-    )
-    if not needs_refresh:
+    if not get_needs_refresh(credential):
         return str(tokens["access_token"])
     if not tokens.get("refresh_token"):
         raise HTTPException(

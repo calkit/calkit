@@ -100,6 +100,9 @@ class XetAccess(BaseModel):
 
     kind: Literal["hf-xet"] = "hf-xet"
     operation: Literal["upload", "download"]
+    # The bucket the token is for, since a project's objects can be in more
+    # than one
+    bucket: str | None = None
     cas_url: str
     access_token: str
     expires_at_unix: int
@@ -332,7 +335,10 @@ def post_project_fs_op(
             raise HTTPException(404, "Path not found")
         st, full_path = found_obj
         if st.backend == "hf":
+            assert st.resource is not None
             info_dict = st.fs.info(full_path)
+            if not info_dict.get("xet_hash"):
+                raise HTTPException(400, "Path is not a file")
             try:
                 token = storage.get_xet_token(st, "read")
             except Exception:
@@ -342,6 +348,7 @@ def post_project_fs_op(
                 backend=st.backend,
                 access=XetAccess(
                     operation="download",
+                    bucket=st.resource.bucket,
                     cas_url=token["casUrl"],
                     access_token=token["accessToken"],
                     expires_at_unix=token["exp"],
@@ -369,6 +376,7 @@ def post_project_fs_op(
     # We are doing a PUT if we've made it this far
     assert operation == "put"
     if target.backend == "hf":
+        assert target.resource is not None
         try:
             token = storage.get_xet_token(target, "write")
         except Exception:
@@ -381,6 +389,7 @@ def post_project_fs_op(
             | PresignedUrlAccess
         ) = XetAccess(
             operation="upload",
+            bucket=target.resource.bucket,
             cas_url=token["casUrl"],
             access_token=token["accessToken"],
             expires_at_unix=token["exp"],
@@ -464,6 +473,8 @@ class FsOpBatchRequest(BaseModel):
         dict[str, Annotated[str, StringConstraints(pattern=XET_HASH_RE)]]
         | None
     ) = None
+    # For register, the bucket the content was uploaded to
+    bucket: str | None = None
 
 
 class FsOpBatchResult(BaseModel):
@@ -491,15 +502,16 @@ def post_project_fs_batch_op(
 
     def get_result(path: str) -> FsOpBatchResult:
         # Use the first storage that has the path, or the first overall
-        fs = storages[0].fs
+        found = storages[0]
         full_path = storages[0].make_project_path(
             owner_name, project_name, path
         )
         for st in storages:
             candidate = st.make_project_path(owner_name, project_name, path)
             if len(storages) == 1 or st.fs.exists(candidate):
-                fs, full_path = st.fs, candidate
+                found, full_path = st, candidate
                 break
+        fs = found.fs
         path_result: dict[str, Any] = {}
         # Handle exists
         if operation == "exists" or "exists" in include:
@@ -526,8 +538,9 @@ def post_project_fs_batch_op(
                     "time_modified": _get_time_modified(info_dict),
                 }
                 # So clients can download from HF without asking per file
-                if info_dict.get("xet_hash"):
+                if info_dict.get("xet_hash") and found.resource is not None:
                     path_result["info"]["xet_hash"] = info_dict["xet_hash"]
+                    path_result["info"]["bucket"] = found.resource.bucket
         # Handle content (if requested via include)
         if "content" in include and info_dict is not None:
             path_result["content_base64"] = None
@@ -586,6 +599,11 @@ def post_project_fs_batch_op(
             raise HTTPException(
                 400, "Register is only needed for Hugging Face storage"
             )
+        assert target.resource is not None
+        # Content uploaded to a bucket the project no longer uses can't be
+        # added to the new one
+        if req.bucket is not None and req.bucket != target.resource.bucket:
+            raise HTTPException(409, "Project storage changed; push again")
         xet_hashes = req.xet_hashes or {}
         if set(paths) != set(xet_hashes):
             raise HTTPException(422, "Every path needs a xet_hash")
@@ -601,6 +619,19 @@ def post_project_fs_batch_op(
         ]
         try:
             storage.post_hf_bucket_batch(target, ops)
+        except storage.HfBucketBatchError as e:
+            logger.error(f"Failed to register files: {e}")
+            prefix = f"{owner_name}/{project_name}/"
+            failed = [
+                str(f.get("path", "")).partition(prefix)[2] for f in e.failures
+            ]
+            # Not 502, since retrying won't help, and the CLI retries those
+            raise HTTPException(
+                422,
+                f"Failed to register {len(failed)} of {len(ops)} files: "
+                + ", ".join(failed[:5])
+                + (" and more" if len(failed) > 5 else ""),
+            )
         except Exception:
             logger.exception(f"Failed to register {len(ops)} files")
             raise HTTPException(502, "Failed to register uploaded files")

@@ -205,10 +205,10 @@ from app.pipeline import (
 )
 from app.security import generate_refresh_token, hash_refresh_token
 from app.storage import (
-    get_object_fs,
+    ProjectStorage,
     get_project_object_url,
     get_project_storage,
-    make_data_fpath,
+    put_project_objects,
     remove_gcs_content_type,
 )
 from calkit.models import ProjectStatus
@@ -552,11 +552,12 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
 
 def _push_dvc_cache_to_storage(
     repo_dir: str,
+    target: ProjectStorage,
     owner_name: str,
     project_name: str,
     skip: set[str] | None = None,
 ) -> int:
-    """Copy a repo's local DVC cache into this project's object storage.
+    """Copy a repo's local DVC cache into the project's storage.
 
     Walking the cache rather than reading each .dvc file covers directory
     outputs and their .dir objects the same way single files are covered,
@@ -568,8 +569,7 @@ def _push_dvc_cache_to_storage(
     cache_dir = os.path.join(repo_dir, ".dvc", "cache", "files", "md5")
     if not os.path.isdir(cache_dir):
         return 0
-    fs = get_object_fs()
-    count = 0
+    objects: list[tuple[str, str | bytes]] = []
     for idx in sorted(os.listdir(cache_dir)):
         idx_dir = os.path.join(cache_dir, idx)
         if not os.path.isdir(idx_dir):
@@ -578,18 +578,9 @@ def _push_dvc_cache_to_storage(
             src = os.path.join(idx_dir, rest)
             if not os.path.isfile(src) or f"{idx}/{rest}" in (skip or ()):
                 continue
-            fpath = make_data_fpath(
-                owner_name=owner_name,
-                project_name=project_name,
-                idx=idx,
-                md5=rest,
-            )
-            with open(src, "rb") as f_in, fs.open(fpath, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            if settings.ENVIRONMENT != "local":
-                remove_gcs_content_type(fpath)
-            count += 1
-    return count
+            objects.append((f"files/md5/{idx}/{rest}", src))
+    put_project_objects(target, owner_name, project_name, objects)
+    return len(objects)
 
 
 @router.post(
@@ -686,6 +677,7 @@ def post_project_upload(
     # storage is what `dvc push` would do, and the server is the remote.
     n_objects = _push_dvc_cache_to_storage(
         repo_dir=str(repo.working_dir),
+        target=get_project_storage(session, project),
         owner_name=project.owner_account_name,
         project_name=project.name,
     )
@@ -5738,6 +5730,7 @@ def post_project_dataset(
         # object storage so a clone can pull them
         _push_dvc_cache_to_storage(
             repo_dir=str(repo.working_dir),
+            target=get_project_storage(session, project),
             owner_name=project.owner_account_name,
             project_name=project.name,
         )

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -476,6 +477,18 @@ def get_xet_token(
     return token
 
 
+class HfBucketBatchError(RuntimeError):
+    """Some operations of an HF bucket batch failed."""
+
+    def __init__(self, failures: list[dict[str, str]]):
+        self.failures = failures
+        listed = ", ".join(
+            f"{f.get('path')}: {f.get('error')}" for f in failures[:5]
+        )
+        more = f" and {len(failures) - 5} more" if len(failures) > 5 else ""
+        super().__init__(f"{len(failures)} failed ({listed}{more})")
+
+
 def post_hf_bucket_batch(
     storage: ProjectStorage, ops: list[dict[str, Any]]
 ) -> None:
@@ -493,7 +506,55 @@ def post_hf_bucket_batch(
         data=data,
         timeout=60,
     )
+    # HF lists failed operations in the body of a 200 for a partial failure,
+    # or a 422 if all failed
+    if resp.status_code in (200, 422):
+        failures = resp.json().get("failed", [])
+        if failures:
+            raise HfBucketBatchError(failures)
     resp.raise_for_status()
+
+
+def put_project_objects(
+    target: ProjectStorage,
+    owner_name: str,
+    project_name: str,
+    objects: list[tuple[str, str | bytes]],
+) -> None:
+    """Write objects to a project's storage, each from a local path or bytes.
+
+    Each object is its path in the project and its source. For HF, they're
+    all added in one batch.
+    """
+    if not objects:
+        return
+    if target.backend == "hf":
+        from huggingface_hub import HfApi
+
+        assert target.resource is not None
+        add = [
+            (
+                src,
+                target.make_project_path(
+                    owner_name, project_name, path
+                ).removeprefix(f"{target.data_prefix}/"),
+            )
+            for path, src in objects
+        ]
+        HfApi(token=target.token).batch_bucket_files(
+            target.resource.bucket, add=add
+        )
+        return
+    for path, src in objects:
+        fpath = target.make_project_path(owner_name, project_name, path)
+        with target.fs.open(fpath, "wb") as f_out:
+            if isinstance(src, bytes):
+                f_out.write(src)
+            else:
+                with open(src, "rb") as f_in:
+                    shutil.copyfileobj(f_in, f_out)
+        if settings.ENVIRONMENT != "local":
+            remove_gcs_content_type(fpath)
 
 
 def get_hf_object_url(storage: ProjectStorage, fpath: str) -> str:

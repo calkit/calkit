@@ -5,7 +5,7 @@ import json
 import os
 import uuid
 from types import SimpleNamespace
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import git
 import pytest
@@ -5861,6 +5861,7 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
     import io as _io
 
     from app.api.routes.projects.core import _push_dvc_cache_to_storage
+    from app.storage import ProjectStorage
 
     repo_dir = tmp_path / "repo"
     cache = repo_dir / ".dvc" / "cache" / "files" / "md5"
@@ -5884,15 +5885,12 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
             buf.close = close  # type: ignore[method-assign]
             return buf
 
-    with (
-        patch(
-            "app.api.routes.projects.core.get_object_fs",
-            return_value=FakeFS(),
-        ),
-        patch("app.config.settings.ENVIRONMENT", "local"),
-    ):
+    with patch("app.config.settings.ENVIRONMENT", "local"):
         count = _push_dvc_cache_to_storage(
             repo_dir=str(repo_dir),
+            target=ProjectStorage(
+                backend="s3", fs=FakeFS(), data_prefix="data"
+            ),
             owner_name="someone",
             project_name="a-project",
         )
@@ -5902,17 +5900,44 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
         ["cd", "ef456789.dir"],
     ]
     assert list(written.values())[0] == b"file contents"
+    # For HF, they're all added in one batch, under the project's folder
+    hf = ProjectStorage(
+        backend="hf",
+        fs=None,
+        data_prefix="buckets/someone/bucket",
+        resource=SimpleNamespace(bucket="someone/bucket"),  # type: ignore[arg-type]
+        token="hf-token",
+    )
+    with patch("huggingface_hub.HfApi") as api:
+        count = _push_dvc_cache_to_storage(
+            repo_dir=str(repo_dir),
+            target=hf,
+            owner_name="someone",
+            project_name="a-project",
+        )
+    assert count == 2
+    api.assert_called_once_with(token="hf-token")
+    batch = api.return_value.batch_bucket_files
+    batch.assert_called_once()
+    assert batch.call_args.args == ("someone/bucket",)
+    assert [dst for _, dst in batch.call_args.kwargs["add"]] == [
+        "someone/a-project/files/md5/ab/cdef0123",
+        "someone/a-project/files/md5/cd/ef456789.dir",
+    ]
     # A repo with nothing in DVC has nothing to push, and that isn't an error.
     empty = tmp_path / "empty"
     empty.mkdir()
-    with patch("app.api.routes.projects.core.get_object_fs") as fs:
-        assert (
-            _push_dvc_cache_to_storage(
-                repo_dir=str(empty), owner_name="a", project_name="b"
-            )
-            == 0
+    fs = MagicMock()
+    assert (
+        _push_dvc_cache_to_storage(
+            repo_dir=str(empty),
+            target=ProjectStorage(backend="s3", fs=fs, data_prefix="data"),
+            owner_name="a",
+            project_name="b",
         )
-    fs.assert_not_called()
+        == 0
+    )
+    fs.open.assert_not_called()
 
 
 def _set_identity(repo: git.Repo) -> None:

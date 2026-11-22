@@ -213,17 +213,20 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         MemoryFileSystem,
     )
 
-    from app.storage import ProjectStorage
+    from app.storage import HfBucketBatchError, ProjectStorage
 
     class FakeHfFileSystem(MemoryFileSystem):  # type: ignore[misc]
         def info(self, path: str, **kwargs: Any) -> dict[str, Any]:
             info: dict[str, Any] = super().info(path, **kwargs)
+            if info["type"] != "file":
+                return info
             return info | {"xet_hash": "a" * 64}
 
     hf = ProjectStorage(
         backend="hf",
         fs=FakeHfFileSystem(),
         data_prefix="/buckets/ns/bkt",
+        resource=SimpleNamespace(bucket="ns/bkt"),  # type: ignore[arg-type]
         token="hf-owner-token",
     )
     internal = ProjectStorage(
@@ -278,6 +281,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         access = response.json()["access"]
         assert access["kind"] == "hf-xet"
         assert access["operation"] == "download"
+        assert access["bucket"] == "ns/bkt"
         assert access["xet_hash"] == "a" * 64
         assert access["size"] == 4
         get_xet_token.assert_called_with(hf, "read")
@@ -285,6 +289,11 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
             FS_OPS_URL, json={"operation": "get", "path": "missing"}
         )
         assert response.status_code == 404
+        # A folder in HF has nothing to download
+        response = client.post(
+            FS_OPS_URL, json={"operation": "get", "path": "files/md5/bb"}
+        )
+        assert response.status_code == 400
         # Listing merges what's in both
         response = client.post(
             FS_OPS_URL, json={"operation": "find", "path": "files/md5"}
@@ -304,6 +313,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         assert access == {
             "kind": "hf-xet",
             "operation": "upload",
+            "bucket": "ns/bkt",
             "cas_url": "https://cas",
             "access_token": "xet",
             "expires_at_unix": 123,
@@ -335,6 +345,30 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
                 json=register | {"xet_hashes": bad_hashes},
             )
             assert response.status_code == 422
+        # Content uploaded to a bucket the project no longer uses isn't
+        # added to the new one
+        register |= {"xet_hashes": {"files/md5/cc/x": "b" * 64}}
+        batch.reset_mock()
+        response = client.post(
+            f"{FS_OPS_URL}/batch", json=register | {"bucket": "ns/old"}
+        )
+        assert response.status_code == 409
+        batch.assert_not_called()
+        # Paths HF rejects are an error, though the others were added
+        batch.side_effect = HfBucketBatchError(
+            [
+                {
+                    "path": f"{OWNER}/{PROJECT}/files/md5/cc/x",
+                    "error": "Unknown xet hash",
+                }
+            ]
+        )
+        response = client.post(
+            f"{FS_OPS_URL}/batch", json=register | {"bucket": "ns/bkt"}
+        )
+        assert response.status_code == 422
+        assert "1 of 1 files: files/md5/cc/x" in response.json()["detail"]
+        batch.side_effect = None
         # The batch endpoint falls back too
         response = client.post(
             f"{FS_OPS_URL}/batch",
@@ -351,6 +385,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         assert results[new_path]["content_base64"] == "bmV3IQ=="
         # HF objects come with what a client needs to download them
         assert results[new_path]["info"]["xet_hash"] == "a" * 64
+        assert results[new_path]["info"]["bucket"] == "ns/bkt"
         assert "xet_hash" not in results[old_path]["info"]
     # A project on the hub's storage has nothing to register
     with (

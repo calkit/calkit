@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from requests.exceptions import Timeout
+from requests.exceptions import HTTPError, Timeout
 
 import calkit
 from calkit import fs as ckfs
@@ -430,11 +430,13 @@ def test_xet_transfers(tmp_path: Path) -> None:
         return [SimpleNamespace(hash="xethash")]
 
     def download_files(infos: list[Any], *a: Any) -> None:
+        download_tokens.append(a[1][0])
         for info in infos:
             with open(info.destination_path, "wb") as f:
                 f.write(stored[info.hash])
 
     upload_gate = None
+    download_tokens: list[str] = []
     fake_xet = SimpleNamespace(
         upload_files=upload_files,
         upload_bytes=upload_bytes,
@@ -443,6 +445,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
     )
     access = {
         "kind": "hf-xet",
+        "bucket": "someone/one",
         "cas_url": "https://cas.example.com",
         "access_token": "xet_token",
         "expires_at_unix": 2_000_000_000,
@@ -469,6 +472,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
             "operation": "register",
             "paths": [obj_path],
             "xet_hashes": {obj_path: "xethash"},
+            "bucket": "someone/one",
         }
         assert stored["xethash"] == content
         # The access covers the whole bucket, so the next upload reuses it
@@ -509,11 +513,19 @@ def test_xet_transfers(tmp_path: Path) -> None:
             fs.put_file(str(local), "ck://owner/project/fails.bin")
         # Access that's about to expire isn't reused
         post.side_effect = None
-        fs._xet_access[("owner", "project", "put")] = access | {
+        fs._xet_access[("owner", "project", "put", None)] = access | {
             "expires_at_unix": 0
         }
         fs.put_file(str(local), "ck://owner/project/later.bin")
         assert get_op.call_count == 2
+        # If the project's storage changed, the next upload gets new access
+        conflict = MagicMock(status_code=409)
+        post.side_effect = HTTPError("409: changed", response=conflict)
+        with pytest.raises(HTTPError):
+            fs.put_file(str(local), "ck://owner/project/switched.bin")
+        post.side_effect = None
+        fs.put_file(str(local), "ck://owner/project/switched.bin")
+        assert get_op.call_count == 3
     # Writing through a file object uploads its bytes the same way
     stored.clear()
     with (
@@ -571,7 +583,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
         "results": {
             obj_path: {
                 "info": {"name": obj_path, "size": len(content)}
-                | {"xet_hash": "xethash"}
+                | {"xet_hash": "xethash", "bucket": "someone/one"}
             }
         },
     }
@@ -588,3 +600,36 @@ def test_xet_transfers(tmp_path: Path) -> None:
         # And one already looked up isn't looked up again
         fs.get_file(f"ck://owner/project/{obj_path}", str(out))
         bop.assert_called_once()
+    # A project that moved between buckets downloads each object with the
+    # token for the bucket it's in
+    other = b"in the previous bucket"
+    other_md5 = hashlib.md5(other).hexdigest()
+    other_path = f"files/md5/{other_md5[:2]}/{other_md5[2:]}"
+    stored["otherhash"] = other
+    batch["results"][other_path] = {
+        "info": {"name": other_path, "size": len(other)}
+        | {"xet_hash": "otherhash", "bucket": "someone/two"}
+    }
+    old_access = access | {"bucket": "someone/two", "access_token": "old"}
+    download_tokens.clear()
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(fs, "_get_fs_op_info_batch", return_value=batch),
+        patch.object(
+            fs, "_get_fs_op_info", return_value={"access": old_access}
+        ) as get_op,
+    ):
+        fs._xet_objects.clear()
+        batcher = fs._xet_batchers[("owner", "project", "get")]
+        outcomes = batcher._send(
+            [
+                (obj_path, str(tmp_path / "a.bin"), ckfs.DEFAULT_CALLBACK),
+                (other_path, str(tmp_path / "b.bin"), ckfs.DEFAULT_CALLBACK),
+            ]
+        )
+    assert outcomes == [None, None]
+    assert (tmp_path / "a.bin").read_bytes() == content
+    assert (tmp_path / "b.bin").read_bytes() == other
+    assert sorted(download_tokens) == ["old", "xet_token"]
+    get_op.assert_called_once()
+    assert get_op.call_args.args[2] == other_path

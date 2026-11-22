@@ -839,7 +839,7 @@ class Project(ProjectBase, table=True):
     )
     # Where DVC objects go; null means the hub's own object storage
     dvc_storage_id: uuid.UUID | None = Field(
-        foreign_key="storageresource.id", default=None
+        foreign_key="storageresource.id", default=None, ondelete="SET NULL"
     )
     # Relationships
     owner_account: Account = Relationship(back_populates="owned_projects")
@@ -1124,7 +1124,8 @@ class StorageResource(SQLModel, table=True):
 
     Projects owned by the account can use it for their DVC objects, each
     under its own ``{owner}/{project}`` folder. The credential used to reach
-    it is the external credential of the user who connected it.
+    it is the external credential of the user who connected it, so it's
+    deleted with that user, since it can't be reached without them.
     """
 
     __table_args__ = (
@@ -1135,13 +1136,17 @@ class StorageResource(SQLModel, table=True):
         ),
     )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    owner_account_id: uuid.UUID = Field(foreign_key="account.id", index=True)
+    owner_account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, ondelete="CASCADE"
+    )
     name: str = Field(min_length=2, max_length=64)
     # Only "hf-bucket" for now
     kind: str = Field(max_length=32)
     # For HF buckets, the bucket ID, i.e., ``{namespace}/{bucket_name}``
     bucket: str = Field(max_length=255)
-    credential_user_id: uuid.UUID = Field(foreign_key="user.id")
+    credential_user_id: uuid.UUID = Field(
+        foreign_key="user.id", ondelete="CASCADE"
+    )
     created: datetime = Field(default_factory=utcnow)
     # Relationships
     owner_account: Account = Relationship()
@@ -1155,9 +1160,11 @@ class ProjectStorageHistory(SQLModel, table=True):
     back through these (and the hub's own storage) to find older objects.
     """
 
-    project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id", primary_key=True, ondelete="CASCADE"
+    )
     storage_resource_id: uuid.UUID = Field(
-        foreign_key="storageresource.id", primary_key=True
+        foreign_key="storageresource.id", primary_key=True, ondelete="CASCADE"
     )
     first_used: datetime = Field(default_factory=utcnow)
     # Relationships

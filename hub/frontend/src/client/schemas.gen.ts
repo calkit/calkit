@@ -3139,6 +3139,17 @@ export const FsOpBatchRequestSchema = {
       ],
       title: "Xet Hashes",
     },
+    bucket: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Bucket",
+    },
   },
   type: "object",
   required: ["operation", "paths"],
@@ -14146,6 +14157,17 @@ export const XetAccessSchema = {
       type: "string",
       enum: ["upload", "download"],
       title: "Operation",
+    },
+    bucket: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Bucket",
     },
     cas_url: {
       type: "string",

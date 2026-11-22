@@ -159,10 +159,10 @@ see what it recorded.
 The notebook printed the rate constants, and the paper has one typed in. A
 printed number has nothing to point back to, so tell Calkit to save the
 variable holding them whenever the notebook runs, without changing its
-code. In VS Code, open `fit_rates.ipynb`, click **Save as Output** in the
-toolbar of the cell that fits the rates, choose **Value**, then `rates`,
-which maps each temperature to its rate constant. The cell
-gets a label saying `rates` is saved after it. Then run everything that's
+code. In VS Code, open `fit_rates.ipynb`, click **Save as Calkit Output**
+in the toolbar of the cell that fits the rates, choose **Value**, then
+`rates`, which maps each temperature to its rate constant. The cell gets a
+label saying `rates` is saved after it. Then run everything that's
 out of date, save the project, and sync the paper, all at once:
 
 ```sh

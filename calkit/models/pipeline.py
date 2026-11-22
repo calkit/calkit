@@ -1724,6 +1724,16 @@ class LatexStage(Stage):
             project_dir or "", self.wdir or "", self.target_path
         )
         self._loads_calkit, components = calkit.latex.read_ck_usage(document)
+        # Its commands can't compile without calkit.sty, e.g., a \ckvalue
+        # typed into a document that never loaded it
+        if (
+            write_files
+            and not self._loads_calkit
+            and calkit.latex.load_package(document)
+        ):
+            self._loads_calkit, components = calkit.latex.read_ck_usage(
+                document
+            )
         paths = []
         copied = []
         for c in components:

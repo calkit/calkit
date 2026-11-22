@@ -95,6 +95,7 @@ import {
   latexPreviewCommand,
   latexWorkingDiffPath,
   latexWorkshopBuildsWithCalkit,
+  needsLatexStage,
   pipelineLatexDiffs,
   type PipelineLatexDiff,
 } from "./latex/core";
@@ -115,6 +116,7 @@ const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
 const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
 const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
+const COMMAND_ADD_LATEX_STAGE = "calkit-vscode.addLatexStage";
 const COMMAND_RUN_MARKDOWN_STAGE = "calkit-vscode.runMarkdownStage";
 const COMMAND_RUN_PIPELINE = "calkit-vscode.runPipeline";
 const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
@@ -885,6 +887,34 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  // Add a stage that builds a LaTeX document and run it, with a TeX Live
+  // environment if the project has none, which calkit xr creates
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_ADD_LATEX_STAGE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        await vscode.workspace.textDocuments
+          .find((d) => d.uri.fsPath === fileUri.fsPath)
+          ?.save();
+        const projectDir = getNotebookProjectRoot(fileUri) ?? workspaceRoot;
+        const relPath = path
+          .relative(projectDir, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const prefix = path.relative(workspaceRoot, projectDir)
+          ? `calkit -C ${shQuote(projectDir)}`
+          : "calkit";
+        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        terminal.show();
+        terminal.sendText(`${prefix} xr ${shQuote(relPath)}`);
       },
     ),
   );
@@ -2752,9 +2782,7 @@ async function refreshPipelineOutputContext(
   currentArtifactOrigins = artifactOrigins;
   currentEnvDescriptions = envDescriptions;
   pdfReviewProvider?.stagesChanged();
-  void refreshActiveFileBuildsPdfContext(
-    vscode.window.activeTextEditor?.document,
-  );
+  void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
   // Gate the sidebar on the presence of a calkit.yaml file. When absent, the
   // tree is left empty so the "Initialize Calkit Project" welcome view shows.
   const calkitYamlExists = await fileExists(
@@ -9277,6 +9305,7 @@ async function refreshActiveFileStageContext(
   const fileUri = document?.uri;
   let hasStage = false;
   let isPipelineOutput = false;
+  let needsStage = false;
   if (workspaceRoot && fileUri) {
     const [stageForFile, producingStage] = await Promise.all([
       findStageForFile(workspaceRoot, fileUri),
@@ -9284,6 +9313,14 @@ async function refreshActiveFileStageContext(
     ]);
     hasStage = stageForFile !== undefined;
     isPipelineOutput = producingStage !== undefined;
+    if (!hasStage && path.extname(fileUri.fsPath).toLowerCase() === ".tex") {
+      const { dvcYaml } = await readMergedProject(workspaceRoot);
+      needsStage = needsLatexStage(
+        path.relative(workspaceRoot, fileUri.fsPath).replace(/\\/g, "/"),
+        document?.getText() ?? "",
+        dvcYaml?.stages ?? {},
+      );
+    }
   }
   const isPlotly =
     document !== undefined &&
@@ -9295,6 +9332,11 @@ async function refreshActiveFileStageContext(
       "setContext",
       "calkit.activeFileHasStage",
       hasStage,
+    ),
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activeFileNeedsLatexStage",
+      needsStage,
     ),
     vscode.commands.executeCommand(
       "setContext",

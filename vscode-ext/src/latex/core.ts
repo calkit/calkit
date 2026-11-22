@@ -238,3 +238,29 @@ export function reviewPath(
   }
   return undefined;
 }
+
+// Whether a .tex file is a document no stage builds or reads, so a stage
+// could build it: it has a \documentclass, and isn't a dependency of any
+// stage, as a chapter a thesis inputs is
+export function needsLatexStage(
+  texFile: string,
+  text: string,
+  dvcStages: Record<string, { deps?: (string | Record<string, unknown>)[] }>,
+): boolean {
+  const hasClass = text
+    .split(/\r?\n/)
+    .some((line) =>
+      /^\s*\\documentclass\b/.test(line.replace(/(?<!\\)%.*$/, "")),
+    );
+  return (
+    hasClass &&
+    !Object.values(dvcStages).some((stage) =>
+      (stage.deps ?? []).some(
+        (dep) =>
+          path.posix.normalize(
+            typeof dep === "string" ? dep : Object.keys(dep)[0] ?? "",
+          ) === texFile,
+      ),
+    )
+  );
+}

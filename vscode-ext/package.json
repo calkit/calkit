@@ -166,6 +166,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "calkit-vscode.addLatexStage",
+        "title": "Add to Pipeline and Build",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
         "command": "calkit-vscode.runMarkdownStage",
         "title": "Calkit: Run Markdown Stage",
         "icon": "$(play)"
@@ -776,6 +782,11 @@
           "group": "navigation"
         },
         {
+          "command": "calkit-vscode.addLatexStage",
+          "when": "resourceExtname == .tex && calkit-vscode.hasProject && calkit.activeFileNeedsLatexStage",
+          "group": "navigation"
+        },
+        {
           "command": "calkit-vscode.openStagePdf",
           "when": "resourceExtname == .qmd && calkit.activeFileHasStage && !calkit.isSettingKernel",
           "group": "navigation"
@@ -1026,6 +1037,10 @@
         {
           "command": "calkit-vscode.runMarkdownStage",
           "when": "false"
+        },
+        {
+          "command": "calkit-vscode.addLatexStage",
+          "when": "resourceExtname == .tex && calkit.activeFileNeedsLatexStage"
         },
         {
           "command": "calkit-vscode.pdfGoToSource",

@@ -9,6 +9,7 @@ import {
   latexStageSource,
   latexWorkingDiffPath,
   latexWorkshopBuildsWithCalkit,
+  needsLatexStage,
   pipelineLatexDiffs,
   reviewPath,
 } from "../latex/core";
@@ -415,4 +416,29 @@ test("a latex stage's document previews with the build it compiled to", () => {
     false,
   );
   assert.equal(latexWorkshopBuildsWithCalkit(undefined), false);
+});
+
+test("needsLatexStage offers a stage for documents nothing builds or reads", () => {
+  const doc = "\\documentclass{article}\n\\begin{document}\n\\end{document}\n";
+  const stages = {
+    thesis: { deps: ["thesis/main.tex", "thesis/chapters/intro.tex"] },
+    plot: { deps: [{ "scripts/plot.py": {} }] },
+  };
+  assert.equal(needsLatexStage("paper/main.tex", doc, stages), true);
+  // A stage's target or a file it inputs, e.g., a chapter
+  assert.equal(needsLatexStage("thesis/main.tex", doc, stages), false);
+  assert.equal(
+    needsLatexStage("thesis/chapters/intro.tex", doc, stages),
+    false,
+  );
+  // Not a document, or only commented out
+  assert.equal(needsLatexStage("intro.tex", "\\section{Intro}\n", {}), false);
+  assert.equal(
+    needsLatexStage("a.tex", "% \\documentclass{article}\n", {}),
+    false,
+  );
+  assert.equal(
+    needsLatexStage("a.tex", "  \\documentclass[11pt]{article} % x\n", {}),
+    true,
+  );
 });

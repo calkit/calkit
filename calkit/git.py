@@ -707,6 +707,72 @@ def get_filter_driver(repo: git.Repo, path: str | PathLike) -> str | None:
     return value
 
 
+def get_checkout_newline(path: str | PathLike) -> str | None:
+    """Return the line ending Git checks ``path`` out with, if it sets one.
+
+    Follows Git's precedence: the ``eol`` attribute, then ``core.autocrlf``,
+    then ``core.eol`` for files marked as text. Writing a tracked file with
+    this ending keeps its bytes, and so its hash as a DVC dependency, the same
+    as a fresh checkout's.
+
+    Parameters
+    ----------
+    path : str or PathLike
+        The file, which needn't exist yet.
+
+    Returns
+    -------
+    str or None
+        ``"\\n"`` or ``"\\r\\n"``, or ``None`` when ``path`` isn't in a Git
+        repo or Git leaves its line endings alone, so passing this as
+        ``open``'s ``newline`` keeps the platform default.
+    """
+    abs_path = os.path.abspath(path)
+    try:
+        repo = get_repo(os.path.dirname(abs_path))
+        rel_path = os.path.relpath(abs_path, str(repo.working_tree_dir))
+        out = repo.git.check_attr(
+            "-z", "text", "eol", "--", Path(rel_path).as_posix()
+        )
+    except (git.GitError, ValueError):
+        # Not in a repo, Git isn't installed, or on another drive
+        return None
+    # -z gives NUL-separated <path> <attr> <value> triples
+    fields = out.split("\0")
+    attrs = {
+        fields[i + 1]: fields[i + 2] for i in range(0, len(fields) - 2, 3)
+    }
+    text = attrs.get("text", "unspecified")
+    eol = attrs.get("eol", "unspecified")
+    if text == "unset":
+        return None
+    if eol in ("lf", "crlf"):
+        return "\n" if eol == "lf" else "\r\n"
+    try:
+        config_out = repo.git.config("--get-regexp", r"^core\.(autocrlf|eol)$")
+    except git.GitCommandError:
+        # Neither is set
+        config_out = ""
+    # Later lines come from more specific config files, so they win
+    config = dict(
+        line.lower().split(maxsplit=1)
+        for line in config_out.splitlines()
+        if " " in line
+    )
+    autocrlf = config.get("core.autocrlf", "false")
+    if autocrlf in ("true", "yes", "on", "1"):
+        return "\r\n"
+    if autocrlf == "input":
+        return "\n"
+    # Without core.autocrlf, Git only converts files marked as text
+    if text == "unspecified":
+        return None
+    core_eol = config.get("core.eol", "native")
+    if core_eol in ("lf", "crlf"):
+        return "\n" if core_eol == "lf" else "\r\n"
+    return os.linesep
+
+
 def ensure_path_is_not_filtered(
     repo: git.Repo, path: str | PathLike
 ) -> bool | None:

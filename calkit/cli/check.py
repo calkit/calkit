@@ -1559,13 +1559,21 @@ def check_venv(
             return
         # Local packages are installed from the spec, since their paths
         # differ between machines
-        with open(lock_fpath_full, encoding="utf-8") as f:
-            frozen = f.read()
+        # Read as written, since pip writes it through the shell, e.g., with
+        # CRLF on Windows, whatever Git checks it out with
+        with open(lock_fpath_full, encoding="utf-8", newline="") as f:
+            written = f.read()
+        frozen = written.replace("\r\n", "\n")
         lock = "".join(
             ln for ln in frozen.splitlines(keepends=True) if not is_local(ln)
         )
-        if lock != frozen:
-            with open(lock_fpath_full, "w", encoding="utf-8") as f:
+        newline = calkit.git.get_checkout_newline(lock_fpath_full)
+        if lock != frozen or (
+            newline is not None and lock.replace("\n", newline) != written
+        ):
+            with open(
+                lock_fpath_full, "w", encoding="utf-8", newline=newline
+            ) as f:
                 f.write(lock)
         lock_changed = lock != lock_before
         # All platforms are relocked together, so they agree; an existing

@@ -892,6 +892,17 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         await saveIfOpen(fileUri);
+        // Run from a PDF, the document it's built from may have edits
+        const relPath = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const source = documentStageSource(
+          getDocumentStages(workspaceRoot, relPath),
+          relPath,
+        );
+        if (source) {
+          await saveIfOpen(vscode.Uri.file(path.join(workspaceRoot, source)));
+        }
         runStageInTerminal(workspaceRoot, stageName);
       },
     ),
@@ -2048,7 +2059,22 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       }
     }
-    return root ? documents.map((d) => path.join(root, d)) : [];
+    // Not what Calkit or a stage writes, e.g., _calkit/values.tex or a
+    // table a notebook saves
+    const written = new Set(
+      Object.values(currentDvcYaml?.stages ?? {}).flatMap((stage) =>
+        dvcStageOutputPaths(stage),
+      ),
+    );
+    const isWritten = (p: string) =>
+      written.has(p) ||
+      p.split("/").some((part) => part === "_calkit" || part === ".calkit");
+    return root
+      ? documents
+          .map((d) => path.posix.normalize(d))
+          .filter((d) => !isWritten(d))
+          .map((d) => path.join(root, d))
+      : [];
   });
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
@@ -2810,6 +2836,7 @@ async function refreshPipelineOutputContext(
   currentEnvDescriptions = envDescriptions;
   pdfReviewProvider?.stagesChanged();
   void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
+  void refreshActiveFileFigureOutputContext();
   // Gate the sidebar on the presence of a calkit.yaml file. When absent, the
   // tree is left empty so the "Initialize Calkit Project" welcome view shows.
   const calkitYamlExists = await fileExists(
@@ -9400,18 +9427,30 @@ async function refreshActiveFileFigureOutputContext(): Promise<void> {
   const uri = tabResourceUri(vscode.window.tabGroups.activeTabGroup.activeTab);
   const workspaceRoot = getWorkspaceRoot();
   let isFigureOutput = false;
+  let pdfHasStage = false;
   if (uri && workspaceRoot) {
     const ext = path.extname(uri.fsPath).toLowerCase();
     if (FIGURE_EXTENSIONS.has(ext) && ext !== ".pdf") {
       isFigureOutput =
         (await findStageProducingOutput(workspaceRoot, uri)) !== undefined;
     }
+    // A PDF opens in the review editor, so its play button is keyed here
+    if (ext === ".pdf") {
+      pdfHasStage = (await findStageForFile(workspaceRoot, uri)) !== undefined;
+    }
   }
-  await vscode.commands.executeCommand(
-    "setContext",
-    "calkit.activeFileIsFigureOutput",
-    isFigureOutput,
-  );
+  await Promise.all([
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activeFileIsFigureOutput",
+      isFigureOutput,
+    ),
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activePdfHasStage",
+      pdfHasStage,
+    ),
+  ]);
 }
 
 async function refreshNotebookToolbarContext(

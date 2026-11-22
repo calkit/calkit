@@ -773,12 +773,12 @@
         },
         {
           "command": "calkit-vscode.showProvenance",
-          "when": "calkit.activeFileIsPipelineOutput || calkit.activeFileIsFigureOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf",
+          "when": "calkit.activeFileIsPipelineOutput || calkit.activeFileIsFigureOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf || calkit.activeFileHasStage && resourceExtname =~ /^\\.(tex|qmd|md)$/",
           "group": "navigation"
         },
         {
           "command": "calkit-vscode.runStageForFile",
-          "when": "calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "when": "calkit.activeFileHasStage && !calkit.isSettingKernel || resourceExtname == .pdf && calkit.activePdfHasStage",
           "group": "navigation"
         },
         {

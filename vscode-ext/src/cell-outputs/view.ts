@@ -294,6 +294,13 @@ async function showCellOutputActions(
       relPath: path.relative(root, fsPath).replace(/\\/g, "/"),
     }))
     .filter((d) => !d.relPath.startsWith("../") && !path.isAbsolute(d.relPath))
+    // Not what Calkit writes, e.g., _calkit/values.tex
+    .filter(
+      (d) =>
+        !d.relPath
+          .split("/")
+          .some((part) => part === "_calkit" || part === ".calkit"),
+    )
     .map((d) => ({ ...d, text: getCellOutputInsertText(output, d.relPath) }))
     .filter((d) => d.text !== null);
   const copy = output.citation ? `$(copy) Copy ${output.citation}` : undefined;

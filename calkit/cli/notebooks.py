@@ -600,7 +600,9 @@ def execute_notebook(
                 ) as f:
                     table = json.load(f)
                 calkit.tables.write_table(o.output_path, table, o.format)
-            elif o.variable_name is None:
+            elif o.variable_name is None and not os.path.isfile(
+                os.path.join(scratch_dir, "tables", f"{i}.figure")
+            ):
                 try:
                     image = calkit.notebooks.get_cell_image(
                         executed,

@@ -83,6 +83,48 @@ CAPTURE_CELL_KEY = "calkit_capture"
 # needn't have Calkit installed, and leaves a figure saved without a variable
 # to be taken from the executed notebook instead
 CAPTURE_HELPER = r"""
+def _calkit_keep_figures():
+    # Matplotlib's inline backend closes a cell's figures once it shows them,
+    # so they're kept open for the cell after to save as they are, e.g., as a
+    # vector PDF, rather than as the PNG shown
+    import sys
+
+    global _calkit_figure_state
+    config = get_ipython().config.InlineBackend
+    backend = sys.modules.get("matplotlib_inline.backend_inline")
+    instance = backend.InlineBackend.instance() if backend else None
+    close = instance.close_figures if instance else config.get("close_figures", True)
+    config.close_figures = False
+    if instance:
+        instance.close_figures = False
+    plt = sys.modules.get("matplotlib.pyplot")
+    _calkit_figure_state = (close, set(plt.get_fignums()) if plt else set())
+
+
+def _calkit_get_new_figures():
+    import sys
+
+    plt = sys.modules.get("matplotlib.pyplot")
+    before = globals().get("_calkit_figure_state", (True, None))[1]
+    if plt is None or before is None:
+        return []
+    return [plt.figure(n) for n in plt.get_fignums() if n not in before]
+
+
+def _calkit_restore_figures():
+    import sys
+
+    close, _ = _calkit_figure_state
+    plt = sys.modules.get("matplotlib.pyplot")
+    if close and plt is not None:
+        for fig in _calkit_get_new_figures():
+            plt.close(fig)
+    get_ipython().config.InlineBackend.close_figures = close
+    backend = sys.modules.get("matplotlib_inline.backend_inline")
+    if backend:
+        backend.InlineBackend.instance().close_figures = close
+
+
 def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
     import json
     import os
@@ -223,6 +265,20 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
                 os.path.join(tables_dir, f"{i}.json"), "w", encoding="utf-8"
             ) as f:
                 json.dump(table, f)
+            continue
+        # A figure the cell shows is saved from Matplotlib if it drew it,
+        # else taken from the executed notebook
+        if name is None and out["kind"] == "figure":
+            figures = _calkit_get_new_figures()
+            if len(figures) > 1:
+                raise ValueError(
+                    f"Calkit: {where} shows {len(figures)} figures; name the "
+                    f"variable of the one to save as {out['output_path']}"
+                )
+            if figures:
+                save_figure(figures[0], out["output_path"], "the figure")
+                os.makedirs(tables_dir, exist_ok=True)
+                open(os.path.join(tables_dir, f"{i}.figure"), "w").close()
             continue
         if name is None:
             continue
@@ -376,12 +432,21 @@ def add_capture_cells(
         by_cell.setdefault(cell, []).append((i, out))
     cells = [make_cell(CAPTURE_HELPER, 0)]
     for cell in nb.get("cells", []):
+        items = by_cell.get(cell.get("id")) or []
+        # A figure saved from what the cell shows needs its figures kept
+        # open while it runs
+        shown = any(
+            o["kind"] == "figure" and o.get("variable_name") is None
+            for _, o in items
+        )
+        if shown:
+            cells.append(make_cell("_calkit_keep_figures()", len(cells)))
         cells.append(cell)
-        items = by_cell.get(cell.get("id"))
         if items:
-            cells.append(
-                make_cell(make_call(f"cell {cell['id']}", items), len(cells))
-            )
+            call = make_call(f"cell {cell['id']}", items)
+            if shown:
+                call += "\n_calkit_restore_figures()"
+            cells.append(make_cell(call, len(cells)))
     if at_end:
         cells.append(make_cell(make_call("the last cell", at_end), len(cells)))
     nb["cells"] = cells

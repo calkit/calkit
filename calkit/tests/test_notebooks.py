@@ -215,6 +215,22 @@ def test_capture_cells():
     # The notebook given isn't changed, and the added cells come out again
     assert len(nb["cells"]) == 3
     assert calkit.notebooks.remove_capture_cells(captured) == nb
+    # A figure saved from what a cell shows keeps its figures open while it
+    # runs
+    shown = calkit.notebooks.add_capture_cells(
+        nb,
+        [{"kind": "figure", "cell_id": "c", "output_path": "f.pdf"}],
+        "v.json",
+        "t",
+    )
+    sources = [c["source"] for c in shown["cells"]]
+    assert sources[3:6] == [
+        "_calkit_keep_figures()",
+        "x = 2",
+        sources[5],
+    ]
+    assert sources[5].endswith("\n_calkit_restore_figures()")
+    assert calkit.notebooks.remove_capture_cells(shown) == nb
     with pytest.raises(ValueError, match="no cell zz"):
         calkit.notebooks.add_capture_cells(
             nb,

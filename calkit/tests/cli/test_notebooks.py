@@ -609,7 +609,7 @@ def test_cell_outputs(tmp_dir):
             "--output-path",
             "figures/fit.pdf",
         ],
-        ["figure", "--cell-index", "3", "--output-path", "figures/shown.png"],
+        ["figure", "--cell-index", "3", "--output-path", "figures/shown.pdf"],
         table + ["tables/rates.tex"],
         table + ["rates.csv"],
     ]:
@@ -692,8 +692,10 @@ def test_cell_outputs(tmp_dir):
         }
     with open("figures/fit.pdf", "rb") as f:
         assert f.read(4) == b"%PDF"
-    with open("figures/shown.png", "rb") as f:
-        assert f.read(4) == b"\x89PNG"
+    # A figure the cell shows is saved from Matplotlib, so as a real PDF
+    # rather than the PNG shown
+    with open("figures/shown.pdf", "rb") as f:
+        assert f.read(4) == b"%PDF"
     with open("tables/rates.tex", encoding="utf-8") as f:
         assert r"25 & 0.0309 \\" in f.read()
     for path in ["fit.ipynb", ".calkit/notebooks/executed/fit.ipynb"]:

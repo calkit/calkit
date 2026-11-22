@@ -192,7 +192,8 @@ There are three kinds of outputs:
   in Quarto with `{{< ckvalue notebook.ipynb name >}}`,
   or in Markdown with `<!-- ckvalue notebook.ipynb name -->`.
   To get a single item out of a dict, use a dot, e.g., `rates.25C`.
-- **Figure:** A Matplotlib figure, or the image the cell displays.
+- **Figure:** A figure the cell displays, or a Matplotlib figure in a
+  variable.
   It's saved in the format of the path you give it,
   so use `.pdf` if you want it sharp in a paper.
 - **Table:** A DataFrame, a list of rows,

@@ -440,6 +440,7 @@ def test_cell_output_marks():
         "output_path": None,
         "format": None,
         "citation": r"\ckvalue{fit.ipynb}{k}",
+        "citations": {"latex": r"\ckvalue{fit.ipynb}{k}"},
         "saved_value": 0.25,
     }
     assert [d["cell_index"] for d in described] == [0, 2, 2, None, None]
@@ -450,6 +451,46 @@ def test_cell_output_marks():
         r"\ckvalue{fit.ipynb}{j}",
     ]
     assert "saved_value" not in described[4]
+    # Quarto and Markdown documents' syntax too, if a stage builds one
+    md = {"kind": "markdown", "target_path": "README.md"}
+    qmd = {"kind": "quarto", "target_path": "paper.qmd"}
+    described = calkit.notebooks.describe_cell_outputs(
+        "fit",
+        stage
+        | {
+            "cell_outputs": stage["cell_outputs"]
+            + [
+                {
+                    "kind": "table",
+                    "cell_id": "b",
+                    "variable_name": "df",
+                    "output_path": "t.md",
+                }
+            ]
+        },
+        nb,
+        ck_info={"pipeline": {"stages": {"fit": stage, "a": md, "b": qmd}}},
+    )
+    assert [d["citations"] for d in described] == [
+        {
+            "latex": r"\ckvalue{fit.ipynb}{k}",
+            "quarto": "{{< ckvalue fit.ipynb k >}}",
+            "markdown": "<!-- ckvalue fit.ipynb k -->",
+        },
+        {
+            "latex": r"\ckfigure{f.png}",
+            "quarto": "![](f.png)",
+            "markdown": "![](f.png)",
+        },
+        {"latex": r"\cktable{t.tex}"},
+        {},
+        {
+            "latex": r"\ckvalue{fit.ipynb}{j}",
+            "quarto": "{{< ckvalue fit.ipynb j >}}",
+            "markdown": "<!-- ckvalue fit.ipynb j -->",
+        },
+        {"quarto": "{{< include t.md >}}"},
+    ]
     # A parameterized notebook's values are cited by their file
     stage["parameters"] = {"t": 25}
     described = calkit.notebooks.describe_cell_outputs("fit", stage, None)

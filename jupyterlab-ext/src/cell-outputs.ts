@@ -16,6 +16,8 @@ export interface ICellOutput {
   output_path: string | null;
   format: string | null;
   citation: string | null;
+  /** By kind of document: latex, and quarto and markdown if a stage builds one. */
+  citations?: Record<string, string>;
   saved_value?: unknown;
 }
 
@@ -103,7 +105,7 @@ export function getCellOutputLabel(output: ICellOutput): {
         } by stage '${output.stage}'`,
   ];
   if (output.citation) {
-    lines.push(`Cite with ${output.citation}`);
+    lines.push(`Cite in LaTeX with ${output.citation}`);
   }
   return { text, tooltip: lines.join("\n") };
 }
@@ -368,4 +370,22 @@ export function getEditChoices(
     name ? c.variable === name : !c.variable && !c.isOther,
   );
   return { choices, index: Math.max(index, 0) };
+}
+
+const DOCUMENT_KIND_NAMES: Record<string, string> = {
+  latex: "LaTeX",
+  quarto: "Quarto",
+  markdown: "Markdown",
+};
+
+/** What can be copied to cite an output, for each kind of document. */
+export function getCopyChoices(
+  output: ICellOutput,
+): { label: string; text: string }[] {
+  const citations =
+    output.citations ?? (output.citation ? { latex: output.citation } : {});
+  return Object.entries(citations).map(([kind, text]) => ({
+    label: `Copy for ${DOCUMENT_KIND_NAMES[kind] ?? kind}: ${text}`,
+    text,
+  }));
 }

@@ -17,7 +17,27 @@ export interface CellOutput {
   output_path: string | null;
   format: string | null;
   citation: string | null;
+  // By kind of document: latex, and quarto and markdown if a stage builds one
+  citations?: Record<string, string>;
   saved_value?: unknown;
+}
+
+const DOCUMENT_KIND_NAMES: Record<string, string> = {
+  latex: "LaTeX",
+  quarto: "Quarto",
+  markdown: "Markdown",
+};
+
+/** What can be copied to cite an output, for each kind of document. */
+export function getCopyChoices(
+  output: CellOutput,
+): { label: string; text: string }[] {
+  const citations =
+    output.citations ?? (output.citation ? { latex: output.citation } : {});
+  return Object.entries(citations).map(([kind, text]) => ({
+    label: `Copy for ${DOCUMENT_KIND_NAMES[kind] ?? kind}: ${text}`,
+    text,
+  }));
 }
 
 /** Cell outputs from `calkit nb outputs --json`, or none if it can't be read. */
@@ -94,7 +114,7 @@ export function getCellOutputLabel(output: CellOutput): {
         } by stage '${output.stage}'`,
   ];
   if (output.citation) {
-    lines.push(`Cite with ${output.citation}`);
+    lines.push(`Cite in LaTeX with ${output.citation}`);
   }
   return { text, tooltip: lines.join("\n") };
 }

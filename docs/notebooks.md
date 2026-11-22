@@ -203,7 +203,8 @@ There are three kinds of outputs:
 In VS Code or JupyterLab, click **Save as Calkit Output**
 in the cell's toolbar.
 The cell will then show a label like `Calkit: k_25 = 0.0309`.
-Click the label to copy the command that cites it,
+Click the label to copy how to cite it in LaTeX
+(or Quarto or Markdown, if the project has those documents),
 insert it into one of the project's documents,
 edit it, or stop saving it.
 

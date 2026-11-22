@@ -110,5 +110,6 @@ Calkit saves the notebook first so the output stays with its cell.
 The cell then gets a label like `Calkit: k_25 = 0.03091`
 (or `Calkit: k_25 (not saved yet)` before the pipeline has run),
 or `Calkit: figures/fit.pdf from fig`.
-Click it to copy the LaTeX command that shows it,
+Click it to copy how to cite it in LaTeX
+(or Quarto or Markdown, if the project has those documents),
 e.g., `\ckvalue{fit-rates.ipynb}{k_25}`, edit it, or stop saving it.

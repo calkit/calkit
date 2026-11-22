@@ -5,6 +5,7 @@ import {
   getAssignedNames,
   getDefaultOutputPath,
   getCellOutputLabel,
+  getCopyChoices,
   getEditChoices,
   getOutputPathError,
   getAddOutputRequestBody,
@@ -58,7 +59,7 @@ describe("cell outputs", () => {
       text: "k_25 = 0.03091",
       tooltip:
         "Saved after this cell by stage 'fit'\n" +
-        "Cite with \\ckvalue{fit.ipynb}{k_25}",
+        "Cite in LaTeX with \\ckvalue{fit.ipynb}{k_25}",
     });
     const unsaved = { ...value };
     delete unsaved.saved_value;
@@ -293,6 +294,18 @@ describe("cell outputs", () => {
       label: "old",
       variable: "old",
     });
+  });
+
+  it("says which kind of document each copy is for", () => {
+    expect(getCopyChoices(value)).toEqual([
+      { label: `Copy for LaTeX: ${value.citation}`, text: value.citation },
+    ]);
+    expect(
+      getCopyChoices({
+        ...value,
+        citations: { markdown: "<!-- ckvalue fit.ipynb k_25 -->" },
+      }).map((c) => c.label),
+    ).toEqual(["Copy for Markdown: <!-- ckvalue fit.ipynb k_25 -->"]);
   });
 
   it("finds a cell's cellOutputs by ID or position", () => {

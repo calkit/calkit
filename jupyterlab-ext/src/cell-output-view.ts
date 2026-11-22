@@ -34,6 +34,7 @@ import {
   getAddOutputRequestBody,
   getCellOutputsForCell,
   getOutputMimeTypes,
+  getCopyChoices,
   getEditChoices,
   getRemoveOutputQuery,
   getVariableChoices,
@@ -181,18 +182,17 @@ function showCellOutputActions(
 ): void {
   const commands = new CommandRegistry();
   const menu = new Menu({ commands });
-  const citation = output.citation;
-  if (citation) {
-    commands.addCommand("copy", {
-      label: `Copy ${citation}`,
+  getCopyChoices(output).forEach(({ label, text }, i) => {
+    commands.addCommand(`copy-${i}`, {
+      label,
       icon: copyIcon,
       execute: () => {
-        Clipboard.copyToSystem(citation);
-        Notification.success(`Copied ${citation}`, { autoClose: 4000 });
+        Clipboard.copyToSystem(text);
+        Notification.success(`Copied ${text}`, { autoClose: 4000 });
       },
     });
-    menu.addItem({ command: "copy" });
-  }
+    menu.addItem({ command: `copy-${i}` });
+  });
   // Edit, as any kind, which asks again with what it is now filled in
   const cell =
     output.cell_index !== null

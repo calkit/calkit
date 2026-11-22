@@ -16,6 +16,7 @@ import {
   getCellOutputsForCell,
   getCellOutputInsertText,
   getCellOutputTarget,
+  getCopyChoices,
   getRemoveOutputArgs,
   hasImageOutput,
   parseCellOutputs,
@@ -355,20 +356,21 @@ async function showCellOutputActions(
     )
     .map((d) => ({ ...d, text: getCellOutputInsertText(output, d.relPath) }))
     .filter((d) => d.text !== null);
-  const copy = output.citation ? `$(copy) Copy ${output.citation}` : undefined;
+  const copies = getCopyChoices(output).map((c) => ({
+    ...c,
+    label: `$(copy) ${c.label}`,
+  }));
   const insert = documents.length ? "$(insert) Insert in document" : undefined;
   const edit = "$(edit) Edit";
   const remove = "$(close) Stop saving";
   const picked = await vscode.window.showQuickPick(
-    [...(copy ? [copy] : []), ...(insert ? [insert] : []), edit, remove],
+    [...copies.map((c) => c.label), ...(insert ? [insert] : []), edit, remove],
     { title: getCellOutputTarget(output) },
   );
-  if (picked === copy && output.citation) {
-    await vscode.env.clipboard.writeText(output.citation);
-    vscode.window.setStatusBarMessage(
-      `$(check) Copied ${output.citation}`,
-      4000,
-    );
+  const copy = copies.find((c) => c.label === picked);
+  if (copy) {
+    await vscode.env.clipboard.writeText(copy.text);
+    vscode.window.setStatusBarMessage(`$(check) Copied ${copy.text}`, 4000);
   } else if (picked === insert) {
     const document = await vscode.window.showQuickPick(
       documents.map((d) => ({

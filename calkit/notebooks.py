@@ -668,12 +668,16 @@ def get_cell_outputs_without(
 
 
 def get_cell_output_citation(
-    output: dict, stage: dict, ck_info: dict | None = None
+    output: dict,
+    stage: dict,
+    ck_info: dict | None = None,
+    document_kind: str = "latex",
 ) -> str | None:
-    """The calkit.sty command a document shows a cell output with, or None
-    for a table that isn't LaTeX, which needs a stage to typeset it. A
-    value's output names one variable, as ``describe_cell_outputs`` gives
-    them.
+    """How a kind of document, i.e., ``latex``, ``quarto``, or
+    ``markdown``, shows a cell output, or None if it can't, e.g., a CSV
+    table. A value's output names one variable, as
+    ``describe_cell_outputs`` gives them, and paths are from the project's
+    root.
 
     A value is cited by its notebook, unless the stage's parameters or
     ``wdir`` put its values file somewhere else, which is then cited.
@@ -684,15 +688,46 @@ def get_cell_output_citation(
         source = get_stage_values_path(stage, ck_info)
         if source == get_notebook_values_path(notebook_path):
             source = notebook_path
-        return f"\\ckvalue{{{source}}}{{{output['variable_name']}}}"
+        name = output["variable_name"]
+        return {
+            "latex": f"\\ckvalue{{{source}}}{{{name}}}",
+            "quarto": f"{{{{< ckvalue {source} {name} >}}}}",
+            "markdown": f"<!-- ckvalue {source} {name} -->",
+        }.get(document_kind)
     path = posixpath.normpath(
         posixpath.join(stage.get("wdir") or "", str(output.get("output_path")))
     )
     if kind == "figure":
-        return f"\\ckfigure{{{path}}}"
-    if kind == "table" and path.lower().endswith(".tex"):
-        return f"\\cktable{{{path}}}"
+        if document_kind == "latex":
+            return f"\\ckfigure{{{path}}}"
+        return f"![]({path})"
+    if kind == "table":
+        ext = posixpath.splitext(path)[1].lower()
+        if document_kind == "latex" and ext == ".tex":
+            return f"\\cktable{{{path}}}"
+        if document_kind == "quarto" and ext == ".md":
+            return f"{{{{< include {path} >}}}}"
     return None
+
+
+def get_cell_output_citations(
+    output: dict, stage: dict, ck_info: dict | None = None
+) -> dict[str, str]:
+    """How each kind of document shows a cell output, by kind: LaTeX, and
+    Quarto and Markdown if a stage builds one.
+    """
+    stages = ((ck_info or {}).get("pipeline") or {}).get("stages") or {}
+    built = {s.get("kind") for s in stages.values() if isinstance(s, dict)}
+    citations = {}
+    for document_kind in ["latex", "quarto", "markdown"]:
+        if document_kind != "latex" and document_kind not in built:
+            continue
+        citation = get_cell_output_citation(
+            output, stage, ck_info, document_kind
+        )
+        if citation is not None:
+            citations[document_kind] = citation
+    return citations
 
 
 def describe_cell_outputs(
@@ -730,6 +765,7 @@ def describe_cell_outputs(
                 "output_path": single.get("output_path"),
                 "format": single.get("format"),
                 "citation": get_cell_output_citation(single, stage, ck_info),
+                "citations": get_cell_output_citations(single, stage, ck_info),
             }
             if item["kind"] == "value" and values is not None:
                 if name in values:

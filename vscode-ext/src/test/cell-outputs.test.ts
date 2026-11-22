@@ -8,6 +8,7 @@ import {
   getAddOutputArgs,
   getCellOutputInsertText,
   getCellOutputLabel,
+  getCopyChoices,
   getCellOutputsForCell,
   getRemoveOutputArgs,
   hasImageOutput,
@@ -63,7 +64,7 @@ test("getCellOutputLabel says what's saved, and how to cite it", () => {
     text: "$(symbol-number) k_25 = 0.03091",
     tooltip:
       "Saved after this cell by stage 'fit'\n" +
-      "Cite with \\ckvalue{fit.ipynb}{k_25}",
+      "Cite in LaTeX with \\ckvalue{fit.ipynb}{k_25}",
   });
   const unsaved = { ...value };
   delete unsaved.saved_value;
@@ -293,4 +294,27 @@ test("getCellOutputInsertText writes each kind for each document", () => {
   ] as [CellOutput, string, string | null][]) {
     assert.equal(getCellOutputInsertText(output, doc), expected, doc);
   }
+});
+
+test("getCopyChoices says which kind of document each is for", () => {
+  assert.deepEqual(getCopyChoices({ ...value, citations: undefined }), [
+    { label: `Copy for LaTeX: ${value.citation}`, text: value.citation },
+  ]);
+  assert.deepEqual(
+    getCopyChoices({
+      ...value,
+      citations: {
+        latex: "\\ckvalue{fit.ipynb}{k_25}",
+        quarto: "{{< ckvalue fit.ipynb k_25 >}}",
+      },
+    }).map((c) => c.label),
+    [
+      "Copy for LaTeX: \\ckvalue{fit.ipynb}{k_25}",
+      "Copy for Quarto: {{< ckvalue fit.ipynb k_25 >}}",
+    ],
+  );
+  assert.deepEqual(
+    getCopyChoices({ ...value, citation: null, citations: {} }),
+    [],
+  );
 });

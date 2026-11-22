@@ -736,9 +736,9 @@ def check_values(
         MarkdownParseError,
         _ck_format,
         format_value,
-        lookup_value,
     )
     from calkit.notebooks import get_notebook_of_values_path
+    from calkit.questions import resolve_key
     from calkit.results import load_result
 
     def check_format(value: QuartoValue) -> None:
@@ -787,7 +787,7 @@ def check_values(
                     str(e), path=document_path, line=value.line
                 )
         try:
-            raw = lookup_value(data_by_path[value.path], value.key)
+            raw = resolve_key(data_by_path[value.path], value.key)
         except KeyError:
             raise MarkdownParseError(
                 f"'{value.path}' has no key '{value.key}'",

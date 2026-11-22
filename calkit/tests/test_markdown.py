@@ -1528,17 +1528,20 @@ def test_values(tmp_path, monkeypatch):
     # YAML and TOML results files are read by extension, as calkit.sty does
     (tmp_path / "r.yaml").write_text("fit:\n  rms: 0.5\n")
     (tmp_path / "r.toml").write_text("[fit]\nn = 12\n")
-    (tmp_path / "r.out").write_text('{"n": 3}')
+    (tmp_path / "r.out").write_text('{"n": 3, "rates": {"25.0": 0.03}}')
     new, _ = set_values(
         "<!-- ckvalue r.yaml fit.rms .2f -->?<!-- /ckvalue -->, "
         "<!-- ckvalue r.toml fit.n -->?<!-- /ckvalue -->, "
-        "<!-- ckvalue r.out n -->?<!-- /ckvalue -->\n",
+        "<!-- ckvalue r.out n -->?<!-- /ckvalue -->, "
+        "<!-- ckvalue r.out rates.25.0 -->?<!-- /ckvalue -->\n",
         "README.md",
     )
+    # A key can have dots in it, e.g., a dict keyed by floats
     assert new == (
         "<!-- ckvalue r.yaml fit.rms .2f -->0.50<!-- /ckvalue -->, "
         "<!-- ckvalue r.toml fit.n -->12<!-- /ckvalue -->, "
-        "<!-- ckvalue r.out n -->3<!-- /ckvalue -->\n"
+        "<!-- ckvalue r.out n -->3<!-- /ckvalue -->, "
+        "<!-- ckvalue r.out rates.25.0 -->0.03<!-- /ckvalue -->\n"
     )
     (tmp_path / "bad.toml").write_text("not = [toml\n")
     with pytest.raises(MarkdownParseError, match="not valid TOML"):

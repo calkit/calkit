@@ -2938,19 +2938,6 @@ def extract_values(
     return values
 
 
-def lookup_value(data: Any, key: str) -> Any:
-    """Return the value at a dotted key, e.g. ``fit.coeffs.0``."""
-    value = data
-    for part in key.split("."):
-        if isinstance(value, dict) and part in value:
-            value = value[part]
-        elif isinstance(value, list) and part.lstrip("-").isdigit():
-            value = value[int(part)]
-        else:
-            raise KeyError(key)
-    return value
-
-
 def format_value(value: Any, fmt: str | None = None) -> str:
     """Render a value the way it should read in prose.
 
@@ -3064,7 +3051,7 @@ def set_values(
     """
     import json
 
-    from calkit.questions import read_evidence_file
+    from calkit.questions import read_evidence_file, resolve_key
 
     original = text
     text, _ = heal_markers(text)
@@ -3103,7 +3090,7 @@ def set_values(
     rendered = []
     for value in values:
         try:
-            raw = lookup_value(data_by_path[value.path], value.key)
+            raw = resolve_key(data_by_path[value.path], value.key)
         except KeyError:
             raise MarkdownParseError(
                 f"Results file '{value.path}' has no key '{value.key}'",

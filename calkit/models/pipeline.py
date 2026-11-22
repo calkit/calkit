@@ -1878,7 +1878,6 @@ class QuartoStage(Stage):
     # the project, set by preprocess
     _value_paths: list[str] = PrivateAttr(default_factory=list)
     # Where it writes the values they show, relative to the project
-    _values_path: str | None = PrivateAttr(default=None)
 
     @property
     def is_notebook(self) -> bool:
@@ -1935,7 +1934,6 @@ class QuartoStage(Stage):
         document = os.path.join(project_dir or "", self.project_target_path)
         text = calkit.quarto.read_document_text(document)
         self._value_paths = []
-        self._values_path = None
         if text is None or "ckvalue" not in text:
             return
         try:
@@ -1947,10 +1945,6 @@ class QuartoStage(Stage):
             )
         except (MarkdownParseError, ValueError):
             values = []
-        if values:
-            self._values_path = calkit.quarto.get_values_path(
-                self.project_target_path, wdir=project_dir
-            )
         for value in values:
             if (
                 exists(value.path)
@@ -1962,20 +1956,6 @@ class QuartoStage(Stage):
             calkit.quarto.write_components(
                 self.project_target_path, wdir=project_dir
             )
-
-    @property
-    def component_outputs(self) -> list[PathOutput]:
-        """The values the stage writes for the ``ckvalue`` shortcode,
-        relative to its ``wdir``, kept in Git, like the extension, so the
-        document renders the same without Calkit, e.g., when a site is
-        published."""
-        if self._values_path is None:
-            return []
-        return [
-            PathOutput(
-                path=self.path_from_wdir(self._values_path), storage="git"
-            )
-        ]
 
     @property
     def notebook_outputs(self) -> list[PathOutput]:
@@ -2034,13 +2014,6 @@ class QuartoStage(Stage):
             if path not in deps:
                 deps.append(path)
         return deps
-
-    @property
-    def dvc_outs(self) -> list[str | dict]:
-        outs = super().dvc_outs
-        for out in self.component_outputs:
-            outs.append({out.path: {"cache": False, "persist": False}})
-        return outs
 
 
 class JsonToLatexStage(Stage):

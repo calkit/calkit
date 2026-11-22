@@ -69,22 +69,27 @@ over {{< ckvalue results/metrics.json key=fit.n >}} samples.
 ```
 
 Paths are relative to the project.
-Results files can be JSON, YAML, or TOML,
+Results files can be JSON or YAML,
 and keys are separated by dots to reach into nested values.
+Formats take a sign, a `,` or `_` separator, and a precision and type,
+e.g., `.2f`, `,d`, or `.1%`, or a template, e.g., `{value:.1f} m/s`.
 The results files are inputs to the stage,
 so a change to a value renders the document again.
 
+<!-- TODO: needs human review -->
+
 When the pipeline is compiled,
 Calkit writes the shortcode as a Quarto extension in `_extensions/calkit/`,
+in the Quarto project's folder, i.e., where `_quarto.yml` is,
+or beside the document if there isn't one,
 so documents can use it without listing it.
-Each time the stage runs,
-it writes the values the document shows to `_calkit/values/`,
-at the document's path, as Quarto does with `_freeze/`.
-Both go in the Quarto project's folder, i.e., where `_quarto.yml` is,
-or beside the document if there isn't one.
-Both are kept in Git,
-so the document renders the same without Calkit, e.g., when a site is
-published by `quarto publish` or a CI workflow.
+It reads each value from its results file when the document renders,
+so with the extension kept in Git,
+the document renders the same without Calkit, e.g., when a site is
+published by `quarto publish`,
+as long as its results files are on this machine.
+Before the stage renders, Calkit checks each value can be shown,
+naming the line of any that can't.
 
 <!-- TODO: needs human review -->
 

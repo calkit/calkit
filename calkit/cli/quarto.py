@@ -74,9 +74,9 @@ def render(
     Quarto has to come from the environment, so every machine renders with
     the same version, unless the project lists 'quarto' as a requirement or
     the environment is `_system`, i.e., this machine.
-    The values the document shows with the 'ckvalue' shortcode are read
-    from their results files and written for it first, with the Quarto
-    extension that shows them.
+    The values the document shows with the 'ckvalue' shortcode are checked
+    first, and the Quarto extension that reads them from their results
+    files is written.
     """
     import calkit
     import calkit.environments
@@ -125,13 +125,8 @@ def render(
             text, document_rel, results=results_by_name(ck_info)
         )
         if values:
-            calkit.quarto.write_components(
-                document_rel,
-                calkit.quarto.resolve_values(
-                    values, document_rel, wdir=project_dir
-                ),
-                wdir=project_dir,
-            )
+            calkit.quarto.check_values(values, document_rel, wdir=project_dir)
+            calkit.quarto.write_components(document_rel, wdir=project_dir)
     except (MarkdownParseError, ValueError) as e:
         raise_error(str(e))
     cmd = ["quarto", "render", target_path]

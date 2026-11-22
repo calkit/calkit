@@ -72,10 +72,6 @@ stages:
       md5: df42206b92f58bee9822430cf38f0769
       size: 81
     outs:
-    - path: _calkit/values/report.json
-      hash: md5
-      md5: b900b841756a2b13d529fc1d965b7293
-      size: 123
     - path: report.html
       hash: md5
       md5: 17dd8ce447611cf3e4a02cbfda5c8a84

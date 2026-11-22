@@ -37,8 +37,5 @@ stages:
       - results/fit.json
     outs:
       - report.html
-      - _calkit/values/report.json:
-          cache: false
-          persist: false
     desc: Automatically generated from the 'report' stage in calkit.yaml.
       Changes made here will be overwritten.

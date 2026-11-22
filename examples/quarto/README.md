@@ -22,6 +22,6 @@ calkit run
 
 Change the damping ratio in `scripts/simulate.jl` and run again:
 the notebook and report render again with the new values.
-The shortcode's extension and values are kept in Git,
-in `_extensions/calkit/` and `_calkit/values/`,
+The shortcode's extension is kept in Git, in `_extensions/calkit/`,
+and reads values from the results files,
 so `quarto render report.qmd` gives the same report without Calkit.

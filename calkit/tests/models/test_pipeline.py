@@ -488,8 +488,7 @@ def test_quartostage(tmp_path):
         '"my report.qmd" -- -M "title:My Paper" -P n:{n}'
     )
     # The files its ckvalue shortcodes read are inputs, if they exist or a
-    # stage makes them, and the values it shows are an output beside it,
-    # with the extension written there too
+    # stage makes them, with the extension that reads them written beside it
     (tmp_path / "calkit.yaml").write_text(
         "results:\n  - name: metrics\n    path: results/metrics.json\n"
     )
@@ -513,17 +512,10 @@ def test_quartostage(tmp_path):
     assert s.dvc_deps[0] == "report/report.qmd"
     assert s.dvc_deps[-2:] == ["results/metrics.json", "data/n.json"]
     assert "missing.json" not in s.dvc_deps
-    assert s.dvc_outs == [
-        {
-            "report/_calkit/values/report.json": {
-                "cache": False,
-                "persist": False,
-            }
-        }
-    ]
+    assert s.dvc_outs == []
     assert (tmp_path / "report/_extensions/calkit/calkit.lua").is_file()
-    # In a Quarto project, both go at its root, with the values at the
-    # document's path, seen from the stage's wdir
+    # In a Quarto project, it goes at its root, with inputs seen from the
+    # stage's wdir
     (tmp_path / "_quarto.yml").write_text("project:\n  type: website\n")
     s = QuartoStage(
         name="report",
@@ -537,19 +529,10 @@ def test_quartostage(tmp_path):
         write_files=True,
     )
     assert s.dvc_deps[-2:] == ["../results/metrics.json", "../data/n.json"]
-    assert s.dvc_outs == [
-        {
-            "../_calkit/values/report/report.json": {
-                "cache": False,
-                "persist": False,
-            }
-        }
-    ]
     assert (tmp_path / "_extensions/calkit/calkit.lua").is_file()
     # One that shows nothing has nothing extra
     (tmp_path / "report" / "report.qmd").write_text("No values.\n")
     s.preprocess(str(tmp_path), lambda p: False, write_files=True)
-    assert s.dvc_outs == []
     assert s.dvc_deps == ["report.qmd"]
 
 

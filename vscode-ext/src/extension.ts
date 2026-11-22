@@ -857,10 +857,15 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_RUN_MARKDOWN_STAGE,
-      (stageName?: string, projectDir?: string) => {
+      async (stageName?: string, projectDir?: string) => {
         const workspaceRoot = getWorkspaceRoot();
         if (!workspaceRoot || !stageName) {
           return;
+        }
+        // Run from a CodeLens in the document itself
+        const active = vscode.window.activeTextEditor?.document.uri;
+        if (active) {
+          await saveIfOpen(active);
         }
         runStageInTerminal(workspaceRoot, stageName, projectDir);
       },
@@ -886,6 +891,7 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           return;
         }
+        await saveIfOpen(fileUri);
         runStageInTerminal(workspaceRoot, stageName);
       },
     ),
@@ -902,9 +908,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!fileUri || !workspaceRoot) {
           return;
         }
-        await vscode.workspace.textDocuments
-          .find((d) => d.uri.fsPath === fileUri.fsPath)
-          ?.save();
+        await saveIfOpen(fileUri);
         const projectDir = getNotebookProjectRoot(fileUri) ?? workspaceRoot;
         const relPath = path
           .relative(projectDir, fileUri.fsPath)
@@ -1680,6 +1684,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
+      await saveIfOpen(notebookUri);
       // The stage name is the project's own, so the CLI is pointed there,
       // since the terminal may be reused from somewhere else
       runStageInTerminal(
@@ -4619,6 +4624,18 @@ function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {
     return existing;
   }
   return vscode.window.createTerminal({ name, cwd });
+}
+
+// Save a file if it's open with unsaved changes, so a stage runs on what's
+// in the editor
+async function saveIfOpen(uri: vscode.Uri): Promise<void> {
+  const open = [
+    ...vscode.workspace.textDocuments,
+    ...vscode.workspace.notebookDocuments,
+  ].find((d) => d.uri.fsPath === uri.fsPath);
+  if (open?.isDirty) {
+    await open.save();
+  }
 }
 
 function runStageInTerminal(

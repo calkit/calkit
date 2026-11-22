@@ -12,8 +12,10 @@ import calkit.office
 def test_find_app_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # USERPROFILE is home on Windows
     monkeypatch.setenv("HOME", str(tmp_path))
-    in_home = os.path.join(str(tmp_path), "Applications", "Microsoft Word.app")
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    in_home = os.path.expanduser("~/Applications/Microsoft Word.app")
     machine_wide = "/Applications/Microsoft Word.app"
     # On macOS, the bundle in /Applications, else in ~/Applications
     for present, expected in [

@@ -12,6 +12,9 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
+from typing import Callable
+
+import calkit.office
 
 
 @dataclasses.dataclass
@@ -30,6 +33,8 @@ class Exporter:
     executables: list[str]
     # The app the source is made in, when it's another, e.g., PowerPoint
     source_app: str | None = None
+    # Where it is when it's found some other way, e.g., the Windows registry
+    locate: Callable[[], str | None] | None = None
 
     def find_executable(self) -> str | None:
         """Its executable here, if it's installed."""
@@ -42,7 +47,7 @@ class Exporter:
             # A macOS app bundle is a folder
             if os.path.isabs(candidate) and os.path.exists(candidate):
                 return candidate
-        return None
+        return self.locate() if self.locate is not None else None
 
     def version(self) -> str | None:
         """The version installed here, if it's installed and says."""
@@ -153,11 +158,8 @@ POWERPOINT = Exporter(
     source_desc="a PowerPoint file",
     source_exts=frozenset({".pptx", ".pptm"}),
     export_exts=frozenset({".pdf", ".png"}),
-    executables=[
-        "/Applications/Microsoft PowerPoint.app",
-        r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
-        r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE",
-    ],
+    executables=[],
+    locate=lambda: calkit.office.find_app_path("powerpoint"),
 )
 # What a Docker environment for exporting slides runs, LibreOffice and
 # fonts pinned together, and the release a new one starts from

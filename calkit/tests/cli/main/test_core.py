@@ -1803,6 +1803,33 @@ def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])
 
 
+def test_run_with_output_outside_code_page(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    # Writes a quote to the run log as UTF-8, which cp1252, Windows' default,
+    # can't decode
+    script = (
+        "import glob; [open(p, 'ab').write(b'\\xe2\\x80\\x9d\\n') "
+        "for p in glob.glob('.calkit/local/logs/*.log')]"
+    )
+    with open("quote.py", "w") as f:
+        f.write(script)
+    ck_info["pipeline"] = {
+        "stages": {
+            "quote": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": f'"{Path(sys.executable).as_posix()}" quote.py',
+                "outputs": [],
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
 @pytest.mark.needs("juliaup")
 def test_run(tmp_dir):
     subprocess.check_call(["calkit", "init"])

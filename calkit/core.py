@@ -1395,10 +1395,10 @@ def check_dep_exists(
         exe = find_conda_exe() if name == "conda" else find_mamba_exe()
         return exe is not None
     # Apps that aren't run by their name, or not on every OS
-    if name == "word":
-        from calkit.docx import word_installed
+    if name in ("word", "excel", "powerpoint"):
+        from calkit.office import app_installed
 
-        return word_installed()
+        return app_installed(name)
     if name == "libreoffice":
         from calkit.docx import find_soffice
 
@@ -1829,6 +1829,7 @@ def get_version_checked_app_names(
         SWITCH_KIND,
         runs_elsewhere,
     )
+    from calkit.install import NAME_ALIASES
     from calkit.pipeline import get_stage_items
 
     envs = ck_info.get("environments") or {}
@@ -1872,7 +1873,8 @@ def get_version_checked_app_names(
             and req["name"] != "calkit"
             and req.get("version_spec")
         ):
-            names.append(req["name"])
+            # As checked, e.g., code for vscode
+            names.append(NAME_ALIASES.get(req["name"], req["name"]))
     return list(dict.fromkeys(names))
 
 
@@ -1920,6 +1922,8 @@ def check_requirements(
     ``aws-credentials`` requirements are checked the same way, by
     :func:`calkit.requirements.check_aws_credentials_req`.
     """
+    from calkit import install as _install
+
     if requirements is not None:
         # An environment's own list is checked exactly as declared: it
         # describes a machine that runs stages, which is a smaller claim
@@ -2038,7 +2042,10 @@ def check_requirements(
             )
         raise ValueError(msg)
     for req in buckets["app"]:
-        req_name = req["name"]
+        declared_name = req["name"]
+        # Checked and installed as the binary it provides, e.g., code for
+        # vscode
+        req_name = _install.NAME_ALIASES.get(declared_name, declared_name)
         # The ``calkit`` app is always satisfied by the running process,
         # but a declared ``version_spec`` (e.g. ``calkit>=0.38``) is
         # checked against the installed version so projects can pin a
@@ -2062,8 +2069,6 @@ def check_requirements(
             continue
         # Offer the project's own way to install it, or else the registered
         # native installer when we have one
-        from calkit import install as _install
-
         setup_command = req.get("setup_command")
         description = (req.get("description") or "").strip()
         registered = _install.get_installer(req_name)
@@ -2082,7 +2087,7 @@ def check_requirements(
                 if "binary" in registered:
                     override["binary"] = registered["binary"]
         if override is not None or registered is not None:
-            print(f"App '{req_name}' is not installed.")
+            print(f"App '{declared_name}' is not installed.")
             if description and interactive:
                 print(f"  {description}")
             if _install.prompt_and_install(
@@ -2104,7 +2109,7 @@ def check_requirements(
             else _install.get_unsupported_message(req_name)
         )
         raise ValueError(
-            f"app '{req_name}' not found on {described_as}"
+            f"app '{declared_name}' not found on {described_as}"
             + (f"; {hint}" if hint else "")
             + (f"\n  {description}" if description else "")
         )

@@ -733,6 +733,31 @@ def test_check_requirements_offers_an_apps_setup_command(
         "app 'colima' not found on this machine; Colima isn't needed on Linux"
     )
     assert str(e.value).endswith("\n  VMs")
+    # Names apps go by are checked and installed as the binary they provide
+    checked = []
+    monkeypatch.setattr(
+        "calkit.core.check_dep_exists",
+        lambda name, *args, **kwargs: checked.append(name) or False,
+    )
+    monkeypatch.setattr(
+        "calkit.install.get_installer",
+        lambda app: (
+            {"script": "true", "path_add": []} if app == "code" else None
+        ),
+    )
+    with (
+        mock.patch(
+            "calkit.install.prompt_and_install", return_value=False
+        ) as m_prompt,
+        # Named as the project declares it
+        pytest.raises(ValueError, match="app 'vscode' not found"),
+    ):
+        calkit.check_requirements(
+            requirements=[{"kind": "app", "name": "vscode"}],
+            interactive=True,
+        )
+    assert checked == ["code"]
+    assert m_prompt.call_args.args == ("code",)
 
 
 @pytest.mark.skipif(
@@ -869,16 +894,18 @@ def test_check_dep_exists_conda_off_path(monkeypatch):
     # When neither is findable, it should report missing.
     monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
     assert not calkit.check_dep_exists("conda", "app")
-    # Word and LibreOffice aren't run by their names
+    # Office apps and LibreOffice aren't run by their names
+    import calkit.office
+
     for found in [True, False]:
-        monkeypatch.setattr(calkit.docx, "word_installed", lambda: found)
+        monkeypatch.setattr(calkit.office, "app_installed", lambda app: found)
         monkeypatch.setattr(
             calkit.docx,
             "find_soffice",
             lambda: "/bin/soffice" if found else None,
         )
-        assert calkit.check_dep_exists("word", "app") is found
-        assert calkit.check_dep_exists("libreoffice", "app") is found
+        for app in ["word", "excel", "powerpoint", "libreoffice"]:
+            assert calkit.check_dep_exists(app, "app") is found
 
 
 def test_get_md5(tmp_dir):
@@ -1175,6 +1202,11 @@ def test_get_version_checked_app_names():
     assert calkit.get_version_checked_app_names(
         ck_info, stage_names={"s"}
     ) == ["jq", "ffmpeg"]
+    # Apps are asked as the binary they provide, e.g., code for vscode
+    ck_info["requirements"].append("vscode>=1.80")
+    assert calkit.get_version_checked_app_names(
+        ck_info, stage_names=set()
+    ) == ["jq", "code"]
     # A malformed requirement says how to write one
     ck_info["environments"]["ml"]["requirements"] = [{"app": "sbatch"}]
     with pytest.raises(ValueError, match="list an app by name"):

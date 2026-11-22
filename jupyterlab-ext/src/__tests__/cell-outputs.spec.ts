@@ -5,6 +5,7 @@ import {
   getAssignedNames,
   getDefaultOutputPath,
   getCellOutputLabel,
+  getEditChoices,
   getOutputPathError,
   getAddOutputRequestBody,
   getCellOutputsForCell,
@@ -249,12 +250,49 @@ describe("cell outputs", () => {
         variableNames: ["k", "j"],
       }).output,
     ).toEqual({ kind: "value", cell_id: "c0", variable_names: ["k", "j"] });
+    // A table keeps its number format
+    expect(
+      getAddOutputRequestBody({
+        notebookPath: "fit.ipynb",
+        cellId: "c4",
+        kind: "table",
+        outputPath: "tables/t.tex",
+        format: ".3f",
+      }).output,
+    ).toEqual({
+      kind: "table",
+      cell_id: "c4",
+      output_path: "tables/t.tex",
+      format: ".3f",
+    });
     expect(getRemoveOutputQuery("nbs/fit rates.ipynb", figure)).toBe(
       "path=nbs%2Ffit+rates.ipynb&output_path=figures%2Ffit.pdf&stage=fit",
     );
     expect(getRemoveOutputQuery("fit.ipynb", value)).toBe(
       "path=fit.ipynb&variable_name=k_25&stage=fit",
     );
+  });
+
+  it("fills in what an edited output is saved from", () => {
+    const choices = getVariableChoices(
+      "fig, ax = plt.subplots()\nplt.show()",
+      "figure",
+      true,
+    );
+    // Nothing being edited, the first
+    expect(getEditChoices(choices, undefined).index).toBe(0);
+    // Its variable
+    const edited = getEditChoices(choices, figure);
+    expect(edited.choices[edited.index].variable).toBe("fig");
+    // What the cell shows
+    const shown = getEditChoices(choices, { ...figure, variable_name: null });
+    expect(shown.choices[shown.index].label).toBe("Image this cell shows");
+    // A variable the cell no longer assigns is still offered
+    const gone = getEditChoices(choices, { ...figure, variable_name: "old" });
+    expect(gone.choices[gone.index]).toEqual({
+      label: "old",
+      variable: "old",
+    });
   });
 
   it("finds a cell's cellOutputs by ID or position", () => {

@@ -274,6 +274,7 @@ export function getAddOutputRequestBody(options: {
   kind: CellOutputKind;
   variableNames?: string[];
   outputPath?: string;
+  format?: string | null;
   stage?: string;
 }): Record<string, unknown> {
   const output: Record<string, unknown> = {
@@ -288,6 +289,9 @@ export function getAddOutputRequestBody(options: {
   }
   if (options.outputPath && options.kind !== "value") {
     output.output_path = options.outputPath;
+  }
+  if (options.format && options.kind === "table") {
+    output.format = options.format;
   }
   return {
     path: options.notebookPath,
@@ -344,4 +348,24 @@ export function hasImageOutput(mimeTypes: string[]): boolean {
   return mimeTypes.some((m) =>
     ["image/png", "image/svg+xml", "image/jpeg", "application/pdf"].includes(m),
   );
+}
+
+/** The choices for an output being edited, with its variable among them,
+ * and which is chosen now: its variable, or what the cell shows.
+ */
+export function getEditChoices(
+  choices: IVariableChoice[],
+  current: ICellOutput | undefined,
+): { choices: IVariableChoice[]; index: number } {
+  const name = current?.variable_name;
+  if (!current) {
+    return { choices, index: 0 };
+  }
+  if (name && !choices.some((c) => c.variable === name)) {
+    choices = [{ label: name, variable: name }, ...choices];
+  }
+  const index = choices.findIndex((c) =>
+    name ? c.variable === name : !c.variable && !c.isOther,
+  );
+  return { choices, index: Math.max(index, 0) };
 }

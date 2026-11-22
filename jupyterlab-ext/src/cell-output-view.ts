@@ -16,6 +16,7 @@ import { ITranslator, nullTranslator } from "@jupyterlab/translation";
 import {
   closeIcon,
   copyIcon,
+  editIcon,
   imageIcon,
   LabIcon,
   numberingIcon,
@@ -33,6 +34,7 @@ import {
   getAddOutputRequestBody,
   getCellOutputsForCell,
   getOutputMimeTypes,
+  getEditChoices,
   getRemoveOutputQuery,
   getVariableChoices,
   hasImageOutput,
@@ -169,7 +171,9 @@ function createLabelNode(
   return node;
 }
 
-/** What to do with an output, from its label: copy how to cite it, or stop saving it. */
+/** What to do with an output, from its label: copy how to cite it, edit
+ * it, or stop saving it.
+ */
 function showCellOutputActions(
   panel: NotebookPanel,
   output: ICellOutput,
@@ -188,6 +192,28 @@ function showCellOutputActions(
       },
     });
     menu.addItem({ command: "copy" });
+  }
+  // Edit, as any kind, which asks again with what it is now filled in
+  const cell =
+    output.cell_index !== null
+      ? panel.content.widgets[output.cell_index]
+      : undefined;
+  if (cell) {
+    const editMenu = new Menu({ commands });
+    editMenu.title.label = "Edit";
+    editMenu.title.icon = editIcon;
+    const kinds: CellOutputKind[] = ["value", "figure", "table"];
+    // What it is now first
+    kinds.sort((a, b) => Number(b === output.kind) - Number(a === output.kind));
+    for (const kind of kinds) {
+      commands.addCommand(`edit-${kind}`, {
+        label: kind[0].toUpperCase() + kind.slice(1),
+        icon: KIND_ICONS[kind],
+        execute: () => void addCellOutput(panel, cell, kind, output),
+      });
+      editMenu.addItem({ command: `edit-${kind}` });
+    }
+    menu.addItem({ type: "submenu", submenu: editMenu });
   }
   commands.addCommand("remove", {
     label: "Stop saving",
@@ -211,23 +237,30 @@ function showCellOutputActions(
   menu.open(rect.left, rect.bottom);
 }
 
-/** Ask what a cell's output is saved from and to, and add it. */
+/** Ask what a cell's output is saved from and to, and add it, or with
+ * `editing`, replace that output with it.
+ */
 async function addCellOutput(
   panel: NotebookPanel,
   cell: Cell,
   kind: CellOutputKind,
+  editing?: ICellOutput,
 ): Promise<void> {
-  const title = `Save ${kind}`;
+  const title = editing ? `Edit ${kind}` : `Save ${kind}`;
+  const current = editing?.kind === kind ? editing : undefined;
   const notebookPath = panel.context.path;
   // The variable it's saved from, or for a figure or table, what the cell
   // shows: its image, or the result of its last line, e.g., df.head()
   const outputs = (cell.model as ICodeCellModel).outputs?.toJSON() ?? [];
-  const choices = getVariableChoices(
-    cell.model.sharedModel.getSource(),
-    kind,
-    kind === "figure"
-      ? hasImageOutput(getOutputMimeTypes(outputs))
-      : hasResultOutput(outputs),
+  const { choices, index } = getEditChoices(
+    getVariableChoices(
+      cell.model.sharedModel.getSource(),
+      kind,
+      kind === "figure"
+        ? hasImageOutput(getOutputMimeTypes(outputs))
+        : hasResultOutput(outputs),
+    ),
+    current,
   );
   // Several values can be saved after one cell at once
   let variableNames: string[] = [];
@@ -250,7 +283,7 @@ async function addCellOutput(
       title,
       label: "Variables",
       items: choices.map((c) => c.label),
-      defaults: [choices[0].label],
+      defaults: [choices[index].label],
     });
     if (!picked.button.accept || !picked.value?.length) {
       return;
@@ -267,13 +300,13 @@ async function addCellOutput(
       variableNames.push(typed);
     }
   } else {
-    let choice = choices[0];
+    let choice = choices[index];
     if (choices.length > 1) {
       const picked = await InputDialog.getItem({
         title,
         label: "Variable",
         items: choices.map((c) => c.label),
-        current: 0,
+        current: index,
       });
       if (!picked.button.accept) {
         return;
@@ -300,7 +333,9 @@ async function addCellOutput(
         kind === "figure"
           ? "Path; PDF stays sharp in a paper"
           : "Path; .tex for \\cktable",
-      text: getDefaultOutputPath(kind, notebookPath, variable),
+      text:
+        current?.output_path ??
+        getDefaultOutputPath(kind, notebookPath, variable),
       required: true,
     });
     if (!chosen.button.accept || !chosen.value?.trim()) {
@@ -317,6 +352,23 @@ async function addCellOutput(
   // for an older notebook until it's saved, even with no unsaved changes
   try {
     await panel.context.save();
+  } catch (error) {
+    Notification.error(getErrorText(error));
+    return;
+  }
+  // An edit replaces the output, which is put back if the new one fails
+  if (editing) {
+    try {
+      await requestAPI(
+        `${ROUTE}?${getRemoveOutputQuery(notebookPath, editing)}`,
+        { method: "DELETE" },
+      );
+    } catch (error) {
+      Notification.error(getErrorText(error));
+      return;
+    }
+  }
+  try {
     const added = await requestAPI<{ warning: string | null }>(ROUTE, {
       method: "POST",
       body: JSON.stringify(
@@ -326,6 +378,8 @@ async function addCellOutput(
           kind,
           variableNames,
           outputPath: kind === "value" ? undefined : target,
+          format: current?.format,
+          stage: editing?.stage,
         }),
       ),
     });
@@ -334,6 +388,22 @@ async function addCellOutput(
       Notification.warning(added.warning);
     }
   } catch (error) {
+    if (editing) {
+      await requestAPI(ROUTE, {
+        method: "POST",
+        body: JSON.stringify(
+          getAddOutputRequestBody({
+            notebookPath,
+            cellId: editing.cell_id ?? cell.model.id,
+            kind: editing.kind,
+            variableNames: editing.variable_name ? [editing.variable_name] : [],
+            outputPath: editing.output_path ?? undefined,
+            format: editing.format,
+            stage: editing.stage,
+          }),
+        ),
+      }).catch(() => undefined);
+    }
     Notification.error(getErrorText(error));
   }
   await loadCellOutputs(panel);

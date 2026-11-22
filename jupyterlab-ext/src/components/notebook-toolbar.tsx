@@ -385,14 +385,14 @@ const EnvironmentBadge: React.FC<{
     await showEnvironmentEditor({
       mode: "edit",
       initialName: currentEnv,
-      initialKind: envData.kind || "uv-venv",
+      initialKind: envData.kind || "uv",
       initialPath: envData.path,
       initialPrefix: envData.prefix,
       initialPython: envData.python || "3.14",
       initialPackages: envData.packages || [],
       existingEnvironment: {
         name: currentEnv,
-        kind: envData.kind || "uv-venv",
+        kind: envData.kind || "uv",
         path: envData.path,
         prefix: envData.prefix,
         python: envData.python || "3.14",
@@ -405,7 +405,7 @@ const EnvironmentBadge: React.FC<{
         await updateEnvironmentMutation.mutateAsync({
           existing: initialData || {
             name: currentEnv,
-            kind: envData.kind || "uv-venv",
+            kind: envData.kind || "uv",
             path: envData.path,
             prefix: envData.prefix,
             python: envData.python || "3.14",

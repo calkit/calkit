@@ -25,6 +25,8 @@ from calkit.cli.new import (
     new_conda_env,
     new_julia_env,
     new_pixi_env,
+    new_texlive_env,
+    new_uv_env,
     new_uv_venv,
     new_venv,
 )
@@ -1157,6 +1159,7 @@ class EnvironmentsRouteHandler(APIHandler):
         if notebook_only:
             for env_name, env in list(envs.items()):
                 if env.get("kind") not in [
+                    "uv",
                     "uv-venv",
                     "venv",
                     "pixi",
@@ -1181,6 +1184,27 @@ class EnvironmentsRouteHandler(APIHandler):
                         if line:
                             packages.append(line)
                 envs[env_name]["packages"] = packages
+            # A uv project's are its dependencies, and its Python the one
+            # pinned, or else the oldest allowed
+            elif (
+                env.get("kind") == "uv"
+                and env_path
+                and os.path.isfile(env_path)
+            ):
+                import tomllib
+
+                with open(env_path, "rb") as f:
+                    project = tomllib.load(f).get("project", {})
+                env = envs[env_name] = dict(env)
+                env["packages"] = list(project.get("dependencies", []))
+                pin_path = os.path.join(
+                    os.path.dirname(env_path), ".python-version"
+                )
+                if os.path.isfile(pin_path):
+                    with open(pin_path, encoding="utf-8") as f:
+                        env.setdefault("python", f.read().strip())
+                elif project.get("requires-python"):
+                    env.setdefault("python", project["requires-python"])
         self.finish(json.dumps(envs))
 
     @tornado.web.authenticated
@@ -1196,9 +1220,33 @@ class EnvironmentsRouteHandler(APIHandler):
         packages = body.get("packages", [])
         prefix = body.get("prefix")
         python = body.get("python")
-        if env_kind not in ["uv-venv", "venv"]:
+        if env_kind not in ["uv", "uv-venv", "venv", "texlive"]:
             return self.error(400, "Unsupported environment kind")
-        if not env_name or not env_kind or not env_path or not packages:
+        if not env_name:
+            return self.error(400, "Missing environment name")
+        # A uv project or TeX Live environment is made by its own command,
+        # which picks a path
+        if env_kind in ["uv", "texlive"]:
+            try:
+                if env_kind == "uv":
+                    new_uv_env(
+                        name=env_name,
+                        path=env_path or None,
+                        python_version=python or None,
+                        packages=packages,
+                        no_commit=True,
+                    )
+                else:
+                    new_texlive_env(
+                        name=env_name, packages=packages, no_commit=True
+                    )
+            except BaseException as e:
+                msg = f"Failed to create environment '{env_name}': {e}"
+                self.log.error(msg + "\n" + traceback.format_exc())
+                return self.error(400, msg)
+            self.finish(json.dumps({"message": "New environment created"}))
+            return
+        if not env_path or not packages:
             return self.error(400, "Missing required environment fields")
         # Start kwargs for environment creation
         kwargs = dict(
@@ -1262,6 +1310,8 @@ class EnvironmentsRouteHandler(APIHandler):
         # We also only support uv-venv and venv env kinds for now
         if existing_env.get("kind") != updated_env.get("kind"):
             return self.error(400, "Environment 'kind' cannot be changed")
+        if existing_env.get("kind") in ["uv", "texlive"]:
+            return self.update_package_env(existing_env, updated_env)
         if existing_env.get("kind") not in ["uv-venv", "venv"]:
             return self.error(
                 400, "Environment kind not supported for updates"
@@ -1318,6 +1368,56 @@ class EnvironmentsRouteHandler(APIHandler):
         except Exception:
             return self.error(400, "Environment check failed.")
         self.log.info(f"Updated environment '{updated_name}' successfully")
+        self.finish(json.dumps({"message": "Environment updated"}))
+
+    def update_package_env(self, existing_env: dict, updated_env: dict):
+        """Update a uv project's or TeX Live environment's packages, and a
+        uv project's Python, with their own tools, so lock files follow.
+        """
+        name = existing_env.get("name")
+        ck_info = calkit.load_calkit_info()
+        env = ck_info.get("environments", {}).get(name)
+        if env is None:
+            return self.error(400, f"No environment named '{name}'")
+        existing = list(existing_env.get("packages") or [])
+        updated = list(updated_env.get("packages") or [])
+        if env.get("kind") == "texlive":
+            if updated:
+                env["packages"] = updated
+            else:
+                env.pop("packages", None)
+            calkit.save_calkit_info(ck_info)
+        else:
+            env_dir = os.path.dirname(env.get("path") or "") or "."
+            # Removed by name, e.g., 'pandas' for 'pandas>=2'
+            removed = [
+                m.group(0)
+                for p in existing
+                if p not in updated
+                and (m := re.match(r"[A-Za-z0-9_.\-]+", p)) is not None
+            ]
+            added = [p for p in updated if p not in existing]
+            python = updated_env.get("python")
+            commands = []
+            if removed:
+                commands.append(["uv", "remove", *removed])
+            if added:
+                commands.append(["uv", "add", *added])
+            if python and python != existing_env.get("python"):
+                commands.append(["uv", "python", "pin", python])
+            for cmd in commands:
+                res = subprocess.run(
+                    cmd, cwd=env_dir, capture_output=True, text=True
+                )
+                if res.returncode != 0:
+                    msg = f"'{' '.join(cmd)}' failed: {res.stderr.strip()}"
+                    self.log.error(msg)
+                    return self.error(400, msg)
+        try:
+            calkit.cli.main.check_environment(env_name=name)
+        except BaseException:
+            return self.error(400, "Environment check failed.")
+        self.log.info(f"Updated environment '{name}' successfully")
         self.finish(json.dumps({"message": "Environment updated"}))
 
 

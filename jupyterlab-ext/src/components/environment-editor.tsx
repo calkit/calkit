@@ -62,7 +62,7 @@ const EnvironmentEditorBody: React.FC<
   }
 > = ({
   initialName = "",
-  initialKind = "uv-venv",
+  initialKind = "uv",
   initialPath = "",
   initialPrefix = "",
   initialPackages = [],
@@ -114,11 +114,13 @@ const EnvironmentEditorBody: React.FC<
     initialPrefix || getDefaultPrefix(initialKind, initialName),
   );
   const [python, setPython] = useState(initialPython);
-  // For uv-venv and venv, ensure ipykernel is included from the start
+  // A new Python environment includes ipykernel from the start
   const [packages, setPackages] = useState<string[]>(() => {
     const pkgs = initialPackages || [];
     if (
-      (initialKind === "uv-venv" || initialKind === "venv") &&
+      (initialKind === "uv-venv" ||
+        initialKind === "venv" ||
+        (initialKind === "uv" && mode === "create")) &&
       !pkgs.includes("ipykernel")
     ) {
       return ["ipykernel", ...pkgs];
@@ -177,6 +179,9 @@ const EnvironmentEditorBody: React.FC<
 
   React.useEffect(() => {
     const data: any = { name, kind, path, packages };
+    if (kind === "uv") {
+      data.python = python;
+    }
     if (kind === "uv-venv" || kind === "venv") {
       data.prefix = prefix;
       data.python = python;
@@ -238,7 +243,8 @@ const EnvironmentEditorBody: React.FC<
     const merged = new Set([
       ...packages,
       ...groupPackages,
-      ...(kind === "uv-venv" ||
+      ...(kind === "uv" ||
+      kind === "uv-venv" ||
       kind === "venv" ||
       kind === "conda" ||
       kind === "julia"
@@ -248,7 +254,10 @@ const EnvironmentEditorBody: React.FC<
     setPackages(Array.from(merged).sort());
   };
 
+  const isPython = kind === "uv" || kind === "uv-venv" || kind === "venv";
   const showPackages =
+    kind === "uv" ||
+    kind === "texlive" ||
     kind === "uv-venv" ||
     kind === "venv" ||
     kind === "julia" ||
@@ -275,9 +284,12 @@ const EnvironmentEditorBody: React.FC<
           id="env-kind"
           value={kind}
           onChange={(e) => handleKindChange(e.target.value)}
+          disabled={mode === "edit"}
         >
+          <option value="uv">uv (Python)</option>
           <option value="uv-venv">uv-venv (Python)</option>
           <option value="venv">venv (Python)</option>
+          <option value="texlive">TeX Live (LaTeX)</option>
           {isFeatureEnabled("advancedEnvironments") && (
             <>
               <option value="julia">Julia</option>
@@ -311,7 +323,11 @@ const EnvironmentEditorBody: React.FC<
               type="text"
               value={newPackage}
               onChange={(e) => setNewPackage(e.target.value)}
-              placeholder="Add package..."
+              placeholder={
+                kind === "texlive"
+                  ? "Add package, e.g., siunitx"
+                  : "Add package"
+              }
               className="calkit-env-package-add-input"
               autoComplete="off"
             />
@@ -330,7 +346,7 @@ const EnvironmentEditorBody: React.FC<
         </div>
       )}
       {/* Package groups */}
-      {showPackages && (
+      {showPackages && kind !== "texlive" && (
         <div className="calkit-env-editor-field">
           <label>Package groups:</label>
           <div className="calkit-env-package-groups">
@@ -350,8 +366,8 @@ const EnvironmentEditorBody: React.FC<
           </div>
         </div>
       )}
-      {/* Advanced section for venv-based environments */}
-      {(kind === "uv-venv" || kind === "venv") && (
+      {/* Advanced section for Python environments */}
+      {isPython && (
         <div className="calkit-env-editor-advanced">
           <div
             className="calkit-env-editor-advanced-toggle"
@@ -376,36 +392,42 @@ const EnvironmentEditorBody: React.FC<
                   autoComplete="off"
                 />
               </div>
-              <div className="calkit-env-editor-field">
-                <label htmlFor="env-path">Path:</label>
-                <input
-                  id="env-path"
-                  type="text"
-                  value={path}
-                  onChange={(e) => {
-                    setPath(e.target.value);
-                    setUserEditedPath(true);
-                  }}
-                  placeholder={getDefaultPath(kind, name)}
-                  title="Path to requirements/environment file"
-                  autoComplete="off"
-                />
-              </div>
-              <div className="calkit-env-editor-field">
-                <label htmlFor="env-prefix">Virtual environment prefix:</label>
-                <input
-                  id="env-prefix"
-                  type="text"
-                  value={prefix}
-                  onChange={(e) => {
-                    setPrefix(e.target.value);
-                    setUserEditedPrefix(true);
-                  }}
-                  placeholder={getDefaultPrefix(kind, name)}
-                  title="Path to virtual environment directory"
-                  autoComplete="off"
-                />
-              </div>
+              {kind !== "uv" && (
+                <>
+                  <div className="calkit-env-editor-field">
+                    <label htmlFor="env-path">Path:</label>
+                    <input
+                      id="env-path"
+                      type="text"
+                      value={path}
+                      onChange={(e) => {
+                        setPath(e.target.value);
+                        setUserEditedPath(true);
+                      }}
+                      placeholder={getDefaultPath(kind, name)}
+                      title="Path to requirements/environment file"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="calkit-env-editor-field">
+                    <label htmlFor="env-prefix">
+                      Virtual environment prefix:
+                    </label>
+                    <input
+                      id="env-prefix"
+                      type="text"
+                      value={prefix}
+                      onChange={(e) => {
+                        setPrefix(e.target.value);
+                        setUserEditedPrefix(true);
+                      }}
+                      placeholder={getDefaultPrefix(kind, name)}
+                      title="Path to virtual environment directory"
+                      autoComplete="off"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -468,7 +490,7 @@ class EnvironmentEditorWidget extends ReactWidget {
       }
     };
     const envName = options.initialName || "";
-    const kind = options.initialKind || "uv-venv";
+    const kind = options.initialKind || "uv";
     const defaultPath = getDefaultPath(kind, envName);
     const defaultPrefix = getDefaultPrefix(kind, envName);
     const initPath = options.initialPath || defaultPath;

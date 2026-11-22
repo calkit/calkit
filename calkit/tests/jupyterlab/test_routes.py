@@ -115,7 +115,7 @@ async def test_notebook_cell_outputs(
             "DELETE",
             None,
             {"path": "fit.ipynb", "variable_name": "no"},
-            "Nothing",
+            "No matching cell output",
         ),
         ("DELETE", None, {}, "must include 'path'"),
         ("GET", None, {}, "must include 'path'"),
@@ -137,3 +137,83 @@ async def test_notebook_cell_outputs(
         "cell_outputs"
         not in (calkit.load_calkit_info()["pipeline"]["stages"]["fit"])
     )
+
+
+async def test_environments(
+    jp_fetch: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    import calkit
+    import calkit.cli.main
+    import calkit.jupyterlab.routes
+
+    async def fetch(method: str, body: dict | None = None, **params: str):
+        kwargs: dict[str, Any] = {"params": params} if params else {}
+        if body is not None:
+            kwargs["body"] = json.dumps(body)
+        return await jp_fetch(
+            "calkit",
+            "environments",
+            method=method,
+            raise_error=False,
+            **kwargs,
+        )
+
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("envs/py")
+    with open("envs/py/pyproject.toml", "w") as f:
+        f.write(
+            '[project]\nname = "py"\nrequires-python = ">=3.12"\n'
+            'dependencies = ["ipykernel", "pandas>=2"]\n'
+        )
+    calkit.save_calkit_info(
+        {
+            "environments": {
+                "py": {"kind": "uv", "path": "envs/py/pyproject.toml"},
+                "tex": {"kind": "texlive", "packages": ["siunitx"]},
+            }
+        }
+    )
+    # A uv project's packages and Python are listed, and it can run a
+    # notebook
+    response = await fetch("GET")
+    envs = json.loads(response.body)
+    assert envs["py"]["packages"] == ["ipykernel", "pandas>=2"]
+    assert envs["py"]["python"] == ">=3.12"
+    assert envs["tex"]["packages"] == ["siunitx"]
+    response = await fetch("GET", notebook_only="1")
+    assert list(json.loads(response.body)) == ["py"]
+    # Editing one changes its packages with its own tools
+    ran = []
+
+    def run(cmd, **kwargs):
+        ran.append((cmd, kwargs.get("cwd")))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(calkit.jupyterlab.routes.subprocess, "run", run)
+    monkeypatch.setattr(calkit.cli.main, "check_environment", lambda **_: None)
+    py = {"name": "py", "kind": "uv", "python": ">=3.12"}
+    response = await fetch(
+        "PUT",
+        body={
+            "existing": py | {"packages": ["ipykernel", "pandas>=2"]},
+            "updated": py | {"packages": ["ipykernel", "scipy"]},
+        },
+    )
+    assert response.code == 200, response.body
+    assert ran == [
+        (["uv", "remove", "pandas"], "envs/py"),
+        (["uv", "add", "scipy"], "envs/py"),
+    ]
+    tex = {"name": "tex", "kind": "texlive"}
+    response = await fetch(
+        "PUT",
+        body={
+            "existing": tex | {"packages": ["siunitx"]},
+            "updated": tex | {"packages": ["siunitx", "booktabs"]},
+        },
+    )
+    assert response.code == 200, response.body
+    env = calkit.load_calkit_info()["environments"]["tex"]
+    assert env["packages"] == ["siunitx", "booktabs"]

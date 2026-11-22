@@ -15,6 +15,7 @@ export interface CalkitEnvironment {
     | "pixi"
     | "venv"
     | "uv-venv"
+    | "texlive"
     | "renv";
   path?: string;
   description?: string;

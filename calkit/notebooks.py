@@ -857,9 +857,9 @@ def add_cell_output(
     stage_dict["cell_outputs"] = outputs
     calkit.save_calkit_info(ck_info, wdir=wdir)
     warning = (
-        f"{notebook_path}'s cell IDs count up from 0, as nbstripout writes "
-        "them without --keep-id, so they change when cells are added; "
-        "install it with --keep-id so outputs stay on their cells"
+        f"{notebook_path}'s cell IDs look renumbered by nbstripout, so "
+        "outputs may be saved after the wrong cell (install nbstripout "
+        "with --keep-id)"
         if has_ordinal_cell_ids(nb)
         else None
     )

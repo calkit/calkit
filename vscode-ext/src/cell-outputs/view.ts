@@ -329,14 +329,37 @@ async function showCellOutputActions(
       return;
     }
     const uri = vscode.Uri.file(document.document.fsPath);
-    const editor = await vscode.window.showTextDocument(uri, {
-      viewColumn:
-        vscode.window.visibleTextEditors.find(
-          (e) => e.document.uri.fsPath === uri.fsPath,
-        )?.viewColumn ?? vscode.ViewColumn.Active,
-    });
     const text = document.document.text ?? "";
-    await editor.edit((edit) => edit.replace(editor.selection, text));
+    // Only an open document has a cursor to insert at; one opened now
+    // would start at the top
+    const tab = vscode.window.tabGroups.all
+      .flatMap((g) => g.tabs)
+      .find(
+        (t) =>
+          t.input instanceof vscode.TabInputText &&
+          t.input.uri.fsPath === uri.fsPath,
+      );
+    const editor = await vscode.window.showTextDocument(uri, {
+      viewColumn: tab?.group.viewColumn ?? vscode.ViewColumn.Active,
+    });
+    if (!tab) {
+      await vscode.env.clipboard.writeText(text);
+      void vscode.window.showInformationMessage(
+        `Copied ${text}; paste where it goes`,
+      );
+      return;
+    }
+    // A figure or table goes on a line of its own
+    const line = editor.document.lineAt(editor.selection.active.line);
+    if (
+      output.kind !== "value" &&
+      editor.selection.isEmpty &&
+      line.text.trim()
+    ) {
+      await editor.edit((edit) => edit.insert(line.range.end, `\n${text}`));
+    } else {
+      await editor.edit((edit) => edit.replace(editor.selection, text));
+    }
   } else if (picked === remove) {
     const notebookPath = getNotebookPath(root, notebookUri);
     if (!notebookPath) {

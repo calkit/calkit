@@ -215,7 +215,7 @@ def test_describe_storage():
         assert "account hub storage used: 3.00 GB of 10 GB" in result.output
         # Someone who doesn't manage the account only sees the project's,
         # a project on the hub's own storage reads from nothing else, and a
-        # remote elsewhere is shown as is
+        # remote elsewhere is shown as its URL, without credentials
         responses["/projects/someone/proj/storage"] = {
             "dvc": None,
             "previous": [],
@@ -224,9 +224,12 @@ def test_describe_storage():
             "project_used_gb": 1.5,
             "account": None,
         }
-        repo.remote.return_value.url = "https://gitlab.com/someone/proj"
+        repo.remote.return_value.url = (
+            "https://someone:secret@gitlab.com/someone/proj"
+        )
         result = runner.invoke(app, ["describe", "storage"])
         assert "git storage: https://gitlab.com/someone/proj" in result.output
+        assert "secret" not in result.output
         assert "dvc storage: Calkit Hub storage" in result.output
         assert "also read from" not in result.output
         assert "hub storage used: 1.50 GB" in result.output

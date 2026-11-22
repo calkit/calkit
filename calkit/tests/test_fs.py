@@ -518,14 +518,32 @@ def test_xet_transfers(tmp_path: Path) -> None:
         }
         fs.put_file(str(local), "ck://owner/project/later.bin")
         assert get_op.call_count == 2
-        # If the project's storage changed, the next upload gets new access
+        # If the project's storage changed since the access was given, the
+        # upload starts over with new access
         conflict = MagicMock(status_code=409)
-        post.side_effect = HTTPError("409: changed", response=conflict)
-        with pytest.raises(HTTPError):
-            fs.put_file(str(local), "ck://owner/project/switched.bin")
-        post.side_effect = None
+        post.reset_mock()
+        post.side_effect = [HTTPError("409: changed", response=conflict), None]
         fs.put_file(str(local), "ck://owner/project/switched.bin")
         assert get_op.call_count == 3
+        assert post.call_count == 2
+        # If it keeps changing, it's an error rather than a loop
+        post.side_effect = HTTPError("409: changed", response=conflict)
+        with pytest.raises(OSError, match="keeps changing"):
+            fs.put_file(str(local), "ck://owner/project/flapping.bin")
+        post.side_effect = None
+        # And storage that's no longer HF gets a regular upload
+        presigned = {"access": {"kind": "presigned-url", "url": "u"}}
+        get_op.return_value = presigned
+        post.side_effect = HTTPError("409: changed", response=conflict)
+        response = MagicMock()
+        with patch.object(
+            fs, "_execute_operation", return_value=response
+        ) as execute:
+            fs.put_file(str(local), "ck://owner/project/to-hub.bin")
+        assert execute.call_args.args[0] == presigned
+        response.raise_for_status.assert_called_once()
+        post.side_effect = None
+        get_op.return_value = {"access": access | {"operation": "upload"}}
     # Writing through a file object uploads its bytes the same way
     stored.clear()
     with (

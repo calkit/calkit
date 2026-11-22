@@ -182,6 +182,14 @@ def describe_storage(
         git_url: str | None = calkit.git.get_repo().remote().url
     except Exception:
         git_url = None
+    # A token in an HTTPS remote, e.g., ``https://user:token@host``, isn't
+    # printed
+    if git_url is not None and "://" in git_url:
+        scheme, rest = git_url.split("://", 1)
+        host_and_path = (
+            rest.split("@", 1)[-1] if "@" in rest.split("/")[0] else rest
+        )
+        git_url = f"{scheme}://{host_and_path}"
     try:
         settings = calkit.hub.get(f"/projects/{project}/storage")
         usage = calkit.hub.get(f"/projects/{project}/storage/usage")

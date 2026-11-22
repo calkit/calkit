@@ -2288,9 +2288,8 @@ def test_disconnect_huggingface_with_storage(
     delete_objects.assert_called_once()
     assert not is_connected()
     assert db.get(StorageResource, resource_id) is None
-    # Transferred storage has to fit in the plan, and its project uses the
-    # hub's storage right away, while HF stays connected until the copy is
-    # done on the worker
+    # Transferred storage has to fit in the plan, and HF stays connected
+    # until the copy is done on the worker
     connect()
     project_id, resource_id = add_bucket()
     with (
@@ -2319,9 +2318,15 @@ def test_disconnect_huggingface_with_storage(
         assert response.status_code == 200
         q.assert_called_once_with(str(user.id))
     assert is_connected()
-    project = db.get(Project, project_id)
-    assert project is not None and project.dvc_storage_id is None
     assert db.get(StorageResource, resource_id) is not None
+    # One at a time
+    with patch(
+        "app.tasks.get_storage_transfer_status", return_value=("running", None)
+    ):
+        response = client.delete(
+            url, headers=headers, params={"storage_action": "transfer"}
+        )
+    assert response.status_code == 409
     # Without a worker, nothing changes hands
     with (
         patch("app.storage.get_resource_usage", return_value={}),

@@ -12395,30 +12395,6 @@ export const StageStatusSchema = {
   title: "StageStatus",
 } as const
 
-export const StorageResourcePostSchema = {
-  properties: {
-    name: {
-      type: "string",
-      maxLength: 64,
-      minLength: 2,
-      pattern: "^[a-z0-9][a-z0-9-]*$",
-      title: "Name",
-    },
-    kind: {
-      type: "string",
-      pattern: "^hf-bucket$",
-      title: "Kind",
-    },
-    bucket: {
-      type: "string",
-      title: "Bucket",
-    },
-  },
-  type: "object",
-  required: ["name", "kind", "bucket"],
-  title: "StorageResourcePost",
-} as const
-
 export const StorageResourcePublicSchema = {
   properties: {
     id: {
@@ -12470,6 +12446,36 @@ export const StorageResourcePublicSchema = {
     "connected_by",
   ],
   title: "StorageResourcePublic",
+} as const
+
+export const StorageTransferStatusSchema = {
+  properties: {
+    status: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Status",
+    },
+    error: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Error",
+    },
+  },
+  type: "object",
+  required: ["status"],
+  title: "StorageTransferStatus",
 } as const
 
 export const StorageUsageSchema = {

@@ -7084,24 +7084,6 @@ export type StageStatus = {
 }
 
 /**
- * StorageResourcePost
- */
-export type StorageResourcePost = {
-  /**
-   * Name
-   */
-  name: string
-  /**
-   * Kind
-   */
-  kind: string
-  /**
-   * Bucket
-   */
-  bucket: string
-}
-
-/**
  * StorageResourcePublic
  */
 export type StorageResourcePublic = {
@@ -7133,6 +7115,20 @@ export type StorageResourcePublic = {
    * Connected By
    */
   connected_by: string
+}
+
+/**
+ * StorageTransferStatus
+ */
+export type StorageTransferStatus = {
+  /**
+   * Status
+   */
+  status: string | null
+  /**
+   * Error
+   */
+  error?: string | null
 }
 
 /**
@@ -17560,38 +17556,6 @@ export type GetAccountStorageResponses = {
 export type GetAccountStorageResponse =
   GetAccountStorageResponses[keyof GetAccountStorageResponses]
 
-export type PostAccountStorageData = {
-  body: StorageResourcePost
-  path: {
-    /**
-     * Account Name
-     */
-    account_name: string
-  }
-  query?: never
-  url: "/accounts/{account_name}/storage"
-}
-
-export type PostAccountStorageErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type PostAccountStorageError =
-  PostAccountStorageErrors[keyof PostAccountStorageErrors]
-
-export type PostAccountStorageResponses = {
-  /**
-   * Successful Response
-   */
-  200: StorageResourcePublic
-}
-
-export type PostAccountStorageResponse =
-  PostAccountStorageResponses[keyof PostAccountStorageResponses]
-
 export type DeleteAccountStorageData = {
   body?: never
   path: {
@@ -17643,6 +17607,23 @@ export type GetUserHuggingfaceStorageResponses = {
 
 export type GetUserHuggingfaceStorageResponse =
   GetUserHuggingfaceStorageResponses[keyof GetUserHuggingfaceStorageResponses]
+
+export type GetUserHuggingfaceStorageTransferData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/huggingface/storage-transfer"
+}
+
+export type GetUserHuggingfaceStorageTransferResponses = {
+  /**
+   * Successful Response
+   */
+  200: StorageTransferStatus
+}
+
+export type GetUserHuggingfaceStorageTransferResponse =
+  GetUserHuggingfaceStorageTransferResponses[keyof GetUserHuggingfaceStorageTransferResponses]
 
 export type GetProjectStorageData = {
   body?: never

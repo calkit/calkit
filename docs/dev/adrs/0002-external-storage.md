@@ -130,12 +130,15 @@ delete them,
 or leave them where they are and forget the resources.
 A transfer runs on the worker,
 since it can take as long as the data takes to copy.
-The hub keeps the credential until the copy is done,
-and switches the affected projects to its own storage right away,
+The hub keeps the credential until the copy is done.
+The job switches each resource's projects to the hub's own storage just
+before copying it,
 so new objects land there while reads still fall back to the old
-resource.
+resource,
+and the resources can't be selected again or added to until it's done.
 The copy skips objects already copied,
-so a failed transfer can be rerun.
+so a failed transfer can be rerun,
+and its status is read from the job.
 
 ### Released datasets
 
@@ -153,6 +156,14 @@ which only make sense to DVC.
   member's own.
 - What to do when a dedicated bucket's name is already taken,
   e.g., by a bucket the user made themselves.
+- A namespace HF bucket's Xet read token covers the whole bucket,
+  so a reader of one public project in it could fetch another project's
+  content if they knew its Xet hash.
+  Dedicated buckets avoid this.
+- Reconnecting a service as a different external account isn't checked
+  against the resources the old one reached,
+  which then become unreachable without the prompt removing a
+  connection gives.
 
 ## Consequences
 

@@ -401,8 +401,18 @@ def get_resource_storage(
     )
 
 
+class UnreachableStorageError(RuntimeError):
+    """Storage a project uses can't be reached, e.g., because the account
+    that connected it disconnected.
+    """
+
+    def __init__(self, resource: "StorageResource"):
+        self.resource = resource
+        super().__init__(f"Can't reach {resource.bucket}")
+
+
 def get_project_storages(
-    session: "Session", project: "Project"
+    session: "Session", project: "Project", skip_unreachable: bool = True
 ) -> list[ProjectStorage]:
     """Get every storage a project's DVC objects may be in, for reading.
 
@@ -411,7 +421,9 @@ def get_project_storages(
     previous storage resources, newest first, then the hub's own storage.
     Storage that can't be reached right now, e.g., because the account that
     connected it disconnected Hugging Face, is skipped so everything else
-    stays readable. New objects go to ``get_project_storage``.
+    stays readable, unless ``skip_unreachable`` is false, in which case it
+    raises ``UnreachableStorageError``. New objects go to
+    ``get_project_storage``.
     """
     from fastapi import HTTPException
 
@@ -428,6 +440,8 @@ def get_project_storages(
         try:
             storages.append(get_resource_storage(session, resource))
         except HTTPException as e:
+            if not skip_unreachable:
+                raise UnreachableStorageError(resource) from e
             logger.warning(
                 f"Skipping unavailable storage {resource.name} "
                 f"({resource.bucket}): {e.detail}"
@@ -473,9 +487,14 @@ def find_project_object(
 
 
 def set_project_bucket_visibility(
-    session: "Session", project: "Project"
+    session: "Session", project: "Project", is_public: bool
 ) -> None:
-    """Make the buckets dedicated to a project match its visibility."""
+    """Make the buckets dedicated to a project public or private.
+
+    Raises ``UnreachableStorageError`` before changing any if one can't be
+    reached.
+    """
+    from fastapi import HTTPException
     from huggingface_hub import HfApi
     from sqlmodel import select
 
@@ -484,10 +503,16 @@ def set_project_bucket_visibility(
     resources = session.exec(
         select(StorageResource).where(StorageResource.project_id == project.id)
     ).all()
+    targets = []
     for resource in resources:
-        target = get_resource_storage(session, resource)
+        try:
+            targets.append(get_resource_storage(session, resource))
+        except HTTPException as e:
+            raise UnreachableStorageError(resource) from e
+    for target in targets:
+        assert target.resource is not None
         HfApi(token=target.token).update_bucket_settings(
-            resource.bucket, private=not project.is_public
+            target.resource.bucket, private=not is_public
         )
 
 
@@ -524,10 +549,16 @@ def delete_objects_from(
 
 def delete_project_objects(session: "Session", project: "Project") -> None:
     """Delete a project's DVC objects from every storage it has used,
-    including the hub's own. Storage that can't be reached is skipped.
+    including the hub's own.
+
+    Raises ``UnreachableStorageError`` before deleting anything if any of
+    that storage can't be reached, rather than leaving objects behind with
+    no record of them.
     """
     owner_name = project.owner_account_name
-    for target in get_project_storages(session, project):
+    for target in get_project_storages(
+        session, project, skip_unreachable=False
+    ):
         delete_objects_from(target, owner_name, project.name)
     invalidate_storage_usage_cache(owner_name)
 
@@ -623,6 +654,9 @@ def copy_resource_to_internal(
 def transfer_storage_and_disconnect(user_id: str) -> None:
     """Move the storage reached with a user's HF account into the hub's own
     storage, then disconnect the account. Run on the worker.
+
+    Each resource's projects switch to the hub's own storage before its
+    objects are copied, so nothing new lands there after the copy.
     """
     import uuid
 
@@ -636,14 +670,27 @@ def transfer_storage_and_disconnect(user_id: str) -> None:
         user = session.get(User, uuid.UUID(user_id))
         if user is None:
             return
-        for resource in get_credential_resources(session, user.id):
-            n_copied = copy_resource_to_internal(session, resource)
-            logger.info(
-                f"Copied {n_copied} objects from {resource.bucket} to the "
-                "hub's storage"
-            )
-            session.delete(resource)
-            session.commit()
+        # Checked again after each pass, in case any was added meanwhile
+        for _ in range(10):
+            resources = get_credential_resources(session, user.id)
+            if not resources:
+                break
+            for resource in resources:
+                for project in get_resource_projects(session, resource):
+                    if project.dvc_storage_id == resource.id:
+                        project.dvc_storage = None
+                        project.dvc_storage_id = None
+                        session.add(project)
+                session.commit()
+                n_copied = copy_resource_to_internal(session, resource)
+                logger.info(
+                    f"Copied {n_copied} objects from {resource.bucket} to "
+                    "the hub's storage"
+                )
+                session.delete(resource)
+                session.commit()
+        else:
+            raise RuntimeError("Storage kept being added during the transfer")
         credential = app.users.get_external_credential(
             session=session, user=user, provider="huggingface"
         )

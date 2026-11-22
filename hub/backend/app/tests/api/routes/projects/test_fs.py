@@ -410,7 +410,8 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         assert results[new_path]["info"]["xet_hash"] == "a" * 64
         assert results[new_path]["info"]["bucket"] == "ns/bkt"
         assert "xet_hash" not in results[old_path]["info"]
-    # A project on the hub's storage has nothing to register
+    # A project on the hub's storage has nothing to register, which a client
+    # that still has HF access learns from a 409, so it gets new access
     with (
         patch(
             "app.api.routes.projects.fs.app.projects.get_project",
@@ -433,7 +434,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
                 "xet_hashes": {"files/md5/cc/x": "b" * 64},
             },
         )
-        assert response.status_code == 400
+        assert response.status_code == 409
     # A bucket dedicated to the project holds it at its root, though clients
     # see the same paths as anywhere else
     dedicated = ProjectStorage(

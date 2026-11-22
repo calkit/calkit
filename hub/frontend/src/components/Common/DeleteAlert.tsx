@@ -135,9 +135,9 @@ const Delete = ({
       onDeleted?.()
     },
     onError: (err: AxiosError) => {
-      // A refusal to remove an org member has a reason worth showing, e.g.,
-      // that they're its last owner
-      if (type === "Org member") {
+      // Some refusals have a reason worth showing, e.g., an org member who's
+      // its last owner, or project storage that can't be reached
+      if (type === "Org member" || type === "Project") {
         handleError(err, showToast)
         return
       }

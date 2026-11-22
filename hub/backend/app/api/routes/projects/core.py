@@ -1481,8 +1481,28 @@ def patch_project(
     if req.title is not None:
         project.title = req.title
     project.description = req.description
-    if req.is_public is not None:
-        project.is_public = req.is_public
+    if req.is_public is not None and req.is_public != project.is_public:
+        was_public = project.is_public
+        # Buckets dedicated to the project follow its visibility, and go
+        # first, so one that can't be reached stops GitHub changing too
+        try:
+            app.storage.set_project_bucket_visibility(
+                session, project, req.is_public
+            )
+        except app.storage.UnreachableStorageError as e:
+            raise HTTPException(
+                409,
+                f"Can't reach Hugging Face bucket {e.resource.bucket}; "
+                "reconnect Hugging Face first",
+            )
+        except Exception:
+            logger.exception(
+                f"Failed to change bucket visibility for {owner_name}/"
+                f"{project_name}"
+            )
+            raise HTTPException(
+                502, "Failed to change Hugging Face bucket visibility"
+            )
         visibility = "public" if req.is_public else "private"
         # Make call to GitHub API to change repo visibility
         gh_owner, gh_repo = project.git_repo_url.split("/")[-2:]
@@ -1499,20 +1519,16 @@ def patch_project(
                 "Failed to change repo visibility for "
                 f"{owner_name}/{project_name}: {resp.text}"
             )
+            try:
+                app.storage.set_project_bucket_visibility(
+                    session, project, was_public
+                )
+            except Exception:
+                logger.exception("Failed to change bucket visibility back")
             raise HTTPException(
                 resp.status_code, "Failed to change GitHub repo visibility"
             )
-        # Buckets dedicated to the project follow its visibility
-        try:
-            app.storage.set_project_bucket_visibility(session, project)
-        except Exception:
-            logger.exception(
-                f"Failed to change bucket visibility for {owner_name}/"
-                f"{project_name}"
-            )
-            raise HTTPException(
-                502, "Failed to change Hugging Face bucket visibility"
-            )
+        project.is_public = req.is_public
     session.commit()
     session.refresh(project)
     return ProjectPublic.model_validate(project)
@@ -1547,6 +1563,12 @@ def _delete_project_objects(session: Session, project: Project) -> None:
     # Before the project itself, so a failure leaves it to try again
     try:
         app.storage.delete_project_objects(session, project)
+    except app.storage.UnreachableStorageError as e:
+        raise HTTPException(
+            409,
+            f"Can't reach Hugging Face bucket {e.resource.bucket}; reconnect "
+            "Hugging Face, or delete without stored files",
+        )
     except Exception:
         logger.exception(f"Failed to delete storage for {project.name}")
         raise HTTPException(502, "Failed to delete project storage")
@@ -3566,10 +3588,12 @@ def _resolve_figures(
     # have to be loaded before the pool starts, not inside it.
     # `owner_account_name` is a computed field over `owner_account`;
     # `file_locks` is iterated by `get_contents_from_tree` for every path,
-    # which also needs the project's storages.
+    # which also needs the project's storages. Storages go first, since
+    # refreshing a token for one commits, which expires the rest.
+    storages = app.projects.get_storages_for_project(project)
+    _ = project.name
     _ = project.owner_account_name
     _ = len(project.file_locks)
-    storages = app.projects.get_storages_for_project(project)
     # Build comment count map from DB, restricted to the figures we're
     # actually returning.
     paths = [fig["path"] for fig in figures]
@@ -4041,10 +4065,12 @@ def _build_tables(
     tables += sorted(auto, key=lambda t: t["path"])
     if not tables:
         return []
-    # Resolved here, since the Session isn't safe to use from the pool below
+    # Resolved here, since the Session isn't safe to use from the pool below,
+    # storages first, since refreshing a token for one commits
+    storages = app.projects.get_storages_for_project(project)
+    _ = project.name
     _ = project.owner_account_name
     _ = len(project.file_locks)
-    storages = app.projects.get_storages_for_project(project)
     # Staleness is best-effort: never let it block the listing.
     stage_statuses = {}
     try:

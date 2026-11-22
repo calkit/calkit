@@ -26,7 +26,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import mixpanel from "mixpanel-browser"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FaCheck, FaPlus, FaTimes, FaTrash } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
 import LoadingSpinner from "../Common/LoadingSpinner"
@@ -70,6 +70,28 @@ function ConnectedAccounts() {
       ),
     enabled: disconnect === "huggingface",
   })
+  // A transfer to Calkit Hub storage runs on the server, so it's checked
+  // until it's done
+  const transferQuery = useQuery({
+    queryKey: ["user", "huggingface-storage-transfer"],
+    queryFn: () =>
+      StorageService.getUserHuggingfaceStorageTransfer().then(
+        (response) => response.data,
+      ),
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 5000 : false,
+  })
+  // Once it's done, HF is disconnected
+  const transferStatus = transferQuery.data?.status
+  const lastTransferStatus = useRef(transferStatus)
+  useEffect(() => {
+    if (lastTransferStatus.current === "running" && !transferStatus) {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "connected-accounts"],
+      })
+    }
+    lastTransferStatus.current = transferStatus
+  }, [transferStatus, queryClient])
   const [storageAction, setStorageAction] = useState<StorageAction>("transfer")
   const disconnectHuggingFaceMutation = useMutation({
     mutationFn: () =>
@@ -94,6 +116,9 @@ function ConnectedAccounts() {
       })
       queryClient.invalidateQueries({
         queryKey: ["user", "huggingface-storage"],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["user", "huggingface-storage-transfer"],
       })
     },
   })
@@ -425,14 +450,26 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.huggingface ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
-                <IconButton
-                  aria-label="Disconnect Hugging Face"
-                  icon={<FaTrash />}
-                  size="xs"
-                  variant="ghost"
-                  colorScheme="red"
-                  onClick={() => setDisconnect("huggingface")}
-                />
+                {transferQuery.data?.status === "running" ? (
+                  <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
+                ) : (
+                  <IconButton
+                    aria-label="Disconnect Hugging Face"
+                    icon={<FaTrash />}
+                    size="xs"
+                    variant="ghost"
+                    colorScheme="red"
+                    onClick={() => setDisconnect("huggingface")}
+                  />
+                )}
+                {transferQuery.data?.status === "failed" && (
+                  <Text color="ui.danger">
+                    Transfer failed
+                    {transferQuery.data.error
+                      ? `: ${transferQuery.data.error}`
+                      : ""}
+                  </Text>
+                )}
               </>
             ) : (
               <Button

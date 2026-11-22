@@ -85,6 +85,32 @@ def enqueue_warm(
     return True
 
 
+def get_storage_transfer_status(user_id: Any) -> tuple[str | None, str | None]:
+    """Get the status of a user's storage transfer, i.e., ``"running"``,
+    ``"failed"``, or None if there isn't one, and the error if it failed.
+    """
+    client = get_client()
+    if client is None or not settings.REDIS_URL:
+        return None, None
+    try:
+        from rq.exceptions import NoSuchJobError
+        from rq.job import Job
+
+        job = Job.fetch(f"storage-transfer-{user_id}", connection=client)
+    except NoSuchJobError:
+        return None, None
+    except Exception as e:
+        logger.warning(f"Could not get storage transfer status: {e}")
+        return None, None
+    status = job.get_status()
+    if status in ("queued", "started", "deferred", "scheduled"):
+        return "running", None
+    if status == "failed":
+        lines = (job.exc_info or "").strip().splitlines()
+        return "failed", lines[-1] if lines else None
+    return None, None
+
+
 def enqueue_storage_transfer(user_id: str) -> bool:
     """Queue moving the storage reached with a user's HF account into the
     hub's own storage, then disconnecting it. True if it was queued.
@@ -92,11 +118,19 @@ def enqueue_storage_transfer(user_id: str) -> bool:
     queue = get_queue()
     if queue is None:
         return False
+    job_id = f"storage-transfer-{user_id}"
     try:
+        # A failed transfer is retried as a new job
+        from rq.job import Job
+
+        try:
+            Job.fetch(job_id, connection=queue.connection).delete()
+        except Exception:
+            pass
         queue.enqueue(
             "app.storage.transfer_storage_and_disconnect",
             user_id,
-            job_id=f"storage-transfer-{user_id}",
+            job_id=job_id,
             # Copying a project's data can take much longer than a warm
             job_timeout=6 * 3600,
         )

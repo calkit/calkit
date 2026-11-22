@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app import users
-from app.models import Project
+from app.models import Project, StorageResource
 from app.tests import authentication_token_from_email, random_email
 
 
@@ -26,49 +26,28 @@ def test_storage_resources_and_project_storage(
     )
     base = f"/accounts/{account_name}/storage"
     assert client.get(base, headers=owner_headers).json() == []
-    # Other users can't see or add storage to the account
+    # Other users can't see the account's storage
     response = client.get(base, headers=other_headers)
     assert response.status_code == 403
-    post = {"name": "hf", "kind": "hf-bucket", "bucket": "someone/calkit"}
-    response = client.post(base, headers=other_headers, json=post)
-    assert response.status_code == 403
-    # Hugging Face must be connected first
-    response = client.post(base, headers=owner_headers, json=post)
-    assert response.status_code == 401
-    with (
-        patch("app.users.get_huggingface_token", return_value="hf-token"),
-        patch("huggingface_hub.create_bucket") as create_bucket,
-        patch("app.storage.get_xet_token", return_value={}) as get_xet_token,
-    ):
-        for bad in [
-            post | {"bucket": "no-namespace"},
-            post | {"kind": "s3"},
-            post | {"name": "Not Valid"},
-        ]:
-            response = client.post(base, headers=owner_headers, json=bad)
-            assert response.status_code == 422
-        response = client.post(base, headers=owner_headers, json=post)
-        assert response.status_code == 200
-        assert response.json()["name"] == "hf"
-        assert response.json()["bucket"] == "someone/calkit"
-        assert response.json()["connected_by"] == account_name
-        create_bucket.assert_called_once_with(
-            "someone/calkit", private=True, exist_ok=True, token="hf-token"
+    # Storage shared by the account's projects, e.g., S3 later, which can't
+    # be added through the API yet
+    for name in ("hf", "unused"):
+        db.add(
+            StorageResource(
+                owner_account_id=owner.account.id,
+                name=name,
+                kind="hf-bucket",
+                bucket="someone/calkit",
+                credential_user_id=owner.id,
+            )
         )
-        get_xet_token.assert_called_once()
-        response = client.post(base, headers=owner_headers, json=post)
-        assert response.status_code == 409
-        # A bucket the account can't write to isn't connected
-        get_xet_token.side_effect = Exception("403")
-        response = client.post(
-            base, headers=owner_headers, json=post | {"name": "other"}
-        )
-        assert response.status_code == 400
-        get_xet_token.side_effect = None
-        response = client.post(
-            base, headers=owner_headers, json=post | {"name": "unused"}
-        )
-        assert response.status_code == 200
+    db.commit()
+    response = client.post(
+        base,
+        headers=owner_headers,
+        json={"name": "hf2", "kind": "hf-bucket", "bucket": "someone/calkit"},
+    )
+    assert response.status_code == 405
     listed = client.get(base, headers=owner_headers).json()
     assert [r["name"] for r in listed] == ["hf", "unused"]
     assert not any(r["dedicated"] for r in listed)
@@ -203,3 +182,22 @@ def test_storage_resources_and_project_storage(
     ]
     response = client.get("/user/huggingface/storage", headers=other_headers)
     assert response.json() == []
+    # While it's being transferred to the hub's own storage, it can't be
+    # selected again, and no more can be made with that HF account
+    response = client.get(
+        "/user/huggingface/storage-transfer", headers=owner_headers
+    )
+    assert response.json() == {"status": None, "error": None}
+    with patch(
+        "app.tasks.get_storage_transfer_status", return_value=("running", None)
+    ):
+        response = client.get(
+            "/user/huggingface/storage-transfer", headers=owner_headers
+        )
+        assert response.json()["status"] == "running"
+        response = client.put(
+            project_url, headers=owner_headers, json={"dvc_storage_id": hf_id}
+        )
+        assert response.status_code == 409
+        response = client.post(bucket_url, headers=owner_headers, json=bucket)
+        assert response.status_code == 409

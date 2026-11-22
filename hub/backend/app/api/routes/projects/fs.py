@@ -620,10 +620,10 @@ def post_project_fs_batch_op(
     if operation == "register":
         # Many uploads' paths added with one call to HF
         target = storage.get_project_storage(session, project)
+        # E.g., if the project switched to the hub's own storage after the
+        # client got its access
         if target.backend != "hf":
-            raise HTTPException(
-                400, "Register is only needed for Hugging Face storage"
-            )
+            raise HTTPException(409, "Project storage changed; push again")
         assert target.resource is not None
         # Content uploaded to a bucket the project no longer uses can't be
         # added to the new one

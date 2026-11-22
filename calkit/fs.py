@@ -195,6 +195,9 @@ class _Batcher:
 # What a batched transfer returns for a file it can't send with Xet, e.g.,
 # one in the hub's own storage, which the caller then sends on its own
 _NOT_XET = object()
+# What a batched upload returns when the project's storage changed after
+# its access was given, so the caller starts over with new access
+_STORAGE_CHANGED = object()
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:
@@ -820,9 +823,16 @@ class CalkitFileSystem(AbstractFileSystem):
             access = self._get_xet_access(owner, project, "put")
             if access is None:
                 info = self._get_fs_op_info(owner, project, items[0][0], "put")
-                access = info["access"]
+                access = info.get("access") or {}
+                if access.get("kind") != "hf-xet":
+                    return [_STORAGE_CHANGED] * len(items)
                 self._set_xet_access(owner, project, "put", access)
-            self._xet_upload(owner, project, access, items)
+            try:
+                self._xet_upload(owner, project, access, items)
+            except HTTPError as e:
+                if e.response is not None and e.response.status_code == 409:
+                    return [_STORAGE_CHANGED] * len(items)
+                raise
             return [None] * len(items)
 
         def download(items: list[tuple[str, str, Any]]) -> list[Any]:
@@ -1376,21 +1386,31 @@ class CalkitFileSystem(AbstractFileSystem):
         size = os.path.getsize(lpath)
         callback.set_size(size)
         access = self._get_xet_access(owner, project, "put")
-        if access is None:
-            operation_info = self._get_fs_op_info(
-                owner,
-                project,
-                file_path,
-                "put",
-                content_length=size,
-            )
-            access = operation_info.get("access") or {}
-            if access.get("kind") == "hf-xet":
-                self._set_xet_access(owner, project, "put", access)
-        if access.get("kind") == "hf-xet":
+        operation_info: dict | None = None
+        # Twice at most, since the project's storage can change after its
+        # access was given, e.g., from HF to the hub's own
+        for _ in range(2):
+            if access is None:
+                operation_info = self._get_fs_op_info(
+                    owner,
+                    project,
+                    file_path,
+                    "put",
+                    content_length=size,
+                )
+                access = operation_info.get("access") or {}
+                if access.get("kind") == "hf-xet":
+                    self._set_xet_access(owner, project, "put", access)
+            if access.get("kind") != "hf-xet":
+                break
             batcher = self._get_xet_batcher(owner, project, "put")
-            batcher.submit((file_path, str(lpath), callback))
-            return None
+            item = (file_path, str(lpath), callback)
+            if batcher.submit(item) is not _STORAGE_CHANGED:
+                return None
+            access = None
+        else:
+            raise OSError(f"Storage for {owner}/{project} keeps changing")
+        assert operation_info is not None
         # Stream the file from disk rather than loading it into memory. This
         # keeps RAM bounded when DVC pushes many (or very large) files in
         # parallel via its worker pool.

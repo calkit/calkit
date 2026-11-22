@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, delete, select
 
 import app.index
+import app.storage
 from app import projects as projects_module
 from app import users, zotero
 from app.api.routes.projects.core import (
@@ -6274,26 +6275,66 @@ def test_project_storage_follows_project(
     project, headers = _make_owner_with_project(db, client)
     base = f"/projects/{project.owner_account.name}/{project.name}"
     project_id = project.id
-    # Its buckets change visibility with it
+    # Its buckets change visibility with it, before GitHub does
+    github = SimpleNamespace(status_code=200, text="")
     with (
         patch("app.users.get_github_token", return_value="gh-token"),
         patch(
             "app.api.routes.projects.core.requests.patch",
-            return_value=SimpleNamespace(status_code=200, text=""),
-        ),
+            return_value=github,
+        ) as gh_patch,
         patch("app.storage.set_project_bucket_visibility") as set_visibility,
     ):
         response = client.patch(
             base, headers=headers, json={"is_public": True}
         )
         assert response.status_code == 200, response.text
-        set_visibility.assert_called_once()
-        # Not just a title change
+        assert set_visibility.call_args.args[2] is True
+        gh_patch.assert_called_once()
+        # Not just a title change, or a visibility it already has
         client.patch(base, headers=headers, json={"title": "New title"})
+        client.patch(base, headers=headers, json={"is_public": True})
         set_visibility.assert_called_once()
+        # A bucket that can't be reached stops GitHub changing too
+        set_visibility.side_effect = app.storage.UnreachableStorageError(
+            SimpleNamespace(bucket="someone/proj")  # type: ignore[arg-type]
+        )
+        gh_patch.reset_mock()
+        response = client.patch(
+            base, headers=headers, json={"is_public": False}
+        )
+        assert response.status_code == 409
+        assert "someone/proj" in response.json()["detail"]
+        gh_patch.assert_not_called()
+        # If GitHub fails, the buckets go back
+        set_visibility.side_effect = None
+        set_visibility.reset_mock()
+        github.status_code = 500
+        response = client.patch(
+            base, headers=headers, json={"is_public": False}
+        )
+        assert response.status_code == 500
+        assert [c.args[2] for c in set_visibility.call_args_list] == [
+            False,
+            True,
+        ]
+        db.expire_all()
+        project_after = db.get(Project, project_id)
+        assert project_after is not None and project_after.is_public
     # Deleting it deletes its storage only when asked, and if that fails,
     # the project stays so it can be tried again
     with patch("app.storage.delete_project_objects") as delete_objects:
+        # Unreachable storage stops it, saying which
+        delete_objects.side_effect = app.storage.UnreachableStorageError(
+            SimpleNamespace(bucket="someone/proj")  # type: ignore[arg-type]
+        )
+        response = client.delete(
+            f"/projects/{project_id}",
+            headers=headers,
+            params={"delete_storage": True},
+        )
+        assert response.status_code == 409
+        assert "someone/proj" in response.json()["detail"]
         delete_objects.side_effect = RuntimeError("HF down")
         response = client.delete(
             f"/projects/{project_id}",

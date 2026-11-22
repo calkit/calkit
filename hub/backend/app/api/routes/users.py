@@ -1434,6 +1434,14 @@ def delete_user_external_credential(
         if provider == "huggingface"
         else []
     )
+    if (
+        provider == "huggingface"
+        and app.tasks.get_storage_transfer_status(current_user.id)[0]
+        == "running"
+    ):
+        raise HTTPException(
+            409, "Transfer to Calkit Hub storage already running"
+        )
     if resources and storage_action is None:
         raise HTTPException(
             409, "Storage uses this account; transfer, delete, or orphan it"
@@ -1459,17 +1467,8 @@ def delete_user_external_credential(
                     f"won't fit in {account.name}'s Calkit Hub storage "
                     f"({used:.2f} of {limit} GB used)",
                 )
-        # New objects go to the hub while the old ones are copied, and
-        # reads fall back to HF until then
-        for resource in resources:
-            for project in app.storage.get_resource_projects(
-                session, resource
-            ):
-                if project.dvc_storage_id == resource.id:
-                    project.dvc_storage = None
-                    project.dvc_storage_id = None
-                    session.add(project)
-        session.commit()
+        # The job switches each project to the hub's own storage before
+        # copying its objects, with reads falling back to HF until then
         if not app.tasks.enqueue_storage_transfer(str(current_user.id)):
             raise HTTPException(503, "Transfers unavailable")
         return Message(

@@ -271,6 +271,7 @@ import type {
   GetUserGithubTokenResponses,
   GetUserHuggingfaceAccountResponses,
   GetUserHuggingfaceStorageResponses,
+  GetUserHuggingfaceStorageTransferResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
   GetUserOverleafSessionResponses,
@@ -350,8 +351,6 @@ import type {
   PipelineRunPost,
   PipelineStageEdit,
   PipelineStagePut,
-  PostAccountStorageErrors,
-  PostAccountStorageResponses,
   PostDiscountCodeErrors,
   PostDiscountCodeResponses,
   PostExternalReleaseErrors,
@@ -578,7 +577,6 @@ import type {
   SessionCredentialsReq,
   StageFromScriptOrNotebookPost,
   StagePost,
-  StorageResourcePost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -10504,54 +10502,6 @@ export class StorageService {
   }
 
   /**
-   * Post Account Storage
-   *
-   * Connect storage to an account with the current user's credential.
-   *
-   * For HF buckets, the bucket is created if it doesn't exist, and the
-   * credential is checked by requesting an upload token for it.
-   */
-  public static postAccountStorage<ThrowOnError extends boolean = true>(
-    parameters: {
-      account_name: string
-      storageResourcePost: StorageResourcePost
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    PostAccountStorageResponses,
-    PostAccountStorageErrors,
-    ThrowOnError
-  > {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "account_name" },
-            { key: "storageResourcePost", map: "body" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).post<
-      PostAccountStorageResponses,
-      PostAccountStorageErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/accounts/{account_name}/storage",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
-    })
-  }
-
-  /**
    * Delete Account Storage
    *
    * Disconnect storage from an account.
@@ -10612,6 +10562,33 @@ export class StorageService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/huggingface/storage",
+      ...options,
+    })
+  }
+
+  /**
+   * Get User Huggingface Storage Transfer
+   *
+   * Get the status of moving the storage reached with the current user's
+   * HF account to the hub's own storage.
+   */
+  public static getUserHuggingfaceStorageTransfer<
+    ThrowOnError extends boolean = true,
+  >(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserHuggingfaceStorageTransferResponses,
+    unknown,
+    ThrowOnError
+  > {
+    return (options?.client ?? client).get<
+      GetUserHuggingfaceStorageTransferResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/huggingface/storage-transfer",
       ...options,
     })
   }

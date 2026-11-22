@@ -108,9 +108,8 @@ def test_dedicated_storage() -> None:
         patch.object(storage, "get_resource_storage", return_value=dedicated),
         patch("huggingface_hub.HfApi") as api,
     ):
-        storage.set_project_bucket_visibility(session, project)  # type: ignore[arg-type]
-        project.is_public = False
-        storage.set_project_bucket_visibility(session, project)  # type: ignore[arg-type]
+        storage.set_project_bucket_visibility(session, project, True)  # type: ignore[arg-type]
+        storage.set_project_bucket_visibility(session, project, False)  # type: ignore[arg-type]
     api.assert_called_with(token="hf-token")
     settings = api.return_value.update_bucket_settings
     assert [c.kwargs["private"] for c in settings.call_args_list] == [
@@ -231,8 +230,11 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
             project_id=project.id, storage_resource_id=resource.id
         )
     )
+    project.dvc_storage_id = resource.id
+    db.add(project)
     db.commit()
     resource_id = resource.id
+    project_id = project.id
     # A failed copy leaves everything as it was, to try again
     with patch.object(
         storage, "copy_resource_to_internal", side_effect=OSError("HF down")
@@ -248,6 +250,9 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
     copy.assert_called_once()
     db.expire_all()
     assert db.get(StorageResource, resource_id) is None
+    # Its project went to the hub's own storage before the copy
+    moved = db.get(Project, project_id)
+    assert moved is not None and moved.dvc_storage_id is None
     assert (
         users.get_external_credential(
             session=db, user=user, provider="huggingface"
@@ -288,3 +293,38 @@ def test_get_hf_paths_info() -> None:
             "xet_hash": "h" * 64,
         }
     }
+
+
+def test_unreachable_storage() -> None:
+    from fastapi import HTTPException
+
+    resource = SimpleNamespace(
+        id="resource-id", name=None, bucket="someone/proj", project_id="p"
+    )
+    project = SimpleNamespace(
+        id="p", dvc_storage=resource, dvc_storage_id="resource-id"
+    )
+    project.storage_history = []
+    session = SimpleNamespace(
+        exec=lambda _: SimpleNamespace(all=lambda: [resource])
+    )
+    unreachable = HTTPException(401, "User needs to authenticate")
+    with (
+        patch.object(storage, "get_resource_storage", side_effect=unreachable),
+        patch("huggingface_hub.HfApi") as api,
+    ):
+        # Reads skip it, so everything else stays readable
+        storages = storage.get_project_storages(session, project)  # type: ignore[arg-type]
+        assert [st.resource for st in storages] == [None]
+        # Deleting and changing visibility don't, so nothing is left behind
+        # or left public without anyone knowing
+        with pytest.raises(storage.UnreachableStorageError) as e:
+            storage.get_project_storages(
+                session,  # type: ignore[arg-type]
+                project,  # type: ignore[arg-type]
+                skip_unreachable=False,
+            )
+        assert e.value.resource is resource
+        with pytest.raises(storage.UnreachableStorageError):
+            storage.set_project_bucket_visibility(session, project, False)  # type: ignore[arg-type]
+    api.return_value.update_bucket_settings.assert_not_called()

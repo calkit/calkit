@@ -6,10 +6,11 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 import app.projects
+import app.tasks
 from app import storage, users
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.models import (
@@ -40,15 +41,6 @@ class StorageResourcePublic(BaseModel):
     dedicated: bool
     created: datetime
     connected_by: str
-
-
-class StorageResourcePost(BaseModel):
-    name: str = Field(
-        min_length=2, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$"
-    )
-    kind: str = Field(pattern=r"^hf-bucket$")
-    # For HF buckets, ``{namespace}/{bucket_name}``
-    bucket: str
 
 
 def to_public(resource: StorageResource) -> StorageResourcePublic:
@@ -103,64 +95,6 @@ def get_account_storage(
         .order_by(StorageResource.name)
     ).all()
     return [to_public(r) for r in resources]
-
-
-@router.post("/accounts/{account_name}/storage")
-def post_account_storage(
-    account_name: str,
-    req: StorageResourcePost,
-    session: SessionDep,
-    current_user: CurrentUser,
-) -> StorageResourcePublic:
-    """Connect storage to an account with the current user's credential.
-
-    For HF buckets, the bucket is created if it doesn't exist, and the
-    credential is checked by requesting an upload token for it.
-    """
-    from huggingface_hub import create_bucket
-
-    account = get_storage_account(
-        session, current_user, account_name, manage=True
-    )
-    if not HF_BUCKET_RE.match(req.bucket):
-        raise HTTPException(422, "Bucket must be like 'namespace/name'")
-    existing = session.exec(
-        select(StorageResource).where(
-            StorageResource.owner_account_id == account.id,
-            StorageResource.name == req.name,
-        )
-    ).first()
-    if existing is not None:
-        raise HTTPException(409, f"Storage '{req.name}' already exists")
-    token = users.get_huggingface_token(session=session, user=current_user)
-    try:
-        create_bucket(req.bucket, private=True, exist_ok=True, token=token)
-    except Exception as e:
-        logger.info(f"Failed to create HF bucket {req.bucket}: {e}")
-        raise HTTPException(
-            400, f"Couldn't create or access bucket '{req.bucket}'"
-        )
-    resource = StorageResource(
-        owner_account_id=account.id,
-        name=req.name,
-        kind=req.kind,
-        bucket=req.bucket,
-        credential_user_id=current_user.id,
-    )
-    resource.credential_user = current_user
-    try:
-        storage.get_xet_token(
-            storage.get_resource_storage(session, resource), "write"
-        )
-    except Exception as e:
-        logger.info(f"No write access to HF bucket {req.bucket}: {e}")
-        raise HTTPException(
-            400, f"Your Hugging Face account can't write to '{req.bucket}'"
-        )
-    session.add(resource)
-    session.commit()
-    session.refresh(resource)
-    return to_public(resource)
 
 
 @router.delete("/accounts/{account_name}/storage/{storage_name}")
@@ -241,6 +175,23 @@ def get_user_huggingface_storage(
     ]
 
 
+class StorageTransferStatus(BaseModel):
+    # "running", "failed", or null if there's no transfer
+    status: str | None
+    error: str | None = None
+
+
+@router.get("/user/huggingface/storage-transfer")
+def get_user_huggingface_storage_transfer(
+    current_user: CurrentUser,
+) -> StorageTransferStatus:
+    """Get the status of moving the storage reached with the current user's
+    HF account to the hub's own storage.
+    """
+    status, error = app.tasks.get_storage_transfer_status(current_user.id)
+    return StorageTransferStatus(status=status, error=error)
+
+
 class ProjectStoragePut(BaseModel):
     # The ID of storage the project owner's account shares among its
     # projects, or that's dedicated to this one, or null for the hub's own
@@ -252,6 +203,13 @@ class ProjectHfBucketPost(BaseModel):
     # ``{namespace}/{bucket_name}``, where the namespace is the user's HF
     # username or one of their HF orgs
     bucket: str
+
+
+def is_transferring(user_id: uuid.UUID) -> bool:
+    """Whether storage reached with a user's HF account is being moved to the
+    hub's own storage.
+    """
+    return app.tasks.get_storage_transfer_status(user_id)[0] == "running"
 
 
 def set_project_storage(
@@ -387,6 +345,11 @@ def put_project_storage(
             or resource.project_id not in (None, project.id)
         ):
             raise HTTPException(404, "Storage not found")
+        # It's about to be removed
+        if is_transferring(resource.credential_user_id):
+            raise HTTPException(
+                409, "Storage being transferred to Calkit Hub storage"
+            )
     set_project_storage(session, project, resource)
     return get_project_storage_settings(project)
 
@@ -417,6 +380,11 @@ def post_project_hf_bucket(
     )
     if not HF_BUCKET_RE.match(req.bucket):
         raise HTTPException(422, "Bucket must be like 'namespace/name'")
+    # Its storage is about to be removed, along with the account
+    if is_transferring(current_user.id):
+        raise HTTPException(
+            409, "Hugging Face storage being transferred to Calkit Hub storage"
+        )
     token = users.get_huggingface_token(session=session, user=current_user)
     try:
         create_bucket(req.bucket, private=not project.is_public, token=token)

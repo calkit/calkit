@@ -703,6 +703,15 @@ def test_jupyternotebookstage():
         kind="figure", cell_id="a", output_path=r".\figs\fit.pdf"
     )
     assert typed.output_path == "figs/fit.pdf"
+    # A percent format has one %, which no shell expands
+    pct = NotebookCellOutput(
+        kind="table",
+        cell_id="a",
+        variable_name="d",
+        output_path="t.tex",
+        format=".1%",
+    )
+    assert NotebookCellOutput.from_arg(pct.to_arg()) == pct
     # What can't be saved
     figure = {"kind": "figure", "cell_id": "a"}
     table = {"kind": "table", "cell_id": "a", "variable_name": "d"}
@@ -723,6 +732,7 @@ def test_jupyternotebookstage():
         (figure | {"output_path": os.path.abspath("f.png")}, "relative"),
         (figure | {"output_path": "f,g.png"}, "comma"),
         (figure | {"output_path": "$HOME/f.png"}, "can't include $"),
+        (figure | {"output_path": "100%.png"}, "can't include %"),
         (
             table | {"output_path": "t.tex", "format": '">8'},
             "can't include \"",

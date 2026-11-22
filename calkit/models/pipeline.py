@@ -2718,11 +2718,14 @@ class NotebookCellOutput(Model):
         check_path_relative_and_child_of_cwd(self.output_path)
         if "," in self.output_path:
             raise ValueError(f"'{self.output_path}' can't include a comma")
-        # The shell running the stage's command would expand these
-        for text in (self.output_path, self.format or ""):
-            unsafe = [c for c in '"$`%' if c in text]
-            if unsafe:
-                raise ValueError(f"'{text}' can't include {unsafe[0]}")
+        # The shell running the stage's command would expand these, and
+        # Windows expands a pair of %s, which a format has only one of
+        for text, chars in ((self.output_path, '"$`%'), (self.format, '"$`')):
+            unsafe = [c for c in chars if c in (text or "")]
+            if unsafe or (text or "").count("%") > 1:
+                raise ValueError(
+                    f"'{text}' can't include {(unsafe or '%')[0]}"
+                )
         ext = os.path.splitext(self.output_path)[1].lower()
         if self.kind == "figure":
             if self.variable_name is None and self.cell_id is None:

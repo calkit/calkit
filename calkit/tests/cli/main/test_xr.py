@@ -191,7 +191,7 @@ def test_xr_mermaid_docker_command_dry_run(tmp_dir):
     assert payload["stage"]["stage"]["outputs"] == [
         {
             "path": "mdocean/plots/non_matlab_figs/taxonomy.pdf",
-            "storage": "dvc",
+            "storage": "git",
         }
     ]
 

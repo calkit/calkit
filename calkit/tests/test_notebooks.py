@@ -638,22 +638,42 @@ def test_add_cell_outputs(tmp_path):
             if o.get("output_path") == path
         )
 
-    # A new figure goes in Git, and one the pipeline has in DVC stays there
+    def set_storage(path: str, storage: str | None) -> None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+        for o in ck_info["pipeline"]["stages"]["fit"]["cell_outputs"]:
+            if o.get("output_path") == path:
+                o.pop("storage", None)
+                if storage is not None:
+                    o["storage"] = storage
+        calkit.save_calkit_info(ck_info, wdir=wdir)
+
+    def edit(path: str) -> None:
+        # As an editor sends it, without storage
+        calkit.notebooks.add_cell_outputs(
+            "fit.ipynb",
+            [
+                {
+                    "kind": "figure",
+                    "cell_id": ids[1],
+                    "variable_name": "fig",
+                    "output_path": path,
+                }
+            ],
+            wdir=wdir,
+        )
+
+    # A new figure goes in Git, and an edited one keeps its storage,
+    # whether set or, from before figures went in Git, implied
     assert get_storage("f.pdf") == "git"
-    (tmp_path / "dvc.lock").write_text(
-        "schema: '2.0'\nstages:\n  fit:\n    cmd: x\n    outs:\n"
-        "    - path: g.png\n      md5: a\n      size: 1\n"
-    )
-    calkit.notebooks.add_cell_outputs(
-        "fit.ipynb",
-        [{"kind": "figure", "cell_id": ids[1], "output_path": "g.png"}],
-        wdir=wdir,
-    )
-    assert get_storage("g.png") == "dvc"
-    calkit.notebooks.remove_cell_outputs(
-        "fit.ipynb", output_path="g.png", wdir=wdir
-    )
-    (tmp_path / "dvc.lock").unlink()
+    edit("f.pdf")
+    assert get_storage("f.pdf") == "git"
+    set_storage("f.pdf", "dvc")
+    edit("f.pdf")
+    assert get_storage("f.pdf") == "dvc"
+    set_storage("f.pdf", None)
+    edit("f.pdf")
+    assert get_storage("f.pdf") == "dvc"
+    set_storage("f.pdf", "git")
     listed = calkit.notebooks.list_cell_outputs("fit.ipynb", wdir=wdir)
     assert [(m["kind"], m["cell_index"]) for m in listed] == [
         ("value", 0),
@@ -758,3 +778,53 @@ def test_clean_all_in_pipeline(tmp_path, monkeypatch):
     assert cleaned == ["analysis.ipynb", "pub/index.ipynb"]
     with open(".calkit/notebooks/cleaned/pub/index.ipynb") as f:
         assert json.load(f)["cells"][0]["outputs"] == []
+
+
+def test_add_cell_outputs_kept_in_dvc(tmp_dir):
+    # A figure DVC caches stays there when added back, e.g., by an editor
+    # that removes and adds it, including for a stage with a wdir, whose
+    # paths DVC has from the project
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    os.makedirs("nb")
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [
+            {"cell_type": "code", "id": "a", "source": "x", "outputs": []}
+        ],
+    }
+    with open("nb/fit.ipynb", "w") as f:
+        json.dump(nb, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"py": {"kind": "uv", "path": "pyproject.toml"}}
+    ck_info["pipeline"] = {
+        "stages": {
+            "fit": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "fit.ipynb",
+                "wdir": "nb",
+                "environment": "py",
+                "cell_outputs": [
+                    {"kind": "figure", "cell_id": "a", "output_path": "g.png"},
+                    {
+                        "kind": "figure",
+                        "cell_id": "a",
+                        "output_path": "h.png",
+                        "storage": "git",
+                    },
+                ],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    for path in ["g.png", "h.png"]:
+        calkit.notebooks.remove_cell_outputs("nb/fit.ipynb", output_path=path)
+        calkit.notebooks.add_cell_outputs(
+            "nb/fit.ipynb",
+            [{"kind": "figure", "cell_id": "a", "output_path": path}],
+        )
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["fit"]
+    storage = {o["output_path"]: o["storage"] for o in stage["cell_outputs"]}
+    assert storage == {"g.png": "dvc", "h.png": "git"}

@@ -6,6 +6,7 @@ import csv
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -1459,7 +1460,8 @@ def add(
             )
     if not dry_run:
         calkit.dvc.configure_autostage()
-        repo.git.add(".dvc/config")
+        # Git runs from the repo root, which may be above the project
+        repo.git.add(os.path.join(dvc_repo.root_dir, ".dvc", "config"))
     dvc_paths = [] if dvc_repo is None else calkit.dvc.list_paths()
     pipeline_output_storage = calkit.pipeline.get_output_storage_map()
     # An ignore rule left on an output stored in Git, e.g., by an older
@@ -2138,11 +2140,14 @@ def save(
     if not dry_run and not no_push and not _has_somewhere_to_push():
         connected = _offer_to_connect()
         no_push = not connected
+    commit_paths = paths
     if not dry_run:
         moved = _offer_dvc_for_large_figures()
-        # What moving them changed goes in the same commit
+        # What moving them changed goes in the same commit, including taking
+        # the figures out of Git, which is already staged
         if moved and paths is not None:
             paths = [*paths, *_get_paths_changed_by_move(moved)]
+            commit_paths = [*paths, *moved]
     if paths is not None:
         add(paths, to=to, existing_only=existing_only, dry_run=dry_run)
     elif save_all:
@@ -2153,7 +2158,7 @@ def save(
     nothing_to_push = False
     try:
         any_dvc = commit(
-            paths=paths,
+            paths=commit_paths,
             all_changed=True if paths is None else False,
             message=message,
             auto_commit_message=auto_commit_message,
@@ -2223,6 +2228,7 @@ def _offer_dvc_for_large_figures() -> list[str]:
         storage = calkit.pipeline.get_output_storage_map()
     except Exception:
         return []
+    repo_root = Path(str(repo.working_dir)).resolve()
     large = {}
     for path, where in storage.items():
         if (
@@ -2234,8 +2240,12 @@ def _offer_dvc_for_large_figures() -> list[str]:
         size = os.path.getsize(path)
         if size <= FIGURE_DVC_SIZE_THRESH_BYTES:
             continue
+        # Git runs from the repo root, which may be above the project
+        in_repo = Path(os.path.relpath(Path(path).resolve(), repo_root))
         try:
-            committed = int(repo.git.cat_file("-s", f"HEAD:./{path}"))
+            committed = int(
+                repo.git.cat_file("-s", f"HEAD:{in_repo.as_posix()}")
+            )
         except (gitpython.GitCommandError, ValueError):
             committed = 0
         if committed <= FIGURE_DVC_SIZE_THRESH_BYTES:
@@ -2249,9 +2259,17 @@ def _offer_dvc_for_large_figures() -> list[str]:
                 f"'calkit update path-storage {path} --to dvc'"
             )
         elif typer.confirm(f"{text}. Store with DVC?", default=True):
+            # One at a time, so one that can't move, e.g., from a stage
+            # that's out of date, says why and is saved in Git as it is,
+            # without stopping the save. Nothing changes before it fails.
+            try:
+                update_path_storage([path], to="dvc")
+            except typer.Exit as e:
+                if e.exit_code == 0:
+                    raise
+                warn(f"Leaving {path} in Git, since it couldn't move")
+                continue
             moved.append(path)
-    if moved:
-        update_path_storage(moved, to="dvc")
     return moved
 
 
@@ -5440,7 +5458,10 @@ def run_in_env(
         extra_env_vars[key] = value
         os.environ[key] = value
     # Matplotlib puts the time in PDFs otherwise, so reruns would differ
-    if cmd and os.path.basename(cmd[0]) in ("python", "python3"):
+    if cmd and re.fullmatch(
+        r"python(\d+(\.\d+)?)?|py",
+        os.path.basename(cmd[0]).lower().removesuffix(".exe"),
+    ):
         date_env_vars = calkit.core.get_output_date_env_vars()
         extra_env_vars |= date_env_vars
         os.environ.update(date_env_vars)

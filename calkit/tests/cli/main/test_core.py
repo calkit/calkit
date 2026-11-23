@@ -1486,10 +1486,72 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
 
 
 def test_status(tmp_dir):
-    subprocess.check_call(["calkit", "status"])
+    # Without a calkit.yaml this isn't a project, which status says
+    res = subprocess.run(["calkit", "status"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "not a Calkit project" in res.stdout
+    # Unless only non-project categories are asked for
+    res = subprocess.run(
+        ["calkit", "status", "-c", "git"], capture_output=True, text=True
+    )
+    assert res.returncode == 0
+    assert "calkit.yaml" not in res.stdout + res.stderr
     subprocess.check_call(["calkit", "init"])
+    # From a subdirectory of the project, it points to the root instead
+    os.makedirs("figures")
+    res = subprocess.run(
+        ["calkit", "status"], capture_output=True, text=True, cwd="figures"
+    )
+    assert res.returncode == 0
+    assert "not a Calkit project" not in res.stdout
+    assert "project is at" in res.stdout
+    # Every category read from calkit.yaml warns, keeping JSON parseable
+    for category in ["questions", "pipeline", "imports"]:
+        res = subprocess.run(
+            ["calkit", "status", "--json", "-c", category],
+            capture_output=True,
+            text=True,
+            cwd="figures",
+        )
+        assert res.returncode == 0
+        json.loads(res.stdout)
+        assert "project is at" in res.stderr
+    # A separate Git repo inside the project isn't part of it
+    nested_repo_path = os.path.join("vendor", "otherlib")
+    os.makedirs(nested_repo_path)
+    subprocess.check_call(["git", "init", "-q"], cwd=nested_repo_path)
+    res = subprocess.run(
+        ["calkit", "status", "-c", "project"],
+        capture_output=True,
+        text=True,
+        cwd=nested_repo_path,
+    )
+    assert res.returncode == 0
+    assert "not a Calkit project" in res.stdout
+    assert "project is at" not in res.stdout
+    # The search doesn't reach or pass the home directory
+    home_path = os.path.join(os.getcwd(), "home")
+    home_subdir_path = os.path.join(home_path, "folder")
+    os.makedirs(home_subdir_path)
+    home_env = {**os.environ, "HOME": home_path, "USERPROFILE": home_path}
+    for wdir, stray_yaml in [(home_path, False), (home_subdir_path, True)]:
+        if stray_yaml:
+            with open(os.path.join(home_path, "calkit.yaml"), "w") as f:
+                f.write("")
+        res = subprocess.run(
+            ["calkit", "status", "-c", "project"],
+            capture_output=True,
+            text=True,
+            cwd=wdir,
+            env=home_env,
+        )
+        assert res.returncode == 0
+        assert "not a Calkit project" in res.stdout
+        assert "project is at" not in res.stdout
     subprocess.check_call(["calkit", "new", "status", "in-progress"])
-    subprocess.check_call(["calkit", "status"])
+    res = subprocess.run(["calkit", "status"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "No calkit.yaml" not in res.stdout
     status = calkit.get_latest_project_status()
     assert status is not None
     assert status.status == "in-progress"

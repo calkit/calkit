@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import json
 import logging
@@ -26,6 +27,7 @@ from typing_extensions import Annotated, Optional
 
 import calkit
 import calkit.merge
+import calkit.progress
 from calkit import (
     AUTO_IGNORE_PATHS,
     AUTO_IGNORE_PREFIXES,
@@ -5588,12 +5590,22 @@ def run_in_env(
                 "recently checked and nothing has changed"
             )
         no_check = True
+
+    def checking() -> contextlib.AbstractContextManager:
+        # On a terminal, what the tools print is only shown if it fails
+        return calkit.progress.spinner(
+            f"Checking environment '{env_name}'",
+            label=env_name,
+            show=not verbose,
+        )
+
     if env["kind"] == "docker":
         from calkit.environments import docker as env_docker
 
         if not no_check:
-            env_docker.check(env_name, env, verbose=verbose)
-            save_env_check_cache()
+            with checking():
+                env_docker.check(env_name, env, verbose=verbose)
+                save_env_check_cache()
         env_docker.run(
             env_name,
             env,
@@ -5606,16 +5618,17 @@ def run_in_env(
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
         if not no_check:
-            check_conda_env(
-                env_fpath=env["path"],
-                output_fpath=get_env_lock_fpath(
-                    env=env, env_name=env_name, as_posix=False
-                ),
-                relaxed=relaxed_check,
-                quiet=not verbose,
-                prefix=env.get("prefix"),
-            )
-            save_env_check_cache()
+            with checking():
+                check_conda_env(
+                    env_fpath=env["path"],
+                    output_fpath=get_env_lock_fpath(
+                        env=env, env_name=env_name, as_posix=False
+                    ),
+                    relaxed=relaxed_check,
+                    quiet=not verbose,
+                    prefix=env.get("prefix"),
+                )
+                save_env_check_cache()
         # Where the environment is kept can be set in either calkit.yaml or
         # the spec
         prefix = env.get("prefix") or conda_env.get("prefix")
@@ -5715,19 +5728,20 @@ def run_in_env(
             typer.echo(f"Shell command: {shell_cmd}")
         # Check environment
         if not no_check:
-            check_venv(
-                path=path,
-                prefix=prefix,
-                use_uv=kind == "uv-venv",
-                python=env.get("python"),
-                lock_fpath=get_env_lock_fpath(
-                    env=env, env_name=env_name, as_posix=False
-                ),
-                wdir=wdir,
-                quiet=True,
-                verbose=verbose,
-            )
-            save_env_check_cache()
+            with checking():
+                check_venv(
+                    path=path,
+                    prefix=prefix,
+                    use_uv=kind == "uv-venv",
+                    python=env.get("python"),
+                    lock_fpath=get_env_lock_fpath(
+                        env=env, env_name=env_name, as_posix=False
+                    ),
+                    wdir=wdir,
+                    quiet=True,
+                    verbose=verbose,
+                )
+                save_env_check_cache()
         # Now run the command
         cmd = f"{activate_cmd} && {shell_cmd} && deactivate"  # type: ignore
         if verbose:
@@ -5739,8 +5753,9 @@ def run_in_env(
             raise_error(f"Failed to run in {kind}")
     elif env["kind"] == "julia":
         if not no_check:
-            check_environment(env_name=env_name, verbose=verbose)
-            save_env_check_cache()
+            with checking():
+                check_environment(env_name=env_name, verbose=verbose)
+                save_env_check_cache()
         env_path = env.get("path")
         if env_path is None:
             raise_error(
@@ -5813,8 +5828,9 @@ def run_in_env(
         # the machine that is about to run the stage. Compiled pipeline
         # commands pass --no-check, having already done this once up front.
         if not no_check:
-            check_environment(env_name=env_name, verbose=verbose)
-            save_env_check_cache()
+            with checking():
+                check_environment(env_name=env_name, verbose=verbose)
+                save_env_check_cache()
         # Gated like the local branch, using the far end's properties. Its
         # shell is recorded by the check, with nothing to compare here.
         if env.get("lock"):
@@ -5866,8 +5882,9 @@ def run_in_env(
             raise_error("renv environments require a path to DESCRIPTION")
         assert isinstance(env_path, str)
         if not no_check:
-            check_renv(env_path=env_path, verbose=verbose)
-            save_env_check_cache()
+            with checking():
+                check_renv(env_path=env_path, verbose=verbose)
+                save_env_check_cache()
         # For renv, we need to run from the renv project directory so renv
         # properly initializes the library, but the script needs to run
         # from its original working directory
@@ -5924,8 +5941,9 @@ def run_in_env(
                 "Nix environments require a path pointing to flake.nix"
             )
         if not no_check:
-            check_nix_env(env=env, verbose=verbose)
-            save_env_check_cache()
+            with checking():
+                check_nix_env(env=env, verbose=verbose)
+                save_env_check_cache()
         env_dir = os.path.dirname(os.path.abspath(env_path)) or "."
         flake_ref = f"path:{env_dir}"
         shell_name = env.get("shell")
@@ -5967,13 +5985,14 @@ def run_in_env(
             )
     elif env["kind"] == "matlab":
         if not no_check:
-            check_matlab_env(
-                env_name=env_name,
-                output_fpath=get_env_lock_fpath(
-                    env=env, env_name=env_name, as_posix=False
-                ),  # type: ignore
-            )
-            save_env_check_cache()
+            with checking():
+                check_matlab_env(
+                    env_name=env_name,
+                    output_fpath=get_env_lock_fpath(
+                        env=env, env_name=env_name, as_posix=False
+                    ),  # type: ignore
+                )
+                save_env_check_cache()
         image_name = calkit.matlab.get_docker_image_name(
             ck_info=ck_info,
             env_name=env_name,
@@ -6024,8 +6043,9 @@ def run_in_env(
         # '_system' env. The check still matters, since it records the
         # machine properties the env locks.
         if not no_check:
-            check_environment(env_name=env_name, verbose=verbose)
-            save_env_check_cache()
+            with checking():
+                check_environment(env_name=env_name, verbose=verbose)
+                save_env_check_cache()
         # Checked even with --no-check, since a stage that needs to run on
         # a machine that doesn't match the lock must not
         try:
@@ -6179,7 +6199,13 @@ def open_env_shell(
             )
         )
     ):
-        check_environment(env_name=env_name, verbose=verbose)
+        # On a terminal, what the tools print is only shown if it fails
+        with calkit.progress.spinner(
+            f"Checking environment '{env_name}'",
+            label=env_name,
+            show=not verbose,
+        ):
+            check_environment(env_name=env_name, verbose=verbose)
         try:
             calkit.environments.save_cache(
                 env_name=env_name, env=env, success=True

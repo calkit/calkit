@@ -492,13 +492,13 @@ def _echo_unattributed(findings: list[dict]) -> None:
     help="Check that an environment is up-to-date (alias for 'environment').",
 )
 @check_app.command(name="environment")
-def check_environment(
+def check_environment_command(
     env_name: Annotated[
         str,
         typer.Option("--name", "-n", help="Name of the environment to check."),
     ],
     verbose: Annotated[
-        bool, typer.Option("--verbose", help="Print verbose output.")
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
     force: Annotated[
         bool,
@@ -509,8 +509,27 @@ def check_environment(
             "something it was built from changed outside the project.",
         ),
     ] = False,
-) -> str | None:
+) -> None:
     """Check that an environment is up-to-date.
+
+    An environment is also rebuilt when one of its 'inputs' changes.
+    """
+    import calkit.progress
+
+    # On a terminal, what the tools print is only shown if it fails
+    with calkit.progress.spinner(
+        f"Checking environment '{env_name}'", label=env_name, show=not verbose
+    ):
+        check_environment(env_name=env_name, verbose=verbose, force=force)
+
+
+def check_environment(
+    env_name: str,
+    verbose: bool = False,
+    force: bool = False,
+) -> str | None:
+    """Check that an environment is up-to-date, rebuilding it with
+    ``force``, and return its lock file's path.
 
     An environment is also rebuilt when one of its 'inputs' changes.
     """

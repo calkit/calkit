@@ -2625,9 +2625,8 @@ def check_all_in_pipeline(
     checks of the environments that use Docker.
     """
     import contextlib
-    import sys
     from collections.abc import Iterator
-    from contextlib import contextmanager, redirect_stderr, redirect_stdout
+    from contextlib import contextmanager
     from typing import IO
 
     import calkit.progress
@@ -2647,64 +2646,11 @@ def check_all_in_pipeline(
 
     @contextmanager
     def silenced(log: IO[str]) -> Iterator[None]:
-        # Tools write to the terminal directly, so this is done where they
-        # inherit it from as well as Python's. Nobody can see a prompt here,
-        # so input is from devnull, which answers one rather than hangs.
         if not quiet:
             yield
             return
-        sys.stdout.flush()
-        sys.stderr.flush()
-        saved_stdin = sys.stdin
-        with (
-            open(os.devnull) as null,
-            redirect_stdout(log),
-            redirect_stderr(log),
-        ):
-            sys.stdin = null
-            try:
-                if sys.platform == "win32":
-                    # Replacing descriptors 0-2 would close the console
-                    # handles Click uses, so only the standard handles that
-                    # subprocesses inherit are swapped
-                    import ctypes
-                    import msvcrt
-                    from ctypes import wintypes
-
-                    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-                    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
-                    kernel32.GetStdHandle.restype = wintypes.HANDLE
-                    kernel32.SetStdHandle.argtypes = [
-                        wintypes.DWORD,
-                        wintypes.HANDLE,
-                    ]
-                    kernel32.SetStdHandle.restype = wintypes.BOOL
-                    # STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
-                    std_ids = [-10, -11, -12]
-                    handles = [
-                        msvcrt.get_osfhandle(f.fileno())
-                        for f in (null, log, log)
-                    ]
-                    saved = [kernel32.GetStdHandle(i) for i in std_ids]
-                    try:
-                        for i, h in zip(std_ids, handles):
-                            kernel32.SetStdHandle(i, h)
-                        yield
-                    finally:
-                        for i, h in zip(std_ids, saved):
-                            kernel32.SetStdHandle(i, h)
-                else:
-                    saved = [os.dup(fd) for fd in (0, 1, 2)]
-                    try:
-                        for fd, f in zip((0, 1, 2), (null, log, log)):
-                            os.dup2(f.fileno(), fd)
-                        yield
-                    finally:
-                        for fd, saved_fd in enumerate(saved):
-                            os.dup2(saved_fd, fd)
-                            os.close(saved_fd)
-            finally:
-                sys.stdin = saved_stdin
+        with calkit.progress.capture_output(log):
+            yield
 
     def reporting() -> contextlib.AbstractContextManager:
         # The checks say what they're doing, e.g., creating, past what the

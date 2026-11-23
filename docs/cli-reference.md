@@ -3952,11 +3952,11 @@ calkit check environment [OPTIONS]
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                                |
-| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`  | str     | yes      |         | Name of the environment to check.                                                                          |
-| `--verbose`     | boolean | no       | False   | Print verbose output.                                                                                      |
-| `--force`, `-f` | boolean | no       | False   | Rebuild the environment from scratch, e.g., after something it was built from changed outside the project. |
+| Option            | Type    | Required | Default | Description                                                                                                |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`    | str     | yes      |         | Name of the environment to check.                                                                          |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                      |
+| `--force`, `-f`   | boolean | no       | False   | Rebuild the environment from scratch, e.g., after something it was built from changed outside the project. |
 
 <a id="subcommand-check-julia-env"></a>
 

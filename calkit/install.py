@@ -154,12 +154,12 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "script": "curl -fsSL https://pixi.sh/install.sh | sh",
             "path_add": "~/.pixi/bin",
         },
+        # Not pixi's own script, which Microsoft Defender blocks as a
+        # trojan for being downloaded and run in one command
         "windows": {
-            "script": (
-                "powershell -ExecutionPolicy ByPass -c "
-                '"iwr -useb https://pixi.sh/install.ps1 | iex"'
-            ),
-            "path_add": "~/.pixi/bin",
+            "script": _WINGET + "prefix-dev.pixi --source winget",
+            # Where winget puts pixi, then where pixi puts what it installs
+            "path_add": ["%LOCALAPPDATA%\\pixi\\bin", "~\\.pixi\\bin"],
         },
     },
     "uv": {
@@ -705,6 +705,19 @@ def find(app: str) -> str | None:
     return shutil.which(app, path=os.pathsep.join(dirs))
 
 
+def add_installed_to_path(app: str) -> bool:
+    """Return whether an app is installed, putting it on ``PATH`` if it's
+    installed off it, e.g., since this shell started.
+    """
+    if shutil.which(app) is not None:
+        return True
+    entry = get_installer(app)
+    if entry is None or find(app) is None:
+        return False
+    _add_to_path(entry)
+    return True
+
+
 # Where to get apps whose installers aren't registered for every platform
 DOWNLOAD_PAGES = {"code": "https://code.visualstudio.com/download"}
 
@@ -870,11 +883,7 @@ def install(app: str, entry: Installer | None = None) -> bool:
     if entry is None:
         return False
     for req in entry.get("requires", []):
-        # One installed but not on PATH yet, e.g., in this shell, is used
-        req_entry = get_installer(req)
-        if find(req) is not None and req_entry is not None:
-            _add_to_path(req_entry)
-        if shutil.which(req) is None and not install(req):
+        if not add_installed_to_path(req) and not install(req):
             return False
     # capture=False so installers can stream their own progress output
     # and (for some) take TTY input.
@@ -912,7 +921,7 @@ def prompt_and_install(
     # Each prerequisite gets its own prompt, so saying yes to one thing
     # never silently installs another
     for req in entry.get("requires", []):
-        if shutil.which(req) is None:
+        if not add_installed_to_path(req):
             print(f"'{app}' is installed with '{req}', which is missing.")
             if not prompt_and_install(req, interactive=interactive):
                 return False

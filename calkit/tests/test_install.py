@@ -532,6 +532,25 @@ def test_platform_entries_prerequisites_and_record(
         assert install.prompt_and_install("node", interactive=True) is False
     assert "'pixi'" in m_input.call_args.args[0]
     m_install.assert_not_called()
+    # With pixi installed off PATH, e.g., since this shell started, it's put
+    # on PATH rather than offered again
+    with (
+        mock.patch("calkit.install.shutil.which", return_value=None),
+        mock.patch(
+            "calkit.install.find",
+            side_effect=lambda app: "/pixi" if app == "pixi" else None,
+        ),
+        mock.patch("calkit.install._add_to_path") as m_add,
+        mock.patch("builtins.input", return_value="n") as m_input,
+    ):
+        assert install.prompt_and_install("node", interactive=True) is False
+    assert "'node'" in m_input.call_args.args[0]
+    assert m_add.call_args.args[0] == install.get_installer("pixi")
+    # On Windows pixi comes from winget, since Microsoft Defender blocks its
+    # own script
+    with mock.patch("calkit.install.sys.platform", "win32"):
+        pixi = install.get_installer("pixi")
+    assert pixi is not None and "prefix-dev.pixi" in pixi["script"]
     # LibreOffice is found by its soffice command, and on Linux comes with
     # the Math component distributions package separately
     assert install.INSTALLERS["soffice"] is install.INSTALLERS["libreoffice"]
@@ -597,6 +616,7 @@ def test_platform_entries_prerequisites_and_record(
     assert ran == ["install-tool"]
     # Prompting asks about the prerequisite before the tool, each on its
     # own prompt
+    (fake_bin / "prereq").unlink()
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     prompts: list[str] = []
 

@@ -377,6 +377,8 @@ def check_repro(
             _echo_retyped(items)
         elif category == "numbers":
             _echo_unattributed(items)
+        elif category == "line-endings":
+            _echo_line_endings(items)
         else:
             calkit.echo(f"{category} ({len(items)}):")
             for item in items:
@@ -422,6 +424,25 @@ def _echo_retyped(findings: list[dict]) -> None:
         "written; and anything in a results file the document doesn't "
         "read with \\ckvalue and no 'json-to-latex' stage reads, or a "
         "value a 'json-to-latex' stage leaves out of the 'keys' it names."
+    )
+
+
+def _echo_line_endings(paths: list[str]) -> None:
+    """Files the pipeline hashes whose line endings Git doesn't pin."""
+    import calkit.eol
+
+    calkit.echo(
+        f"Pipeline files with line endings that differ on Windows "
+        f"({len(paths)}):"
+    )
+    for path in paths:
+        calkit.echo(f"  {path}")
+    calkit.echo(
+        "\nGit for Windows checks text files out with CRLF unless "
+        ".gitattributes says otherwise, and DVC hashes them as they are on "
+        "disk, so these hash differently there than wherever dvc.lock was "
+        "written, and the stages that use or write them read as out of "
+        f"date. To pin them to LF everywhere, {calkit.eol.FIX}."
     )
 
 

@@ -308,9 +308,24 @@ whatever `core.autocrlf` is set to. Nothing to do.
 
 Files your project commits itself are a different matter, and worth
 thinking about if you collaborate across platforms---a text file that is
-also a stage dependency has the same problem. DVC's
+also a stage dependency, or an output stored in Git, has the same problem.
+`calkit check repro` lists the ones whose line endings Git doesn't pin,
+and `calkit run` warns when the checkout it's running in has CRLF where
+Git has LF in any of them, which is what makes stages rerun. To pin them
+to LF on every platform:
+
+```sh
+echo "* text=auto eol=lf" >> .gitattributes
+git add --renormalize .
+git commit -m "Check out text files with LF everywhere"
+```
+
+A checkout made before the rule keeps its CRLF files until they're
+checked out again, and Git skips a file whose size and time haven't
+changed, so delete them first, then restore them with
+`git checkout -- <path>`. DVC's
 [guide to running on Windows](https://doc.dvc.org/user-guide/how-to/run-dvc-on-windows)
-covers the options.
+covers the options in more depth.
 
 <!-- prettier-ignore -->
 !!! note

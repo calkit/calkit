@@ -3503,6 +3503,45 @@ def _cleans_up_after_run(func: Any) -> Any:
     return wrapper
 
 
+def _warn_rewritten_line_endings() -> None:
+    """Warn if this checkout has CRLF where Git has LF in files the pipeline
+    hashes, e.g., on Windows, which then disagree with ``dvc.lock``.
+
+    Only the rewrite itself is reported here, since it's what makes stages
+    rerun, and it can only happen where Git converts line endings. Files
+    whose line endings could be rewritten elsewhere are for
+    `calkit check repro`, rather than a warning on every run.
+    """
+    import calkit.eol
+
+    try:
+        rewritten = [f for f in calkit.eol.check_pipeline() if f.rewritten]
+    except Exception:
+        return
+    if not rewritten:
+        return
+    paths = [f.path for f in rewritten]
+    n = len(paths)
+    message = (
+        f"{n} {'file' if n == 1 else 'files'} the pipeline hashes "
+        f"{'has' if n == 1 else 'have'} CRLF line endings here but LF in "
+        f"Git ({calkit.eol.summarize(paths)}), so stages that use them look "
+        "out of date compared with other machines, and rerunning them "
+        "changes dvc.lock for everyone. "
+    )
+    if all(f.pinned for f in rewritten):
+        # .gitattributes pins them already, so only this checkout is behind
+        message += "They were checked out before .gitattributes pinned them. "
+    else:
+        message += f"To fix it, {calkit.eol.FIX}. "
+    # Git skips a file whose size and time still match, so it has to go
+    message += (
+        "Then, with nothing in them uncommitted, delete them and restore "
+        "them with `git checkout -- <path>`."
+    )
+    warn(message)
+
+
 @app.command(name="run")
 @_cleans_up_after_run
 def run(
@@ -4149,6 +4188,7 @@ def run(
             except Exception as e:
                 os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
                 raise_error(f"Pipeline compilation failed: {e}")
+            _warn_rewritten_line_endings()
         # Initialize DVC repo if necessary
         from dvc.exceptions import NotDvcRepoError
 

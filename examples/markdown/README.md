@@ -89,15 +89,15 @@ Numbers in the prose can be kept current too.
 The stage above writes its results to `results/fit.json`, and this
 sentence refers to them by key, between a pair of markers that are
 invisible when rendered:
-the fit has a leading coefficient of <!-- calkit value key=coeffs.0 path=results/fit.json format="{:.3f}" -->1.974<!-- /calkit value -->
-from <!-- calkit value key=n path=results/fit.json -->50<!-- /calkit value --> points.
+the fit has a leading coefficient of <!-- ckvalue results/fit.json coeffs.0 .3f -->1.974<!-- /ckvalue -->
+from <!-- ckvalue results/fit.json n -->50<!-- /ckvalue --> points.
 After every run, the text between each pair is rewritten from the
 results file.
 In the source, that sentence reads:
 
 ```md
-the fit has a leading coefficient of <!-- calkit value key=coeffs.0 path=results/fit.json format="{:.3f}" -->1.974<!-- /calkit value -->
-from <!-- calkit value key=n path=results/fit.json -->50<!-- /calkit value --> points.
+the fit has a leading coefficient of <!-- ckvalue results/fit.json coeffs.0 .3f -->1.974<!-- /ckvalue -->
+from <!-- ckvalue results/fit.json n -->50<!-- /ckvalue --> points.
 ```
 
 ## Plotting

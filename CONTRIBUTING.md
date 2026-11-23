@@ -23,11 +23,15 @@ This guide will help you get started.
    cd calkit
    ```
 1. **Install system-level dependencies:**
-   - [Docker](https://docker.com)
+   - [Docker](https://docker.com),
+     usable without `sudo`, e.g., on Linux, by joining the `docker` group
    - [Miniforge](https://conda-forge.org/download/)
    - [uv](https://docs.astral.sh/uv/getting-started/installation/)
    - [Pixi](https://pixi.sh/latest/)
-   - [node.js](https://nodejs.org/en/download)
+   - [Juliaup](https://github.com/JuliaLang/juliaup)
+   - [R](https://www.r-project.org/)
+   - [Node.js](https://nodejs.org/en/download)
+   - [gh](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)
 1. **Create the virtual environment:**
    ```bash
    uv sync --all-packages
@@ -37,10 +41,15 @@ This guide will help you get started.
    Always pass `--all-packages`, since a bare `uv sync` installs only one
    member and uninstalls the other's dependencies, leaving either the
    `calkit` CLI or the hub backend unable to import its dependencies.
-1. **Run tests** to ensure everything is working:
+1. **Run some tests** to ensure everything is working:
    ```bash
-   uv run pytest
+   uv run pytest calkit/tests/test_core.py
    ```
+   While iterating, run only the tests for the code you're changing,
+   e.g., `uv run pytest calkit/tests/cli/test_new.py -k julia`.
+   The full suite runs in GitHub Actions on every pull request.
+   Locally, tests that need Docker, Juliaup, or Chrome are skipped
+   when those aren't available.
 1. Install the Calkit CLI in dev mode:
    ```sh
    uv tool install -e .
@@ -84,6 +93,9 @@ This guide will help you get started.
   - No blank lines inside functions/methods
   - Type hints required for all functions
   - NumPy-style docstrings
+  - A subclass lives in the module of the class it extends, unless that
+    class is written to be subclassed, e.g., `calkit.models.base.Model`,
+    or comes from another package
 - Commit your changes
   (use the imperative mood and capitalize the first letter,
   but don't use punctuation):

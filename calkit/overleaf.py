@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -407,30 +408,65 @@ def get_mirror(project_id: str, dest: str | None = None) -> git.Repo:
     return git.Repo(dest)
 
 
-def pull_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
+def pull_mirror(
+    repo: git.Repo,
+    client: WebClient | None,
+    project_id: str,
+    files: dict[str, bytes] | None = None,
+) -> None:
     """Commit Overleaf's current files to the mirror if they've changed.
 
     Anything left by a sync that failed partway is discarded first, as with
-    ``pull``.
+    ``pull``. The files are downloaded unless given, e.g., by the browser
+    extension, which has them from Overleaf's editor.
     """
+    import hashlib
     import io
     import zipfile
 
-    archive = zipfile.ZipFile(io.BytesIO(client.download(project_id)))
+    if files is None:
+        if client is None:
+            raise ValueError("Either a client or files are needed")
+        archive = zipfile.ZipFile(io.BytesIO(client.download(project_id)))
+        files = {
+            entry.filename: archive.read(entry)
+            for entry in archive.infolist()
+            if not entry.is_dir()
+        }
+    # Nothing to do, which is usual, if Overleaf has what was last pulled and
+    # nothing's been left since, which Git hashes of its files tell without
+    # writing them
+    if (
+        repo.head.is_valid()
+        and is_mirror(repo)
+        and repo.head.commit == repo.commit(MIRROR_REF)
+        and not repo.git.status("--porcelain", "--ignored", "-uall")
+    ):
+        pulled = {
+            b.path: b.hexsha
+            for b in repo.head.commit.tree.traverse()
+            if isinstance(b, git.Blob)
+        }
+        shas = {}
+        for name, data in files.items():
+            header = f"blob {len(data)}\0".encode()
+            shas[name] = hashlib.sha1(header + data).hexdigest()
+        if shas == pulled:
+            return
     if repo.head.is_valid():
         repo.git.reset("--hard", MIRROR_REF if is_mirror(repo) else "HEAD")
         repo.git.rm("-r", "-q", "--cached", "--ignore-unmatch", ".")
     repo.git.clean("-fdx")
     root = Path(str(repo.working_dir)).resolve()
-    for entry in archive.infolist():
-        dest = (root / entry.filename).resolve()
+    for name, data in files.items():
+        dest = (root / name).resolve()
         # Never write outside the mirror or into its .git
-        if entry.is_dir() or root not in dest.parents:
+        if root not in dest.parents:
             continue
         if dest.relative_to(root).parts[0] == ".git":
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(archive.read(entry))
+        dest.write_bytes(data)
     # Everything is tracked, even what an Overleaf .gitignore would exclude,
     # as the Git integration does
     repo.git.add("-A", "-f")
@@ -441,6 +477,53 @@ def pull_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
     repo.git.read_tree("HEAD")
     repo.git.checkout_index("-a", "-f", "-u")
     repo.git.update_ref(MIRROR_REF, "HEAD")
+
+
+def pull_from_editor(
+    repo: git.Repo, file_shas: dict[str, str], texts: dict[str, str]
+) -> bool:
+    """Bring a clone of an Overleaf project up to date from what Overleaf's
+    editor has, without asking Overleaf, if it can, returning whether it did.
+
+    ``file_shas`` are the Git hashes of every file on Overleaf, by path, as
+    its file tree lists them, and ``texts`` the contents of its documents.
+    A Git integration clone that fetched those files already is reset to
+    them, as ``pull`` would after fetching nothing new, but otherwise has to
+    fetch, so it can be pushed from. A session-synced mirror is updated as
+    ``pull_mirror`` would be if only documents changed.
+    """
+    import hashlib
+
+    mirror = is_mirror(repo)
+    try:
+        ref = repo.commit(
+            repo.git.rev_parse(MIRROR_REF if mirror else "@{upstream}")
+        )
+    except (git.BadName, ValueError, git.GitCommandError):
+        return False
+    pulled = {
+        b.path: b for b in ref.tree.traverse() if isinstance(b, git.Blob)
+    }
+    if not mirror:
+        if {path: b.hexsha for path, b in pulled.items()} != file_shas:
+            return False
+        repo.git.reset("--hard", "@{upstream}")
+        repo.git.clean("-fdx")
+        return True
+    files = {}
+    for path, sha in file_shas.items():
+        if path in pulled and pulled[path].hexsha == sha:
+            files[path] = pulled[path].data_stream.read()
+            continue
+        data = texts.get(path, "").encode()
+        if (
+            hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+            != sha
+        ):
+            return False
+        files[path] = data
+    pull_mirror(repo, None, "", files=files)
+    return True
 
 
 def is_mirror(repo: git.Repo) -> bool:
@@ -1884,10 +1967,9 @@ def sync(
                 "merge conflict" in process.stdout.lower()
                 or "merge conflict" in process.stderr.lower()
             ):
-                msg = ""
-                for line in process.stdout.split("\n"):
-                    if "merge conflict" in line.lower():
-                        msg += line + "\n"
+                conflicted = re.findall(
+                    r"Merge conflict in (.+)", process.stdout
+                )
                 # Save a file to track this merge conflict, with a commit
                 # the next pull keeps, since a rebuilt one isn't
                 c = overleaf_repo.git.rev_parse(
@@ -1903,8 +1985,11 @@ def sync(
                         f,
                     )
                 raise RuntimeError(
-                    f"{msg}Edit the file(s) and then call:\n\n"
-                    "    calkit overleaf sync --resolve"
+                    (", ".join(conflicted) or "Some files")
+                    + " changed on Overleaf and on this machine. Each has "
+                    "both versions between '<<<<<<<' and '>>>>>>>' marks. "
+                    "Keep what should stay, delete the marks, then run "
+                    "'calkit overleaf sync --resolve'"
                 )
             elif process.returncode != 0:
                 with staged_changes_set_aside(main_repo):

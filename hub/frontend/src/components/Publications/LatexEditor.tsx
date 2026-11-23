@@ -23,6 +23,13 @@ import {
   VStack,
   useDisclosure,
 } from "@chakra-ui/react"
+import { RangeSetBuilder } from "@codemirror/state"
+import {
+  Decoration,
+  type DecorationSet,
+  ViewPlugin,
+  type ViewUpdate,
+} from "@codemirror/view"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
@@ -57,7 +64,6 @@ import {
   type TexThread,
   addComment,
   commentDate,
-  commentHighlighter,
   editComment,
   newCommentId,
   paragraphStart,
@@ -85,6 +91,38 @@ interface LatexEditorProps {
   commentsOpen?: boolean
   onCommentsOpenChange?: (open: boolean) => void
 }
+
+// Tints comment blocks in the editor, so they read apart from the text
+const commentHighlighter = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet
+    constructor(view: EditorView) {
+      this.decorations = this.build(view)
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged) this.decorations = this.build(u.view)
+    }
+    build(view: EditorView): DecorationSet {
+      const doc = view.state.doc
+      const builder = new RangeSetBuilder<Decoration>()
+      const lines = doc.toString().split("\n")
+      for (const t of parseComments(lines)) {
+        for (let n = t.lineno; n < t.lineno + t.nlines; n++) {
+          const from = doc.line(n).from
+          builder.add(
+            from,
+            from,
+            Decoration.line({
+              class: t.resolved ? "cm-texComment cm-resolved" : "cm-texComment",
+            }),
+          )
+        }
+      }
+      return builder.finish()
+    }
+  },
+  { decorations: (v) => v.decorations },
+)
 
 // How comment blocks look in the source
 const commentTheme = EditorView.theme({

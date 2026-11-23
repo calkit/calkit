@@ -27,6 +27,9 @@ import {
   type CalkitEnvironment,
   type EnvKind,
   type SlurmLaunchOptions,
+  getKernelMatchRank,
+  getPythonEnvDir,
+  type KernelController,
 } from "./environments";
 import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
@@ -37,14 +40,17 @@ import type {
   CalkitInfo,
   DvcYaml,
   EnvDescription,
+  PipelineStage,
   StaleStageDetail,
 } from "./types";
 import { dvcStageOutputPaths } from "./pipeline/core";
 import {
   collectSubprojects,
+  findUndeclaredProjectDir,
   mergeSubprojectConfigs,
   mergeSubprojectDvcYaml,
   qualifyEnvDescriptions,
+  rebaseStages,
   splitQualifiedName,
   splitSubprojectPath,
   stageNameFromDvcAddress,
@@ -68,12 +74,23 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
+import { isSyncedWithOverleaf } from "./overleaf/core";
+import {
+  checkOverleaf,
+  registerOverleaf,
+  runPipeline,
+  setOverleafSynced,
+  suggestCommitMessage,
+} from "./overleaf/view";
 import {
   documentStagePdf,
   documentStageSource,
+  findLatexStage,
   latexStagePdf,
   latexStageSource,
+  latexPreviewCommand,
   latexWorkingDiffPath,
+  latexWorkshopBuildsWithCalkit,
   pipelineLatexDiffs,
   type PipelineLatexDiff,
 } from "./latex/core";
@@ -125,6 +142,7 @@ const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
 const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
 const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
+const COMMAND_PREVIEW_LATEX = "calkit-vscode.previewLatex";
 const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
 const COMMAND_SHOW_IN_PDF_TO_SIDE = "calkit-vscode.showInPdfToSide";
 const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
@@ -148,6 +166,7 @@ const SIDEBAR_SECTIONS: { id: string; label: string }[] = [
   { id: "figures", label: "Figures" },
   { id: "datasets", label: "Datasets" },
   { id: "publications", label: "Publications" },
+  { id: "overleaf", label: "Overleaf" },
   { id: "presentations", label: "Presentations" },
   { id: "results", label: "Results" },
 ];
@@ -442,7 +461,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const pdfReview = new PdfReviewProvider(context, {
     getWorkspaceRoot,
-    getStages: () => currentCalkitConfig?.pipeline?.stages ?? {},
+    getStages: (file) => {
+      const workspaceRoot = getWorkspaceRoot();
+      return workspaceRoot
+        ? getDocumentStages(workspaceRoot, file)
+        : currentCalkitConfig?.pipeline?.stages ?? {};
+    },
+    getPublications: () => currentCalkitConfig?.publications ?? [],
     getNonce,
     promptUpgrade: (message) =>
       void promptCalkitInstallOrUpgrade({
@@ -552,7 +577,7 @@ export function activate(context: vscode.ExtensionContext): void {
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
         const pdfFile = documentStagePdf(
-          currentCalkitConfig?.pipeline?.stages ?? {},
+          getDocumentStages(workspaceRoot, docFile),
           docFile,
         );
         if (!pdfFile) {
@@ -606,8 +631,14 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     // Not in an open PDF yet, so open the one its stage builds, or for a
-    // file it inputs, the only one there is
-    const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+    // file it inputs, the only one there is, in its own project if the root
+    // doesn't declare it
+    const stages = getDocumentStages(workspaceRoot, texFile);
+    const projectDir = findUndeclaredProjectDir(
+      texFile,
+      (d) => fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml")),
+      currentSubprojectDirs,
+    );
     const latexPdfs = Object.values(stages)
       .map((stage) => {
         const st = stage as {
@@ -622,7 +653,11 @@ export function activate(context: vscode.ExtensionContext): void {
             )
           : undefined;
       })
-      .filter((p): p is string => p !== undefined);
+      .filter(
+        (p): p is string =>
+          p !== undefined &&
+          (projectDir === undefined || p.startsWith(`${projectDir}/`)),
+      );
     const pdfFile =
       documentStagePdf(stages, texFile) ??
       (latexPdfs.length === 1 ? latexPdfs[0] : undefined);
@@ -682,7 +717,7 @@ export function activate(context: vscode.ExtensionContext): void {
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
         const sourceFile = documentStageSource(
-          currentCalkitConfig?.pipeline?.stages ?? {},
+          getDocumentStages(workspaceRoot, pdfFile),
           pdfFile,
         );
         if (!sourceFile) {
@@ -717,6 +752,80 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  // Build a latex stage's document by itself, i.e., without DVC or its
+  // upstream stages, with whatever their outputs are now. LaTeX Workshop
+  // builds it when Calkit set it up to, so it stays the one builder on save
+  // and of its viewer; otherwise this runs the stage's build in a terminal.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_PREVIEW_LATEX,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const texFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const latexStage = findLatexStage(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          texFile,
+        );
+        if (!latexStage) {
+          void vscode.window.showInformationMessage(
+            "No latex stage in the pipeline builds this document.",
+          );
+          return;
+        }
+        // Both would write the same PDF
+        if (runningStageNames.size > 0) {
+          void vscode.window.showInformationMessage(
+            "The pipeline is running; preview after it finishes.",
+          );
+          return;
+        }
+        const tools = vscode.workspace
+          .getConfiguration("latex-workshop", fileUri)
+          .get("latex.tools");
+        // Saving with LaTeX Workshop's command doesn't start its own build
+        // on save too
+        if (isLatexWorkshopInstalled()) {
+          await vscode.window.showTextDocument(fileUri);
+          await vscode.commands.executeCommand(
+            "latex-workshop.saveWithoutBuilding",
+          );
+          if (latexWorkshopBuildsWithCalkit(tools)) {
+            await vscode.commands.executeCommand("latex-workshop.build");
+            return;
+          }
+        } else {
+          await vscode.workspace.save(fileUri);
+        }
+        const cmd = latexPreviewCommand(
+          currentDvcYaml?.stages?.[latexStage.name]?.cmd,
+          path.join(workspaceRoot, latexStage.wdir),
+        );
+        if (!cmd) {
+          void vscode.window.showInformationMessage(
+            `Stage '${latexStage.name}' isn't compiled yet; run it once first.`,
+          );
+          return;
+        }
+        const pdfFile = latexStagePdf(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          texFile,
+        );
+        if (pdfFile && isLatexWorkshopInstalled()) {
+          ensurePdfRefreshWatcher(context, path.join(workspaceRoot, pdfFile));
+        }
+        const terminal = getOrCreateTerminal("calkit: preview", workspaceRoot);
+        terminal.show(true);
+        terminal.sendText(cmd);
       },
     ),
   );
@@ -983,7 +1092,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const picker = vscode.window.createQuickPick();
         picker.title = `Diff ${path.basename(texFile)} against...`;
-        picker.placeholder = "Pick or type a Git revision";
+        picker.placeholder = "Select or type a Git revision";
         picker.items = items;
         picker.onDidChangeValue((value) => {
           const typed = value.trim();
@@ -1119,12 +1228,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RUN_PIPELINE, () => {
       const workspaceRoot = getWorkspaceRoot();
-      if (!workspaceRoot) {
-        return;
+      if (workspaceRoot) {
+        // Through the runner Run and Save uses, so neither interrupts the
+        // other in the terminal they share
+        void runPipeline(workspaceRoot);
       }
-      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
-      terminal.show();
-      terminal.sendText("calkit run");
     }),
   );
 
@@ -1138,6 +1246,7 @@ export function activate(context: vscode.ExtensionContext): void {
         title: "Calkit: Save",
         prompt: "Commit message for saving your work",
         placeHolder: "e.g. Update analysis figures",
+        value: await suggestCommitMessage(workspaceRoot),
         ignoreFocusOut: true,
       });
       // Cancelled (Escape) returns undefined; an empty message is not allowed.
@@ -1647,8 +1756,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, async () => {
       // refreshPipelineOutputContext already re-scans detected files; force the
-      // staleness check too, since the user explicitly asked to refresh.
+      // staleness check too, since the user explicitly asked to refresh, and
+      // ask Overleaf what's changed there
       void refreshPipelineOutputContext(context, true);
+      void checkOverleaf();
     }),
   );
 
@@ -1829,6 +1940,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   sidebarProvider = new CalkitSidebarProvider();
+  registerOverleaf(context, sidebarProvider, getWorkspaceRoot);
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
     showCollapseAll: true,
@@ -2574,6 +2686,7 @@ async function refreshPipelineOutputContext(
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
   currentSubprojectDirs = subprojectDirs;
+  undeclaredProjectStages.clear();
   currentQuestionOrigins = questionOrigins;
   currentArtifactOrigins = artifactOrigins;
   currentEnvDescriptions = envDescriptions;
@@ -2596,6 +2709,20 @@ async function refreshPipelineOutputContext(
     "calkit-vscode.hasProject",
     calkitYamlExists,
   );
+  const syncsWithOverleaf =
+    calkitYamlExists &&
+    isSyncedWithOverleaf(
+      calkitConfig,
+      await fileExists(
+        path.join(workspaceRoot, ".calkit", "overleaf-sync.json"),
+      ),
+    );
+  void vscode.commands.executeCommand(
+    "setContext",
+    "calkit-vscode.syncsWithOverleaf",
+    syncsWithOverleaf,
+  );
+  setOverleafSynced(workspaceRoot, syncsWithOverleaf);
   const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([
     ...pipelineOutputUris,
@@ -4523,10 +4650,16 @@ async function findStageForFile(
   for (const [stageName, stage] of Object.entries(
     calkitConfig?.pipeline?.stages ?? {},
   )) {
+    // A root stage's paths are relative to its wdir; a subproject's were
+    // rebased onto the root, dropping it
+    const wdir = typeof stage.wdir === "string" ? stage.wdir : "";
+    const isFile = (p: unknown) =>
+      typeof p === "string" &&
+      path.posix.join(wdir, p.replace(/\\/g, "/")) === relPath;
     if (
-      stage.notebook_path === relPath ||
-      stage.script_path === relPath ||
-      stage.target_path === relPath ||
+      isFile(stage.notebook_path) ||
+      isFile(stage.script_path) ||
+      isFile(stage.target_path) ||
       pipelineStageOutputPaths(stage).includes(relPath)
     ) {
       return stageName;
@@ -4929,6 +5062,46 @@ async function selectCalkitEnvironment(
 
 function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+// Stages of projects inside the workspace the root doesn't declare, by
+// directory, cleared when the pipeline is reread, e.g., any calkit.yaml changes
+const undeclaredProjectStages = new Map<
+  string,
+  Record<string, PipelineStage>
+>();
+
+// The stages that may build a root-relative document into a PDF, which for
+// one in a project the root doesn't declare as a subproject, e.g., a Git
+// submodule, include that project's
+function getDocumentStages(
+  workspaceRoot: string,
+  relPath: string,
+): Record<string, unknown> {
+  const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+  const dir = findUndeclaredProjectDir(
+    relPath,
+    (d) => fs.existsSync(path.join(workspaceRoot, d, "calkit.yaml")),
+    currentSubprojectDirs,
+  );
+  if (dir === undefined) {
+    return stages;
+  }
+  let cached = undeclaredProjectStages.get(dir);
+  if (cached === undefined) {
+    let config: CalkitInfo | undefined;
+    try {
+      config =
+        YAML.parse(
+          fs.readFileSync(path.join(workspaceRoot, dir, "calkit.yaml"), "utf8"),
+        ) ?? undefined;
+    } catch {
+      config = undefined;
+    }
+    cached = rebaseStages(dir, config?.pipeline?.stages);
+    undeclaredProjectStages.set(dir, cached);
+  }
+  return { ...stages, ...cached };
 }
 
 // The root's calkit.yaml and dvc.yaml with every subproject's folded in.
@@ -5375,7 +5548,7 @@ async function runCreateEnvironmentWizard(
 
     const kindPick = await vscode.window.showQuickPick(kindItems, {
       title: options?.title ?? "Create Calkit environment",
-      placeHolder: options?.placeHolder ?? "Pick environment kind",
+      placeHolder: options?.placeHolder ?? "Select environment kind",
     });
     if (!kindPick) {
       return undefined;
@@ -6431,7 +6604,7 @@ async function runCreateNotebookEnvironmentCreationFlow(
         ? {
             includeSlurm: false,
             title: `Create inner environment for ${outerSlurmEnvironment}`,
-            placeHolder: "Pick an environment kind to run inside SLURM",
+            placeHolder: "Select environment kind to run inside SLURM",
           }
         : undefined,
     );
@@ -7852,6 +8025,10 @@ async function registerAndSelectKernel(
       }
 
       log(`Kernel selection failed or unconfirmed`);
+      // Picked again when it's showing, e.g., after switching back to it
+      if (!getNotebookEditorForUri(expectedNotebookUri)) {
+        return undefined;
+      }
       void vscode.window.showWarningMessage(
         `Kernel '${kernelName}' was registered but auto-selection timed out. It should appear in the notebook kernel picker (top-right).`,
       );
@@ -8144,11 +8321,16 @@ function scoreKernelCandidate(
     score += 50;
   }
 
-  if (
-    kernelMatchesPreference(kernel, preferredKernelName, preferredDisplayName)
-  ) {
-    score += 1000;
-  }
+  // A closer match comes first, e.g., the kernel registered for the
+  // environment before another one whose name starts the same
+  score +=
+    1000 *
+    getKernelMatchRank(
+      kernel,
+      preferredKernelName,
+      preferredDisplayName,
+      kernelEnvDirs.get((preferredKernelName ?? "").toLowerCase()),
+    );
 
   if (languageHint.length > 0) {
     if (
@@ -8177,37 +8359,17 @@ function scoreKernelCandidate(
 }
 
 function kernelMatchesPreference(
-  kernel: {
-    id?: string;
-    label?: string;
-    description?: string;
-    detail?: string;
-  },
+  kernel: KernelController,
   kernelName?: string,
   displayName?: string,
 ): boolean {
-  const normalizedKernel = (kernelName ?? "").toLowerCase();
-  const normalizedDisplay = (displayName ?? "").toLowerCase();
-  const id = (kernel.id ?? "").toLowerCase();
-  const label = (kernel.label ?? "").toLowerCase();
-  const desc = (kernel.description ?? "").toLowerCase();
-  const detail = (kernel.detail ?? "").toLowerCase();
-  const idCompact = id.replace(/[^a-z0-9]/g, "");
-  const kernelCompact = normalizedKernel.replace(/[^a-z0-9]/g, "");
-  const displayCompact = normalizedDisplay.replace(/[^a-z0-9]/g, "");
-
   return (
-    (normalizedKernel.length > 0 && id.endsWith(`/${normalizedKernel}`)) ||
-    (normalizedKernel.length > 0 && id === normalizedKernel) ||
-    (normalizedKernel.length > 0 && id.includes(normalizedKernel)) ||
-    (kernelCompact.length > 0 && idCompact.includes(kernelCompact)) ||
-    (normalizedDisplay.length > 0 && label === normalizedDisplay) ||
-    (normalizedDisplay.length > 0 && label.includes(normalizedDisplay)) ||
-    (normalizedDisplay.length > 0 && desc.includes(normalizedDisplay)) ||
-    (normalizedDisplay.length > 0 && detail.includes(normalizedDisplay)) ||
-    (displayCompact.length > 0 &&
-      label.replace(/[^a-z0-9]/g, "").includes(displayCompact)) ||
-    (normalizedKernel.length > 0 && label.includes(normalizedKernel))
+    getKernelMatchRank(
+      kernel,
+      kernelName,
+      displayName,
+      kernelEnvDirs.get((kernelName ?? "").toLowerCase()),
+    ) > 0
   );
 }
 
@@ -8303,10 +8465,27 @@ async function trySelectKernelViaNotebookApi(
 
       log(`Resolved ${resolved.length} kernels (attempt ${attempt + 1}/10)`);
 
-      candidate = resolved.find((k) =>
-        kernelMatchesPreference(k, normalizedKernel, normalizedDisplay),
-      );
-
+      // The closest match, waiting for Jupyter to list the kernel just
+      // registered rather than settling for a loose match to another
+      let rank = 0;
+      candidate = undefined;
+      for (const k of resolved) {
+        const kRank = getKernelMatchRank(
+          k,
+          normalizedKernel,
+          normalizedDisplay,
+          kernelEnvDirs.get(normalizedKernel),
+        );
+        if (k.id && kRank > rank) {
+          candidate = k;
+          rank = kRank;
+        }
+      }
+      // A loose match may be another environment named alike, so it's
+      // never taken
+      if (rank < 2) {
+        candidate = undefined;
+      }
       if (candidate?.id) {
         break;
       }
@@ -8532,6 +8711,10 @@ async function getExpectedKernelSpecForEnvironment(
   return undefined;
 }
 
+// The folder each registered kernel's environment is in, by kernel name in
+// lowercase, which picks its controller out from others named alike
+const kernelEnvDirs = new Map<string, string>();
+
 function parseCheckKernelJson(
   stdout: string,
 ): { kernelName: string; displayName?: string } | undefined {
@@ -8549,6 +8732,12 @@ function parseCheckKernelJson(
       typeof result.display_name === "string" && result.display_name.length > 0
         ? result.display_name
         : undefined;
+    if (typeof result.python === "string" && result.python) {
+      kernelEnvDirs.set(
+        kernelName.toLowerCase(),
+        getPythonEnvDir(result.python),
+      );
+    }
     return { kernelName, displayName };
   } catch {
     return undefined;
@@ -8892,13 +9081,15 @@ async function refreshActiveFileBuildsPdfContext(
   document: vscode.TextDocument | undefined,
 ): Promise<void> {
   const workspaceRoot = getWorkspaceRoot();
+  const relPath =
+    workspaceRoot !== undefined && document !== undefined
+      ? path.relative(workspaceRoot, document.uri.fsPath).replace(/\\/g, "/")
+      : undefined;
   const buildsPdf =
     workspaceRoot !== undefined &&
-    document !== undefined &&
-    documentStagePdf(
-      currentCalkitConfig?.pipeline?.stages ?? {},
-      path.relative(workspaceRoot, document.uri.fsPath).replace(/\\/g, "/"),
-    ) !== undefined;
+    relPath !== undefined &&
+    documentStagePdf(getDocumentStages(workspaceRoot, relPath), relPath) !==
+      undefined;
   await vscode.commands.executeCommand(
     "setContext",
     "calkit.activeFileBuildsPdf",

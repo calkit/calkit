@@ -2,7 +2,8 @@ name: Run pipeline
 
 # Calkit's own pipeline computes claims in its docs, e.g., the LaTeX image's
 # size, so a pull request that makes one stale gets it rerun and committed
-# back, e.g., the one pinning a newly published image
+# back, e.g., the one pinning a newly published image. The stages that
+# collect data once a day are skipped, since update-data.yml runs them.
 on:
   pull_request:
   workflow_dispatch:
@@ -19,10 +20,14 @@ concurrency:
 jobs:
   run:
     name: run
-    # A fork's branch can't be pushed to with this repo's token
+    # A fork's branch can't be pushed to with this repo's token, and
+    # Dependabot's runs get a read-only one and no OIDC token to log in with
     if: >-
       github.event_name == 'workflow_dispatch'
-      || github.event.pull_request.head.repo.full_name == github.repository
+      || (
+        github.event.pull_request.head.repo.full_name == github.repository
+        && github.actor != 'dependabot[bot]'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -66,3 +71,8 @@ jobs:
         with:
           # Its Docker environments only pull public images
           login_ghcr: "false"
+          # Those update-data.yml runs, which the Makefile's pr target skips
+          # too; what depends on them still runs, from their last results
+          run_args: >-
+            --skip find-calkit-projects --skip find-calkit-papers
+            --skip traction

@@ -73,4 +73,30 @@ describe("FileContent", () => {
     )
     expect(html).toContain("answer")
   })
+
+  it("marks the lines a citation names, in Markdown's source too", () => {
+    const client = new QueryClient()
+    const log: ContentsItem = {
+      ...numbersJson,
+      name: "run.log",
+      path: "logs/run.log",
+      content: encodeBase64Utf8("one\ntwo\nthree\nfour\n"),
+    }
+    const render = (item: ContentsItem, lines?: [number, number]) =>
+      renderToStaticMarkup(
+        <QueryClientProvider client={client}>
+          <ChakraProvider>
+            <FileContent item={item} highlightLines={lines} />
+          </ChakraProvider>
+        </QueryClientProvider>,
+      )
+    expect(render(log).match(/cited-line/g)).toBeNull()
+    expect(render(log, [2, 3]).match(/cited-line/g)).toHaveLength(2)
+    // Rendered Markdown has no lines to mark, so its source is shown
+    const notes = { ...readme, content: encodeBase64Utf8("# Notes\n\nText") }
+    expect(render(notes)).toContain("chakra-heading")
+    const cited = render(notes, [1, 1])
+    expect(cited).not.toContain("chakra-heading")
+    expect(cited.match(/cited-line/g)).toHaveLength(1)
+  })
 })

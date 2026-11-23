@@ -51,6 +51,8 @@ export interface OverleafSyncStatusFile {
 
 export interface OverleafSyncStatus {
   path: string;
+  /** Whether Overleaf was asked just now, when answered on this machine. */
+  pulled?: boolean;
   overleaf_project_id?: string | null;
   overleaf_url?: string | null;
   last_sync_commit?: string | null;
@@ -69,6 +71,13 @@ export interface OverleafLinkPublic {
   project_name: string;
   project_title: string;
   current_user_access?: "read" | "write" | "admin" | "owner" | null;
+  /** Its repo on GitHub, e.g., `https://github.com/owner/name`. */
+  github_repo_url?: string | null;
+  /**
+   * The checkout on this machine that answers for it, when the extension
+   * is connected to Calkit here, rather than the hub.
+   */
+  local_path?: string | null;
 }
 
 export interface OverleafLookup {
@@ -194,6 +203,10 @@ export interface Provenance {
   origin?: string | null;
   origin_url?: string | null;
   origin_path?: string | null;
+  /** Imported from a Git repo or another project, so it can be updated. */
+  updatable?: boolean;
+  /** Whether its source has something newer, if that's known. */
+  update_available?: boolean | null;
   /** Data behind it, however far back, nothing records the origin of. */
   gaps?: ProvenanceGap[];
 }
@@ -217,6 +230,13 @@ export interface StageFile {
   created_by_me?: boolean;
 }
 
+export interface ImportUpdate {
+  path: string;
+  /** Whether the file changed, not only the commit it's recorded at. */
+  changed: boolean;
+  rev?: string | null;
+}
+
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */
 export interface StageFromScriptOrNotebookResponse {
   stage_name: string;
@@ -228,8 +248,14 @@ export interface StageFromScriptOrNotebookResponse {
   dependencies: string[];
   inputs: string[];
   outputs: string[];
+  /** Found by reading it or declared by its stage, not just shown. */
+  found_outputs?: string[];
   /** Inputs that aren't in the project and that no stage produces. */
   missing_inputs: string[];
+  /** Data read from outside the project, as the script names it. */
+  external_inputs?: string[];
+  /** Data paths changed to read from the project instead, as named. */
+  rewritten?: string[];
   /** Which output is what the document shows. */
   produces?: string | null;
   /** Documents changed to show it from there, with `\ckfigure`. */
@@ -245,12 +271,21 @@ export interface ProjectPipeline {
   stage_statuses: Record<string, StageStatus>;
   status: "up-to-date" | "stale" | "unknown";
   error?: string | null;
+  /** The compiled DVC stages, by name, with what each runs and reads. */
+  dvc_stages?: Record<
+    string,
+    {
+      cmd?: string | string[];
+      deps?: string[] | null;
+      outs?: (string | Record<string, unknown>)[] | null;
+    }
+  >;
 }
 
 /** A run of the pipeline, wherever it ran. */
 export interface PipelineRun {
   id: string;
-  location: "github-actions";
+  location: "github-actions" | "local";
   status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   created: string;
   started?: string | null;
@@ -263,6 +298,21 @@ export interface PipelineRun {
   github_workflow?: string | null;
   /** Unknown for one just started, until GitHub lists it. */
   github_run_id?: number | null;
+  /** For one on this machine, why it failed, and the end of its output. */
+  error?: string | null;
+  output?: string | null;
+  /** For one on this machine that's running, what it's doing now. */
+  progress?: RunProgress | null;
+}
+
+/** How far a run on this machine has got, from what it's printed. */
+export interface RunProgress {
+  phase: "starting" | "syncing" | "running" | "finishing" | "saving";
+  /** The stage running now, if one is, e.g., "sweep@1". */
+  stage: string | null;
+  n_done: number;
+  /** Unknown until the pipeline's been compiled. */
+  n_stages: number | null;
 }
 
 export interface PipelineRuns {

@@ -17,7 +17,7 @@ from app.models import (
     UserProjectAccess,
 )
 from app.models.core import ROLE_IDS
-from app.tests.api.routes.projects.test_overleaf_links import (
+from app.tests.api.routes.projects.test_core import (
     _make_owner_with_project,
 )
 

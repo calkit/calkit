@@ -21,6 +21,7 @@ import calkit
         "of it that exists for Windows, covered only by Linux runs."
     ),
 )
+@pytest.mark.needs("chrome")
 def test_stage(tmp_dir):
     # Test the stage magic
     # Run git and dvc init in the temp dir

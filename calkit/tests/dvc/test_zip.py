@@ -1,5 +1,6 @@
 """Tests for ``calkit.dvc.zip``."""
 
+import json
 import os
 import shutil
 
@@ -328,3 +329,44 @@ def test_sync_one(tmp_dir, monkeypatch):
     assert not os.path.exists(zip_out9)
     assert get_sync_record(str(src9.as_posix())) is None
     assert (src9 / "a.txt").read_text() == "hello"
+
+
+def test_sync_all(tmp_path, monkeypatch):
+    monkeypatch.setattr(calkit.dvc.zip, "run_dvc_command", lambda *a, **k: 0)
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    for d in [project, outside]:
+        d.mkdir()
+    (outside / "keep.txt").write_text("mine")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text("hello")
+    zip_path = project / ".calkit" / "zip" / "files" / "data.zip"
+    zip_(str(src), str(zip_path))
+    # The map is committed, so only paths in the project sync, and not
+    # through links, which could point anywhere
+    path_map = {
+        "data": ".calkit/zip/files/data.zip",
+        str(project / "abs-data"): ".calkit/zip/files/data.zip",
+        "../outside": ".calkit/zip/files/data.zip",
+        str(outside): ".calkit/zip/files/data.zip",
+        "fine": "../outside/keep.txt",
+    }
+    # Windows needs a privilege for links, which CI may not have
+    try:
+        os.symlink(outside, project / "linked")
+        path_map["linked/data"] = ".calkit/zip/files/data.zip"
+    except OSError:
+        pass
+    map_path = project / calkit.dvc.zip.PATH_MAP_PATH
+    map_path.write_text(json.dumps(path_map))
+    for path in path_map:
+        assert calkit.dvc.zip.is_safe_mapped_path(path, wdir=str(project)) == (
+            path in ["data", str(project / "abs-data"), "fine"]
+        )
+    calkit.dvc.zip.sync_all(direction="to-workspace", wdir=str(project))
+    assert (project / "data" / "a.txt").read_text() == "hello"
+    assert (project / "abs-data" / "a.txt").read_text() == "hello"
+    assert sorted(os.listdir(outside)) == ["keep.txt"]
+    assert (outside / "keep.txt").read_text() == "mine"
+    assert not (project / "fine").exists()

@@ -99,6 +99,7 @@ questions:
 requirements:
   - docker
   - uv
+  - gh
   - kind: setup
     name: GitHub CLI logged in
     # Not 'gh auth status', which calls the API, so fails when rate limited

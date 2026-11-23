@@ -25,6 +25,14 @@ The **Calkit** activity-bar view presents the project as connected sections:
 - **Figures**, **Datasets**, **Results**, **Publications**, and
   **Presentations**: The output artifacts, each annotated with the stage (or
   import source) it came from.
+- **Overleaf**: Each folder synced with an Overleaf project, checked in the
+  background, showing whether it's in sync, has changes on Overleaf, e.g.,
+  from a coauthor, or has files to push, with buttons to sync it, open it on
+  Overleaf, or import another project. **Run and Save** in the toolbar runs
+  the pipeline and saves in one step, syncing with Overleaf too unless
+  **Auto-sync Overleaf on run+save** is off in the sidebar's menu, and walks
+  you through a file that changed in two places if one did.
+  <!-- TODO: needs human review -->
 
 Items are cross-linked, so you can traverse the system in any direction:
 expand a figure to jump to the stage that made it, jump from a stage to its
@@ -135,6 +143,16 @@ pipeline:
   servers.
 - `calkit.sidebar.hiddenSections`: Sidebar sections to hide (managed via the
   sidebar's **Manage Sections** action).
+- `calkit.overleaf.checkInterval`: How often, in seconds, to check folders
+  synced with Overleaf while VS Code has focus (default 120; 0 turns it
+  off).
+- `calkit.runAndSave.askForMessage`: Ask for a commit message when running and
+  saving from the sidebar (off by default, using one that names the one file
+  changed, or "Run pipeline").
+- `calkit.overleaf.autoSync`: Sync with Overleaf too when running and saving
+  from the sidebar, in a project that syncs with Overleaf (on by default;
+  toggled per project with **Auto-sync Overleaf on run+save** in the
+  sidebar's menu).
 
 ## Commands
 

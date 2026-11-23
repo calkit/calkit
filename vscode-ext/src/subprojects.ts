@@ -250,15 +250,10 @@ export function mergeSubprojectConfigs(
           ? { ...env, path: rebasePath(dir, env.path) }
           : env;
     }
-    for (const [name, stage] of Object.entries(config.pipeline?.stages ?? {})) {
-      if (!isObject(stage)) {
-        continue;
-      }
-      merged.pipeline!.stages![qualifyName(dir, name)] = rebaseStage(
-        dir,
-        stage,
-      );
-    }
+    Object.assign(
+      merged.pipeline!.stages!,
+      rebaseStages(dir, config.pipeline?.stages),
+    );
     for (const [name, app] of Object.entries(config.apps ?? {})) {
       if (!isObject(app)) {
         continue;
@@ -418,4 +413,52 @@ export function splitSubprojectPath(
   return dir
     ? { dir, path: relPath.slice(dir.length + 1) }
     : { dir: ".", path: relPath };
+}
+
+/**
+ * A project's stages as the root sees them: named "dir:name", with their
+ * paths relative to the root.
+ */
+export function rebaseStages(
+  dir: string,
+  stages: Record<string, PipelineStage> | undefined,
+): Record<string, PipelineStage> {
+  const rebased: Record<string, PipelineStage> = {};
+  for (const [name, stage] of Object.entries(stages ?? {})) {
+    if (isObject(stage)) {
+      rebased[qualifyName(dir, name)] = rebaseStage(dir, stage);
+    }
+  }
+  return rebased;
+}
+
+/**
+ * The project a root-relative file is in, if it's one the merged config
+ * leaves out: the nearest directory above it with a calkit.yaml, that isn't
+ * the root or a subproject the root declares, e.g., a Git submodule that's a
+ * project of its own.
+ */
+export function findUndeclaredProjectDir(
+  relPath: string,
+  isProject: (dir: string) => boolean,
+  subprojectDirs: string[],
+): string | undefined {
+  // Outside the workspace, including on another Windows drive
+  if (
+    path.posix.isAbsolute(relPath) ||
+    relPath.startsWith("../") ||
+    /^[A-Za-z]:/.test(relPath)
+  ) {
+    return undefined;
+  }
+  for (
+    let dir = path.posix.dirname(relPath);
+    dir !== "." && dir !== "/";
+    dir = path.posix.dirname(dir)
+  ) {
+    if (isProject(dir)) {
+      return subprojectDirs.includes(dir) ? undefined : dir;
+    }
+  }
+  return undefined;
 }

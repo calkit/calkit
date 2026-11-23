@@ -1480,6 +1480,11 @@ def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
     failing.add("command -v julia")
     with pytest.raises(ValueError, match="app 'julia' was not found on host"):
         ws.check_requirements(w, ["julia"])
+    # And so is how the project says to install it
+    with pytest.raises(ValueError, match="To install it there, run: get-j"):
+        ws.check_requirements(
+            w, [{"kind": "app", "name": "julia", "setup_command": "get-j"}]
+        )
     failing.clear()
     failing.add("SCRATCH")
     with pytest.raises(ValueError, match="env-var 'SCRATCH' is not set"):

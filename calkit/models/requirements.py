@@ -36,7 +36,8 @@ class Requirement(Model):
     Five kinds are supported:
 
     - ``app``: an executable that must be on ``PATH``, optionally
-      satisfying a ``version_spec``.
+      satisfying a ``version_spec``. ``setup_command`` says how to install
+      it, and is offered in place of any installer Calkit has for it.
     - ``env-var``: an environmental variable that must be defined.
       ``setup_command`` says how to get a value, e.g., a login flow that
       prints a token, and is offered before the value is asked for.
@@ -69,8 +70,10 @@ class Requirement(Model):
     setup_command: str | None = Field(
         default=None,
         description="Command that sets the requirement up, offered on a "
-        "terminal and printed as the fix otherwise. For an 'env-var', it's "
-        "run before the value is asked for, e.g., 'claude setup-token'.",
+        "terminal and printed as the fix otherwise. For an 'app', it "
+        "installs it, e.g., 'brew install colima', in place of any installer "
+        "Calkit has for it. For an 'env-var', it's run before the value is "
+        "asked for, e.g., 'claude setup-token'.",
     )
     # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
     # integer number of seconds. Setup requirements cache successful checks

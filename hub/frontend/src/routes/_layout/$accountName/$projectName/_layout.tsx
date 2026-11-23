@@ -73,6 +73,7 @@ import useProject from "../../../../hooks/useProject"
 import useRefreshProject from "../../../../hooks/useRefreshProject"
 import { isAuthenticationError } from "../../../../lib/auth"
 import { DISMISSED } from "../../../../lib/onboarding"
+import { safeHref } from "../../../../lib/strings"
 
 interface CommitHistory {
   hash: string
@@ -299,8 +300,11 @@ function ProjectMenu({
   const refreshProject = useRefreshProject(accountName, projectName)
   // Codespaces gives a browser editor that can also run the pipeline; the
   // CLI signs in on its own there, so no token setup stands in the way.
-  const codespacesUrl = project.git_repo_url
-    ? `${project.git_repo_url.replace("://github.com/", "://codespaces.new/")}?quickstart=1`
+  const githubRepo = project.git_repo_url?.match(
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/,
+  )?.[1]
+  const codespacesUrl = githubRepo
+    ? `https://codespaces.new/${githubRepo}?quickstart=1`
     : null
 
   return (
@@ -333,7 +337,7 @@ function ProjectMenu({
               <MenuItem
                 icon={<FaGithub fontSize={18} />}
                 as="a"
-                href={codespacesUrl}
+                href={safeHref(codespacesUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -608,7 +612,7 @@ function ProjectLayout() {
                 {/* GitHub link */}
                 {project?.git_repo_url ? (
                   <Box mr={2}>
-                    <Link href={project?.git_repo_url} isExternal>
+                    <Link href={safeHref(project?.git_repo_url)} isExternal>
                       <Flex alignItems="center">
                         <Icon as={FaGithub} pt={0.5} />
                         <Icon as={ExternalLinkIcon} />

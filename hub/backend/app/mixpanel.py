@@ -466,3 +466,48 @@ def user_saved_figure_script(
             n_packages=n_packages,
         ),
     )
+
+
+def user_linked_machine(user: User, platform: str | None, n_machines: int):
+    """A machine linked, with how many the user has linked, so the first
+    stands out.
+    """
+    track(
+        user,
+        "Linked machine",
+        add_event_info=dict(platform=platform, n_machines=n_machines),
+    )
+
+
+def user_unlinked_machine(user: User, platform: str | None, days_linked: int):
+    track(
+        user,
+        "Unlinked machine",
+        add_event_info=dict(platform=platform, days_linked=days_linked),
+    )
+
+
+def machine_came_online(user: User, platform: str | None, mode: str | None):
+    """A linked machine's first check-in, which a link that failed to
+    install or start never sends.
+    """
+    track(
+        user,
+        "Machine came online",
+        add_event_info=dict(platform=platform, mode=mode),
+    )
+
+
+def user_used_machine(
+    user: User, platform: str | None, mode: str | None, usage: dict[str, int]
+):
+    """What browsers asked a machine to do since its last check-in, as
+    counts of each kind of request, e.g., ``sessions.open`` or
+    ``workspace.run``, and agents started in its sessions, e.g.,
+    ``agent.claude``, never what they ran or where.
+    """
+    track(
+        user,
+        "Used machine",
+        add_event_info=dict(platform=platform, mode=mode) | usage,
+    )

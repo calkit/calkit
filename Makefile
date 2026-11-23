@@ -28,6 +28,10 @@ format: ## Automatically format files and regenerate what's generated.
 	@echo "🚀 Linting code with pre-commit"
 	@uv run pre-commit run -a
 
+# Collect data once a day; update-data.yml runs them, so a pull request
+# doesn't carry their results
+DATA_STAGES := find-calkit-projects find-calkit-papers traction
+
 .PHONY: pr
 pr: ## Get a pull request ready to pass: format, and run the pipeline.
 	@echo "🚀 Formatting, then checking it's done"
@@ -35,14 +39,16 @@ pr: ## Get a pull request ready to pass: format, and run the pipeline.
 	@echo "🚀 Pulling the pipeline's outputs, so only what changed reruns"
 	@uv run calkit dvc pull || true
 	@echo "🚀 Running the pipeline"
-	@uv run calkit run
+	@uv run calkit run $(addprefix --skip ,$(DATA_STAGES))
 	@echo "🚀 Pushing the pipeline's outputs"
 	@uv run calkit dvc push
 	@echo "🚀 Checking the run left nothing to format or rerun"
 	@files="$$(git diff --name-only)"; \
 		[ -z "$$files" ] || uv run pre-commit run --files $$files
 	@uv run calkit status --json | uv run python -c \
-		"import json, sys; sys.exit(json.load(sys.stdin)['pipeline']['is_stale'])" \
+		"import json, sys; p = json.load(sys.stdin)['pipeline']; \
+		sys.exit(bool(set(p['stale_stage_names']) - set(sys.argv[1:])))" \
+		$(DATA_STAGES) \
 		|| (echo "The pipeline is stale; see 'calkit status'" && exit 1)
 
 .PHONY: check
@@ -97,6 +103,8 @@ devcontainer-image: ## Build the dev container image and smoke test it.
 	@echo "🚀 Smoke testing the dev container image"
 	@docker run --rm calkit/devcontainer:dev bash -c \
 		"calkit --version && uv --version && pixi --version && conda --version"
+	@docker run --rm --user vscode calkit/devcontainer:dev bash -lc \
+		"calkit --version && dvc --version && conda --version"
 
 .PHONY: docs
 docs: sync-docs ## Build and serve the documentation.
@@ -130,7 +138,7 @@ test-jlab-ui: ## Run the JupyterLab UI integration tests.
 .PHONY: browser-ext
 browser-ext: ## Build the browser extension and package it as a ZIP.
 	@echo "🚀 Building the browser extension"
-	@cd browser-ext && npm ci && npm run build
+	@cd browser-ext && npm ci --no-audit --no-fund && npm run build
 	@echo "📦 Packaging the browser extension ZIP"
 	@mkdir -p browser-ext/zip
 # Packaged from a staged copy, never from dist: dist is what gets loaded

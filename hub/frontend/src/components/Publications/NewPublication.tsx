@@ -262,9 +262,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
             {/* Environment name */}
             {variant === "template" ? (
               <FormControl mt={4} isRequired isInvalid={!!errors.environment}>
-                <FormLabel htmlFor="environment">
-                  Docker environment name
-                </FormLabel>
+                <FormLabel htmlFor="environment">Environment name</FormLabel>
                 <Input
                   autoComplete="off"
                   id="environment"

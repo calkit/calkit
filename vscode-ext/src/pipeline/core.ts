@@ -9,7 +9,7 @@ import type { DvcStage, StaleStageDetail } from "../types";
 
 // Expand a DVC `matrix` into the list of concrete `${item.*}` substitution maps,
 // one per cartesian-product combination. Mirrors calkit's `_expand_matrix` in
-// calkit/pipeline.py, including flattening nested-dict values (produced by
+// calkit/pipeline/core.py, including flattening nested-dict values (produced by
 // list-of-lists iterations) into dotted "parent.child" keys.
 export function expandDvcMatrix(
   matrix: Record<string, unknown[]>,

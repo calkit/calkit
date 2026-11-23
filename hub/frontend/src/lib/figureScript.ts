@@ -200,7 +200,7 @@ export function defaultScript({
     )
   } else if (first && isFramePath(first)) {
     lines.push(
-      "# Pick the columns to plot; df.columns lists them.",
+      "# Select the columns to plot; df.columns lists them.",
       "df.plot(ax=ax)",
     )
   } else if (first) {

@@ -1,12 +1,20 @@
+import os
+import pathlib
 import shlex
+import shutil
 import sys
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
 
 import calkit.cli.export
-from calkit.export import GIMP, INKSCAPE
-from calkit.models.pipeline import GimpExportStage, InkscapeExportStage
+from calkit.export import GIMP, INKSCAPE, LIBREOFFICE, POWERPOINT
+from calkit.models.pipeline import (
+    GimpExportStage,
+    InkscapeExportStage,
+    PptxExportStage,
+)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Fake apps are scripts")
@@ -78,12 +86,14 @@ def test_inkscape(tmp_path, monkeypatch):
         ("a.svg", "a.jpg", "not 'a.jpg'"),
     ]:
         with pytest.raises(ValueError, match=error):
-            calkit.cli.export.inkscape(src, output)
+            calkit.cli.export.export_with_inkscape(src, output)
     with pytest.raises(ValueError, match="doesn't exist"):
-        calkit.cli.export.inkscape(str(tmp_path / "gone.svg"), "out.png")
+        calkit.cli.export.export_with_inkscape(
+            str(tmp_path / "gone.svg"), "out.png"
+        )
     # Into a folder made for it
     out = tmp_path / "figs" / "setup.png"
-    calkit.cli.export.inkscape(str(source), str(out), dpi=150)
+    calkit.cli.export.export_with_inkscape(str(source), str(out), dpi=150)
     assert out.read_text() == "png"
     assert log.read_text() == repr(
         [str(source), f"--export-filename={out}", "--export-dpi=150"]
@@ -93,7 +103,7 @@ def test_inkscape(tmp_path, monkeypatch):
     nothing = tmp_path / "nothing.svg"
     nothing.write_text("<svg/>")
     with pytest.raises(ValueError, match="didn't export"):
-        calkit.cli.export.inkscape(str(nothing), str(out))
+        calkit.cli.export.export_with_inkscape(str(nothing), str(out))
     assert not out.exists()
     # It says what's missing when it isn't installed
     monkeypatch.setattr(
@@ -101,7 +111,168 @@ def test_inkscape(tmp_path, monkeypatch):
     )
     assert INKSCAPE.find_executable() is None
     with pytest.raises(ValueError, match="needs Inkscape installed"):
-        calkit.cli.export.inkscape(str(source), str(out))
+        calkit.cli.export.export_with_inkscape(str(source), str(out))
+
+
+@pytest.mark.skipif(
+    LIBREOFFICE.find_executable() is None, reason="Needs LibreOffice"
+)
+def test_export_slides(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    import pypdfium2 as pdfium
+    from PIL import Image
+
+    import calkit
+    from calkit.cli.main.core import app
+
+    def pdf_sizes(path: str) -> list[tuple[float, float]]:
+        pdf = pdfium.PdfDocument(path)
+        try:
+            return [
+                (round(float(w), 1), round(float(h), 1))
+                for w, h in (page.get_size() for page in pdf)
+            ]
+        finally:
+            pdf.close()
+
+    def export(*args: str) -> None:
+        result = CliRunner().invoke(app, ["export", "pptx", *args])
+        assert result.exit_code == 0, result.output
+
+    monkeypatch.chdir(tmp_path)
+    # A title, a hidden slide, a diagram off to one side, a colored
+    # background, a photo filling the slide with a label on it, a picture
+    # cropped to its right half beside a shape running off the slide, and
+    # a small shape beside the slide's number; 960 by 540 points
+    shutil.copy(
+        os.path.join(
+            os.path.dirname(__file__), "..", "..", "..", "test", "slides.pptx"
+        ),
+        "slides.pptx",
+    )
+    with open("calkit.yaml", "w") as yaml_file:
+        yaml_file.write(
+            "environments:\n"
+            "  py: {kind: uv, path: pyproject.toml}\n"
+            "  plain: {kind: system, requirements: [git]}\n"
+            "  lo: {kind: system, requirements: [libreoffice]}\n"
+            "  ppt: {kind: system, requirements: [powerpoint]}\n"
+        )
+    # What it can export from and to, and where
+    cases: list[tuple[dict[str, Any], str]] = [
+        (dict(source="a.key", outputs=[([1], "a.pdf")]), "a PowerPoint file"),
+        (dict(outputs=[([1], "a.svg")]), "not 'a.svg'"),
+        (dict(outputs=[]), "Say what to export"),
+        (dict(outputs=[([0], "a.pdf")]), "numbered from 1"),
+        (dict(outputs=[([8], "a.pdf")]), "has 7 slides"),
+        (dict(outputs=[([3, 5], "a.png")]), "'a.png' can show one slide"),
+        (dict(outputs=[(None, "a.png")]), "'a.png' can show one slide"),
+        (dict(outputs=[(None, "a.pdf")], env="nope"), "no environment named"),
+        (dict(outputs=[(None, "a.pdf")], env="py"), "in a uv environment"),
+        (dict(outputs=[(None, "a.pdf")], env="plain"), "requires neither"),
+    ]
+    for kwargs, error in cases:
+        with pytest.raises(ValueError, match=error):
+            calkit.cli.export.export_slides(
+                **{"source": "slides.pptx", **kwargs}
+            )
+    assert not os.path.exists("a.pdf")
+    # The diagram, cropped to what's drawn, through the command its stage
+    # runs, the same each time it's exported
+    stage = PptxExportStage.model_validate(
+        dict(
+            source_path="slides.pptx",
+            outputs=[{"path": "figs/setup.pdf", "slide": 3}],
+            environment="lo",
+        )
+    )
+    exported = []
+    for _ in range(2):
+        result = CliRunner().invoke(app, shlex.split(stage.dvc_cmd)[1:])
+        assert result.exit_code == 0, result.output
+        with open("figs/setup.pdf", "rb") as f:
+            exported.append(f.read())
+    assert exported[0] == exported[1]
+    [(width, height)] = pdf_sizes("figs/setup.pdf")
+    assert 400 < width < 460 and 100 < height < 130
+    # and the app that did it, as a run records it
+    assert stage.run_properties() == {
+        "libreoffice_version": LIBREOFFICE.version()
+    }
+    # As a PNG, at 300 DPI unless asked
+    export("slides.pptx", "-o", "3=setup.png")
+    assert Image.open("setup.png").size == (
+        pytest.approx(width * 300 / 72, abs=2),
+        pytest.approx(height * 300 / 72, abs=2),
+    )
+    # A file per slide from one run, each cropped to what's drawn on it:
+    # the hidden slide, the whole photo under its label, the picture as
+    # cropped and the shape as far as the slide's edge, and the small shape
+    # without the slide's number, beside a PDF of two of them and the whole
+    # deck, uncropped
+    specs = [f"{n}=figs/s-{n}.png" for n in (2, 5, 6, 7)]
+    specs += ["7,3=two.pdf", "talk.pdf"]
+    export("slides.pptx", *[a for spec in specs for a in ("-o", spec)])
+    sizes = {n: Image.open(f"figs/s-{n}.png").size for n in (2, 5, 6, 7)}
+    assert sizes[2][0] < 300 * 960 / 72
+    assert sizes[5] == (pytest.approx(4000, abs=1), 2250)
+    assert sizes[6][0] == pytest.approx(660 * 300 / 72, abs=10)
+    assert sizes[7][0] < 120 * 300 / 72 and sizes[7][1] < 120 * 300 / 72
+    assert pdf_sizes("two.pdf") == [(960.0, 540.0)] * 2
+    assert pdf_sizes("talk.pdf") == [(960.0, 540.0)] * 7
+    # unless asked otherwise
+    export("slides.pptx", "-o", "3,7=two.pdf", "--trim")
+    assert [w < 500 for w, _ in pdf_sizes("two.pdf")] == [True, True]
+    export("slides.pptx", "-o", "2=whole.png", "--no-trim")
+    assert Image.open("whole.png").size == (pytest.approx(4000, abs=1), 2250)
+    result = CliRunner().invoke(
+        app, ["export", "pptx", "slides.pptx", "-o", "4-=a.pdf"]
+    )
+    assert result.exit_code != 0 and "should list slides" in result.output
+    # PowerPoint, when it's here, crops the same, and says its version
+    if POWERPOINT.find_executable() is not None and sys.platform != "linux":
+        stage = PptxExportStage.model_validate(
+            dict(
+                source_path="slides.pptx",
+                outputs=[
+                    {"path": "ppt/s-2.pdf", "slide": 2},
+                    {"path": "ppt/s-3.pdf", "slide": 3},
+                ],
+                environment="ppt",
+            )
+        )
+        result = CliRunner().invoke(app, shlex.split(stage.dvc_cmd)[1:])
+        assert result.exit_code == 0, result.output
+        [(w, h)] = pdf_sizes("ppt/s-3.pdf")
+        assert w == pytest.approx(width, abs=2)
+        assert h == pytest.approx(height, abs=2)
+        assert pdf_sizes("ppt/s-2.pdf")[0][0] < 960
+        assert stage.run_properties() == {
+            "powerpoint_version": POWERPOINT.version()
+        }
+    # LibreOffice's image, when it's here, in a Docker environment
+    image = "ghcr.io/calkit/libreoffice:0.1.0"
+    if (
+        shutil.which("docker") is not None
+        and subprocess.run(
+            ["docker", "image", "inspect", image], capture_output=True
+        ).returncode
+        == 0
+    ):
+        with open("calkit.yaml", "a") as yaml_file:
+            yaml_file.write(f"  img: {{kind: docker, image: '{image}'}}\n")
+        export("slides.pptx", "-o", "3=img.pdf", "-e", "img")
+        [(w, h)] = pdf_sizes("img.pdf")
+        assert w == pytest.approx(width, abs=2)
+        assert not [p for p in os.listdir(".calkit") if p.startswith("tmp-")]
+    # It says what's missing when nothing that exports slides is installed
+    monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-test-no-soffice"])
+    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-test-no-ppt"])
+    with pytest.raises(ValueError, match="needs LibreOffice or PowerPoint"):
+        calkit.cli.export.export_slides("slides.pptx", [(None, "a.pdf")])
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Fake app is a script")
@@ -131,11 +302,13 @@ def test_gimp(tmp_path, monkeypatch):
         ("a.xcf", "a.pdf", "not 'a.pdf'"),
     ]:
         with pytest.raises(ValueError, match=error):
-            calkit.cli.export.gimp(src, output)
+            calkit.cli.export.export_with_gimp(src, output)
     with pytest.raises(ValueError, match="doesn't exist"):
-        calkit.cli.export.gimp(str(tmp_path / "gone.xcf"), "out.png")
+        calkit.cli.export.export_with_gimp(
+            str(tmp_path / "gone.xcf"), "out.png"
+        )
     out = tmp_path / "figure.png"
-    calkit.cli.export.gimp(str(source), str(out))
+    calkit.cli.export.export_with_gimp(str(source), str(out))
     assert out.read_text() == "png"
     # GIMP 3's dialect first, then GIMP 2's, each flattening the document
     attempts = log.read_text().splitlines()
@@ -145,8 +318,10 @@ def test_gimp(tmp_path, monkeypatch):
     assert "gimp-image-flatten" in attempts[1]
     # Writing nothing in either dialect is a failure
     with pytest.raises(ValueError, match="didn't export"):
-        calkit.cli.export.gimp(str(source), str(tmp_path / "nothing.png"))
+        calkit.cli.export.export_with_gimp(
+            str(source), str(tmp_path / "nothing.png")
+        )
     monkeypatch.setattr(GIMP, "executables", ["calkit-test-no-gimp"])
     assert GIMP.find_executable() is None
     with pytest.raises(ValueError, match="needs GIMP installed"):
-        calkit.cli.export.gimp(str(source), str(out))
+        calkit.cli.export.export_with_gimp(str(source), str(out))

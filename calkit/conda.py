@@ -1024,7 +1024,7 @@ def write_cross_platform_locks(
 
     Returns the paths written.
     """
-    from calkit.environments import (
+    from calkit.environments.core import (
         CONDA_VENV_ARCHS,
         UV_PLATFORM_TARGETS,
         _conda_venv_platform,

@@ -1,6 +1,7 @@
 """GitHub related functionality."""
 
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -28,6 +29,28 @@ def _load_app_signing_key() -> bytes:
     # Env vars commonly carry the PEM with escaped newlines; restore them so
     # the key parses whether it was provided escaped or as a real multi-line.
     return settings.GH_APP_PRIVATE_KEY.replace("\\n", "\n").encode()
+
+
+# A GitHub repo's URL, as a project's git_repo_url may give it: over HTTPS
+# or HTTP, or SSH in either form, with or without ".git" and a trailing slash
+_GITHUB_REPO_URL = re.compile(
+    r"(?:https?://github\.com/|ssh://git@github\.com(?::22)?/"
+    r"|git@github\.com:)"
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._][A-Za-z0-9._-]*?)"
+    r"(?:\.git)?/?",
+    re.IGNORECASE,
+)
+
+
+def parse_github_repo(url: str) -> str | None:
+    """The "owner/repo" a GitHub URL is for, lowercased, so two forms of
+    one repo's URL compare equal, or None if it isn't one.
+    """
+    match = _GITHUB_REPO_URL.fullmatch(url.strip())
+    # Repos can start with ".", e.g., ".github", but aren't all dots
+    if match is None or not match.group(2).strip("."):
+        return None
+    return f"{match.group(1)}/{match.group(2)}".lower()
 
 
 def create_app_token() -> str:
@@ -68,6 +91,22 @@ def get_app_installation_token(
 ) -> str:
     """Return a GitHub App installation access token scoped to one repo.
 
+    See ``get_app_installation_token_and_expiry``.
+    """
+    return get_app_installation_token_and_expiry(
+        owner_name, repo_name, read_only=read_only, permissions=permissions
+    )[0]
+
+
+def get_app_installation_token_and_expiry(
+    owner_name: str,
+    repo_name: str,
+    read_only: bool = False,
+    permissions: dict[str, str] | None = None,
+) -> tuple[str, float]:
+    """Return a GitHub App installation access token scoped to one repo,
+    and when to stop using it, a little before GitHub's expiry.
+
     Used to perform git operations on behalf of users who have native Calkit
     access to a project but no personal GitHub token (e.g. email/Google
     signups). Tokens are cached in-process and reused until shortly before they
@@ -95,7 +134,7 @@ def get_app_installation_token(
     with _installation_token_cache_lock:
         cached = _installation_token_cache.get(cache_key)
         if cached is not None and cached[1] > now:
-            return cached[0]
+            return cached
     # Miss or expired: mint a fresh token. Done outside the lock so requests
     # for different repos don't serialize; a rare concurrent double-mint just
     # yields two valid tokens.
@@ -112,7 +151,7 @@ def get_app_installation_token(
             pass
     with _installation_token_cache_lock:
         _installation_token_cache[cache_key] = (token, expiry)
-    return token
+    return token, expiry
 
 
 def _mint_app_installation_token(
@@ -180,6 +219,24 @@ def token_resp_text_to_dict(resp_text: str) -> dict:
         key, value = item.split("=")
         out[key] = value
     return out
+
+
+def has_verified_email(access_token: str, email: str) -> bool:
+    """Whether GitHub verified this email for the token's user."""
+    resp = requests.get(
+        "https://api.github.com/user/emails",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    emails = resp.json() if resp.status_code == 200 else None
+    if not isinstance(emails, list):
+        return False
+    return any(
+        isinstance(e, dict)
+        and e.get("verified") is True
+        and str(e.get("email", "")).lower() == email.lower()
+        for e in emails
+    )
 
 
 def resolve_email(access_token: str) -> tuple[str, bool]:

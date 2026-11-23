@@ -7,7 +7,7 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import (
     AliasChoices,
@@ -23,6 +23,7 @@ from pydantic import (
 from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
+from calkit.core import normalize_orcid
 from calkit.models.base import Model
 from calkit.models.io import EnvVarInput
 from calkit.models.iteration import ParametersType
@@ -54,6 +55,15 @@ class _ImportedFromProject(Model):
 
     project: str
     path: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Branch, tag, or commit to follow when refreshing this. "
+            "Optional: an entry that names none follows the project's "
+            "default branch. The commit it resolves to is recorded in "
+            ".calkit/imports.json."
+        ),
+    )
     date: date_type | None = Field(
         default=None, description="When the data was downloaded."
     )
@@ -293,30 +303,7 @@ class _Person(Model):
         # RO-Crate both want, so neither has to guess at a bare identifier.
         if v is None:
             return v
-        match = re.fullmatch(
-            r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
-            r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
-            v.strip(),
-        )
-        if match is None:
-            raise ValueError(
-                f"orcid must look like 0000-0002-1825-0097 (got {v!r})"
-            )
-        bare = match.group(1).upper()
-        # The last character is an ISO 7064 MOD 11-2 check digit over the
-        # other 15, so a typo is caught here rather than by whoever later
-        # finds the identifier resolves to a stranger, or to nobody.
-        total = 0
-        for digit in bare[:-1].replace("-", ""):
-            total = (total + int(digit)) * 2
-        result = (12 - total % 11) % 11
-        expected = "X" if result == 10 else str(result)
-        if bare[-1] != expected:
-            raise ValueError(
-                f"orcid {v!r} has check digit {bare[-1]} but its other "
-                f"digits call for {expected}, so one of them is mistyped"
-            )
-        return f"https://orcid.org/{bare}"
+        return normalize_orcid(v)
 
     @model_validator(mode="after")
     def _check_identifiable(self) -> _Person:
@@ -606,6 +593,15 @@ PublicationKind = Literal[
 ]
 
 
+class PublicationReview(Model):
+    """A review of a publication, e.g., by a peer reviewer."""
+
+    path: str = Field(
+        description="Path to the review, a Markdown file whose comments are "
+        'numbered items under a heading containing "comments".'
+    )
+
+
 class Publication(_CalkitObject):
     """A publication the project produced, or one it builds upon.
 
@@ -631,6 +627,11 @@ class Publication(_CalkitObject):
     # was got from here, the same way a dataset does.
     imported_from: ImportedFromType | None = Field(
         default=None, description=_IMPORTED_FROM_DESCRIPTION
+    )
+    reviews: list[PublicationReview] = Field(
+        default_factory=list,
+        description="Reviews of this publication, whether written in this "
+        "project or received.",
     )
 
     @model_validator(mode="before")
@@ -715,6 +716,7 @@ class Environment(Model):
         "uv-venv",
         "renv",
         "switch",
+        "texlive",
     ] = Field(description="What kind of environment this is.")
     # Note: ``path`` is declared on the specific subclasses that need it (most
     # of them, required; optional for Docker) rather than here, so subclasses
@@ -743,7 +745,21 @@ class Environment(Model):
         return data
 
 
-class CondaEnvironment(Environment):
+class ComposableEnvironment(Environment):
+    """Base class for the kinds other environments can be composed into."""
+
+    with_: list[str] = Field(
+        default=[],
+        alias="with",
+        description=(
+            "Names of TeX Live environments whose programs this one's "
+            "commands also get, e.g., for Matplotlib's usetex. They come "
+            "after this environment's own on PATH and before the system's."
+        ),
+    )
+
+
+class CondaEnvironment(ComposableEnvironment):
     kind: Literal["conda"] = "conda"
     path: str = Field(description="Path to the Conda environment YAML file.")
     prefix: str | None = Field(
@@ -751,7 +767,7 @@ class CondaEnvironment(Environment):
     )
 
 
-class VenvEnvironment(Environment):
+class VenvEnvironment(ComposableEnvironment):
     kind: Literal["venv"] = "venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -770,12 +786,12 @@ class VenvEnvironment(Environment):
     )
 
 
-class UvEnvironment(Environment):
+class UvEnvironment(ComposableEnvironment):
     kind: Literal["uv"] = "uv"
     path: str = Field(description="Path to the uv project's pyproject.toml.")
 
 
-class UvVenvEnvironment(Environment):
+class UvVenvEnvironment(ComposableEnvironment):
     kind: Literal["uv-venv"] = "uv-venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -794,7 +810,7 @@ class UvVenvEnvironment(Environment):
     )
 
 
-class PixiEnvironment(Environment):
+class PixiEnvironment(ComposableEnvironment):
     kind: Literal["pixi"] = "pixi"
     path: str = Field(description="Path to the Pixi manifest file.")
     name: str | None = Field(
@@ -817,6 +833,41 @@ class NixEnvironment(Environment):
         description=(
             "Name of the dev shell to enter, passed as #<shell> to "
             "'nix develop'. Defaults to the flake's default dev shell."
+        ),
+    )
+
+
+class TexLiveEnvironment(Environment):
+    kind: Literal["texlive"] = "texlive"
+    release: int | None = Field(
+        default=None,
+        description=(
+            "TeX Live release, e.g., 2025, to install packages from. A "
+            "past release's repository is frozen, so its lock pins every "
+            "package for good. Defaults to the latest frozen release."
+        ),
+    )
+    packages: list[str] = Field(
+        default=[],
+        description=(
+            "TeX Live packages to install, beyond the base set every "
+            "TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). "
+            "What they depend on comes with them, and packages a build "
+            "finds missing are added to the lock, not here."
+        ),
+    )
+    platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "TeX Live platforms to lock for. Defaults to macOS, Windows, "
+            "and Linux on x86_64 and ARM."
+        ),
+    )
+    repository_url: str | None = Field(
+        default=None,
+        description=(
+            "TeX Live repository URL to install from instead of the one "
+            "for 'release', e.g., a local mirror."
         ),
     )
 
@@ -946,7 +997,7 @@ class DockerEnvironment(Environment):
         return self
 
 
-class REnvironment(Environment):
+class REnvironment(ComposableEnvironment):
     kind: Literal["renv"] = "renv"
     path: str = Field(
         description="Path to the project's DESCRIPTION file. The renv lock "
@@ -957,7 +1008,7 @@ class REnvironment(Environment):
     )
 
 
-class JuliaEnvironment(Environment):
+class JuliaEnvironment(ComposableEnvironment):
     kind: Literal["julia"] = "julia"
     path: str = Field(description="Path to the Julia project's Project.toml.")
     julia: str = Field(description="Julia version to use.")
@@ -1390,6 +1441,7 @@ InlineEnvironment = Annotated[
     | UvEnvironment
     | UvVenvEnvironment
     | NixEnvironment
+    | TexLiveEnvironment
     | SystemEnvironment,
     Discriminator("kind"),
 ]
@@ -1848,7 +1900,8 @@ class ResultsEvidence(Model):
     without an entry per value.
     """
 
-    kind: Literal["result"] = "result"
+    # Null too, since an entry with no kind and a key or values is a result
+    kind: Literal["result"] | None = "result"
     path: str
     key: str | None = Field(
         default=None,
@@ -1873,6 +1926,11 @@ class ResultsEvidence(Model):
             "version of the repository where the result can be found."
         ),
     )
+
+    @field_validator("kind", mode="after")
+    @classmethod
+    def _result_kind(cls, kind: str | None) -> str:
+        return "result"
 
     @model_validator(mode="after")
     def _key_or_values(self) -> ResultsEvidence:
@@ -2000,6 +2058,87 @@ class DocumentEvidence(Model):
     )
 
 
+class FileEvidence(Model):
+    """Evidence in the form of a file cited as-is by its path, e.g., a log,
+    a transcript excerpt, a script, or a raw output, optionally at specific
+    lines.
+
+    It has no ``kind``. An entry without one that has a ``key`` or
+    ``values`` is a ``result``, which is how those used to be written.
+    """
+
+    kind: None = Field(
+        default=None,
+        description="Left out, or null, for a file cited by its path.",
+    )
+    path: str
+    lines: (
+        Annotated[int, Field(ge=1)]
+        | Annotated[str, Field(pattern=r"^\s*\d+\s*([-–]\s*\d+\s*)?$")]
+        | None
+    ) = Field(
+        default=None,
+        description=(
+            "Line or inclusive range of lines in the file where the evidence "
+            "is, e.g., 8 or '8-12'. Checked against the file, so a citation "
+            "of lines that are no longer there is an error."
+        ),
+    )
+    explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the file can be found."
+        ),
+    )
+
+    @field_validator("lines", mode="before")
+    @classmethod
+    def _lines_format(cls, lines: object) -> object:
+        from calkit.questions import parse_lines
+
+        if lines is not None:
+            parse_lines(lines)
+        return lines
+
+
+def _evidence_tag(value: object) -> str | None:
+    # Resolved as the check resolves it, so the two can't disagree
+    from calkit.questions import get_evidence_kind
+
+    if isinstance(value, Model):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+    return get_evidence_kind(value) or "file"
+
+
+def _evidence_any_of(schema: dict[str, Any]) -> None:
+    """Publish the evidence union as ``anyOf`` rather than ``oneOf``.
+
+    Every kind but a value's has a default or optional ``kind``, so an
+    entry with just a path, a file, matches several of them, which ``oneOf``
+    would reject.
+    """
+    for option in schema.get("anyOf") or []:
+        items = option.get("items") or {}
+        if "oneOf" in items:
+            items["anyOf"] = items.pop("oneOf")
+
+
+Evidence = Annotated[
+    Annotated[FigureEvidence, Tag("figure")]
+    | Annotated[ResultsEvidence, Tag("result")]
+    | Annotated[ValueEvidence, Tag("value")]
+    | Annotated[TableEvidence, Tag("table")]
+    | Annotated[PublicationEvidence, Tag("publication")]
+    | Annotated[DocumentEvidence, Tag("document")]
+    | Annotated[FileEvidence, Tag("file")],
+    Discriminator(_evidence_tag),
+]
+
+
 class SignOff(Model):
     """A person's sign-off on a question, as a verification or validation.
 
@@ -2089,17 +2228,9 @@ class Question(Model):
             "rather than as an answer lacking evidence."
         ),
     )
-    evidence: (
-        list[
-            FigureEvidence
-            | ResultsEvidence
-            | ValueEvidence
-            | TableEvidence
-            | PublicationEvidence
-            | DocumentEvidence
-        ]
-        | None
-    ) = None
+    evidence: list[Evidence] | None = Field(
+        default=None, json_schema_extra=_evidence_any_of
+    )
     verifications: list[SignOff] | None = Field(
         default=None,
         description=(
@@ -2263,6 +2394,7 @@ class ProjectInfo(Model):
             | UvEnvironment
             | UvVenvEnvironment
             | NixEnvironment
+            | TexLiveEnvironment
             | SystemEnvironment
             | SwitchEnvironment,
             Discriminator("kind"),

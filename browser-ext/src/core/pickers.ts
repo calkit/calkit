@@ -1,3 +1,4 @@
+/** Pickers the panels share: hub, project, and a path in a project. */
 import { RequestFailed, send } from "./messages";
 import { clear, el, errorMessage, loading, textInput } from "./ui";
 
@@ -95,6 +96,8 @@ export async function renderProjectPicker(options: {
   // Focusable, so clicking a row's text doesn't count as leaving the list
   results.tabIndex = -1;
   results.style.outline = "none";
+  // A click keeps focus in the input, so browsing doesn't close the list
+  results.addEventListener("mousedown", (e) => e.preventDefault());
   const message = el("div", { class: "small" });
   const container = el("div", {}, [
     el("label", { text: "Active project" }),
@@ -235,9 +238,7 @@ export function renderFailure(
   });
   button.addEventListener("click", async () => {
     button.disabled = true;
-    clear(message).append(
-      loading("Approve the request in the tab that just opened"),
-    );
+    clear(message).append(loading("Approve the request in the new tab"));
     try {
       await send({ type: "auth.signIn", hubUrl: options.hubUrl });
       options.onSignedIn();
@@ -340,6 +341,8 @@ export function renderPathPicker(options: {
   });
   results.tabIndex = -1;
   results.style.outline = "none";
+  // A click keeps focus in the input, so browsing doesn't close the list
+  results.addEventListener("mousedown", (e) => e.preventDefault());
   const container = el("div", {}, [input, results]);
   let all: Promise<string[]> | null = null;
   let dir = "";
@@ -382,7 +385,11 @@ export function renderPathPicker(options: {
       );
       return;
     }
-    const { dirs, files } = listDir(paths, dir);
+    // Hidden ones, e.g., .calkit/, are Calkit's or Git's, not for picking
+    const { dirs, files } = listDir(
+      paths.filter((path) => !/(^|\/)\./.test(path)),
+      dir,
+    );
     if (dir) {
       const up = dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "";
       results.append(pick(`← ${dir}/`, () => browse(up), "Up a folder"));
@@ -411,6 +418,9 @@ export function renderPathPicker(options: {
   const browse = (to: string) => {
     dir = to;
     typed = false;
+    // Before the folder's button is replaced, or focus leaves the picker
+    // with it and the list closes
+    input.focus();
     void render();
   };
   const choose = (path: string) => {

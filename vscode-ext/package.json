@@ -183,6 +183,12 @@
         "icon": "$(diff)"
       },
       {
+        "command": "calkit-vscode.previewLatex",
+        "title": "Preview PDF",
+        "category": "Calkit",
+        "icon": "$(open-preview)"
+      },
+      {
         "command": "calkit-vscode.showLatexPdf",
         "title": "Show PDF",
         "category": "Calkit",
@@ -236,6 +242,56 @@
         "title": "Save",
         "category": "Calkit",
         "icon": "$(save)"
+      },
+      {
+        "command": "calkit-vscode.runSave",
+        "title": "Run and Save",
+        "category": "Calkit",
+        "icon": "$(run-all)",
+        "enablement": "calkit-vscode.hasProject"
+      },
+      {
+        "command": "calkit-vscode.runSaveSync",
+        "title": "Run, Save, and Sync with Overleaf",
+        "category": "Calkit",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "calkit-vscode.syncOverleaf",
+        "title": "Sync with Overleaf",
+        "category": "Calkit",
+        "icon": "$(sync)",
+        "enablement": "calkit-vscode.syncsWithOverleaf"
+      },
+      {
+        "command": "calkit-vscode.refreshOverleaf",
+        "title": "Check Overleaf",
+        "category": "Calkit",
+        "icon": "$(refresh)",
+        "enablement": "calkit-vscode.syncsWithOverleaf"
+      },
+      {
+        "command": "calkit-vscode.openOnOverleaf",
+        "title": "Open on Overleaf",
+        "category": "Calkit",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "calkit-vscode.importOverleaf",
+        "title": "Import from Overleaf",
+        "category": "Calkit",
+        "icon": "$(add)",
+        "enablement": "calkit-vscode.hasProject"
+      },
+      {
+        "command": "calkit-vscode.overleafLogin",
+        "title": "Sign in to Overleaf",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.resolveOverleafConflict",
+        "title": "Resolve Overleaf Conflict",
+        "category": "Calkit"
       },
       {
         "command": "calkit-vscode.viewStage",
@@ -361,6 +417,16 @@
         "category": "Calkit"
       },
       {
+        "command": "calkit-vscode.enableAutoSyncOverleaf",
+        "title": "Auto-sync Overleaf on run+save",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.disableAutoSyncOverleaf",
+        "title": "✓ Auto-sync Overleaf on run+save",
+        "category": "Calkit"
+      },
+      {
         "command": "calkit-vscode.openCalkitYaml",
         "title": "Open calkit.yaml",
         "category": "Calkit",
@@ -412,9 +478,24 @@
     "menus": {
       "view/title": [
         {
-          "command": "calkit-vscode.save",
+          "command": "calkit-vscode.runPipeline",
           "when": "view == calkit-sidebar && calkit-vscode.hasProject",
           "group": "navigation@0"
+        },
+        {
+          "command": "calkit-vscode.runSave",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject && !calkit-vscode.syncsWithOverleaf || view == calkit-sidebar && calkit-vscode.hasProject && !calkit-vscode.autoSyncOverleaf",
+          "group": "navigation@0"
+        },
+        {
+          "command": "calkit-vscode.runSaveSync",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject && calkit-vscode.syncsWithOverleaf && calkit-vscode.autoSyncOverleaf",
+          "group": "navigation@0"
+        },
+        {
+          "command": "calkit-vscode.save",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject",
+          "group": "navigation@1"
         },
         {
           "command": "calkit-vscode.manageSections",
@@ -450,9 +531,44 @@
           "command": "calkit-vscode.disableAutoRefresh",
           "when": "view == calkit-sidebar && calkit-vscode.autoRefreshStatus",
           "group": "1_options"
+        },
+        {
+          "command": "calkit-vscode.enableAutoSyncOverleaf",
+          "when": "view == calkit-sidebar && calkit-vscode.syncsWithOverleaf && !calkit-vscode.autoSyncOverleaf",
+          "group": "1_options"
+        },
+        {
+          "command": "calkit-vscode.disableAutoSyncOverleaf",
+          "when": "view == calkit-sidebar && calkit-vscode.syncsWithOverleaf && calkit-vscode.autoSyncOverleaf",
+          "group": "1_options"
         }
       ],
       "view/item/context": [
+        {
+          "command": "calkit-vscode.importOverleaf",
+          "when": "view == calkit-sidebar && viewItem == section-overleaf",
+          "group": "inline@0"
+        },
+        {
+          "command": "calkit-vscode.refreshOverleaf",
+          "when": "view == calkit-sidebar && viewItem == section-overleaf && calkit-vscode.syncsWithOverleaf",
+          "group": "inline@1"
+        },
+        {
+          "command": "calkit-vscode.syncOverleaf",
+          "when": "view == calkit-sidebar && viewItem == section-overleaf && calkit-vscode.syncsWithOverleaf",
+          "group": "inline@2"
+        },
+        {
+          "command": "calkit-vscode.openOnOverleaf",
+          "when": "view == calkit-sidebar && viewItem == overleaf-folder-url",
+          "group": "inline@0"
+        },
+        {
+          "command": "calkit-vscode.syncOverleaf",
+          "when": "view == calkit-sidebar && viewItem =~ /^overleaf-folder/",
+          "group": "inline@1"
+        },
         {
           "command": "calkit-vscode.hideSection",
           "when": "view == calkit-sidebar && viewItem =~ /^section-/",
@@ -597,6 +713,11 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "calkit-vscode.previewLatex",
+          "when": "resourceExtname == .tex && calkit.activeFileHasStage",
+          "group": "navigation"
+        },
         {
           "command": "calkit-vscode.showLatexPdf",
           "when": "resourceExtname == .tex && calkit.activeFileHasStage || calkit.activeFileBuildsPdf",
@@ -827,6 +948,10 @@
           "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)"
         },
         {
+          "command": "calkit-vscode.previewLatex",
+          "when": "resourceExtname == .tex && calkit.activeFileHasStage"
+        },
+        {
           "command": "calkit-vscode.showInPdf",
           "when": "resourceExtname == .tex || calkit.activeFileBuildsPdf"
         },
@@ -888,6 +1013,14 @@
         {
           "command": "calkit-vscode.togglePdfSource",
           "when": "resourceExtname == .tex || calkit.activeFileBuildsPdf || activeCustomEditorId == 'calkit.pdfReview'"
+        },
+        {
+          "command": "calkit-vscode.openOnOverleaf",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.resolveOverleafConflict",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -935,6 +1068,23 @@
           "default": [],
           "scope": "resource",
           "description": "Calkit sidebar sections to hide. Manage these via the sidebar's 'Manage sections' action or by right-clicking a section header."
+        },
+        "calkit.overleaf.checkInterval": {
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "description": "How often, in seconds, to check folders synced with Overleaf for changes while VS Code has focus. 0 turns it off."
+        },
+        "calkit.overleaf.autoSync": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Sync with Overleaf too when running and saving from the Calkit sidebar, in a project that syncs with Overleaf."
+        },
+        "calkit.runAndSave.askForMessage": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ask for a commit message when running and saving from the Calkit sidebar. Otherwise the message names the one file changed, e.g., 'Update fit_rates.ipynb', or is 'Run pipeline'."
         }
       }
     }

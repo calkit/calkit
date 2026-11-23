@@ -42,6 +42,7 @@ import useAuth from "../../../../../hooks/useAuth"
 import useProject, {
   useProjectPresentations,
 } from "../../../../../hooks/useProject"
+import { safeHref } from "../../../../../lib/strings"
 
 const presSearchSchema = z.object({
   path: z.string().optional(),
@@ -119,7 +120,7 @@ function PresInfo({ presentation }: PresInfoProps) {
         <Box mt={3}>
           <Button
             as="a"
-            href={String(presentation.url)}
+            href={safeHref(String(presentation.url))}
             download
             target="_blank"
             rel="noopener noreferrer"

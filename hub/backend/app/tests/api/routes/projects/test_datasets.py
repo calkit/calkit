@@ -276,7 +276,10 @@ def _streaming(body: bytes, headers: dict | None = None):
 
 
 def test_post_project_dataset_fetches_imports(
-    client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path,
+    monkeypatch,
 ) -> None:
     repo, origin = _repo(tmp_path)
     fake_project = SimpleNamespace(
@@ -377,13 +380,35 @@ def test_post_project_dataset_fetches_imports(
         assert (tmp_path / "repo" / "data" / "multi" / "a.csv").exists()
         assert (tmp_path / "repo" / "data" / "multi" / "b.csv").exists()
         assert not (tmp_path / "repo" / "data" / "multi.csv").exists()
+        # Only https:// repos are cloned, since a local path or file:// URL
+        # would read the server's own files
+        for local in [str(tmp_path / "src"), f"file://{tmp_path / 'src'}"]:
+            resp = client.post(
+                URL,
+                json={
+                    "path": "data/local.csv",
+                    "imported_from": {
+                        "git_repo_url": local,
+                        "path": "data/wind.csv",
+                    },
+                },
+                headers=normal_user_token_headers,
+            )
+            assert resp.status_code == 422, resp.text
+        # Git maps this https:// URL to the local source repo
+        git_url = "https://example.org/src"
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv(
+            "GIT_CONFIG_KEY_0", f"url.{tmp_path / 'src'}.insteadOf"
+        )
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", git_url)
         # A Git repo path at a commit is copied over
         resp = client.post(
             URL,
             json={
                 "path": "data/wind.csv",
                 "imported_from": {
-                    "git_repo_url": str(tmp_path / "src"),
+                    "git_repo_url": git_url,
                     "git_ref": rev,
                     "path": "data/wind.csv",
                 },
@@ -401,7 +426,7 @@ def test_post_project_dataset_fetches_imports(
             json={
                 "path": "data/wind-head.csv",
                 "imported_from": {
-                    "git_repo_url": str(tmp_path / "src"),
+                    "git_repo_url": git_url,
                     "path": "data/wind.csv",
                 },
             },

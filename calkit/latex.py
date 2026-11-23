@@ -61,18 +61,25 @@ WORKING_NAME = "working"
 # of a full TeX Live image. Pinned to an exact tag rather than :latest so
 # a document keeps building against the same TeX until this is moved
 # deliberately; what it carries is recorded in images/latex/README.md.
-DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.7"
-# The environment created for a document that doesn't have one, wherever
-# that happens: a new publication, an Overleaf import, or a stage whose
-# environment is worked out from what it runs. Copied where it's used,
-# since what's written into a project is the caller's to amend.
-DEFAULT_LATEX_ENVIRONMENT = {
-    "kind": "docker",
-    "image": DEFAULT_LATEX_IMAGE,
-    "description": "TeX Live via Calkit's LaTeX image.",
-}
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.8"
 
 
+def is_latex_env(env: dict) -> bool:
+    """Whether an environment builds LaTeX: a TeX Live one, or a Docker
+    one whose image carries TeX Live.
+    """
+    if env.get("kind") == "texlive":
+        return True
+    image = env.get("image") or ""
+    return env.get("kind") == "docker" and (
+        "texlive" in image or "calkit/latex" in image
+    )
+
+
+# TeX run before the document, keeping it in nonstop mode when a class
+# switches back, e.g., one that tests for fonts in batch mode, so an error
+# doesn't stop a build that nobody is there to answer
+NONSTOP_PRETEX = r"\let\errorstopmode\nonstopmode"
 # TeX run before the document, leaving the dates and trailer ID out of the
 # PDF. Even taken from a commit, the date changes when history is rewritten,
 # e.g., by a squash merge, which changes the bytes of an identical document.
@@ -176,8 +183,17 @@ CONTAINER_TEXMF_DIR = "/work/.calkit/local/texmf"
 # couldn't, e.g., "Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable"
 _MISSING_FILE_RE = re.compile(r"File `([^']+)' not found")
 _MISSING_TFM_RE = re.compile(
-    r"Font \S+=(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
+    r"Font \S+=(?![\"\[])(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
 )
+# XeTeX's and LuaTeX's for a font fontspec loads by file name, e.g.,
+# "Font TU/...=[texgyretermes-regular.otf]/OT at 10.0pt not loadable"
+_MISSING_FONT_FILE_RE = re.compile(r"Font \S+=\"?\[([^\]\n]+\.[ot]t[fc])\]")
+# LuaTeX's require() of a module no package installed, e.g., pdftexcmds
+# under LuaLaTeX, which only says so as a Lua error
+_MISSING_LUA_RE = re.compile(r"module '([^']+)' not found")
+# pdfTeX's for a font with metrics but no outlines, e.g., T1-encoded
+# Computer Modern without cm-super, falling back to a bitmap
+_MISSING_FONT_RE = re.compile(r"Font (\S+) at \d+ not found")
 
 
 def get_texmf_cache_dir(wdir: str | None = None) -> str:
@@ -192,17 +208,176 @@ def get_texmf_cache_dir(wdir: str | None = None) -> str:
     return os.path.join(ensure_local_dir(wdir), "texmf")
 
 
+def get_latexmk_programs(latexmk_cmd: list[str], wdir: str = ".") -> list[str]:
+    """The programs a latexmk command makes its PDF with: the TeX engine,
+    e.g., 'xelatex', then any converter, e.g., 'dvipdf' from DVI.
+
+    Follows latexmk's own order: the rc file in the directory it runs in,
+    then its options, including '-r' rc files and '-e' code where they
+    appear. The user's own rc file is left out, since it isn't the
+    project's.
+    """
+    modes = {"pdf_mode": 0, "dvi_mode": 0, "xdv_mode": 0}
+    programs = {
+        "pdflatex": "pdflatex",
+        "lualatex": "lualatex",
+        "xelatex": "xelatex",
+        "latex": "latex",
+        "dvipdf": "dvipdf",
+        "dvips": "dvips",
+        "ps2pdf": "ps2pdf",
+    }
+    flags = {
+        "-pdf": {"pdf_mode": 1, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflatex": {"pdf_mode": 1, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflua": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-lualatex": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflualatex": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdfxe": {"pdf_mode": 5, "dvi_mode": 0},
+        "-xelatex": {"pdf_mode": 5, "dvi_mode": 0},
+        "-pdfxelatex": {"pdf_mode": 5, "dvi_mode": 0},
+        "-pdfdvi": {"pdf_mode": 3, "xdv_mode": 0},
+        "-pdfps": {"pdf_mode": 2, "xdv_mode": 0},
+        "-dvi": {"dvi_mode": 1},
+        "-latex": {"dvi_mode": 1, "xdv_mode": 0},
+        "-xdv": {"xdv_mode": 1, "dvi_mode": 0},
+    }
+    commands = {
+        "pdflatex": "pdflatex",
+        "pdflualatex": "lualatex",
+        "lualatex": "lualatex",
+        "pdfxelatex": "xelatex",
+        "xelatex": "xelatex",
+        "latex": "latex",
+    }
+
+    def read_perl(code: str) -> None:
+        # Assignments in the order they appear, which is enough for an rc
+        # file setting a mode or a command
+        code = re.sub(
+            r"""('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$#)|#.*""",
+            lambda m: m.group(1) or "",
+            code,
+        )
+        for m in re.finditer(
+            r"\$(pdf_mode|dvi_mode|xdv_mode)\s*=\s*(\d+)"
+            r"|\$(pdflatex|lualatex|xelatex|latex|dvipdf|dvips|ps2pdf)"
+            r"\s*=\s*(['\"])(.*?)\4",
+            code,
+        ):
+            if m.group(1):
+                modes[m.group(1)] = int(m.group(2))
+            else:
+                programs[m.group(3)] = m.group(5)
+
+    def read_rc(fpath: str) -> None:
+        try:
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                read_perl(f.read())
+        except OSError:
+            pass
+
+    for name in [".latexmkrc", "latexmkrc"]:
+        if os.path.isfile(os.path.join(wdir, name)):
+            read_rc(os.path.join(wdir, name))
+            break
+    args = iter(latexmk_cmd[1:])
+    for arg in args:
+        if arg in ("-r", "-e"):
+            value = next(args, "")
+            if arg == "-r":
+                read_rc(os.path.join(wdir, value))
+            else:
+                read_perl(value)
+        elif arg in flags:
+            pdf_mode = modes["pdf_mode"]
+            modes.update(flags[arg])
+            # As latexmk does, -latex and -xdv keep a PDF mode that
+            # converts from their output
+            if arg == "-latex" and pdf_mode in (2, 3):
+                modes["pdf_mode"] = pdf_mode
+            elif arg == "-xdv" and pdf_mode != 5:
+                modes["pdf_mode"] = 0
+            elif arg == "-latex":
+                modes["pdf_mode"] = 0
+        elif arg.startswith("-") and "=" in arg:
+            option, value = arg[1:].split("=", 1)
+            if option in commands:
+                programs[commands[option]] = value
+    if modes["pdf_mode"] == 5 or modes["xdv_mode"]:
+        command = programs["xelatex"]
+    elif modes["pdf_mode"] == 4:
+        command = programs["lualatex"]
+    elif modes["pdf_mode"] == 1:
+        command = programs["pdflatex"]
+    else:
+        command = programs["latex"]
+    commands_run = [command]
+    if modes["pdf_mode"] == 2:
+        commands_run += [programs["dvips"], programs["ps2pdf"]]
+    elif modes["pdf_mode"] == 3:
+        commands_run.append(programs["dvipdf"])
+    return [
+        os.path.splitext(os.path.basename(c.split()[0]))[0]
+        for c in commands_run
+        if c.split()
+    ]
+
+
 def find_missing_tex_files(log: str) -> list[str]:
     """The files a LaTeX log says it couldn't find, in the order it says.
 
     Style and class files are named as they are; a font whose metrics are
-    missing is named as its ``.tfm`` file, which is what finds the package
-    providing it.
+    missing is named as its ``.tfm`` file, and one whose outlines are as
+    its ``.pfb`` file, which is what finds the package providing it. One
+    fontspec loads by file name is named as that file.
     """
-    found = _MISSING_FILE_RE.findall(log) + [
-        f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)
-    ]
+    found = (
+        _MISSING_FILE_RE.findall(log)
+        + [f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)]
+        + [f"{name}.lua" for name in _MISSING_LUA_RE.findall(log)]
+        + [f"{name}.pfb" for name in _MISSING_FONT_RE.findall(log)]
+        + _MISSING_FONT_FILE_RE.findall(log)
+    )
     return list(dict.fromkeys(found))
+
+
+def find_named_tex_files(tex_file: str) -> list[str]:
+    """List the classes, packages, and bibliography styles a document names.
+
+    Read from the document and the files it inputs, so a missing package
+    can be found before compiling rather than one failed run at a time.
+    Names built from macros are skipped.
+    """
+    tex_dir = os.path.dirname(tex_file)
+    exts = {
+        "documentclass": ".cls",
+        "usepackage": ".sty",
+        "RequirePackage": ".sty",
+        "bibliographystyle": ".bst",
+    }
+    names: list[str] = []
+    queue = [tex_file]
+    seen = {os.path.normpath(tex_file)}
+    while queue:
+        try:
+            with open(queue.pop(), encoding="utf-8", errors="replace") as f:
+                tex = _strip_comments(f.read())
+        except OSError:
+            continue
+        for command, arg in _INPUT_RE.findall(tex):
+            for raw in [n.strip() for n in arg.split(",")]:
+                if not raw or "#" in raw or "\\" in raw:
+                    continue
+                if command in exts:
+                    names.append(raw + exts[command])
+                elif command in ("input", "include", "subfile"):
+                    for name in (raw, raw + ".tex"):
+                        path = os.path.normpath(os.path.join(tex_dir, name))
+                        if path not in seen and os.path.isfile(path):
+                            seen.add(path)
+                            queue.append(path)
+    return list(dict.fromkeys(names))
 
 
 def _ref_dirname(ref: str) -> str:
@@ -1045,10 +1220,6 @@ def map_ck_components(
     Returns what couldn't be brought in, e.g., a file the pipeline hasn't
     produced yet. Those print as ``??`` rather than failing the build.
     """
-    import calkit.git
-    import calkit.resources
-    from calkit.questions import read_evidence_file
-
     named = [] if os.path.isdir(path or ".") else [path]
     folder = os.path.dirname(path) if named else path
     docs = list(
@@ -1088,6 +1259,8 @@ def map_ck_components(
             shutil.rmtree(out)
         # Only the one Calkit wrote, and never one that's committed
         if os.path.isfile(style_path):
+            import calkit.git
+
             with open(style_path, encoding="utf-8", errors="replace") as f:
                 ours = "Calkit project components" in f.read()
             try:
@@ -1105,6 +1278,12 @@ def map_ck_components(
             if ours and not committed:
                 os.remove(style_path)
         return []
+    # Imported only here, since most documents use no components, and
+    # GitPython alone is a noticeable part of a build's startup
+    import calkit.git
+    import calkit.resources
+    from calkit.questions import read_evidence_file
+
     # Component paths are relative to the project, wherever the document is
     root = os.path.abspath(folder or ".")
     while not os.path.isfile(os.path.join(root, "calkit.yaml")):
@@ -1298,7 +1477,11 @@ LOCAL_DOCX_MERGES_DIR = os.path.join(LOCAL_DIR, "docx-merges")
 DOCX_BUILD_DIR = os.path.join(LOCAL_DIR, "latex-docx-build")
 # Word bookmark names: 40 chars max, letters/digits/underscores
 _INCLUDE_RE = re.compile(
-    r"^\s*\\(input|include|subfile|import)\{([^}]*)\}(?:\{([^}]*)\})?"
+    r"^\s*\\(input|include|subfile|import)\s*\{([^}]*)\}(?:\s*\{([^}]*)\})?"
+)
+# An include anywhere in a line, e.g., after text
+_INLINE_INCLUDE_RE = re.compile(
+    r"\\(input|include|subfile|import)\s*\{([^}]*)\}(?:\s*\{([^}]*)\})?"
 )
 _BLOCK_START_RE = re.compile(
     r"^\s*\\(begin|end|section|subsection|subsubsection|chapter|part|item|"
@@ -1623,8 +1806,19 @@ def flatten(
             return
         seen.add(key)
         for i, line in enumerate(text.split("\n"), 1):
-            m = None if markdown else _INCLUDE_RE.match(_strip_comments(line))
-            if m:
+            matches = (
+                []
+                if markdown
+                else list(_INLINE_INCLUDE_RE.finditer(_strip_comments(line)))
+            )
+            if not matches:
+                out.append(SourceLine(rel, i, line))
+                continue
+            # Text around an include is kept, on the line it's on
+            pos = 0
+            for m in matches:
+                if line[pos : m.start()].strip():
+                    out.append(SourceLine(rel, i, line[pos : m.start()]))
                 cmd, a, b = m.groups()
                 target = Path(b) if cmd == "import" and b else Path(a)
                 start = base / a if cmd == "import" else base
@@ -1634,8 +1828,9 @@ def flatten(
                 # TeX reads \input paths from where it compiles, and only
                 # \import moves that to the imported file's folder
                 visit(child, child.parent if cmd == "import" else base)
-                continue
-            out.append(SourceLine(rel, i, line))
+                pos = m.end()
+            if line[pos:].strip():
+                out.append(SourceLine(rel, i, line[pos:]))
 
     visit(main, main.parent)
     return out

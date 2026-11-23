@@ -1,3 +1,4 @@
+import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -24,18 +25,42 @@ def test_get_project_provenance(client: TestClient) -> None:
         "paper/pasted.png": "",
         "paper/diagram.png": "",
         "paper/box.png": "",
+        "paper/from-src.png": "old",
+        "paper/from-stored.png": "old",
+        "paper/from-git.png": "",
+        # The other project's, which has moved on
+        "figs/plot.png": "new",
+        ".calkit/imports.json": json.dumps(
+            {
+                path: {"hash": "sha256:" + hashlib.sha256(b"old").hexdigest()}
+                for path in ["paper/from-src.png", "paper/from-stored.png"]
+            }
+        ),
     }
     # In object storage, inside a directory a stage outputs
-    stored = {"results/sweep/summary.json": json.dumps({"best": 7})}
+    stored = {
+        "results/sweep/summary.json": json.dumps({"best": 7}),
+        # The other project's, kept with DVC, which has moved on too
+        "figs/stored.png": "new",
+    }
     tree = SimpleNamespace(
         is_file=lambda path: path in files,
         is_dir=lambda path: path == "data/downloaded",
         listdir=lambda path: (
             ["a.csv", "notes.csv"] if path == "data/downloaded" else []
         ),
+        read_text=lambda path: files[path],
+        read_bytes=lambda path: files[path].encode(),
     )
     ck_info = {
-        "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
+        "environments": {
+            "py": {"kind": "uv", "path": "pyproject.toml"},
+            "lo": {
+                "kind": "docker",
+                "image": "ghcr.io/calkit/libreoffice:0.1.0",
+            },
+            "ppt": {"kind": "system", "requirements": ["powerpoint"]},
+        },
         "datasets": [
             {
                 "path": "data/downloaded",
@@ -56,6 +81,24 @@ def test_get_project_provenance(client: TestClient) -> None:
             {"path": "paper/exported.png", "created_by": {"name": "Ada"}},
             # Only described, so nobody else can check it
             {"path": "paper/box.png", "imported_from": "Our Box folder"},
+            {
+                "path": "paper/from-src.png",
+                "imported_from": {"project": "o/src", "path": "figs/plot.png"},
+            },
+            {
+                "path": "paper/from-stored.png",
+                "imported_from": {
+                    "project": "o/src",
+                    "path": "figs/stored.png",
+                },
+            },
+            {
+                "path": "paper/from-git.png",
+                "imported_from": {
+                    "git_repo_url": "https://github.com/a/b",
+                    "path": "fig.png",
+                },
+            },
         ],
         "pipeline": {
             "stages": {
@@ -85,6 +128,18 @@ def test_get_project_provenance(client: TestClient) -> None:
                     "source_path": "figs/setup.svg",
                     "outputs": ["paper/setup.png"],
                 },
+                # Slides, by whichever app each environment provides
+                **{
+                    f"export-slide-{env}": {
+                        "kind": "pptx-export",
+                        "source_path": "figs/slides.pptx",
+                        "environment": env,
+                        "outputs": [
+                            {"path": f"paper/slide-{env}.pdf", "slide": 1}
+                        ],
+                    }
+                    for env in ["lo", "ppt", "_system"]
+                },
                 # Puts the plot beside the paper, which includes it there
                 "copy": {
                     "kind": "map-paths",
@@ -93,7 +148,12 @@ def test_get_project_provenance(client: TestClient) -> None:
                             "kind": "file-to-file",
                             "src": "figs/out.png",
                             "dest": "paper/out.png",
-                        }
+                        },
+                        {
+                            "kind": "file-to-file",
+                            "src": "paper/from-src.png",
+                            "dest": "slides/from-src.png",
+                        },
                     ],
                 },
             }
@@ -258,6 +318,10 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["stage_kind"] == "inkscape-export"
     assert body["stage_app"] == "Inkscape"
     assert body["source"] == "figs/setup.svg"
+    for env, app in [("lo", "LibreOffice"), ("ppt", "PowerPoint")]:
+        assert get(f"path=paper/slide-{env}.pdf")["stage_app"] == app
+    # though the system's own depends on the machine
+    assert get("path=paper/slide-_system.pdf")["stage_app"] is None
     # A figure nothing accounts for is a gap itself
     for path in ["paper/pasted.png", "paper/exported.png"]:
         body = get(f"path={path}")
@@ -273,6 +337,27 @@ def test_get_project_provenance(client: TestClient) -> None:
     body = get("path=paper/box.png")
     assert body["origin"] == "Our Box folder"
     assert [g["unchecked"] for g in body["gaps"]] == [True]
+    assert not body["updatable"]
+    # Imported from another project, which has something newer
+    body = get("path=paper/from-src.png")
+    assert body["origin"] == "Imported from o/src/figs/plot.png"
+    assert body["origin_url"].endswith("/o/src/files?path=figs/plot.png")
+    assert body["updatable"]
+    assert body["update_available"]
+    # Also when the source is kept with DVC rather than Git
+    body = get("path=paper/from-stored.png")
+    assert body["updatable"]
+    assert body["update_available"]
+    # A copy of an import shows where it came from, but is updated through
+    # the import itself
+    body = get("path=slides/from-src.png")
+    assert body["origin"] == "Imported from o/src/figs/plot.png"
+    assert body["copied_from"] == "paper/from-src.png"
+    assert not body["updatable"]
+    # Imported from a Git repo, which would have to be cloned to tell
+    body = get("path=paper/from-git.png")
+    assert body["updatable"]
+    assert body["update_available"] is None
     # Nothing produces an authored file
     body = get("path=scripts/analyze.py")
     assert body["exists"]

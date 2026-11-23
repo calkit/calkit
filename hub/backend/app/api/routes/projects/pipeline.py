@@ -15,10 +15,13 @@ e.g., for a figure a paper includes that nothing in the pipeline produces.
 
 import base64
 import binascii
-import json
+import glob
+import hashlib
 import os
+import posixpath
 import re
 import subprocess
+import sys
 import tempfile
 import uuid
 from collections import deque
@@ -38,9 +41,11 @@ from sqlmodel import col, select
 import app.cache
 import app.github
 import app.projects
+import calkit.detect
 import calkit.export
 import calkit.latex
 import calkit.pipeline
+import calkit.pipeline.detect
 import calkit.provenance
 import calkit.resources
 from app.api.deps import CurrentUser, SessionDep
@@ -50,9 +55,10 @@ from app.api.routes.projects.core import (
     _dump_ck_stage_map,
     _github_token_for_repo,
     _inside,
+    _push_dvc_cache_to_storage,
     _validate_ck_stage,
 )
-from app.api.routes.projects.figures import _clean_rel_path, _slug
+from app.api.routes.projects.figures import _clean_rel_path
 from app.config import settings
 from app.core import logger, ryaml, utcnow
 from app.dvc import run_dvc_command
@@ -332,9 +338,28 @@ def _commit_pipeline(
         record_project_update(project, repo, session)
 
 
-# What calkit xr makes a script stage from, by extension
-SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
 MAX_SCRIPT_BYTES = 1_000_000
+# All the data uploaded with a script, which arrives in one request
+MAX_SCRIPT_DATA_BYTES = 50_000_000
+
+
+class ScriptDataFile(BaseModel):
+    # Relative to the data's path in the project, or empty for a single file
+    path: str = ""
+    # Base64-encoded
+    content: str
+
+
+class ScriptData(BaseModel):
+    """Data a script reads from outside the project, and its place in it."""
+
+    # As the script names it, e.g., one of the detected external inputs
+    external: str
+    # Where it goes, or already is, in the project
+    path: str
+    # Uploaded; without any, it's already in the project, or for a dry run,
+    # will be
+    files: list[ScriptDataFile] = []
 
 
 class StageFromScriptOrNotebookPost(BaseModel):
@@ -346,6 +371,9 @@ class StageFromScriptOrNotebookPost(BaseModel):
     # the script's outputs that is, when the script writes it elsewhere
     shows: str | None = None
     produces: str | None = None
+    # Data to read from the project instead, with the script's paths to it
+    # rewritten
+    data: list[ScriptData] = []
     # Without it, nothing is written, so the user can see what would be
     save: bool = False
 
@@ -362,8 +390,17 @@ class StageFromScriptOrNotebookResponse(BaseModel):
     dependencies: list[str] = []
     inputs: list[str] = []
     outputs: list[str] = []
+    # Those found by reading the script, or already declared by its stage,
+    # rather than only added because a document shows them
+    found_outputs: list[str] = []
     # Inputs that aren't in the project and that no stage produces
     missing_inputs: list[str] = []
+    # Data read from outside the project, e.g., a synced Box folder, as the
+    # script names it, which only the machine it came from has
+    external_inputs: list[str] = []
+    # Data paths the script was changed to read from the project instead,
+    # as it named them
+    rewritten: list[str] = []
     # Which output is what the document shows, and the documents changed
     # to show it from there with \ckfigure when that's a different path
     produces: str | None = None
@@ -390,7 +427,9 @@ def post_project_stage_from_script_or_notebook(
     script isn't left in the project's clone before it's saved. With
     ``save``, the script, its environment, and the stage are committed,
     with each document that shows the output elsewhere changed to show it
-    with ``\\ckfigure`` from where it's made.
+    with ``\\ckfigure`` from where it's made. Data it reads from outside
+    the project can come with it, and the script is changed to read the
+    project's copy.
     """
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -404,12 +443,8 @@ def post_project_stage_from_script_or_notebook(
     )
     wdir = str(repo.working_dir)
     script_path = _clean_rel_path(req.script_path, "script")
-    if not script_path.lower().endswith(SCRIPT_EXTS):
-        raise HTTPException(
-            422,
-            "Scripts can be Python, R, Julia, MATLAB, shell, or Jupyter "
-            "notebooks",
-        )
+    if not script_path.lower().endswith(calkit.pipeline.detect.SCRIPT_EXTS):
+        raise HTTPException(422, calkit.pipeline.detect.SCRIPT_EXTS_MESSAGE)
     content = None
     if req.content is not None:
         try:
@@ -432,6 +467,120 @@ def post_project_stage_from_script_or_notebook(
                     f"'{script_path}' is already in the project; pick it "
                     "without uploading, or upload under another name",
                 )
+    # Data, checked in full before anything is written
+    data_files: list[tuple[str, bytes]] = []
+    data_paths: list[str] = []
+    moves: dict[str, str] = {}
+    # What the script names is relative to where it runs: a notebook's
+    # folder, or else the project
+    run_dir = (
+        posixpath.dirname(script_path)
+        if script_path.lower().endswith(".ipynb")
+        else "."
+    )
+    for data in req.data:
+        data_path = _clean_rel_path(data.path, "data")
+        if not _inside(wdir, os.path.join(wdir, data_path)):
+            raise HTTPException(
+                422, f"'{data_path}' leads outside the project"
+            )
+        # The script names it in a string
+        if re.search("['\"]", data_path):
+            raise HTTPException(422, f"'{data_path}' can't have quotes")
+        for file in data.files:
+            path = _clean_rel_path(
+                posixpath.join(data_path, file.path)
+                if file.path
+                else data_path,
+                "data",
+            )
+            full = os.path.join(wdir, path)
+            if not _inside(wdir, full):
+                raise HTTPException(422, f"'{path}' leads outside the project")
+            try:
+                content_bytes = base64.b64decode(file.content, validate=True)
+            except (binascii.Error, ValueError):
+                raise HTTPException(
+                    422, f"Content of '{path}' isn't valid base64"
+                )
+            data_files.append((path, content_bytes))
+            if sum(len(c) for _, c in data_files) > MAX_SCRIPT_DATA_BYTES:
+                raise HTTPException(
+                    413,
+                    "The data is too large to upload with the script; add "
+                    "it to the project another way, e.g., with 'calkit add' "
+                    "on the computer that has it",
+                )
+        if (
+            req.save
+            and not data.files
+            and not any(
+                os.path.exists(os.path.join(wdir, data_path + ext))
+                for ext in ("", ".dvc")
+            )
+        ):
+            raise HTTPException(404, f"'{data_path}' is not in the project")
+        data_paths.append(data_path)
+        moves[data.external] = posixpath.relpath(data_path, run_dir)
+    # Nothing already in the project, or uploaded with it, is replaced, and
+    # a file never goes where a folder is or the other way around
+    planned: dict[str, bytes] = {}
+    for path, content_bytes in data_files:
+        if planned.setdefault(path, content_bytes) != content_bytes:
+            raise HTTPException(
+                409,
+                f"Different files would go to '{path}'; pick another place "
+                "for one",
+            )
+    for path, content_bytes in planned.items():
+        full = os.path.join(wdir, path)
+        parents = []
+        parent = posixpath.dirname(path)
+        while parent:
+            parents.append(parent)
+            parent = posixpath.dirname(parent)
+        same = False
+        if os.path.isfile(full):
+            with open(full, "rb") as fb:
+                same = fb.read() == content_bytes
+        taken = (
+            (os.path.exists(full) and not same)
+            or any(p in planned for p in parents)
+            or any(os.path.isfile(os.path.join(wdir, p)) for p in parents)
+        )
+        # DVC-tracked data is there even when it isn't checked out
+        for p in [path, *parents]:
+            dvc_path = os.path.join(wdir, p + ".dvc")
+            if same or taken or not os.path.isfile(dvc_path):
+                continue
+            with open(dvc_path) as f:
+                outs = (ryaml.load(f) or {}).get("outs") or [{}]
+            taken = (
+                p != path
+                or outs[0].get("md5") != hashlib.md5(content_bytes).hexdigest()
+            )
+        if taken:
+            raise HTTPException(
+                409,
+                f"'{path}' is already in the project; pick another place for "
+                "the data",
+            )
+    # The script, changed to read the project's copies
+    rewritten: list[str] = []
+    if moves:
+        if content is not None:
+            source = content
+        else:
+            with open(os.path.join(wdir, script_path), "rb") as fb:
+                source = fb.read()
+        try:
+            text, rewritten = calkit.detect.rewrite_paths(
+                source.decode("utf-8"), moves
+            )
+        except UnicodeDecodeError:
+            raise HTTPException(422, f"'{script_path}' isn't UTF-8 text")
+        if rewritten:
+            content = text.encode("utf-8")
     # Read in a checkout of its own, discarded after
     scan_dir = tempfile.mkdtemp(prefix="calkit-xr-")
     os.rmdir(scan_dir)
@@ -447,154 +596,52 @@ def post_project_stage_from_script_or_notebook(
             with open(dest, "wb") as fb:
                 fb.write(content)
         try:
-            result = subprocess.run(
-                ["calkit", "xr", "--dry-run", "--json", script_path],
-                cwd=scan_dir,
-                capture_output=True,
-                text=True,
-                timeout=120,
+            detected = calkit.pipeline.detect.get_script_detection(
+                script_path, wdir=scan_dir
             )
-        except subprocess.TimeoutExpired:
-            raise HTTPException(504, f"Reading '{script_path}' took too long")
+        except TimeoutError as e:
+            raise HTTPException(504, str(e))
+        except ValueError as e:
+            logger.info(f"xr --dry-run on {script_path} failed: {e}")
+            raise HTTPException(422, str(e))
     finally:
         repo.git.worktree("remove", "--force", scan_dir)
-    # Anything printed before the JSON is xr saying what it chose
-    start = result.stdout.find("\n{")
-    if result.returncode != 0 or not result.stdout.strip():
-        lines = [x.strip() for x in result.stderr.splitlines() if x.strip()]
-        detail = lines[-1].removeprefix("Error: ") if lines else ""
-        logger.info(f"xr --dry-run on {script_path} failed: {result.stderr}")
-        raise HTTPException(422, detail or f"Can't read '{script_path}'")
-    detected = json.loads(
-        result.stdout
-        if result.stdout.startswith("{")
-        else result.stdout[start + 1 :]
-    )
-    env = detected["environment"]
-    stage_name = detected["stage"]["name"]
-    stage = detected["stage"]["stage"]
     ck_info = get_ck_info_from_repo(repo=repo)
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    # A stage that already runs this script keeps what it declares, with
-    # anything newly found added
-    existing_stage = stages.get(stage_name)
-    if isinstance(existing_stage, dict):
-        merged = dict(existing_stage)
-        for field in ("outputs", "inputs"):
-            items = list(existing_stage.get(field) or [])
-            known = {
-                i.get("path") if isinstance(i, dict) else i for i in items
-            }
-            items += [
-                i
-                for i in stage.get(field) or []
-                if (i["path"] if isinstance(i, dict) else i) not in known
-            ]
-            if items:
-                merged[field] = items
-        stage = merged
-    outputs = [
-        o["path"] if isinstance(o, dict) else o
-        for o in stage.get("outputs") or []
-    ]
-    # Env vars, schedules, and other stages' outputs aren't paths
-    inputs = [
-        i if isinstance(i, str) else i["path"]
-        for i in stage.get("inputs") or []
-        if isinstance(i, str) or "path" in i
-    ]
     tree = get_repo_tree_for_ref(repo, None)
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
-    missing = [
-        i
-        for i in inputs
-        if not os.path.exists(os.path.join(wdir, i))
-        and i not in dvc_outs
-        and calkit.pipeline.get_stage_for_output(i, ck_info) is None
-    ]
-
-    def include(shown: str, path: str) -> dict[str, str]:
-        # The new text of each document file that would show it from path
-        documents = [
-            s["target_path"]
-            for s in stages.values()
-            if isinstance(s, dict)
-            and s.get("kind") == "latex"
-            and s.get("target_path")
-        ]
-        for folder in ck_info.get("overleaf_sync") or {}:
-            if os.path.isdir(os.path.join(wdir, folder)):
-                documents += [
-                    os.path.relpath(d, wdir)
-                    for d in calkit.latex.root_documents(
-                        os.path.join(wdir, folder)
-                    )
-                ]
-        changed: dict[str, str] = {}
-        for document in dict.fromkeys(documents):
-            changed.update(
-                calkit.latex.include_figure(document, shown, path, wdir=wdir)
-            )
-        return changed
-
-    # The output the document shows: the same path, or the one the user
-    # picked, or else the only one with the same file name
-    shows = _clean_rel_path(req.shows, "shown") if req.shows else None
-    produces = None
-    if req.produces is not None:
-        produces = _clean_rel_path(req.produces, "output")
-        if produces not in outputs and produces != shows:
-            raise HTTPException(
-                422, f"'{script_path}' doesn't write '{produces}'"
-            )
-    elif shows in outputs:
-        produces = shows
-    elif shows is not None:
-        same_name = [
-            o
-            for o in outputs
-            if os.path.basename(o) == os.path.basename(shows)
-        ]
-        # Only worth guessing if a document includes it, so it can show it
-        # from there instead
-        if len(same_name) == 1 and include(shows, same_name[0]):
-            produces = same_name[0]
-    # What the document shows is what the stage makes, so if the script
-    # isn't found writing it anywhere, it writes it there
-    if shows is not None and produces is None:
-        produces = shows
-    if produces is not None and produces not in outputs:
-        tracked = bool(repo.git.ls_files("--", produces).strip())
-        stage.setdefault("outputs", []).append(
-            {"path": produces, "storage": "git"} if tracked else produces
+    try:
+        plan = calkit.pipeline.detect.get_stage_from_script_plan(
+            script_path,
+            detected,
+            ck_info,
+            wdir=wdir,
+            shows=_clean_rel_path(req.shows, "shown") if req.shows else None,
+            produces=(
+                _clean_rel_path(req.produces, "output")
+                if req.produces is not None
+                else None
+            ),
+            data_paths=data_paths,
+            is_dvc_output=lambda path: path in dvc_outs,
         )
-        outputs.append(produces)
-    included: dict[str, str] = {}
-    if shows is not None and produces is not None and produces != shows:
-        included = include(shows, produces)
-        if not included:
-            raise HTTPException(
-                422,
-                f"No document includes '{shows}' to show it from "
-                f"'{produces}' instead",
-            )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     out = StageFromScriptOrNotebookResponse(
-        stage_name=stage_name,
-        stage_yaml=_dump_ck_stage_map(stage),
-        environment=env["name"],
-        environment_is_new=not env["exists"],
-        environment_spec_path=(
-            env["spec_path"] if env["created_from_dependencies"] else None
-        ),
-        environment_spec_content=(
-            env["spec_content"] if env["created_from_dependencies"] else None
-        ),
-        dependencies=env.get("dependencies") or [],
-        inputs=inputs,
-        outputs=outputs,
-        missing_inputs=missing,
-        produces=produces,
-        included_in=sorted(included),
+        stage_name=plan["stage_name"],
+        stage_yaml=_dump_ck_stage_map(plan["stage"]),
+        environment=plan["environment"],
+        environment_is_new=plan["environment_is_new"],
+        environment_spec_path=plan["environment_spec_path"],
+        environment_spec_content=plan["environment_spec_content"],
+        dependencies=plan["dependencies"],
+        inputs=plan["inputs"],
+        outputs=plan["outputs"],
+        found_outputs=plan["found_outputs"],
+        missing_inputs=plan["missing_inputs"],
+        external_inputs=plan["external_inputs"],
+        rewritten=rewritten,
+        produces=plan["produces"],
+        included_in=sorted(plan["included"]),
         git_repo_url=project.git_repo_url,
     )
     if not req.save:
@@ -605,30 +652,77 @@ def post_project_stage_from_script_or_notebook(
         writes.append(
             _clean_rel_path(out.environment_spec_path, "environment")
         )
-    for path in writes + list(included):
+    for path in writes + list(plan["included"]):
         if not _inside(wdir, os.path.join(wdir, path)):
             raise HTTPException(422, f"'{path}' leads outside the project")
+    # The data goes where calkit add puts it, Git or DVC, with only what it
+    # newly cached copied to the hub's storage
+    if data_files:
+        cache_dir = os.path.join(wdir, ".dvc", "cache", "files", "md5")
+        cached = {
+            os.path.relpath(p, cache_dir).replace(os.sep, "/")
+            for p in glob.glob(os.path.join(cache_dir, "*", "*"))
+        }
+        uploaded = sorted(
+            {
+                d
+                for d in data_paths
+                if any(p == d or p.startswith(d + "/") for p in planned)
+            }
+        )
+        try:
+            for path, data_bytes in planned.items():
+                full = os.path.join(wdir, path)
+                os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+                with open(full, "wb") as fb:
+                    fb.write(data_bytes)
+            subprocess.check_call(
+                [sys.executable, "-m", "calkit", "add", *uploaded],
+                cwd=wdir,
+                stdin=subprocess.DEVNULL,
+            )
+            _push_dvc_cache_to_storage(
+                repo_dir=wdir,
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                skip=cached,
+            )
+        except Exception as e:
+            logger.exception(f"Adding {uploaded} failed: {e}")
+            # Uncached too, so a retry caches, and so stores, it again
+            for p in glob.glob(os.path.join(cache_dir, "*", "*")):
+                if os.path.relpath(p, cache_dir).replace(os.sep, "/") not in (
+                    cached
+                ):
+                    os.remove(p)
+            repo.git.reset("--hard")
+            repo.git.clean("-fd")
+            raise HTTPException(500, "Couldn't add the data to the project")
+        # Recorded as a dataset, from where it was, unless it's already one
+        datasets = ck_info.setdefault("datasets", [])
+        known = {d.get("path") for d in datasets if isinstance(d, dict)}
+        for data in req.data:
+            data_path = _clean_rel_path(data.path, "data")
+            if data_path in uploaded and data_path not in known:
+                datasets.append(
+                    {
+                        "path": data_path,
+                        "imported_from": {
+                            "description": f"Uploaded from {data.external}",
+                            "date": utcnow().date(),
+                        },
+                    }
+                )
     # Written as xr writes them, then committed with the pipeline
     if content is not None:
         dest = os.path.join(wdir, script_path)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as fb:
             fb.write(content)
-    if out.environment_spec_path and out.environment_spec_content is not None:
-        spec_path = os.path.join(
-            wdir, _clean_rel_path(out.environment_spec_path, "environment")
-        )
-        os.makedirs(os.path.dirname(spec_path) or wdir, exist_ok=True)
-        with open(spec_path, "w") as f:
-            f.write(out.environment_spec_content)
-    if out.environment_is_new:
-        ck_info.setdefault("environments", {})[env["name"]] = env["env"]
-    _validate_ck_stage(stage, stage_name)
-    stages[stage_name] = stage
-    for path, text in included.items():
-        with open(os.path.join(wdir, path), "w") as f:
-            f.write(text)
-    ck_info.setdefault("pipeline", {})["stages"] = stages
+    try:
+        calkit.pipeline.write_stage_from_script(plan, ck_info, wdir=wdir)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     _commit_pipeline(
         project,
         session,
@@ -637,7 +731,7 @@ def post_project_stage_from_script_or_notebook(
         None,
         [],
         [],
-        f"Add stage {stage_name} for {script_path}",
+        f"Add stage {plan['stage_name']} for {script_path}",
     )
     out.saved = True
     return out
@@ -696,39 +790,37 @@ def post_project_pipeline_stage(
     )
     wdir = str(repo.working_dir)
     ck_info = get_ck_info_from_repo(repo=repo)
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     stage = dict(req.stage)
+    stage["outputs"] = [
+        (
+            out | {"path": _clean_rel_path(out["path"], "output")}
+            if isinstance(out, dict)
+            else _clean_rel_path(str(out), "output")
+        )
+        for out in stage.get("outputs") or []
+    ]
+    if not stage["outputs"]:
+        stage.pop("outputs")
     # Outputs are made by one stage only, and one already in Git can't
     # move to DVC
-    outputs = []
-    for out in stage.get("outputs") or []:
-        path = _clean_rel_path(
-            out["path"] if isinstance(out, dict) else str(out), "output"
+    try:
+        stage_name, stage = calkit.pipeline.get_stage_to_add(
+            stage,
+            ck_info,
+            name=req.name,
+            is_tracked=lambda p: bool(repo.git.ls_files("--", p).strip()),
         )
-        producer = calkit.pipeline.get_stage_for_output(path, ck_info)
-        if producer is not None:
-            raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
-        if not isinstance(out, dict):
-            tracked = repo.git.ls_files("--", path).strip()
-            out = {"path": path, "storage": "git"} if tracked else path
-        outputs.append(out)
-    if outputs:
-        stage["outputs"] = outputs
-    first = outputs[0] if outputs else None
-    first_path = first["path"] if isinstance(first, dict) else first
-    base_name = req.name or (
-        _slug(os.path.splitext(os.path.basename(first_path))[0])
-        if first_path
-        else "stage"
-    )
-    if not STAGE_NAME_RE.fullmatch(base_name or ""):
-        raise HTTPException(422, f"Invalid stage name: {req.name!r}")
-    stage_name = base_name
-    n = 2
-    while stage_name in stages:
-        stage_name = f"{base_name}-{n}"
-        n += 1
-    _validate_ck_stage(stage, stage_name)
+    except calkit.pipeline.OutputTakenError as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    # Slides are exported in Calkit's LibreOffice image unless the stage
+    # says otherwise, so they export the same anywhere, GitHub included
+    if stage.get("kind") == "pptx-export" and not stage.get("environment"):
+        env_name, env = calkit.export.get_slide_environment(ck_info)
+        stage["environment"] = env_name
+        if env is not None:
+            ck_info.setdefault("environments", {})[env_name] = env
     # Files are all checked before any is written
     uploads: list[tuple[str, bytes]] = []
     created: list[str] = []
@@ -792,29 +884,12 @@ def post_project_pipeline_stage(
     person = {"email": current_user.email}
     if current_user.full_name:
         person["name"] = current_user.full_name
-    for path in created:
-        entry = next(
-            (
-                e
-                for items in ck_info.values()
-                if isinstance(items, list)
-                for e in items
-                if isinstance(e, dict) and e.get("path") == path
-            ),
-            None,
-        )
-        if entry is None:
-            ck_info.setdefault("misc", []).append(
-                {"path": path, "created_by": [person]}
-            )
-        elif not (
-            entry.get("created_by")
-            or entry.get("imported_from")
-            or entry.get("stage")
-        ):
-            entry["created_by"] = [person]
-    stages[stage_name] = stage
-    ck_info.setdefault("pipeline", {})["stages"] = stages
+    ck_info = calkit.provenance.add_creator(ck_info, created, person)
+    if not ck_info.get("pipeline"):
+        ck_info["pipeline"] = {}
+    if not ck_info["pipeline"].get("stages"):
+        ck_info["pipeline"]["stages"] = {}
+    ck_info["pipeline"]["stages"][stage_name] = stage
     _commit_pipeline(
         project,
         session,

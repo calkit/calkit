@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import posixpath
 import sys
+from typing import Literal
 
-import click
 import typer
 from typing_extensions import Annotated
 
@@ -101,7 +101,7 @@ def resolve_merge_conflicts(
             )
         answer = typer.prompt(
             "Keep [o]urs, [t]heirs, or [r]erun it",
-            type=click.Choice(["o", "t", "r"]),
+            type=Literal["o", "t", "r"],
             show_choices=False,
         )
         return {"o": "ours", "t": "theirs", "r": "rerun"}[answer]

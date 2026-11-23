@@ -207,6 +207,14 @@ def test_get_app_installation_token(monkeypatch) -> None:
     }
     app.github.get_app_installation_token("owner-acct", "my-repo", True)
     assert calls["post_json"]["permissions"] == {"contents": "read"}
+    # As is one with its expiry, e.g., only to push for a linked machine
+    app.github.get_app_installation_token_and_expiry(
+        "owner-acct", "my-repo", permissions={"contents": "write"}
+    )
+    assert calls["post_json"] == {
+        "repositories": ["my-repo"],
+        "permissions": {"contents": "write"},
+    }
 
 
 def test_get_app_installation_token_caches(monkeypatch) -> None:

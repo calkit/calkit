@@ -104,29 +104,48 @@ def _get_overleaf_session_from_hub(stale: str | None = None) -> str | None:
     return str(session)
 
 
-def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
-    """Get a Git token, or, if only a session is available, a web client
-    for syncing without Overleaf Premium.
-
-    Credentials in config come first, then a token saved to the hub, then a
-    session saved to the hub, before prompting for a token.
+def _get_overleaf_token_from_hub(stale: str | None = None) -> str | None:
+    """Get an Overleaf Git token saved to the hub, other than a ``stale``
+    one, and store it in config.
     """
-    calkit_config = calkit.config.read()
-    if calkit_config.overleaf_token:
-        return calkit_config.overleaf_token
-    if calkit_config.overleaf_session:
-        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
+    import hashlib
+
     try:
         token = calkit.hub.get(
             "/user/overleaf-token", allow_login=False, max_retries=2
         )["access_token"]
     except Exception:
-        token = None
+        return None
+    if not token or token == stale:
+        return None
+    calkit_config = calkit.config.read()
+    # Rejected by Overleaf already, e.g., since Premium ended
+    token_sha = hashlib.sha256(str(token).encode()).hexdigest()
+    if token_sha == calkit_config.overleaf_rejected_token_sha:
+        return None
+    calkit_config.overleaf_token = token
+    calkit_config.write()
+    return str(token)
+
+
+def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
+    """Get a Git token, or, if only a session is available, a web client
+    for syncing without Overleaf Premium.
+
+    A token comes first, in config or else saved to the hub, since Git
+    integration fetches only what's new and keeps each edit's author, then a
+    session, in config or else saved to the hub, before prompting for a
+    token.
+    """
+    calkit_config = calkit.config.read()
+    if calkit_config.overleaf_token:
+        return calkit_config.overleaf_token
+    token = _get_overleaf_token_from_hub()
     if token:
         typer.echo("Using the Overleaf token saved to the hub")
-        calkit_config.overleaf_token = token
-        calkit_config.write()
-        return str(token)
+        return token
+    if calkit_config.overleaf_session:
+        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
     session = _get_overleaf_session_from_hub()
     if session:
         typer.echo("Using the Overleaf session saved to the hub")
@@ -143,6 +162,7 @@ def _get_pulled_overleaf_repo(
     Returns the repo and the credentials that worked, so later projects use
     them too.
     """
+    import hashlib
 
     def get_new_session(stale: str, error: Exception) -> str:
         """Get a new Overleaf session from the hub, or prompt for one, and
@@ -184,6 +204,13 @@ def _get_pulled_overleaf_repo(
                     get_new_session(stale=auth.session, error=e)
                 )
             else:
+                # A newer token on the hub, e.g., one made on another
+                # computer, replaces one that expired
+                token = _get_overleaf_token_from_hub(stale=auth)
+                if token:
+                    typer.echo("Using the Overleaf token saved to the hub")
+                    auth = token
+                    continue
                 # A token stops working when Premium ends, but a browser
                 # session still does
                 session = (
@@ -198,10 +225,14 @@ def _get_pulled_overleaf_repo(
                     )
                     # Forget the token, so later syncs go straight to the
                     # session
+                    # and the hub's copy isn't tried first again
                     calkit_config = calkit.config.read()
                     if calkit_config.overleaf_token == auth:
                         calkit_config.overleaf_token = None
-                        calkit_config.write()
+                    calkit_config.overleaf_rejected_token_sha = hashlib.sha256(
+                        str(auth).encode()
+                    ).hexdigest()
+                    calkit_config.write()
                     auth = calkit.overleaf.WebClient(str(session))
                 else:
                     auth = _get_overleaf_token(rejected=True)
@@ -435,24 +466,19 @@ def import_publication(
     # Check that we have a LaTeX environment
     typer.echo("Checking that this project has a LaTeX environment")
     envs = ck_info.get("environments", {})
-    tex_env_name = None
-    for name, env in envs.items():
-        image = env.get("image", "")
-        if env.get("kind") == "docker" and (
-            "texlive" in image or "calkit/latex" in image
-        ):
-            tex_env_name = name
-            break
+    tex_env_name = next(
+        (n for n, e in envs.items() if calkit.latex.is_latex_env(e)), None
+    )
     if tex_env_name is None:
-        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+        from calkit.environments.texlive import DEFAULT_ENVIRONMENT
 
-        typer.echo("Creating TeX Live Docker environment")
+        typer.echo("Creating TeX Live environment")
         tex_env_name = "tex"
         n = 1
         while tex_env_name in envs:
             tex_env_name = f"tex-{n}"
             n += 1
-        envs[tex_env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
+        envs[tex_env_name] = dict(DEFAULT_ENVIRONMENT)
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
@@ -1024,6 +1050,26 @@ def sync(
         )
         wdir = synced_folder
         if resolve:
+            import calkit.merge
+
+            # Committed with its marks in, a conflict would reach Overleaf,
+            # including from a folder that's the whole project
+            folder = posixpath.normpath(wdir)
+            marked = calkit.merge.get_paths_with_markers(
+                repo,
+                [
+                    p
+                    for p in calkit.merge.get_unmerged_paths(repo)
+                    if folder == "." or p.startswith(folder + "/")
+                ],
+            )
+            if marked:
+                raise_error(
+                    f"{', '.join(marked)} still "
+                    f"{'has' if len(marked) == 1 else 'have'} '<<<<<<<' and "
+                    "'>>>>>>>' marks. Keep what should stay and delete the "
+                    "marks first"
+                )
             repo.git.add(wdir)
             if repo.git.diff(["--staged", wdir]):
                 repo.git.commit(
@@ -1202,7 +1248,7 @@ def sync(
         ):
             # Push to the project remote
             typer.echo("Pushing changes to project Git remote")
-            repo.git.push()
+            repo.git.push(*calkit.git.get_set_upstream_args(repo))
         # Built outputs DVC tracks are only recorded in Git by their hash
         if built and push_dvc:
             calkit_push(targets=["dvc"])
@@ -1253,6 +1299,17 @@ def get_status(
             ),
         ),
     ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help=(
+                "Print what a sync of each folder would do as JSON, as "
+                "the hub reports it, or an error with 'needs_login' when "
+                "Overleaf credentials are missing."
+            ),
+        ),
+    ] = False,
 ):
     """Check the status of folders synced with Overleaf in a project."""
     # Read all synced folders, fixing legacy schema if applicable
@@ -1270,6 +1327,27 @@ def get_status(
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")
+    if as_json:
+        from calkit.browser_link import (
+            OverleafAuthMissing,
+            get_overleaf_sync_statuses,
+        )
+
+        targets: list[str | None] = list(paths) if paths else [None]
+        try:
+            statuses = [
+                status
+                for path in targets
+                for status in get_overleaf_sync_statuses(".", path=path)
+            ]
+        except OverleafAuthMissing as e:
+            typer.echo(json.dumps({"error": str(e), "needs_login": True}))
+            raise typer.Exit(1)
+        except ValueError as e:
+            typer.echo(json.dumps({"error": str(e)}))
+            raise typer.Exit(1)
+        typer.echo(json.dumps({"statuses": statuses}))
+        return
     overleaf_auth = _get_overleaf_auth()
     first = True
     for path_in_project, sync_data in overleaf_info.items():

@@ -3,21 +3,28 @@ import test from "node:test";
 import {
   documentStagePdf,
   documentStageSource,
-  findInSource,
-  findText,
+  findLatexStage,
+  latexPreviewCommand,
   latexStagePdf,
   latexStageSource,
   latexWorkingDiffPath,
+  latexWorkshopBuildsWithCalkit,
+  pipelineLatexDiffs,
+  reviewPath,
+} from "../latex/core";
+import {
+  findInSource,
+  findText,
   lineMap,
   normalizeSelection,
   paragraphLines,
   parseSynctex,
-  pipelineLatexDiffs,
   synctexForward,
   synctexInputFile,
   synctexReverse,
   synctexTag,
-} from "../latex/core";
+} from "../latex/pdf";
+import { mergeSubprojectConfigs } from "../subprojects";
 
 test("latexWorkingDiffPath mirrors the CLI's working tree diff path", () => {
   // No revision means the CLI's default-branch merge base.
@@ -277,6 +284,20 @@ test("lineMap follows lines across comments added and removed", () => {
   assert.equal(lineMap([], ["x"]).toBefore(1), 0);
 });
 
+test("reviewPath finds the review file a PDF's publication lists", () => {
+  const pubs = [
+    "not an object",
+    { path: "paper/other.pdf", reviews: [{ path: "wrong.md" }] },
+    {
+      path: "paper/./manuscript.pdf",
+      reviews: [{ title: "no path" }, { path: "paper/review.md" }],
+    },
+  ];
+  assert.equal(reviewPath(pubs, "paper/manuscript.pdf"), "paper/review.md");
+  assert.equal(reviewPath(pubs, "paper/none.pdf"), undefined);
+  assert.equal(reviewPath([{ path: "a.pdf" }], "a.pdf"), undefined);
+});
+
 test("functions injected into the webview are self-contained", () => {
   // The webview has no CommonJS `exports` for them to refer to
   for (const fn of [findText, normalizeSelection]) {
@@ -310,4 +331,88 @@ test("findInSource finds selected PDF text near a source line", () => {
   assert.equal(findInSource(lines, 1, "The model in Eq. (1)")!.start, 0);
   assert.equal(findInSource(lines, 1, "absent words"), undefined);
   assert.equal(findInSource(lines, 1, "in"), undefined);
+});
+
+test("a latex stage's document previews with the build it compiled to", () => {
+  const stages = {
+    data: { kind: "python-script", script_path: "paper/main.tex" },
+    paper: { kind: "latex", target_path: "paper/main.tex" },
+    thesis: { kind: "latex", wdir: "thesis", target_path: "main.tex" },
+  };
+  assert.deepEqual(findLatexStage(stages, "paper/main.tex"), {
+    name: "paper",
+    wdir: "",
+  });
+  assert.deepEqual(findLatexStage(stages, "thesis/main.tex"), {
+    name: "thesis",
+    wdir: "thesis",
+  });
+  assert.equal(findLatexStage(stages, "main.tex"), undefined);
+  // A subproject's builds from its own directory, which merging it into the
+  // root's config and dvc.yaml takes out of their wdir
+  const { config } = mergeSubprojectConfigs(
+    { subprojects: [{ path: "sub" }] },
+    [
+      {
+        dir: "sub",
+        config: {
+          environments: { tex: { kind: "texlive" } },
+          pipeline: {
+            stages: {
+              paper: {
+                kind: "latex",
+                environment: "tex",
+                wdir: "paper",
+                target_path: "main.tex",
+              },
+            },
+          },
+        },
+      },
+    ],
+  );
+  assert.deepEqual(
+    findLatexStage(config.pipeline?.stages ?? {}, "sub/paper/main.tex"),
+    { name: "sub:paper", wdir: "sub/paper" },
+  );
+  // The environment is checked, since no pipeline run did, and the build runs
+  // where the stage's does
+  assert.equal(
+    latexPreviewCommand(
+      "calkit latex build -e tex --no-check -r 'my rc' paper/main.tex",
+      "/work/it's here",
+    ),
+    "calkit -C '/work/it'\\''s here' latex build -e tex -r 'my rc' paper/main.tex",
+  );
+  assert.equal(
+    latexPreviewCommand("calkit latex build -e tex paper/main.tex", "/w"),
+    "calkit -C '/w' latex build -e tex paper/main.tex",
+  );
+  // Anything else isn't a LaTeX build to preview
+  assert.equal(latexPreviewCommand("calkit run paper", "/w"), undefined);
+  assert.equal(latexPreviewCommand(undefined, "/w"), undefined);
+  // LaTeX Workshop builds it if its tools run Calkit, and not if they're
+  // its defaults or a user's own
+  assert.equal(
+    latexWorkshopBuildsWithCalkit([
+      {
+        name: "Calkit",
+        command: "calkit",
+        args: ["latex", "build", "--as-stage", "%DOC_EXT%"],
+      },
+    ]),
+    true,
+  );
+  // Not if they build every document with one stage's options
+  assert.equal(
+    latexWorkshopBuildsWithCalkit([
+      { name: "Calkit", command: "calkit", args: ["latex", "build", "-e"] },
+    ]),
+    false,
+  );
+  assert.equal(
+    latexWorkshopBuildsWithCalkit([{ name: "latexmk", command: "latexmk" }]),
+    false,
+  );
+  assert.equal(latexWorkshopBuildsWithCalkit(undefined), false);
 });

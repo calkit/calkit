@@ -161,6 +161,18 @@ save in version control.
 This provides the most automated and hands of experience
 but gives the least control.
 
+<!-- TODO: needs human review -->
+
+If someone else pushed first, e.g., from another machine or the hub,
+`calkit save` merges their changes in and pushes again,
+leaving stages that ran on both sides to rerun.
+If you both changed the same lines of a file,
+it stops and names the file;
+keep what should stay between the `<<<<<<<` and `>>>>>>>` marks,
+delete the marks, then run `calkit merge --continue`.
+`calkit run --save` merges before running, so the run includes their
+changes.
+
 Options:
 
 - `[PATHS]...`: Specify a list of paths to save. Not required if `--all` is

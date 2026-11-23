@@ -801,19 +801,18 @@ def get_status(
                 )
     else:
         categories = default_categories
-    # Without a calkit.yaml this isn't a project, which an empty status
-    # would read as one with nothing in it. Saying so only fits when
-    # project status was asked for: 'calkit status -c git' in a plain Git
-    # repo doesn't care about calkit.yaml.
-    if "project" in categories:
-        # Walking up for a calkit.yaml tells a subdirectory of a project
-        # from a directory that isn't one, where 'calkit init' is wrong
+    # Without calkit.yaml, these would read as an empty project
+    if {"project", "questions", "pipeline", "imports"} & set(categories):
+        # Stop at the Git top level, since a nested repo is its own project
         project_dir: str | None = os.path.abspath(".")
         while project_dir is not None and not os.path.isfile(
             os.path.join(project_dir, "calkit.yaml")
         ):
             parent = os.path.dirname(project_dir)
-            project_dir = None if parent == project_dir else parent
+            at_top = parent == project_dir or os.path.exists(
+                os.path.join(project_dir, ".git")
+            )
+            project_dir = None if at_top else parent
         if project_dir != os.path.abspath("."):
             if project_dir is None:
                 warn(

@@ -1505,6 +1505,30 @@ def test_status(tmp_dir):
     assert res.returncode == 0
     assert "not a Calkit project" not in res.stdout
     assert "project is at" in res.stdout
+    # Every category read from calkit.yaml warns, keeping JSON parseable
+    for category in ["questions", "pipeline", "imports"]:
+        res = subprocess.run(
+            ["calkit", "status", "--json", "-c", category],
+            capture_output=True,
+            text=True,
+            cwd="figures",
+        )
+        assert res.returncode == 0
+        json.loads(res.stdout)
+        assert "project is at" in res.stderr
+    # A separate Git repo inside the project isn't part of it
+    nested_repo_path = os.path.join("vendor", "otherlib")
+    os.makedirs(nested_repo_path)
+    subprocess.check_call(["git", "init", "-q"], cwd=nested_repo_path)
+    res = subprocess.run(
+        ["calkit", "status", "-c", "project"],
+        capture_output=True,
+        text=True,
+        cwd=nested_repo_path,
+    )
+    assert res.returncode == 0
+    assert "not a Calkit project" in res.stdout
+    assert "project is at" not in res.stdout
     subprocess.check_call(["calkit", "new", "status", "in-progress"])
     res = subprocess.run(["calkit", "status"], capture_output=True, text=True)
     assert res.returncode == 0

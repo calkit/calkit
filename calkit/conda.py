@@ -20,6 +20,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel
 
 import calkit
+import calkit.progress
 from calkit import ryaml
 
 # Typical conda/mamba installation directories to search
@@ -221,6 +222,60 @@ _VIRTUAL_PACKAGE_OVERRIDES = {
 # How long locking every other platform may take in all, since it happens
 # during an env check and a solve can take minutes
 CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS = 600
+# What Conda prints as it starts each step of creating an environment, and
+# what that step is called on a spinner, in order
+_CREATE_PHASES = [
+    ("Collecting package metadata", "collecting package metadata"),
+    ("Solving environment", "solving"),
+    ("Downloading and Extracting Packages", "downloading packages"),
+    ("Preparing transaction", "installing packages"),
+    ("Installing pip dependencies", "installing pip dependencies"),
+]
+
+
+def _create_env(cmd: list[str], doing: str) -> None:
+    """Run a Conda command that creates an environment.
+
+    Anyone watching is told ``doing``, followed by each step Conda starts,
+    read from what it prints, which is only printed if creation fails.
+    Without anyone watching, Conda prints to the terminal as usual.
+
+    Raises ``subprocess.CalledProcessError`` if creation fails.
+    """
+    calkit.progress.report(doing)
+    if not calkit.progress.active():
+        subprocess.check_call(cmd)
+        return
+    # Conda flushes as it goes only when it's told to
+    env = os.environ | {"PYTHONUNBUFFERED": "1"}
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+    )
+    assert proc.stdout is not None
+    output = b""
+    phase = -1
+    # A marker can be split across reads, so the end of the last is kept
+    overlap = max(len(marker) for marker, _ in _CREATE_PHASES)
+    # Whatever has arrived, rather than waiting for a full buffer
+    while chunk := os.read(proc.stdout.fileno(), 65536):
+        recent = (output[-overlap:] + chunk).decode(errors="replace")
+        output += chunk
+        # The furthest step started, since a read can span several
+        for i in range(len(_CREATE_PHASES) - 1, phase, -1):
+            marker, name = _CREATE_PHASES[i]
+            if marker in recent:
+                phase = i
+                calkit.progress.report(f"{doing}: {name}")
+                break
+    returncode = proc.wait()
+    if returncode != 0:
+        sys.stderr.write(output.decode(errors="replace"))
+        sys.stderr.flush()
+        raise subprocess.CalledProcessError(returncode, cmd, output=output)
 
 
 def _pkg_name_from_dep(dep: str) -> str:
@@ -662,7 +717,12 @@ def check_env(
         "export",
         "--no-builds",
         "--json",
+        # Else it warns it can't reliably lock pip packages, which Calkit
+        # pins itself
+        "--quiet",
     ]
+    # Who's watching knows the environment by its name in calkit.yaml
+    label = calkit.progress.label(env_name)
     # Create with conda since newer mamba versions create a strange
     # "Library" subdirectory, at least on Windows
     # Use lock file for creation if available, otherwise use env spec
@@ -687,8 +747,12 @@ def check_env(
         log_func(f"Environment {env_name} doesn't exist; creating")
         res.env_exists = False
         # Environment doesn't exist, so create it
+        source = "its lock file" if create_file != env_fpath else "its spec"
         try:
-            subprocess.check_call(create_cmd)
+            _create_env(
+                create_cmd,
+                doing=f"Creating environment '{label}' from {source}",
+            )
             # Delete legacy lock file after successful creation
             if used_legacy_lock:
                 try:
@@ -726,7 +790,10 @@ def check_env(
                 ]
                 if prefix is not None:
                     create_cmd += ["--prefix", prefix]
-                subprocess.check_call(create_cmd)
+                _create_env(
+                    create_cmd,
+                    doing=f"Creating environment '{label}' from its spec",
+                )
             else:
                 raise
         env_needs_rebuild = False
@@ -857,7 +924,11 @@ def check_env(
         if prefix is not None:
             rebuild_cmd += ["--prefix", prefix]
         try:
-            subprocess.check_call(rebuild_cmd)
+            source = "its lock file" if lock_is_current else "its spec"
+            _create_env(
+                rebuild_cmd,
+                doing=f"Rebuilding environment '{label}' from {source}",
+            )
         except subprocess.CalledProcessError:
             if lock_is_current:
                 raise RuntimeError(
@@ -923,6 +994,7 @@ def check_env(
                 )
     if env_needs_export:
         log_func(f"Exporting existing env to {env_check_fpath}")
+        calkit.progress.report(f"Recording environment '{label}'")
         env_check = json.loads(subprocess.check_output(export_cmd).decode())
         env_check["mtime"] = os.path.getmtime(
             os.path.normpath(env_check["prefix"])
@@ -951,6 +1023,7 @@ def check_env(
         or lock_is_stale(lock_fpath)
     ):
         log_func(f"Exporting lock file to {lock_fpath}")
+        calkit.progress.report(f"Locking environment '{label}'")
         env_export = json.loads(
             subprocess.check_output(
                 [a for a in export_cmd if a != "--no-builds"]
@@ -1144,6 +1217,7 @@ def write_cross_platform_locks(
     stem, ext = os.path.splitext(lock_name)
     here = _conda_venv_platform()
     written: list[str] = []
+    label = calkit.progress.label(env_fpath)
     # Only a per-platform lock, e.g., from 'calkit check env', has siblings
     if stem != here or not os.path.isfile(lock_fpath):
         return written
@@ -1240,6 +1314,7 @@ def write_cross_platform_locks(
         out_fpath = os.path.join(lock_dir, arch + ext)
         if arch == here or (not relock and os.path.isfile(out_fpath)):
             continue
+        calkit.progress.report(f"Locking environment '{label}' for {arch}")
         links = None
         if not pip_deps or not (
             unpinnable

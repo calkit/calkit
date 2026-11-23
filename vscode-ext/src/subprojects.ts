@@ -433,6 +433,34 @@ export function rebaseStages(
 }
 
 /**
+ * The project a root-relative file is in: the nearest directory above it
+ * with a calkit.yaml, declared as a subproject or not, or else the root.
+ */
+export function findProjectDir(
+  relPath: string,
+  isProject: (dir: string) => boolean,
+): string {
+  // Outside the workspace, including on another Windows drive
+  if (
+    path.posix.isAbsolute(relPath) ||
+    relPath.startsWith("../") ||
+    /^[A-Za-z]:/.test(relPath)
+  ) {
+    return ".";
+  }
+  for (
+    let dir = path.posix.dirname(relPath);
+    dir !== "." && dir !== "/";
+    dir = path.posix.dirname(dir)
+  ) {
+    if (isProject(dir)) {
+      return dir;
+    }
+  }
+  return ".";
+}
+
+/**
  * The project a root-relative file is in, if it's one the merged config
  * leaves out: the nearest directory above it with a calkit.yaml, that isn't
  * the root or a subproject the root declares, e.g., a Git submodule that's a
@@ -443,22 +471,6 @@ export function findUndeclaredProjectDir(
   isProject: (dir: string) => boolean,
   subprojectDirs: string[],
 ): string | undefined {
-  // Outside the workspace, including on another Windows drive
-  if (
-    path.posix.isAbsolute(relPath) ||
-    relPath.startsWith("../") ||
-    /^[A-Za-z]:/.test(relPath)
-  ) {
-    return undefined;
-  }
-  for (
-    let dir = path.posix.dirname(relPath);
-    dir !== "." && dir !== "/";
-    dir = path.posix.dirname(dir)
-  ) {
-    if (isProject(dir)) {
-      return subprojectDirs.includes(dir) ? undefined : dir;
-    }
-  }
-  return undefined;
+  const dir = findProjectDir(relPath, isProject);
+  return dir === "." || subprojectDirs.includes(dir) ? undefined : dir;
 }

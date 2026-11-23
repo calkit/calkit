@@ -1485,6 +1485,12 @@ def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
         ws.check_requirements(
             w, [{"kind": "app", "name": "julia", "setup_command": "get-j"}]
         )
+    # An app is looked for as the binary it provides, but named as declared
+    ws.check_requirements(w, ["nodejs"])
+    assert "command -v node" in ran[-1]
+    failing.add("command -v node")
+    with pytest.raises(ValueError, match="app 'nodejs' was not found"):
+        ws.check_requirements(w, ["nodejs"])
     failing.clear()
     failing.add("SCRATCH")
     with pytest.raises(ValueError, match="env-var 'SCRATCH' is not set"):

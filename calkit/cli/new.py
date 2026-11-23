@@ -34,7 +34,11 @@ def _check_path_dir(path: str):
 
 
 def _person_from_options(
-    option: str, email: str | None, orcid: str | None, with_ai: list[str]
+    option: str,
+    email: str | None,
+    orcid: str | None,
+    with_ai: list[str],
+    name: str | None = None,
 ) -> dict | None:
     """Build a ``created_by`` entry from CLI options.
 
@@ -46,7 +50,7 @@ def _person_from_options(
 
     from calkit.models.core import _Person
 
-    if email is None and orcid is None and not with_ai:
+    if email is None and orcid is None and name is None and not with_ai:
         return None
     # ``with_ai`` is a list, one entry per --with-ai given. A single tool is
     # written as a scalar, which is what the docs show and what reads best
@@ -57,7 +61,9 @@ def _person_from_options(
     elif with_ai:
         with_ai_value = with_ai
     try:
-        person = _Person(email=email, orcid=orcid, with_ai=with_ai_value)
+        person = _Person(
+            email=email, name=name, orcid=orcid, with_ai=with_ai_value
+        )
     except ValidationError as e:
         raise_error(
             f"Invalid --{option}: "
@@ -673,6 +679,10 @@ def new_figure(
             ),
         ),
     ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option("--created-by-name", help="Their name."),
+    ] = None,
     created_by_orcid: Annotated[
         str | None,
         typer.Option(
@@ -716,7 +726,11 @@ def new_figure(
     if (deps or outs or outs_from_stage) and not stage_name:
         raise_error("Stage name must be provided")
     created_by = _person_from_options(
-        "created-by", created_by_email, created_by_orcid, created_with_ai
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
     )
     obj: dict = dict(path=path, title=title)
     if description is not None:
@@ -1461,6 +1475,10 @@ def new_dataset(
             ),
         ),
     ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option("--created-by-name", help="Their name."),
+    ] = None,
     created_by_orcid: Annotated[
         str | None,
         typer.Option(
@@ -1505,7 +1523,11 @@ def new_dataset(
     if (deps or outs or outs_from_stage) and not stage_name:
         raise_error("Stage name must be provided")
     created_by = _person_from_options(
-        "created-by", created_by_email, created_by_orcid, created_with_ai
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
     )
     obj: dict = dict(path=path, title=title)
     if description is not None:

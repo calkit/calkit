@@ -4248,13 +4248,19 @@ def log_to_file() -> None:
     point at a file only root may write.
     """
     global _logs_to_file
+    # Binary, since on Windows the streams already end lines with \r\n
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | NOFOLLOW
+    flags |= getattr(os, "O_BINARY", 0)
     fd = os.open(_private_log(), flags, 0o600)
     sys.stdout.flush()
     sys.stderr.flush()
     os.dup2(fd, 1)
     os.dup2(fd, 2)
     os.close(fd)
+    # On Windows, streams on a console write to it directly, not the fds
+    if sys.platform == "win32":
+        sys.stdout = open(1, "w", encoding="utf-8", buffering=1, closefd=False)
+        sys.stderr = open(2, "w", encoding="utf-8", buffering=1, closefd=False)
     _logs_to_file = True
 
 
@@ -4263,11 +4269,8 @@ def trim_log(fpath: str | None = None) -> None:
 
     Service managers write to it directly, so it's cut down in place rather
     than rotated, which would leave them writing to the old file. They open
-    it to append, so their next write goes at the new end, except on
-    Windows, where it's left alone.
+    it to append, so their next write goes at the new end.
     """
-    if sys.platform == "win32":
-        return
     fpath = fpath or get_log_path()
     try:
         if os.path.getsize(fpath) <= LOG_MAX_BYTES:
@@ -4419,19 +4422,20 @@ def _windows_startup_path(key: str | None = None) -> str:
 
 
 def _windows_startup_script() -> str:
-    # pythonw has no console window, and a VBScript can start it hidden
+    # python, not pythonw, in a console the VBScript hides, which what the
+    # link runs shares rather than each opening a window of its own
     exe = sys.executable
-    pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
-    if os.path.isfile(pythonw):
-        exe = pythonw
-    args = " ".join(f'""{a}""' for a in [exe, *_service_command()[1:]])
-    log = get_log_path()
-    # cmd strips the first and last quotes of a command with more than two,
-    # so the whole command gets a pair of its own (quotes are doubled in
-    # VBScript)
+    python = os.path.join(os.path.dirname(exe), "python.exe")
+    if os.path.isfile(python):
+        exe = python
+    # The link writes its own log, since one cmd redirects to can't be
+    # opened by anything else, e.g., the link restarting itself
+    cmd = [exe, *_service_command()[1:], "--log-file"]
+    # Quotes are doubled in VBScript
+    args = " ".join(f'""{a}""' for a in cmd)
     return (
         'Set shell = CreateObject("WScript.Shell")\r\n'
-        f'shell.Run "cmd /c ""{args} >> ""{log}"" 2>&1""", 0, False\r\n'
+        f'shell.Run "{args}", 0, False\r\n'
     )
 
 

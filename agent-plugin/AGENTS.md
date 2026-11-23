@@ -14,7 +14,7 @@ agent-plugin/
 └── skills/<skill-name>/SKILL.md
 ```
 
-`calkit update agent-skills` also copies `skills/` into `~/.agents/skills`
+`calkit update agent-skills --copy` copies `skills/` into `~/.agents/skills`
 for other agents.
 
 When you change the skills, bump `version` in both `plugin.json` manifests

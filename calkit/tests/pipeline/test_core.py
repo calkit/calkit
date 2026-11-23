@@ -563,7 +563,7 @@ def test_to_dvc_unignores_dvc_lock(tmp_dir):
     assert not repo.ignored("dvc.lock")
 
 
-def test_to_dvc_removes_stage_output_dvc_files(tmp_dir):
+def test_to_dvc_removes_stage_output_dvc_files(tmp_dir, capsys):
     subprocess.check_call(["calkit", "init"])
     ck_info = {
         "pipeline": {
@@ -571,22 +571,33 @@ def test_to_dvc_removes_stage_output_dvc_files(tmp_dir):
                 "make": {
                     "kind": "shell-command",
                     "environment": "_system",
-                    "command": "echo hi > fig.png",
-                    "outputs": ["fig.png"],
+                    "command": "echo hi > fig.png && echo yo > kept.png",
+                    "outputs": ["fig.png", "kept.png"],
                 }
             }
         }
     }
     # A figure added with DVC by hand before the stage that makes it was
+    md5 = "a" * 32
     with open("fig.png.dvc", "w") as f:
-        f.write("outs:\n- path: fig.png\n")
+        f.write(
+            f"outs:\n- md5: {md5}\n  size: 3\n  hash: md5\n  path: fig.png\n"
+        )
     with open("data.csv.dvc", "w") as f:
         f.write("outs:\n- path: data.csv\n")
+    # One that doesn't list the output has no hash to move
+    with open("kept.png.dvc", "w") as f:
+        f.write(f"outs:\n- md5: {md5}\n  path: other.png\n")
     calkit.pipeline.to_dvc(ck_info=ck_info)
     assert os.path.isfile("fig.png.dvc")
+    assert not os.path.isfile("dvc.lock")
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     assert not os.path.isfile("fig.png.dvc")
     assert os.path.isfile("data.csv.dvc")
+    (locked,) = calkit.dvc.read_lock_stages()["make"]["outs"]
+    assert (locked["path"], locked["md5"]) == ("fig.png", md5)
+    assert os.path.isfile("kept.png.dvc")
+    assert "Keeping kept.png.dvc" in capsys.readouterr().out
 
 
 def test_to_dvc_skips_no_op_writes(tmp_dir):
@@ -4297,7 +4308,21 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
     # Recompiling replaces the managed block rather than stacking copies
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open(".gitattributes") as f:
-        assert f.read().count("/.calkit/** text eol=lf") == 1
+        gitattributes = f.read()
+    assert gitattributes.count("/.calkit/** text eol=lf") == 1
+    # dvc.yaml is written with the line ending Git checks it out with, so
+    # the compiled pipeline doesn't show as modified, e.g., an LF rule on
+    # Windows, where Git for Windows defaults to core.autocrlf=true
+    subprocess.run(["git", "config", "core.autocrlf", "true"], check=True)
+    for eol in ["lf", "crlf"]:
+        with open(".gitattributes", "w") as f:
+            f.write(f"dvc.yaml text eol={eol}\n" + gitattributes)
+        os.remove("dvc.yaml")
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        with open("dvc.yaml", "rb") as f:
+            raw = f.read()
+        n_crlf = raw.count(b"\n") if eol == "crlf" else 0
+        assert raw.count(b"\r\n") == n_crlf, eol
 
 
 def test_get_stage_for_output_reads_map_paths_destinations():
@@ -5164,7 +5189,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
     monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
     monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-no-soffice"])
-    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-no-powerpoint"])
+    monkeypatch.setattr(POWERPOINT, "locate", None)
     gated, errors = calkit.pipeline.get_gated_stages(
         ck_info, stage_names=["drawn", "photo", "slide"], interactive=False
     )
@@ -5695,6 +5720,30 @@ def test_get_figure_paths_with_origins(tmp_dir):
                         }
                     ],
                 },
+                "fit": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "fit.ipynb",
+                    "environment": "py",
+                    "wdir": "nbs",
+                    "cell_outputs": [
+                        {
+                            "kind": "value",
+                            "cell_id": "a",
+                            "variable_name": "k",
+                        },
+                        {
+                            "kind": "figure",
+                            "cell_id": "b",
+                            "output_path": "figs/fit.pdf",
+                        },
+                        {
+                            "kind": "table",
+                            "cell_id": "c",
+                            "variable_name": "df",
+                            "output_path": "t.tex",
+                        },
+                    ],
+                },
             }
         },
         "publications": [{"path": "paper/main.pdf"}],
@@ -5708,8 +5757,32 @@ def test_get_figure_paths_with_origins(tmp_dir):
     assert calkit.pipeline.get_figure_paths_with_origins(ck_info) == [
         "plot.png",
         "paper/exported.png",
+        "nbs/figs/fit.pdf",
         "paper/drawn.png",
     ]
+    # What a notebook's cells are marked to make is the stage's output too
+    fit = ck_info["pipeline"]["stages"]["fit"]
+    assert calkit.pipeline.get_cell_output_paths(fit) == [
+        "nbs/.calkit/notebooks/outputs/fit.ipynb/values.json",
+        "nbs/figs/fit.pdf",
+        "nbs/t.tex",
+    ]
+    by_output = calkit.pipeline.stages_by_output(ck_info=ck_info)
+    assert by_output["nbs/t.tex"] == ["fit"]
+    assert by_output[
+        "nbs/.calkit/notebooks/outputs/fit.ipynb/values.json"
+    ] == ["fit"]
+    # Named for the parameters the pipeline fills in from the project's
+    templated = fit | {"parameters": {"t": "{temp}"}}
+    assert calkit.pipeline.get_cell_output_paths(
+        templated, {"parameters": {"temp": 25}}
+    )[0] == ("nbs/.calkit/notebooks/outputs/fit.ipynb/t-25/values.json")
+    assert (
+        calkit.pipeline.get_cell_output_paths(
+            ck_info["pipeline"]["stages"]["plot"]
+        )
+        == []
+    )
     # Listed among the project's figures, after those detected by folder
     subprocess.check_call(["git", "init", "-q"])
     os.makedirs("figures")
@@ -5721,6 +5794,7 @@ def test_get_figure_paths_with_origins(tmp_dir):
         "figures/a.png",
         "plot.png",
         "paper/exported.png",
+        "nbs/figs/fit.pdf",
         "paper/drawn.png",
     ]
 

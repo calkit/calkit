@@ -11,6 +11,7 @@ from calkit.reproducibility import (
     check_reproducibility,
     find_literals_in_project,
     find_retyped_values,
+    find_scripts_not_in_pipeline,
     find_unattributed_numbers,
 )
 
@@ -112,7 +113,9 @@ def test_check_reproducibility(tmp_dir):
     ]
     # Scripts are the tracked ones no stage names, in either pipeline;
     # tooling and environment directories don't count, nor do untracked
-    # files, and a nested project's files are relative to it
+    # files, and a nested project's files are relative to it. A folder a
+    # stage reads or writes covers the scripts in it, e.g., a package's
+    # modules or data written as Python
     ck_info["environments"] = {
         "py": {"kind": "venv", "path": "requirements.txt", "prefix": "myenv"}
     }
@@ -122,6 +125,8 @@ def test_check_reproducibility(tmp_dir):
                 "kind": "jupyter-notebook",
                 "notebook_path": "analysis.ipynb",
                 "environment": "py",
+                "inputs": ["src/pkg"],
+                "outputs": ["data"],
             }
         }
     }
@@ -150,6 +155,8 @@ def test_check_reproducibility(tmp_dir):
         "myenv/hook.sh",
         "requirements.txt",
         "untracked.py",
+        "src/pkg/mod.py",
+        "data/params.py",
     ]:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w") as f:
@@ -166,6 +173,8 @@ def test_check_reproducibility(tmp_dir):
             ".devcontainer",
             "myenv",
             "requirements.txt",
+            "src",
+            "data",
         ]
     )
     res = check_reproducibility()
@@ -175,6 +184,14 @@ def test_check_reproducibility(tmp_dir):
     assert res.scripts_not_in_pipeline == ["explore.R", "scripts/orphan.py"]
     assert res.n_scripts_not_in_pipeline == 2
     assert "Scripts not run by any pipeline stage: 2" in res.to_pretty()
+    # A folder that's only named, e.g., like the environment, isn't read or
+    # written, so it doesn't cover what's in it
+    os.makedirs("py")
+    with open("py/tool.py", "w") as f:
+        f.write("")
+    subprocess.check_call(["git", "add", "py/tool.py"])
+    assert "py/tool.py" in find_scripts_not_in_pipeline()
+    subprocess.check_call(["git", "rm", "-q", "--cached", "py/tool.py"])
     assert "lacking provenance: 2" in res.to_pretty()
     # Both make it into the recommendation once the basics are in place,
     # scripts first, since an unrun script is a gap in the pipeline itself

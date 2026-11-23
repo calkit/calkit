@@ -385,6 +385,67 @@ def skip_stages(
         setattr(Stage, "reproduce", original_reproduce)
 
 
+@contextlib.contextmanager
+def thaw_stages(names: set[str], force_only: bool = False) -> Iterator[None]:
+    """Run these frozen stages in ``dvc repro`` while active.
+
+    Keyed by Calkit stage name, which also covers the ``<name>@<item>``
+    stages DVC makes from an iterated one. Only stages in the root
+    ``dvc.yaml`` match. DVC never runs a frozen stage, even forced, so this
+    is how one named outright with ``--force`` runs, e.g., to retrain a
+    model whose committed weights are otherwise left alone.
+
+    With ``force_only``, a forced run forces only these stages, and the
+    stages upstream of them run only if they're out of date, as they would
+    for an unfrozen stage that is. DVC otherwise forces every stage in the
+    plan, which thawing one brings its upstream stages into, e.g.,
+    regenerating the data a model is trained on.
+    """
+    import dvc.repo.reproduce
+    from dvc.stage.loader import StageLoader
+
+    original_load = StageLoader.__dict__["load_stage"]
+
+    def load_stage(cls: Any, *args: Any, **kwargs: Any) -> Any:
+        stage = original_load.__func__(cls, *args, **kwargs)
+        name = getattr(stage, "name", None) or ""
+        dvcfile = getattr(stage, "dvcfile", None)
+        if (
+            name.split("@")[0] in names
+            and dvcfile is not None
+            and os.path.normpath(os.path.relpath(dvcfile.path)) == "dvc.yaml"
+        ):
+            stage.frozen = False
+        return stage
+
+    original_reproduce = dvc.repo.reproduce._reproduce
+
+    def reproduce(stages: Any, *args: Any, **kwargs: Any) -> Any:
+        repro_fn = kwargs.pop("repro_fn", dvc.repo.reproduce._reproduce_stage)
+
+        def repro_thawed_only(stage: Any, **stage_kwargs: Any) -> Any:
+            name = getattr(stage, "name", None) or ""
+            if name.split("@")[0] not in names:
+                stage_kwargs["force"] = False
+            return repro_fn(stage, **stage_kwargs)
+
+        return original_reproduce(
+            stages, *args, repro_fn=repro_thawed_only, **kwargs
+        )
+
+    if not names:
+        yield
+        return
+    setattr(StageLoader, "load_stage", classmethod(load_stage))
+    if force_only:
+        setattr(dvc.repo.reproduce, "_reproduce", reproduce)
+    try:
+        yield
+    finally:
+        setattr(StageLoader, "load_stage", original_load)
+        setattr(dvc.repo.reproduce, "_reproduce", original_reproduce)
+
+
 _memoized_hashes_lock = threading.RLock()
 
 
@@ -2133,6 +2194,81 @@ def get_stage_output_dvc_files(
     return found
 
 
+def record_stage_output_dvc_file(
+    overlap: dict, dvc_stage: dict, wdir: str | None = None
+) -> bool:
+    """Copy the hash from a stage output's own .dvc file to ``dvc.lock``, so
+    the data can still be pulled once that file is removed.
+
+    ``overlap`` is an item from ``get_stage_output_dvc_files``. Only the
+    output is recorded, so a stage that hasn't run stays stale, and an
+    output ``dvc.lock`` already records is left as is.
+
+    Returns whether the .dvc file can be removed, which it can't if it
+    doesn't list the output, since its hash wasn't found to keep.
+    """
+    import calkit.git
+
+    base = wdir or "."
+    with open(os.path.join(base, overlap["dvc_file"])) as f:
+        dvc_file = calkit.ryaml.load(f) or {}
+    dvc_file_wdir = posixpath.join(
+        posixpath.dirname(overlap["dvc_file"]), dvc_file.get("wdir") or ""
+    )
+    dvc_out = next(
+        (
+            out
+            for out in dvc_file.get("outs") or []
+            if posixpath.normpath(
+                posixpath.join(dvc_file_wdir, out.get("path", ""))
+            )
+            == overlap["path"]
+        ),
+        None,
+    )
+    if dvc_out is None:
+        return False
+    hash_keys = ("md5", "etag", "checksum", "files")
+    if not any(k in dvc_out for k in hash_keys):
+        return True
+    hashes = {
+        k: dvc_out[k]
+        for k in (*hash_keys, "size", "nfiles", "hash")
+        if k in dvc_out
+    }
+    lock_path = os.path.join(base, "dvc.lock")
+    lock: dict = {}
+    if os.path.isfile(lock_path):
+        with open(lock_path) as f:
+            lock = calkit.ryaml.load(f) or {}
+    lock.setdefault("schema", "2.0")
+    stages = lock.setdefault("stages", {})
+    entry = stages.setdefault(overlap["stage"], {"cmd": dvc_stage.get("cmd")})
+    outs = entry.setdefault("outs", [])
+    # As the stage declares it, e.g., with a trailing slash, for DVC to match
+    stage_wdir = dvc_stage.get("wdir") or ""
+    declared = [
+        next(iter(out)) if isinstance(out, dict) else out
+        for out in dvc_stage.get("outs") or []
+    ]
+    out_path = next(
+        (
+            p
+            for p in declared
+            if posixpath.normpath(posixpath.join(stage_wdir, p))
+            == overlap["path"]
+        ),
+        posixpath.relpath(overlap["path"], stage_wdir or "."),
+    )
+    if any(out.get("path") == out_path for out in outs):
+        return True
+    outs.append({"path": out_path, **hashes})
+    newline = calkit.git.get_checkout_newline(lock_path)
+    with open(lock_path, "w", newline=newline) as f:
+        calkit.ryaml.dump(lock, f)
+    return True
+
+
 def untrack_cached_stage_outputs(
     dvc_stages: dict, wdir: str | None = None
 ) -> list[dict]:
@@ -2219,6 +2355,9 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
       its own ``dvc_file`` too, e.g., added with DVC by hand before the
       stage was, which belongs to the stage. DVC can't index a project like
       that, so if there are any, they're all that's reported.
+    - ``stage-output-in-dvc-dir``: made by a pipeline ``stage``, and inside
+      a directory ``dvc_file`` tracks, which DVC refuses to run. Left to the
+      user, since the .dvc file can cover data the stage doesn't make.
 
     Building DVC's index is most of the cost, and loading calkit.yaml much
     of the rest, so a ``dvc_repo`` that has built it, and ``ck_info``, can
@@ -2279,6 +2418,34 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     if dvc_repo is None:
         dvc_repo = get_dvc_repo(wdir)
     try:
+        # An output in a tracked directory doesn't stop the index from
+        # building, only DVC's runs
+        outs_by_path = {
+            Path(out.fs_path).resolve(): out for out in dvc_repo.index.outs
+        }
+        for path, out in sorted(outs_by_path.items()):
+            if out.stage.is_data_source or not path.is_relative_to(base):
+                continue
+            for parent in path.parents:
+                parent_out = outs_by_path.get(parent)
+                if parent_out is None or not parent_out.stage.is_data_source:
+                    continue
+                dvc_file = rel(Path(parent_out.stage.path).resolve())
+                problems.append(
+                    dict(
+                        path=rel(path),
+                        kind="stage-output-in-dvc-dir",
+                        stage=out.stage.addressing,
+                        dvc_file=dvc_file,
+                        store_in=None,
+                        message=(
+                            f"{rel(path)} is made by stage "
+                            f"'{out.stage.addressing}', but {dvc_file} tracks "
+                            f"{rel(parent)}, which contains it; add its other "
+                            f"files separately and delete {dvc_file}"
+                        ),
+                    )
+                )
         for out in dvc_repo.index.outs:
             path = Path(out.fs_path).resolve()
             # A project in a subdirectory can share its DVC repo with others

@@ -17,6 +17,8 @@ import {
   useEnvironments,
 } from "../hooks/useQueries";
 import { isFeatureEnabled } from "../feature-flags";
+import { getLoadedCellOutputs, onCellOutputsLoaded } from "../cell-output-view";
+import { getCellOutputLabel } from "../cell-outputs";
 
 /**
  * Extract a readable error message from various error types
@@ -383,14 +385,14 @@ const EnvironmentBadge: React.FC<{
     await showEnvironmentEditor({
       mode: "edit",
       initialName: currentEnv,
-      initialKind: envData.kind || "uv-venv",
+      initialKind: envData.kind || "uv",
       initialPath: envData.path,
       initialPrefix: envData.prefix,
       initialPython: envData.python || "3.14",
       initialPackages: envData.packages || [],
       existingEnvironment: {
         name: currentEnv,
-        kind: envData.kind || "uv-venv",
+        kind: envData.kind || "uv",
         path: envData.path,
         prefix: envData.prefix,
         python: envData.python || "3.14",
@@ -403,7 +405,7 @@ const EnvironmentBadge: React.FC<{
         await updateEnvironmentMutation.mutateAsync({
           existing: initialData || {
             name: currentEnv,
-            kind: envData.kind || "uv-venv",
+            kind: envData.kind || "uv",
             path: envData.path,
             prefix: envData.prefix,
             python: envData.python || "3.14",
@@ -1085,6 +1087,27 @@ const OutputsBadge: React.FC<{
   >([]);
   const [manualOutput, setManualOutput] = useState("");
   const setNotebookStageMutation = useSetNotebookStage();
+  // What cells save, which their labels edit, kept as they load
+  const [cellOutputs, setCellOutputs] = useState(() =>
+    getLoadedCellOutputs(panel),
+  );
+  useEffect(
+    () =>
+      onCellOutputsLoaded((loaded) => {
+        if (loaded === panel) {
+          setCellOutputs(getLoadedCellOutputs(panel));
+        }
+      }),
+    [panel],
+  );
+  const showCell = (index: number | null) => {
+    if (index === null) {
+      return;
+    }
+    panel.content.activeCellIndex = index;
+    void panel.content.scrollToCell(panel.content.widgets[index]);
+    setIsOpen(false);
+  };
 
   // Load outputs on mount
   useEffect(() => {
@@ -1184,7 +1207,7 @@ const OutputsBadge: React.FC<{
     }
   };
 
-  const label = `Outputs (${outputs.length})`;
+  const label = `Outputs (${outputs.length + cellOutputs.length})`;
 
   return (
     <BadgeDropdown
@@ -1201,6 +1224,33 @@ const OutputsBadge: React.FC<{
           <button className="calkit-dropdown-button" onClick={handleAutoDetect}>
             🔍 Auto-Detect Outputs
           </button>
+        )}
+        {cellOutputs.length > 0 && (
+          <div className="calkit-io-list">
+            <label className="calkit-io-label">Saved from cells</label>
+            {cellOutputs.map((output, index) => (
+              <div
+                key={`cell-${index}`}
+                className="calkit-io-item"
+                title={getCellOutputLabel(output).tooltip}
+                onClick={() => showCell(output.cell_index)}
+                style={{ cursor: "pointer" }}
+              >
+                <div className="calkit-io-item-content">
+                  <div className="calkit-io-field">
+                    <span className="calkit-io-label">
+                      {output.cell_index !== null
+                        ? `Cell ${output.cell_index + 1}:`
+                        : "End:"}
+                    </span>
+                    <span className="calkit-io-value">
+                      {getCellOutputLabel(output).text}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
         <div className="calkit-io-list">
           {outputs.map((output, index) => (

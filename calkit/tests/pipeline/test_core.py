@@ -563,7 +563,7 @@ def test_to_dvc_unignores_dvc_lock(tmp_dir):
     assert not repo.ignored("dvc.lock")
 
 
-def test_to_dvc_removes_stage_output_dvc_files(tmp_dir):
+def test_to_dvc_removes_stage_output_dvc_files(tmp_dir, capsys):
     subprocess.check_call(["calkit", "init"])
     ck_info = {
         "pipeline": {
@@ -571,22 +571,33 @@ def test_to_dvc_removes_stage_output_dvc_files(tmp_dir):
                 "make": {
                     "kind": "shell-command",
                     "environment": "_system",
-                    "command": "echo hi > fig.png",
-                    "outputs": ["fig.png"],
+                    "command": "echo hi > fig.png && echo yo > kept.png",
+                    "outputs": ["fig.png", "kept.png"],
                 }
             }
         }
     }
     # A figure added with DVC by hand before the stage that makes it was
+    md5 = "a" * 32
     with open("fig.png.dvc", "w") as f:
-        f.write("outs:\n- path: fig.png\n")
+        f.write(
+            f"outs:\n- md5: {md5}\n  size: 3\n  hash: md5\n  path: fig.png\n"
+        )
     with open("data.csv.dvc", "w") as f:
         f.write("outs:\n- path: data.csv\n")
+    # One that doesn't list the output has no hash to move
+    with open("kept.png.dvc", "w") as f:
+        f.write(f"outs:\n- md5: {md5}\n  path: other.png\n")
     calkit.pipeline.to_dvc(ck_info=ck_info)
     assert os.path.isfile("fig.png.dvc")
+    assert not os.path.isfile("dvc.lock")
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     assert not os.path.isfile("fig.png.dvc")
     assert os.path.isfile("data.csv.dvc")
+    (locked,) = calkit.dvc.read_lock_stages()["make"]["outs"]
+    assert (locked["path"], locked["md5"]) == ("fig.png", md5)
+    assert os.path.isfile("kept.png.dvc")
+    assert "Keeping kept.png.dvc" in capsys.readouterr().out
 
 
 def test_to_dvc_skips_no_op_writes(tmp_dir):

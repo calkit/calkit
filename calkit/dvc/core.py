@@ -2196,33 +2196,46 @@ def get_stage_output_dvc_files(
 
 def record_stage_output_dvc_file(
     overlap: dict, dvc_stage: dict, wdir: str | None = None
-) -> None:
+) -> bool:
     """Copy the hash from a stage output's own .dvc file to ``dvc.lock``, so
     the data can still be pulled once that file is removed.
 
     ``overlap`` is an item from ``get_stage_output_dvc_files``. Only the
     output is recorded, so a stage that hasn't run stays stale, and an
     output ``dvc.lock`` already records is left as is.
+
+    Returns whether the .dvc file can be removed, which it can't if it
+    doesn't list the output, since its hash wasn't found to keep.
     """
     import calkit.git
 
     base = wdir or "."
     with open(os.path.join(base, overlap["dvc_file"])) as f:
-        dvc_outs = (calkit.ryaml.load(f) or {}).get("outs") or []
-    dvc_file_dir = posixpath.dirname(overlap["dvc_file"])
-    hashes = next(
+        dvc_file = calkit.ryaml.load(f) or {}
+    dvc_file_wdir = posixpath.join(
+        posixpath.dirname(overlap["dvc_file"]), dvc_file.get("wdir") or ""
+    )
+    dvc_out = next(
         (
-            {k: out[k] for k in ("md5", "size", "nfiles", "hash") if k in out}
-            for out in dvc_outs
+            out
+            for out in dvc_file.get("outs") or []
             if posixpath.normpath(
-                posixpath.join(dvc_file_dir, out.get("path", ""))
+                posixpath.join(dvc_file_wdir, out.get("path", ""))
             )
             == overlap["path"]
         ),
         None,
     )
-    if not hashes or "md5" not in hashes:
-        return
+    if dvc_out is None:
+        return False
+    hash_keys = ("md5", "etag", "checksum", "files")
+    if not any(k in dvc_out for k in hash_keys):
+        return True
+    hashes = {
+        k: dvc_out[k]
+        for k in (*hash_keys, "size", "nfiles", "hash")
+        if k in dvc_out
+    }
     lock_path = os.path.join(base, "dvc.lock")
     lock: dict = {}
     if os.path.isfile(lock_path):
@@ -2232,13 +2245,28 @@ def record_stage_output_dvc_file(
     stages = lock.setdefault("stages", {})
     entry = stages.setdefault(overlap["stage"], {"cmd": dvc_stage.get("cmd")})
     outs = entry.setdefault("outs", [])
-    out_path = posixpath.relpath(overlap["path"], dvc_stage.get("wdir") or ".")
+    # As the stage declares it, e.g., with a trailing slash, for DVC to match
+    stage_wdir = dvc_stage.get("wdir") or ""
+    declared = [
+        next(iter(out)) if isinstance(out, dict) else out
+        for out in dvc_stage.get("outs") or []
+    ]
+    out_path = next(
+        (
+            p
+            for p in declared
+            if posixpath.normpath(posixpath.join(stage_wdir, p))
+            == overlap["path"]
+        ),
+        posixpath.relpath(overlap["path"], stage_wdir or "."),
+    )
     if any(out.get("path") == out_path for out in outs):
-        return
+        return True
     outs.append({"path": out_path, **hashes})
     newline = calkit.git.get_checkout_newline(lock_path)
     with open(lock_path, "w", newline=newline) as f:
         calkit.ryaml.dump(lock, f)
+    return True
 
 
 def untrack_cached_stage_outputs(

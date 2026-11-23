@@ -2398,6 +2398,18 @@ def test_check_storage_stage_output_dvc_file(tmp_dir):
     assert locked["path"] == "fig.png"
     assert locked["md5"] == hashlib.md5(b"old").hexdigest()
     subprocess.check_call(["git", "commit", "-qm", "Fix figure"])
+    # A .dvc file whose hash can't be found to keep isn't removed
+    with open("fig.png.dvc", "w") as f:
+        f.write("outs:\n- path: other.png\n  md5: abc\n")
+    result = subprocess.run(
+        ["calkit", "check", "storage", "--fix"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "Keeping fig.png.dvc" in result.stdout
+    assert os.path.isfile("fig.png.dvc")
+    os.remove("fig.png.dvc")
     # A stage output in a directory a .dvc file tracks, which the check
     # reports for the user, keeping the .dvc file since it covers other data
     os.makedirs("data")

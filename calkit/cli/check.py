@@ -2215,9 +2215,12 @@ def check_storage(
             # The stage says how it's made, so its own .dvc file goes, with
             # its hash kept in dvc.lock
             dvc_file = problem["dvc_file"]
-            calkit.dvc.record_stage_output_dvc_file(
+            if not calkit.dvc.record_stage_output_dvc_file(
                 problem, dvc_stages[problem["stage"]]
-            )
+            ):
+                warn(f"Keeping {dvc_file}: can't record its hash in dvc.lock")
+                unfixed.append(problem)
+                continue
             if repo.git.ls_files("--", dvc_file):
                 repo.git.rm("-q", "--", dvc_file)
             elif os.path.isfile(dvc_file):
@@ -2284,7 +2287,9 @@ def check_storage(
         target = problem["dvc_file"] or stage
         if calkit.dvc.run_dvc_command(["commit", "-f", "-q", target]) != 0:
             warn(f"Couldn't record {problem['path']} in DVC")
-    if dvc_stages and os.path.isfile("dvc.lock"):
+    if os.path.isfile("dvc.lock") and any(
+        p["kind"] == "stage-output-dvc-file" for p in fixed
+    ):
         calkit.dvc.ensure_dvc_lock_not_ignored()
         repo.git.add("--", "dvc.lock")
     for message in calkit.git.stage_gitignores(repo, gitignores):

@@ -206,6 +206,9 @@ def fix_line_endings() -> None:
     rewrites any file in this checkout whose line endings don't match, e.g.,
     on Windows, keeping uncommitted changes. No committed file changes, so
     there's nothing to renormalize; commit .gitattributes afterwards.
+
+    Submodules that don't pin their own line endings are set to check
+    their files out as committed, in this clone only.
     """
     import calkit.eol
     import calkit.git
@@ -227,6 +230,13 @@ def fix_line_endings() -> None:
         typer.echo(
             f"Rewrote {n} {'file' if n == 1 else 'files'} in this checkout "
             f"to match: {calkit.eol.summarize(res.converted)}"
+        )
+    for sm in res.submodules:
+        typer.echo(
+            f"Set submodule {sm} to check its files out as committed, in "
+            "this clone only, since the project's .gitattributes doesn't "
+            "reach it. To pin it for every clone, commit "
+            "'* text=auto eol=lf' to its own .gitattributes."
         )
     if res.wrote_gitattributes:
         typer.echo("Commit .gitattributes to pin them for everyone")

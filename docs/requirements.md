@@ -256,7 +256,7 @@ Some skips still fail the run, after the stages that can run have run:
   `calkit run fetch`, is out of date and can't run.
 - A stage is out of date and can't run because something is wrong
   rather than because the project says so, e.g., its machine can't be
-  reached.
+  reached, or one of its environments failed its check.
 - Any stage is out of date and can't run, with `calkit run --strict`,
   e.g., in CI for a project whose stages should all run there.
   The `calkit/run` action takes it as `run_args: --strict`.

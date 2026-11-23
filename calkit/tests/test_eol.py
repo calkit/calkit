@@ -224,3 +224,65 @@ def test_init_pins(tmp_dir):
         assert "* text=auto eol=lf" in f.read()
     assert ".gitattributes" in _git("show", "--name-only", "--format=")
     assert _git("status", "--porcelain") == ""
+
+
+def test_submodule(tmp_dir, monkeypatch):
+    """A submodule's files are checked, and pinned in this clone, since
+    the project's .gitattributes doesn't reach them."""
+    os.makedirs("sub")
+    os.chdir("sub")
+    _git("init", "-q")
+    with open("plot.py", "w", newline="\n") as f:
+        f.write("x = 1\n")
+    _git("add", "-A")
+    _git("commit", "-qm", "Sub")
+    os.chdir("..")
+    os.makedirs("origin")
+    os.chdir("origin")
+    _git("init", "-q")
+    _git(
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        os.path.abspath("../sub"),
+        "utils",
+    )
+    with open("dvc.yaml", "w", newline="\n") as f:
+        f.write(
+            "stages:\n"
+            "  make:\n"
+            "    cmd: echo\n"
+            "    deps:\n"
+            "      - utils/plot.py\n"
+            "      - utils\n"
+        )
+    _git("add", "-A")
+    _git("commit", "-qm", "Set up")
+    os.chdir("..")
+    # As on Windows
+    with open("gitconfig", "w") as f:
+        f.write("[core]\n\tautocrlf = true\n[protocol]\n\tallow = always\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.path.abspath("gitconfig"))
+    _git("clone", "-q", "--recursive", "origin", "clone")
+    os.chdir("clone")
+    assert calkit.eol.submodules() == ["utils"]
+    found = calkit.eol.check_pipeline()
+    assert [f.path for f in found] == ["utils/plot.py"]
+    assert found[0].rewritten
+    res = calkit.eol.pin()
+    assert res.submodules == ["utils"]
+    assert "utils/plot.py" in res.converted
+    with open("utils/plot.py", "rb") as f:
+        assert f.read() == b"x = 1\n"
+    assert _git("status", "--porcelain", cwd="utils") == ""
+    # Still at risk in other clones, but not rewritten in this one
+    found = calkit.eol.check_pipeline()
+    assert [f.path for f in found] == ["utils/plot.py"]
+    assert not found[0].rewritten
+    # And a checkout in it now keeps what was committed
+    os.remove("utils/plot.py")
+    _git("checkout", "--", "plot.py", cwd="utils")
+    with open("utils/plot.py", "rb") as f:
+        assert f.read() == b"x = 1\n"

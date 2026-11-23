@@ -4374,6 +4374,8 @@ Check text files out with the same line endings on every platform.
 
 Puts rules first in .gitattributes that check text files out with LF everywhere, including Windows, whose Git converts them to CRLF by default, so the files the pipeline hashes match across machines. Then rewrites any file in this checkout whose line endings don't match, e.g., on Windows, keeping uncommitted changes. No committed file changes, so there's nothing to renormalize; commit .gitattributes afterwards.
 
+Submodules that don't pin their own line endings are set to check their files out as committed, in this clone only.
+
 Usage:
 
 ```text

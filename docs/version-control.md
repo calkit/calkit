@@ -329,7 +329,18 @@ the rules keeps its CRLF files, and Git shows each as modified, with an
 empty diff, until it's checked out again. No committed file changes:
 `text=auto` leaves binary files alone, and also files committed with CRLF,
 which are checked out the same on every platform already, so there's
-nothing to renormalize. DVC's
+nothing to renormalize.
+
+A [submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) is its
+own repo, so the project's `.gitattributes` doesn't reach it, and a stage
+that uses its files has the same problem. `calkit fix line-endings` and
+`calkit clone` turn off `core.autocrlf` in this clone of each submodule
+that doesn't pin its own line endings, so its files have the bytes it
+committed, on every platform, and its own attributes still apply. That's
+for this clone only, so other clones need the same, which `calkit run`
+warns about. To pin it for every clone, and for projects that use it
+without Calkit, commit `* text=auto eol=lf` to the submodule's own
+`.gitattributes`. DVC's
 [guide to running on Windows](https://doc.dvc.org/user-guide/how-to/run-dvc-on-windows)
 covers the options in more depth.
 

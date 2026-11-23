@@ -78,13 +78,21 @@ def list_tracked_eol(paths: list[str], wdir: str = ".") -> list[TrackedEol]:
     """
     if not paths:
         return []
+    subs = submodules(wdir)
+    paths = [posixpath.normpath(p).rstrip("/") or "." for p in paths]
+    # Git refuses a path inside a submodule
+    top_paths = [
+        p for p in paths if not any(p.startswith(sm + "/") for sm in subs)
+    ]
+    out = ""
     try:
-        out = subprocess.run(
-            ["git", "ls-files", "--eol", "-z", "--", *paths],
-            cwd=wdir,
-            capture_output=True,
-            check=True,
-        ).stdout.decode("utf-8", errors="replace")
+        if top_paths:
+            out = subprocess.run(
+                ["git", "ls-files", "--eol", "-z", "--", *top_paths],
+                cwd=wdir,
+                capture_output=True,
+                check=True,
+            ).stdout.decode("utf-8", errors="replace")
     except (OSError, subprocess.CalledProcessError):
         return []
     res = []
@@ -104,6 +112,40 @@ def list_tracked_eol(paths: list[str], wdir: str = ".") -> list[TrackedEol]:
                 attr=" ".join(fields[2:]).removeprefix("attr/"),
             )
         )
+    # Git lists a submodule as one entry, so what's in it is asked of its
+    # own repo, whose attributes are its own
+    for sm in subs:
+        sub_paths = []
+        for path in paths:
+            if path in (".", sm) or sm.startswith(path + "/"):
+                sub_paths = ["."]
+                break
+            if path.startswith(sm + "/"):
+                sub_paths.append(path[len(sm) + 1 :])
+        for f in list_tracked_eol(sub_paths, wdir=os.path.join(wdir, sm)):
+            f.path = f"{sm}/{f.path}"
+            res.append(f)
+    return res
+
+
+def submodules(wdir: str = ".") -> list[str]:
+    """The paths, relative to ``wdir``, of the checked-out submodules
+    under it."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-s", "-z"],
+            cwd=wdir,
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8", errors="replace")
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    res = []
+    for entry in out.split("\0"):
+        info, sep, path = entry.partition("\t")
+        if sep and info.startswith("160000 "):
+            if os.path.exists(os.path.join(wdir, path, ".git")):
+                res.append(path)
     return res
 
 
@@ -157,6 +199,8 @@ class PinResult:
     wrote_gitattributes: bool = False
     #: Working-tree files rewritten to the line endings Git checks out
     converted: list[str] = dataclass_field(default_factory=list)
+    #: Submodules set to check files out as committed, in this clone only
+    submodules: list[str] = dataclass_field(default_factory=list)
 
 
 def pins_all(wdir: str = ".") -> bool:
@@ -207,10 +251,13 @@ def write_rules(wdir: str = ".") -> bool:
     return True
 
 
-def convert_worktree(wdir: str = ".") -> list[str]:
+def convert_worktree(wdir: str = ".", as_committed: bool = False) -> list[str]:
     """Rewrite the Git-tracked files under ``wdir`` whose line endings on
     disk aren't what Git would check out now, e.g., CRLF from a checkout
     made before an ``eol=lf`` rule, and return their paths.
+
+    With ``as_committed``, a text file without an ``eol`` attribute is
+    expected as Git has it, as when ``core.autocrlf`` is off.
 
     Git itself only rewrites a file it checks out again, and skips one whose
     size and time haven't changed. Until then the file reads as modified,
@@ -246,6 +293,8 @@ def convert_worktree(wdir: str = ".") -> list[str]:
             if t.startswith("eol=")
         ]
         want = eols[-1] if eols else None
+        if want is None and as_committed:
+            want = None if "-text" in tracked.attr.split() else "lf"
         if tracked.index != "lf" or want not in ("lf", "crlf"):
             continue
         if tracked.worktree not in ("lf", "crlf", "mixed"):
@@ -320,4 +369,52 @@ def pin(wdir: str = ".") -> PinResult:
     """
     res = PinResult(wrote_gitattributes=write_rules(wdir))
     res.converted = convert_worktree(wdir)
+    sub = pin_submodules(wdir)
+    res.converted += sub.converted
+    res.submodules = sub.submodules
+    return res
+
+
+def pin_submodules(wdir: str = ".") -> PinResult:
+    """Check the files of the submodules under ``wdir`` out as committed,
+    and bring this checkout in line, for those that don't pin their line
+    endings themselves.
+
+    A submodule is its own repo, so the project's ``.gitattributes`` doesn't
+    reach it, and a rule committed to it would be a change to someone else's
+    project. Instead, ``core.autocrlf`` is turned off in this clone of it,
+    which leaves its own attributes in charge, unlike a rule in
+    ``info/attributes``, which would outrank them. Its files then have the
+    bytes it committed, on every platform.
+    """
+    res = PinResult()
+    for sm in submodules(wdir):
+        subdir = os.path.join(wdir, sm)
+        if not pins_all(subdir):
+            try:
+                current = subprocess.run(
+                    ["git", "config", "--local", "core.autocrlf"],
+                    cwd=subdir,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                if current != "false":
+                    subprocess.run(
+                        ["git", "config", "--local", "core.autocrlf", "false"],
+                        cwd=subdir,
+                        capture_output=True,
+                        check=True,
+                    )
+                    res.submodules.append(sm)
+            except (OSError, subprocess.CalledProcessError):
+                continue
+        res.converted += [
+            f"{sm}/{p}"
+            for p in convert_worktree(
+                subdir, as_committed=not pins_all(subdir)
+            )
+        ]
+        nested = pin_submodules(subdir)
+        res.converted += [f"{sm}/{p}" for p in nested.converted]
+        res.submodules += [f"{sm}/{p}" for p in nested.submodules]
     return res

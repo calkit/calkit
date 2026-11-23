@@ -5728,9 +5728,11 @@ def test_run_jupyter(tmp_dir):
     assert "Application directory" in out.stdout
 
 
-def test_run_stops_for_failed_env(tmp_dir):
-    # A stage whose environment couldn't be built fails with its own error,
-    # e.g., that a tool isn't in it, which would hide the real one
+def test_run_skips_for_failed_env(tmp_dir):
+    # A stage whose environment couldn't be built is skipped rather than
+    # failing with its own error, e.g., that a tool isn't in it, which
+    # would hide the real one. The stages that need its outputs are skipped
+    # too, the rest run, and then the run fails.
     subprocess.check_call(["calkit", "init"])
     with open("requirements.txt", "w") as f:
         f.write("./does-not-exist\n")
@@ -5749,16 +5751,33 @@ def test_run_stops_for_failed_env(tmp_dir):
                 "environment": "py",
                 "command": "echo hi > out.txt",
                 "outputs": ["out.txt"],
-            }
+            },
+            "after": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "cat out.txt > after.txt",
+                "inputs": ["out.txt"],
+                "outputs": ["after.txt"],
+            },
+            "other": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo other > other.txt",
+                "outputs": ["other.txt"],
+            },
         }
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
-    assert res.returncode != 0
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, out
+    assert "Stage 'thing' is out of date and couldn't run" in out
     assert (
-        "Failed to check environment 'py', which stage 'thing' uses"
-        in res.stderr
+        "Failed to check environment 'py', so skipping out-of-date stage "
+        "'thing'" in out
     )
-    assert "calkit check env -n py" in res.stderr
+    assert "calkit check env -n py" in out
     assert not os.path.exists("out.txt")
+    assert not os.path.exists("after.txt")
+    assert os.path.exists("other.txt")

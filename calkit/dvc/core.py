@@ -2194,6 +2194,53 @@ def get_stage_output_dvc_files(
     return found
 
 
+def record_stage_output_dvc_file(
+    overlap: dict, dvc_stage: dict, wdir: str | None = None
+) -> None:
+    """Copy the hash from a stage output's own .dvc file to ``dvc.lock``, so
+    the data can still be pulled once that file is removed.
+
+    ``overlap`` is an item from ``get_stage_output_dvc_files``. Only the
+    output is recorded, so a stage that hasn't run stays stale, and an
+    output ``dvc.lock`` already records is left as is.
+    """
+    import calkit.git
+
+    base = wdir or "."
+    with open(os.path.join(base, overlap["dvc_file"])) as f:
+        dvc_outs = (calkit.ryaml.load(f) or {}).get("outs") or []
+    dvc_file_dir = posixpath.dirname(overlap["dvc_file"])
+    hashes = next(
+        (
+            {k: out[k] for k in ("md5", "size", "nfiles", "hash") if k in out}
+            for out in dvc_outs
+            if posixpath.normpath(
+                posixpath.join(dvc_file_dir, out.get("path", ""))
+            )
+            == overlap["path"]
+        ),
+        None,
+    )
+    if not hashes or "md5" not in hashes:
+        return
+    lock_path = os.path.join(base, "dvc.lock")
+    lock: dict = {}
+    if os.path.isfile(lock_path):
+        with open(lock_path) as f:
+            lock = calkit.ryaml.load(f) or {}
+    lock.setdefault("schema", "2.0")
+    stages = lock.setdefault("stages", {})
+    entry = stages.setdefault(overlap["stage"], {"cmd": dvc_stage.get("cmd")})
+    outs = entry.setdefault("outs", [])
+    out_path = posixpath.relpath(overlap["path"], dvc_stage.get("wdir") or ".")
+    if any(out.get("path") == out_path for out in outs):
+        return
+    outs.append({"path": out_path, **hashes})
+    newline = calkit.git.get_checkout_newline(lock_path)
+    with open(lock_path, "w", newline=newline) as f:
+        calkit.ryaml.dump(lock, f)
+
+
 def untrack_cached_stage_outputs(
     dvc_stages: dict, wdir: str | None = None
 ) -> list[dict]:
@@ -2280,6 +2327,9 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
       its own ``dvc_file`` too, e.g., added with DVC by hand before the
       stage was, which belongs to the stage. DVC can't index a project like
       that, so if there are any, they're all that's reported.
+    - ``stage-output-in-dvc-dir``: made by a pipeline ``stage``, and inside
+      a directory ``dvc_file`` tracks, which DVC refuses to run. Left to the
+      user, since the .dvc file can cover data the stage doesn't make.
 
     Building DVC's index is most of the cost, and loading calkit.yaml much
     of the rest, so a ``dvc_repo`` that has built it, and ``ck_info``, can
@@ -2340,6 +2390,34 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     if dvc_repo is None:
         dvc_repo = get_dvc_repo(wdir)
     try:
+        # An output in a tracked directory doesn't stop the index from
+        # building, only DVC's runs
+        outs_by_path = {
+            Path(out.fs_path).resolve(): out for out in dvc_repo.index.outs
+        }
+        for path, out in sorted(outs_by_path.items()):
+            if out.stage.is_data_source or not path.is_relative_to(base):
+                continue
+            for parent in path.parents:
+                parent_out = outs_by_path.get(parent)
+                if parent_out is None or not parent_out.stage.is_data_source:
+                    continue
+                dvc_file = rel(Path(parent_out.stage.path).resolve())
+                problems.append(
+                    dict(
+                        path=rel(path),
+                        kind="stage-output-in-dvc-dir",
+                        stage=out.stage.addressing,
+                        dvc_file=dvc_file,
+                        store_in=None,
+                        message=(
+                            f"{rel(path)} is made by stage "
+                            f"'{out.stage.addressing}', but {dvc_file} tracks "
+                            f"{rel(parent)}, which contains it; add its other "
+                            f"files separately and delete {dvc_file}"
+                        ),
+                    )
+                )
         for out in dvc_repo.index.outs:
             path = Path(out.fs_path).resolve()
             # A project in a subdirectory can share its DVC repo with others

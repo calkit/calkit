@@ -1100,8 +1100,7 @@ class HuggingFaceAuthStart(BaseModel):
     redirect_uri: str
 
 
-# Enough to create buckets; ``contribute-repos`` would be narrower if it
-# covers buckets
+# Enough to create buckets
 HF_OAUTH_SCOPES = "openid profile manage-repos"
 
 

@@ -827,6 +827,13 @@ Run `calkit describe system` to see what these are on the machine you're on.
 The built-in `_system` environment is shorthand for this kind
 on `localhost` with nothing locked.
 
+<!-- TODO: needs human review -->
+
+Since nothing is locked, a Python, R, or Julia script or notebook run with
+`_system` gets whatever version and packages each machine has installed,
+so Calkit warns about such a stage.
+Give it an environment of its own instead, e.g., with `calkit new uv-env`.
+
 #### Following the machine, or staying on one
 
 Every stage using an environment depends on its lock file,

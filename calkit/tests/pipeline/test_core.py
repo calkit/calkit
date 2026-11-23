@@ -5900,3 +5900,54 @@ def test_get_stage_to_add():
             calkit.pipeline.get_stage_to_add(stage | bad, ck_info)
     with pytest.raises(ValueError, match="Invalid stage name"):
         calkit.pipeline.get_stage_to_add(stage, ck_info, name="-x")
+
+
+def test_to_dvc_warns_on_system_env(tmp_dir, capsys):
+    # Code that imports packages gets whatever this machine has, but a
+    # shell command, MATLAB, or Calkit's own stages are fine there
+    ck_info = {
+        "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "_system",
+                },
+                "fit": {
+                    "kind": "r-script",
+                    "script_path": "fit.R",
+                    "environment": "_system",
+                },
+                "explore": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "explore.ipynb",
+                    "environment": "_system",
+                },
+                "in-env": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "py",
+                },
+                "copy": {
+                    "kind": "shell-command",
+                    "command": "cp a b",
+                    "environment": "_system",
+                },
+                "sim": {
+                    "kind": "matlab-script",
+                    "script_path": "sim.m",
+                    "environment": "_system",
+                },
+            }
+        },
+    }
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    out, err = capsys.readouterr()
+    assert "_system" not in out
+    warned = [
+        line.split("'")[1] for line in err.splitlines() if "_system" in line
+    ]
+    assert warned == ["plot", "fit", "explore"]
+    assert "calkit new uv-env" in err
+    assert "calkit new renv" in err

@@ -2993,6 +2993,49 @@ def _stage_revision_key(
     return _revision_key(wdir, paths)
 
 
+# Stage kinds whose code imports packages, so on _system gets whatever this
+# machine has installed, with the command to make an environment for it.
+# MATLAB is an app, so _system is how it's usually run.
+SYSTEM_ENV_RISKY_KINDS = {
+    "python-script": ("a Python script", "calkit new uv-env"),
+    "r-script": ("an R script", "calkit new renv"),
+    "julia-script": ("a Julia script", "calkit new julia-env"),
+    "julia-command": ("Julia", "calkit new julia-env"),
+}
+
+
+def _warn_on_system_env(stage_name: str, stage) -> None:
+    """Warn that a stage runs code that imports packages with ``_system``,
+    which uses whatever this machine has installed.
+    """
+    from calkit.cli import warn
+
+    if stage.environment != "_system":
+        return
+    if stage.kind == "jupyter-notebook":
+        language = getattr(stage, "language", None) or "python"
+        if language == "matlab":
+            return
+        what = "a notebook"
+        new_cmd = (
+            "calkit new julia-env"
+            if language == "julia"
+            else "calkit new uv-env"
+        )
+    elif stage.kind in SYSTEM_ENV_RISKY_KINDS:
+        what, new_cmd = SYSTEM_ENV_RISKY_KINDS[stage.kind]
+    else:
+        return
+    warn(
+        f"Stage '{stage_name}' runs {what} with the '_system' environment, "
+        "so it uses whatever version and packages each machine has "
+        "installed, and may fail or give different results elsewhere. "
+        f"Create an environment for it, e.g., with '{new_cmd}', and set the "
+        "stage's environment to it.",
+        err=True,
+    )
+
+
 def to_dvc(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -3486,6 +3529,7 @@ def to_dvc(
     output_dvcignores: list[str] = []
     output_gitignores: list[str] = []
     for stage_name, stage in pipeline.stages.items():
+        _warn_on_system_env(stage_name, stage)
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
         if stage.kind == "jupyter-notebook":

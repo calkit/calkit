@@ -1167,11 +1167,8 @@ def test_save_moves_large_figure(tmp_dir, monkeypatch, capsys):
         return subprocess.check_output(["git", *args], text=True)
 
     def run() -> None:
-        subprocess.check_call(
-            ["calkit", "run"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        p = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+        assert p.returncode == 0, p.stdout + p.stderr
 
     # A project in a subdirectory of its repo, where Git runs from above it
     git("init", "-q")

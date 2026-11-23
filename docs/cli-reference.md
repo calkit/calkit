@@ -22,6 +22,7 @@
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
+| [`shell`](#top-command-shell)                    | Open a shell with an environment activated.                                                                  |
 | [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
 | [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                         |
 | [`calc`](#top-command-calc)                      | Run a project's calculation.                                                                                 |
@@ -433,6 +434,31 @@ Options:
 | `--setup-file`     | str       | no       |         | Path to a JSON list of setup commands, used instead of --setup. This is what a compiled pipeline stage carries, since a path survives being parsed by cmd.exe on Windows and by a POSIX shell elsewhere, and quoted commands don't. |
 | `--env-var`        | list[str] | no       |         | Environmental variable to set for the command, as KEY=VALUE. Can be given multiple times. Set in the process the command runs in, and passed into a container for an environment that runs in one.                                  |
 | `--verbose`, `-v`  | boolean   | no       | False   | Print verbose output.                                                                                                                                                                                                               |
+
+<a id="top-command-shell"></a>
+
+### `calkit shell`
+
+Open a shell with an environment activated.
+
+The environment is checked, and created if it doesn't exist yet, as `calkit xenv` does. In the shell, its programs come first on PATH, and the prompt starts with its name. Run `exit` to leave.
+
+Conda, uv, venv, and Pixi environments open in a shell on this machine, and a Docker environment in its container's shell.
+
+Usage:
+
+```text
+calkit shell [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                 |
+| ----------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`    | str     | no       |         | Environment to activate in the shell. There's no default.                                                   |
+| `--shell`         | str     | no       |         | Shell to open, e.g., bash, zsh, fish, pwsh, or cmd. Defaults to the one in SHELL, or PowerShell on Windows. |
+| `--no-check`      | boolean | no       | False   | Don't check the environment is valid before opening it.                                                     |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                       |
 
 <a id="top-command-install"></a>
 

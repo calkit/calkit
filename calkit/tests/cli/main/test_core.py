@@ -832,6 +832,69 @@ def test_run_in_env_system(tmp_dir):
     assert "'user'" not in combined
 
 
+def test_open_env_shell(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from calkit.environments import shell as env_shell
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CALKIT_SHELL", raising=False)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "py": {"kind": "uv", "path": "pyproject.toml"},
+                    "jl": {"kind": "julia", "path": "Project.toml"},
+                }
+            },
+            f,
+        )
+    opened = {}
+
+    def start(shell, activation, base_env=None):
+        opened["shell"] = shell
+        opened["activation"] = activation
+        return 4
+
+    monkeypatch.setattr(env_shell, "start", start)
+
+    def shell(*args: str):
+        return CliRunner().invoke(calkit_app, ["shell", *args])
+
+    # The environment has to be named
+    res = shell()
+    assert res.exit_code == 1
+    assert "Name the environment to open with '-n', one of: py, jl" in (
+        res.output
+    )
+    # Ones with nothing to activate in a shell are refused
+    res = shell("-n", "_system")
+    assert res.exit_code == 1
+    assert "nothing to activate" in res.output
+    res = shell("-n", "nope")
+    assert "Environment 'nope' does not exist" in res.output
+    res = shell("-n", "jl")
+    assert res.exit_code == 1
+    assert "calkit xenv -n jl -- <command>" in res.output
+    assert not opened
+    # The shell opens with the environment activated, and its exit status
+    # is this one's
+    res = shell("-n", "py", "--no-check", "--shell", "/bin/zsh")
+    assert res.exit_code == 4, res.output
+    assert "Opening zsh in environment 'py'; run 'exit' to leave" in (
+        res.output
+    )
+    assert opened["shell"] == "/bin/zsh"
+    assert opened["activation"].env_vars["VIRTUAL_ENV"] == os.path.join(
+        str(tmp_path), ".venv"
+    )
+    # Not inside another
+    monkeypatch.setenv("CALKIT_SHELL", "py")
+    res = shell("-n", "py", "--no-check")
+    assert res.exit_code == 1
+    assert "Already in a shell for environment 'py'" in res.output
+
+
 def test_to_shell_cmd():
     cmd = ["python", "-c", "import math; print('hello world')"]
     subprocess.check_call(cmd)

@@ -108,6 +108,32 @@ Calkit will check that the environment matches its specification,
 and if it needs to be updated,
 that will be done before execution.
 
+<!-- TODO: needs human review -->
+
+To work in an environment interactively,
+e.g., to try things out in Python or run a few commands in a row,
+open a shell with it activated:
+
+```sh
+calkit shell -n {env-name}
+```
+
+This checks the environment, creating it if it doesn't exist yet,
+and then opens your shell with the environment's programs first on `PATH`,
+the variables its kind sets, e.g., `VIRTUAL_ENV` or `CONDA_PREFIX`,
+and its name at the start of the prompt.
+Your shell's startup files are read as usual,
+and the environment is activated after them,
+so it comes first even if they activate another, e.g., Conda's `base`.
+Run `exit` to leave.
+It works with Conda, uv, venv, and Pixi environments,
+and opens a Docker environment's shell in its container.
+For other kinds, run programs in them with `calkit xenv`.
+
+On macOS and Linux, the shell is the one in `SHELL`,
+and on Windows, it's PowerShell.
+Pick another with `--shell`, e.g., `calkit shell -n main --shell bash`.
+
 All project environments can be checked at once with:
 
 ```sh

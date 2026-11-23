@@ -566,6 +566,7 @@ def check_environment(
             alt_lock_fpaths=alt_lock_fpaths,
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
+            prefix=env.get("prefix"),
         )
     elif env["kind"] == "pixi":
         cmd = ["pixi", "install"]
@@ -587,6 +588,12 @@ def check_environment(
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--directory", env_dir]
+        try:
+            extras = calkit.environments.get_uv_extras(env)
+        except ValueError as e:
+            raise_error(str(e))
+        for extra in extras:
+            cmd += ["--extra", extra]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -1327,6 +1334,13 @@ def check_conda_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
+    prefix: Annotated[
+        str | None,
+        typer.Option(
+            "--prefix",
+            help="Where the environment is kept, overriding the spec's.",
+        ),
+    ] = None,
 ) -> None:
     log_func: Callable[..., None]
     if quiet:
@@ -1342,6 +1356,7 @@ def check_conda_env(
             log_func=log_func,
             relaxed=relaxed,
             verbose=not quiet,
+            prefix=prefix,
         )
     except Exception as e:
         warn_app_control(output=str(e), maybe=True)
@@ -1553,13 +1568,21 @@ def check_venv(
             return
         # Local packages are installed from the spec, since their paths
         # differ between machines
-        with open(lock_fpath_full, encoding="utf-8") as f:
-            frozen = f.read()
+        # Read as written, since pip writes it through the shell, e.g., with
+        # CRLF on Windows, whatever Git checks it out with
+        with open(lock_fpath_full, encoding="utf-8", newline="") as f:
+            written = f.read()
+        frozen = written.replace("\r\n", "\n")
         lock = "".join(
             ln for ln in frozen.splitlines(keepends=True) if not is_local(ln)
         )
-        if lock != frozen:
-            with open(lock_fpath_full, "w", encoding="utf-8") as f:
+        newline = calkit.git.get_checkout_newline(lock_fpath_full)
+        if lock != frozen or (
+            newline is not None and lock.replace("\n", newline) != written
+        ):
+            with open(
+                lock_fpath_full, "w", encoding="utf-8", newline=newline
+            ) as f:
                 f.write(lock)
         lock_changed = lock != lock_before
         # All platforms are relocked together, so they agree; an existing
@@ -1999,10 +2022,18 @@ def check_stage_runs() -> None:
     problems = []
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
+        # DVC writes a frozen stage's entry whenever it verifies the stage's
+        # outputs rather than running it, so there's no run to match
+        try:
+            frozen = calkit.pipeline.frozen_stage_base_names(wdir=lock_dir)
+        except Exception:
+            frozen = set()
         for lock_name, locked in sorted(lock_stages.items()):
             if not isinstance(locked, dict) or lock_name in removed.get(
                 lock_dir, set()
             ):
+                continue
+            if lock_name.split("@")[0] in frozen:
                 continue
             name = (
                 lock_name

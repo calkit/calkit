@@ -2673,7 +2673,7 @@ def _pipeline_output_paths(
     """
     import posixpath
 
-    from calkit.pipeline import get_map_paths_outputs
+    from calkit.pipeline import get_cell_output_paths, get_map_paths_outputs
 
     stages = ((ck_info or {}).get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
@@ -2692,7 +2692,9 @@ def _pipeline_output_paths(
             )
             if isinstance(out, str) and out
         ]
-        outs += get_map_paths_outputs(stage)
+        outs += get_map_paths_outputs(stage) + get_cell_output_paths(
+            stage, ck_info
+        )
         for out in outs:
             full = root / out
             if full.is_file():

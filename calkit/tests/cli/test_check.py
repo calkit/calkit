@@ -124,6 +124,21 @@ def test_check_venv(tmp_dir):
     assert result.returncode != 0
     assert "out of sync with its lock" in result.stderr + result.stdout
     assert not [f for f in os.listdir() if f.startswith(("osx-", "linux-"))]
+    # A new lock gets the line ending Git checks it out with, whichever one
+    # the installer froze it with
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "config", "core.autocrlf", "false"])
+    for eol, reqs in [("crlf", "requests\nsix\n"), ("lf", "requests\n")]:
+        with open(".gitattributes", "w") as f:
+            f.write(f"lock.txt text eol={eol}\n")
+        with open("reqs.txt", "w") as f:
+            f.write(reqs)
+        subprocess.check_call(check_311)
+        with open("lock.txt", "rb") as f:
+            raw = f.read()
+        assert b"requests==" in raw
+        n_crlf = raw.count(b"\n") if eol == "crlf" else 0
+        assert raw.count(b"\r\n") == n_crlf, eol
 
 
 def test_check_venv_moved(tmp_dir):
@@ -1878,6 +1893,42 @@ def test_check_stage_runs(tmp_dir):
     # Rerunning them records them again
     subprocess.check_call(["calkit", "run", "--force"])
     subprocess.check_call(check)
+    # A frozen stage's committed output, e.g., model weights trained
+    # elsewhere, gets an entry DVC writes on verifying it, not a run, so
+    # it isn't checked against one
+    with open("f.txt", "w") as f:
+        f.write("trained elsewhere\n")
+    ck_info["pipeline"]["stages"]["f"] = {
+        "kind": "shell-command",
+        "command": "echo f > f.txt",
+        "environment": "_system",
+        "inputs": [{"from_stage_outputs": "a"}],
+        "outputs": [{"path": "f.txt", "storage": "git"}],
+        "frozen": True,
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    assert "f" in calkit.dvc.read_lock_stages()
+    assert "f" not in calkit.read_stage_runs()
+    with open("f.txt") as f:
+        assert f.read() == "trained elsewhere\n"
+    subprocess.check_call(check)
+    # Forcing all stages leaves it alone, but naming it runs it,
+    subprocess.check_call(["calkit", "run", "--force"])
+    with open("f.txt") as f:
+        assert f.read() == "trained elsewhere\n"
+    # without rerunning what it depends on, which is up to date
+    a_run = calkit.read_stage_runs()["a"]
+    subprocess.check_call(["calkit", "run", "--force", "f"])
+    with open("f.txt") as f:
+        assert f.read() == "f\n"
+    assert "f" in calkit.read_stage_runs()
+    assert calkit.read_stage_runs()["a"] == a_run
+    subprocess.check_call(check)
+    del ck_info["pipeline"]["stages"]["f"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
     # A subproject's runs are kept beside its dvc.lock under their names
     # there, so it is the same record whichever directory ran them
     os.makedirs("sub")

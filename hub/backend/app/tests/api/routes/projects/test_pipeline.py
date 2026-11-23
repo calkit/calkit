@@ -704,7 +704,7 @@ def test_post_project_pipeline_stage(
     }
     [entry] = info["misc"]
     assert entry["path"] == "figures/src/drawn.psd"
-    assert entry["created_by"][0]["email"]
+    assert entry["created_by"]["email"]
     assert repo.git.ls_files("figures/src/drawn.psd")
     dvc_yaml = yaml.safe_load((tmp_path / "repo" / "dvc.yaml").read_text())
     assert dvc_yaml["stages"]["export-drawn"]["cmd"].startswith(

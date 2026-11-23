@@ -166,6 +166,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "calkit-vscode.addLatexStage",
+        "title": "Add to Pipeline and Build",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
         "command": "calkit-vscode.runMarkdownStage",
         "title": "Calkit: Run Markdown Stage",
         "icon": "$(play)"
@@ -365,6 +371,12 @@
         "icon": "$(cloud-download)"
       },
       {
+        "command": "calkit-vscode.defineArtifactCreated",
+        "title": "Created by Me",
+        "category": "Calkit",
+        "icon": "$(person)"
+      },
+      {
         "command": "calkit-vscode.runArtifactStage",
         "title": "Run Stage",
         "category": "Calkit",
@@ -473,6 +485,17 @@
         "title": "Reopen as Text",
         "category": "Calkit",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.addCellOutput",
+        "title": "Save as Calkit Output",
+        "category": "Calkit",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "calkit-vscode.cellOutputActions",
+        "title": "Cell Output Actions",
+        "category": "Calkit"
       }
     ],
     "menus": {
@@ -645,6 +668,11 @@
           "group": "inline@2"
         },
         {
+          "command": "calkit-vscode.defineArtifactCreated",
+          "when": "view == calkit-sidebar && (viewItem == figure-no-provenance || viewItem == dataset-no-provenance)",
+          "group": "inline@3"
+        },
+        {
           "command": "calkit-vscode.editStage",
           "when": "view == calkit-sidebar && viewItem == notebook-stage-prop",
           "group": "inline"
@@ -745,12 +773,17 @@
         },
         {
           "command": "calkit-vscode.showProvenance",
-          "when": "calkit.activeFileIsPipelineOutput || calkit.activeFileIsFigureOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf",
+          "when": "calkit.activeFileIsPipelineOutput || calkit.activeFileIsFigureOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf || calkit.activeFileHasStage && resourceExtname =~ /^\\.(tex|qmd|md)$/",
           "group": "navigation"
         },
         {
           "command": "calkit-vscode.runStageForFile",
-          "when": "calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "when": "calkit.activeFileHasStage && !calkit.isSettingKernel || resourceExtname == .pdf && calkit.activePdfHasStage",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.addLatexStage",
+          "when": "resourceExtname == .tex && calkit-vscode.hasProject && calkit.activeFileNeedsLatexStage",
           "group": "navigation"
         },
         {
@@ -909,6 +942,9 @@
           "command": "calkit-vscode.defineArtifactImport"
         },
         {
+          "command": "calkit-vscode.defineArtifactCreated"
+        },
+        {
           "command": "calkit-vscode.runArtifactStage"
         },
         {
@@ -1003,6 +1039,10 @@
           "when": "false"
         },
         {
+          "command": "calkit-vscode.addLatexStage",
+          "when": "resourceExtname == .tex && calkit.activeFileNeedsLatexStage"
+        },
+        {
           "command": "calkit-vscode.pdfGoToSource",
           "when": "false"
         },
@@ -1021,6 +1061,14 @@
         {
           "command": "calkit-vscode.resolveOverleafConflict",
           "when": "false"
+        },
+        {
+          "command": "calkit-vscode.cellOutputActions",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.addCellOutput",
+          "when": "notebookType == 'jupyter-notebook'"
         }
       ],
       "webview/context": [
@@ -1033,6 +1081,13 @@
           "command": "calkit-vscode.pdfGoToSourceToSide",
           "when": "webviewId == 'calkit.pdfReview'",
           "group": "navigation@2"
+        }
+      ],
+      "notebook/cell/title": [
+        {
+          "command": "calkit-vscode.addCellOutput",
+          "when": "notebookType == 'jupyter-notebook' && notebookCellType == 'code'",
+          "group": "inline@90"
         }
       ]
     },

@@ -72,6 +72,7 @@ from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.open_ import open_app
 from calkit.cli.overleaf import overleaf_app
+from calkit.cli.quarto import quarto_app
 from calkit.cli.scheduler import scheduler_app
 from calkit.cli.show import show_app
 from calkit.cli.sync import sync_app
@@ -112,6 +113,7 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
+app.add_typer(quarto_app, name="quarto", help="Work with Quarto.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
@@ -4426,7 +4428,7 @@ def run(
     # Create a file handler for dvc.stage.run logger. Append mode matters:
     # stage output is teed into this file through a second handle, and a
     # truncating handle would overwrite it.
-    file_handler = logging.FileHandler(log_fpath, mode="a")
+    file_handler = logging.FileHandler(log_fpath, mode="a", encoding="utf-8")
     run_history_length = calkit.config.read().run_history_length
     # Keep the private log directory bounded; the new log counts toward the
     # cap and is protected so it can never be pruned out from under this run.
@@ -4495,6 +4497,18 @@ def run(
                 f"'{found['stage']}' stores it with DVC"
             )
     dvc.stage.run._run = _patched_run
+    # DVC never runs a frozen stage, so one named outright with --force is
+    # thawed for this run. When those are all that's named, only they're
+    # forced, so what they depend on reruns only if it's out of date, e.g.,
+    # retraining a model doesn't regenerate its data
+    targeted_names = {t.split("@")[0] for t in targets or []}
+    thawed = (
+        calkit.pipeline.frozen_stage_base_names(ck_info=ck_info)
+        & targeted_names
+        if force
+        else set()
+    )
+    force_only_thawed = bool(thawed) and thawed == targeted_names
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s
         # default. Brief contention is common and benign: a background
@@ -4506,13 +4520,14 @@ def run(
         with (
             calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT),
             calkit.dvc.skip_stages(gated_stages, skipped=skipped_stale),
+            calkit.dvc.thaw_stages(thawed, force_only=force_only_thawed),
         ):
             res = _run_dvc_repro(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
         dvc.stage.run._run = orig_run
     # Parse log to get timing and which stages ran
-    with open(log_fpath, "r") as f:
+    with open(log_fpath, encoding="utf-8", errors="replace") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(
             log_content, run_finished=True
@@ -5425,10 +5440,12 @@ def run_in_env(
                 ),
                 relaxed=relaxed_check,
                 quiet=not verbose,
+                prefix=env.get("prefix"),
             )
             save_env_check_cache()
-        # TODO: Prefix should only be in the env file or calkit.yaml, not both?
-        prefix = env.get("prefix")
+        # Where the environment is kept can be set in either calkit.yaml or
+        # the spec
+        prefix = env.get("prefix") or conda_env.get("prefix")
         # Conda is often not on the PATH (especially on Windows), so search
         # typical install locations rather than relying on the bare name,
         # which would fail with a confusing FileNotFoundError traceback.
@@ -5441,9 +5458,33 @@ def run_in_env(
         conda_cmd = [conda_exe, "run"]
         if prefix is not None:
             conda_cmd += ["--prefix", os.path.abspath(prefix)]
+            env_prefix = os.path.abspath(prefix)
         else:
             conda_cmd += ["-n", conda_env["name"]]
+            env_prefix = calkit.conda.find_named_env_prefix(
+                conda_env["name"], conda_exe
+            )
         cmd = conda_cmd + cmd
+        # Activating an environment while Conda's base is on PATH swaps it in
+        # at base's position rather than putting it first, so anything
+        # earlier on PATH, e.g., a Quarto or Python installed with Homebrew
+        # or Pixi, would win over the environment's own
+        bin_dirs = []
+        if env_prefix is not None:
+            bin_dirs = (
+                [env_prefix, os.path.join(env_prefix, "Library", "bin")]
+                + [os.path.join(env_prefix, "Scripts")]
+                if sys.platform == "win32"
+                else [os.path.join(env_prefix, "bin")]
+            )
+        bin_dirs = [d for d in bin_dirs if os.path.isdir(d)]
+        if bin_dirs:
+            run_env_vars = dict(
+                run_env_vars if run_env_vars is not None else os.environ
+            )
+            run_env_vars["PATH"] = os.pathsep.join(
+                bin_dirs + [run_env_vars.get("PATH", "")]
+            )
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -5468,7 +5509,15 @@ def run_in_env(
             raise_error("Failed to run in Pixi environment")
     elif env["kind"] == "uv":
         env_dir = os.path.dirname(os.path.abspath(env["path"]))
-        cmd = ["uv", "run", "--project", env_dir] + cmd
+        try:
+            extras = calkit.environments.get_uv_extras(env)
+        except ValueError as e:
+            raise_error(str(e))
+        cmd = (
+            ["uv", "run", "--project", env_dir]
+            + [arg for extra in extras for arg in ("--extra", extra)]
+            + cmd
+        )
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -6457,7 +6506,16 @@ def run_jupyter(
         from calkit.cli.scheduler import record_interactive_job
 
         record_interactive_job("jupyter")
-    process = subprocess.run([sys.executable, "-m", "jupyter"] + args)
+    # Jupyter runs a subcommand, e.g., jupyter-lab, from the first one on
+    # PATH, which may be another install without Calkit's extensions, so
+    # this Python's come first
+    import sysconfig
+
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join(
+        [sysconfig.get_path("scripts"), env.get("PATH", "")]
+    )
+    process = subprocess.run([sys.executable, "-m", "jupyter"] + args, env=env)
     sys.exit(process.returncode)
 
 

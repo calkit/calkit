@@ -17,7 +17,13 @@ if TYPE_CHECKING:
     # forward reference in Project.releases for type checkers without creating
     # a runtime circular import.
     from app.models.releases import Release
-from pydantic import BaseModel, EmailStr, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.subscriptions import (
@@ -1958,6 +1964,12 @@ class MiscArtifact(BaseModel):
     description: str | None = None
     created_by: list[dict[str, Any]] | None = None
     imported_from: dict[str, Any] | None = None
+
+    @field_validator("created_by", mode="before")
+    @classmethod
+    def get_creator_list(cls, value: Any) -> Any:
+        # calkit.yaml writes a single creator as one person, not a list
+        return [value] if isinstance(value, dict) else value
 
 
 # Question evidence models live here (after Figure, Result, and Publication) so

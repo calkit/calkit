@@ -479,8 +479,11 @@ def add_origin(
         entry["title"] = title
     if description:
         entry["description"] = description
+    # One person is written as one, as people write it
     if created_by is not None:
-        entry["created_by"] = created_by
+        entry["created_by"] = (
+            created_by[0] if len(created_by) == 1 else created_by
+        )
     if imported_from is not None:
         entry["imported_from"] = imported_from
     # Validated against the model that owns calkit.yaml, which is where
@@ -529,13 +532,13 @@ def add_creator(ck_info: dict, paths: list[str], person: dict) -> dict:
         if entry is None:
             if not ck_info.get("misc"):
                 ck_info["misc"] = []
-            ck_info["misc"].append({"path": path, "created_by": [person]})
+            ck_info["misc"].append({"path": path, "created_by": person})
         elif not (
             entry.get("created_by")
             or entry.get("imported_from")
             or entry.get("stage")
         ):
-            entry["created_by"] = [person]
+            entry["created_by"] = person
     return ck_info
 
 
@@ -1906,6 +1909,7 @@ def get_path_provenance(
 
     import calkit.environments
     import calkit.export
+    import calkit.notebooks
     import calkit.pipeline
     import calkit.questions
 
@@ -1964,6 +1968,9 @@ def get_path_provenance(
             return None, f"{key or path} is too big to show"
         return json.loads(encoded), None
 
+    # A value cited from a notebook is one its cells make, saved beside it
+    if key is not None and path.lower().endswith(".ipynb"):
+        path = calkit.notebooks.get_notebook_values_path(path)
     lock_stages = dvc_lock.get("stages") or {}
     yaml_stages = dvc_yaml.get("stages") or {}
     lock_outs = {

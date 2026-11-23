@@ -159,6 +159,11 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
 - `\ckvalue[format]{path}{key}` prints a value from a JSON, YAML, or TOML
   file.
   Keys are separated by dots to reach into nested values, e.g., `fit.slope`.
+  <!-- TODO: needs human review -->
+  For a value saved from a notebook cell, use the notebook's path,
+  e.g., `\ckvalue[.3f]{fit-rates.ipynb}{k_25}`.
+  See [saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells)
+  for more info.
 - `\ckfigure[options]{path}` includes a figure, with the same options as
   `\includegraphics`.
 - `\cktable{path}` includes a table a stage writes.

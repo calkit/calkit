@@ -140,13 +140,19 @@ requirements:
     version_spec: ">=3.11"
 ```
 
+<!-- TODO: needs human review -->
+
 `cpu-count` and `memory-gb` take `min` and/or `max`.
 Everything else takes `equals`---matched case-insensitively, and a list
 means any one of them will do---`matches`, a glob like `*.cluster.edu`
 that is matched the same way, or a `version_spec` for properties that
 are versions.
 The properties available are the machine-describing ones from the table
-in [environments](environments.md#system);
+in [environments](environments.md#system),
+plus `gpu-name`, `gpu-vendor` (`amd`, `nvidia` or `apple`) and `gpu-arch`
+(e.g., `gfx1201` or `sm_89`), which are met when any of the machine's GPUs
+meets them, so an integrated GPU beside a discrete one doesn't get in the
+way;
 versions of installed tools are reached as an `app` requirement with a
 `version_spec` instead, which is one way to say it rather than two.
 
@@ -341,31 +347,32 @@ non-zero.
 Installing is always opt-in: nothing runs without a yes at the prompt
 or `--yes` on the command line.
 
-<!-- TODO: needs human review: gh and make rows -->
+<!-- TODO: needs human review: gh, make, and Office rows -->
 
 Apps currently in the registry:
 
-| Name                 | Installer                                                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `pixi`               | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                                                 |
-| `uv`                 | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                                        |
-| `rustup`, `cargo`    | upstream `rustup` script on Unix, `winget` on Windows                                                                     |
-| `juliaup`, `julia`   | upstream `juliaup` script on Unix, `winget` on Windows                                                                    |
-| `nix`                | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows                        |
-| `conda`, `mamba`     | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                                        |
-| `git`                | Homebrew on macOS, `winget` on Windows                                                                                    |
-| `gh`                 | Homebrew on macOS, `pixi global install gh` on Linux, `winget` on Windows                                                 |
-| `make`               | `winget` on Windows; comes with the developer tools elsewhere                                                             |
-| `docker`             | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows, enabling Virtual Machine Platform first if needed |
-| `colima`             | Homebrew on macOS, with the Docker CLI unless one is already installed                                                    |
-| `code`               | VS Code's own download on macOS, `winget` on Windows; also `calkit install vscode`                                        |
-| `R`, `Rscript`       | Homebrew cask on macOS, `winget` on Windows                                                                               |
-| `node`, `npm`, `npx` | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                                               |
-| `claude`             | upstream script; then adds Calkit's plugin                                                                                |
-| `codex`              | upstream script; then adds Calkit's plugin                                                                                |
-| `opencode`           | upstream script on Unix; then adds Calkit's plugin                                                                        |
-| `brew`               | the upstream Homebrew script, macOS only                                                                                  |
-| `choco`              | the upstream Chocolatey script in an elevated shell, Windows only                                                         |
+| Name                          | Installer                                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `pixi`                        | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                                                 |
+| `uv`                          | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                                        |
+| `rustup`, `cargo`             | upstream `rustup` script on Unix, `winget` on Windows                                                                     |
+| `juliaup`, `julia`            | upstream `juliaup` script on Unix, `winget` on Windows                                                                    |
+| `nix`                         | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows                        |
+| `conda`, `mamba`              | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                                        |
+| `git`                         | Homebrew on macOS, `winget` on Windows                                                                                    |
+| `gh`                          | Homebrew on macOS, `pixi global install gh` on Linux, `winget` on Windows                                                 |
+| `make`                        | `winget` on Windows; comes with the developer tools elsewhere                                                             |
+| `docker`                      | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows, enabling Virtual Machine Platform first if needed |
+| `colima`                      | Homebrew on macOS, with the Docker CLI unless one is already installed                                                    |
+| `code`                        | VS Code's own download on macOS, `winget` on Windows; also `calkit install vscode`                                        |
+| `R`, `Rscript`                | Homebrew cask on macOS, `winget` on Windows                                                                               |
+| `word`, `excel`, `powerpoint` | Homebrew cask on macOS; Microsoft 365 Apps, with all three, from `winget` on Windows                                      |
+| `node`, `npm`, `npx`          | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                                               |
+| `claude`                      | upstream script; then adds Calkit's plugin                                                                                |
+| `codex`                       | upstream script; then adds Calkit's plugin                                                                                |
+| `opencode`                    | upstream script on Unix; then adds Calkit's plugin                                                                        |
+| `brew`                        | the upstream Homebrew script, macOS only                                                                                  |
+| `choco`                       | the upstream Chocolatey script in an elevated shell, Windows only                                                         |
 
 Run `calkit list installers` for the live list.
 On Linux, Git, VS Code, and R come from the system package manager,

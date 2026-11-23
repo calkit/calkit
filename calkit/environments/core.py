@@ -1068,6 +1068,30 @@ def get_composed_env_vars(
     return env_vars
 
 
+def get_uv_extras(env: dict) -> list[str]:
+    """Get the extras of a uv environment to install on this machine.
+
+    One given with ``when`` is included only where all of its conditions
+    hold.
+    """
+    from pydantic import ValidationError
+
+    from calkit.models.core import UvExtra
+
+    extras = []
+    for extra in env.get("extras") or []:
+        if isinstance(extra, str):
+            extras.append(extra)
+            continue
+        try:
+            uv_extra = UvExtra.model_validate(extra)
+        except ValidationError as e:
+            raise ValueError(f"Extra {extra!r} is invalid: {e}") from None
+        if all(check_condition(c) for c in uv_extra.when):
+            extras.append(uv_extra.name)
+    return extras
+
+
 def get_env(name: str, envs: dict) -> dict | None:
     """An environment by name, including one a switch defines in place.
 
@@ -1171,13 +1195,18 @@ def _load_switch(env_name: str, envs: dict) -> list["SwitchOption"]:
 _FQDNS: dict[str, str] = {}
 
 
-def resolve_switch(env_name: str, envs: dict) -> str | None:
-    """The environment a switch picks on this machine, or None."""
+def check_condition(condition: object) -> bool:
+    """Check whether a switch condition, e.g., ``os_is: linux``, holds on
+    this machine.
+    """
     from calkit.models.core import (
         AppExistsCondition,
         EnvVarEqualsCondition,
         EnvVarExistsCondition,
         EnvVarSetCondition,
+        GpuArchIsCondition,
+        GpuNameMatchesCondition,
+        GpuVendorIsCondition,
         HostnameMatchesCondition,
         MachineIdEqualsCondition,
         OsIsCondition,
@@ -1186,49 +1215,61 @@ def resolve_switch(env_name: str, envs: dict) -> str | None:
     def any_of(value: str | list) -> list:
         return value if isinstance(value, list) else [value]
 
-    def holds(condition: object) -> bool:
-        if isinstance(condition, AppExistsCondition):
-            return any(
-                shutil.which(a) is not None
-                for a in any_of(condition.app_exists)
-            )
-        if isinstance(condition, EnvVarSetCondition):
-            return any(n in os.environ for n in any_of(condition.env_var_set))
-        if isinstance(condition, EnvVarExistsCondition):
-            return any(
-                n in os.environ for n in any_of(condition.env_var_exists)
-            )
-        if isinstance(condition, EnvVarEqualsCondition):
-            settings = [
-                s.split("=", 1) for s in any_of(condition.env_var_equals)
-            ]
-            return any(os.environ.get(n) == v for n, v in settings)
-        if isinstance(condition, HostnameMatchesCondition):
-            patterns = [p.lower() for p in any_of(condition.hostname_matches)]
-            hostname = socket.gethostname().lower()
-            if any(fnmatch.fnmatchcase(hostname, p) for p in patterns):
-                return True
-            # Cluster nodes often report a short name, so the qualified one
-            # is tried too, which can take a slow reverse DNS lookup
-            if hostname not in _FQDNS:
-                _FQDNS[hostname] = socket.getfqdn().lower()
-            return any(
-                fnmatch.fnmatchcase(_FQDNS[hostname], p) for p in patterns
-            )
-        if isinstance(condition, OsIsCondition):
-            names = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
-            return names.get(platform.system()) in any_of(condition.os_is)
-        if isinstance(condition, MachineIdEqualsCondition):
-            here = calkit.get_machine_id()
-            return any(
-                calkit.machine_ids_match(here, m)
-                for m in any_of(condition.machine_id_equals)
-            )
-        raise TypeError(f"Unknown switch condition: {condition!r}")
+    if isinstance(condition, AppExistsCondition):
+        return any(
+            shutil.which(a) is not None for a in any_of(condition.app_exists)
+        )
+    if isinstance(condition, EnvVarSetCondition):
+        return any(n in os.environ for n in any_of(condition.env_var_set))
+    if isinstance(condition, EnvVarExistsCondition):
+        return any(n in os.environ for n in any_of(condition.env_var_exists))
+    if isinstance(condition, EnvVarEqualsCondition):
+        settings = [s.split("=", 1) for s in any_of(condition.env_var_equals)]
+        return any(os.environ.get(n) == v for n, v in settings)
+    if isinstance(condition, HostnameMatchesCondition):
+        patterns = [p.lower() for p in any_of(condition.hostname_matches)]
+        hostname = socket.gethostname().lower()
+        if any(fnmatch.fnmatchcase(hostname, p) for p in patterns):
+            return True
+        # Cluster nodes often report a short name, so the qualified one
+        # is tried too, which can take a slow reverse DNS lookup
+        if hostname not in _FQDNS:
+            _FQDNS[hostname] = socket.getfqdn().lower()
+        return any(fnmatch.fnmatchcase(_FQDNS[hostname], p) for p in patterns)
+    if isinstance(condition, OsIsCondition):
+        names = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
+        return names.get(platform.system()) in any_of(condition.os_is)
+    if isinstance(condition, MachineIdEqualsCondition):
+        here = calkit.get_machine_id()
+        return any(
+            calkit.machine_ids_match(here, m)
+            for m in any_of(condition.machine_id_equals)
+        )
+    # A GPU condition holds when any one of the machine's GPUs meets it
+    if isinstance(condition, GpuVendorIsCondition):
+        vendors = any_of(condition.gpu_vendor_is)
+        return any(g.get("vendor") in vendors for g in calkit.core.get_gpus())
+    if isinstance(condition, GpuArchIsCondition):
+        archs = [a.lower() for a in any_of(condition.gpu_arch_is)]
+        return any(
+            str(g.get("arch") or "").lower() in archs
+            for g in calkit.core.get_gpus()
+        )
+    if isinstance(condition, GpuNameMatchesCondition):
+        patterns = [p.lower() for p in any_of(condition.gpu_name_matches)]
+        return any(
+            fnmatch.fnmatchcase(str(g.get("name") or "").lower(), p)
+            for g in calkit.core.get_gpus()
+            for p in patterns
+        )
+    raise TypeError(f"Unknown switch condition: {condition!r}")
 
+
+def resolve_switch(env_name: str, envs: dict) -> str | None:
+    """The environment a switch picks on this machine, or None."""
     get_switch_options(env_name, envs)
     for n, option in enumerate(_load_switch(env_name, envs), start=1):
-        if option.when is None or all(holds(c) for c in option.when):
+        if option.when is None or all(check_condition(c) for c in option.when):
             if isinstance(option.use, str):
                 return option.use
             return f"{env_name}.{n}"
@@ -4348,3 +4389,125 @@ def relock(env_name: str, env: dict) -> None:
             err=True,
         )
         raise
+
+
+# Kinds whose commands run as local processes with the environment's PATH,
+# where Calkit's own interpreter can be run to see what that PATH resolves
+APP_CHECK_ENV_KINDS = ("uv", "uv-venv", "venv", "conda", "pixi")
+
+
+def is_app_required(
+    app: str, ck_info: dict, stage: dict | None = None
+) -> bool:
+    """Whether the project, or the stage, lists an app as a requirement,
+    so a copy installed outside its environment is expected."""
+    import calkit
+    from calkit.core import _normalize_requirement
+
+    reqs = list(calkit.get_requirements(ck_info) or [])
+    reqs += list((stage or {}).get("requirements") or [])
+    for req in reqs:
+        try:
+            normalized = _normalize_requirement(req)
+        except ValueError:
+            continue
+        if normalized.get("kind") == "app" and normalized.get("name") == app:
+            return True
+    return False
+
+
+def check_app_in_env(
+    app: str,
+    env_name: str,
+    ck_info: dict,
+    stage: dict | None = None,
+    wdir: str | None = None,
+    check_env: bool = False,
+) -> str | None:
+    """Return what's wrong with where an app comes from in an environment,
+    or None if nothing is.
+
+    An app a stage runs belongs in its environment, like any other tool, so
+    the same version runs on every machine, unless the project or stage
+    lists it as a requirement, saying one installed on the machine is
+    expected. It's in the environment if the environment's PATH resolves
+    it somewhere other than PATH outside it does, which also sees through a
+    launcher, e.g., Pixi's for a global install. Only environments that run
+    commands locally are checked. The '_system' environment is this
+    machine, so there it only has to be installed, which counts one in an
+    environment active here, since that's what runs. With ``check_env``,
+    the environment is checked first, which creates it if it's missing.
+    """
+
+    def get_path_outside_active_env() -> str:
+        """PATH without the environment active in this process, if any,
+        e.g., under 'uv run' or 'pixi run', or in a shell that activated it,
+        so an app from it isn't mistaken for one installed on the machine.
+        """
+        active = [
+            os.environ.get("VIRTUAL_ENV"),
+            os.environ.get("PIXI_PROJECT_ROOT")
+            and os.environ.get("CONDA_PREFIX"),
+        ]
+        if os.environ.get("CONDA_DEFAULT_ENV") not in (None, "base"):
+            active.append(os.environ.get("CONDA_PREFIX"))
+        prefixes = [os.path.realpath(p) for p in active if p]
+        dirs = os.environ.get("PATH", "").split(os.pathsep)
+        return os.pathsep.join(
+            d
+            for d in dirs
+            if not any(
+                os.path.realpath(d) == p
+                or os.path.realpath(d).startswith(p + os.sep)
+                for p in prefixes
+            )
+        )
+
+    if is_app_required(app, ck_info, stage):
+        return None
+    if env_name == "_system":
+        if shutil.which(app) is None:
+            return (
+                f"'{app}' isn't installed on this machine; install it, or "
+                "use an environment that provides it"
+            )
+        return None
+    fix = (
+        f"add it to the environment, or list '{app}' in the project's "
+        "requirements"
+    )
+    env = (ck_info.get("environments") or {}).get(env_name)
+    if not isinstance(env, dict) or env.get("kind") not in (
+        APP_CHECK_ENV_KINDS
+    ):
+        return None
+    where = f"isn't in environment '{env_name}'"
+    system_path = shutil.which(app, path=get_path_outside_active_env())
+    res = subprocess.run(
+        [sys.executable, "-m", "calkit", "xenv", "-n", env_name]
+        + ([] if check_env else ["--no-check"])
+        + ["--", sys.executable, "-c"]
+        + ["import shutil, sys; print(shutil.which(sys.argv[1]) or '')"]
+        + [app],
+        capture_output=True,
+        text=True,
+        cwd=wdir,
+    )
+    if res.returncode != 0:
+        errors = (res.stderr or res.stdout).strip().splitlines()
+        return (
+            f"Couldn't run a command in environment '{env_name}' to find "
+            f"'{app}'" + (f": {errors[-1]}" if errors else "")
+        )
+    lines = res.stdout.strip().splitlines()
+    env_path = (lines[-1].strip() if lines else "") or None
+    if env_path is None:
+        return f"'{app}' {where}; {fix}"
+    if system_path is not None and os.path.realpath(
+        env_path
+    ) == os.path.realpath(system_path):
+        return (
+            f"'{app}' {where}, so the one installed on this machine "
+            f"({system_path}) would be used; {fix}"
+        )
+    return None

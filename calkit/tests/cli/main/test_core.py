@@ -557,6 +557,46 @@ def test_run_in_env_by_path(tmp_dir):
     assert len(envs) == 3
 
 
+def test_run_in_env_uv_extras(tmp_dir):
+    def write_extras(extras: list) -> None:
+        env = {"kind": "uv", "path": "pyproject.toml", "extras": extras}
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"environments": {"main": env}}, f)
+
+    subprocess.check_call(["uv", "init", "--bare"])
+    subprocess.check_call(["uv", "add", "--optional", "accel", "six"])
+    # Adding it installs it, so start from an environment without it
+    subprocess.check_call(["uv", "sync"])
+    cmd = ["calkit", "xenv", "-n", "main", "--", "python", "-c", "import six"]
+    # An extra meant for another machine, e.g., one with a GPU this one
+    # lacks, is neither installed nor an error
+    write_extras(
+        [{"name": "accel", "when": [{"gpu_arch_is": "calkit-test-no-such"}]}]
+    )
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "No module named 'six'" in res.stderr
+    # A mistake in one is a clean error, not a traceback
+    write_extras([{"name": "accel", "when": [{"gpu_arch": "gfx1201"}]}])
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "is invalid" in res.stderr and "Traceback" not in res.stderr
+    # One meant for this machine is installed by 'uv run', even when the
+    # environment isn't checked first
+    any_os = ["linux", "macos", "windows"]
+    write_extras([{"name": "accel", "when": [{"os_is": any_os}]}])
+    subprocess.check_call(cmd[:4] + ["--no-check"] + cmd[4:])
+    # And by checking the environment, as is one given by name alone
+    subprocess.check_call(["uv", "sync"])
+    write_extras(["accel"])
+    subprocess.check_call(
+        ["calkit", "check", "environment", "-n", "main", "--force"]
+    )
+    subprocess.check_call(
+        ["uv", "run", "--no-sync", "python", "-c", "import six"]
+    )
+
+
 def test_run_in_env_detect_default(tmp_dir):
     # Check that if we don't specify an environment, we'll find a default one
     # and add it to the project
@@ -1767,6 +1807,33 @@ def test_save_data_not_in_cache(tmp_dir):
 def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "--help"])
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])
+
+
+def test_run_with_output_outside_code_page(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    # Writes a quote to the run log as UTF-8, which cp1252, Windows' default,
+    # can't decode
+    script = (
+        "import glob; [open(p, 'ab').write(b'\\xe2\\x80\\x9d\\n') "
+        "for p in glob.glob('.calkit/local/logs/*.log')]"
+    )
+    with open("quote.py", "w") as f:
+        f.write(script)
+    ck_info["pipeline"] = {
+        "stages": {
+            "quote": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": f'"{Path(sys.executable).as_posix()}" quote.py',
+                "outputs": [],
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
 
 
 @pytest.mark.needs("juliaup")
@@ -5539,3 +5606,61 @@ def test_run_untracks_git_tracked_outputs(tmp_dir):
     ).strip()
     with open("fig.txt") as f:
         assert f.read() == "made\n"
+
+
+@pytest.mark.xdist_group("conda")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Conda environments need Windows debugging"
+)
+def test_xenv_conda_env_first_on_path(tmp_dir, monkeypatch):
+    conda_name = "calkit-test-" + calkit.to_kebab_case(
+        os.path.basename(os.getcwd())
+    )
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "conda-env", "-n", "py", "--conda-name", conda_name]
+        + ["python=3.12"]
+    )
+    try:
+        # A program installed elsewhere and earlier on PATH, e.g., by Homebrew
+        # or Pixi, doesn't win over the environment's own, even though
+        # activating it puts it where Conda's base is on PATH, if there
+        decoy = Path("decoy")
+        decoy.mkdir()
+        (decoy / "python").write_text("#!/bin/sh\necho decoy\n")
+        (decoy / "python").chmod(0o755)
+        monkeypatch.setenv(
+            "PATH", str(decoy.absolute()) + os.pathsep + os.environ["PATH"]
+        )
+        out = subprocess.check_output(
+            ["calkit", "xenv", "-n", "py", "--", "python", "-c"]
+            + ["import sys; print(sys.prefix)"],
+            text=True,
+        )
+        assert out.strip().splitlines()[-1].endswith(conda_name)
+    finally:
+        subprocess.call(
+            [calkit.conda.find_conda_exe() or "conda", "env", "remove"]
+            + ["-y", "-n", conda_name]
+        )
+
+
+def test_run_jupyter(tmp_dir):
+    # Another Jupyter first on PATH, without Calkit's extensions, isn't run
+    os.makedirs("other")
+    fake = os.path.join("other", "jupyter-lab")
+    with open(fake, "w") as f:
+        f.write("#!/bin/sh\necho other\n")
+    os.chmod(fake, 0o755)
+    env = os.environ | {
+        "PATH": os.path.abspath("other") + os.pathsep + os.environ["PATH"]
+    }
+    out = subprocess.run(
+        ["calkit", "jupyter", "lab", "path"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "other" not in out.stdout
+    assert "Application directory" in out.stdout

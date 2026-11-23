@@ -2592,6 +2592,10 @@ def get_cached_env_states(
     return states
 
 
+# How much of what a failed environment check printed is kept to show
+FAILED_CHECK_OUTPUT_LINES = 20
+
+
 def check_all_in_pipeline(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -2609,8 +2613,10 @@ def check_all_in_pipeline(
     Each object inside tracks the last check timestamp, pass/fail,
     and some sort of hash(es) for the important file content involved.
 
-    With ``quiet``, what the checks' tools print, e.g., uv or Julia, is
-    discarded, and ``progress`` is told which environment is being checked.
+    With ``quiet``, what the checks' tools print, e.g., uv or Julia, isn't
+    shown, but the end of it is kept in a failed check's result, under
+    ``output``. ``progress`` is told which environment is being checked, and
+    what's being done to it, e.g., creating it.
 
     Raises ``calkit.docker.DockerNotReadyError`` if a Docker environment
     runs on this machine but Docker isn't installed or running, after
@@ -2618,10 +2624,13 @@ def check_all_in_pipeline(
     e.g., when which stages will run isn't known yet, that only fails the
     checks of the environments that use Docker.
     """
+    import contextlib
     import sys
     from collections.abc import Iterator
     from contextlib import contextmanager, redirect_stderr, redirect_stdout
+    from typing import IO
 
+    import calkit.progress
     from calkit.cli.check import check_environment
 
     def runs_docker_here(env_name: str) -> bool:
@@ -2637,7 +2646,7 @@ def check_all_in_pipeline(
         return outer.get("kind") == "system" and env_is_local(outer)
 
     @contextmanager
-    def silenced() -> Iterator[None]:
+    def silenced(log: IO[str]) -> Iterator[None]:
         # Tools write to the terminal directly, so this is done where they
         # inherit it from as well as Python's. Nobody can see a prompt here,
         # so input is from devnull, which answers one rather than hangs.
@@ -2648,9 +2657,9 @@ def check_all_in_pipeline(
         sys.stderr.flush()
         saved_stdin = sys.stdin
         with (
-            open(os.devnull, "r+") as null,
-            redirect_stdout(null),
-            redirect_stderr(null),
+            open(os.devnull) as null,
+            redirect_stdout(log),
+            redirect_stderr(log),
         ):
             sys.stdin = null
             try:
@@ -2672,11 +2681,14 @@ def check_all_in_pipeline(
                     kernel32.SetStdHandle.restype = wintypes.BOOL
                     # STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
                     std_ids = [-10, -11, -12]
-                    null_handle = msvcrt.get_osfhandle(null.fileno())
+                    handles = [
+                        msvcrt.get_osfhandle(f.fileno())
+                        for f in (null, log, log)
+                    ]
                     saved = [kernel32.GetStdHandle(i) for i in std_ids]
                     try:
-                        for i in std_ids:
-                            kernel32.SetStdHandle(i, null_handle)
+                        for i, h in zip(std_ids, handles):
+                            kernel32.SetStdHandle(i, h)
                         yield
                     finally:
                         for i, h in zip(std_ids, saved):
@@ -2684,8 +2696,8 @@ def check_all_in_pipeline(
                 else:
                     saved = [os.dup(fd) for fd in (0, 1, 2)]
                     try:
-                        for fd in (0, 1, 2):
-                            os.dup2(null.fileno(), fd)
+                        for fd, f in zip((0, 1, 2), (null, log, log)):
+                            os.dup2(f.fileno(), fd)
                         yield
                     finally:
                         for fd, saved_fd in enumerate(saved):
@@ -2693,6 +2705,13 @@ def check_all_in_pipeline(
                             os.close(saved_fd)
             finally:
                 sys.stdin = saved_stdin
+
+    def reporting() -> contextlib.AbstractContextManager:
+        # The checks say what they're doing, e.g., creating, past what the
+        # command running them takes
+        if progress is None:
+            return contextlib.nullcontext()
+        return calkit.progress.reporting(progress, label=env_name)
 
     # TODO: ``check_environment`` should be able to take a wdir argument
     if wdir is not None:
@@ -2734,16 +2753,26 @@ def check_all_in_pipeline(
                 continue
         if progress is not None:
             progress(f"Checking environment '{env_name}'")
-        try:
-            with silenced():
-                check_environment(env_name, verbose=False)
-            res[env_name] = save_cache(
-                env_name=env_name, env=env, wdir=wdir, success=True
-            )
-        except Exception:
-            res[env_name] = save_cache(
-                env_name=env_name, env=env, wdir=wdir, success=False
-            )
+        # Appended to, since the tools and Python share it
+        with tempfile.TemporaryFile(
+            "a+", buffering=1, errors="replace"
+        ) as log:
+            try:
+                with silenced(log), reporting():
+                    check_environment(env_name, verbose=False)
+                res[env_name] = save_cache(
+                    env_name=env_name, env=env, wdir=wdir, success=True
+                )
+            except Exception:
+                res[env_name] = save_cache(
+                    env_name=env_name, env=env, wdir=wdir, success=False
+                )
+                if quiet:
+                    log.seek(0)
+                    lines = log.read().rstrip().splitlines()
+                    res[env_name]["output"] = "\n".join(
+                        lines[-FAILED_CHECK_OUTPUT_LINES:]
+                    )
     return res
 
 

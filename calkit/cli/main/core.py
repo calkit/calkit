@@ -3817,17 +3817,78 @@ def run(
             qualified = calkit.qualify_with_project(sp, env_name)
             if verbose:
                 typer.echo(f"{qualified}: {result}")
-            if not result.get("success", False):
-                message = f"Failed to check environment '{qualified}'"
-                if spinner:
-                    # Its tools' output was discarded
-                    where = "" if sp == "." else f"-C {sp} "
-                    message += (
-                        f"; run 'calkit {where}check env -n {env_name}' "
-                        "for details"
-                    )
-                warn(message)
+            if result.get("success", False):
+                failed_envs.pop(qualified, None)
+                continue
+            # The project's own stop the run if one that would run uses it
+            if sp == ".":
+                failed_envs[env_name] = result.get("output") or ""
+                continue
+            message = f"Failed to check environment '{qualified}'"
+            if spinner:
+                # Its tools' output wasn't shown
+                message += (
+                    f"; run 'calkit -C {sp} check env -n {env_name}' "
+                    "for details"
+                )
+            warn(message)
 
+    def stop_for_failed_envs() -> None:
+        """Fail if a stage that would run uses an environment that failed
+        its check, since the stage's own error would only mislead."""
+        if not failed_envs or dry:
+            return
+        _, _, stages = calkit.environments.get_pipeline_env_names(
+            ck_info=ck_info,
+            targets=targets,
+            skip_stages=list(gated_stages),
+        )
+        users: dict[str, list[str]] = {}
+        for stage_name, stage in stages.items():
+            parts = str(stage.get("environment") or "").split(
+                calkit.environments.COMPOSITE_ENV_SEP
+            )
+            for env_name in failed_envs:
+                if env_name in parts:
+                    users.setdefault(env_name, []).append(stage_name)
+        try:
+            would_run = calkit.pipeline.get_stages_that_would_run(
+                [n for names in users.values() for n in names],
+                force=force,
+                single_item=single_item,
+            )
+        except Exception:
+            # Without knowing, assume they would
+            would_run = {n for names in users.values() for n in names}
+        for env_name, stage_names in users.items():
+            blocked = [n for n in stage_names if n in would_run]
+            if not blocked:
+                continue
+            message = (
+                f"Failed to check environment '{env_name}', which "
+                f"{'stages' if len(blocked) > 1 else 'stage'} "
+                f"{', '.join(repr(n) for n in blocked)} "
+                f"{'use' if len(blocked) > 1 else 'uses'}"
+            )
+            if output := failed_envs[env_name]:
+                message += f":\n\n{output}\n\n"
+            elif spinner:
+                message += "; "
+            else:
+                message += "; see above, or "
+            message += f"run 'calkit check env -n {env_name}' for details"
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            raise_error(message)
+        # None that would run uses them
+        for env_name in failed_envs:
+            warn(
+                f"Failed to check environment '{env_name}'; run 'calkit "
+                f"check env -n {env_name}' for details"
+            )
+
+    # Environments of this project that failed their check, with the end
+    # of what their tools printed, if it wasn't shown
+    failed_envs: dict[str, str] = {}
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
@@ -4231,6 +4292,7 @@ def run(
                 os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
                 raise_error(f"Pipeline compilation failed: {e}")
             offered = [n for n in offered if n not in would_run]
+        stop_for_failed_envs()
     if nothing_for_dvc:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         md_stages = calkit.markdown.get_markdown_stages(ck_info)

@@ -5726,3 +5726,39 @@ def test_run_jupyter(tmp_dir):
     assert out.returncode == 0, out.stderr
     assert "other" not in out.stdout
     assert "Application directory" in out.stdout
+
+
+def test_run_stops_for_failed_env(tmp_dir):
+    # A stage whose environment couldn't be built fails with its own error,
+    # e.g., that a tool isn't in it, which would hide the real one
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("./does-not-exist\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        }
+    }
+    ck_info["pipeline"] = {
+        "stages": {
+            "thing": {
+                "kind": "shell-command",
+                "environment": "py",
+                "command": "echo hi > out.txt",
+                "outputs": ["out.txt"],
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode != 0
+    assert (
+        "Failed to check environment 'py', which stage 'thing' uses"
+        in res.stderr
+    )
+    assert "calkit check env -n py" in res.stderr
+    assert not os.path.exists("out.txt")

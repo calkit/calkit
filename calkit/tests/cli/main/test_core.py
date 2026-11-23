@@ -5534,6 +5534,110 @@ def test_run_records_app_version(tmp_dir):
     assert system["os"] == platform.system()
 
 
+def test_clone_data_not_available(tmp_dir, monkeypatch):
+    from typer.testing import CliRunner
+
+    real_check_call = subprocess.check_call
+
+    def run(*cmd):
+        real_check_call(cmd, stdout=subprocess.DEVNULL)
+
+    def clone(name, remote_url=None):
+        # Clone from a copy that has the remote, if any, in its DVC config
+        source = os.path.join(top, f"source-{name}")
+        run("git", "clone", "-q", origin, source)
+        if remote_url is not None:
+            run("dvc", "--cd", source, "remote", "add", "-d", "r", remote_url)
+            run("git", "-C", source, "add", ".dvc/config")
+            run(
+                "git",
+                "-C",
+                source,
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "commit",
+                "-qm",
+                "Add remote",
+            )
+
+        def check_call(cmd, *args, **kwargs):
+            # Clone only takes URLs, so have Git clone the local copy
+            if cmd[:2] == ["git", "clone"]:
+                cmd = ["git", "clone", "-q", source, cmd[-1]]
+            return real_check_call(cmd, *args, **kwargs)
+
+        with patch("subprocess.check_call", check_call):
+            result = CliRunner().invoke(
+                calkit.cli.main.app,
+                ["clone", "https://example.com/me/proj.git", f"clone-{name}"],
+            )
+        os.chdir(top)
+        return result, Path(top, f"clone-{name}")
+
+    monkeypatch.setattr(calkit.github, "can_use_ssh", lambda **kwargs: False)
+    monkeypatch.setattr(calkit, "record_project_path", lambda: None)
+    top = os.getcwd()
+    origin = os.path.join(top, "origin")
+    os.makedirs(origin)
+    os.chdir(origin)
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "test@example.com")
+    run("git", "config", "user.name", "Test")
+    run("dvc", "init", "-q")
+    Path("kept.txt").write_text("kept")
+    Path("lost.txt").write_text("lost")
+    run("dvc", "add", "-q", "kept.txt", "lost.txt")
+    with open("dvc.yaml", "w") as f:
+        yaml.safe_dump(
+            {
+                "stages": {
+                    "never-run": {
+                        "cmd": "echo hi > never-run.txt",
+                        "outs": ["never-run.txt"],
+                    }
+                }
+            },
+            f,
+        )
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "Add data")
+    all_there = os.path.join(top, "all-there")
+    partial = os.path.join(top, "partial")
+    run("dvc", "remote", "add", "--local", "all-there", all_there)
+    run("dvc", "remote", "add", "--local", "partial", partial)
+    run("dvc", "push", "-q", "-r", "all-there", "kept.txt", "lost.txt")
+    run("dvc", "push", "-q", "-r", "partial", "kept.txt")
+    os.chdir(top)
+    # With no remote, the data is named and the clone still finishes
+    result, path = clone("no-remote")
+    assert result.exit_code == 0, result.output
+    assert "the project has no DVC remote" in result.output
+    warning = result.output.split("weren't pulled")[1]
+    assert "kept.txt" in warning and "lost.txt" in warning
+    assert "never-run.txt" not in warning
+    assert (path / "kept.txt.dvc").is_file()
+    # With everything in the remote, a stage that hasn't run isn't missing
+    result, path = clone("all-there", all_there)
+    assert result.exit_code == 0, result.output
+    assert "weren't pulled" not in result.output
+    assert (path / "kept.txt").read_text() == "kept"
+    assert (path / "lost.txt").read_text() == "lost"
+    # What the remote does have is pulled, and only the rest is named
+    result, path = clone("partial", partial)
+    assert result.exit_code == 0, result.output
+    assert "they aren't in the project's DVC remote" in result.output
+    warning = result.output.split("weren't pulled")[1]
+    assert "lost.txt" in warning and "kept.txt" not in warning
+    assert (path / "kept.txt").read_text() == "kept"
+    assert not (path / "lost.txt").exists()
+    # A remote that can't be reached is still an error
+    result, _ = clone("unreachable", "ssh://nobody@127.0.0.1:1/nothing")
+    assert result.exit_code != 0
+    assert "Failed to pull" in result.output
+
+
 def test_clone(monkeypatch):
     from typer.testing import CliRunner
 
@@ -5577,6 +5681,19 @@ def test_clone(monkeypatch):
         == "git@github.com:me/proj.git"
     )
     assert clone_url("github.com/me/proj") == "git@github.com:me/proj"
+    # GitHub's ssh:// form is the same URL, and another host's is kept
+    assert (
+        clone_url("ssh://git@github.com/me/proj.git")
+        == "git@github.com:me/proj.git"
+    )
+    assert (
+        clone_url("ssh://git@github.com/me/proj.git", "--https")
+        == "https://github.com/me/proj.git"
+    )
+    assert (
+        clone_url("ssh://git@gitlab.com/me/proj.git")
+        == "ssh://git@gitlab.com/me/proj.git"
+    )
     # Otherwise HTTPS, which is also what's asked for wins
     assert (
         clone_url("me/proj", ssh_set_up=False)

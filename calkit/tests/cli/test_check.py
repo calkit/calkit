@@ -1,5 +1,6 @@
 """Tests for ``calkit.cli.check``."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -2390,3 +2391,52 @@ def test_check_storage_stage_output_dvc_file(tmp_dir):
         ["git", "diff", "--cached", "--name-only"], text=True
     ).split()
     assert "fig.png.dvc" in staged
+    # Its hash moves to dvc.lock, staged, so the data can still be pulled
+    assert "dvc.lock" in staged
+    with open("dvc.lock") as f:
+        (locked,) = calkit.ryaml.load(f)["stages"]["plot"]["outs"]
+    assert locked["path"] == "fig.png"
+    assert locked["md5"] == hashlib.md5(b"old").hexdigest()
+    subprocess.check_call(["git", "commit", "-qm", "Fix figure"])
+    # A .dvc file whose hash can't be found to keep isn't removed
+    with open("fig.png.dvc", "w") as f:
+        f.write("outs:\n- path: other.png\n  md5: abc\n")
+    result = subprocess.run(
+        ["calkit", "check", "storage", "--fix"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "Keeping fig.png.dvc" in result.stdout
+    assert os.path.isfile("fig.png.dvc")
+    os.remove("fig.png.dvc")
+    # A stage output in a directory a .dvc file tracks, which the check
+    # reports for the user, keeping the .dvc file since it covers other data
+    os.makedirs("data")
+    for fname in ["made.pkl", "other.pkl"]:
+        with open(f"data/{fname}", "w") as f:
+            f.write(fname)
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data"])
+    subprocess.check_call(["git", "commit", "-qm", "Add data"])
+    with open("dvc.yaml", "a") as f:
+        f.write("  make:\n    cmd: x\n    outs:\n    - data/made.pkl\n")
+    for args in [[], ["--fix"]]:
+        result = subprocess.run(
+            ["calkit", "check", "storage", *args],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "data/made.pkl is made by stage 'make'" in result.stdout
+        assert "add its other files separately" in result.stdout
+        assert "--fix" not in result.stdout
+        assert os.path.isfile("data.dvc")
+    (problem,) = json.loads(
+        subprocess.run(
+            ["calkit", "check", "storage", "--json"],
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    assert problem["kind"] == "stage-output-in-dvc-dir"
+    assert problem["dvc_file"] == "data.dvc"

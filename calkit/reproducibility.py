@@ -785,6 +785,7 @@ def _project_values(
     import json
 
     from calkit.latex import component_path, read_ck_usage
+    from calkit.notebooks import get_notebook_of_values_path
     from calkit.questions import read_evidence_file, resolve_key
 
     def add_numbers(node: Any, path: str, key: str = "") -> None:
@@ -821,7 +822,8 @@ def _project_values(
                 data = read_evidence_file(os.path.join(wdir, rel))
             except Exception:
                 continue
-            add_numbers(data, rel)
+            # A value saved from a notebook's cells is cited by the notebook
+            add_numbers(data, get_notebook_of_values_path(rel) or rel)
     for stage in stages.values():
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
         if "calkit latex from-json" not in cmd:

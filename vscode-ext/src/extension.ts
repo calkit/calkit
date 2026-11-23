@@ -85,6 +85,7 @@ import {
   setOverleafSynced,
   suggestCommitMessage,
 } from "./overleaf/view";
+import { registerCellOutputs } from "./cell-outputs/view";
 import {
   documentStagePdf,
   documentStageSource,
@@ -94,6 +95,7 @@ import {
   latexPreviewCommand,
   latexWorkingDiffPath,
   latexWorkshopBuildsWithCalkit,
+  needsLatexStage,
   pipelineLatexDiffs,
   type PipelineLatexDiff,
 } from "./latex/core";
@@ -114,6 +116,7 @@ const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
 const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
 const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
+const COMMAND_ADD_LATEX_STAGE = "calkit-vscode.addLatexStage";
 const COMMAND_RUN_MARKDOWN_STAGE = "calkit-vscode.runMarkdownStage";
 const COMMAND_RUN_PIPELINE = "calkit-vscode.runPipeline";
 const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
@@ -122,6 +125,7 @@ const COMMAND_EDIT_STAGE = "calkit-vscode.editStage";
 const COMMAND_DEFINE_PROVENANCE = "calkit-vscode.defineProvenance";
 const COMMAND_DEFINE_ARTIFACT_STAGE = "calkit-vscode.defineArtifactStage";
 const COMMAND_DEFINE_ARTIFACT_IMPORT = "calkit-vscode.defineArtifactImport";
+const COMMAND_DEFINE_ARTIFACT_CREATED = "calkit-vscode.defineArtifactCreated";
 const COMMAND_RUN_ARTIFACT_STAGE = "calkit-vscode.runArtifactStage";
 const COMMAND_RUN_NOTEBOOK_STAGE = "calkit-vscode.runNotebookStage";
 const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
@@ -853,10 +857,15 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_RUN_MARKDOWN_STAGE,
-      (stageName?: string, projectDir?: string) => {
+      async (stageName?: string, projectDir?: string) => {
         const workspaceRoot = getWorkspaceRoot();
         if (!workspaceRoot || !stageName) {
           return;
+        }
+        // Run from a CodeLens in the document itself
+        const active = vscode.window.activeTextEditor?.document.uri;
+        if (active) {
+          await saveIfOpen(active);
         }
         runStageInTerminal(workspaceRoot, stageName, projectDir);
       },
@@ -882,7 +891,45 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           return;
         }
+        await saveIfOpen(fileUri);
+        // Run from a PDF, the document it's built from may have edits
+        const relPath = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const source = documentStageSource(
+          getDocumentStages(workspaceRoot, relPath),
+          relPath,
+        );
+        if (source) {
+          await saveIfOpen(vscode.Uri.file(path.join(workspaceRoot, source)));
+        }
         runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  // Add a stage that builds a LaTeX document and run it, with a TeX Live
+  // environment if the project has none, which calkit xr creates
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_ADD_LATEX_STAGE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        await saveIfOpen(fileUri);
+        const projectDir = getNotebookProjectRoot(fileUri) ?? workspaceRoot;
+        const relPath = path
+          .relative(projectDir, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const prefix = path.relative(workspaceRoot, projectDir)
+          ? `calkit -C ${shQuote(projectDir)}`
+          : "calkit";
+        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        terminal.show();
+        terminal.sendText(`${prefix} xr ${shQuote(relPath)}`);
       },
     ),
   );
@@ -1583,6 +1630,27 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
+      COMMAND_DEFINE_ARTIFACT_CREATED,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot || !item?.nodeId) {
+          return;
+        }
+        const project = projectForArtifact(workspaceRoot, item.nodeId);
+        const marked = await markCreatedByMe(
+          project.projectDir,
+          item.nodeKind === "dataset" ? "dataset" : "figure",
+          project.path,
+        );
+        if (marked) {
+          void refreshPipelineOutputContext(context);
+        }
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
       COMMAND_RUN_ARTIFACT_STAGE,
       (item?: import("./sidebar").SidebarItem) => {
         const workspaceRoot = getWorkspaceRoot();
@@ -1627,6 +1695,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
+      await saveIfOpen(notebookUri);
       // The stage name is the project's own, so the CLI is pointed there,
       // since the terminal may be reused from somewhere else
       runStageInTerminal(
@@ -1969,6 +2038,44 @@ export function activate(context: vscode.ExtensionContext): void {
 
   sidebarProvider = new CalkitSidebarProvider();
   registerOverleaf(context, sidebarProvider, getWorkspaceRoot);
+  // Documents cell outputs can be inserted in: what document stages build,
+  // and the files they read, e.g., a thesis's chapters
+  registerCellOutputs(context, getWorkspaceRoot, () => {
+    const root = getWorkspaceRoot();
+    const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+    const documents: string[] = [];
+    for (const [name, stage] of Object.entries(stages)) {
+      if (!["latex", "quarto", "markdown"].includes(String(stage.kind))) {
+        continue;
+      }
+      if (typeof stage.target_path === "string") {
+        const wdir = typeof stage.wdir === "string" ? stage.wdir : "";
+        documents.push(path.posix.join(wdir, stage.target_path));
+      }
+      for (const dep of currentDvcYaml?.stages?.[name]?.deps ?? []) {
+        const depPath = typeof dep === "string" ? dep : Object.keys(dep)[0];
+        if (depPath && /\.(tex|qmd|md)$/i.test(depPath)) {
+          documents.push(depPath);
+        }
+      }
+    }
+    // Not what Calkit or a stage writes, e.g., _calkit/values.tex or a
+    // table a notebook saves
+    const written = new Set(
+      Object.values(currentDvcYaml?.stages ?? {}).flatMap((stage) =>
+        dvcStageOutputPaths(stage),
+      ),
+    );
+    const isWritten = (p: string) =>
+      written.has(p) ||
+      p.split("/").some((part) => part === "_calkit" || part === ".calkit");
+    return root
+      ? documents
+          .map((d) => path.posix.normalize(d))
+          .filter((d) => !isWritten(d))
+          .map((d) => path.join(root, d))
+      : [];
+  });
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
     showCollapseAll: true,
@@ -2728,9 +2835,8 @@ async function refreshPipelineOutputContext(
   currentArtifactOrigins = artifactOrigins;
   currentEnvDescriptions = envDescriptions;
   pdfReviewProvider?.stagesChanged();
-  void refreshActiveFileBuildsPdfContext(
-    vscode.window.activeTextEditor?.document,
-  );
+  void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
+  void refreshActiveFileFigureOutputContext();
   // Gate the sidebar on the presence of a calkit.yaml file. When absent, the
   // tree is left empty so the "Initialize Calkit Project" welcome view shows.
   const calkitYamlExists = await fileExists(
@@ -3316,6 +3422,63 @@ function buildDagHtml(nonce: string): string {
 </html>`;
 }
 
+/**
+ * Record a figure or dataset as created by whoever Git commits as, e.g.,
+ * drawn or measured by them, asking for an email if Git has none.
+ */
+async function markCreatedByMe(
+  projectDir: string,
+  artifactKind: "figure" | "dataset",
+  relPath: string,
+): Promise<boolean> {
+  const getGitConfig = async (key: string): Promise<string> => {
+    try {
+      const { stdout } = await execFileAsync("git", ["config", key], {
+        cwd: projectDir,
+      });
+      return stdout.trim();
+    } catch {
+      return "";
+    }
+  };
+  const name = await getGitConfig("user.name");
+  const email =
+    (await getGitConfig("user.email")) ||
+    (await vscode.window.showInputBox({
+      title: "Created by me",
+      prompt: "Your email",
+      validateInput: (v) => (v.includes("@") ? undefined : "Not an email"),
+    }));
+  if (!email) {
+    return false;
+  }
+  try {
+    await execFileAsync(
+      "calkit",
+      [
+        "update",
+        artifactKind,
+        relPath,
+        "--created-by-email",
+        email,
+        ...(name ? ["--created-by-name", name] : []),
+      ],
+      { cwd: projectDir },
+    );
+  } catch (err) {
+    const stderr = (err as { stderr?: string }).stderr;
+    void vscode.window.showErrorMessage(
+      stderr?.trim().replace(/^Error: /, "") ||
+        `Failed to update ${artifactKind}: ${String(err)}`,
+    );
+    return false;
+  }
+  void vscode.window.showInformationMessage(
+    `Marked '${path.basename(relPath)}' as created by ${name || email}`,
+  );
+  return true;
+}
+
 async function defineProvenance(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
@@ -3332,19 +3495,28 @@ async function defineProvenance(
 
   const choiceStage = "$(play) Produced by a script or notebook";
   const choiceImported = "$(cloud-download) Imported from an external source";
+  const choiceCreated =
+    artifactKind === "dataset"
+      ? "$(person) Collected or measured by me"
+      : "$(person) Drawn or made by me";
   const notebookChoiceStage =
     "$(play) Run this notebook and record as a pipeline stage";
 
   const picked = await vscode.window.showQuickPick(
     isNotebook
       ? [notebookChoiceStage, choiceImported]
-      : [choiceStage, choiceImported],
+      : [choiceStage, choiceImported, choiceCreated],
     {
       title: `Define source for ${path.basename(fileUri.fsPath)}`,
       placeHolder: "How is this file produced?",
     },
   );
   if (!picked) {
+    return;
+  }
+
+  if (picked === choiceCreated) {
+    await markCreatedByMe(workspaceRoot, artifactKind, relPath);
     return;
   }
 
@@ -4479,6 +4651,18 @@ function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {
     return existing;
   }
   return vscode.window.createTerminal({ name, cwd });
+}
+
+// Save a file if it's open with unsaved changes, so a stage runs on what's
+// in the editor
+async function saveIfOpen(uri: vscode.Uri): Promise<void> {
+  const open = [
+    ...vscode.workspace.textDocuments,
+    ...vscode.workspace.notebookDocuments,
+  ].find((d) => d.uri.fsPath === uri.fsPath);
+  if (open?.isDirty) {
+    await open.save();
+  }
 }
 
 function runStageInTerminal(
@@ -9187,6 +9371,7 @@ async function refreshActiveFileStageContext(
   const fileUri = document?.uri;
   let hasStage = false;
   let isPipelineOutput = false;
+  let needsStage = false;
   if (workspaceRoot && fileUri) {
     const [stageForFile, producingStage] = await Promise.all([
       findStageForFile(workspaceRoot, fileUri),
@@ -9194,6 +9379,14 @@ async function refreshActiveFileStageContext(
     ]);
     hasStage = stageForFile !== undefined;
     isPipelineOutput = producingStage !== undefined;
+    if (!hasStage && path.extname(fileUri.fsPath).toLowerCase() === ".tex") {
+      const { dvcYaml } = await readMergedProject(workspaceRoot);
+      needsStage = needsLatexStage(
+        path.relative(workspaceRoot, fileUri.fsPath).replace(/\\/g, "/"),
+        document?.getText() ?? "",
+        dvcYaml?.stages ?? {},
+      );
+    }
   }
   const isPlotly =
     document !== undefined &&
@@ -9205,6 +9398,11 @@ async function refreshActiveFileStageContext(
       "setContext",
       "calkit.activeFileHasStage",
       hasStage,
+    ),
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activeFileNeedsLatexStage",
+      needsStage,
     ),
     vscode.commands.executeCommand(
       "setContext",
@@ -9229,18 +9427,30 @@ async function refreshActiveFileFigureOutputContext(): Promise<void> {
   const uri = tabResourceUri(vscode.window.tabGroups.activeTabGroup.activeTab);
   const workspaceRoot = getWorkspaceRoot();
   let isFigureOutput = false;
+  let pdfHasStage = false;
   if (uri && workspaceRoot) {
     const ext = path.extname(uri.fsPath).toLowerCase();
     if (FIGURE_EXTENSIONS.has(ext) && ext !== ".pdf") {
       isFigureOutput =
         (await findStageProducingOutput(workspaceRoot, uri)) !== undefined;
     }
+    // A PDF opens in the review editor, so its play button is keyed here
+    if (ext === ".pdf") {
+      pdfHasStage = (await findStageForFile(workspaceRoot, uri)) !== undefined;
+    }
   }
-  await vscode.commands.executeCommand(
-    "setContext",
-    "calkit.activeFileIsFigureOutput",
-    isFigureOutput,
-  );
+  await Promise.all([
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activeFileIsFigureOutput",
+      isFigureOutput,
+    ),
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activePdfHasStage",
+      pdfHasStage,
+    ),
+  ]);
 }
 
 async function refreshNotebookToolbarContext(

@@ -956,6 +956,7 @@ Options:
 | `--out`                  | list[str] | no       |         | Path to stage output. Figure path will be added automatically.                            |
 | `--deps-from-stage-outs` | str       | no       |         | Stage name from which to add outputs as dependencies.                                     |
 | `--created-by-email`     | str       | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage. |
+| `--created-by-name`      | str       | no       |         | Their name.                                                                               |
 | `--created-by-orcid`     | str       | no       |         | ORCID of whoever made this figure.                                                        |
 | `--created-with-ai`      | list[str] | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                   |
 | `--no-commit`            | boolean   | no       | False   |                                                                                           |
@@ -1203,6 +1204,7 @@ Options:
 | `--out`                  | list[str] | no       |         | Path to stage output. Dataset path will be added automatically.                                                   |
 | `--deps-from-stage-outs` | str       | no       |         | Stage name from which to add outputs as dependencies.                                                             |
 | `--created-by-email`     | str       | no       |         | Email of whoever collected this data for the project, which marks it as primary rather than imported or computed. |
+| `--created-by-name`      | str       | no       |         | Their name.                                                                                                       |
 | `--created-by-orcid`     | str       | no       |         | ORCID of whoever collected this data.                                                                             |
 | `--created-with-ai`      | list[str] | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                           |
 | `--no-commit`            | boolean   | no       | False   |                                                                                                                   |
@@ -1873,13 +1875,16 @@ Options:
 
 Work with computational notebooks.
 
-| Command                                                             | Description                                                         |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`clean`](#subcommand-notebooks-nb-clean)                           | Clean notebook and place a copy in the cleaned notebooks directory. |
-| [`clean-all`](#subcommand-notebooks-nb-clean-all)                   | Clean all notebooks in the pipeline.                                |
-| [`check-kernel`](#subcommand-notebooks-nb-check-kernel)             | Check that an environment has a registered Jupyter kernel.          |
-| [`execute`](#subcommand-notebooks-nb-execute)                       | Execute notebook and place a copy in the relevant directory.        |
-| [`export-marimo-wasm`](#subcommand-notebooks-nb-export-marimo-wasm) | Export a marimo notebook to a WebAssembly app.                      |
+| Command                                                             | Description                                                                           |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [`clean`](#subcommand-notebooks-nb-clean)                           | Clean notebook and place a copy in the cleaned notebooks directory.                   |
+| [`clean-all`](#subcommand-notebooks-nb-clean-all)                   | Clean all notebooks in the pipeline.                                                  |
+| [`check-kernel`](#subcommand-notebooks-nb-check-kernel)             | Check that an environment has a registered Jupyter kernel.                            |
+| [`execute`](#subcommand-notebooks-nb-execute)                       | Execute notebook and place a copy in the relevant directory.                          |
+| [`add-output`](#subcommand-notebooks-nb-add-output)                 | Save a value, figure, or table from a cell each time the pipeline runs the notebook.  |
+| [`remove-output`](#subcommand-notebooks-nb-remove-output)           | Stop saving a value, figure, or table from a notebook's cell.                         |
+| [`outputs`](#subcommand-notebooks-nb-outputs)                       | List values, figures, and tables saved from a notebook's cells, and how to cite each. |
+| [`export-marimo-wasm`](#subcommand-notebooks-nb-export-marimo-wasm) | Export a marimo notebook to a WebAssembly app.                                        |
 
 <a id="subcommand-notebooks-nb-clean"></a>
 
@@ -1970,17 +1975,100 @@ Arguments:
 
 Options:
 
-| Option                  | Type      | Required | Default  | Description                                                                     |
-| ----------------------- | --------- | -------- | -------- | ------------------------------------------------------------------------------- |
-| `--environment`, `-e`   | str       | no       |          | Name or path to the spec of the environment in which to run the notebook.       |
-| `--to`                  | list[str] | no       | notebook | Output format ('html' or 'notebook').                                           |
-| `--no-check`            | boolean   | no       | False    | Do not check environment before executing.                                      |
-| `--param`, `-p`         | list[str] | no       |          | Parameter to pass to the notebook in key=value format.                          |
-| `--params-json`, `-j`   | str       | no       |          | JSON string to parse as parameters to pass to the notebook.                     |
-| `--params-base64`, `-b` | str       | no       |          | Base64-encoded JSON string to parse as parameters to pass to the notebook.      |
-| `--language`, `-l`      | str       | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
-| `--no-replace`          | boolean   | no       | False    | Do not replace notebook outputs from executed version.                          |
-| `--verbose`, `-v`       | boolean   | no       | False    | Print verbose output.                                                           |
+| Option                  | Type      | Required | Default  | Description                                                                                                                                                                                              |
+| ----------------------- | --------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`   | str       | no       |          | Name or path to the spec of the environment in which to run the notebook.                                                                                                                                |
+| `--to`                  | list[str] | no       | notebook | Output format ('html' or 'notebook').                                                                                                                                                                    |
+| `--no-check`            | boolean   | no       | False    | Do not check environment before executing.                                                                                                                                                               |
+| `--param`, `-p`         | list[str] | no       |          | Parameter to pass to the notebook in key=value format.                                                                                                                                                   |
+| `--params-json`, `-j`   | str       | no       |          | JSON string to parse as parameters to pass to the notebook.                                                                                                                                              |
+| `--params-base64`, `-b` | str       | no       |          | Base64-encoded JSON string to parse as parameters to pass to the notebook.                                                                                                                               |
+| `--language`, `-l`      | str       | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment.                                                                                                                          |
+| `--no-replace`          | boolean   | no       | False    | Do not replace notebook outputs from executed version.                                                                                                                                                   |
+| `--output`, `-o`        | list[str] | no       |          | Value, figure, or table to save after a cell runs, e.g., 'kind=value,cell_id=3f9a1c2e,variable_name=k' or 'kind=figure,cell_id=8b77d0aa,variable_name=fig,output_path=figures/fit.pdf'. Can be repeated. |
+| `--verbose`, `-v`       | boolean   | no       | False    | Print verbose output.                                                                                                                                                                                    |
+
+<a id="subcommand-notebooks-nb-add-output"></a>
+
+#### `calkit notebooks|nb add-output`
+
+Save a value, figure, or table from a cell each time the pipeline runs the notebook.
+
+Usage:
+
+```text
+calkit notebooks|nb add-output [OPTIONS] PATH KIND
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                          |
+| -------- | ---- | -------- | ------- | ------------------------------------ |
+| `path`   | str  | yes      |         | Path to the notebook.                |
+| `kind`   | str  | yes      |         | Kind: 'value', 'figure', or 'table'. |
+
+Options:
+
+| Option                  | Type      | Required | Default | Description                                                                                                           |
+| ----------------------- | --------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `--cell-id`             | str       | no       |         | ID of cell to save after.                                                                                             |
+| `--cell-index`          | int       | no       |         | Index of cell to save after, starting at 0 (adds cell IDs if the notebook has none).                                  |
+| `--variable-name`, `-v` | list[str] | no       |         | Variable to save (can be repeated for values). If not given, saves what the cell displays, e.g., a plot or df.head(). |
+| `--output-path`, `-o`   | str       | no       |         | Figure or table path, e.g., figures/fit.pdf or tables/rates.tex.                                                      |
+| `--format`              | str       | no       |         | Number format for tables, e.g., '.3f'.                                                                                |
+| `--stage`               | str       | no       |         | Stage name, if several run the notebook.                                                                              |
+| `--json`                | boolean   | no       | False   | Print the result as JSON.                                                                                             |
+
+<a id="subcommand-notebooks-nb-remove-output"></a>
+
+#### `calkit notebooks|nb remove-output`
+
+Stop saving a value, figure, or table from a notebook's cell.
+
+Usage:
+
+```text
+calkit notebooks|nb remove-output [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description           |
+| -------- | ---- | -------- | ------- | --------------------- |
+| `path`   | str  | yes      |         | Path to the notebook. |
+
+Options:
+
+| Option                  | Type | Required | Default | Description                              |
+| ----------------------- | ---- | -------- | ------- | ---------------------------------------- |
+| `--variable-name`, `-v` | str  | no       |         | Value to stop saving, by name.           |
+| `--output-path`, `-o`   | str  | no       |         | Figure or table to stop saving.          |
+| `--cell-id`             | str  | no       |         | Stop saving everything after this cell.  |
+| `--stage`               | str  | no       |         | Stage name, if several run the notebook. |
+
+<a id="subcommand-notebooks-nb-outputs"></a>
+
+#### `calkit notebooks|nb outputs`
+
+List values, figures, and tables saved from a notebook's cells, and how to cite each.
+
+Usage:
+
+```text
+calkit notebooks|nb outputs [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description           |
+| -------- | ---- | -------- | ------- | --------------------- |
+| `path`   | str  | yes      |         | Path to the notebook. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description         |
+| -------- | ------- | -------- | ------- | ------------------- |
+| `--json` | boolean | no       | False   | Print them as JSON. |
 
 <a id="subcommand-notebooks-nb-export-marimo-wasm"></a>
 
@@ -3608,11 +3696,15 @@ Arguments:
 
 Options:
 
-| Option                | Type | Required | Default | Description                                                                                                                                                                           |
-| --------------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
-| `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
-| `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+| Option                | Type      | Required | Default | Description                                                                                                                                                                           |
+| --------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from`     | str       | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
+| `--imported-from-url` | str       | no       |         | URL the figure was imported from.                                                                                                                                                     |
+| `--stage`             | str       | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+| `--created-by-email`  | str       | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage.                                                                                             |
+| `--created-by-name`   | str       | no       |         | Name of whoever made this figure.                                                                                                                                                     |
+| `--created-by-orcid`  | str       | no       |         | ORCID of whoever made this figure.                                                                                                                                                    |
+| `--created-with-ai`   | list[str] | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                                                                                               |
 
 <a id="subcommand-update-question"></a>
 
@@ -3692,16 +3784,20 @@ Arguments:
 
 Options:
 
-| Option                     | Type     | Required | Default | Description                                                                                                                                                                           |
-| -------------------------- | -------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--imported-from`          | str      | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
-| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                                                                                                                    |
-| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                                                                                                                             |
-| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                                                                                                                              |
-| `--imported-from-git-ref`  | str      | no       |         | Branch, tag, or commit to follow, e.g. 'main'. The commit it resolves to is recorded in .calkit/imports.json by 'calkit sync import', not here.                                       |
-| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
-| `--imported-from-date`     | %Y-%m-%d | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                                                                |
-| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                                                                                                                                |
+| Option                     | Type      | Required | Default | Description                                                                                                                                                                           |
+| -------------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from`          | str       | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
+| `--imported-from-url`      | str       | no       |         | URL the dataset was imported from.                                                                                                                                                    |
+| `--imported-from-doi`      | str       | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                                                                                                                             |
+| `--imported-from-git-url`  | str       | no       |         | Clone URL of the Git repo the dataset was imported from.                                                                                                                              |
+| `--imported-from-git-ref`  | str       | no       |         | Branch, tag, or commit to follow, e.g. 'main'. The commit it resolves to is recorded in .calkit/imports.json by 'calkit sync import', not here.                                       |
+| `--imported-from-git-path` | str       | no       |         | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
+| `--imported-from-date`     | %Y-%m-%d  | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                                                                |
+| `--stage`                  | str       | no       |         | Name of the pipeline stage that produces this dataset.                                                                                                                                |
+| `--created-by-email`       | str       | no       |         | Email of whoever collected this data, for one collected for the project rather than imported or computed.                                                                             |
+| `--created-by-name`        | str       | no       |         | Name of whoever collected this data.                                                                                                                                                  |
+| `--created-by-orcid`       | str       | no       |         | ORCID of whoever collected this data.                                                                                                                                                 |
+| `--created-with-ai`        | list[str] | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                                                                                               |
 
 <a id="subcommand-update-hub"></a>
 

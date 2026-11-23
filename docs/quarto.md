@@ -78,6 +78,13 @@ so a change to a value renders the document again.
 
 <!-- TODO: needs human review -->
 
+To show a value saved from a notebook cell, use the notebook's path
+instead of a results file, e.g., `{{< ckvalue fit.ipynb k_25 .3f >}}`.
+See [saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells)
+for more info.
+
+<!-- TODO: needs human review -->
+
 When the pipeline is compiled,
 Calkit writes the shortcode as a Quarto extension in `_extensions/calkit/`,
 in the Quarto project's folder, i.e., where `_quarto.yml` is,

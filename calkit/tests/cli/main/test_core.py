@@ -5643,3 +5643,24 @@ def test_xenv_conda_env_first_on_path(tmp_dir, monkeypatch):
             [calkit.conda.find_conda_exe() or "conda", "env", "remove"]
             + ["-y", "-n", conda_name]
         )
+
+
+def test_run_jupyter(tmp_dir):
+    # Another Jupyter first on PATH, without Calkit's extensions, isn't run
+    os.makedirs("other")
+    fake = os.path.join("other", "jupyter-lab")
+    with open(fake, "w") as f:
+        f.write("#!/bin/sh\necho other\n")
+    os.chmod(fake, 0o755)
+    env = os.environ | {
+        "PATH": os.path.abspath("other") + os.pathsep + os.environ["PATH"]
+    }
+    out = subprocess.run(
+        ["calkit", "jupyter", "lab", "path"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "other" not in out.stdout
+    assert "Application directory" in out.stdout

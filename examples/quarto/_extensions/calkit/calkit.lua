@@ -389,10 +389,16 @@ local function get_results_path(source, kind)
       end
     end
   end
+  local path = source
   if kind ~= "path" and result_paths[source] ~= nil then
-    return result_paths[source]
+    path = result_paths[source]
   end
-  return source
+  -- A notebook stands for the values the pipeline saves from its cells
+  if path:lower():match("%.ipynb$") then
+    path = ".calkit/notebooks/outputs/" .. (path:gsub("^%./", ""))
+      .. "/values.json"
+  end
+  return path
 end
 
 -- A dotted key, e.g., fit.coeffs.0, with numbers indexing lists from 0

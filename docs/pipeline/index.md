@@ -568,14 +568,15 @@ Notebooks need to be cleaned of outputs so they can be used as DVC
 dependencies. The `status` and `run` commands handle this
 automatically.
 
-| Kind-specific parameter  | Type                                         | Required | Default | Description                                                                                                  |
-| ------------------------ | -------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `notebook_path`          | str                                          | yes      |         | Path to the notebook to execute.                                                                             |
-| `cleaned_ipynb_storage`  | Literal['git', 'dvc'] \| None                | no       | null    | Where to store the output-stripped notebook.                                                                 |
-| `executed_ipynb_storage` | Literal['git', 'dvc'] \| None                | no       | 'dvc'   | Where to store the executed notebook.                                                                        |
-| `html_storage`           | Literal['git', 'dvc'] \| None                | no       | 'dvc'   | Where to store the executed notebook as HTML.                                                                |
-| `parameters`             | dict[str, Any]                               | no       |         | Parameters injected into the notebook. A value like '{name}' is filled in from the project-level parameters. |
-| `language`               | Literal['python', 'matlab', 'julia'] \| None | no       | null    | The notebook's language. Detected automatically if unset.                                                    |
+| Kind-specific parameter  | Type                                         | Required | Default | Description                                                                                                                                                 |
+| ------------------------ | -------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notebook_path`          | str                                          | yes      |         | Path to the notebook to execute.                                                                                                                            |
+| `cleaned_ipynb_storage`  | Literal['git', 'dvc'] \| None                | no       | null    | Where to store the output-stripped notebook.                                                                                                                |
+| `executed_ipynb_storage` | Literal['git', 'dvc'] \| None                | no       | 'dvc'   | Where to store the executed notebook.                                                                                                                       |
+| `html_storage`           | Literal['git', 'dvc'] \| None                | no       | 'dvc'   | Where to store the executed notebook as HTML.                                                                                                               |
+| `parameters`             | dict[str, Any]                               | no       |         | Parameters injected into the notebook. A value like '{name}' is filled in from the project-level parameters.                                                |
+| `language`               | Literal['python', 'matlab', 'julia'] \| None | no       | null    | The notebook's language. Detected automatically if unset.                                                                                                   |
+| `cell_outputs`           | list[NotebookCellOutput]                     | no       |         | Values, figures, and tables the notebook's cells make, saved by Calkit when the notebook runs, so it doesn't have to write them. Only for Python notebooks. |
 
 ### `latex`
 
@@ -1120,6 +1121,21 @@ name as its key instead.
 | `account_id`    | str \| None                                                            | no       | null    |             |
 | `profile`       | str \| None                                                            | no       | null    |             |
 | `notes`         | str \| None                                                            | no       | null    |             |
+
+#### `NotebookCellOutput`
+
+A value, figure, or table one of a notebook's cells makes, which
+Calkit saves when the pipeline runs the notebook, so the notebook
+doesn't have to write it itself.
+
+| Parameter       | Type                                | Required | Default | Description                                                                                                                                                                                                                                                                      |
+| --------------- | ----------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['value', 'figure', 'table'] | yes      |         | What it is: a value, cited by the notebook's path, e.g., \ckvalue{analysis.ipynb}{name}, or a figure or table, saved to 'output_path'.                                                                                                                                           |
+| `cell_id`       | str \| None                         | no       | null    | ID of the cell it's saved after, which Jupyter and VS Code keep on the cell as it moves. A value with none is saved after the last cell.                                                                                                                                         |
+| `variable_name` | str \| None                         | no       | null    | Name of the variable it's saved from: a value's name, e.g., a number or a dict of them, a figure, e.g., a Matplotlib figure, or a table, e.g., a DataFrame. A figure without one is the image the cell shows, and a table the result it shows, e.g., df.head() on its last line. |
+| `output_path`   | str \| None                         | no       | null    | Where a figure or table is saved, in the format its extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as LaTeX (.tex), CSV, Markdown, or JSON.                                                                                                                     |
+| `format`        | str \| None                         | no       | null    | Python format spec for a table's numbers, e.g., '.3f'.                                                                                                                                                                                                                           |
+| `storage`       | Literal['git', 'dvc'] \| None       | no       | null    | Where to store a figure or table; by its extension if not set, as for other outputs.                                                                                                                                                                                             |
 
 #### `PythonScriptDiffFilter`
 

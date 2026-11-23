@@ -32,6 +32,7 @@ def test_post_project_misc(
     (wdir / "notes.txt").write_bytes(b"notes")
     (wdir / "box.csv").write_bytes(b"a,b")
     (wdir / "sheet.csv").write_bytes(b"c,d")
+    (wdir / "sketch.jpg").write_bytes(b"sketch")
     with open(wdir / "calkit.yaml", "w") as f:
         ryaml.dump(
             {
@@ -113,13 +114,11 @@ def test_post_project_misc(
             {
                 "path": "photo.jpg",
                 "title": "Site photo",
-                "created_by": [
-                    {
-                        "email": "a@example.com",
-                        "name": "A",
-                        "with_ai": ["Claude"],
-                    }
-                ],
+                "created_by": {
+                    "email": "a@example.com",
+                    "name": "A",
+                    "with_ai": ["Claude"],
+                },
             },
             {
                 "path": "logo.png",
@@ -225,7 +224,7 @@ def test_post_project_misc(
                 },
                 {
                     "path": "sheet.csv",
-                    "created_by": [{"email": "a@example.com"}],
+                    "created_by": {"email": "a@example.com"},
                 },
             ]
         # Once it's checkable, it's edited as what it is
@@ -238,6 +237,20 @@ def test_post_project_misc(
             headers=normal_user_token_headers,
         )
         assert resp.status_code == 400, resp.text
+        # Several people are kept as a list, and one as one person
+        people = [{"email": "a@example.com"}, {"email": "b@example.com"}]
+        resp = client.post(
+            URL,
+            json={"path": "sketch.jpg", "created_by": people},
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["created_by"] == people
+        with open(wdir / "calkit.yaml") as f:
+            assert ryaml.load(f)["misc"][-1] == {
+                "path": "sketch.jpg",
+                "created_by": people,
+            }
         # A path that isn't in the project can't be attributed
         resp = client.post(
             URL,
@@ -249,7 +262,7 @@ def test_post_project_misc(
         )
         assert resp.status_code == 404, resp.text
     with open(wdir / "calkit.yaml") as f:
-        assert len(ryaml.load(f)["misc"]) == 2
+        assert len(ryaml.load(f)["misc"]) == 3
 
 
 def test_post_project_import_update(

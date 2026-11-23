@@ -258,6 +258,7 @@ def test_ck_components(tmp_dir):
                     "figures/fit_1.5.pdf",
                     "tables/summary.tex",
                     "results/m.json",
+                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json",
                 }
             ),
         )
@@ -284,6 +285,17 @@ def test_ck_components(tmp_dir):
     # A dot in a name isn't taken for an extension
     assert component_path("figures/fit_1.5", "figure")[0] == (
         "figures/fit_1.5.pdf"
+    )
+    # A value cited from a notebook is one its cells make, saved beside it,
+    # which says what to do before it's been saved
+    assert component_path("nbs/fit.ipynb") == (
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json",
+        None,
+    )
+    assert component_path("other.ipynb") == (
+        None,
+        "No values saved from other.ipynb yet; add it as a cell output "
+        "and run the pipeline",
     )
     # The same can be worked out without the files on disk, e.g., from the
     # hub's copy of a repo, with figures stored with DVC fetched by name
@@ -513,6 +525,42 @@ def test_include_figure(tmp_dir):
     assert (
         calkit.latex.include_figure("paper/main.tex", "x.png", "y.png") == {}
     )
+
+
+def test_load_package(tmp_dir):
+    os.makedirs("paper")
+    with open("paper/sections.tex", "w") as f:
+        f.write("\\ckvalue{results.json}{rmse}\n")
+    # A command in a file it inputs needs the package too, and line endings
+    # are kept
+    with open("paper/main.tex", "w", newline="") as f:
+        f.write(
+            "\\documentclass{article}\r\n"
+            "\\begin{document}\r\n"
+            "\\input{sections}\r\n"
+            "\\end{document}\r\n"
+        )
+    assert calkit.latex.load_package("paper/main.tex")
+    with open("paper/main.tex", newline="") as f:
+        assert f.read() == (
+            "\\documentclass{article}\r\n"
+            "\\usepackage{calkit}\r\n"
+            "\\begin{document}\r\n"
+            "\\input{sections}\r\n"
+            "\\end{document}\r\n"
+        )
+    # Not twice, nor for a document using no commands, or only in comments
+    assert not calkit.latex.load_package("paper/main.tex")
+    for text in [
+        "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n",
+        "\\documentclass{article}\n\\begin{document}\n% \\ckvalue{a}{b}\n"
+        "\\end{document}\n",
+    ]:
+        with open("paper/main.tex", "w") as f:
+            f.write(text)
+        assert not calkit.latex.load_package("paper/main.tex")
+        with open("paper/main.tex") as f:
+            assert f.read() == text
 
 
 def test_expand_ck_components(tmp_dir):
@@ -905,6 +953,7 @@ def test_find_named_tex_files(tmp_dir):
             "\\input{sections/intro}\n"
             "\\input{missing}\n"
             "\\bibliographystyle{plainnat}\n"
+            "\\usepackage[main=english, french, shorthands=off]{babel}\n"
         )
     with open("paper/sections/intro.tex", "w") as f:
         f.write("\\RequirePackage{siunitx}\n\\usepackage{amsmath}\n")
@@ -914,6 +963,9 @@ def test_find_named_tex_files(tmp_dir):
         "amsmath.sty",
         "booktabs.sty",
         "plainnat.bst",
+        "babel.sty",
+        "english.ldf",
+        "french.ldf",
         "siunitx.sty",
     ]
 

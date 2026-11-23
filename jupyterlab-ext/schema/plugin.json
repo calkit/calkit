@@ -3,7 +3,7 @@
   "jupyter.lab.toolbars": {
     "Cell": [
       {
-        "name": "calkit-output-marker",
+        "name": "calkit-add-output",
         "rank": 60
       }
     ],

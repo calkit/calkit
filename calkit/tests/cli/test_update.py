@@ -200,6 +200,34 @@ def test_update_dataset(tmp_dir):
     assert "cannot also be imported" in result.output
     ck_info = calkit.load_calkit_info()
     assert "imported_from" not in ck_info["datasets"][2]
+    # Someone can be named as having collected a dataset, and drawn a figure
+    for kind in ["dataset", "figure"]:
+        result = runner.invoke(
+            update_app,
+            [
+                kind,
+                f"{kind}s/mine",
+                "--created-by-name",
+                "Pat Lee",
+                "--created-by-email",
+                "pat@x.edu",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][3] == {
+        "path": "datasets/mine",
+        "created_by": {"email": "pat@x.edu", "name": "Pat Lee"},
+    }
+    assert ck_info["figures"][0]["created_by"]["name"] == "Pat Lee"
+    # But not for an imported one
+    result = runner.invoke(
+        update_app,
+        ["dataset", "data/a.csv", "--created-by-email", "pat@x.edu"],
+    )
+    assert result.exit_code != 0
+    assert "cannot also be imported" in result.output
+    ck_info = calkit.load_calkit_info()
     # What was written validates as a whole, dates included
     info = ProjectInfo.model_validate(ck_info)
     assert info.datasets[0].imported_from.date == date(2026, 1, 2)

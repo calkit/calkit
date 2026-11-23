@@ -148,6 +148,36 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
 The stage depends on everything included this way, so don't add
 `json-to-latex` or `map-paths` stages, or list those files in `inputs`.
 
+<!-- TODO: needs human review -->
+
+### Values, figures, and tables from notebook cells
+
+A `jupyter-notebook` stage can save values, figures, and tables from its
+cells, so the notebook doesn't need to write files.
+Offer this to anyone who'd rather not add `json.dump` or `savefig` calls.
+Add them with `calkit nb add-output`, which stores them under the stage's
+`cell_outputs` by cell ID.
+Read IDs from the `.ipynb`, or use `--cell-index`, which adds IDs if the
+notebook has none.
+
+```sh
+calkit nb add-output analysis.ipynb value --cell-id 3f9a1c2e --variable-name k_25 --variable-name k_35
+calkit nb add-output analysis.ipynb figure --cell-id 8b77d0aa --variable-name fig --output-path figures/fit.pdf
+calkit nb add-output analysis.ipynb table --cell-id 1d2e4c0b --variable-name df --output-path tables/rates.tex
+calkit nb outputs analysis.ipynb --json
+```
+
+Cite a value with the notebook's path, e.g.,
+`\ckvalue[.3f]{analysis.ipynb}{k_25}`, or `{rates.25C}` for a key in a
+dict.
+Cite figures and tables by their paths.
+Each output is saved right after its cell runs,
+so if a later cell changes the variable, the saved one doesn't change.
+Outputs are only saved when the pipeline runs the notebook,
+so run `calkit run` after adding them.
+`calkit nb remove-output` stops saving one.
+Don't also list a saved figure or table in the stage's `outputs`.
+
 ### Outputs: Git vs. DVC storage
 
 By default, outputs are stored with DVC (large file storage). Use

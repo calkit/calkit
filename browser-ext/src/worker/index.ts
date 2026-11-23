@@ -869,6 +869,23 @@ async function handle(
         path: message.path,
       });
     }
+    case "project.printedNumbers": {
+      // Read from the notebooks on this machine, when the project's here
+      const local = `${message.owner}/${message.project}`;
+      if (!(await getLocalCheckout(local)).path) {
+        return [];
+      }
+      return askLocal({ type: "project.printedNumbers", project: local });
+    }
+    case "project.addCellOutput":
+      return askLocal({
+        type: "project.addCellOutput",
+        project: `${message.owner}/${message.project}`,
+        notebook: message.notebook,
+        stage: message.stage,
+        cell_id: message.cell_id,
+        variable_name: message.variable_name,
+      });
     case "local.save":
       await waitForJob(
         await askLocal<LocalJob>({

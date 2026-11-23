@@ -172,6 +172,118 @@ we can simply add `calkit-python` to the `requirements.txt` file and rerun
 `calkit xenv -n py jupyter lab`.
 The environment will be updated before starting JupyterLab.
 
+<!-- TODO: needs human review -->
+
+## Saving values, figures, and tables from cells
+
+Usually, to get a number or figure from a notebook into a paper,
+the notebook needs to write it to a file,
+and the paper needs to read that file.
+With Calkit, you can skip the first part.
+Pick a value, figure, or table that a cell makes,
+and Calkit will save it every time the pipeline runs the notebook.
+
+There are three kinds of outputs:
+
+- **Value:** A number, string, or list or dict of them, up to 100 kB,
+  e.g., a fitted constant.
+  You can cite it in a LaTeX document with
+  `\ckvalue{notebook.ipynb}{name}`,
+  in Quarto with `{{< ckvalue notebook.ipynb name >}}`,
+  or in Markdown with `<!-- ckvalue notebook.ipynb name -->`.
+  To get a single item out of a dict or pandas Series, use a dot,
+  e.g., `rates.25C`, or for a list, its index, e.g., `ks.0`.
+- **Figure:** A figure the cell displays, or a Matplotlib figure in a
+  variable.
+  It's saved in the format of the path you give it,
+  so use `.pdf` if you want it sharp in a paper.
+- **Table:** A DataFrame, a list of rows,
+  or whatever the cell displays, e.g., `df.head()` on its last line.
+  It can be saved as LaTeX (`.tex`, for `\cktable`), CSV, Markdown, or JSON.
+
+In VS Code or JupyterLab, click **Save as Calkit Output**
+in the cell's toolbar.
+The cell will then show a label like `Calkit: k_25 = 0.0309`.
+Click the label to copy how to cite it in LaTeX
+(or Quarto or Markdown, if the project has those documents),
+insert it into one of the project's documents,
+edit it, or stop saving it.
+
+From the command line (or for an agent), use `calkit nb add-output`.
+To save multiple values from the same cell,
+pass `--variable-name` once for each:
+
+```sh
+calkit nb add-output fit-rates.ipynb value --cell-id 3f9a1c2e \
+    --variable-name k_25 --variable-name k_35
+calkit nb add-output fit-rates.ipynb figure --cell-id 8b77d0aa \
+    --variable-name fig --output-path figures/decay.pdf
+calkit nb add-output fit-rates.ipynb table --cell-id 1d2e4c0b \
+    --variable-name rates_df --output-path tables/rates.tex --format .3f
+calkit nb outputs fit-rates.ipynb
+```
+
+`calkit nb remove-output` stops saving one.
+
+Outputs are stored with the notebook's stage in `calkit.yaml`,
+and point to cells by their IDs,
+so they follow a cell if you move it:
+
+```yaml
+pipeline:
+  stages:
+    fit-rates:
+      kind: jupyter-notebook
+      notebook_path: fit-rates.ipynb
+      environment: py
+      cell_outputs:
+        - kind: value
+          cell_id: 3f9a1c2e
+          variable_name: k_25
+        - kind: value
+          cell_id: 3f9a1c2e
+          variable_name: k_35
+        - kind: figure
+          cell_id: 8b77d0aa
+          variable_name: fig
+          output_path: figures/decay.pdf
+        - kind: table
+          cell_id: 1d2e4c0b
+          variable_name: rates_df
+          output_path: tables/rates.tex
+          format: .3f
+```
+
+A value is saved right after its cell runs,
+so if a later cell changes the variable,
+you still get the value from that cell.
+Values go in a JSON file for the notebook, e.g.,
+`.calkit/notebooks/outputs/fit.ipynb/values.json`.
+Figures and tables go wherever their paths say.
+They're all outputs of the stage,
+so the pipeline knows when they're out of date.
+Note that running the notebook by hand doesn't save them.
+What a document shows always comes from a pipeline run.
+If an output can't be saved, e.g., because a variable was renamed,
+the run will stop and tell you which cell and variable.
+
+On Overleaf, if the browser extension is connected to Calkit on your
+machine, it can find numbers in the paper that a notebook printed.
+Click **Use this** in the Calkit card to save the variable as an output,
+then **Run and sync**.
+After that, the card can replace the typed number with a `\ckvalue`.
+
+You can still write results files from the notebook, e.g., with
+`json.dump`, if you'd like it to work without Calkit.
+Just list those files in the stage's `outputs`.
+
+<!-- prettier-ignore -->
+!!! note
+    Cell IDs need to stay the same for this to work.
+    `nbstripout` renumbers them unless it's installed with `--keep-id`.
+    `calkit nb add-output` will warn you if a notebook's IDs look
+    renumbered.
+
 ## Working interactively
 
 The main advantage of Jupyter notebooks is the ability to work interactively,

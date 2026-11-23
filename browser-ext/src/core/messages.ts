@@ -4,6 +4,7 @@
  */
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
+import type { PrintedNumbers } from "./latex";
 import type { CheckoutStatus, LocalStatus } from "./local";
 import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
@@ -346,6 +347,22 @@ export type Request =
       project: string;
       path: string;
     }
+  | {
+      /** Numbers the pipeline's notebooks printed, read on this machine. */
+      type: "project.printedNumbers";
+      owner: string;
+      project: string;
+    }
+  | {
+      /** Add a variable a notebook's cell makes as a value to save. */
+      type: "project.addCellOutput";
+      owner: string;
+      project: string;
+      notebook: string;
+      stage: string;
+      cell_id: string;
+      variable_name: string;
+    }
   | { type: "local.openOptions" }
   /** Install the editor projects open in, i.e., VS Code. */
   | { type: "local.installEditor"; project: string }
@@ -426,6 +443,13 @@ export interface ResponseMap {
     /** What a script or notebook writes that matched. */
     writes?: string;
   }[];
+  "project.printedNumbers": PrintedNumbers[];
+  "project.addCellOutput": {
+    stage: string;
+    outputs: Record<string, string>[];
+    citations: string[];
+    warning: string | null;
+  };
   "local.createProject": { path: string; project: string };
   "local.openOptions": null;
   "local.installEditor": null;

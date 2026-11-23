@@ -74,6 +74,16 @@ datasets:
       orcid: 0000-0002-1825-0097 # Optional
 ```
 
+<!-- TODO: needs human review -->
+
+In VS Code, you can right-click the file, select **Define Source**,
+then **Collected or measured by me**.
+You can also click the person button next to the dataset in the Calkit
+sidebar.
+Either way, Calkit uses the name and email from your Git config.
+From the command line, run
+`calkit update dataset data/raw.csv --created-by-email me@myorg.edu`.
+
 `created_by` can be a list, since data is usually collected by more than
 one person, and each entry carries its own identifiers:
 

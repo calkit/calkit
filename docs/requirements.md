@@ -353,7 +353,7 @@ Apps currently in the registry:
 
 | Name                          | Installer                                                                                                                 |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `pixi`                        | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                                                 |
+| `pixi`                        | `curl -fsSL https://pixi.sh/install.sh \| sh` on Unix, `winget` on Windows                                                |
 | `uv`                          | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                                        |
 | `rustup`, `cargo`             | upstream `rustup` script on Unix, `winget` on Windows                                                                     |
 | `juliaup`, `julia`            | upstream `juliaup` script on Unix, `winget` on Windows                                                                    |

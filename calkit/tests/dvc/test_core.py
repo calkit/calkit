@@ -19,6 +19,7 @@ from dvc_objects.fs import known_implementations
 
 import calkit
 import calkit.latex
+import calkit.overleaf
 import calkit.pipeline
 from calkit.dvc import register_ck_scheme
 from calkit.dvc.core import _tolerate_lock_release_failures
@@ -133,7 +134,7 @@ def test_record_stage_output_dvc_file(tmp_dir):
     subprocess.check_call(["dvc", "remote", "add", "-d", "store", "../store"])
     subprocess.check_call(["dvc", "push", "-q"])
     shutil.rmtree("sub/data")
-    shutil.rmtree(".dvc/cache")
+    calkit.overleaf.rmtree(".dvc/cache")
     subprocess.check_call(["dvc", "pull", "-q"])
     with open("sub/data/y.txt") as f:
         assert f.read() == "y"

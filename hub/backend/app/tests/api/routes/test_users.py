@@ -2190,6 +2190,84 @@ def test_end_other_sessions(
     assert live == []
 
 
+def test_huggingface_login_keeps_storage_account(
+    client: TestClient, db: Session
+) -> None:
+    import json
+    from datetime import timedelta
+
+    from app.core import utcnow
+    from app.models import StorageResource
+
+    email = random_email()
+    headers = authentication_token_from_email(
+        client=client, email=email, db=db
+    )
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    users.save_external_credential(
+        session=db,
+        user=user,
+        provider="huggingface",
+        secret_payload=json.dumps({"access_token": "hf_old"}),
+        provider_account_id="first",
+        expires=utcnow() + timedelta(hours=1),
+    )
+    resource = StorageResource(
+        owner_account_id=user.account.id,
+        kind="hf-bucket",
+        bucket="first/project",
+        credential_user_id=user.id,
+    )
+    db.add(resource)
+    db.commit()
+
+    def login(userinfo: SimpleNamespace) -> int:
+        token = SimpleNamespace(
+            status_code=200, json=lambda: {"access_token": "hf_new"}
+        )
+        with (
+            patch("app.api.routes.users.settings.HF_CLIENT_ID", "id"),
+            patch("app.api.routes.users.settings.HF_CLIENT_SECRET", "secret"),
+            patch("requests.post", return_value=token),
+            patch("requests.get", return_value=userinfo),
+        ):
+            response = client.post(
+                "/user/huggingface-auth",
+                headers=headers,
+                json={"code": "code", "redirect_uri": "https://x/cb"},
+            )
+        db.expire_all()
+        return response.status_code
+
+    def get_account() -> tuple[str | None, str]:
+        credential = users.get_external_credential(
+            session=db, user=user, provider="huggingface"
+        )
+        assert credential is not None
+        secret = json.loads(users.decrypt_secret(credential.secret_payload))
+        return credential.provider_account_id, secret["access_token"]
+
+    def info(username: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            ok=True, json=lambda: {"preferred_username": username, "orgs": []}
+        )
+
+    # A different HF user can't take over storage, nor one that can't be
+    # identified
+    assert login(info("second")) == 409
+    assert login(SimpleNamespace(ok=False)) == 502
+    assert get_account() == ("first", "hf_old")
+    # The same one can log in again
+    assert login(info("First")) == 200
+    assert get_account()[1] == "hf_new"
+    # And with no storage, so can anyone
+    db.delete(db.get(StorageResource, resource.id))
+    db.commit()
+    assert login(info("second")) == 200
+    assert get_account()[0] == "second"
+
+
 def test_disconnect_huggingface_with_storage(
     client: TestClient, db: Session
 ) -> None:

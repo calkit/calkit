@@ -50,6 +50,14 @@ function HuggingFaceAuth() {
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
+      // A different HF user needs a choice about the old one's storage
+      if (err.response?.status === 409) {
+        navigate({
+          to: "/settings",
+          search: { tab: "connected-accounts", disconnect: "huggingface" },
+        })
+        return
+      }
       setTimeout(goToSettings, 2000)
     },
   })

@@ -1135,10 +1135,15 @@ HF_TOKEN_URL = "https://huggingface.co/oauth/token"
 
 
 def save_huggingface_token(
-    session: Session, user: User, hf_resp: dict[str, Any]
+    session: Session,
+    user: User,
+    hf_resp: dict[str, Any],
+    new_login: bool = False,
 ) -> None:
     """Save a Hugging Face OAuth token response, keeping the existing refresh
     token and account details when the response doesn't include them.
+
+    A new login can't replace the HF account storage is using.
     """
     existing = get_external_credential(
         session=session, user=user, provider="huggingface"
@@ -1167,11 +1172,25 @@ def save_huggingface_token(
             if org.get("preferred_username")
         ]
         metadata = {"orgs": orgs}
-    elif existing is not None:
+    elif existing is not None and not new_login:
         username = existing.provider_account_id
         metadata = existing.metadata_json or {}
     else:
         raise HTTPException(502, "Failed to get Hugging Face account info")
+    if (
+        new_login
+        and existing is not None
+        and existing.provider_account_id
+        and str(username).lower() != existing.provider_account_id.lower()
+    ):
+        from app.storage import get_credential_resources
+
+        if get_credential_resources(session, user.id):
+            raise HTTPException(
+                409,
+                "Storage uses Hugging Face account "
+                f"{existing.provider_account_id}; disconnect first",
+            )
     expires_in = hf_resp.get("expires_in")
     save_external_credential(
         session=session,

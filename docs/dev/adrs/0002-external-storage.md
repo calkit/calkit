@@ -4,12 +4,12 @@
 !!! note
     This document was written by Anthropic's Claude Code.
 
-<!-- TODO: needs human review -->
-
 - Status: accepted
 - Date: 2026-11-22
 - Issues: #1739 (Hugging Face buckets)
 - User docs: [storage.md](../../storage.md)
+- Notes on later work, e.g., storage per path, Git LFS, and HF Datasets:
+  [original design notes](https://github.com/calkit/calkit/blob/55e3628d1665fb5e72ca1f4cc74acea94810af0a/docs/storage.md#design-notes)
 
 ## Context
 
@@ -68,12 +68,17 @@ follow, so the model has to fit all of them.
 | Service                               | Default kind                      | Reason                                                                                  |
 | ------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------- |
 | HF, connected with OAuth              | dedicated bucket                  | HF doesn't limit bucket count, and a bucket's visibility can match its project's        |
-| HF, with a token scoped to one bucket | namespace                         | The token can't create buckets                                                          |
+| HF, with a token scoped to one bucket | dedicated bucket                  | The token can't create buckets, and a Xet read token covers a whole bucket              |
 | S3 and compatible                     | namespace bucket                  | Creating buckets takes broader permissions, and institutions usually provide one bucket |
 | Box, Dropbox, OneDrive, Google Drive  | namespace folder, e.g., `Calkit/` | Their narrower OAuth scopes are limited to a folder like this                           |
 
 A service may offer the other kind as an option,
 e.g., a dedicated S3 bucket when the credential can create one.
+HF is the exception,
+and its buckets are always dedicated.
+A Xet read token covers a whole bucket,
+so a reader of one public project in a shared bucket could fetch another
+project's content if they knew its Xet hash.
 
 ### Layout
 
@@ -90,6 +95,11 @@ so storage can be used with the service's own tools:
 - Clients always see paths as `{owner}/{project}/...`,
   whichever kind of resource the objects are in.
 
+Creating a dedicated bucket fails if the name is taken.
+The hub doesn't adopt the existing bucket,
+since it would write into it and could expose what's there by changing its
+visibility.
+
 Projects are rarely renamed today.
 Renaming a project or moving it to another owner will have to rename its
 storage too, along with other things that carry its name,
@@ -98,11 +108,14 @@ That's left for when renaming is supported.
 
 ### Visibility
 
-The hub keeps a dedicated resource's visibility in sync with its
-project's, wherever the service supports it.
+The hub keeps the visibility of a dedicated resource it created in sync
+with its project's, wherever the service supports it.
 A namespace resource stays private,
 since it holds other projects too,
-so the hub gives out access to a public project's objects itself.
+and a resource the hub didn't create,
+e.g., an HF bucket connected with a token limited to it,
+keeps the visibility its owner gave it.
+For both, the hub gives out access to a public project's objects itself.
 
 ### Access
 
@@ -140,6 +153,15 @@ The copy skips objects already copied,
 so a failed transfer can be rerun,
 and its status is read from the job.
 
+Two other events would strand a connection's resources the same way:
+
+- Removing an org member whose credential a connection uses.
+  This takes the same choice, from an org admin,
+  and isn't built yet.
+- Reconnecting a service as a different external account.
+  The hub refuses while resources use the old account,
+  so it has to be removed first.
+
 ### Released datasets
 
 Publishing a dataset,
@@ -148,22 +170,6 @@ dataset card,
 is a separate feature from storage.
 A storage resource holds DVC objects by hash,
 which only make sense to DVC.
-
-### Open questions
-
-- What happens to an org's connection when the member who connected it
-  leaves the org, for services like HF where the credential is that
-  member's own.
-- What to do when a dedicated bucket's name is already taken,
-  e.g., by a bucket the user made themselves.
-- A namespace HF bucket's Xet read token covers the whole bucket,
-  so a reader of one public project in it could fetch another project's
-  content if they knew its Xet hash.
-  Dedicated buckets avoid this.
-- Reconnecting a service as a different external account isn't checked
-  against the resources the old one reached,
-  which then become unreachable without the prompt removing a
-  connection gives.
 
 ## Consequences
 

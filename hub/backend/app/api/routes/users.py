@@ -1162,7 +1162,10 @@ def post_user_huggingface_auth(
         is None
     )
     users.save_huggingface_token(
-        session=session, user=current_user, hf_resp=resp.json()
+        session=session,
+        user=current_user,
+        hf_resp=resp.json(),
+        new_login=True,
     )
     mixpanel.user_connected_huggingface(current_user, first=first)
     return Message(message="success")

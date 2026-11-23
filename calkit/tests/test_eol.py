@@ -92,10 +92,9 @@ def test_check_pipeline_rewritten(tmp_dir):
         f.write("* text=auto eol=lf\n")
     found = {f.path: f for f in calkit.eol.check_pipeline()}
     assert all(f.rewritten and f.pinned for f in found.values())
-    for path in found:
-        os.remove(path)
-    _git("checkout", "--", *found)
+    assert {"out.txt", "src/a.py"} <= set(calkit.eol.convert_worktree())
     assert calkit.eol.check_pipeline() == []
+    assert _git("status", "--porcelain") == " M .gitattributes\n"
 
 
 def test_list_tracked_eol_outside_git(tmp_dir):
@@ -108,6 +107,9 @@ def test_run_warns_for_rewritten(tmp_dir):
     os.makedirs("origin")
     os.chdir("origin")
     subprocess.check_call(["calkit", "init"])
+    # As in a project from before init pinned line endings
+    os.remove(".gitattributes")
+    _git("commit", "-qam", "Unpin")
     with open("in.txt", "w", newline="\n") as f:
         f.write("in\n")
     ck_info = calkit.load_calkit_info()
@@ -135,4 +137,90 @@ def test_run_warns_for_rewritten(tmp_dir):
     result = subprocess.run(["calkit", "run"], capture_output=True, text=True)
     out = result.stdout + result.stderr
     assert "have CRLF line endings here but LF in Git" in out
-    assert "* text=auto eol=lf" in out
+    assert "calkit fix line-endings" in out
+    # Which fixes it, without anything left to show as modified
+    _git("reset", "-q", "--hard")
+    subprocess.check_call(["calkit", "fix", "line-endings"])
+    assert _git("status", "--porcelain") == "?? .gitattributes\n"
+    result = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert "line endings" not in out
+    assert _git("status", "--porcelain") == "?? .gitattributes\n"
+
+
+def test_pin(tmp_dir):
+    """Pinning a repo checked out with CRLF, as on Windows, makes no
+    committed file read as changed, and leaves the checkout clean."""
+    os.makedirs("origin")
+    os.chdir("origin")
+    _git("init", "-q")
+    with open("lf.txt", "w", newline="\n") as f:
+        f.write("a\nb\n")
+    with open("crlf.txt", "w", newline="") as f:
+        f.write("a\r\nb\r\n")
+    with open("run.bat", "w", newline="\n") as f:
+        f.write("@echo off\n")
+    with open("data.bin", "wb") as f:
+        f.write(b"\0\1\r\n\2")
+    with open(".gitattributes", "w", newline="\n") as f:
+        f.write("*.txt diff\n")
+    _git("add", "-A")
+    _git("commit", "-qm", "Set up")
+    os.chdir("..")
+    _git("-c", "core.autocrlf=true", "clone", "-q", "origin", "clone")
+    os.chdir("clone")
+    _git("config", "core.autocrlf", "true")
+    with open("lf.txt", "rb") as f:
+        assert f.read() == b"a\r\nb\r\n"
+    # An uncommitted change survives
+    with open("lf.txt", "ab") as f:
+        f.write(b"c\r\n")
+    res = calkit.eol.pin()
+    assert res.wrote_gitattributes
+    # The batch file is CRLF here already
+    assert res.converted == ["lf.txt"]
+    with open("lf.txt", "rb") as f:
+        assert f.read() == b"a\nb\nc\n"
+    with open("run.bat", "rb") as f:
+        assert f.read() == b"@echo off\r\n"
+    with open("crlf.txt", "rb") as f:
+        assert f.read() == b"a\r\nb\r\n"
+    with open("data.bin", "rb") as f:
+        assert f.read() == b"\0\1\r\n\2"
+    with open(".gitattributes") as f:
+        attrs = f.read()
+    # First, so the project's own rules still win
+    assert attrs.startswith("# >>> calkit line endings")
+    assert attrs.endswith("\n\n*.txt diff\n")
+    assert _git("status", "--porcelain") == (" M .gitattributes\n M lf.txt\n")
+    assert _git("diff", "--stat", "--", "lf.txt").count("|") == 1
+    # Again, nothing to do
+    res = calkit.eol.pin()
+    assert not res.wrote_gitattributes and res.converted == []
+    # On macOS or Linux, the batch file is the one to rewrite
+    os.chdir("../origin")
+    res = calkit.eol.pin()
+    assert res.converted == ["run.bat"]
+    with open("run.bat", "rb") as f:
+        assert f.read() == b"@echo off\r\n"
+    assert _git("status", "--porcelain") == " M .gitattributes\n"
+
+
+def test_write_rules_respects_existing(tmp_dir):
+    with open(".gitattributes", "w", newline="\n") as f:
+        f.write("* text=auto eol=lf\n")
+    assert calkit.eol.pins_all()
+    assert not calkit.eol.write_rules()
+    os.remove(".gitattributes")
+    assert calkit.eol.write_rules()
+    assert calkit.eol.pins_all()
+    assert not calkit.eol.write_rules()
+
+
+def test_init_pins(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open(".gitattributes") as f:
+        assert "* text=auto eol=lf" in f.read()
+    assert ".gitattributes" in _git("show", "--name-only", "--format=")
+    assert _git("status", "--porcelain") == ""

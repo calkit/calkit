@@ -194,3 +194,39 @@ def fix_storage() -> None:
     from calkit.cli.check import check_storage
 
     check_storage(fix=True, as_json=False)
+
+
+@fix_app.command(name="line-endings")
+def fix_line_endings() -> None:
+    """Check text files out with the same line endings on every platform.
+
+    Puts rules first in .gitattributes that check text files out with LF
+    everywhere, including Windows, whose Git converts them to CRLF by
+    default, so the files the pipeline hashes match across machines. Then
+    rewrites any file in this checkout whose line endings don't match, e.g.,
+    on Windows, keeping uncommitted changes. No committed file changes, so
+    there's nothing to renormalize; commit .gitattributes afterwards.
+    """
+    import calkit.eol
+    import calkit.git
+
+    try:
+        calkit.git.get_repo()
+    except Exception:
+        raise_error("Not in a Git repo")
+    res = calkit.eol.pin()
+    if res.wrote_gitattributes:
+        typer.echo(
+            "Added rules to .gitattributes that check text files out with "
+            "LF everywhere"
+        )
+    else:
+        typer.echo(".gitattributes already pins line endings")
+    if res.converted:
+        n = len(res.converted)
+        typer.echo(
+            f"Rewrote {n} {'file' if n == 1 else 'files'} in this checkout "
+            f"to match: {calkit.eol.summarize(res.converted)}"
+        )
+    if res.wrote_gitattributes:
+        typer.echo("Commit .gitattributes to pin them for everyone")

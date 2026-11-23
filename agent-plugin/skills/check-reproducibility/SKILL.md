@@ -51,10 +51,10 @@ Judgment, done here:
 
    <!-- TODO: needs human review -->
 
-   **`eol_unpinned`** has one fix, which is the project's call because it
-   renormalizes its own files: add `* text=auto eol=lf` to
-   `.gitattributes`, run `git add --renormalize .`, and commit. Suggest it
-   rather than doing it unasked, and say it matters for anyone on Windows.
+   **`eol_unpinned`** has one fix: `calkit fix line-endings`, then commit
+   `.gitattributes`. It changes no committed file, only how text files are
+   checked out, but it's a project-wide rule, so suggest it rather than
+   doing it unasked, and say it matters for anyone on Windows.
 
 3. **Every `retyped_values` finding is worth fixing.** Each is a number
    the pipeline already computes, typed into the document: right today and

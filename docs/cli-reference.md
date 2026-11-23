@@ -4323,10 +4323,11 @@ Options:
 
 Fix things.
 
-| Command                                              | Description                                                     |
-| ---------------------------------------------------- | --------------------------------------------------------------- |
-| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.      |
-| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC). |
+| Command                                              | Description                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------ |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.         |
+| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC).    |
+| [`line-endings`](#subcommand-fix-line-endings)       | Check text files out with the same line endings on every platform. |
 
 <a id="subcommand-fix-merge-conflicts"></a>
 
@@ -4363,6 +4364,20 @@ Usage:
 
 ```text
 calkit fix storage
+```
+
+<a id="subcommand-fix-line-endings"></a>
+
+#### `calkit fix line-endings`
+
+Check text files out with the same line endings on every platform.
+
+Puts rules first in .gitattributes that check text files out with LF everywhere, including Windows, whose Git converts them to CRLF by default, so the files the pipeline hashes match across machines. Then rewrites any file in this checkout whose line endings don't match, e.g., on Windows, keeping uncommitted changes. No committed file changes, so there's nothing to renormalize; commit .gitattributes afterwards.
+
+Usage:
+
+```text
+calkit fix line-endings
 ```
 
 <a id="command-group-latex-tex"></a>

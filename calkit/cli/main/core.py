@@ -361,12 +361,23 @@ def init(
     repo.git.add(os.path.abspath(".dvc"))
     if not no_commit and calkit.git.get_staged_files(repo=repo):
         repo.git.commit("-m", "Initialize DVC")
+    # Pinned before there's a pipeline, so dvc.lock never records hashes
+    # of files with this machine's line endings. Committed files keep
+    # their content, so none reads as changed.
+    from calkit.eol import pin as pin_line_endings
+
+    attrs = os.path.abspath(".gitattributes")
+    pinned = pin_line_endings().wrote_gitattributes
+    if pinned:
+        repo.git.add(attrs)
     # Create an empty calkit.yaml if one doesn't already exist
     if not os.path.isfile("calkit.yaml"):
         calkit.schema.ensure_modeline("calkit.yaml")
         repo.git.add(os.path.abspath("calkit.yaml"))
         if not no_commit and calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
+    elif pinned and not no_commit:
+        repo.git.commit(attrs, "-m", "Pin line endings")
     calkit.record_project_path()
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
@@ -3531,14 +3542,12 @@ def _warn_rewritten_line_endings() -> None:
     )
     if all(f.pinned for f in rewritten):
         # .gitattributes pins them already, so only this checkout is behind
-        message += "They were checked out before .gitattributes pinned them. "
+        message += (
+            "They were checked out before .gitattributes pinned them; run "
+            "`calkit fix line-endings` to rewrite them."
+        )
     else:
-        message += f"To fix it, {calkit.eol.FIX}. "
-    # Git skips a file whose size and time still match, so it has to go
-    message += (
-        "Then, with nothing in them uncommitted, delete them and restore "
-        "them with `git checkout -- <path>`."
-    )
+        message += f"To fix it, {calkit.eol.FIX}."
     warn(message)
 
 

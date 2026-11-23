@@ -11,14 +11,29 @@ every platform.
 
 import os
 import posixpath
+import re
 import subprocess
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 
 #: What to do about files whose line endings aren't pinned
-FIX = (
-    "add `* text=auto eol=lf` to .gitattributes, run "
-    "`git add --renormalize .`, and commit"
-)
+FIX = "run `calkit fix line-endings` and commit .gitattributes"
+
+#: Marks the block of rules :func:`pin` writes
+MARKER = "calkit line endings"
+
+#: The rules :func:`pin` writes, first in ``.gitattributes`` so a project's
+#: own rules after them win. ``text=auto`` leaves binary files alone, and
+#: files committed with CRLF, which are checked out the same everywhere
+#: already, so pinning makes no committed file read as changed.
+RULES = [
+    "# Check out text files with LF everywhere, including Windows, so the",
+    "# files the pipeline hashes are the same on every machine",
+    "* text=auto eol=lf",
+    "# cmd.exe can misread batch files with LF",
+    "*.bat text=auto eol=crlf",
+    "*.cmd text=auto eol=crlf",
+]
 
 
 @dataclass
@@ -132,3 +147,177 @@ def summarize(paths: list[str], n: int = 3) -> str:
     if len(paths) > n:
         shown += f", and {len(paths) - n} more"
     return shown
+
+
+@dataclass
+class PinResult:
+    """What :func:`pin` changed."""
+
+    #: Whether ``.gitattributes`` was written
+    wrote_gitattributes: bool = False
+    #: Working-tree files rewritten to the line endings Git checks out
+    converted: list[str] = dataclass_field(default_factory=list)
+
+
+def pins_all(wdir: str = ".") -> bool:
+    """Whether ``wdir``'s ``.gitattributes`` already sets ``eol`` for every
+    file, with Calkit's block or a ``*`` rule of its own."""
+    path = os.path.join(wdir, ".gitattributes")
+    if not os.path.isfile(path):
+        return False
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            parts = line.split()
+            if (
+                len(parts) > 1
+                and parts[0] == "*"
+                and any(p.startswith("eol=") for p in parts[1:])
+            ):
+                return True
+    return False
+
+
+def write_rules(wdir: str = ".") -> bool:
+    """Put :data:`RULES` first in ``wdir``'s ``.gitattributes``, unless it
+    pins every file already. Returns whether the file was written."""
+    path = os.path.join(wdir, ".gitattributes")
+    begin = f"# >>> {MARKER} (managed by calkit) >>>"
+    end = f"# <<< {MARKER} <<<"
+    block = "\n".join([begin, *RULES, end])
+    existing = ""
+    if os.path.isfile(path):
+        # Read with universal newlines and written with LF, as the rules
+        # it gets say it should be
+        with open(path, encoding="utf-8") as f:
+            existing = f.read()
+    block_re = re.compile(
+        re.escape(begin) + r".*?" + re.escape(end), flags=re.DOTALL
+    )
+    if block_re.search(existing):
+        updated = block_re.sub(lambda _: block, existing)
+    elif pins_all(wdir):
+        return False
+    else:
+        # First, since the last rule that matches a file wins
+        updated = block + "\n" + ("\n" + existing if existing else "")
+    if updated == existing:
+        return False
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(updated)
+    return True
+
+
+def convert_worktree(wdir: str = ".") -> list[str]:
+    """Rewrite the Git-tracked files under ``wdir`` whose line endings on
+    disk aren't what Git would check out now, e.g., CRLF from a checkout
+    made before an ``eol=lf`` rule, and return their paths.
+
+    Git itself only rewrites a file it checks out again, and skips one whose
+    size and time haven't changed. Until then the file reads as modified,
+    with nothing in its diff, and hashes differently from other machines.
+    Converting in place keeps any uncommitted changes. Only files Git has
+    with LF are touched, since one committed with CRLF is checked out as it
+    is.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "--eol", "-z"],
+            cwd=wdir,
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8", errors="replace")
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    converted = []
+    for entry in out.split("\0"):
+        info, sep, path = entry.partition("\t")
+        fields = info.split()
+        if not sep or len(fields) < 3:
+            continue
+        tracked = TrackedEol(
+            path=path,
+            index=fields[0].removeprefix("i/"),
+            worktree=fields[1].removeprefix("w/"),
+            attr=" ".join(fields[2:]).removeprefix("attr/"),
+        )
+        eols = [
+            t.removeprefix("eol=")
+            for t in tracked.attr.split()
+            if t.startswith("eol=")
+        ]
+        want = eols[-1] if eols else None
+        if tracked.index != "lf" or want not in ("lf", "crlf"):
+            continue
+        if tracked.worktree not in ("lf", "crlf", "mixed"):
+            continue
+        if tracked.worktree == want:
+            continue
+        fpath = os.path.join(wdir, path)
+        if os.path.islink(fpath) or not os.path.isfile(fpath):
+            continue
+        with open(fpath, "rb") as f:
+            data = f.read()
+        new = data.replace(b"\r\n", b"\n")
+        if want == "crlf":
+            new = new.replace(b"\n", b"\r\n")
+        if new == data:
+            continue
+        with open(fpath, "wb") as f:
+            f.write(new)
+        converted.append(path)
+    _refresh_index(converted, wdir=wdir)
+    return converted
+
+
+def _refresh_index(paths: list[str], wdir: str = ".") -> None:
+    """Record the new size and time of rewritten files that match what's
+    staged, which Git otherwise shows as modified, since it doesn't compare
+    content when a file's size has changed. Files with uncommitted changes
+    are left as they are, so nothing new is staged."""
+    if not paths:
+        return
+    try:
+        staged = {}
+        out = subprocess.run(
+            ["git", "ls-files", "-s", "-z", "--", *paths],
+            cwd=wdir,
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8", errors="replace")
+        for entry in out.split("\0"):
+            info, sep, path = entry.partition("\t")
+            if sep:
+                staged[path] = info.split()[1]
+        hashes = (
+            subprocess.run(
+                ["git", "hash-object", "--", *paths],
+                cwd=wdir,
+                capture_output=True,
+                check=True,
+            )
+            .stdout.decode()
+            .split()
+        )
+        same = [p for p, h in zip(paths, hashes) if staged.get(p) == h]
+        if same:
+            subprocess.run(
+                ["git", "update-index", "-q", "--", *same],
+                cwd=wdir,
+                capture_output=True,
+                check=True,
+            )
+    except (OSError, subprocess.CalledProcessError, IndexError):
+        pass
+
+
+def pin(wdir: str = ".") -> PinResult:
+    """Pin line endings for everything under ``wdir`` and bring this
+    checkout in line with the rules.
+
+    This changes no file's committed content, and on a checkout that
+    already matches, e.g., most on macOS and Linux, nothing on disk but
+    ``.gitattributes``.
+    """
+    res = PinResult(wrote_gitattributes=write_rules(wdir))
+    res.converted = convert_worktree(wdir)
+    return res

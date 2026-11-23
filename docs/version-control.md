@@ -309,21 +309,27 @@ whatever `core.autocrlf` is set to. Nothing to do.
 Files your project commits itself are a different matter, and worth
 thinking about if you collaborate across platforms---a text file that is
 also a stage dependency, or an output stored in Git, has the same problem.
-`calkit check repro` lists the ones whose line endings Git doesn't pin,
-and `calkit run` warns when the checkout it's running in has CRLF where
-Git has LF in any of them, which is what makes stages rerun. To pin them
-to LF on every platform:
+`calkit init` and `calkit new project` pin them, adding rules to the start
+of `.gitattributes` that check text files out with LF on every platform
+(and batch files with CRLF, which `cmd.exe` needs). For a project created
+before that, or another way, `calkit check repro` lists the files whose
+line endings Git doesn't pin, and `calkit run` warns when the checkout it's
+running in has CRLF where Git has LF in any of them, which is what makes
+stages rerun. To pin them:
 
 ```sh
-echo "* text=auto eol=lf" >> .gitattributes
-git add --renormalize .
-git commit -m "Check out text files with LF everywhere"
+calkit fix line-endings
+git commit -m "Pin line endings" .gitattributes
 ```
 
-A checkout made before the rule keeps its CRLF files until they're
-checked out again, and Git skips a file whose size and time haven't
-changed, so delete them first, then restore them with
-`git checkout -- <path>`. DVC's
+This adds the same rules, unless `.gitattributes` already sets `eol` for
+every file, and rewrites any file in this checkout whose line endings
+don't match, keeping uncommitted changes. Otherwise a checkout made before
+the rules keeps its CRLF files, and Git shows each as modified, with an
+empty diff, until it's checked out again. No committed file changes:
+`text=auto` leaves binary files alone, and also files committed with CRLF,
+which are checked out the same on every platform already, so there's
+nothing to renormalize. DVC's
 [guide to running on Windows](https://doc.dvc.org/user-guide/how-to/run-dvc-on-windows)
 covers the options in more depth.
 

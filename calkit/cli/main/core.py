@@ -5926,6 +5926,157 @@ def run_in_env(
         raise_error("Environment kind not supported")
 
 
+@app.command(name="shell")
+def open_env_shell(
+    env_name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            "-n",
+            help="Environment to activate in the shell. There's no default.",
+        ),
+    ] = None,
+    shell: Annotated[
+        str | None,
+        typer.Option(
+            "--shell",
+            help=(
+                "Shell to open, e.g., bash, zsh, fish, pwsh, or cmd. "
+                "Defaults to the one in SHELL, or PowerShell on Windows."
+            ),
+        ),
+    ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Don't check the environment is valid before opening it.",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+) -> None:
+    """Open a shell with an environment activated.
+
+    The environment is checked, and created if it doesn't exist yet, as
+    `calkit xenv` does. In the shell, its programs come first on PATH, and
+    the prompt starts with its name. Run `exit` to leave.
+
+    Conda, uv, venv, and Pixi environments open in a shell on this
+    machine, and a Docker environment in its container's shell.
+    """
+    from calkit.environments import shell as env_shell
+
+    if active := os.environ.get("CALKIT_SHELL"):
+        raise_error(
+            f"Already in a shell for environment '{active}'; run 'exit' to "
+            "leave it first"
+        )
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    ck_info = calkit.load_calkit_info()
+    calkit.set_env_vars(ck_info=ck_info)
+    envs = ck_info.get("environments") or {}
+    if env_name is None:
+        if not envs:
+            raise_error("No environments defined in calkit.yaml")
+        raise_error(
+            "Name the environment to open with '-n', one of: "
+            + ", ".join(envs)
+        )
+    if env_name == "_system":
+        raise_error(
+            "Environment '_system' is this machine, which has nothing to "
+            "activate"
+        )
+    env = calkit.environments.get_env(env_name, envs)
+    if env is None:
+        raise_error(f"Environment '{env_name}' does not exist")
+    if env.get("kind") == calkit.environments.SWITCH_KIND:
+        from calkit.cli.scheduler import _gate_switch_machine_lock
+
+        try:
+            picked = calkit.environments.resolve_switch(env_name, envs)
+        except ValueError as e:
+            raise_error(str(e))
+        if picked is None:
+            raise_error(
+                calkit.environments.describe_switch_no_match(env_name, env)
+            )
+        _gate_switch_machine_lock(env_name, env, picked, envs, ck_info)
+        env_name, env = (
+            picked,
+            (calkit.environments.get_env(picked, envs) or {}),
+        )
+    kind = env.get("kind")
+    if kind == "docker":
+        if env.get("command_mode", "shell") != "shell":
+            raise_error(
+                f"Can't open a shell in Docker environment '{env_name}', "
+                "since its commands are arguments to its image's entrypoint"
+            )
+        # The container's shell, which 'calkit xenv' runs commands in
+        run_in_env(
+            cmd=[env.get("shell", "sh")],
+            env_name=env_name,
+            no_check=no_check,
+            verbose=verbose,
+        )
+        return
+    if kind not in env_shell.SHELL_KINDS:
+        raise_error(env_shell.get_unsupported_message(env_name, kind))
+    if (
+        not no_check
+        and kind not in calkit.environments.KINDS_NO_CHECK
+        and not (
+            calkit.environments.cacheable(env)
+            and calkit.environments.check_cache(env_name=env_name, env=env)
+            and _env_prefix_exists(
+                env=env, envs=envs, env_name=env_name, wdir=None
+            )
+        )
+    ):
+        check_environment(env_name=env_name, verbose=verbose)
+        try:
+            calkit.environments.save_cache(
+                env_name=env_name, env=env, success=True
+            )
+        except Exception as e:
+            if verbose:
+                typer.echo(f"Failed to save environment check cache: {e}")
+    # What the project sets, and the environments composed in with 'with'
+    try:
+        base_env = calkit.environments.get_composed_env_vars(
+            env_name,
+            env,
+            envs,
+            keep=[
+                *(ck_info.get("env_vars") or {}),
+                *dotenv.dotenv_values(".env"),
+            ],
+            verbose=verbose,
+        )
+    except (ValueError, RuntimeError, OSError) as e:
+        raise_error(str(e))
+    try:
+        activation = env_shell.get_activation(env_name, env, envs)
+    except ValueError as e:
+        raise_error(str(e))
+    shell = shell or env_shell.get_default_shell()
+    typer.echo(
+        f"Opening {os.path.basename(shell)} in environment '{env_name}'; "
+        "run 'exit' to leave",
+        err=True,
+    )
+    if verbose:
+        typer.echo(f"Putting first on PATH: {activation.path}", err=True)
+    try:
+        status = env_shell.start(shell, activation, base_env=base_env)
+    except OSError as e:
+        raise_error(f"Failed to open {shell}: {e}")
+    raise typer.Exit(status)
+
+
 @app.command(
     name="install",
     help=(

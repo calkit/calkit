@@ -803,14 +803,18 @@ def get_status(
         categories = default_categories
     # Without calkit.yaml, these would read as an empty project
     if {"project", "questions", "pipeline", "imports"} & set(categories):
-        # Stop at the Git top level, since a nested repo is its own project
+        # Stop at the Git top level, since a nested repo is its own project,
+        # and before home, where a calkit.yaml is likely stray
+        home_path = os.path.realpath(os.path.expanduser("~"))
         project_dir: str | None = os.path.abspath(".")
         while project_dir is not None and not os.path.isfile(
             os.path.join(project_dir, "calkit.yaml")
         ):
             parent = os.path.dirname(project_dir)
-            at_top = parent == project_dir or os.path.exists(
-                os.path.join(project_dir, ".git")
+            at_top = (
+                parent == project_dir
+                or home_path in (project_dir, parent)
+                or os.path.exists(os.path.join(project_dir, ".git"))
             )
             project_dir = None if at_top else parent
         if project_dir != os.path.abspath("."):

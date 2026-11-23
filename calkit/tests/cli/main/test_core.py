@@ -1529,6 +1529,25 @@ def test_status(tmp_dir):
     assert res.returncode == 0
     assert "not a Calkit project" in res.stdout
     assert "project is at" not in res.stdout
+    # The search doesn't reach or pass the home directory
+    home_path = os.path.join(os.getcwd(), "home")
+    home_subdir_path = os.path.join(home_path, "folder")
+    os.makedirs(home_subdir_path)
+    home_env = {**os.environ, "HOME": home_path, "USERPROFILE": home_path}
+    for wdir, stray_yaml in [(home_path, False), (home_subdir_path, True)]:
+        if stray_yaml:
+            with open(os.path.join(home_path, "calkit.yaml"), "w") as f:
+                f.write("")
+        res = subprocess.run(
+            ["calkit", "status", "-c", "project"],
+            capture_output=True,
+            text=True,
+            cwd=wdir,
+            env=home_env,
+        )
+        assert res.returncode == 0
+        assert "not a Calkit project" in res.stdout
+        assert "project is at" not in res.stdout
     subprocess.check_call(["calkit", "new", "status", "in-progress"])
     res = subprocess.run(["calkit", "status"], capture_output=True, text=True)
     assert res.returncode == 0

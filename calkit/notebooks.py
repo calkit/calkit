@@ -126,6 +126,7 @@ def _calkit_restore_figures():
 
 
 def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
+    import contextlib
     import json
     import os
 
@@ -224,7 +225,15 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
         if not callable(getattr(fig, "savefig", None)):
             fig = getattr(fig, "figure", None) or fig
         if callable(getattr(fig, "savefig", None)):
-            fig.savefig(path, bbox_inches="tight")
+            # An SVG's IDs are random otherwise, so reruns would differ
+            try:
+                import matplotlib
+
+                context = matplotlib.rc_context({"svg.hashsalt": "calkit"})
+            except ImportError:
+                context = contextlib.nullcontext()
+            with context:
+                fig.savefig(path, bbox_inches="tight")
         elif callable(getattr(fig, "write_image", None)):
             fig.write_image(path)
         elif callable(getattr(fig, "save", None)):
@@ -783,9 +792,12 @@ def add_cell_outputs(
     outputs as given, how a document cites each, and a warning, if any.
     Raises a ``ValueError`` saying what's wrong, without adding any.
     """
+    import subprocess
+
     from pydantic import ValidationError
 
     import calkit
+    import calkit.dvc
     from calkit.models.pipeline import JupyterNotebookStage, NotebookCellOutput
 
     def get_message(e: ValidationError) -> str:
@@ -839,6 +851,23 @@ def add_cell_outputs(
         if saved.count(item) > 1:
             raise ValueError(f"'{item}' is given twice")
     stage_dict = ck_info["pipeline"]["stages"][name]
+    # New figures go in Git, and one the pipeline has in DVC stays there
+    locked = calkit.dvc.get_lock_out_paths(wdir)
+    for output in added:
+        if output["kind"] != "figure" or "storage" in output:
+            continue
+        project_path = posixpath.normpath(
+            posixpath.join(stage_dict.get("wdir") or "", output["output_path"])
+        )
+        in_git = subprocess.run(
+            ["git", "ls-files", "--", project_path],
+            cwd=wdir or ".",
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        output["storage"] = (
+            "dvc" if project_path in locked and not in_git else "git"
+        )
     updated = [dict(o) for o in stage_dict.get("cell_outputs") or []]
     for output in added:
         updated = get_cell_outputs_with(updated, output)

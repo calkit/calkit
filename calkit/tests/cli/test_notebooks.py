@@ -710,6 +710,11 @@ def test_cell_outputs(tmp_dir):
         assert f.read(4) == b"%PDF"
     with open("tables/rates.tex", encoding="utf-8") as f:
         assert r"25 & 0.0309 \\" in f.read()
+    # Rerunning the same data gives the same PDFs
+    pdfs = ["figures/fit.pdf", "figures/shown.pdf"]
+    before = [calkit.get_md5(path) for path in pdfs]
+    subprocess.check_call(["calkit", "run", "--force"])
+    assert [calkit.get_md5(path) for path in pdfs] == before
     for path in ["fit.ipynb", ".calkit/notebooks/executed/fit.ipynb"]:
         with open(path) as f:
             sources = [c["source"] for c in json.load(f)["cells"]]

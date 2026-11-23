@@ -629,6 +629,31 @@ def test_add_cell_outputs(tmp_path):
     )
     text = (tmp_path / "calkit.yaml").read_text()
     assert text.startswith("# The pipeline\n")
+
+    def get_storage(path: str) -> str | None:
+        stage = calkit.load_calkit_info(wdir=wdir)["pipeline"]["stages"]["fit"]
+        return next(
+            o.get("storage")
+            for o in stage["cell_outputs"]
+            if o.get("output_path") == path
+        )
+
+    # A new figure goes in Git, and one the pipeline has in DVC stays there
+    assert get_storage("f.pdf") == "git"
+    (tmp_path / "dvc.lock").write_text(
+        "schema: '2.0'\nstages:\n  fit:\n    cmd: x\n    outs:\n"
+        "    - path: g.png\n      md5: a\n      size: 1\n"
+    )
+    calkit.notebooks.add_cell_outputs(
+        "fit.ipynb",
+        [{"kind": "figure", "cell_id": ids[1], "output_path": "g.png"}],
+        wdir=wdir,
+    )
+    assert get_storage("g.png") == "dvc"
+    calkit.notebooks.remove_cell_outputs(
+        "fit.ipynb", output_path="g.png", wdir=wdir
+    )
+    (tmp_path / "dvc.lock").unlink()
     listed = calkit.notebooks.list_cell_outputs("fit.ipynb", wdir=wdir)
     assert [(m["kind"], m["cell_index"]) for m in listed] == [
         ("value", 0),

@@ -797,6 +797,13 @@ def execute_notebook(
             if o.output_path is not None and os.path.isfile(o.output_path):
                 os.remove(o.output_path)
     # Whatever happens, the scratch folder for cell outputs is removed
+    # Matplotlib puts the time in PDFs otherwise, so reruns would differ
+    date_env_vars = (
+        calkit.core.get_output_date_env_vars()
+        if language.lower() == "python"
+        else {}
+    )
+    os.environ.update(date_env_vars)
     try:
         # If this is a Python, Julia, or R notebook, we can use Papermill.
         # If it's a MATLAB notebook, we need to use the MATLAB kernel inside the
@@ -859,6 +866,7 @@ def execute_notebook(
                 run_in_env(
                     pm_cmd,
                     env_name=env_name,
+                    env_var=[f"{k}={v}" for k, v in date_env_vars.items()],
                     no_check=no_check,
                     verbose=verbose,
                 )

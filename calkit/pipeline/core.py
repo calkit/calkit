@@ -2538,6 +2538,12 @@ def get_output_storage_map(
             if isinstance(out, dict) and "path" in out and "storage" in out:
                 path = Path(os.path.normpath(os.path.join(wdir, out["path"])))
                 result[path.as_posix()] = out["storage"]
+        for out in stage.get("cell_outputs") or []:
+            if out.get("output_path") and out.get("storage"):
+                path = Path(
+                    os.path.normpath(os.path.join(wdir, out["output_path"]))
+                )
+                result[path.as_posix()] = out["storage"]
     return result
 
 

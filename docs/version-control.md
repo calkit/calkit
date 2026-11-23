@@ -213,6 +213,13 @@ which sets it up to be committed.
 Calkit will determine based on its type and size if it should be tracked
 with Git or DVC and act accordingly.
 
+<!-- TODO: needs human review -->
+
+Figures, i.e., PNG, JPEG, PDF, and SVG files, go in Git unless they're over
+1 MB, so a clone has them.
+If a figure stored in Git grows past that,
+`calkit save` asks to move it to DVC.
+
 Options:
 
 - `--to`, `-t`: Manually specify `git`, `dvc`, or `dvc-zip` as the tracking

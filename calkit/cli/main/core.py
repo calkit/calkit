@@ -3555,8 +3555,10 @@ def _warn_rewritten_line_endings() -> None:
     if all(f.pinned for f in rewritten):
         # .gitattributes pins them already, so only this checkout is behind
         message += (
-            "They were checked out before .gitattributes pinned them; run "
-            "`calkit fix line-endings` to rewrite them."
+            "They were checked out before .gitattributes pinned them, or "
+            "something here wrote them with CRLF, e.g., an editor or a "
+            "script writing text on Windows; `calkit fix line-endings` "
+            "rewrites them."
         )
     else:
         message += f"To fix it, {calkit.eol.FIX}."

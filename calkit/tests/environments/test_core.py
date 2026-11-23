@@ -3019,9 +3019,15 @@ def test_check_all_in_pipeline_quiet(tmp_dir, monkeypatch, capfd):
     def failing_check(env_name, verbose=False):
         calkit.progress.report(f"Creating environment '{env_name}'")
         print("from Python")
-        # As a tool does, to the descriptor it inherits
-        sys.stdout.flush()
-        os.write(1, b"".join(f"line {i}\n".encode() for i in range(30)))
+        # As a tool does, to what it inherits
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "for i in range(30): print(f'line {i}')",
+            ],
+            check=True,
+        )
         raise typer.Exit(1)
 
     monkeypatch.setattr(calkit.cli.check, "check_environment", failing_check)

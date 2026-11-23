@@ -155,6 +155,8 @@ def test_pin(tmp_dir):
     os.makedirs("origin")
     os.chdir("origin")
     _git("init", "-q")
+    # So the CRLF file is committed with CRLF, on Windows too
+    _git("config", "core.autocrlf", "false")
     with open("lf.txt", "w", newline="\n") as f:
         f.write("a\nb\n")
     with open("crlf.txt", "w", newline="") as f:

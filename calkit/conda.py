@@ -1213,6 +1213,14 @@ def write_cross_platform_locks(
             log(f"Could not solve {env_fpath} for {arch}: {e}")
             return None
 
+    def get_locked_dep(link: dict) -> str:
+        """Pin a solved package, with its channel if the lock won't list it."""
+        dep = f"{link['name']}={link['version']}={link['build_string']}"
+        for channel in dep_channels:
+            if channel in (link.get("channel"), link.get("base_url")):
+                return f"{channel}::{dep}"
+        return dep
+
     lock_dir, lock_name = os.path.split(lock_fpath)
     stem, ext = os.path.splitext(lock_name)
     here = _conda_venv_platform()
@@ -1252,6 +1260,12 @@ def write_cross_platform_locks(
         or re.match(r"^(-r|-c|--requirement|--constraint)\b", d.strip())
     ]
     channels = list(env_spec.get("channels") or [])
+    # Named only on a dependency, e.g., 'sea-lab::pkg'
+    dep_channels = {
+        str(d).rpartition("::")[0].rstrip("/")
+        for d in conda_deps
+        if "::" in str(d)
+    } - {c.rstrip("/") for c in channels}
     # Pin direct dependencies to what's installed here
     with open(lock_fpath, encoding="utf-8") as f:
         local_lock = ryaml.load(f) or {}
@@ -1358,8 +1372,7 @@ def write_cross_platform_locks(
                 os.remove(out_fpath)
             continue
         dependencies: list = [
-            f"{p['name']}={p['version']}={p['build_string']}"
-            for p in sorted(links, key=lambda p: p["name"])
+            get_locked_dep(p) for p in sorted(links, key=lambda p: p["name"])
         ]
         if pinned_pip is not None:
             # A project path is written as this platform's lock writes it,

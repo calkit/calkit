@@ -616,6 +616,7 @@ def test_platform_entries_prerequisites_and_record(
     assert ran == ["install-tool"]
     # Prompting asks about the prerequisite before the tool, each on its
     # own prompt
+    (fake_bin / "prereq").unlink()
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     prompts: list[str] = []
 

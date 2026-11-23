@@ -761,6 +761,19 @@ def test_jupyternotebookstage():
     ]:
         with pytest.raises(ValidationError, match=message):
             NotebookCellOutput.model_validate({"kind": "value"} | fields)
+    # Figures added before they defaulted to Git stay in DVC
+    for path, storage, stored_with in [
+        ("f.png", None, "dvc"),
+        ("f.pdf", None, "dvc"),
+        ("f.svg", None, "git"),
+        ("f.png", "git", "git"),
+    ]:
+        assert (
+            NotebookCellOutput(
+                kind="figure", cell_id="a", output_path=path, storage=storage
+            ).stored_with
+            == stored_with
+        )
     with pytest.raises(ValueError, match="give it as"):
         NotebookCellOutput.from_arg("value")
     with pytest.raises(ValueError, match="given twice"):

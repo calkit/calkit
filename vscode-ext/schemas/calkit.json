@@ -6324,7 +6324,7 @@
             }
           ],
           "default": null,
-          "description": "Where to store a figure or table; by its extension if not set, as for other outputs.",
+          "description": "Where to store a figure or table. New figures are set to Git when added.",
           "title": "Storage"
         },
         "variable_name": {

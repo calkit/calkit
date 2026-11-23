@@ -7,6 +7,7 @@ import csv
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -33,8 +34,10 @@ from calkit import (
     AUTO_IGNORE_PREFIXES,
     AUTO_IGNORE_SUFFIXES,
     DVC_EXTENSIONS,
-    DVC_SIZE_THRESH_BYTES,
+    FIGURE_DVC_SIZE_THRESH_BYTES,
+    FIGURE_EXTENSIONS,
     STAGE_RUNS_FPATH,
+    get_dvc_size_thresh_bytes,
 )
 from calkit.cli import (
     AliasGroup,
@@ -1505,7 +1508,8 @@ def add(
             )
     if not dry_run:
         calkit.dvc.configure_autostage()
-        repo.git.add(".dvc/config")
+        # Git runs from the repo root, which may be above the project
+        repo.git.add(os.path.join(dvc_repo.root_dir, ".dvc", "config"))
     dvc_paths = [] if dvc_repo is None else calkit.dvc.list_paths()
     pipeline_output_storage = calkit.pipeline.get_output_storage_map()
     # An ignore rule left on an output stored in Git, e.g., by an older
@@ -1855,12 +1859,14 @@ def add(
                         "(large directory of small files)"
                     )
                     calkit.dvc.zip.add(path)
-            elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
+            elif calkit.get_size(path) > get_dvc_size_thresh_bytes(path):
+                limit_mb = get_dvc_size_thresh_bytes(path) / 1e6
                 if dry_run:
-                    typer.echo(f"Would add {path} to DVC (>1 MB)")
+                    typer.echo(f"Would add {path} to DVC (>{limit_mb:g} MB)")
                 else:
                     typer.echo(
-                        f"Adding {path} to DVC since it's greater than 1 MB"
+                        f"Adding {path} to DVC since it's greater than "
+                        f"{limit_mb:g} MB"
                     )
                     calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
                     calkit.dvc.run_dvc_command(["add", path])
@@ -2182,6 +2188,14 @@ def save(
     if not dry_run and not no_push and not _has_somewhere_to_push():
         connected = _offer_to_connect()
         no_push = not connected
+    commit_paths = paths
+    if not dry_run:
+        moved = _offer_dvc_for_large_figures()
+        # What moving them changed goes in the same commit, including taking
+        # the figures out of Git, which is already staged
+        if moved and paths is not None:
+            paths = [*paths, *_get_paths_changed_by_move(moved)]
+            commit_paths = [*paths, *moved]
     if paths is not None:
         add(paths, to=to, existing_only=existing_only, dry_run=dry_run)
     elif save_all:
@@ -2192,7 +2206,7 @@ def save(
     nothing_to_push = False
     try:
         any_dvc = commit(
-            paths=paths,
+            paths=commit_paths,
             all_changed=True if paths is None else False,
             message=message,
             auto_commit_message=auto_commit_message,
@@ -2227,6 +2241,84 @@ def save(
         from calkit.cli.overleaf import sync as overleaf_sync
 
         overleaf_sync(verbose=verbose, no_push=no_push)
+
+
+def _get_paths_changed_by_move(moved: list[str]) -> list[str]:
+    """What moving ``moved`` to DVC changes besides the figures."""
+    gitignores = {
+        os.path.join(os.path.dirname(path), ".gitignore") for path in moved
+    }
+    return [
+        path
+        for path in [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            *sorted(gitignores),
+        ]
+        if os.path.isfile(path)
+    ]
+
+
+def _offer_dvc_for_large_figures() -> list[str]:
+    """Offer to move figures in Git that have grown past the size limit to
+    DVC, since Git keeps each version for good, returning those moved.
+
+    Without a terminal to ask at, says how. A figure already that big in the
+    last commit was left in Git on purpose, so isn't asked about again.
+    """
+    import git as gitpython
+
+    from calkit.cli.update import update_path_storage
+
+    try:
+        repo = calkit.git.get_repo()
+        storage = calkit.pipeline.get_output_storage_map()
+    except Exception:
+        return []
+    repo_root = Path(str(repo.working_dir)).resolve()
+    large = {}
+    for path, where in storage.items():
+        if (
+            where != "git"
+            or os.path.splitext(path)[-1].lower() not in FIGURE_EXTENSIONS
+            or not os.path.isfile(path)
+        ):
+            continue
+        size = os.path.getsize(path)
+        if size <= FIGURE_DVC_SIZE_THRESH_BYTES:
+            continue
+        # Git runs from the repo root, which may be above the project
+        in_repo = Path(os.path.relpath(Path(path).resolve(), repo_root))
+        try:
+            committed = int(
+                repo.git.cat_file("-s", f"HEAD:{in_repo.as_posix()}")
+            )
+        except (gitpython.GitCommandError, ValueError):
+            committed = 0
+        if committed <= FIGURE_DVC_SIZE_THRESH_BYTES:
+            large[path] = size
+    moved = []
+    for path, size in large.items():
+        text = f"{path} is {size / 1e6:.1f} MB"
+        if not sys.stdin.isatty():
+            warn(
+                f"{text}; to keep it out of Git history, run "
+                f"'calkit update path-storage {path} --to dvc'"
+            )
+        elif typer.confirm(f"{text}. Store with DVC?", default=True):
+            # One at a time, so one that can't move, e.g., from a stage
+            # that's out of date, says why and is saved in Git as it is,
+            # without stopping the save. Nothing changes before it fails.
+            try:
+                update_path_storage([path], to="dvc")
+            except typer.Exit as e:
+                if e.exit_code == 0:
+                    raise
+                warn(f"Leaving {path} in Git, since it couldn't move")
+                continue
+            moved.append(path)
+    return moved
 
 
 def _warn_on_hub_mismatch() -> None:
@@ -5537,6 +5629,14 @@ def run_in_env(
             raise_error(f"Invalid --env-var '{item}'; write it as KEY=VALUE")
         extra_env_vars[key] = value
         os.environ[key] = value
+    # Matplotlib puts the time in PDFs otherwise, so reruns would differ
+    if cmd and re.fullmatch(
+        r"python(\d+(\.\d+)?)?|py",
+        os.path.basename(cmd[0]).lower().removesuffix(".exe"),
+    ):
+        date_env_vars = calkit.core.get_output_date_env_vars()
+        extra_env_vars |= date_env_vars
+        os.environ.update(date_env_vars)
     # Environments composed into this one with 'with' put their programs on
     # PATH for its command, which gets them rather than this process, since
     # it may be a long-lived one, e.g., Jupyter's. What the project and

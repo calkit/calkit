@@ -1133,6 +1133,177 @@ def test_add_pipeline_output_storage(tmp_dir):
     assert "dvc.lock" in calkit.git.get_staged_files()
 
 
+def test_figure_storage(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import _offer_dvc_for_large_figures
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    subprocess.check_call(["calkit", "init"])
+    # A small figure goes in Git and a big one in DVC, saying the real limit
+    with open("small.png", "wb") as f:
+        f.write(os.urandom(1000))
+    with open("big.pdf", "wb") as f:
+        f.write(os.urandom(1_100_000))
+    out = subprocess.check_output(
+        ["calkit", "add", "small.png", "big.pdf"], text=True
+    )
+    assert "greater than 1 MB" in out
+    assert git("ls-files", "small.png").strip() == "small.png"
+    assert not git("ls-files", "big.pdf").strip()
+    assert os.path.isfile("big.pdf.dvc")
+    # An output DVC will cache isn't Git's, even before its first run
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": (
+                    'python -c "import os; '
+                    "[open(p, 'wb').write(os.urandom(1_100_000)) "
+                    "for p in ('kept.png', 'moved.png')]; "
+                    "open('declared.png', 'wb').write(b'png')\""
+                ),
+                "outputs": [
+                    {"path": "kept.png", "storage": "git"},
+                    {"path": "moved.png", "storage": "git"},
+                    "declared.png",
+                ],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "status"], stdout=subprocess.DEVNULL)
+    with open("declared.png", "wb") as f:
+        f.write(b"png")
+    subprocess.check_call(
+        ["calkit", "add", "declared.png"], stdout=subprocess.DEVNULL
+    )
+    assert not git("ls-files", "declared.png").strip()
+    assert not os.path.isfile("declared.png.dvc")
+    subprocess.check_call(["calkit", "run"], stdout=subprocess.DEVNULL)
+    git("add", "-A")
+    git("reset", "-q", "--", "kept.png", "moved.png")
+    git("commit", "-qm", "Set up")
+    # Without a terminal it says how
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+    assert _offer_dvc_for_large_figures() == []
+    assert "path-storage kept.png --to dvc" in capsys.readouterr().out
+    # With one, each is up to the person
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr(
+        "typer.confirm", lambda text, default=None: "moved.png" in text
+    )
+    assert _offer_dvc_for_large_figures() == ["moved.png"]
+    assert not git("ls-files", "moved.png").strip()
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["make"]
+    assert "moved.png" in stage["outputs"]
+    # One left in Git at that size isn't asked about again
+    git("add", "-A")
+    git("commit", "-qm", "Keep it")
+
+    def fail(*args, **kwargs):
+        raise AssertionError("Asked again")
+
+    monkeypatch.setattr("typer.confirm", fail)
+    assert _offer_dvc_for_large_figures() == []
+    # A pipeline's Python keeps the time out of what it writes
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"sys": {"kind": "system"}}
+    calkit.save_calkit_info(ck_info)
+    env = os.environ | {"CALKIT_PIPELINE_RUNNING": "1"}
+    env.pop("SOURCE_DATE_EPOCH", None)
+    code = "import os; print(os.environ.get('SOURCE_DATE_EPOCH'))"
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "sys", "--", "python", "-c", code],
+        env=env,
+        text=True,
+    )
+    assert out.strip().splitlines()[-1] == calkit.core.OUTPUT_SOURCE_DATE_EPOCH
+
+
+def test_save_moves_large_figure(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import _offer_dvc_for_large_figures, save
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def run() -> None:
+        p = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+        assert p.returncode == 0, p.stdout + p.stderr
+
+    # A project in a subdirectory of its repo, where Git runs from above it
+    git("init", "-q")
+    git("commit", "-q", "--allow-empty", "-m", "Start")
+    os.makedirs("proj")
+    monkeypatch.chdir("proj")
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    with open("make.py", "w") as f:
+        f.write(
+            "import os\n"
+            "n = int(open('size.txt').read())\n"
+            "open('fig.png', 'wb').write(os.urandom(n))\n"
+        )
+    with open("size.txt", "w") as f:
+        f.write("1000")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "python make.py",
+                "inputs": ["make.py", "size.txt"],
+                "outputs": [{"path": "fig.png", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    run()
+    git("add", "-A", ".")
+    git("commit", "-qm", "Set up")
+    with open("size.txt", "w") as f:
+        f.write("2000000")
+    run()
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr("typer.confirm", lambda text, default=None: True)
+    # One that can't move, here since its stage is out of date, says why,
+    # and the rest is still saved
+    with open("make.py", "a") as f:
+        f.write("# Edited\n")
+    with open("notes.md", "w") as f:
+        f.write("Notes\n")
+    git("add", "notes.md")
+    save(paths=["notes.md"], message="Notes", no_push=True)
+    assert "is out of date" in capsys.readouterr().err
+    assert git("log", "-1", "--format=%s").strip() == "Notes"
+    assert git("ls-files", "fig.png").strip() == "fig.png"
+    # Moving it commits taking it out of Git too, not only what says to
+    run()
+    with open("notes.md", "a") as f:
+        f.write("More\n")
+    save(paths=["notes.md", "make.py"], message="Move", no_push=True)
+    committed = git("ls-tree", "-r", "--name-only", "HEAD").split()
+    assert "proj/fig.png" not in committed
+    assert "/fig.png" in git("show", "HEAD:proj/.gitignore")
+    assert "proj/calkit.yaml" not in git("diff", "--name-only", "HEAD")
+    assert not git("ls-files", "fig.png").strip()
+    # One left in Git at that size isn't asked about again
+    subprocess.check_call(
+        ["calkit", "update", "path-storage", "fig.png", "--to", "git"],
+        stdout=subprocess.DEVNULL,
+    )
+    git("add", "-A", ".")
+    git("commit", "-qm", "Keep it in Git")
+
+    def fail(*args, **kwargs):
+        raise AssertionError("Asked again")
+
+    monkeypatch.setattr("typer.confirm", fail)
+    assert _offer_dvc_for_large_figures() == []
+
+
 def test_git_outputs_with_ignored_files(
     tmp_dir: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:

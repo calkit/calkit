@@ -597,9 +597,6 @@ AUTO_IGNORE_PREFIXES = [
 ]
 # Constants for version control auto-add to DVC
 DVC_EXTENSIONS = [
-    ".png",
-    ".jpeg",
-    ".jpg",
     ".gif",
     ".h5",
     ".parquet",
@@ -607,7 +604,6 @@ DVC_EXTENSIONS = [
     ".mp4",
     ".avi",
     ".webm",
-    ".pdf",
     ".xlsx",
     ".docx",
     ".pptx",
@@ -619,6 +615,13 @@ DVC_EXTENSIONS = [
     ".zarr",
 ]
 DVC_SIZE_THRESH_BYTES = 5_000_000
+# Figures go in Git so a clone has them, unless they're big, since each
+# version stays in its history at about full size
+FIGURE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf", ".svg"]
+FIGURE_DVC_SIZE_THRESH_BYTES = 1_000_000
+# What pipeline runs of Python tell tools to date their files, so the same
+# data gives the same bytes. Tools that write ZIPs can't go before 1980.
+OUTPUT_SOURCE_DATE_EPOCH = "315532800"
 # How each stage's current outputs were made, kept with the project
 STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
 
@@ -2237,6 +2240,24 @@ def read_file(path: str, as_bytes: bool | None = None) -> str | bytes:
     # Project is None, so let's just read a local file
     with open(path, mode="rb" if as_bytes else "r") as f:
         return f.read()
+
+
+def get_dvc_size_thresh_bytes(path: str) -> int:
+    """The size above which a new file at ``path`` goes to DVC."""
+    if os.path.splitext(path)[-1].lower() in FIGURE_EXTENSIONS:
+        return FIGURE_DVC_SIZE_THRESH_BYTES
+    return DVC_SIZE_THRESH_BYTES
+
+
+def get_output_date_env_vars() -> dict[str, str]:
+    """Environmental variables that keep the time out of files a pipeline
+    run of Python writes, e.g., Matplotlib's PDFs, unless already set.
+    """
+    if not os.environ.get("CALKIT_PIPELINE_RUNNING") or os.environ.get(
+        "SOURCE_DATE_EPOCH"
+    ):
+        return {}
+    return {"SOURCE_DATE_EPOCH": OUTPUT_SOURCE_DATE_EPOCH}
 
 
 def get_size(path: str):

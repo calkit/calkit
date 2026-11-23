@@ -5931,8 +5931,8 @@ def open_env_shell(
     env_name: Annotated[
         str | None,
         typer.Option(
-            "--name",
-            "-n",
+            "--environment",
+            "-e",
             help="Environment to activate in the shell. There's no default.",
         ),
     ] = None,
@@ -5981,7 +5981,7 @@ def open_env_shell(
         if not envs:
             raise_error("No environments defined in calkit.yaml")
         raise_error(
-            "Name the environment to open with '-n', one of: "
+            "Name the environment to open with '-e', one of: "
             + ", ".join(envs)
         )
     if env_name == "_system":

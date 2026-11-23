@@ -864,22 +864,22 @@ def test_open_env_shell(tmp_path, monkeypatch):
     # The environment has to be named
     res = shell()
     assert res.exit_code == 1
-    assert "Name the environment to open with '-n', one of: py, jl" in (
+    assert "Name the environment to open with '-e', one of: py, jl" in (
         res.output
     )
     # Ones with nothing to activate in a shell are refused
-    res = shell("-n", "_system")
+    res = shell("-e", "_system")
     assert res.exit_code == 1
     assert "nothing to activate" in res.output
-    res = shell("-n", "nope")
+    res = shell("-e", "nope")
     assert "Environment 'nope' does not exist" in res.output
-    res = shell("-n", "jl")
+    res = shell("-e", "jl")
     assert res.exit_code == 1
     assert "calkit xenv -n jl -- <command>" in res.output
     assert not opened
     # The shell opens with the environment activated, and its exit status
     # is this one's
-    res = shell("-n", "py", "--no-check", "--shell", "/bin/zsh")
+    res = shell("-e", "py", "--no-check", "--shell", "/bin/zsh")
     assert res.exit_code == 4, res.output
     assert "Opening zsh in environment 'py'; run 'exit' to leave" in (
         res.output
@@ -890,7 +890,7 @@ def test_open_env_shell(tmp_path, monkeypatch):
     )
     # Not inside another
     monkeypatch.setenv("CALKIT_SHELL", "py")
-    res = shell("-n", "py", "--no-check")
+    res = shell("-e", "py", "--no-check")
     assert res.exit_code == 1
     assert "Already in a shell for environment 'py'" in res.output
 

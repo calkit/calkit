@@ -262,7 +262,7 @@ DVC handles:
 | `calkit status`                 | Show which stages are stale                             |
 | `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline       |
 | `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                    |
-| `calkit shell -n <env>`         | Open an interactive shell with an environment activated |
+| `calkit shell -e <env>`         | Open an interactive shell with an environment activated |
 | `calkit push`                   | Push Git commits and DVC-tracked files to remotes       |
 | `calkit pull`                   | Pull latest code and data                               |
 | `calkit save`                   | Auto-add, commit, and push (Git + DVC)                  |

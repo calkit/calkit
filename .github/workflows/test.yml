@@ -125,7 +125,7 @@ jobs:
         with:
           run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@8d13b44e0eb1620c4e2d2d0a4ceee7d98100b955 # v3.1.6
+        uses: julia-actions/install-juliaup@ac1bed66e8369307bff3d25a4fa3f6b85cdfcfe7 # v3.1.7
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       # Juliaup installs Julia but leaves the depot empty, and the first Pkg

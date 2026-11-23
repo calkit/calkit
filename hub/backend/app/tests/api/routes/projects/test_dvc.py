@@ -15,13 +15,19 @@ MD5 = "cdef1234567890abcdef1234567890ab"
 GET_URL = f"/projects/{OWNER}/{PROJECT}/dvc/files/md5/{IDX}/{MD5}"
 
 
-def _fake_project(dvc_storage_id: uuid.UUID | None = None) -> SimpleNamespace:
+def _fake_project(
+    dvc_storage_id: uuid.UUID | None = None,
+    storage_history: list[object] | None = None,
+) -> SimpleNamespace:
     sub = SimpleNamespace(storage_limit=10.0)
     owner = SimpleNamespace(subscription=sub)
     # No such project row, so recording the push for the activity feed
     # fails quietly rather than being tested here
     return SimpleNamespace(
-        owner=owner, id=uuid.uuid4(), dvc_storage_id=dvc_storage_id
+        owner=owner,
+        id=uuid.uuid4(),
+        dvc_storage_id=dvc_storage_id,
+        storage_history=storage_history or [],
     )
 
 
@@ -275,3 +281,25 @@ def test_dvc_file_refused_for_external_storage(
         assert "ck://" in resp.json()["detail"]
     fake_fs.open.assert_not_called()
     fake_fs.exists.assert_not_called()
+    # Back on the hub's storage, objects there are served, and others may be
+    # in storage the project used before
+    fake_fs = MagicMock()
+    fake_fs.open.return_value.__enter__.return_value = io.BytesIO(b"data")
+    fake_fs.open.return_value.__exit__.return_value = False
+    with (
+        patch(
+            "app.api.routes.projects.dvc.app.projects.get_project",
+            return_value=_fake_project(storage_history=[object()]),
+        ),
+        patch("app.api.routes.projects.dvc.mixpanel.user_dvc_pulled"),
+        patch(
+            "app.api.routes.projects.dvc.get_object_fs",
+            return_value=fake_fs,
+        ),
+    ):
+        fake_fs.exists.return_value = True
+        assert client.get(GET_URL, headers=headers).content == b"data"
+        fake_fs.exists.return_value = False
+        resp = client.get(GET_URL, headers=headers)
+    assert resp.status_code == 400
+    assert "ck://" in resp.json()["detail"]

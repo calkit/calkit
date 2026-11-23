@@ -2300,7 +2300,7 @@ def test_disconnect_huggingface_with_storage(
     project_id, resource_id = add_bucket()
     with (
         patch(
-            "app.storage.get_resource_usage",
+            "app.storage.get_resource_gb_to_copy",
             return_value={user.account.name: 9.0},
         ),
         patch("app.api.routes.users.get_storage_usage", return_value=2.0),
@@ -2315,7 +2315,7 @@ def test_disconnect_huggingface_with_storage(
         project = db.get(Project, project_id)
         assert project is not None and project.dvc_storage_id == resource_id
         with patch(
-            "app.storage.get_resource_usage",
+            "app.storage.get_resource_gb_to_copy",
             return_value={user.account.name: 1.0},
         ):
             response = client.delete(
@@ -2335,7 +2335,7 @@ def test_disconnect_huggingface_with_storage(
     assert response.status_code == 409
     # Without a worker, nothing changes hands
     with (
-        patch("app.storage.get_resource_usage", return_value={}),
+        patch("app.storage.get_resource_gb_to_copy", return_value={}),
         patch("app.tasks.enqueue_storage_transfer", return_value=False),
     ):
         response = client.delete(
@@ -2343,3 +2343,10 @@ def test_disconnect_huggingface_with_storage(
         )
     assert response.status_code == 503
     assert is_connected()
+    # An HF outage doesn't show the account as disconnected
+    with patch(
+        "app.users.get_huggingface_token",
+        side_effect=HTTPException(503, "Hugging Face unavailable"),
+    ):
+        response = client.get("/user/connected-accounts", headers=headers)
+    assert response.json()["huggingface"]

@@ -403,6 +403,43 @@ def test_calkitfilesystem_dvc_staging(monkeypatch, tmp_dir):
     subprocess.run(["calkit", "dvc", "pull"], check=True)
 
 
+def test_get_file_from_object_storage(tmp_path: Path) -> None:
+    import hashlib
+    import io
+
+    fs = ckfs.CalkitFileSystem(
+        endpoint_url="https://api.example.com", skip_instance_cache=True
+    )
+    op_info = {"access": {"kind": "presigned-url", "url": "u"}}
+    with (
+        patch.object(fs, "_get_fs_op_info", return_value=op_info),
+        patch.object(fs, "isdir", return_value=False),
+        patch.object(fs, "open", return_value=io.BytesIO(b"content")),
+    ):
+        nested = tmp_path / "new" / "dir" / "f.txt"
+        fs.get_file("ck://o/p/f.txt", str(nested))
+        assert nested.read_bytes() == b"content"
+    with (
+        patch.object(fs, "_get_fs_op_info", return_value=op_info),
+        patch.object(fs, "isdir", return_value=True),
+        patch.object(fs, "open") as open_remote,
+    ):
+        directory = tmp_path / "new" / "d"
+        fs.get_file("ck://o/p/d", str(directory))
+        assert directory.is_dir()
+        open_remote.assert_not_called()
+    # DVC directory manifests are checked like other objects
+    manifest = tmp_path / "manifest"
+    manifest.write_bytes(b'[{"md5": "abc", "relpath": "a.txt"}]')
+    md5 = hashlib.md5(manifest.read_bytes()).hexdigest()
+    obj_path = f"files/md5/{md5[:2]}/{md5[2:]}.dir"
+    ckfs._check_dvc_md5(obj_path, str(manifest))
+    manifest.write_bytes(b'[{"md5": "def", "relpath": "a.txt"}]')
+    with pytest.raises(OSError, match="doesn't match its MD5"):
+        ckfs._check_dvc_md5(obj_path, str(manifest))
+    assert not manifest.exists()
+
+
 def test_xet_transfers(tmp_path: Path) -> None:
     import hashlib
     import threading

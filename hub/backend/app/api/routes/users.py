@@ -1001,8 +1001,9 @@ def get_user_connected_accounts(
     try:
         users.get_huggingface_token(session=session, user=current_user)
         huggingface_connected = True
-    except HTTPException:
-        pass
+    except HTTPException as e:
+        # An outage doesn't mean the account was disconnected
+        huggingface_connected = e.status_code == 503
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
@@ -1472,7 +1473,7 @@ def delete_user_external_credential(
         # Everything has to fit in each owner's plan
         needed: dict[str, float] = {}
         for resource in resources:
-            for owner_name, gb in app.storage.get_resource_usage(
+            for owner_name, gb in app.storage.get_resource_gb_to_copy(
                 session, resource
             ).items():
                 needed[owner_name] = needed.get(owner_name, 0) + gb

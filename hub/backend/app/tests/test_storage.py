@@ -1,5 +1,7 @@
 """Tests for ``app.storage``."""
 
+import dataclasses
+import io
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -94,6 +96,11 @@ def test_dedicated_storage() -> None:
         f"/buckets/someone/my-project/{path}"
     )
     assert dedicated.make_container_path("someone", "My-Project", path) == path
+    # Worker threads don't need the resource's database row
+    detached = dataclasses.replace(dedicated)
+    detached.resource = None
+    assert detached.bucket == "someone/my-project"
+    assert detached.make_container_path("someone", "My-Project", path) == path
     assert shared.make_container_path("someone", "My-Project", path) == (
         f"someone/my-project/{path}"
     )
@@ -171,16 +178,43 @@ def test_copy_resource_to_internal() -> None:
     internal.fs.pipe(
         internal.make_project_path("someone", "one", path), b"one"
     )
+    # Cut off, so it's copied again
+    partial = internal.make_project_path("someone", "two", path)
+    internal.fs.pipe(partial, b"t")
+
+    class BrokenRead(io.BytesIO):
+        def read(self, *args: object) -> bytes:
+            raise OSError("HF down")
+
+    class ExpiredFs(MemoryFileSystem):
+        def open(self, *args: object, **kwargs: object) -> None:
+            raise PermissionError("expired token")
+
+    expired = dataclasses.replace(shared, fs=ExpiredFs())
     with (
-        patch.object(storage, "get_resource_storage", return_value=shared),
+        patch.object(
+            storage, "get_resource_storage", return_value=shared
+        ) as get_storage,
         patch.object(storage, "get_internal_storage", return_value=internal),
         patch.object(storage, "get_resource_projects", return_value=projects),
         patch("app.config.settings.ENVIRONMENT", "local"),
     ):
-        assert storage.get_resource_usage(None, None) == {  # type: ignore[arg-type]
-            "someone": 6 / 1e9
+        # Only what's left to copy counts toward the plan
+        assert storage.get_resource_gb_to_copy(None, None) == {  # type: ignore[arg-type]
+            "someone": 3 / 1e9
         }
+        # A failed or short read leaves the hub's copy alone
+        for source_file in (BrokenRead(b"two"), io.BytesIO(b"tw")):
+            with (
+                patch.object(shared.fs, "open", return_value=source_file),
+                pytest.raises(OSError),
+            ):
+                storage.copy_resource_to_internal(None, None)  # type: ignore[arg-type]
+            assert internal.fs.cat(partial) == b"t"
+        # Each object gets a current token
+        get_storage.side_effect = [expired, expired, shared]
         assert storage.copy_resource_to_internal(None, None) == 1  # type: ignore[arg-type]
+        get_storage.side_effect = None
     for project in projects:
         assert (
             internal.fs.cat(

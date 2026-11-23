@@ -6321,6 +6321,35 @@ def test_project_storage_follows_project(
         db.expire_all()
         project_after = db.get(Project, project_id)
         assert project_after is not None and project_after.is_public
+        # Including when GitHub can't be reached
+        set_visibility.reset_mock()
+        gh_patch.side_effect = ConnectionError("GitHub down")
+        response = client.patch(
+            base, headers=headers, json={"is_public": False}
+        )
+        assert response.status_code == 502
+        assert [c.args[2] for c in set_visibility.call_args_list] == [
+            False,
+            True,
+        ]
+        gh_patch.side_effect = None
+        # A bucket failing partway puts the others back, before GitHub
+        set_visibility.reset_mock()
+        gh_patch.reset_mock()
+        set_visibility.side_effect = [RuntimeError("HF down"), 1]
+        response = client.patch(
+            base, headers=headers, json={"is_public": False}
+        )
+        assert response.status_code == 502
+        assert [c.args[2] for c in set_visibility.call_args_list] == [
+            False,
+            True,
+        ]
+        gh_patch.assert_not_called()
+        set_visibility.side_effect = None
+        db.expire_all()
+        project_after = db.get(Project, project_id)
+        assert project_after is not None and project_after.is_public
     # Deleting it deletes its storage only when asked, and if that fails,
     # the project stays so it can be tried again
     with patch("app.storage.delete_project_objects") as delete_objects:

@@ -198,6 +198,7 @@ async def get_project_dvc_file(
     )
     if project.dvc_storage_id is not None:
         raise HTTPException(400, EXTERNAL_STORAGE_MESSAGE)
+    used_external_storage = bool(project.storage_history)
     # Release the DB connection before streaming: FastAPI finalizes the
     # session dependency only after the response body is fully sent, so an
     # open session would pin a pool connection (idle in transaction) for the
@@ -211,6 +212,9 @@ async def get_project_dvc_file(
     logger.info(f"Checking for {fpath}")
     if not fs.exists(fpath):
         logger.info(f"{fpath} does not exist")
+        # It may be in storage the project used before
+        if used_external_storage:
+            raise HTTPException(400, EXTERNAL_STORAGE_MESSAGE)
         raise HTTPException(404)
 
     # Stream the file contents back to the user

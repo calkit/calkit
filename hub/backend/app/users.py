@@ -1150,10 +1150,15 @@ def save_huggingface_token(
         ).get("refresh_token")
     # The username and orgs are what storage can be created under
     headers = {"Authorization": f"Bearer {hf_resp['access_token']}"}
-    resp = requests.get(
-        "https://huggingface.co/oauth/userinfo", headers=headers, timeout=15
-    )
-    if resp.ok:
+    try:
+        resp = requests.get(
+            "https://huggingface.co/oauth/userinfo",
+            headers=headers,
+            timeout=15,
+        )
+    except requests.RequestException:
+        resp = None
+    if resp is not None and resp.ok:
         info = resp.json()
         username = info.get("preferred_username")
         orgs = [
@@ -1231,23 +1236,31 @@ def get_huggingface_token(session: Session, user: User) -> str:
             "Hugging Face token expired. Please reconnect your account.",
         )
     logger.info(f"Refreshing Hugging Face token for {user.email}")
-    resp = requests.post(
-        HF_TOKEN_URL,
-        data=dict(
-            grant_type="refresh_token",
-            refresh_token=tokens["refresh_token"],
-        ),
-        auth=(settings.HF_CLIENT_ID or "", settings.HF_CLIENT_SECRET or ""),
-        timeout=15,
-    )
+    try:
+        resp = requests.post(
+            HF_TOKEN_URL,
+            data=dict(
+                grant_type="refresh_token",
+                refresh_token=tokens["refresh_token"],
+            ),
+            auth=(
+                settings.HF_CLIENT_ID or "",
+                settings.HF_CLIENT_SECRET or "",
+            ),
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        logger.error(f"Failed to reach Hugging Face: {e}")
+        raise HTTPException(503, "Hugging Face unavailable") from e
     if resp.status_code != 200:
         logger.error(
             f"Failed to refresh Hugging Face token for {user.email}: "
             f"{resp.status_code} {resp.text[:200]}"
         )
-        if resp.status_code in (400, 401):
-            session.delete(credential)
-            session.commit()
+        if resp.status_code not in (400, 401):
+            raise HTTPException(503, "Hugging Face unavailable")
+        session.delete(credential)
+        session.commit()
         raise HTTPException(
             401,
             "Hugging Face token refresh failed. "

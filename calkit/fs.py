@@ -107,7 +107,7 @@ register_filesystem()
 
 # DVC object paths are named by their content's MD5
 _DVC_MD5_PATH_RE = re.compile(
-    r"(?:^|/)files/md5/([0-9a-f]{2})/([0-9a-f]{30})$"
+    r"(?:^|/)files/md5/([0-9a-f]{2})/([0-9a-f]{30})(?:\.dir)?$"
 )
 
 
@@ -1468,6 +1468,11 @@ class CalkitFileSystem(AbstractFileSystem):
             if error is not None:
                 raise error
             return None
+        # Object storage has URLs for prefixes too
+        if self.isdir(rpath):
+            os.makedirs(lpath, exist_ok=True)
+            return None
+        os.makedirs(os.path.dirname(os.path.abspath(lpath)), exist_ok=True)
         # Reuse the operation info so the file doesn't fetch it again
         with self.open(rpath, "rb", **kwargs) as f1:
             f1.operation_info = operation_info

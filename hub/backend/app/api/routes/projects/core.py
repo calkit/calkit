@@ -1471,6 +1471,14 @@ def patch_project(
     current_user: CurrentUser,
     req: ProjectPatch,
 ) -> ProjectPublic:
+    def restore_bucket_visibility(is_public: bool) -> None:
+        try:
+            app.storage.set_project_bucket_visibility(
+                session, project, is_public
+            )
+        except Exception:
+            logger.exception("Failed to change bucket visibility back")
+
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -1500,34 +1508,38 @@ def patch_project(
                 f"Failed to change bucket visibility for {owner_name}/"
                 f"{project_name}"
             )
+            # Some may have changed before the failure
+            restore_bucket_visibility(was_public)
             raise HTTPException(
                 502, "Failed to change Hugging Face bucket visibility"
             )
         visibility = "public" if req.is_public else "private"
         # Make call to GitHub API to change repo visibility
-        gh_owner, gh_repo = project.git_repo_url.split("/")[-2:]
-        url = f"https://api.github.com/repos/{gh_owner}/{gh_repo}"
-        token = users.get_github_token(session=session, user=current_user)
-        headers = {"Authorization": f"Bearer {token}"}
-        resp = requests.patch(
-            url,
-            json={"visibility": visibility},
-            headers=headers,
-        )
-        if resp.status_code != 200:
-            logger.warning(
-                "Failed to change repo visibility for "
-                f"{owner_name}/{project_name}: {resp.text}"
+        try:
+            gh_owner, gh_repo = project.git_repo_url.split("/")[-2:]
+            url = f"https://api.github.com/repos/{gh_owner}/{gh_repo}"
+            token = users.get_github_token(session=session, user=current_user)
+            headers = {"Authorization": f"Bearer {token}"}
+            resp = requests.patch(
+                url,
+                json={"visibility": visibility},
+                headers=headers,
+                timeout=30,
             )
-            try:
-                app.storage.set_project_bucket_visibility(
-                    session, project, was_public
+            if resp.status_code != 200:
+                logger.warning(
+                    "Failed to change repo visibility for "
+                    f"{owner_name}/{project_name}: {resp.text}"
                 )
-            except Exception:
-                logger.exception("Failed to change bucket visibility back")
-            raise HTTPException(
-                resp.status_code, "Failed to change GitHub repo visibility"
-            )
+                raise HTTPException(
+                    resp.status_code, "Failed to change GitHub repo visibility"
+                )
+        except Exception as e:
+            restore_bucket_visibility(was_public)
+            if isinstance(e, HTTPException):
+                raise
+            logger.exception("Failed to change GitHub repo visibility")
+            raise HTTPException(502, "Failed to change GitHub repo visibility")
         project.is_public = req.is_public
         mixpanel.user_changed_project_visibility(
             current_user,

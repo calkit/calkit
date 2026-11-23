@@ -276,6 +276,41 @@ def test_get_huggingface_token(db: Session) -> None:
     ):
         assert users.get_huggingface_token(db, user) == "hf_other"
         post.assert_not_called()
+    # An outage doesn't disconnect the account
+    save("hf_current", 1)
+    for post_kwargs in (
+        {"side_effect": users.requests.ConnectionError("down")},
+        {"return_value": SimpleNamespace(status_code=500, text="down")},
+    ):
+        with (
+            mock.patch.object(users.requests, "post", **post_kwargs),
+            pytest.raises(HTTPException) as e,
+        ):
+            users.get_huggingface_token(db, user)
+        assert e.value.status_code == 503
+        assert (
+            users.get_external_credential(
+                session=db, user=user, provider="huggingface"
+            )
+            is not None
+        )
+    # Nor does failing to get account details while refreshing
+    with (
+        mock.patch.object(
+            users.requests,
+            "post",
+            return_value=SimpleNamespace(
+                status_code=200,
+                json=lambda: {"access_token": "hf_new", "expires_in": 3600},
+            ),
+        ),
+        mock.patch.object(
+            users.requests,
+            "get",
+            side_effect=users.requests.ConnectionError("down"),
+        ),
+    ):
+        assert users.get_huggingface_token(db, user) == "hf_new"
     # A rejected refresh disconnects the account
     save("hf_current", 1)
     with (

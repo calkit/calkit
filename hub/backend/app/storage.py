@@ -4,7 +4,8 @@ import json
 import logging
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import boto3
@@ -341,12 +342,15 @@ class ProjectStorage:
     resource: "StorageResource | None" = None
     # Owner's credential for the backend, when the hub holds one
     token: str | None = None
+    bucket: str | None = field(init=False, default=None)
+    is_dedicated: bool = field(init=False, default=False)
 
-    @property
-    def is_dedicated(self) -> bool:
-        return (
-            self.resource is not None and self.resource.project_id is not None
-        )
+    def __post_init__(self) -> None:
+        # Copied since worker threads can't load an expired resource through
+        # the request's session
+        if self.resource is not None:
+            self.bucket = self.resource.bucket
+            self.is_dedicated = self.resource.project_id is not None
 
     def make_project_path(
         self, owner_name: str, project_name: str, path: str = ""
@@ -511,9 +515,9 @@ def set_project_bucket_visibility(
         except HTTPException as e:
             raise UnreachableStorageError(resource) from e
     for target in targets:
-        assert target.resource is not None
+        assert target.bucket is not None
         HfApi(token=target.token).update_bucket_settings(
-            target.resource.bucket, private=not is_public
+            target.bucket, private=not is_public
         )
     return len(targets)
 
@@ -529,21 +533,19 @@ def delete_objects_from(
     from huggingface_hub import HfApi
 
     if target.is_dedicated:
-        assert target.resource is not None
-        HfApi(token=target.token).delete_bucket(
-            target.resource.bucket, missing_ok=True
-        )
+        assert target.bucket is not None
+        HfApi(token=target.token).delete_bucket(target.bucket, missing_ok=True)
         return
     base = target.make_project_path(owner_name, project_name)
     if target.backend == "hf":
-        assert target.resource is not None
+        assert target.bucket is not None
         paths = [
             p.removeprefix(f"{target.data_prefix}/")
             for p in target.fs.find(base)
         ]
         if paths:
             HfApi(token=target.token).batch_bucket_files(
-                target.resource.bucket, delete=paths
+                target.bucket, delete=paths
             )
     elif target.fs.exists(base):
         target.fs.rm(base, recursive=True)
@@ -601,23 +603,46 @@ def get_resource_projects(
     )
 
 
-def get_resource_usage(
+def get_project_object_sizes(
+    target: ProjectStorage, owner_name: str, project_name: str
+) -> dict[str, int]:
+    """Get the size of each of a project's objects in a storage, by path in
+    the project.
+    """
+    base = target.fs._strip_protocol(
+        target.make_project_path(owner_name, project_name)
+    )
+    try:
+        found = target.fs.find(base, detail=True)
+    except FileNotFoundError:
+        return {}
+    return {
+        fpath.removeprefix(f"{base}/"): int(info["size"])
+        for fpath, info in found.items()
+    }
+
+
+def get_resource_gb_to_copy(
     session: "Session", resource: "StorageResource"
 ) -> dict[str, float]:
-    """Get how many GB of each owner account's projects a storage resource
-    holds.
+    """Get how many GB of each owner account's projects in a storage
+    resource aren't in the hub's own storage yet.
     """
     source = get_resource_storage(session, resource)
-    usage: dict[str, float] = {}
+    internal = get_internal_storage()
+    needed: dict[str, float] = {}
     for project in get_resource_projects(session, resource):
         owner_name = project.owner_account_name
-        base = source.make_project_path(owner_name, project.name)
-        try:
-            size = source.fs.du(base)
-        except FileNotFoundError:
-            size = 0
-        usage[owner_name] = usage.get(owner_name, 0) + float(size) / 1e9
-    return usage
+        copied = get_project_object_sizes(internal, owner_name, project.name)
+        size = sum(
+            size
+            for path, size in get_project_object_sizes(
+                source, owner_name, project.name
+            ).items()
+            if copied.get(path) != size
+        )
+        needed[owner_name] = needed.get(owner_name, 0) + size / 1e9
+    return needed
 
 
 def copy_resource_to_internal(
@@ -627,25 +652,34 @@ def copy_resource_to_internal(
     own storage. Objects already there are skipped, so it can be rerun.
     Returns how many objects were copied.
     """
-    source = get_resource_storage(session, resource)
+    import tempfile
+
     internal = get_internal_storage()
     n_copied = 0
     for project in get_resource_projects(session, resource):
         owner_name = project.owner_account_name
-        base = source.make_project_path(owner_name, project.name)
-        for fpath in source.fs.find(base):
-            dest = internal.make_project_path(
-                owner_name,
-                project.name,
-                fpath.removeprefix(f"{base}/"),
-            )
-            if internal.fs.exists(dest):
+        project_name = project.name
+        source = get_resource_storage(session, resource)
+        copied = get_project_object_sizes(internal, owner_name, project_name)
+        for path, size in get_project_object_sizes(
+            source, owner_name, project_name
+        ).items():
+            if copied.get(path) == size:
                 continue
-            with (
-                source.fs.open(fpath, "rb") as f_in,
-                internal.fs.open(dest, "wb") as f_out,
-            ):
-                shutil.copyfileobj(f_in, f_out)
+            # This can outlast a token, so get a current one for each object
+            source = get_resource_storage(session, resource)
+            dest = internal.make_project_path(owner_name, project_name, path)
+            # Uploaded once complete, so a failed read can't leave part of it
+            with tempfile.NamedTemporaryFile() as tmp:
+                with source.fs.open(
+                    source.make_project_path(owner_name, project_name, path),
+                    "rb",
+                ) as f_in:
+                    shutil.copyfileobj(f_in, tmp)
+                tmp.flush()
+                if os.path.getsize(tmp.name) != size:
+                    raise OSError(f"Incomplete read of {path}")
+                internal.fs.put_file(tmp.name, dest)
             if settings.ENVIRONMENT != "local":
                 remove_gcs_content_type(dest)
             n_copied += 1
@@ -728,10 +762,9 @@ def get_xet_token(
     """
     import requests
 
-    assert storage.resource is not None
+    assert storage.bucket is not None
     resp = requests.get(
-        f"{HF_ENDPOINT}/api/buckets/{storage.resource.bucket}"
-        f"/xet-{token_type}-token",
+        f"{HF_ENDPOINT}/api/buckets/{storage.bucket}/xet-{token_type}-token",
         headers={"Authorization": f"Bearer {storage.token}"},
         timeout=15,
     )
@@ -758,10 +791,10 @@ def post_hf_bucket_batch(
     """Add or delete files in an HF bucket with the owner's credential."""
     import requests
 
-    assert storage.resource is not None
+    assert storage.bucket is not None
     data = b"".join(json.dumps(op).encode() + b"\n" for op in ops)
     resp = requests.post(
-        f"{HF_ENDPOINT}/api/buckets/{storage.resource.bucket}/batch",
+        f"{HF_ENDPOINT}/api/buckets/{storage.bucket}/batch",
         headers={
             "Authorization": f"Bearer {storage.token}",
             "Content-Type": "application/x-ndjson",
@@ -794,8 +827,8 @@ def put_project_objects(
     if target.backend == "hf":
         from huggingface_hub import HfApi
 
-        assert target.resource is not None
-        add = [
+        assert target.bucket is not None
+        add: list[tuple[str | Path | bytes, str]] = [
             (
                 src,
                 target.make_project_path(
@@ -804,9 +837,7 @@ def put_project_objects(
             )
             for path, src in objects
         ]
-        HfApi(token=target.token).batch_bucket_files(
-            target.resource.bucket, add=add
-        )
+        HfApi(token=target.token).batch_bucket_files(target.bucket, add=add)
         return
     for path, src in objects:
         fpath = target.make_project_path(owner_name, project_name, path)
@@ -830,10 +861,10 @@ def get_hf_paths_info(
     """
     from huggingface_hub import HfApi
 
-    assert storage.resource is not None
+    assert storage.bucket is not None
     infos = {}
     for f in HfApi(token=storage.token).get_bucket_paths_info(
-        storage.resource.bucket, paths
+        storage.bucket, paths
     ):
         infos[f.path] = {
             "name": f"{storage.data_prefix}/{f.path}",
@@ -853,11 +884,10 @@ def get_hf_object_url(storage: ProjectStorage, fpath: str) -> str:
     """
     import requests
 
-    assert storage.resource is not None
+    assert storage.bucket is not None
     path_in_bucket = fpath.removeprefix(f"{storage.data_prefix}/")
     resp = requests.get(
-        f"{HF_ENDPOINT}/buckets/{storage.resource.bucket}"
-        f"/resolve/{path_in_bucket}",
+        f"{HF_ENDPOINT}/buckets/{storage.bucket}/resolve/{path_in_bucket}",
         headers={"Authorization": f"Bearer {storage.token}"},
         allow_redirects=False,
         timeout=15,

@@ -111,7 +111,7 @@ const NewHfBucket = ({
       }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Bucket created.", "success")
-      reset()
+      reset({ namespace: hfUsername ?? "", name: projectName })
       onClose()
     },
     onError: (err: AxiosError) => {

@@ -344,7 +344,7 @@ def post_project_fs_op(
             raise HTTPException(404, "Path not found")
         st, full_path = found_obj
         if st.backend == "hf":
-            assert st.resource is not None
+            assert st.bucket is not None
             info_dict = st.fs.info(full_path)
             if not info_dict.get("xet_hash"):
                 raise HTTPException(400, "Path is not a file")
@@ -362,7 +362,7 @@ def post_project_fs_op(
                 backend=st.backend,
                 access=XetAccess(
                     operation="download",
-                    bucket=st.resource.bucket,
+                    bucket=st.bucket,
                     cas_url=token["casUrl"],
                     access_token=token["accessToken"],
                     expires_at_unix=token["exp"],
@@ -390,7 +390,7 @@ def post_project_fs_op(
     # We are doing a PUT if we've made it this far
     assert operation == "put"
     if target.backend == "hf":
-        assert target.resource is not None
+        assert target.bucket is not None
         try:
             token = storage.get_xet_token(target, "write")
         except Exception:
@@ -403,7 +403,7 @@ def post_project_fs_op(
             | PresignedUrlAccess
         ) = XetAccess(
             operation="upload",
-            bucket=target.resource.bucket,
+            bucket=target.bucket,
             cas_url=token["casUrl"],
             access_token=token["accessToken"],
             expires_at_unix=token["exp"],
@@ -568,9 +568,9 @@ def post_project_fs_batch_op(
                     "time_modified": _get_time_modified(info_dict),
                 }
                 # So clients can download from HF without asking per file
-                if info_dict.get("xet_hash") and found.resource is not None:
+                if info_dict.get("xet_hash") and found.bucket is not None:
                     path_result["info"]["xet_hash"] = info_dict["xet_hash"]
-                    path_result["info"]["bucket"] = found.resource.bucket
+                    path_result["info"]["bucket"] = found.bucket
         # Handle content (if requested via include)
         if "content" in include and info_dict is not None:
             path_result["content_base64"] = None
@@ -629,10 +629,10 @@ def post_project_fs_batch_op(
         # client got its access
         if target.backend != "hf":
             raise HTTPException(409, "Project storage changed; push again")
-        assert target.resource is not None
+        assert target.bucket is not None
         # Content uploaded to a bucket the project no longer uses can't be
         # added to the new one
-        if req.bucket is not None and req.bucket != target.resource.bucket:
+        if req.bucket is not None and req.bucket != target.bucket:
             raise HTTPException(409, "Project storage changed; push again")
         xet_hashes = req.xet_hashes or {}
         if set(paths) != set(xet_hashes):

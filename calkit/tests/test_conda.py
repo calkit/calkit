@@ -10,9 +10,11 @@ import sys
 import pytest
 
 import calkit
+import calkit.progress
 from calkit.conda import (
     _check_list,
     _check_single,
+    _create_env,
     _enrich_pip_deps_from_freeze,
     _get_pip_dependency_list,
     _split_env_dependencies,
@@ -1005,3 +1007,43 @@ def test_find_named_env_prefix(tmp_path, monkeypatch):
     elsewhere = make_env(tmp_path / "elsewhere" / "d")
     (home / ".conda" / "environments.txt").write_text(elsewhere + "\n")
     assert find_named_env_prefix("d", str(conda_exe)) is None
+
+
+def test_create_env_reports_steps(capsys):
+    # What Conda prints as it goes, with one step split across writes and
+    # one skipped
+    script = (
+        "import sys, time\n"
+        "for text in [\n"
+        "    'Channels:\\n',\n"
+        "    'Solving envir', 'onment: done\\n',\n"
+        "    'Downloading and Extracting Packages: done\\n',\n"
+        "    'Preparing transaction: done\\n',\n"
+        "    'Installing pip dependencies: done\\n',\n"
+        "]:\n"
+        "    sys.stdout.write(text)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.05)\n"
+        "sys.exit(int(sys.argv[1]))\n"
+    )
+    reported: list[str] = []
+    doing = "Creating environment 'main' from its lock file"
+    with calkit.progress.reporting(reported.append, label="main"):
+        _create_env([sys.executable, "-c", script, "0"], doing=doing)
+    assert reported == [
+        doing,
+        f"{doing}: solving",
+        f"{doing}: downloading packages",
+        f"{doing}: installing packages",
+        f"{doing}: installing pip dependencies",
+    ]
+    # Shown only if it fails
+    assert "Channels" not in capsys.readouterr().err
+    with calkit.progress.reporting(reported.append):
+        with pytest.raises(subprocess.CalledProcessError):
+            _create_env([sys.executable, "-c", script, "1"], doing=doing)
+    assert "Channels:" in capsys.readouterr().err
+    # With nobody watching, nothing's reported
+    reported.clear()
+    _create_env([sys.executable, "-c", script, "0"], doing=doing)
+    assert reported == []

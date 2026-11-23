@@ -16,6 +16,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
+import calkit.eol
 from calkit.cli import AliasGroup, OptionalValueCommand, raise_error, warn
 from calkit.core import ryaml
 
@@ -566,8 +567,11 @@ def new_project(
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:
             warn("Could not set authentication for Calkit DVC remote")
+        # Before adding, so what's committed is normalized by the rules
+        calkit.eol.write_rules(abs_path)
         # Commit this stuff to Git
         repo.git.add(".")
+        calkit.eol.convert_worktree(abs_path)
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Create new project from {template_name}"])
         calkit.record_project_path(abs_path)
@@ -580,6 +584,9 @@ def new_project(
         typer.echo("Initializing Git repository")
         subprocess.run(["git", "init", "-q"], cwd=abs_path)
     repo = calkit.git.get_repo(abs_path)
+    # Before anything is added, so what's committed is normalized by them
+    if calkit.eol.write_rules(abs_path):
+        repo.git.add(".gitattributes")
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
         result = run_dvc_command(
@@ -625,6 +632,8 @@ def new_project(
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception as e:
             warn(f"Failed to set up Calkit DVC remote: {e}")
+    # Files written here have this platform's line endings
+    calkit.eol.convert_worktree(abs_path)
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     calkit.record_project_path(abs_path)

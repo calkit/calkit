@@ -377,6 +377,8 @@ def check_repro(
             _echo_retyped(items)
         elif category == "numbers":
             _echo_unattributed(items)
+        elif category == "line-endings":
+            _echo_line_endings(items)
         else:
             calkit.echo(f"{category} ({len(items)}):")
             for item in items:
@@ -422,6 +424,25 @@ def _echo_retyped(findings: list[dict]) -> None:
         "written; and anything in a results file the document doesn't "
         "read with \\ckvalue and no 'json-to-latex' stage reads, or a "
         "value a 'json-to-latex' stage leaves out of the 'keys' it names."
+    )
+
+
+def _echo_line_endings(paths: list[str]) -> None:
+    """Files the pipeline hashes whose line endings Git doesn't pin."""
+    import calkit.eol
+
+    calkit.echo(
+        f"Pipeline files with line endings that differ on Windows "
+        f"({len(paths)}):"
+    )
+    for path in paths:
+        calkit.echo(f"  {path}")
+    calkit.echo(
+        "\nGit for Windows checks text files out with CRLF unless "
+        ".gitattributes says otherwise, and DVC hashes them as they are on "
+        "disk, so these hash differently there than wherever dvc.lock was "
+        "written, and the stages that use or write them read as out of "
+        f"date. To pin them to LF everywhere, {calkit.eol.FIX}."
     )
 
 
@@ -471,13 +492,13 @@ def _echo_unattributed(findings: list[dict]) -> None:
     help="Check that an environment is up-to-date (alias for 'environment').",
 )
 @check_app.command(name="environment")
-def check_environment(
+def check_environment_command(
     env_name: Annotated[
         str,
         typer.Option("--name", "-n", help="Name of the environment to check."),
     ],
     verbose: Annotated[
-        bool, typer.Option("--verbose", help="Print verbose output.")
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
     force: Annotated[
         bool,
@@ -488,8 +509,27 @@ def check_environment(
             "something it was built from changed outside the project.",
         ),
     ] = False,
-) -> str | None:
+) -> None:
     """Check that an environment is up-to-date.
+
+    An environment is also rebuilt when one of its 'inputs' changes.
+    """
+    import calkit.progress
+
+    # On a terminal, what the tools print is only shown if it fails
+    with calkit.progress.spinner(
+        f"Checking environment '{env_name}'", label=env_name, show=not verbose
+    ):
+        check_environment(env_name=env_name, verbose=verbose, force=force)
+
+
+def check_environment(
+    env_name: str,
+    verbose: bool = False,
+    force: bool = False,
+) -> str | None:
+    """Check that an environment is up-to-date, rebuilding it with
+    ``force``, and return its lock file's path.
 
     An environment is also rebuilt when one of its 'inputs' changes.
     """

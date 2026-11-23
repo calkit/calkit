@@ -1037,6 +1037,7 @@ def get_gated_stages(
     manual: bool = True,
     requirements_by_stage: dict[str, list] | None = None,
     blocked_by: dict[str, set[str]] | None = None,
+    failed_environments: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -1060,6 +1061,9 @@ def get_gated_stages(
     later, e.g., by ``calkit run`` for a stage it would run. Each of those,
     and each stage skipped for an output a skipped stage hasn't made, that
     needs such an output is added to ``blocked_by`` with those stages.
+
+    ``failed_environments`` maps environments that failed their check to a
+    reason, which a stage using one is skipped for, as for a requirement.
     """
     import contextlib
     import json
@@ -1300,6 +1304,10 @@ def get_gated_stages(
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )
+        failed = [e for e in env_names if e in (failed_environments or {})]
+        if failed:
+            gated[name] = (failed_environments or {})[failed[0]]
+            continue
         resolved: list[tuple[str, dict]] = []
         reason = None
         is_error = False

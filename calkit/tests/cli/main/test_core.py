@@ -832,6 +832,69 @@ def test_run_in_env_system(tmp_dir):
     assert "'user'" not in combined
 
 
+def test_open_env_shell(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from calkit.environments import shell as env_shell
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CALKIT_SHELL", raising=False)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "py": {"kind": "uv", "path": "pyproject.toml"},
+                    "jl": {"kind": "julia", "path": "Project.toml"},
+                }
+            },
+            f,
+        )
+    opened = {}
+
+    def start(shell, activation, base_env=None):
+        opened["shell"] = shell
+        opened["activation"] = activation
+        return 4
+
+    monkeypatch.setattr(env_shell, "start", start)
+
+    def shell(*args: str):
+        return CliRunner().invoke(calkit_app, ["shell", *args])
+
+    # The environment has to be named
+    res = shell()
+    assert res.exit_code == 1
+    assert "Name the environment to open with '-e', one of: py, jl" in (
+        res.output
+    )
+    # Ones with nothing to activate in a shell are refused
+    res = shell("-e", "_system")
+    assert res.exit_code == 1
+    assert "nothing to activate" in res.output
+    res = shell("-e", "nope")
+    assert "Environment 'nope' does not exist" in res.output
+    res = shell("-e", "jl")
+    assert res.exit_code == 1
+    assert "calkit xenv -n jl -- <command>" in res.output
+    assert not opened
+    # The shell opens with the environment activated, and its exit status
+    # is this one's
+    res = shell("-e", "py", "--no-check", "--shell", "/bin/zsh")
+    assert res.exit_code == 4, res.output
+    assert "Opening zsh in environment 'py'; run 'exit' to leave" in (
+        res.output
+    )
+    assert opened["shell"] == "/bin/zsh"
+    assert opened["activation"].env_vars["VIRTUAL_ENV"] == os.path.join(
+        str(tmp_path), ".venv"
+    )
+    # Not inside another
+    monkeypatch.setenv("CALKIT_SHELL", "py")
+    res = shell("-e", "py", "--no-check")
+    assert res.exit_code == 1
+    assert "Already in a shell for environment 'py'" in res.output
+
+
 def test_to_shell_cmd():
     cmd = ["python", "-c", "import math; print('hello world')"]
     subprocess.check_call(cmd)
@@ -5726,3 +5789,58 @@ def test_run_jupyter(tmp_dir):
     assert out.returncode == 0, out.stderr
     assert "other" not in out.stdout
     assert "Application directory" in out.stdout
+
+
+def test_run_skips_for_failed_env(tmp_dir):
+    # A stage whose environment couldn't be built is skipped rather than
+    # failing with its own error, e.g., that a tool isn't in it, which
+    # would hide the real one. The stages that need its outputs are skipped
+    # too, the rest run, and then the run fails.
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("./does-not-exist\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        }
+    }
+    ck_info["pipeline"] = {
+        "stages": {
+            "thing": {
+                "kind": "shell-command",
+                "environment": "py",
+                "command": "echo hi > out.txt",
+                "outputs": ["out.txt"],
+            },
+            "after": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "cat out.txt > after.txt",
+                "inputs": ["out.txt"],
+                "outputs": ["after.txt"],
+            },
+            "other": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo other > other.txt",
+                "outputs": ["other.txt"],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, out
+    assert "Stage 'thing' is out of date and couldn't run" in out
+    assert (
+        "Failed to check environment 'py', so skipping out-of-date stage "
+        "'thing'" in out
+    )
+    assert "calkit check env -n py" in out
+    assert not os.path.exists("out.txt")
+    assert not os.path.exists("after.txt")
+    assert os.path.exists("other.txt")

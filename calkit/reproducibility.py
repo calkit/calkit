@@ -8,6 +8,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, computed_field
 
 import calkit
+import calkit.eol
 from calkit.provenance import (
     PROVENANCE_ARTIFACT_TYPES,
     find_project_provenance_gaps,
@@ -105,6 +106,7 @@ DETAIL_CATEGORIES = {
     "provenance": "misc_needing_provenance",
     "gaps": "provenance_gaps",
     "imports": "unchecked_imports",
+    "line-endings": "eol_unpinned",
 }
 
 
@@ -152,6 +154,10 @@ class ReproCheck(BaseModel):
     # write, e.g., an absolute path to a synced drive, which only exist on
     # the machine they were written on
     paths_outside_project: list[str] = []
+    # Git-tracked text files the pipeline hashes whose line endings Git
+    # doesn't pin, so a Windows checkout hashes them differently from
+    # everyone else's and its stages read as out of date there
+    eol_unpinned: list[str] = []
     n_dvc_remotes: int
     # Values the project computes that a manuscript typed out instead,
     # which go stale the next time the stage behind them runs
@@ -257,6 +263,14 @@ class ReproCheck(BaseModel):
                     "created them. Define where they came from or create "
                     "stage(s) to produce them."
                 )
+        if self.eol_unpinned:
+            return (
+                f"There are {len(self.eol_unpinned)} files the pipeline "
+                "hashes whose line endings Git doesn't pin, e.g., "
+                f"{self.eol_unpinned[0]}. Git for Windows checks them out "
+                "with CRLF, so they hash differently there and stages read "
+                f"as out of date. To pin them, {calkit.eol.FIX}."
+            )
         if not self.has_dev_container:
             return (
                 "No dev container spec is defined. "
@@ -355,6 +369,12 @@ class ReproCheck(BaseModel):
             f"{len(self.paths_outside_project)} "
             f"{calkit.check_or_x(not self.paths_outside_project)}"
             f"{self._tag('outside')}\n"
+        )
+        txt += (
+            "Pipeline files with line endings that differ on Windows: "
+            f"{len(self.eol_unpinned)} "
+            f"{calkit.check_or_x(not self.eol_unpinned)}"
+            f"{self._tag('line-endings')}\n"
         )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n = getattr(self, f"n_{artifact_type}")
@@ -1111,6 +1131,11 @@ def check_reproducibility(
             f"{script} writes {p}" for p in io.get("external_outputs", [])
         ]
     res["paths_outside_project"] = list(dict.fromkeys(outside))
+    res["eol_unpinned"] = (
+        [f.path for f in calkit.eol.check_pipeline(wdir=wdir) if f.at_risk]
+        if res["is_git_repo"]
+        else []
+    )
     res["n_environments"] = len(ck_info.get("environments", {}))
     # Check for stages not run with environments
     stages = pipeline.get("stages", {})

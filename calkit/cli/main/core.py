@@ -801,6 +801,36 @@ def get_status(
                 )
     else:
         categories = default_categories
+    # Without calkit.yaml, these would read as an empty project
+    if {"project", "questions", "pipeline", "imports"} & set(categories):
+        # Stop at the Git top level, since a nested repo is its own project,
+        # and before home, where a calkit.yaml is likely stray
+        home_path = os.path.realpath(os.path.expanduser("~"))
+        project_dir: str | None = os.path.abspath(".")
+        while project_dir is not None and not os.path.isfile(
+            os.path.join(project_dir, "calkit.yaml")
+        ):
+            parent = os.path.dirname(project_dir)
+            at_top = (
+                parent == project_dir
+                or home_path in (project_dir, parent)
+                or os.path.exists(os.path.join(project_dir, ".git"))
+            )
+            project_dir = None if at_top else parent
+        if project_dir != os.path.abspath("."):
+            if project_dir is None:
+                warn(
+                    f"No calkit.yaml in {os.getcwd()}; not a Calkit "
+                    "project. Run 'calkit init' or change to project "
+                    "directory.",
+                    err=as_json,
+                )
+            else:
+                warn(
+                    f"No calkit.yaml in {os.getcwd()}; project is at "
+                    f"{project_dir}. Change to that directory.",
+                    err=as_json,
+                )
     # Everything is worked out before anything is shown, which can take a
     # while, e.g., when environments are checked again, so a spinner shows
     # until then. It writes to its own copy of the terminal, since what the

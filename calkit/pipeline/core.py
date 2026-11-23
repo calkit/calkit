@@ -3775,6 +3775,14 @@ def to_dvc(
         # A path a stage makes now isn't also added on its own, e.g., a
         # figure saved with DVC before its stage was, which DVC would refuse
         for overlap in calkit.dvc.get_stage_output_dvc_files(dvc_stages, wdir):
+            if not calkit.dvc.record_stage_output_dvc_file(
+                overlap, dvc_stages[overlap["stage"]], wdir
+            ):
+                warn(
+                    f"Keeping {overlap['dvc_file']}: can't record its hash "
+                    "in dvc.lock"
+                )
+                continue
             os.remove(os.path.join(wdir or ".", overlap["dvc_file"]))
             warn(
                 f"Removed {overlap['dvc_file']}, since stage "

@@ -2166,8 +2166,9 @@ def check_storage(
     """Check that paths are tracked where they're declared to be stored.
 
     That is, nothing is tracked by both Git and DVC, no pipeline output has
-    a .dvc file of its own too, no pipeline output stored in Git, or file
-    in one, is ignored by it, and nothing in Git is too large for it.
+    a .dvc file of its own too or is in a directory one tracks, no
+    pipeline output stored in Git, or file in one, is ignored by it, and
+    nothing in Git is too large for it.
     Large files are only reported.
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
@@ -2188,7 +2189,10 @@ def check_storage(
             for problem in problems:
                 warn(problem["message"])
         if any(p["kind"] != "large" for p in problems):
-            if not as_json:
+            if not as_json and any(
+                p["kind"] not in ("large", "stage-output-in-dvc-dir")
+                for p in problems
+            ):
                 typer.echo("Run 'calkit check storage --fix' to fix these")
             raise typer.Exit(1)
         if not problems and not as_json:
@@ -2201,11 +2205,22 @@ def check_storage(
     # Pipeline outputs are recorded in DVC, which records their stages'
     # inputs too, so only for stages that are up to date
     to_record = []
+    dvc_stages: dict = {}
+    if any(p["kind"] == "stage-output-dvc-file" for p in problems):
+        with open("dvc.yaml") as f:
+            dvc_stages = calkit.ryaml.load(f)["stages"]
     for problem in problems:
         path = os.path.abspath(problem["path"])
         if problem["kind"] == "stage-output-dvc-file":
-            # The stage says how it's made, so its own .dvc file goes
+            # The stage says how it's made, so its own .dvc file goes, with
+            # its hash kept in dvc.lock
             dvc_file = problem["dvc_file"]
+            if not calkit.dvc.record_stage_output_dvc_file(
+                problem, dvc_stages[problem["stage"]]
+            ):
+                warn(f"Keeping {dvc_file}: can't record its hash in dvc.lock")
+                unfixed.append(problem)
+                continue
             if repo.git.ls_files("--", dvc_file):
                 repo.git.rm("-q", "--", dvc_file)
             elif os.path.isfile(dvc_file):
@@ -2272,6 +2287,11 @@ def check_storage(
         target = problem["dvc_file"] or stage
         if calkit.dvc.run_dvc_command(["commit", "-f", "-q", target]) != 0:
             warn(f"Couldn't record {problem['path']} in DVC")
+    if os.path.isfile("dvc.lock") and any(
+        p["kind"] == "stage-output-dvc-file" for p in fixed
+    ):
+        calkit.dvc.ensure_dvc_lock_not_ignored()
+        repo.git.add("--", "dvc.lock")
     for message in calkit.git.stage_gitignores(repo, gitignores):
         warn(message)
     for problem in unfixed:

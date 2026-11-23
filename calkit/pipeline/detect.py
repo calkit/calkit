@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 import calkit
-from calkit.core import DVC_EXTENSIONS, DVC_SIZE_THRESH_BYTES
+from calkit.core import DVC_EXTENSIONS, get_dvc_size_thresh_bytes
 from calkit.environments import EnvForStageResult
 
 # What calkit xr makes a script stage from, by extension
@@ -160,7 +160,7 @@ def detect_stage(
         # Check size if file exists
         if os.path.exists(path):
             try:
-                if calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
+                if calkit.get_size(path) > get_dvc_size_thresh_bytes(path):
                     return "dvc"
             except (OSError, IOError):
                 # If we cannot determine file size (e.g., permission

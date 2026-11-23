@@ -1896,6 +1896,9 @@ def update_path_storage(
             if isinstance(out, dict) and out.get("storage") == "dvc-zip":
                 raise_error(f"{path} is stored zipped, which can't move yet")
             return f"outputs.{n}"
+        for n, out in enumerate(stage.get("cell_outputs") or []):
+            if out.get("output_path") and here(out["output_path"]) == path:
+                return f"cell_outputs.{n}"
         try:
             model = Pipeline.model_validate(
                 {"stages": {stage_name: stage}}
@@ -1926,6 +1929,9 @@ def update_path_storage(
         return None
 
     def set_storage(stage_name: str, stage: dict, key: str) -> None:
+        if key.startswith("cell_outputs."):
+            stage["cell_outputs"][int(key.split(".")[1])]["storage"] = to
+            return
         # Back to the default rather than spelled out where it can be
         if key.startswith("outputs."):
             n = int(key.split(".")[1])

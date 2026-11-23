@@ -1241,6 +1241,37 @@ def test_update_path_storage(tmp_dir, tmp_path_factory):
     result = update("paper/main.pdf", "--to", "dvc")
     assert result.exit_code != 0
     assert "out of date" in result.output
+    # A cell output's storage is set on the cell output
+    with open("nb.ipynb", "w") as f:
+        json.dump(
+            {
+                "cells": [],
+                "metadata": {},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            },
+            f,
+        )
+    with open("cell.png", "wb") as f:
+        f.write(b"png")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "py": {"kind": "uv-venv", "path": "requirements.txt", "python": "3.12"}
+    }
+    ck_info["pipeline"]["stages"]["nb"] = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "nb.ipynb",
+        "environment": "py",
+        "cell_outputs": [
+            {"kind": "figure", "output_path": "cell.png", "cell_id": "a"}
+        ],
+    }
+    calkit.save_calkit_info(ck_info)
+    result = update("cell.png", "--to", "git")
+    assert result.exit_code == 0, result.output
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["nb"]
+    assert stage["cell_outputs"][0]["storage"] == "git"
+    assert git("ls-files", "--", "cell.png").strip() == "cell.png"
     # A project in a subdirectory of its repo, where Git runs from above it
     os.chdir(tmp_path_factory.mktemp("parent"))
     git("init", "-q")

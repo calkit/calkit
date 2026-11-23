@@ -115,7 +115,7 @@ e.g., to try things out in Python or run a few commands in a row,
 open a shell with it activated:
 
 ```sh
-calkit shell -n {env-name}
+calkit shell -e {env-name}
 ```
 
 This checks the environment, creating it if it doesn't exist yet,
@@ -132,7 +132,7 @@ For other kinds, run programs in them with `calkit xenv`.
 
 On macOS and Linux, the shell is the one in `SHELL`,
 and on Windows, it's PowerShell.
-Pick another with `--shell`, e.g., `calkit shell -n main --shell bash`.
+Pick another with `--shell`, e.g., `calkit shell -e main --shell bash`.
 
 All project environments can be checked at once with:
 

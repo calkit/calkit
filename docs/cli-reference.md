@@ -453,12 +453,12 @@ calkit shell [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                                                 |
-| ----------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`    | str     | no       |         | Environment to activate in the shell. There's no default.                                                   |
-| `--shell`         | str     | no       |         | Shell to open, e.g., bash, zsh, fish, pwsh, or cmd. Defaults to the one in SHELL, or PowerShell on Windows. |
-| `--no-check`      | boolean | no       | False   | Don't check the environment is valid before opening it.                                                     |
-| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                       |
+| Option                | Type    | Required | Default | Description                                                                                                 |
+| --------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e` | str     | no       |         | Environment to activate in the shell. There's no default.                                                   |
+| `--shell`             | str     | no       |         | Shell to open, e.g., bash, zsh, fish, pwsh, or cmd. Defaults to the one in SHELL, or PowerShell on Windows. |
+| `--no-check`          | boolean | no       | False   | Don't check the environment is valid before opening it.                                                     |
+| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                       |
 
 <a id="top-command-install"></a>
 

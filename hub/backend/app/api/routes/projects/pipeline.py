@@ -59,7 +59,6 @@ from app.api.routes.projects.core import (
     _validate_ck_stage,
 )
 from app.api.routes.projects.figures import _clean_rel_path
-from app.config import settings
 from app.core import logger, ryaml, utcnow
 from app.dvc import run_dvc_command
 from app.git import (
@@ -72,7 +71,7 @@ from app.git import (
     record_project_update,
 )
 from app.models import PipelineStage, ProjectPipelineRun
-from app.storage import get_object_fs, make_data_fpath, remove_gcs_content_type
+from app.storage import get_project_storage, put_project_objects
 from calkit.models.pipeline import MapPathsKind, MapPathsStage
 
 router = APIRouter()
@@ -683,6 +682,7 @@ def post_project_stage_from_script_or_notebook(
             )
             _push_dvc_cache_to_storage(
                 repo_dir=wdir,
+                target=get_project_storage(session, project),
                 owner_name=project.owner_account_name,
                 project_name=project.name,
                 skip=cached,
@@ -857,6 +857,7 @@ def post_project_pipeline_stage(
                         "without uploading, or upload under another name",
                     )
         uploads.append((path, content))
+    objects: list[tuple[str, str | bytes]] = []
     for path, content in uploads:
         full = os.path.join(wdir, path)
         os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
@@ -867,19 +868,17 @@ def post_project_pipeline_stage(
         if not os.path.isdir(os.path.join(wdir, ".dvc")):
             run_dvc_command(["init"], wdir=wdir, check=True)
         run_dvc_command(["add", path], wdir=wdir, check=True)
-        # Put where the hub's DVC remote serves it, by its hash
+        # Put in the project's storage, by its hash
         with open(full + ".dvc") as f:
             md5 = (ryaml.load(f) or {})["outs"][0]["md5"]
-        fpath = make_data_fpath(
-            owner_name=project.owner_account_name,
-            project_name=project.name,
-            idx=md5[:2],
-            md5=md5[2:],
+        objects.append((f"files/md5/{md5[:2]}/{md5[2:]}", content))
+    if objects:
+        put_project_objects(
+            get_project_storage(session, project),
+            project.owner_account_name,
+            project.name,
+            objects,
         )
-        with get_object_fs().open(fpath, "wb") as f_out:
-            f_out.write(content)
-        if settings.ENVIRONMENT != "local":
-            remove_gcs_content_type(fpath)
     # What someone made is theirs, unless something already says otherwise
     person = {"email": current_user.email}
     if current_user.full_name:

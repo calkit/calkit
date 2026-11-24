@@ -3,8 +3,12 @@
 import json
 import os
 import subprocess
+from unittest.mock import MagicMock, patch
+
+from typer.testing import CliRunner
 
 import calkit
+from calkit.cli.main import app
 
 
 def test_describe_system():
@@ -166,3 +170,67 @@ def test_describe_subprojects(tmp_dir):
     )
     assert "sub/nested:\n    parent: sub\n" in out
     assert "title" not in out.split("sub/nested:")[1]
+
+
+def test_describe_storage():
+    runner = CliRunner()
+    hf = {"kind": "hf-bucket", "bucket": "someone/proj"}
+    responses = {
+        "/projects/someone/proj/storage": {"dvc": hf, "previous": []},
+        "/projects/someone/proj/storage/usage": {
+            "project_used_gb": 0.25,
+            "account": {"used_gb": 3.0, "limit_gb": 10},
+        },
+    }
+    repo = MagicMock()
+    repo.remote.return_value.url = "git@github.com:someone/proj.git"
+    with (
+        patch.object(
+            calkit, "detect_project_name", return_value="someone/proj"
+        ),
+        patch.object(calkit.git, "get_repo", return_value=repo),
+        patch.object(calkit.hub, "get", side_effect=responses.get),
+    ):
+        result = runner.invoke(app, ["describe", "storage", "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {
+            "project": "someone/proj",
+            "git": {
+                "storage": "GitHub repo someone/proj",
+                "url": "git@github.com:someone/proj.git",
+            },
+            "dvc": {
+                "storage": "Hugging Face bucket someone/proj",
+                "previous_storage": ["Calkit Hub storage"],
+                "hub_used_gb": 0.25,
+                "account_hub_used_gb": 3.0,
+                "account_hub_limit_gb": 10,
+            },
+        }
+        result = runner.invoke(app, ["describe", "storage"])
+        assert "git storage: GitHub repo someone/proj" in result.output
+        assert "dvc storage: Hugging Face bucket someone/proj" in result.output
+        assert "dvc also read from: Calkit Hub storage" in result.output
+        assert "hub storage used: 250.0 MB" in result.output
+        assert "account hub storage used: 3.00 GB of 10 GB" in result.output
+        # Someone who doesn't manage the account only sees the project's,
+        # a project on the hub's own storage reads from nothing else, and a
+        # remote elsewhere is shown as its URL, without credentials
+        responses["/projects/someone/proj/storage"] = {
+            "dvc": None,
+            "previous": [],
+        }
+        responses["/projects/someone/proj/storage/usage"] = {
+            "project_used_gb": 1.5,
+            "account": None,
+        }
+        repo.remote.return_value.url = (
+            "https://someone:secret@gitlab.com/someone/proj"
+        )
+        result = runner.invoke(app, ["describe", "storage"])
+        assert "git storage: https://gitlab.com/someone/proj" in result.output
+        assert "secret" not in result.output
+        assert "dvc storage: Calkit Hub storage" in result.output
+        assert "also read from" not in result.output
+        assert "hub storage used: 1.50 GB" in result.output
+        assert "account hub storage used" not in result.output

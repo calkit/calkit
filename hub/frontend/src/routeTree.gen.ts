@@ -23,6 +23,7 @@ import { Route as LoginDeviceRouteImport } from './routes/login/device'
 import { Route as JoinTokenRouteImport } from './routes/join/$token'
 import { Route as AuthZoteroRouteImport } from './routes/auth/zotero'
 import { Route as AuthZenodoRouteImport } from './routes/auth/zenodo'
+import { Route as AuthHuggingfaceRouteImport } from './routes/auth/huggingface'
 import { Route as AuthGoogleRouteImport } from './routes/auth/google'
 import { Route as LayoutWorkspacesRouteImport } from './routes/_layout/workspaces'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
@@ -38,6 +39,7 @@ import { Route as LayoutAccountNameProjectNameReleasesReleaseNameRouteImport } f
 import { Route as LayoutAccountNameProjectNameLayoutWorkspacesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/workspaces'
 import { Route as LayoutAccountNameProjectNameLayoutTablesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/tables'
 import { Route as LayoutAccountNameProjectNameLayoutSoftwareRouteImport } from './routes/_layout/$accountName/$projectName/_layout/software'
+import { Route as LayoutAccountNameProjectNameLayoutSettingsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/settings'
 import { Route as LayoutAccountNameProjectNameLayoutResultsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/results'
 import { Route as LayoutAccountNameProjectNameLayoutReleasesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/releases'
 import { Route as LayoutAccountNameProjectNameLayoutReferencesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/references'
@@ -119,6 +121,11 @@ const AuthZoteroRoute = AuthZoteroRouteImport.update({
 const AuthZenodoRoute = AuthZenodoRouteImport.update({
   id: '/auth/zenodo',
   path: '/auth/zenodo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthHuggingfaceRoute = AuthHuggingfaceRouteImport.update({
+  id: '/auth/huggingface',
+  path: '/auth/huggingface',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthGoogleRoute = AuthGoogleRouteImport.update({
@@ -205,6 +212,12 @@ const LayoutAccountNameProjectNameLayoutSoftwareRoute =
   LayoutAccountNameProjectNameLayoutSoftwareRouteImport.update({
     id: '/software',
     path: '/software',
+    getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
+  } as any)
+const LayoutAccountNameProjectNameLayoutSettingsRoute =
+  LayoutAccountNameProjectNameLayoutSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
     getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
   } as any)
 const LayoutAccountNameProjectNameLayoutResultsRoute =
@@ -336,6 +349,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof LayoutSettingsRoute
   '/workspaces': typeof LayoutWorkspacesRoute
   '/auth/google': typeof AuthGoogleRoute
+  '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
@@ -359,6 +373,7 @@ export interface FileRoutesByFullPath {
   '/$accountName/$projectName/references': typeof LayoutAccountNameProjectNameLayoutReferencesRoute
   '/$accountName/$projectName/releases': typeof LayoutAccountNameProjectNameLayoutReleasesRoute
   '/$accountName/$projectName/results': typeof LayoutAccountNameProjectNameLayoutResultsRoute
+  '/$accountName/$projectName/settings': typeof LayoutAccountNameProjectNameLayoutSettingsRoute
   '/$accountName/$projectName/software': typeof LayoutAccountNameProjectNameLayoutSoftwareRoute
   '/$accountName/$projectName/tables': typeof LayoutAccountNameProjectNameLayoutTablesRoute
   '/$accountName/$projectName/workspaces': typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
@@ -383,6 +398,7 @@ export interface FileRoutesByTo {
   '/settings': typeof LayoutSettingsRoute
   '/workspaces': typeof LayoutWorkspacesRoute
   '/auth/google': typeof AuthGoogleRoute
+  '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
@@ -405,6 +421,7 @@ export interface FileRoutesByTo {
   '/$accountName/$projectName/references': typeof LayoutAccountNameProjectNameLayoutReferencesRoute
   '/$accountName/$projectName/releases': typeof LayoutAccountNameProjectNameLayoutReleasesRoute
   '/$accountName/$projectName/results': typeof LayoutAccountNameProjectNameLayoutResultsRoute
+  '/$accountName/$projectName/settings': typeof LayoutAccountNameProjectNameLayoutSettingsRoute
   '/$accountName/$projectName/software': typeof LayoutAccountNameProjectNameLayoutSoftwareRoute
   '/$accountName/$projectName/tables': typeof LayoutAccountNameProjectNameLayoutTablesRoute
   '/$accountName/$projectName/workspaces': typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
@@ -430,6 +447,7 @@ export interface FileRoutesById {
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/workspaces': typeof LayoutWorkspacesRoute
   '/auth/google': typeof AuthGoogleRoute
+  '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
@@ -454,6 +472,7 @@ export interface FileRoutesById {
   '/_layout/$accountName/$projectName/_layout/references': typeof LayoutAccountNameProjectNameLayoutReferencesRoute
   '/_layout/$accountName/$projectName/_layout/releases': typeof LayoutAccountNameProjectNameLayoutReleasesRoute
   '/_layout/$accountName/$projectName/_layout/results': typeof LayoutAccountNameProjectNameLayoutResultsRoute
+  '/_layout/$accountName/$projectName/_layout/settings': typeof LayoutAccountNameProjectNameLayoutSettingsRoute
   '/_layout/$accountName/$projectName/_layout/software': typeof LayoutAccountNameProjectNameLayoutSoftwareRoute
   '/_layout/$accountName/$projectName/_layout/tables': typeof LayoutAccountNameProjectNameLayoutTablesRoute
   '/_layout/$accountName/$projectName/_layout/workspaces': typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
@@ -480,6 +499,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/workspaces'
     | '/auth/google'
+    | '/auth/huggingface'
     | '/auth/zenodo'
     | '/auth/zotero'
     | '/join/$token'
@@ -503,6 +523,7 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/references'
     | '/$accountName/$projectName/releases'
     | '/$accountName/$projectName/results'
+    | '/$accountName/$projectName/settings'
     | '/$accountName/$projectName/software'
     | '/$accountName/$projectName/tables'
     | '/$accountName/$projectName/workspaces'
@@ -527,6 +548,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/workspaces'
     | '/auth/google'
+    | '/auth/huggingface'
     | '/auth/zenodo'
     | '/auth/zotero'
     | '/join/$token'
@@ -549,6 +571,7 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/references'
     | '/$accountName/$projectName/releases'
     | '/$accountName/$projectName/results'
+    | '/$accountName/$projectName/settings'
     | '/$accountName/$projectName/software'
     | '/$accountName/$projectName/tables'
     | '/$accountName/$projectName/workspaces'
@@ -573,6 +596,7 @@ export interface FileRouteTypes {
     | '/_layout/settings'
     | '/_layout/workspaces'
     | '/auth/google'
+    | '/auth/huggingface'
     | '/auth/zenodo'
     | '/auth/zotero'
     | '/join/$token'
@@ -597,6 +621,7 @@ export interface FileRouteTypes {
     | '/_layout/$accountName/$projectName/_layout/references'
     | '/_layout/$accountName/$projectName/_layout/releases'
     | '/_layout/$accountName/$projectName/_layout/results'
+    | '/_layout/$accountName/$projectName/_layout/settings'
     | '/_layout/$accountName/$projectName/_layout/software'
     | '/_layout/$accountName/$projectName/_layout/tables'
     | '/_layout/$accountName/$projectName/_layout/workspaces'
@@ -616,6 +641,7 @@ export interface RootRouteChildren {
   SignupRoute: typeof SignupRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
   AuthGoogleRoute: typeof AuthGoogleRoute
+  AuthHuggingfaceRoute: typeof AuthHuggingfaceRoute
   AuthZenodoRoute: typeof AuthZenodoRoute
   AuthZoteroRoute: typeof AuthZoteroRoute
   JoinTokenRoute: typeof JoinTokenRoute
@@ -707,6 +733,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/zenodo'
       fullPath: '/auth/zenodo'
       preLoaderRoute: typeof AuthZenodoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/huggingface': {
+      id: '/auth/huggingface'
+      path: '/auth/huggingface'
+      fullPath: '/auth/huggingface'
+      preLoaderRoute: typeof AuthHuggingfaceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/google': {
@@ -819,6 +852,13 @@ declare module '@tanstack/react-router' {
       path: '/software'
       fullPath: '/$accountName/$projectName/software'
       preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutSoftwareRouteImport
+      parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
+    }
+    '/_layout/$accountName/$projectName/_layout/settings': {
+      id: '/_layout/$accountName/$projectName/_layout/settings'
+      path: '/settings'
+      fullPath: '/$accountName/$projectName/settings'
+      preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutSettingsRouteImport
       parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
     }
     '/_layout/$accountName/$projectName/_layout/results': {
@@ -991,6 +1031,7 @@ interface LayoutAccountNameProjectNameLayoutRouteChildren {
   LayoutAccountNameProjectNameLayoutReferencesRoute: typeof LayoutAccountNameProjectNameLayoutReferencesRoute
   LayoutAccountNameProjectNameLayoutReleasesRoute: typeof LayoutAccountNameProjectNameLayoutReleasesRoute
   LayoutAccountNameProjectNameLayoutResultsRoute: typeof LayoutAccountNameProjectNameLayoutResultsRoute
+  LayoutAccountNameProjectNameLayoutSettingsRoute: typeof LayoutAccountNameProjectNameLayoutSettingsRoute
   LayoutAccountNameProjectNameLayoutSoftwareRoute: typeof LayoutAccountNameProjectNameLayoutSoftwareRoute
   LayoutAccountNameProjectNameLayoutTablesRoute: typeof LayoutAccountNameProjectNameLayoutTablesRoute
   LayoutAccountNameProjectNameLayoutWorkspacesRoute: typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
@@ -1031,6 +1072,8 @@ const LayoutAccountNameProjectNameLayoutRouteChildren: LayoutAccountNameProjectN
       LayoutAccountNameProjectNameLayoutReleasesRoute,
     LayoutAccountNameProjectNameLayoutResultsRoute:
       LayoutAccountNameProjectNameLayoutResultsRoute,
+    LayoutAccountNameProjectNameLayoutSettingsRoute:
+      LayoutAccountNameProjectNameLayoutSettingsRoute,
     LayoutAccountNameProjectNameLayoutSoftwareRoute:
       LayoutAccountNameProjectNameLayoutSoftwareRoute,
     LayoutAccountNameProjectNameLayoutTablesRoute:
@@ -1106,6 +1149,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignupRoute: SignupRoute,
   VerifyEmailRoute: VerifyEmailRoute,
   AuthGoogleRoute: AuthGoogleRoute,
+  AuthHuggingfaceRoute: AuthHuggingfaceRoute,
   AuthZenodoRoute: AuthZenodoRoute,
   AuthZoteroRoute: AuthZoteroRoute,
   JoinTokenRoute: JoinTokenRoute,

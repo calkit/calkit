@@ -205,3 +205,127 @@ def test_get_github_token_refreshes_only_when_due(db: Session) -> None:
     with mock.patch.object(users.requests, "post") as post:
         assert users.get_github_token(db, user) == "gho_new"
         post.assert_not_called()
+
+
+def test_get_huggingface_token(db: Session) -> None:
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(), password=random_lower_string()
+        ),
+    )
+
+    def save(access_token: str, expires_in_minutes: int) -> None:
+        users.save_external_credential(
+            session=db,
+            user=user,
+            provider="huggingface",
+            secret_payload=json.dumps(
+                {"access_token": access_token, "refresh_token": "hf_refresh"}
+            ),
+            expires=utcnow() + timedelta(minutes=expires_in_minutes),
+        )
+
+    # One with plenty of life left isn't refreshed
+    save("hf_current", 60)
+    with mock.patch.object(users.requests, "post") as post:
+        assert users.get_huggingface_token(db, user) == "hf_current"
+        post.assert_not_called()
+    # One about to expire is
+    save("hf_current", 1)
+    userinfo = SimpleNamespace(
+        ok=True, json=lambda: {"preferred_username": "someone", "orgs": []}
+    )
+    with (
+        mock.patch.object(
+            users.requests,
+            "post",
+            return_value=SimpleNamespace(
+                status_code=200,
+                json=lambda: {"access_token": "hf_new", "expires_in": 3600},
+            ),
+        ) as post,
+        mock.patch.object(users.requests, "get", return_value=userinfo),
+    ):
+        assert users.get_huggingface_token(db, user) == "hf_new"
+        assert post.call_count == 1
+    # One another request refreshed while this one waited for the lock isn't
+    # refreshed again
+    save("hf_current", 1)
+    get_credential = users.get_external_credential
+
+    def get_then_refresh_elsewhere(**kwargs):
+        credential = get_credential(**kwargs)
+        with Session(db.get_bind()) as other:
+            row = other.get(type(credential), credential.id)
+            row.secret_payload = users.encrypt_secret(
+                json.dumps({"access_token": "hf_other"})
+            )
+            row.expires = utcnow() + timedelta(hours=1)
+            other.add(row)
+            other.commit()
+        return credential
+
+    with (
+        mock.patch.object(
+            users,
+            "get_external_credential",
+            side_effect=get_then_refresh_elsewhere,
+        ),
+        mock.patch.object(users.requests, "post") as post,
+    ):
+        assert users.get_huggingface_token(db, user) == "hf_other"
+        post.assert_not_called()
+    # An outage doesn't disconnect the account
+    save("hf_current", 1)
+    for post_kwargs in (
+        {"side_effect": users.requests.ConnectionError("down")},
+        {"return_value": SimpleNamespace(status_code=500, text="down")},
+    ):
+        with (
+            mock.patch.object(users.requests, "post", **post_kwargs),
+            pytest.raises(HTTPException) as e,
+        ):
+            users.get_huggingface_token(db, user)
+        assert e.value.status_code == 503
+        assert (
+            users.get_external_credential(
+                session=db, user=user, provider="huggingface"
+            )
+            is not None
+        )
+    # Nor does failing to get account details while refreshing
+    with (
+        mock.patch.object(
+            users.requests,
+            "post",
+            return_value=SimpleNamespace(
+                status_code=200,
+                json=lambda: {"access_token": "hf_new", "expires_in": 3600},
+            ),
+        ),
+        mock.patch.object(
+            users.requests,
+            "get",
+            side_effect=users.requests.ConnectionError("down"),
+        ),
+    ):
+        assert users.get_huggingface_token(db, user) == "hf_new"
+    # A rejected refresh disconnects the account
+    save("hf_current", 1)
+    with (
+        mock.patch.object(
+            users.requests,
+            "post",
+            return_value=SimpleNamespace(status_code=400, text="bad"),
+        ),
+        pytest.raises(HTTPException) as e,
+    ):
+        users.get_huggingface_token(db, user)
+    assert e.value.status_code == 401
+    assert (
+        users.get_external_credential(
+            session=db, user=user, provider="huggingface"
+        )
+        is None
+    )

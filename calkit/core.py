@@ -1544,11 +1544,14 @@ def _normalize_requirement(req) -> dict:
             "'kind', e.g., '- kind: env-var' with 'name: TOKEN'"
         )
 
-    def check_search(out: dict) -> None:
-        if out.get("search") is not None and out["kind"] != "path-env-var":
+    def check_search_paths(out: dict) -> None:
+        if (
+            out.get("search_paths") is not None
+            and out["kind"] != "path-env-var"
+        ):
             raise ValueError(
                 f"Malformed requirement {req!r}; only a 'path-env-var' can "
-                "have 'search', since it's what names a path to look for"
+                "have 'search_paths', since it's what names a path to look for"
             )
 
     if isinstance(req, str):
@@ -1599,7 +1602,7 @@ def _normalize_requirement(req) -> dict:
                 f"Malformed requirement {req!r}; its 'name' must be text, "
                 'so quote it if it\'s in braces, e.g., name: "{var}"'
             )
-        check_search(out)
+        check_search_paths(out)
         return out
     if len(keys) != 1:
         raise malformed()
@@ -1611,7 +1614,7 @@ def _normalize_requirement(req) -> dict:
     out = dict(attrs)
     out["name"] = name
     out.setdefault("kind", "app")
-    check_search(out)
+    check_search_paths(out)
     return out
 
 

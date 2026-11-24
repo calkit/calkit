@@ -131,7 +131,7 @@ e.g., because they need a license or a download behind a login,
 and each collaborator may put them somewhere different.
 A `path-env-var` requirement is an environmental variable holding a path
 that must exist,
-and its `search` patterns say where that path usually is,
+and its `search_paths` patterns say where that path usually is,
 so a project doesn't need its own setup script to find it:
 
 ```yaml
@@ -140,7 +140,7 @@ requirements:
     name: MYAPP_EXE
     description: Path to the MyApp 2.1 executable.
     notes: MyApp needs a license. Download it from https://example.com.
-    search:
+    search_paths:
       - ~/apps/MyApp_2.1.*/MyApp.exe
       - C:/Program Files/MyApp_2.1.*/MyApp.exe
       - /Applications/MyApp.app/Contents/MacOS/MyApp

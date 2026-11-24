@@ -374,7 +374,7 @@ def test_get_path_env_var_candidates(tmp_dir, monkeypatch):
         ]
 
     # Highest version first, numerically rather than as text
-    assert names(search="App_*/app.exe") == [
+    assert names(search_paths="App_*/app.exe") == [
         "App_2.10/app.exe",
         "App_2.9/app.exe",
         "App_1.0/app.exe",
@@ -383,21 +383,25 @@ def test_get_path_env_var_candidates(tmp_dir, monkeypatch):
     for version in ("2.9.3", "2.9.10"):
         (tmp_dir / f"App_{version}").mkdir()
         (tmp_dir / f"App_{version}" / "app.exe").touch()
-    assert names(search="App_2.9*/app.exe") == [
+    assert names(search_paths="App_2.9*/app.exe") == [
         "App_2.9.10/app.exe",
         "App_2.9.3/app.exe",
         "App_2.9/app.exe",
     ]
     # Patterns keep their order, may use ~ and env vars, and don't repeat
     assert names(
-        search=["other.exe", "~/App_1*/app.exe", "$CK_APPS/App_1*/app.exe"]
+        search_paths=[
+            "other.exe",
+            "~/App_1*/app.exe",
+            "$CK_APPS/App_1*/app.exe",
+        ]
     ) == ["other.exe", "App_1.0/app.exe"]
     # A default is tried first, and what doesn't exist isn't suggested
-    assert names(default="other.exe", search="App_2.9/app.exe") == [
+    assert names(default="other.exe", search_paths="App_2.9/app.exe") == [
         "other.exe",
         "App_2.9/app.exe",
     ]
-    assert names(default="nope.exe", search=["nope/*"]) == []
+    assert names(default="nope.exe", search_paths=["nope/*"]) == []
     assert names() == []
     # A default is a path, so one with glob characters in it is still found
     (tmp_dir / "[x]").mkdir()
@@ -421,7 +425,7 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
         "name": "CK_APP",
         "description": "Path to the app.",
         "notes": "Get a license first.",
-        "search": "app*.exe",
+        "search_paths": "app*.exe",
     }
     # Enter takes the first thing found, and it's saved for the next run
     value = ask(req, "")
@@ -447,7 +451,7 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
     with mock.patch("builtins.input", side_effect=EOFError):
         assert reqs.prompt_for_path_env_var_req(req) is None
     # Installing it while asked, then pressing Enter, finds it
-    later = dict(req, search="later/*.exe")
+    later = dict(req, search_paths="later/*.exe")
 
     def install_then_answer(*args):
         (tmp_dir / "later").mkdir()
@@ -464,7 +468,7 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
     # A setup command is only offered when nothing was found
     setup = dict(
         req,
-        search="made/*.exe",
+        search_paths="made/*.exe",
         setup_command=(
             "python -c \"import os; os.mkdir('made'); "
             "open('made/app.exe', 'w').close()\""
@@ -474,7 +478,9 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
     assert ask(setup, "") == str(tmp_dir / "made" / "app.exe")
     # Without a terminal, it's only shown, so piped input is the path
     monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
-    other = dict(setup, search="other/*.exe", setup_command="mkdir other")
+    other = dict(
+        setup, search_paths="other/*.exe", setup_command="mkdir other"
+    )
     assert ask(other, str(tmp_dir / "app1.exe")) == str(tmp_dir / "app1.exe")
     assert not (tmp_dir / "other").exists()
     assert "To install it, run:  mkdir other" in capsys.readouterr().out
@@ -499,7 +505,11 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
 def test_check_path_env_var_req(tmp_dir, monkeypatch):
     app = tmp_dir / "app.exe"
     app.touch()
-    req = {"kind": "path-env-var", "name": "CK_APP", "search": "app*.exe"}
+    req = {
+        "kind": "path-env-var",
+        "name": "CK_APP",
+        "search_paths": "app*.exe",
+    }
     monkeypatch.delenv("CK_APP", raising=False)
     # Without a terminal, the error gives the command to fix it
     with pytest.raises(
@@ -510,7 +520,7 @@ def test_check_path_env_var_req(tmp_dir, monkeypatch):
     # With nothing found, it still says how to set it
     with pytest.raises(ValueError, match="not found.*<path>"):
         calkit.check_requirements(
-            requirements=[dict(req, search="nope/*")], interactive=False
+            requirements=[dict(req, search_paths="nope/*")], interactive=False
         )
     # On a terminal it's asked for
     with mock.patch("builtins.input", return_value=""):
@@ -548,19 +558,23 @@ def test_check_path_env_var_req(tmp_dir, monkeypatch):
     assert reqs.resolve_env_var_deps(ck_info, interactive=False) == []
     # An empty search is no search, whatever the kind
     calkit.check_requirements(
-        requirements=[{"kind": "env-var", "name": "CK_APP", "search": None}],
+        requirements=[
+            {"kind": "env-var", "name": "CK_APP", "search_paths": None}
+        ],
         interactive=False,
     )
     # Only this kind can search
     for kind in ("env-var", "app"):
         with pytest.raises(ValueError, match="only a 'path-env-var'"):
             calkit.check_requirements(
-                requirements=[{"kind": kind, "name": "X", "search": "*"}],
+                requirements=[
+                    {"kind": kind, "name": "X", "search_paths": "*"}
+                ],
                 interactive=False,
             )
     with pytest.raises(ValueError, match="only a 'path-env-var'"):
         calkit.check_requirements(
-            requirements=[{"X": {"kind": "env-var", "search": "*"}}],
+            requirements=[{"X": {"kind": "env-var", "search_paths": "*"}}],
             interactive=False,
         )
 

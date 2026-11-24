@@ -509,7 +509,7 @@ def get_path_env_var_candidates(req: dict[str, Any]) -> list[str]:
     """Get the existing paths a ``path-env-var`` requirement could be.
 
     They're in the order of its ``default``, which is a path rather than a
-    pattern, then its ``search`` patterns, with what sorts as the highest
+    pattern, then its ``search_paths`` patterns, with what sorts as the highest
     version first within a pattern, so ``App_2.10`` is suggested ahead of
     ``App_2.9``, and ``App_2.1.3`` ahead of ``App_2.1``.
     """
@@ -529,8 +529,10 @@ def get_path_env_var_candidates(req: dict[str, Any]) -> list[str]:
     def expand(path: str) -> str:
         return os.path.expanduser(os.path.expandvars(path))
 
-    search = req.get("search") or []
-    patterns = [search] if isinstance(search, str) else list(search)
+    search_paths = req.get("search_paths") or []
+    patterns = (
+        [search_paths] if isinstance(search_paths, str) else list(search_paths)
+    )
     found: dict[str, str] = {}
     if req.get("default") and os.path.exists(expand(req["default"])):
         path = os.path.abspath(expand(req["default"]))
@@ -568,7 +570,7 @@ def prompt_for_path_env_var_req(
     for key in ("description", "notes"):
         if req.get(key):
             print(f"  {str(req[key]).strip()}")
-    searchable = bool(req.get("search") or req.get("default"))
+    searchable = bool(req.get("search_paths") or req.get("default"))
     setup_command = req.get("setup_command")
     candidates = get_path_env_var_candidates(req)
     if not candidates and setup_command and not is_tty():

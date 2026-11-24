@@ -32,7 +32,7 @@ class RequirementAttrs(Model):
     version_spec: str | None = None
     account_id: str | None = None
     profile: str | None = None
-    search: str | list[str] | None = None
+    search_paths: str | list[str] | None = None
     notes: str | None = None
 
 
@@ -49,7 +49,7 @@ class Requirement(Model):
       prints a token, and is offered before the value is asked for.
     - ``path-env-var``: an environmental variable holding a path that must
       exist, e.g., to a licensed app that can't be installed for the user.
-      ``search`` lists where it's usually found, to suggest. ``setup_command``
+      ``search_paths`` lists where it's usually found, to suggest. ``setup_command``
       is offered when the search finds nothing.
     - ``setup``: a per-machine precondition that isn't a file---e.g.,
       the user must have authenticated a CLI like ``gh auth login``.
@@ -114,7 +114,7 @@ class Requirement(Model):
         description="AWS profile 'aws-credentials' are checked with, if not "
         "the default.",
     )
-    search: str | list[str] | None = Field(
+    search_paths: str | list[str] | None = Field(
         default=None,
         description="Glob patterns for where a 'path-env-var' is usually "
         "found, which may use `~` and environmental variables, e.g., "
@@ -124,10 +124,10 @@ class Requirement(Model):
     notes: str | None = None
 
     @model_validator(mode="after")
-    def _check_search(self) -> Requirement:
-        if self.search is not None and self.kind != "path-env-var":
+    def _check_search_paths(self) -> Requirement:
+        if self.search_paths is not None and self.kind != "path-env-var":
             raise ValueError(
-                f"A '{self.kind}' requirement can't have 'search', since "
+                f"A '{self.kind}' requirement can't have 'search_paths', since "
                 "only a 'path-env-var' names a path to look for"
             )
         return self

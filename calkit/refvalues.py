@@ -5,13 +5,12 @@ comes from, in ``calkit.yaml``, with where in the reference it appears::
 
     references:
       - path: references.bib
-        entries:
+        values:
           liu2025:
-            values:
-              noise-sigma:
-                value: 0.1
-                page: 4
-                quote: "positions perturbed by Gaussian noise with σ = 0.1"
+            noise-sigma:
+              value: 0.1
+              page: 4
+              quote: "positions perturbed by Gaussian noise with σ = 0.1"
 
 The document cites it with ``\\ckrefval{liu2025}{noise-sigma}``, or its
 Quarto and Markdown counterparts. This module finds the reference's PDF,
@@ -19,7 +18,7 @@ reads its text, and checks the value and quote against it, or searches it
 for a number a document typed in.
 
 PDFs are never stored in the project. They come from, in order: a file the
-entry names, Zotero desktop, the Calkit Cloud for a collection linked to
+collection's ``files`` names for the key, Zotero desktop, the Calkit Cloud for a collection linked to
 Zotero, and open-access copies downloaded into ``.calkit/local``.
 """
 
@@ -403,7 +402,7 @@ def get_pdf(
 ) -> PdfSource | None:
     """A reference's PDF, from the first source that has it.
 
-    ``file`` is the entry's own, from ``calkit.yaml``. Without one, Zotero
+    ``file`` is the one the collection names for the key in ``calkit.yaml``. Without one, Zotero
     desktop and the Calkit Cloud are asked for a collection linked to
     Zotero, and with ``download``, open-access copies are fetched. What's
     fetched is kept in ``.calkit/local`` for next time, never in the
@@ -443,36 +442,29 @@ def get_pdf(
     return None
 
 
-def iter_declared_values(
-    ck_info: dict,
-) -> list[tuple[str, str, str, dict, dict]]:
+def iter_declared_values(ck_info: dict) -> list[tuple[str, str, str, dict]]:
     """Every value declared on a reference, as ``(collection path, key,
-    name, value info, entry info)``.
+    name, value info)``.
     """
     out = []
     for collection in ck_info.get("references") or []:
         if not isinstance(collection, dict):
             continue
         path = collection.get("path")
-        entries = collection.get("entries") or {}
-        if not path or not isinstance(entries, dict):
+        by_key = collection.get("values") or {}
+        if not path or not isinstance(by_key, dict):
             continue
-        for key, entry in entries.items():
-            if not isinstance(entry, dict):
+        for key, values in by_key.items():
+            if not isinstance(values, dict):
                 continue
-            for name, info in (entry.get("values") or {}).items():
+            for name, info in values.items():
                 if isinstance(info, dict):
-                    out.append((path, str(key), str(name), info, entry))
+                    out.append((path, str(key), str(name), info))
     return out
 
 
 def get_entry_file(collection: dict, key: str) -> str | None:
-    """The PDF an entry names, whether in ``entries`` or in the older
-    ``files`` list.
-    """
-    entry = (collection.get("entries") or {}).get(key)
-    if isinstance(entry, dict) and entry.get("file"):
-        return entry["file"]
+    """The PDF a collection's ``files`` names for a key, if any."""
     for item in collection.get("files") or []:
         if isinstance(item, dict) and item.get("key") == key:
             return item.get("path")
@@ -552,10 +544,43 @@ def add_value(
     if description:
         info["description"] = description
     ReferenceValue.model_validate(info)
-    entries = target.setdefault("entries", {})
-    entry = entries.setdefault(key, {})
-    values = entry.setdefault("values", {})
+    values = target.setdefault("values", {}).setdefault(key, {})
     if name in values:
         raise ValueError(f"'{key}' already has a value named '{name}'")
     values[name] = info
     return collection
+
+
+#: Every value quoted from a reference, by citation key and then name,
+#: which Calkit writes from calkit.yaml for documents to read, so one that
+#: quotes them depends on this rather than on all of calkit.yaml
+VALUES_PATH = ".calkit/reference-values.json"
+
+
+def get_values_data(ck_info: dict) -> dict[str, dict[str, Any]]:
+    """The values documents can quote, by citation key, then name."""
+    data: dict[str, dict[str, Any]] = {}
+    for _, key, name, info in iter_declared_values(ck_info):
+        data.setdefault(key, {})[name] = info.get("value")
+    return data
+
+
+def write_values_file(ck_info: dict, wdir: str | None = None) -> bool:
+    """Write the values file from ``calkit.yaml``, if it declares any, and
+    remove it otherwise, returning whether it's there.
+
+    It's only rewritten when what it holds changes, so what depends on it
+    isn't made out of date by rewriting it.
+    """
+    path = Path(wdir or ".") / VALUES_PATH
+    data = get_values_data(ck_info)
+    if not data:
+        if path.is_file():
+            path.unlink()
+        return False
+    text = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False)
+    text += "\n"
+    if not path.is_file() or path.read_text(encoding="utf-8") != text:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+    return True

@@ -9226,15 +9226,6 @@
     },
     "ReferenceCollection": {
       "properties": {
-        "entries": {
-          "additionalProperties": {
-            "$ref": "#/$defs/ReferenceEntry"
-          },
-          "default": {},
-          "description": "Entries of the collection the project records something about, e.g., values a document quotes from them, by citation key.",
-          "title": "Entries",
-          "type": "object"
-        },
         "files": {
           "default": [],
           "items": {
@@ -9246,41 +9237,24 @@
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ReferenceValue"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Values documents quote from the collection's entries, by citation key, and then by a name unique within the entry.",
+          "title": "Values",
+          "type": "object"
         }
       },
       "required": [
         "path"
       ],
       "title": "ReferenceCollection",
-      "type": "object"
-    },
-    "ReferenceEntry": {
-      "description": "What the project records about one entry of a reference collection,\nby its citation key.",
-      "properties": {
-        "file": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The entry's PDF, relative to the project. Without one, it's looked for in Zotero for a collection linked to Zotero, or downloaded, but not stored in the project.",
-          "title": "File"
-        },
-        "values": {
-          "additionalProperties": {
-            "$ref": "#/$defs/ReferenceValue"
-          },
-          "default": {},
-          "description": "Values documents quote from it, by a name unique within the entry.",
-          "title": "Values",
-          "type": "object"
-        }
-      },
-      "title": "ReferenceEntry",
       "type": "object"
     },
     "ReferenceFile": {

@@ -3435,6 +3435,13 @@ def to_dvc(
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
+    # Values quoted from references are written to a file of their own, so
+    # a document quoting them depends on it, not on all of calkit.yaml, and
+    # it has to be there before stages work out what they depend on
+    if write:
+        from calkit.refvalues import write_values_file
+
+        write_values_file(ck_info, wdir=wdir)
     # Stages that work out what they depend on from the project, which only
     # the pipeline knows the location of
     pipeline.preprocess_stages(wdir, write_files=preprocess_stages)

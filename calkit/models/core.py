@@ -693,32 +693,13 @@ class ReferenceValue(Model):
     )
 
 
-class ReferenceEntry(Model):
-    """What the project records about one entry of a reference collection,
-    by its citation key.
-    """
-
-    file: str | None = Field(
-        default=None,
-        description="The entry's PDF, relative to the project. Without one, "
-        "it's looked for in Zotero for a collection linked to Zotero, or "
-        "downloaded, but not stored in the project.",
-    )
-    values: dict[str, ReferenceValue] = Field(
-        default={},
-        description="Values documents quote from it, by a name unique "
-        "within the entry.",
-    )
-
-
 class ReferenceCollection(Model):
     path: str
     files: list[ReferenceFile] = []
-    entries: dict[str, ReferenceEntry] = Field(
+    values: dict[str, dict[str, ReferenceValue]] = Field(
         default={},
-        description="Entries of the collection the project records "
-        "something about, e.g., values a document quotes from them, by "
-        "citation key.",
+        description="Values documents quote from the collection's entries, "
+        "by citation key, and then by a name unique within the entry.",
     )
 
 

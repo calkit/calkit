@@ -780,6 +780,12 @@ _CK_COMMAND_RE = re.compile(
     r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
     r"(?(value)\s*\{(?P<second>[^}]*)\})"
 )
+# \ckrefval[format]{citation key}{name}, a value quoted from a reference,
+# which reads from the file Calkit writes them all to
+_CK_REFVAL_RE = re.compile(
+    r"\\ckrefval\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
+    r"\s*\{(?P<second>[^}]*)\}"
+)
 _PACKAGE_RE = re.compile(
     r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}"
 )
@@ -813,6 +819,20 @@ class CkComponent:
     # How calkit.sty formats a value: siunitx options, or a Python format
     # spec, e.g., .2f
     format: str = ""
+    # For a value quoted from a reference, its citation key and name, since
+    # it's read from the file of them all with the key and name joined
+    ref: tuple[str, str] | None = None
+
+
+def ref_component(key: str, name: str, format: str = "") -> CkComponent:
+    """The value a \\ckrefval quotes, as a component read from the file of
+    every value quoted from a reference.
+    """
+    from calkit.refvalues import VALUES_PATH
+
+    return CkComponent(
+        "value", VALUES_PATH, f"{key}.{name}", format, ref=(key, name)
+    )
 
 
 def _read_leniently(path: str) -> str | None:
@@ -847,21 +867,33 @@ def read_ck_usage(
     )
     if not loads:
         return False, []
-    found: list[CkComponent] = []
+    found: list[tuple[int, CkComponent]] = []
     for match in _CK_COMMAND_RE.finditer(text):
         kind, option, first = match.group("kind", "option", "first")
         option, second = option or "", match.group("second") or ""
         if "#" in first + second:
             continue
         if kind == "value":
-            found.append(
-                CkComponent(
-                    kind, first.strip(), second.strip(), option.strip()
-                )
+            component = CkComponent(
+                kind, first.strip(), second.strip(), option.strip()
             )
         else:
-            found.append(CkComponent(kind, first.strip()))
-    return True, list(dict.fromkeys(found))
+            component = CkComponent(kind, first.strip())
+        found.append((match.start(), component))
+    for match in _CK_REFVAL_RE.finditer(text):
+        option, first, second = match.group("option", "first", "second")
+        if "#" in first + second:
+            continue
+        found.append(
+            (
+                match.start(),
+                ref_component(
+                    first.strip(), second.strip(), (option or "").strip()
+                ),
+            )
+        )
+    found.sort(key=lambda item: item[0])
+    return True, list(dict.fromkeys(c for _, c in found))
 
 
 def component_candidates(
@@ -1238,7 +1270,12 @@ def plan_ck_components(
                 loaded[rel] = read_data(rel)
             kind, text = tex_value(resolve_key(loaded[rel], c.key or ""))
         except KeyError:
-            problems.append(f"{c.path} has no {c.key}")
+            problems.append(
+                f"calkit.yaml records no value '{c.ref[1]}' quoted from "
+                f"'{c.ref[0]}'"
+                if c.ref
+                else f"{c.path} has no {c.key}"
+            )
             continue
         except Exception as e:
             problems.append(f"{c.key} from {c.path}: {e}")
@@ -1366,7 +1403,13 @@ def map_ck_components(
             )
             link_base = f"{hub}/{ck_info['owner']}/{ck_info['name']}"
     except Exception:
-        pass
+        ck_info = None
+    # Values quoted from references are read from the file Calkit writes
+    # them to, which is brought up to date with calkit.yaml first
+    if ck_info is not None and any(c.ref for c in components):
+        from calkit.refvalues import write_values_file
+
+        write_values_file(ck_info, wdir=root)
     if previous_values is None:
         try:
             with open(os.path.join(out, VALUES_FNAME), encoding="utf-8") as f:

@@ -198,11 +198,24 @@
   \ck@if@value{#2}{#3}%
     {\ck@link{results?path=#2\string&key=#3}{\ck@value{#1}{#2}{#3}}}%
     {\ck@missing{#3 from #2}}}
+% \ckrefval[format]{citation key}{name}: a value quoted from a reference,
+% which calkit.yaml records with where in the reference it is, and which
+% Calkit writes with the rest to .calkit/reference-values.json, the path
+% written out, since names aren't expanded. The reference is cited as
+% usual, e.g., with \cite, wherever it belongs.
+\newcommand\ckrefval[3][]{%
+  \ck@if@value{.calkit/reference-values.json}{#2.#3}%
+    {\ck@value{#1}{.calkit/reference-values.json}{#2.#3}}%
+    {\ck@missing{#3 from #2}}}
 \ifdefined\NewExpandableDocumentCommand
   \NewExpandableDocumentCommand\ck@plainvalue{O{}mm}{\ck@plain{#2}{#3}}
+  \NewExpandableDocumentCommand\ck@plainrefval{O{}mm}%
+    {\ck@plain{.calkit/reference-values.json}{#2.#3}}
   \AtBeginDocument{%
     \ifdefined\pdfstringdefDisableCommands
-      \pdfstringdefDisableCommands{\let\ckvalue\ck@plainvalue}%
+      \pdfstringdefDisableCommands{%
+        \let\ckvalue\ck@plainvalue
+        \let\ckrefval\ck@plainrefval}%
     \fi}
 \fi
 % Where a component is in _calkit, with the extension Calkit found for one

@@ -271,3 +271,69 @@ def test_get_zotero_local_pdf(tmp_path, monkeypatch):
     link = {"library_type": "group", "library_id": "77"}
     assert rv.get_zotero_local_pdf(link, {"pdf_attachment_keys": ["A"]}) == pdf
     assert urls == [f"{rv.ZOTERO_LOCAL_URL}/groups/77/items/A/file/view/url"]
+
+
+def test_values_file_and_latex_deps(tmp_dir):
+    # Values are written to a file of their own when the pipeline compiles,
+    # and a LaTeX stage quoting one depends on it, not on calkit.yaml
+    import subprocess
+
+    import calkit
+    import calkit.latex
+    import calkit.pipeline
+
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "Noise \\ckrefval[.2f]{liu.2025}{noise-sigma} \\cite{liu.2025}.\n"
+            "\\end{document}\n"
+        )
+    loads, components = calkit.latex.read_ck_usage("paper/main.tex")
+    assert loads
+    assert components == [
+        calkit.latex.CkComponent(
+            "value",
+            rv.VALUES_PATH,
+            "liu.2025.noise-sigma",
+            ".2f",
+            ref=("liu.2025", "noise-sigma"),
+        )
+    ]
+    ck_info = calkit.load_calkit_info()
+    ck_info["references"] = [
+        {
+            "path": "refs.bib",
+            "values": {"liu.2025": {"noise-sigma": {"value": 0.1}}},
+        }
+    ]
+    ck_info["environments"] = {"tex": {"kind": "texlive"}}
+    ck_info["pipeline"] = {
+        "stages": {
+            "paper": {
+                "kind": "latex",
+                "target_path": "paper/main.tex",
+                "environment": "tex",
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    stages = calkit.pipeline.to_dvc(write=True)
+    with open(rv.VALUES_PATH) as f:
+        assert json.load(f) == {"liu.2025": {"noise-sigma": 0.1}}
+    assert rv.VALUES_PATH in stages["paper"]["deps"]
+    assert "calkit.yaml" not in stages["paper"]["deps"]
+    # A citation key with dots is found by the dotted lookup
+    calkit.latex.map_ck_components("paper/main.tex")
+    with open("paper/_calkit/values.tex") as f:
+        assert (
+            f"\\cksetvalue{{{rv.VALUES_PATH}}}{{liu.2025.noise-sigma}}{{n}}"
+            "{0.1}"
+        ) in f.read()
+    # With none declared, the file goes away
+    ck_info["references"] = [{"path": "refs.bib"}]
+    calkit.save_calkit_info(ck_info)
+    calkit.pipeline.to_dvc(write=True)
+    assert not os.path.exists(rv.VALUES_PATH)

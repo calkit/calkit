@@ -1572,7 +1572,7 @@ def delete_project(
         min_access_level="owner",
     )
     if delete_storage:
-        _delete_project_objects(session, project)
+        _delete_project_objects(session, project, current_user.id)
     mixpanel.user_deleted_project(
         current_user,
         project.owner_account_name,
@@ -1585,10 +1585,12 @@ def delete_project(
     return Message(message="success")
 
 
-def _delete_project_objects(session: Session, project: Project) -> None:
+def _delete_project_objects(
+    session: Session, project: Project, user_id: uuid.UUID
+) -> None:
     # Before the project itself, so a failure leaves it to try again
     try:
-        app.storage.delete_project_objects(session, project)
+        app.storage.delete_project_objects(session, project, user_id)
     except app.storage.UnreachableStorageError as e:
         raise HTTPException(
             409,
@@ -1619,7 +1621,7 @@ def delete_project_by_id(
     if project.owner != current_user:
         raise HTTPException(403)
     if delete_storage:
-        _delete_project_objects(session, project)
+        _delete_project_objects(session, project, current_user.id)
     mixpanel.user_deleted_project(
         current_user,
         project.owner_account_name,

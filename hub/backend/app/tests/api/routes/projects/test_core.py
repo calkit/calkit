@@ -6396,6 +6396,11 @@ def test_project_storage_follows_project(
             )
         assert response.status_code == 200
         delete_objects.assert_called_once()
+        # Only the deleting user's own external storage is removed
+        assert (
+            str(delete_objects.call_args.args[2])
+            == client.get("/user", headers=headers).json()["id"]
+        )
         assert mp.user_deleted_project.call_args.kwargs == {
             "delete_storage": True,
             "n_external_storage": 0,

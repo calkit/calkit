@@ -171,7 +171,7 @@ def test_dedicated_storage() -> None:
             api.return_value.bucket_info.return_value.created_at = created_at
             api.return_value.list_bucket_tree.return_value = files
             with pytest.raises(storage.UnsafeStorageDeleteError):
-                storage.delete_project_objects(None, project)  # type: ignore[arg-type]
+                storage.delete_project_objects(None, project, "user-id")  # type: ignore[arg-type]
         api.return_value.delete_bucket.assert_not_called()
         api.return_value.batch_bucket_files.assert_not_called()
         assert internal.fs.exists(f"/internal/data/someone/my-project/{path}")
@@ -184,7 +184,7 @@ def test_dedicated_storage() -> None:
             dvc_object,
             dvc_dir,
         ]
-        storage.delete_project_objects(None, project)  # type: ignore[arg-type]
+        storage.delete_project_objects(None, project, "user-id")  # type: ignore[arg-type]
         api.return_value.delete_bucket.assert_called_once_with(
             "someone/my-project", missing_ok=True
         )
@@ -399,7 +399,11 @@ def test_unreachable_storage() -> None:
     from fastapi import HTTPException
 
     resource = SimpleNamespace(
-        id="resource-id", name=None, bucket="someone/proj", project_id="p"
+        id="resource-id",
+        name=None,
+        bucket="someone/proj",
+        project_id="p",
+        credential_user_id="member-id",
     )
     project = SimpleNamespace(
         id="p", dvc_storage=resource, dvc_storage_id="resource-id"
@@ -425,6 +429,21 @@ def test_unreachable_storage() -> None:
                 skip_unreachable=False,
             )
         assert e.value.resource is resource
+        # Someone else's storage is left alone, reachable or not
+        storages = storage.get_project_storages(
+            session,  # type: ignore[arg-type]
+            project,  # type: ignore[arg-type]
+            skip_unreachable=False,
+            credential_user_id="other-id",
+        )
+        assert [st.resource for st in storages] == [None]
+        with pytest.raises(storage.UnreachableStorageError):
+            storage.get_project_storages(
+                session,  # type: ignore[arg-type]
+                project,  # type: ignore[arg-type]
+                skip_unreachable=False,
+                credential_user_id="member-id",
+            )
         with pytest.raises(storage.UnreachableStorageError):
             storage.set_project_bucket_visibility(session, project, False)  # type: ignore[arg-type]
     api.return_value.update_bucket_settings.assert_not_called()

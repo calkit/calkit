@@ -137,6 +137,7 @@ so you and your collaborators don't need to do anything.
 
 When deleting a project,
 you can choose to delete its files from storage too.
+A bucket in someone else's Hugging Face account stays there.
 
 ## Using your storage without Calkit
 

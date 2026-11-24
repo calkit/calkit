@@ -418,7 +418,10 @@ class UnreachableStorageError(RuntimeError):
 
 
 def get_project_storages(
-    session: "Session", project: "Project", skip_unreachable: bool = True
+    session: "Session",
+    project: "Project",
+    skip_unreachable: bool = True,
+    credential_user_id: Any = None,
 ) -> list[ProjectStorage]:
     """Get every storage a project's DVC objects may be in, for reading.
 
@@ -429,7 +432,8 @@ def get_project_storages(
     connected it disconnected Hugging Face, is skipped so everything else
     stays readable, unless ``skip_unreachable`` is false, in which case it
     raises ``UnreachableStorageError``. New objects go to
-    ``get_project_storage``.
+    ``get_project_storage``. With ``credential_user_id``, the only external
+    storage included is what's reached with that user's credential.
     """
     from fastapi import HTTPException
 
@@ -441,6 +445,10 @@ def get_project_storages(
     ):
         if record.storage_resource_id != project.dvc_storage_id:
             resources.append(record.storage_resource)
+    if credential_user_id is not None:
+        resources = [
+            r for r in resources if r.credential_user_id == credential_user_id
+        ]
     storages = []
     for resource in resources:
         try:
@@ -595,9 +603,12 @@ def delete_objects_from(
         target.fs.rm(base, recursive=True)
 
 
-def delete_project_objects(session: "Session", project: "Project") -> None:
-    """Delete a project's DVC objects from every storage it has used,
-    including the hub's own.
+def delete_project_objects(
+    session: "Session", project: "Project", user_id: Any
+) -> None:
+    """Delete a project's DVC objects from the hub's own storage and all the
+    storage it has used in the given user's external accounts. Storage in
+    anyone else's account stays there, since only they can delete it.
 
     Raises ``UnreachableStorageError`` before deleting anything if any of
     that storage can't be reached, rather than leaving objects behind with
@@ -605,7 +616,9 @@ def delete_project_objects(session: "Session", project: "Project") -> None:
     outside Calkit.
     """
     owner_name = project.owner_account_name
-    targets = get_project_storages(session, project, skip_unreachable=False)
+    targets = get_project_storages(
+        session, project, skip_unreachable=False, credential_user_id=user_id
+    )
     for target in targets:
         check_safe_to_delete(target)
     for target in targets:

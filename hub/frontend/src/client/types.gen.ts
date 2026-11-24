@@ -4933,6 +4933,10 @@ export type ProjectStorageSettings = {
    * Previous
    */
   previous: Array<StorageResourcePublic>
+  /**
+   * Deletable Ids
+   */
+  deletable_ids: Array<string>
 }
 
 /**

@@ -173,6 +173,9 @@ and refuses if one was created after the hub recorded it,
 or holds anything other than DVC objects.
 The hub only calls HF's bucket API to delete,
 never its repo API.
+Deleting a project only removes external storage reached with the
+deleting user's own credential,
+so one member can't use another's credential to delete from their account.
 
 ### Released datasets
 

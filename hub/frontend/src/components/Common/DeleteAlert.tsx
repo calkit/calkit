@@ -18,6 +18,7 @@ import {
   OrgsService,
   ProjectsService,
   StorageService,
+  type StorageResourcePublic,
   UsersService,
 } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
@@ -68,16 +69,24 @@ const Delete = ({
       }).then((response) => response.data),
     enabled: isOpen && type === "Project" && !!projectOwner && !!projectName,
   })
-  const storageLocations = storageQuery.data
+  const storageResources = storageQuery.data
     ? [
         ...(storageQuery.data.dvc ? [storageQuery.data.dvc] : []),
         ...storageQuery.data.previous,
-      ].map((r) =>
-        r.dedicated
-          ? `Hugging Face bucket ${r.bucket}`
-          : `Project folder in Hugging Face bucket ${r.bucket}`,
-      )
+      ]
     : []
+  const getStorageLabel = (r: StorageResourcePublic) =>
+    r.dedicated
+      ? `Hugging Face bucket ${r.bucket}`
+      : `Project folder in Hugging Face bucket ${r.bucket}`
+  const deletableIds = storageQuery.data?.deletable_ids ?? []
+  const storageLocations = storageResources
+    .filter((r) => deletableIds.includes(r.id))
+    .map(getStorageLabel)
+  // Only whoever connected storage can delete it
+  const keptLocations = storageResources
+    .filter((r) => !deletableIds.includes(r.id))
+    .map((r) => `${getStorageLabel(r)} (connected by ${r.connected_by})`)
 
   const deleteEntity = async (id: string) => {
     if (type === "Project") {
@@ -208,6 +217,11 @@ const Delete = ({
                   {deleteStorage && (
                     <Text mt={2} fontSize="sm" color="ui.dim">
                       {["Calkit Hub storage", ...storageLocations].join(", ")}
+                    </Text>
+                  )}
+                  {deleteStorage && keptLocations.length > 0 && (
+                    <Text mt={2} fontSize="sm" color="ui.dim">
+                      Not deleted: {keptLocations.join(", ")}
                     </Text>
                   )}
                 </>

@@ -1,8 +1,10 @@
 """Tests for the ``core`` module."""
 
+import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from unittest import mock
 
@@ -1254,3 +1256,52 @@ def test_get_version_checked_app_names():
         ck_info["environments"]["ml"]["requirements"] = [req]
         with pytest.raises(ValueError, match="'name' must be text"):
             calkit.get_version_checked_app_names(ck_info)
+
+
+def test_write_json_waits_for_reader_on_windows(tmp_path: Path) -> None:
+    path = tmp_path / "data.json"
+    denied = PermissionError("Access is denied")
+    # A brief denial on Windows is retried until the write lands
+    with (
+        mock.patch("calkit.core.sys.platform", "win32"),
+        mock.patch("time.sleep") as m_sleep,
+        mock.patch(
+            "calkit.core.os.replace",
+            side_effect=[denied, denied, mock.DEFAULT],
+            wraps=os.replace,
+        ) as m_replace,
+    ):
+        calkit.write_json(str(path), [1])
+    assert m_replace.call_count == 3
+    assert m_sleep.call_count == 2
+    # One that never clears is raised, leaving no temporary file
+    path.unlink(missing_ok=True)
+    with (
+        mock.patch("calkit.core.sys.platform", "win32"),
+        mock.patch("time.sleep"),
+        mock.patch("calkit.core.os.replace", side_effect=denied),
+        pytest.raises(PermissionError),
+    ):
+        calkit.write_json(str(path), [2])
+    assert list(tmp_path.iterdir()) == []
+    # Elsewhere a denial is real, so it isn't retried
+    with (
+        mock.patch("calkit.core.sys.platform", "linux"),
+        mock.patch("time.sleep") as m_sleep,
+        mock.patch("calkit.core.os.replace", side_effect=denied) as m_replace,
+        pytest.raises(PermissionError),
+    ):
+        calkit.write_json(str(path), [3])
+    assert m_replace.call_count == 1
+    m_sleep.assert_not_called()
+    # A real reader holding the file open doesn't fail the write
+    calkit.write_json(str(path), [4])
+    reader = open(path)
+    timer = threading.Timer(0.2, reader.close)
+    timer.start()
+    try:
+        calkit.write_json(str(path), [5])
+    finally:
+        timer.join()
+        reader.close()
+    assert json.loads(path.read_text()) == [5]

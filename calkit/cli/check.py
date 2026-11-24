@@ -528,14 +528,29 @@ def _echo_unattributed(findings: list[dict]) -> None:
             "the reference from then on. 'not in' names a cited reference "
             "whose PDF doesn't have it, which may be a misquote."
         )
+    import shlex
+
     for finding in found:
         match = finding["found"][0]
-        context = match["context"].replace('"', '\\"')
+        # Quoted, since a context can hold anything, e.g., $ or a backtick
+        command = shlex.join(
+            [
+                "calkit",
+                "new",
+                "ref-value",
+                match["key"],
+                "NAME",
+                "--value",
+                finding["value"].strip(),
+                "--page",
+                str(match["page"]),
+                "--context",
+                match["context"],
+            ]
+        )
         calkit.echo(
             f"\n{finding['file']}:{finding['line']}, {finding['value']}:\n"
-            f"  calkit new ref-value {match['key']} <name> "
-            f"--value {finding['value'].rstrip('%').strip()} "
-            f'--page {match["page"]} --context "{context}"'
+            f"  {command}"
         )
 
 

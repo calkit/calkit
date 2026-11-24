@@ -635,9 +635,12 @@ return {
     for i = 1, math.min(#args, 3) do
       slots[i] = pandoc.utils.stringify(args[i])
     end
-    local fmt_kwarg = pandoc.utils.stringify(kwargs["format"] or "")
-    if fmt_kwarg ~= "" then
-      slots[3] = fmt_kwarg
+    -- The name and format can be given by name, as for ckvalue
+    for name, slot in pairs({key = 2, format = 3}) do
+      local value = pandoc.utils.stringify(kwargs[name] or "")
+      if value ~= "" then
+        slots[slot] = value
+      end
     end
     local key, name, fmt = slots[1], slots[2], slots[3]
     local data = load_data(".calkit/reference-values.json")

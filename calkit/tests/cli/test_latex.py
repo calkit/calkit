@@ -342,6 +342,7 @@ def test_build_ck_components(tmp_dir):
             "Tiny: \\ckvalue[.2f]{results/metrics.json}{tiny}.\n"
             "Quoted: \\ckrefval[.2f]{liu2025}{noise-sigma}.\n"
             "Unrecorded: \\ckrefval{liu2025}{nope}.\n"
+            "Spaced: \\ckrefval[.1f]{ liu2025 }{ noise-sigma }.\n"
             "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/not-yet.png}\n"
@@ -419,6 +420,7 @@ def test_build_ck_components(tmp_dir):
     assert "Tiny: 0.00." in text
     assert "Quoted: 0.10." in text
     assert "Unrecorded: ??." in text
+    assert "Spaced: 0.1." in text
     assert "Trials: 42." in text
     # A bookmark shows the value as it is, rather than the command
     pdf = pypdfium2.PdfDocument("paper/main.pdf")

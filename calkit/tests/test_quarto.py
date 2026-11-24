@@ -331,7 +331,8 @@ def test_refval_shortcode(tmp_path, monkeypatch):
         "---\ntitle: T\n---\n\n"
         "A {{< ckrefval liu.2025 noise-sigma .2f >}} "
         "B {{< ckrefval liu.2025 label >}} "
-        "C {{< ckrefval liu.2025 nope >}}\n"
+        "C {{< ckrefval liu.2025 nope >}} "
+        "D {{< ckrefval liu.2025 key=noise-sigma format=.1f >}}\n"
     )
     calkit.quarto.write_components("index.qmd", wdir=str(tmp_path))
     subprocess.check_call(
@@ -340,4 +341,4 @@ def test_refval_shortcode(tmp_path, monkeypatch):
         stderr=subprocess.DEVNULL,
     )
     out = (tmp_path / "index.md").read_text()
-    assert "A 0.10 B α C ??" in out
+    assert "A 0.10 B α C ?? D 0.1" in out

@@ -1049,7 +1049,10 @@ def load_package(document: str) -> bool:
         "calkit" in (name.strip() for name in m.group(1).split(","))
         for m in _PACKAGE_RE.finditer(text)
     )
-    if loads or _CK_COMMAND_RE.search(text) is None:
+    if loads or (
+        _CK_COMMAND_RE.search(text) is None
+        and _CK_REFVAL_RE.search(text) is None
+    ):
         return False
     # Read as written, so its line endings are kept, and left alone if it
     # isn't UTF-8, which writing back would garble

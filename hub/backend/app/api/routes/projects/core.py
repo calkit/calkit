@@ -6430,6 +6430,11 @@ def get_project_publication_components(
             document, read=read_source
         )
         for c in ck_components:
+            # Values quoted from references come from calkit.yaml, which
+            # names each one's reference, rather than being a file of the
+            # document's
+            if c.ref is not None:
+                continue
             rel, _ = calkit.latex.component_path(c, is_project_file)
             if (
                 rel is not None
@@ -11509,7 +11514,12 @@ def get_project_repro_check(
                 # than recompute past it on every request until it expires.
                 logger.warning(f"Discarding unreadable repro check: {e}")
                 cache.delete(key)
-    res = check_reproducibility(wdir=str(repo.working_dir))
+    # Offline, so the result is a function of the tree, and a page load
+    # never downloads references' PDFs or asks other services, including
+    # anything on the server posing as Zotero desktop
+    res = check_reproducibility(
+        wdir=str(repo.working_dir), offline=True, zotero_desktop=False
+    )
     if key is not None:
         cache.set_json(key, res.model_dump())
     return res

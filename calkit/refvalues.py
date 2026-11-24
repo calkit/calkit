@@ -105,67 +105,111 @@ def read_pdf_pages(path: str | Path) -> list[str]:
         pdf.close()
 
 
-def _to_decimal(text: str) -> Decimal | None:
-    try:
-        return Decimal(text)
-    except (InvalidOperation, ValueError):
-        return None
+# A number as text: digits, optionally grouped in thousands with commas or
+# thin or non-breaking spaces, a fraction, and an exponent, as "1e-8",
+# "1 × 10−8", or a bare "10^-8" or "10−8", which is how text extraction
+# flattens a superscript, then a percent sign. A bare "10" and digits isn't
+# read as a power, since "107" is as often a page number. Never the middle
+# of a word or of a longer number, e.g., not 2.0 in "2.0.1".
+_NUMBER_RE = re.compile(
+    r"(?<![\w.])"
+    r"(?:"
+    r"(?P<pow>10)\s*(?:\^\s*\{?\s*(?P<pexp>[-−+]?\d+)\s*\}?|(?P<nexp>[-−]\d+))"
+    r"|(?P<num>(?:\d{1,3}(?:[,\u202f\u00a0]\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
+    r"(?:\s*[eE]\s*(?P<eexp>[-−+]?\d+)"
+    r"|\s*(?:×|x|·|\\times)\s*10\s*"
+    r"(?:\^\s*\{?\s*(?P<texp>[-−+]?\d+)\s*\}?|(?P<tnexp>[-−]\d+)))?"
+    r")"
+    r"(?P<pct>\s*%)?"
+    r"(?!\d|\.\d)"
+)
 
 
-def get_number_pattern(value: Any) -> re.Pattern | None:
-    """A pattern matching a number as a document or a PDF might write it.
+@dataclass(frozen=True)
+class Number:
+    """A number found in text, with where it is."""
 
-    Leading and trailing zeros may differ, e.g., 0.1 matches ".1" and
-    "0.10", as may a thousands separator, e.g., 10000 and "10,000", and a
-    percentage keeps its sign, e.g., "12.5 %". Scientific notation matches
-    "1e-3", "1 × 10-3", and "10-3", as text extraction flattens exponents.
-    A number never matches part of a longer one: 0.1 doesn't match 0.15.
+    start: int
+    end: int
+    text: str
+    value: Decimal
+    percent: bool
+
+
+def _exponent(text: str) -> int:
+    return int(text.replace("−", "-"))
+
+
+def find_numbers(text: str) -> list[Number]:
+    """Every number in some text, in order.
+
+    A minus sign counts as the number's own after a space, an opening
+    bracket, or an operator, e.g., "σ = −0.1", and not after a letter,
+    digit, or closing bracket, where it's a hyphen or a subtraction, e.g.,
+    "r−1.9".
     """
-    text = normalize_text(str(value)).replace(",", "")
-    percent = text.endswith("%")
-    text = text.rstrip("%").strip()
-    number = _to_decimal(text)
-    if number is None:
+    out = []
+    for m in _NUMBER_RE.finditer(text):
+        try:
+            if m.group("pow"):
+                exp = m.group("pexp") or m.group("nexp")
+                value = Decimal(1).scaleb(_exponent(exp))
+            else:
+                digits = re.sub(r"[,\u202f\u00a0]", "", m.group("num"))
+                value = Decimal(digits)
+                exp = m.group("eexp") or m.group("texp") or m.group("tnexp")
+                if exp:
+                    value = value.scaleb(_exponent(exp))
+        except (InvalidOperation, ValueError):
+            continue
+        start = m.start()
+        before = text[start - 1] if start > 0 else ""
+        if before and before in "-−+":
+            ahead = text[start - 2] if start > 1 else ""
+            if not (ahead and (ahead.isalnum() or ahead in ")]}")):
+                if before != "+":
+                    value = -value
+                start -= 1
+        out.append(
+            Number(
+                start=start,
+                end=m.end(),
+                text=text[start : m.end()],
+                value=value,
+                percent=bool(m.group("pct")),
+            )
+        )
+    return out
+
+
+def parse_number(value: Any) -> tuple[Decimal, bool] | None:
+    """A recorded value as a number, and whether it's a percentage, if it's
+    one finite number, e.g., 0.1, "12.5%", "1e-8", or "10,000".
+    """
+    if isinstance(value, bool):
         return None
-    sign = "-" if number < 0 else ""
-    number = abs(number)
-    before = r"(?<![\w.,])"
-    after = r"(?![\d]|[.,]\d)"
-    if number != 0 and (number < Decimal("0.001") or number >= 10**7):
-        mantissa, exponent = f"{number:e}".split("e")
-        mantissa = mantissa.rstrip("0").rstrip(".")
-        exponent = int(exponent)
-        exp = ("[-−]" if exponent < 0 else "[+]?") + str(abs(exponent))
-        variants = [rf"{re.escape(mantissa)}0*\s*[eE]\s*{exp}"]
-        times = r"\s*(?:×|x|\\times|·)\s*10\s*\^?\s*\{?"
-        variants.append(rf"{re.escape(mantissa)}0*{times}{exp}\}}?")
-        if mantissa == "1":
-            variants.append(rf"10\s*\^?\s*\{{?{exp}\}}?")
-        body = "(?:" + "|".join(variants) + ")"
-    else:
-        integer, _, fraction = f"{number:f}".partition(".")
-        fraction = fraction.rstrip("0")
-        if len(integer) > 3:
-            # 10000, 10,000, or 10 000, but not 1,0000
-            groups = []
-            while len(integer) > 3:
-                groups.insert(0, integer[-3:])
-                integer = integer[:-3]
-            groups.insert(0, integer)
-            int_part = groups[0] + "".join(rf"[,\s ]?{g}" for g in groups[1:])
-        elif integer == "0" and fraction:
-            int_part = "0?"
-        else:
-            int_part = re.escape(integer)
-        if fraction:
-            body = rf"{int_part}\.{fraction}0*"
-        else:
-            body = rf"{int_part}(?:\.0+)?"
-    if sign:
-        body = rf"[-−]\s*{body}"
-    if percent:
-        body = rf"{body}\s*%"
-    return re.compile(before + body + (after if not percent else ""))
+    text = normalize_text(str(value))
+    found = find_numbers(text)
+    if len(found) != 1 or (found[0].start, found[0].end) != (0, len(text)):
+        return None
+    if not found[0].value.is_finite():
+        return None
+    return found[0].value, found[0].percent
+
+
+def _matches(number: Number, wanted: tuple[Decimal, bool]) -> bool:
+    return number.value == wanted[0] and number.percent == wanted[1]
+
+
+def has_number(text: str, value: Any) -> bool:
+    """Whether some text has a number, written any of the ways
+    ``find_numbers`` reads, e.g., 0.1 as ".1" or "0.10", and 10000 as
+    "10,000".
+    """
+    wanted = parse_number(value)
+    if wanted is None:
+        return False
+    return any(_matches(n, wanted) for n in find_numbers(normalize_text(text)))
 
 
 def _context(text: str, start: int, end: int) -> str:
@@ -183,20 +227,30 @@ def _context(text: str, start: int, end: int) -> str:
 
 def find_number(pages: list[str], value: Any) -> list[Match]:
     """Every place a number appears in a PDF's pages."""
-    pattern = get_number_pattern(value)
-    if pattern is None:
+    wanted = parse_number(value)
+    if wanted is None:
         return []
     matches = []
     for n, text in enumerate(pages, start=1):
-        for m in pattern.finditer(text):
-            matches.append(
-                Match(
-                    page=n,
-                    text=m.group(0),
-                    context=_context(text, m.start(), m.end()),
+        for number in find_numbers(text):
+            if _matches(number, wanted):
+                matches.append(
+                    Match(
+                        page=n,
+                        text=number.text,
+                        context=_context(text, number.start, number.end),
+                    )
                 )
-            )
     return matches
+
+
+def _context_pattern(context: str) -> re.Pattern:
+    """A pattern finding a context in a page, whatever the spacing and case,
+    since text extraction spaces things its own way, e.g., a subscript run
+    into what it's on.
+    """
+    chars = [c for c in normalize_text(context) if not c.isspace()]
+    return re.compile(r"\s*".join(re.escape(c) for c in chars), re.IGNORECASE)
 
 
 def check_value(
@@ -206,35 +260,52 @@ def check_value(
     context: str | None = None,
 ) -> str | None:
     """Why a declared value doesn't match its reference's PDF, if it
-    doesn't: the context must be on the page, and the value in it, or
-    without one, the value on the page.
+    doesn't: the context must be on the page, with the value in it, as a
+    whole number, so 0.1 doesn't match a context reading 0.15, or without
+    a context, the value on the page.
     """
-    pattern = get_number_pattern(value)
-    if pattern is None:
+    wanted = parse_number(value)
+    if wanted is None:
         return f"{value!r} isn't a number"
     if page is not None and not 1 <= page <= len(pages):
         return f"the PDF has {len(pages)} pages, not {page}"
     if context:
-        wanted = normalize_text(context)
-        if not pattern.search(wanted):
+        if not has_number(context, value):
             return f"the context doesn't contain {value}"
-
-        # Text extraction spaces things its own way, e.g., a subscript run
-        # into what it's on, so spaces don't count
-        def fold(text: str) -> str:
-            return re.sub(r"\s+", "", text).casefold()
-
-        folded = fold(wanted)
-        on = [
-            n for n, text in enumerate(pages, start=1) if folded in fold(text)
-        ]
-        if not on:
+        pattern = _context_pattern(context)
+        found: list[tuple[int, list[str]]] = []
+        for n, text in enumerate(pages, start=1):
+            numbers = find_numbers(text)
+            for m in pattern.finditer(text):
+                inside = [
+                    x
+                    for x in numbers
+                    if x.start >= m.start() - 1 and x.end <= m.end()
+                ]
+                # The context's own number has to be a whole number there,
+                # not the start of a longer one
+                overlapping = [
+                    x
+                    for x in numbers
+                    if x.start < m.end() and x.end > m.start()
+                ]
+                if any(_matches(x, wanted) for x in inside):
+                    if page is None or page == n:
+                        return None
+                    found.append((n, []))
+                else:
+                    found.append((n, [x.text for x in overlapping]))
+        if not found:
             return "the context isn't in the PDF"
-        if page is not None and page not in on:
-            return f"the context is on page {on[0]}, not {page}"
-        return None
+        right = [n for n, numbers in found if not numbers]
+        if right:
+            return f"the context is on page {right[0]}, not {page}"
+        n, numbers = found[0]
+        return (
+            f"on page {n}, the context reads {', '.join(numbers)}, not {value}"
+        )
     where = [pages[page - 1]] if page is not None else pages
-    if not any(pattern.search(text) for text in where):
+    if not any(has_number(text, value) for text in where):
         return (
             f"{value} isn't on page {page}"
             if page is not None
@@ -394,6 +465,38 @@ def download_pdf(url: str, dest: Path) -> Path | None:
     return dest
 
 
+def get_cache_path(
+    collection_path: str, key: str, entry: dict | None, wdir: str | None
+) -> Path:
+    """Where a downloaded copy of a reference's PDF is kept, named for its
+    collection, key, and identifiers, so two works sharing a key, or an
+    entry that now names another work, don't share one.
+    """
+    import hashlib
+
+    entry = entry or {}
+    ident = "\n".join(
+        [
+            collection_path,
+            key,
+            str(entry.get("doi") or ""),
+            str(entry.get("eprint") or ""),
+            str(entry.get("url") or ""),
+        ]
+    )
+    digest = hashlib.sha256(ident.encode()).hexdigest()[:12]
+    safe_key = re.sub(r"[^\w.-]", "_", key)[:60]
+    return Path(wdir or ".") / PDF_CACHE_DIR / f"{safe_key}-{digest}.pdf"
+
+
+def _in_project(path: Path, base: Path) -> bool:
+    """Whether a path, links followed, is inside the project."""
+    try:
+        return path.resolve().is_relative_to(base.resolve())
+    except OSError:
+        return False
+
+
 def get_pdf(
     collection_path: str,
     key: str,
@@ -403,14 +506,17 @@ def get_pdf(
     download: bool = False,
     lookup: Any = None,
     search: PdfSearch | None = None,
+    zotero_desktop: bool = True,
 ) -> PdfSource | None:
     """A reference's PDF, from the first source that has it.
 
-    ``file`` is the one the collection names for the key in ``calkit.yaml``. Without one, Zotero
-    desktop and the Calkit Cloud are asked for a collection linked to
-    Zotero, and with ``download``, open-access copies are fetched. What's
-    fetched is kept in ``.calkit/local`` for next time, never in the
-    project.
+    ``file`` is the one the collection names for the key in ``calkit.yaml``,
+    which has to be inside the project. Then Zotero desktop, which is on
+    this machine, is asked for a collection linked to Zotero, then a copy
+    downloaded before is used. With ``download``, which is what goes on the
+    network, the Calkit Cloud is asked for a collection linked to Zotero,
+    and then open-access copies are fetched. What's fetched is kept in
+    ``.calkit/local`` for next time, never in the project.
     """
     base = Path(wdir or ".")
     search = search if search is not None else PdfSearch()
@@ -421,12 +527,21 @@ def get_pdf(
     if file:
         path = base / file
         tried(file)
-        if path.is_file():
+        # A path outside the project, e.g., absolute, with .., or a link,
+        # isn't the project's to read
+        if path.is_file() and _in_project(path, base):
             return PdfSource(path=path, source=file)
-    safe_key = re.sub(r"[^\w.-]", "_", key)
-    cached = base / PDF_CACHE_DIR / f"{safe_key}.pdf"
+    linked = get_zotero_link(collection_path, key, wdir=wdir)
+    if linked is not None and zotero_desktop:
+        tried("Zotero desktop")
+        path = get_zotero_local_pdf(*linked)
+        if path is not None:
+            return PdfSource(path=path, source="Zotero desktop")
+    cached = get_cache_path(collection_path, key, entry, wdir)
     if cached.is_file():
         return PdfSource(path=cached, source="downloaded")
+    if not download:
+        return None
     # What's fetched goes in the local directory, which keeps itself out of
     # Git, since most papers can't be redistributed
     from calkit.core import ensure_local_dir
@@ -435,18 +550,13 @@ def get_pdf(
         ensure_local_dir(str(base))
         cached.parent.mkdir(parents=True, exist_ok=True)
 
-    linked = get_zotero_link(collection_path, key, wdir=wdir)
     if linked is not None:
-        tried("Zotero desktop")
-        path = get_zotero_local_pdf(*linked)
-        if path is not None:
-            return PdfSource(path=path, source="Zotero desktop")
         tried("the Calkit Cloud's Zotero link")
         make_cache_dir()
         path = get_cloud_pdf(collection_path, key, cached, wdir=wdir)
         if path is not None:
             return PdfSource(path=path, source="Zotero, through the Cloud")
-    if download and entry is not None:
+    if entry is not None:
         for url in get_open_access_urls(entry, lookup):
             tried(url)
             make_cache_dir()
@@ -454,6 +564,87 @@ def get_pdf(
             if path is not None:
                 return PdfSource(path=path, source=url)
     return None
+
+
+class PdfFinder:
+    """Finds and reads references' PDFs, once each per run, including the
+    ones it can't find, so a reference quoted many times is looked up, and
+    downloaded, once.
+    """
+
+    def __init__(
+        self,
+        ck_info: dict,
+        wdir: str | None = None,
+        download: bool = True,
+        lookup: Any = None,
+        read: Callable[[Path], list[str]] | None = None,
+        zotero_desktop: bool = True,
+    ) -> None:
+        from calkit.references import (
+            get_declared_collection_paths,
+            load_collections,
+        )
+
+        self.wdir = wdir
+        self.download = download
+        self.zotero_desktop = zotero_desktop
+        self.lookup = lookup
+        self.read = read or read_pdf_pages
+        self.paths = get_declared_collection_paths(ck_info)
+        self.loaded = load_collections(wdir=wdir, paths=self.paths)
+        self.collections = {
+            c["path"]: c
+            for c in ck_info.get("references") or []
+            if isinstance(c, dict) and c.get("path")
+        }
+        self.found: dict[tuple[str, str], tuple] = {}
+
+    def get(
+        self, collection_path: str, key: str
+    ) -> tuple[PdfSource | None, list[str] | None, list[str]]:
+        """A reference's PDF, its pages' text, and what was tried, with
+        ``None`` for the pages if it couldn't be read or has no text, e.g.,
+        a scan.
+        """
+        cache_key = (collection_path, key)
+        if cache_key in self.found:
+            return self.found[cache_key]
+        search = PdfSearch()
+        source = get_pdf(
+            collection_path,
+            key,
+            entry=self.loaded.get(collection_path, {}).get(key),
+            file=get_entry_file(
+                self.collections.get(collection_path, {}), key
+            ),
+            wdir=self.wdir,
+            download=self.download,
+            lookup=self.lookup,
+            search=search,
+            zotero_desktop=self.zotero_desktop,
+        )
+        pages = None
+        if source is not None:
+            try:
+                pages = self.read(source.path)
+            except Exception as e:
+                search.tried.append(f"{source.source}: {e}")
+                pages = None
+            if pages is not None and not any(p.strip() for p in pages):
+                search.tried.append(f"{source.source}, which has no text")
+                pages = None
+        self.found[cache_key] = (source, pages, search.tried)
+        return self.found[cache_key]
+
+    def get_by_key(
+        self, key: str
+    ) -> tuple[PdfSource | None, list[str] | None, list[str]]:
+        """A reference's PDF from the first collection defining the key."""
+        for path in self.paths:
+            if key in self.loaded.get(path, {}):
+                return self.get(path, key)
+        return None, None, []
 
 
 def iter_declared_values(ck_info: dict) -> list[tuple[str, str, str, dict]]:
@@ -569,6 +760,8 @@ def add_value(
     target = next((c for c in collections if c["path"] == collection), None)
     if target is None:
         raise ValueError(f"'{collection}' isn't a reference collection")
+    if parse_number(value) is None:
+        raise ValueError(f"{value!r} isn't a number")
     info: dict[str, Any] = {"value": value}
     if page is not None:
         info["page"] = page
@@ -621,11 +814,14 @@ def write_values_file(ck_info: dict, wdir: str | None = None) -> bool:
 
 @dataclass
 class Use:
-    """A document quoting a value from a reference, on a 1-based line, or a
-    line of a notebook's Markdown and raw cells.
+    """A document quoting a value from a reference: the document, which
+    names the bibliographies and cites, and the ``file`` and 1-based
+    ``line`` it's on, which differ for a file a LaTeX document inputs, and
+    are a line of a notebook's Markdown and raw cells for a notebook.
     """
 
     document: str
+    file: str
     line: int
     key: str
     name: str
@@ -648,9 +844,49 @@ def read_markdown_lines(path: str) -> list[str]:
     return text.splitlines() if text is not None else []
 
 
+# Inline code, whose text is an example, not a use
+_MD_INLINE_CODE_RE = re.compile(r"(`+)[^\n]*?(?<!`)\1(?!`)")
+_MD_FENCE_RE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})")
+# LaTeX environments and commands whose text is shown as is
+_TEX_VERBATIM_ENVS = (
+    "verbatim",
+    "Verbatim",
+    "lstlisting",
+    "minted",
+    "comment",
+    "alltt",
+)
+_TEX_VERB_RE = re.compile(r"\\verb\*?(.).*?\1|\\lstinline\*?(.).*?\2")
+
+
+def _markdown_prose_lines(path: str) -> list[tuple[int, str]]:
+    """A Markdown document's lines that are prose, numbered from 1, with
+    inline code blanked, leaving out code blocks.
+    """
+    out = []
+    fence: str | None = None
+    for n, line in enumerate(read_markdown_lines(path), start=1):
+        m = _MD_FENCE_RE.match(line)
+        if fence is not None:
+            if (
+                m
+                and m.group(1)[0] == fence[0]
+                and len(m.group(1)) >= len(fence)
+            ):
+                fence = None
+            continue
+        if m:
+            fence = m.group(1)
+            continue
+        out.append(
+            (n, _MD_INLINE_CODE_RE.sub(lambda c: " " * len(c.group()), line))
+        )
+    return out
+
+
 def find_uses(documents: list[str], wdir: str | None = None) -> list[Use]:
     """Every ``ckrefval`` in the documents, in LaTeX, Quarto, or Markdown,
-    with project-relative paths.
+    with project-relative paths, leaving out examples in code.
     """
     from calkit.latex import _CK_REFVAL_RE, _strip_comments, flatten
     from calkit.markdown import (
@@ -665,7 +901,7 @@ def find_uses(documents: list[str], wdir: str | None = None) -> list[Use]:
     for document in documents:
         full = os.path.join(base, document)
         if is_markdown_like(document):
-            for n, line in enumerate(read_markdown_lines(full), start=1):
+            for n, line in _markdown_prose_lines(full):
                 found = [
                     m.group("args")
                     for m in _REFVAL_SHORTCODE_RE.finditer(line)
@@ -679,15 +915,30 @@ def find_uses(documents: list[str], wdir: str | None = None) -> list[Use]:
                         got = _ckvalue_args(args, document, n)
                     except MarkdownParseError:
                         continue
-                    uses.append(Use(document, n, got["source"], got["key"]))
+                    uses.append(
+                        Use(document, document, n, got["source"], got["key"])
+                    )
             continue
+        verbatim: str | None = None
         for line in flatten(full):
-            for m in _CK_REFVAL_RE.finditer(_strip_comments(line.text)):
+            text = _strip_comments(line.text)
+            if verbatim is not None:
+                if f"\\end{{{verbatim}}}" in text:
+                    verbatim = None
+                continue
+            begin = re.search(
+                r"\\begin\{(" + "|".join(_TEX_VERBATIM_ENVS) + r")\*?\}", text
+            )
+            if begin and f"\\end{{{begin.group(1)}}}" not in text:
+                verbatim = begin.group(1)
+                text = text[: begin.start()]
+            text = _TEX_VERB_RE.sub(" ", text)
+            for m in _CK_REFVAL_RE.finditer(text):
                 key, name = m.group("first").strip(), m.group("second").strip()
                 if "#" in key + name:
                     continue
                 rel = os.path.relpath(line.path, base).replace(os.sep, "/")
-                uses.append(Use(rel, line.lineno, key, name))
+                uses.append(Use(document, rel, line.lineno, key, name))
     return uses
 
 
@@ -732,8 +983,9 @@ def get_document_bibliographies(
 
 
 def get_cited_keys(document: str, wdir: str | None = None) -> set[str]:
-    """The citation keys a document cites in its text, not counting
-    ``\\\\nocite``, or a Quarto cross-reference.
+    """The citation keys a document cites in its text, including the files
+    a LaTeX one inputs, not counting ``\\nocite``, Pandoc's ``nocite`` in
+    front matter, or a Quarto cross-reference.
     """
     from calkit.latex import flatten
     from calkit.references import (
@@ -749,7 +1001,19 @@ def get_cited_keys(document: str, wdir: str | None = None) -> set[str]:
             return set(find_cited_keys(flatten(full), include_nocite=False))
         except Exception:
             return set()
-    text = _MD_SKIP_RE.sub(" ", "\n".join(read_markdown_lines(full)))
+    lines = [line for _, line in _markdown_prose_lines(full)]
+    # Front matter, e.g., nocite, isn't text
+    if lines and lines[0].strip() == "---":
+        end = next(
+            (
+                i
+                for i, line in enumerate(lines[1:], start=1)
+                if line.strip() in ("---", "...")
+            ),
+            0,
+        )
+        lines = lines[end + 1 :]
+    text = _MD_SKIP_RE.sub(" ", "\n".join(lines))
     keys = set()
     for m in MARKDOWN_CITE_RE.finditer(text):
         key = m.group(1) or m.group(2)
@@ -814,20 +1078,23 @@ def check_project(
     download: bool = True,
     lookup: Any = None,
     read: Callable[[Path], list[str]] | None = None,
+    finder: PdfFinder | None = None,
 ) -> dict[str, list[dict]]:
     """Check the values a project quotes from references.
 
     Returns ``problems``, each with the ``file`` and ``line`` it's about,
     the ``key`` and ``name``, and the ``problem``, and ``unchecked``, the
-    values whose reference has no PDF to check them against.
+    values whose reference has no PDF with text to check them against.
     """
     from calkit.references import (
         get_declared_collection_paths,
         load_collections,
     )
 
-    read = read or cached_pages()
     base = wdir or "."
+    finder = finder or PdfFinder(
+        ck_info, wdir=wdir, download=download, lookup=lookup, read=read
+    )
     problems: list[dict] = []
     unchecked: list[dict] = []
 
@@ -862,43 +1129,26 @@ def check_project(
         for key, count in _count_keys(os.path.join(base, path)).items():
             if count > 1:
                 problem(path, 0, key, None, f"{key} is defined {count} times")
-    collections = {
-        c["path"]: c
-        for c in ck_info.get("references") or []
-        if isinstance(c, dict) and c.get("path")
-    }
     by_value: dict[tuple[str, str], list[str]] = {}
     for path, key, name, info in declared:
         by_value.setdefault((key, name), []).append(path)
         if path in loaded and key not in loaded[path]:
             problem(
+                "calkit.yaml", 0, key, name, f"{path} doesn't define {key}"
+            )
+            continue
+        if parse_number(info.get("value")) is None:
+            problem(
                 "calkit.yaml",
                 0,
                 key,
                 name,
-                f"{path} doesn't define {key}",
+                f"{info.get('value')!r} isn't a number",
             )
             continue
-        search = PdfSearch()
-        source = get_pdf(
-            path,
-            key,
-            entry=loaded.get(path, {}).get(key),
-            file=get_entry_file(collections.get(path, {}), key),
-            wdir=wdir,
-            download=download,
-            lookup=lookup,
-            search=search,
-        )
-        if source is None:
-            unchecked.append({"key": key, "name": name, "tried": search.tried})
-            continue
-        try:
-            pages = read(source.path)
-        except Exception as e:
-            unchecked.append(
-                {"key": key, "name": name, "tried": [f"{source.source}: {e}"]}
-            )
+        source, pages, tried = finder.get(path, key)
+        if source is None or pages is None:
+            unchecked.append({"key": key, "name": name, "tried": tried})
             continue
         found = check_value(
             pages, info.get("value"), info.get("page"), info.get("context")
@@ -907,12 +1157,13 @@ def check_project(
             problem(
                 "calkit.yaml", 0, key, name, f"in {source.source}, {found}"
             )
+    cited: dict[str, set[str]] = {}
     for use in uses:
         named = bibs.get(use.document) or []
         recorded = by_value.get((use.key, use.name), [])
         if not recorded:
             problem(
-                use.document,
+                use.file,
                 use.line,
                 use.key,
                 use.name,
@@ -923,12 +1174,12 @@ def check_project(
             defining = [p for p in named if use.key in loaded.get(p, {})]
             if not defining:
                 problem(
-                    use.document,
+                    use.file,
                     use.line,
                     use.key,
                     use.name,
-                    f"{use.key} isn't in the bibliographies it names "
-                    f"({', '.join(named)})",
+                    f"{use.key} isn't in the bibliographies "
+                    f"{use.document} names ({', '.join(named)})",
                 )
             elif len(defining) > 1:
                 first = loaded[defining[0]][use.key]
@@ -936,7 +1187,7 @@ def check_project(
                     _same_entry(first, loaded[p][use.key]) for p in defining
                 ):
                     problem(
-                        use.document,
+                        use.file,
                         use.line,
                         use.key,
                         use.name,
@@ -945,29 +1196,31 @@ def check_project(
                     )
             if recorded and not set(recorded) & set(named):
                 problem(
-                    use.document,
+                    use.file,
                     use.line,
                     use.key,
                     use.name,
                     f"'{use.name}' is recorded for {use.key} in "
-                    f"{', '.join(recorded)}, which it doesn't use",
+                    f"{', '.join(recorded)}, which {use.document} doesn't use",
                 )
         if len(recorded) > 1:
             problem(
-                use.document,
+                use.file,
                 use.line,
                 use.key,
                 use.name,
                 f"'{use.name}' is recorded for {use.key} in both "
                 f"{' and '.join(recorded)}",
             )
-        if use.key not in get_cited_keys(use.document, wdir=wdir):
+        if use.document not in cited:
+            cited[use.document] = get_cited_keys(use.document, wdir=wdir)
+        if use.key not in cited[use.document]:
             problem(
-                use.document,
+                use.file,
                 use.line,
                 use.key,
                 use.name,
-                f"it quotes {use.key} but never cites it",
+                f"{use.document} quotes {use.key} but never cites it",
             )
     # One problem per thing wrong, though a value is quoted many times
     unique = list(
@@ -983,6 +1236,7 @@ def search_cited(
     download: bool = True,
     lookup: Any = None,
     read: Callable[[Path], list[str]] | None = None,
+    finder: PdfFinder | None = None,
 ) -> None:
     """For each typed number in a sentence citing a reference, look for it
     in the reference's PDF, adding where it was ``found``, or the keys
@@ -990,59 +1244,25 @@ def search_cited(
 
     Each finding needs ``value`` and ``cited_keys``.
     """
-    from calkit.references import (
-        get_declared_collection_paths,
-        load_collections,
+    finder = finder or PdfFinder(
+        ck_info, wdir=wdir, download=download, lookup=lookup, read=read
     )
-
-    read = read or cached_pages()
-    paths = get_declared_collection_paths(ck_info)
-    loaded = load_collections(wdir=wdir, paths=paths)
-    collections = {
-        c["path"]: c
-        for c in ck_info.get("references") or []
-        if isinstance(c, dict) and c.get("path")
-    }
-    pages_by_key: dict[str, tuple[str, list[str]] | None] = {}
-
-    def get_pages(key: str) -> tuple[str, list[str]] | None:
-        if key in pages_by_key:
-            return pages_by_key[key]
-        pages_by_key[key] = None
-        for path in paths:
-            if key not in loaded.get(path, {}):
-                continue
-            source = get_pdf(
-                path,
-                key,
-                entry=loaded[path][key],
-                file=get_entry_file(collections.get(path, {}), key),
-                wdir=wdir,
-                download=download,
-                lookup=lookup,
-            )
-            if source is not None:
-                try:
-                    pages_by_key[key] = (source.source, read(source.path))
-                except Exception:
-                    pass
-                break
-        return pages_by_key[key]
-
     for finding in findings:
+        if parse_number(finding["value"]) is None:
+            continue
         found, searched = [], []
         for key in finding.get("cited_keys") or []:
-            got = get_pages(key)
-            if got is None:
+            source, pages, _ = finder.get_by_key(key)
+            if source is None or pages is None:
                 continue
             searched.append(key)
-            for match in find_number(got[1], finding["value"]):
+            for match in find_number(pages, finding["value"]):
                 found.append(
                     {
                         "key": key,
                         "page": match.page,
                         "context": match.context,
-                        "source": got[0],
+                        "source": source.source,
                     }
                 )
         if found:

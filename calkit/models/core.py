@@ -16,6 +16,7 @@ from pydantic import (
     Discriminator,
     Field,
     Tag,
+    WithJsonSchema,
     computed_field,
     field_validator,
     model_validator,
@@ -704,7 +705,30 @@ def _reference_files_by_key(v: object) -> object:
 class ReferenceCollection(Model):
     path: str
     files: Annotated[
-        dict[str, str], BeforeValidator(_reference_files_by_key)
+        dict[str, str],
+        BeforeValidator(_reference_files_by_key),
+        # Editors validating calkit.yaml accept the list Calkit wrote before
+        WithJsonSchema(
+            {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                            },
+                            "required": ["key", "path"],
+                        },
+                    },
+                ]
+            }
+        ),
     ] = Field(
         default={},
         description="PDFs of the collection's entries, by citation key, "

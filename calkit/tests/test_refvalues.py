@@ -77,24 +77,57 @@ def write_pdf(path: Path, pages: list[list[str]]) -> Path:
         (0.1, "noise of 0.15 was", False),
         (0.1, "noise of 10.1 was", False),
         (0.1, "see section 2.0.1", False),
+        (0.1, "σ = -0.1", False),
+        (0.1, "(0.1,0.2)", True),
+        (0.2, "(0.1,0.2)", True),
         ("12.5%", "about 12.5 % of runs", True),
         ("12.5%", "about 12.5 of runs", False),
         (10000, "trained on 10,000 orbits", True),
         (10000, "trained on 10000 orbits", True),
         (10000, "trained on 100000 orbits", False),
+        (1e7, "10,000,000 steps", True),
+        (25000000, "25,000,000", True),
+        (1e7, "page 107", False),
+        (1e7, "10 7", False),
+        (1e8, "108 samples", False),
+        # A minus after a letter is a hyphen or a subtraction
         (-1.9, "scales as r−1.9 here", False),
+        (1.9, "scales as r−1.9 here", True),
         (-1.9, "slope of −1.9 here", True),
-        (0.001, "a rate of 10−3 per step", False),
+        (-0.1, "σ = −0.1", True),
+        # Small numbers, written out or not
+        (0.0001, "a rate of 0.0001", True),
+        (0.0003, "a rate of 0.0003", True),
+        (0.001, "a rate of 10−3 per step", True),
+        (0.001, "a rate of 1e-3 per step", True),
         (1e-8, "tolerances of 10−8 and", True),
         (1e-8, "tolerances of 1e-8 and", True),
+        (1e-8, "tolerances of 1.0e-8 and", True),
+        (1e-5, "decay of 1e-05", True),
+        (1e8, "up to 1e+08", True),
+        (5e-4, "rate 5e-04", True),
         (2.5e-8, "a value of 2.5 × 10−8 here", True),
+        # A mantissa counts
+        (1e-8, "2 × 10−8", False),
+        (1e-8, "1.5 × 10−8", False),
+        (1e-8, "10 × 10−8", False),
+        (1e-8, "10e-8", False),
+        (1e-8, "100e-8", False),
+        (3e-4, "30 × 10−4", False),
         (3, "in 3 dimensions", True),
         (3, "in 3.5 dimensions", False),
     ],
 )
-def test_get_number_pattern(value, text, found):
-    pattern = rv.get_number_pattern(value)
-    assert bool(pattern.search(rv.normalize_text(text))) == found
+def test_has_number(value, text, found):
+    assert rv.has_number(text, value) == found
+
+
+@pytest.mark.parametrize(
+    "value", ["nan", "inf", "Infinity", "sNaN", float("nan"), True, "lots"]
+)
+def test_not_a_number(value):
+    assert rv.parse_number(value) is None
+    assert rv.check_value(["0.1"], value) == f"{value!r} isn't a number"
 
 
 def test_check_value_and_find_number():
@@ -125,6 +158,26 @@ def test_check_value_and_find_number():
     assert rv.check_value(pages, 0.1, page=1) == "0.1 isn't on page 1"
     assert rv.check_value(pages, 0.1, page=3) == "the PDF has 2 pages, not 3"
     assert rv.check_value(pages, "lots") == "'lots' isn't a number"
+    # The context's number has to be the whole number in the PDF
+    misquoted = [
+        rv.normalize_text(
+            "Noise with σ = 0.15 during training. Dropout of 0.1 5, and "
+            "10.1 was used."
+        )
+    ]
+    assert rv.check_value(
+        misquoted, 0.1, context="Gaussian noise with σ = 0.1"
+    ) == ("the context isn't in the PDF")
+    assert rv.check_value(misquoted, 0.1, context="noise with σ = 0.1") == (
+        "on page 1, the context reads 0.15, not 0.1"
+    )
+    assert rv.check_value(misquoted, 0.15, context="dropout of 0.15") == (
+        "on page 1, the context reads 0.1, 5, not 0.15"
+    )
+    assert rv.check_value(misquoted, 0.1, context="0.1 was used") == (
+        "on page 1, the context reads 10.1, not 0.1"
+    )
+    assert rv.check_value(misquoted, 0.15, context="σ=0.15") is None
     (match,) = rv.find_number(pages, 0.1)
     assert match.page == 2
     assert match.text == "0.1"
@@ -150,17 +203,24 @@ def test_read_pdf_pages(tmp_path):
 
 
 def test_get_pdf(tmp_path, monkeypatch):
-    # A file the entry names comes first, then one downloaded before, then
-    # Zotero, then a download, which is kept in .calkit/local
+    # A file the collection names comes first, then Zotero desktop, then one
+    # downloaded before, and only when going online, the Calkit Cloud and
+    # then a download, which is kept in .calkit/local
     wdir = str(tmp_path)
     write_pdf(tmp_path / "liu.pdf", [["x"]])
     found = rv.get_pdf("refs.bib", "liu2025", file="liu.pdf", wdir=wdir)
     assert found.source == "liu.pdf"
+    # One outside the project isn't read, however it's named
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.pdf"
+    write_pdf(outside, [["secret"]])
+    (tmp_path / "link.pdf").symlink_to(outside)
+    for file in [str(outside), f"../{outside.name}", "link.pdf"]:
+        assert rv.get_pdf("refs.bib", "liu2025", file=file, wdir=wdir) is None
     search = rv.PdfSearch()
     assert rv.get_pdf("refs.bib", "liu2025", wdir=wdir, search=search) is None
     assert search.tried == []
     # Linked to Zotero, Zotero desktop is asked for the attachment, and
-    # then the Calkit Cloud
+    # online, the Calkit Cloud
     os.makedirs(tmp_path / ".calkit" / "zotero")
     (tmp_path / rv.ZOTERO_SYNC_INFO_PATH).write_text(
         json.dumps({"refs.bib": {"library_type": "user", "library_id": "9"}})
@@ -187,14 +247,33 @@ def test_get_pdf(tmp_path, monkeypatch):
     found = rv.get_pdf("refs.bib", "liu2025", wdir=wdir)
     assert found.source == "Zotero desktop"
     assert asked == [("user", ["ATT1"])]
+    # Not on a server, which shouldn't ask anything posing as Zotero
+    assert (
+        rv.get_pdf("refs.bib", "liu2025", wdir=wdir, zotero_desktop=False)
+        is None
+    )
     monkeypatch.setattr(rv, "get_zotero_local_pdf", lambda link, item: None)
+    cloud = []
     monkeypatch.setattr(
-        rv, "get_cloud_pdf", lambda path, key, dest, wdir=None: None
+        rv,
+        "get_cloud_pdf",
+        lambda path, key, dest, wdir=None: cloud.append(key),
     )
     search = rv.PdfSearch()
     assert rv.get_pdf("refs.bib", "liu2025", wdir=wdir, search=search) is None
+    assert search.tried == ["Zotero desktop"]
+    assert cloud == []
+    search = rv.PdfSearch()
+    assert (
+        rv.get_pdf(
+            "refs.bib", "liu2025", wdir=wdir, search=search, download=True
+        )
+        is None
+    )
     assert search.tried == ["Zotero desktop", "the Calkit Cloud's Zotero link"]
-    # Downloads only when asked, and kept for next time
+    assert cloud == ["liu2025"]
+    # Downloads only when asked, and kept for next time, named for the
+    # entry, so another work with the key doesn't share it
     entry = {"archiveprefix": "arXiv", "eprint": "2507.06952"}
 
     def download(url, dest):
@@ -208,10 +287,41 @@ def test_get_pdf(tmp_path, monkeypatch):
         "refs.bib", "liu2025", entry=entry, wdir=wdir, download=True
     )
     assert found.source == "https://arxiv.org/pdf/2507.06952"
-    assert found.path == tmp_path / rv.PDF_CACHE_DIR / "liu2025.pdf"
+    assert found.path == rv.get_cache_path("refs.bib", "liu2025", entry, wdir)
+    assert found.path.parent == tmp_path / rv.PDF_CACHE_DIR
+    assert (tmp_path / ".calkit" / "local" / ".gitignore").read_text() == "*\n"
     monkeypatch.setattr(rv, "download_pdf", None)
     found = rv.get_pdf("refs.bib", "liu2025", entry=entry, wdir=wdir)
     assert found.source == "downloaded"
+    other = {"doi": "10.1/other"}
+    assert rv.get_cache_path("refs.bib", "liu2025", other, wdir) != found.path
+    assert rv.get_cache_path("other.bib", "liu2025", entry, wdir) != found.path
+
+
+def test_pdf_finder(tmp_path, monkeypatch):
+    # Each reference is looked for once, found or not, and one with no
+    # text, e.g., a scan, has no pages to check
+    calls = []
+
+    def get_pdf(path, key, **kwargs):
+        calls.append(key)
+        if key == "scan":
+            return rv.PdfSource(path=tmp_path / "scan.pdf", source="scan.pdf")
+        return None
+
+    monkeypatch.setattr(rv, "get_pdf", get_pdf)
+    finder = rv.PdfFinder(
+        {"references": [{"path": "refs.bib"}]},
+        wdir=str(tmp_path),
+        read=lambda path: ["", " "],
+    )
+    for _ in range(3):
+        assert finder.get("refs.bib", "liu2025") == (None, None, [])
+    source, pages, tried = finder.get("refs.bib", "scan")
+    assert source.source == "scan.pdf"
+    assert pages is None
+    assert tried == ["scan.pdf, which has no text"]
+    assert calls == ["liu2025", "scan"]
 
 
 def test_get_open_access_urls():
@@ -432,7 +542,7 @@ def test_check_reproducibility_refvals(tmp_dir):
             10,
             "wu2024",
             "speed",
-            "it quotes wu2024 but never cites it",
+            "index.qmd quotes wu2024 but never cites it",
         ),
     ]
     assert [(u["key"], u["name"]) for u in res.refvals_unchecked] == [
@@ -466,7 +576,7 @@ def test_check_repro_refvals_cli(tmp_dir):
     assert "as in [@liu2025]" in out
     assert "p. 2 of liu2025" in out
     assert "not in liu2025" in out
-    assert "calkit new ref-value liu2025 <name> --value 0.10 --page 2" in out
+    assert "calkit new ref-value liu2025 NAME --value 0.10 --page 2" in out
     out = subprocess.check_output(
         ["calkit", "check", "repro", "--offline", "-c", "refvals"],
         text=True,
@@ -565,3 +675,143 @@ def test_reference_files():
     assert rv.get_reference_files({"path": "r.bib"}) == {}
     assert ReferenceCollection.model_validate(old).files == {"a": "a.pdf"}
     assert ReferenceCollection.model_validate(new).files == {"a": "a.pdf"}
+
+
+def test_check_latex_project(tmp_dir):
+    # A document's chapters count as the document: its bibliography, its
+    # citations, and where it quotes values. Quoted values aren't results
+    # the pipeline computes, nor files with no origin, and examples in
+    # verbatim aren't uses.
+    import subprocess
+
+    import calkit
+    import calkit.latex
+    from calkit.reproducibility import check_reproducibility
+
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    write_pdf(
+        Path("refs/liu2025.pdf"),
+        [["Training runs for 250 epochs at a learning rate of 0.001."]],
+    )
+    Path("refs.bib").write_text(
+        "@article{liu2025, title={Orbits}, author={Liu, A.}}\n"
+        "@article{wu2024, title={Other}, author={Wu, B.}}\n"
+    )
+    os.makedirs("paper/chapters")
+    Path("paper/main.tex").write_text(
+        "\\documentclass{article}\n\\usepackage{calkit}\n"
+        "\\begin{document}\n\\input{chapters/intro}\n"
+        "\\input{chapters/methods}\n\\bibliography{../refs}\n"
+        "\\end{document}\n"
+    )
+    Path("paper/chapters/intro.tex").write_text("We follow \\cite{liu2025}.\n")
+    Path("paper/chapters/methods.tex").write_text(
+        "The rate is \\ckrefval{liu2025}{lr}, over 250 epochs with a batch "
+        "of 128.\n"
+        "\\begin{verbatim}\n\\ckrefval{liu2025}{example}\n\\end{verbatim}\n"
+        "Write \\verb|\\ckrefval{liu2025}{other}| to quote one.\n"
+    )
+    ck_info = calkit.load_calkit_info()
+    ck_info["references"] = [
+        {
+            "path": "refs.bib",
+            "files": {"liu2025": "refs/liu2025.pdf"},
+            "values": {
+                "liu2025": {"lr": {"value": 0.001, "page": 1}},
+                "wu2024": {
+                    "epochs": {"value": 250},
+                    "batch": {"value": 128},
+                },
+            },
+        }
+    ]
+    ck_info["environments"] = {"tex": {"kind": "texlive"}}
+    ck_info["pipeline"] = {
+        "stages": {
+            "paper": {
+                "kind": "latex",
+                "target_path": "paper/main.tex",
+                "environment": "tex",
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    calkit.pipeline.to_dvc(write=True)
+    res = check_reproducibility(log_func=lambda *a: None, offline=True)
+    assert res.retyped_values == []
+    assert not any(
+        rv.VALUES_PATH in str(gap) for gap in res.provenance_gaps or []
+    )
+    assert rv.VALUES_PATH not in res.to_pretty()
+    assert res.refval_problems == []
+    # A document using only \ckrefval gets the package too
+    Path("other.tex").write_text(
+        "\\documentclass{article}\n\\begin{document}\n"
+        "\\ckrefval{liu2025}{lr}\n\\end{document}\n"
+    )
+    assert calkit.latex.load_package("other.tex")
+    assert "\\usepackage{calkit}" in Path("other.tex").read_text()
+
+
+def test_markdown_uses(tmp_path):
+    # Examples in code aren't uses, and nocite in front matter isn't citing
+    doc = tmp_path / "index.qmd"
+    doc.write_text(
+        "---\nbibliography: refs.bib\nnocite: '@wu2024'\n---\n\n"
+        "Rate {{< ckrefval liu2025 lr >}} [@liu2025].\n\n"
+        "```markdown\n{{< ckrefval liu2025 example >}}\n```\n\n"
+        "Write `<!-- ckrefval liu2025 other --><!-- /ckrefval -->`.\n"
+    )
+    uses = rv.find_uses(["index.qmd"], wdir=str(tmp_path))
+    assert [(u.file, u.line, u.key, u.name) for u in uses] == [
+        ("index.qmd", 6, "liu2025", "lr")
+    ]
+    assert rv.get_cited_keys("index.qmd", wdir=str(tmp_path)) == {"liu2025"}
+
+
+def test_new_ref_value_and_markdown_check(tmp_dir):
+    # Recording a value writes the file documents read, and a check of
+    # Markdown values reads them from calkit.yaml, needing no file
+    import subprocess
+
+    import calkit
+
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    Path("refs.bib").write_text("@article{liu2025, title={Orbits}}\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["references"] = [{"path": "refs.bib"}]
+    calkit.save_calkit_info(ck_info)
+    p = subprocess.run(
+        ["calkit", "new", "ref-value", "liu2025", "x", "--value", "nan"],
+        capture_output=True,
+        text=True,
+    )
+    assert p.returncode != 0
+    assert "isn't a number" in p.stderr
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "ref-value",
+            "liu2025",
+            "lr",
+            "--value",
+            "0.001",
+            "--no-check",
+        ],
+        stdout=subprocess.DEVNULL,
+    )
+    with open(rv.VALUES_PATH) as f:
+        assert json.load(f) == {"liu2025": {"lr": 0.001}}
+    os.remove(rv.VALUES_PATH)
+    import calkit.markdown
+
+    text = "Rate <!-- ckrefval liu2025 lr -->x<!-- /ckrefval -->.\n"
+    out, changed = calkit.markdown.set_values(
+        text,
+        "doc.md",
+        data={rv.VALUES_PATH: rv.get_values_data(calkit.load_calkit_info())},
+    )
+    assert changed
+    assert "-->0.001<!--" in out
+    assert not os.path.exists(rv.VALUES_PATH)

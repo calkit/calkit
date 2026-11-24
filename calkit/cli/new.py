@@ -1079,6 +1079,8 @@ def new_ref_value(
                     "use --no-check to add it anyway"
                 )
     calkit.save_calkit_info(ck_info)
+    # What documents read the values from
+    calkit.refvalues.write_values_file(ck_info)
     typer.echo(f"Added '{name}' to '{key}' in {collection}")
     typer.echo(
         f"Quote it with \\ckrefval{{{key}}}{{{name}}} in LaTeX, "

@@ -1494,10 +1494,19 @@ def expand_ck_info(
             with open(read_path, encoding="utf-8") as f:
                 text = f.read()
             # What it shows, and calkit.yaml for the questions its values
-            # link to
+            # link to, and for the values it quotes from references, so not
+            # the file Calkit writes those to, which isn't there without any
+            from calkit.refvalues import VALUES_PATH
+
             inputs = (
                 list(md_cfg.get("inputs") or [])
-                + pdf_inputs(text, md_path, results=results_by_name(ck_info))
+                + [
+                    p
+                    for p in pdf_inputs(
+                        text, md_path, results=results_by_name(ck_info)
+                    )
+                    if p != VALUES_PATH
+                ]
                 + ["calkit.yaml"]
             )
             sub = {
@@ -2985,7 +2994,8 @@ def format_value(value: Any, fmt: str | None = None) -> str:
 # A compact marker with calkit.sty's bracketed option, e.g.,
 # ``ckvalue[.4f] metrics rms``, which reads naturally coming from LaTeX
 _BRACKET_CKVALUE_RE = re.compile(
-    r"<!--(?P<lead>\s*)ckvalue\[(?P<bformat>[^\]]*)\](?P<bargs>.*?)-->"
+    r"<!--(?P<lead>\s*)(?P<bcmd>ckvalue|ckrefval)\[(?P<bformat>[^\]]*)\]"
+    r"(?P<bargs>.*?)-->"
 )
 
 
@@ -3053,7 +3063,7 @@ def heal_markers(text: str) -> tuple[str, int]:
             fmt = format_arg(m.group("bformat"), args)
             if fmt is None:
                 continue
-            new = f"<!--{m.group('lead')}ckvalue {args} {fmt} -->"
+            new = f"<!--{m.group('lead')}{m.group('bcmd')} {args} {fmt} -->"
             bare = bare[: m.start()] + new + bare[m.end() :]
             n += 1
         out.append(bare + line[len(line.rstrip("\r\n")) :])
@@ -3065,6 +3075,7 @@ def set_values(
     markdown_path: str,
     wdir: str | None = None,
     results: dict[str, str] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> tuple[str, bool]:
     """Rewrite each value marker's text from its results file.
 
@@ -3086,7 +3097,9 @@ def set_values(
     if not values:
         return text, text != original
     path = Path(markdown_path).as_posix()
-    data_by_path: dict[str, Any] = {}
+    # What's given, e.g., the values quoted from references, read from
+    # calkit.yaml rather than the file Calkit writes them to
+    data_by_path: dict[str, Any] = dict(data or {})
     for value in values:
         if value.path in data_by_path:
             continue

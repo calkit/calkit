@@ -942,7 +942,8 @@ def _project_values(
     for tex_path in sorted(tex_paths):
         _, components = read_ck_usage(tex_path)
         for c in components:
-            if c.kind != "value":
+            # A value quoted from a reference isn't one the pipeline computes
+            if c.kind != "value" or c.ref is not None:
                 continue
             rel, _ = component_path(
                 c, lambda p: os.path.isfile(os.path.join(wdir, p))
@@ -1230,14 +1231,19 @@ def get_document_paths(wdir: str, ck_info: dict, stages: dict) -> list[str]:
 
 
 def check_reproducibility(
-    wdir: str = ".", log_func: Callable | None = None, offline: bool = False
+    wdir: str = ".",
+    log_func: Callable | None = None,
+    offline: bool = False,
+    zotero_desktop: bool = True,
 ) -> ReproCheck:
     """Check the reproducibility of a project.
 
     Values quoted from references are checked against the references' PDFs,
     and typed numbers in sentences citing a reference are looked for in
     them. Without ``offline``, open-access PDFs are downloaded into
-    ``.calkit/local`` for that, but never stored in the project.
+    ``.calkit/local`` for that, but never stored in the project. With
+    ``zotero_desktop``, Zotero desktop on this machine is asked for them
+    too, which a server shouldn't do.
     """
     from git.exc import InvalidGitRepositoryError
 
@@ -1399,26 +1405,24 @@ def check_reproducibility(
         from calkit.references import Lookup
 
         lookup = Lookup(wdir=wdir, offline=offline)
-        read = refvalues.cached_pages()
+        # Shared, so each reference's PDF is found and read once
+        finder = refvalues.PdfFinder(
+            ck_info,
+            wdir=wdir,
+            download=not offline,
+            lookup=lookup,
+            zotero_desktop=zotero_desktop,
+        )
         checked = refvalues.check_project(
             ck_info,
             get_document_paths(wdir, ck_info, stages),
             wdir=wdir,
-            download=not offline,
-            lookup=lookup,
-            read=read,
+            finder=finder,
         )
         res["refval_problems"] = checked["problems"]
         res["refvals_unchecked"] = checked["unchecked"]
         if cited:
-            refvalues.search_cited(
-                cited,
-                ck_info,
-                wdir=wdir,
-                download=not offline,
-                lookup=lookup,
-                read=read,
-            )
+            refvalues.search_cited(cited, ck_info, wdir=wdir, finder=finder)
         try:
             lookup.save()
         except OSError:

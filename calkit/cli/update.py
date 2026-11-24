@@ -560,11 +560,11 @@ def update_markdown(
     results = calkit.markdown.results_by_name(ck_info)
     # Values quoted from references come from calkit.yaml, so a check needs
     # no file, and the file Calkit writes them to is brought up to date
-    import calkit.refvalues
+    import calkit.references.values
 
-    refvals = calkit.refvalues.get_values_data(ck_info)
+    refvals = calkit.references.values.get_values_data(ck_info)
     if not check:
-        calkit.refvalues.write_values_file(ck_info)
+        calkit.references.values.write_values_file(ck_info)
     stale = []
     problems = []
     for path in paths:

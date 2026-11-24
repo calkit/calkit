@@ -1668,7 +1668,7 @@ class ProvenanceGap:
 
 
 #: Where Calkit writes the values documents quote from references, as
-#: ``calkit.refvalues.VALUES_DIR`` names it
+#: ``calkit.references.values.VALUES_DIR`` names it
 REF_VALUES_DIR = ".calkit/reference-values"
 
 

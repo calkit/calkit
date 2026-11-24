@@ -3439,7 +3439,7 @@ def to_dvc(
     # a document quoting them depends on it, not on all of calkit.yaml, and
     # it has to be there before stages work out what they depend on
     if write:
-        from calkit.refvalues import write_values_file
+        from calkit.references.values import write_values_file
 
         write_values_file(ck_info, wdir=wdir)
     # Stages that work out what they depend on from the project, which only

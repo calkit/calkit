@@ -130,7 +130,7 @@ def render(
             text, document_rel, results=results_by_name(ck_info)
         )
         if any(v.ref for v in values):
-            from calkit.refvalues import write_values_file
+            from calkit.references.values import write_values_file
 
             write_values_file(ck_info, wdir=project_dir)
         if values:

@@ -1254,7 +1254,7 @@ def _with_cited_keys(
     A sentence is read across the lines of its paragraph, since one in a
     hard-wrapped document often cites on another line than its number.
     """
-    from calkit.refvalues import get_line_cited_keys
+    from calkit.references.values import get_line_cited_keys
 
     lines = content.splitlines()
     for finding in findings:
@@ -1465,7 +1465,7 @@ def check_reproducibility(
     res["retyped_values"] = literals["retyped"]
     res["unattributed_numbers"] = literals["unattributed"]
     # Values quoted from references, and numbers in sentences citing one
-    from calkit import refvalues
+    from calkit.references import values as refvalues
 
     res["n_refvals"] = len(refvalues.iter_declared_values(ck_info))
     cited = [f for f in literals["unattributed"] if f.get("cited_keys")]

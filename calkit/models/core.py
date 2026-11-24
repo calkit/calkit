@@ -695,7 +695,7 @@ def _reference_files_by_key(v: object) -> object:
     """A collection's files by citation key, reading the list of key and
     path Calkit wrote before.
     """
-    from calkit.refvalues import get_reference_files
+    from calkit.references.values import get_reference_files
 
     if isinstance(v, list):
         return get_reference_files({"files": v})

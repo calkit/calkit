@@ -1082,9 +1082,9 @@ def get_contents_from_tree(
             ck_objects[item["path"]] = item
             # Handle files inside references objects
             if category == "references":
-                import calkit.refvalues
+                import calkit.references.values
 
-                for key, path in calkit.refvalues.get_reference_files(
+                for key, path in calkit.references.values.get_reference_files(
                     item
                 ).items():
                     ck_objects[path] = dict(

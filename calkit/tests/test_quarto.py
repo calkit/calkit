@@ -271,7 +271,7 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
 def test_refvals(tmp_path):
     # A value quoted from a reference is read from the file Calkit writes
     # its reference's values to, by name, in document order
-    from calkit.refvalues import get_values_path, write_values_file
+    from calkit.references.values import get_values_path, write_values_file
 
     path = get_values_path("liu.2025")
 
@@ -320,7 +320,7 @@ def test_refval_shortcode(tmp_path, monkeypatch):
     # Quarto renders the shortcode itself, finding the file of a
     # reference's values as Python names it, whatever the key, and a
     # missing one as ??
-    from calkit.refvalues import write_values_file
+    from calkit.references.values import write_values_file
 
     monkeypatch.chdir(tmp_path)
     (tmp_path / "calkit.yaml").write_text("name: t\n")

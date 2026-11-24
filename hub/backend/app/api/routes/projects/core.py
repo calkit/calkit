@@ -66,7 +66,7 @@ import calkit.latex
 import calkit.pipeline
 import calkit.provenance
 import calkit.questions
-import calkit.refvalues
+import calkit.references.values
 import calkit.resources
 import calkit.templates
 from app import (
@@ -9666,7 +9666,9 @@ def get_project_references(
             final_entries = []
             # Keyed by citation key, or a list of key and path, as Calkit
             # wrote before
-            file_paths = calkit.refvalues.get_reference_files(ref_collection)
+            file_paths = calkit.references.values.get_reference_files(
+                ref_collection
+            )
             for entry in entries:
                 key = entry.pop("ID")
                 reftype = entry.pop("ENTRYTYPE")
@@ -9712,7 +9714,7 @@ def get_project_references(
         # writes them
         ref_collection["files"] = [
             {"key": key, "path": path}
-            for key, path in calkit.refvalues.get_reference_files(
+            for key, path in calkit.references.values.get_reference_files(
                 ref_collection
             ).items()
         ]

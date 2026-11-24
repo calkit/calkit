@@ -831,7 +831,7 @@ def ref_component(key: str, name: str, format: str = "") -> CkComponent:
     """The value a \\ckrefval quotes, as a component read from the file
     of its reference's values, which calkit.sty names ``ref:<key>``.
     """
-    from calkit.refvalues import get_values_path
+    from calkit.references.values import get_values_path
 
     return CkComponent(
         "value",
@@ -1425,7 +1425,7 @@ def map_ck_components(
     # Values quoted from references are read from the file Calkit writes
     # them to, which is brought up to date with calkit.yaml first
     if ck_info is not None and any(c.ref for c in components):
-        from calkit.refvalues import write_values_file
+        from calkit.references.values import write_values_file
 
         write_values_file(ck_info, wdir=root)
     if previous_values is None:

@@ -460,7 +460,7 @@ def download_pdf(url: str, dest: Path) -> Path | None:
     import urllib.error
     import urllib.request
 
-    from calkit.references import USER_AGENT
+    from calkit.references.check import USER_AGENT
 
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -591,7 +591,7 @@ class PdfFinder:
         read: Callable[[Path], list[str]] | None = None,
         zotero_desktop: bool = True,
     ) -> None:
-        from calkit.references import (
+        from calkit.references.check import (
             get_declared_collection_paths,
             load_collections,
         )
@@ -723,7 +723,7 @@ def find_collections_with_key(
     ck_info: dict, key: str, wdir: str | None = None
 ) -> list[str]:
     """The declared collections that define a citation key."""
-    from calkit.references import (
+    from calkit.references.check import (
         get_declared_collection_paths,
         load_collections,
     )
@@ -989,7 +989,7 @@ def get_document_bibliographies(
     import yaml
 
     from calkit.latex import flatten
-    from calkit.references import get_named_collection_paths
+    from calkit.references.check import get_named_collection_paths
 
     base = wdir or "."
     full = os.path.join(base, document)
@@ -1028,7 +1028,7 @@ def get_cited_keys(document: str, wdir: str | None = None) -> set[str]:
     front matter, or a Quarto cross-reference.
     """
     from calkit.latex import flatten
-    from calkit.references import (
+    from calkit.references.check import (
         _MD_SKIP_RE,
         CROSSREF_RE,
         MARKDOWN_CITE_RE,
@@ -1065,7 +1065,7 @@ def get_cited_keys(document: str, wdir: str | None = None) -> set[str]:
 def get_line_cited_keys(line: str, markdown: bool) -> list[str]:
     """The citation keys one line of a document cites, in order."""
     from calkit.latex import SourceLine
-    from calkit.references import (
+    from calkit.references.check import (
         CROSSREF_RE,
         MARKDOWN_CITE_RE,
         find_cited_keys,
@@ -1088,7 +1088,7 @@ def get_line_cited_keys(line: str, markdown: bool) -> list[str]:
 
 def _same_entry(a: dict, b: dict) -> bool:
     """Whether two collections' entries for a key are the same work."""
-    from calkit.references import normalize_doi, normalize_title
+    from calkit.references.check import normalize_doi, normalize_title
 
     doi_a, doi_b = normalize_doi(a.get("doi")), normalize_doi(b.get("doi"))
     if doi_a and doi_b:
@@ -1126,7 +1126,7 @@ def check_project(
     the ``key`` and ``name``, and the ``problem``, and ``unchecked``, the
     values whose reference has no PDF with text to check them against.
     """
-    from calkit.references import (
+    from calkit.references.check import (
         get_declared_collection_paths,
         load_collections,
     )

@@ -729,7 +729,7 @@ def extract_values(
         _ckvalue_args,
         _resolve_source,
     )
-    from calkit.refvalues import get_values_path
+    from calkit.references.values import get_values_path
 
     path = Path(document_path).as_posix()
     values = []

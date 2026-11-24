@@ -1,4 +1,4 @@
-"""Tests for ``calkit.refvalues``."""
+"""Tests for ``calkit.references.values``."""
 
 import json
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import calkit.refvalues as rv
+import calkit.references.values as rv
 
 
 def write_pdf(path: Path, pages: list[list[str]]) -> Path:

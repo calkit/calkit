@@ -1023,7 +1023,7 @@ def new_ref_value(
     It's checked against the reference's PDF, if one can be found, unless
     --no-check is given.
     """
-    import calkit.refvalues
+    import calkit.references.values
 
     ck_info = calkit.load_calkit_info()
     parsed: str | int | float = value
@@ -1034,7 +1034,7 @@ def new_ref_value(
         except ValueError:
             continue
     try:
-        collection = calkit.refvalues.add_value(
+        collection = calkit.references.values.add_value(
             ck_info,
             key=key,
             name=name,
@@ -1050,11 +1050,11 @@ def new_ref_value(
         from calkit.references import load_collections
 
         entry = load_collections(paths=[collection]).get(collection, {})
-        source = calkit.refvalues.get_pdf(
+        source = calkit.references.values.get_pdf(
             collection,
             key,
             entry=entry.get(key),
-            file=calkit.refvalues.get_entry_file(
+            file=calkit.references.values.get_entry_file(
                 next(
                     c
                     for c in ck_info["references"]
@@ -1067,8 +1067,8 @@ def new_ref_value(
         if source is None:
             warn(f"Couldn't find a PDF of '{key}' to check it against")
         else:
-            problem = calkit.refvalues.check_value(
-                calkit.refvalues.read_pdf_pages(source.path),
+            problem = calkit.references.values.check_value(
+                calkit.references.values.read_pdf_pages(source.path),
                 parsed,
                 page=page,
                 context=context,
@@ -1080,7 +1080,7 @@ def new_ref_value(
                 )
     calkit.save_calkit_info(ck_info)
     # What documents read the values from
-    calkit.refvalues.write_values_file(ck_info)
+    calkit.references.values.write_values_file(ck_info)
     typer.echo(f"Added '{name}' to '{key}' in {collection}")
     typer.echo(
         f"Quote it with \\ckrefval{{{key}}}{{{name}}} in LaTeX, "

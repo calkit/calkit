@@ -120,6 +120,8 @@ services:
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
       - HF_CLIENT_ID=${HF_CLIENT_ID:-}
       - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
+      - BOX_CLIENT_ID=${BOX_CLIENT_ID:-}
+      - BOX_CLIENT_SECRET=${BOX_CLIENT_SECRET:-}
 
   backend:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
@@ -189,6 +191,8 @@ services:
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
       - HF_CLIENT_ID=${HF_CLIENT_ID:-}
       - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
+      - BOX_CLIENT_ID=${BOX_CLIENT_ID:-}
+      - BOX_CLIENT_SECRET=${BOX_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # Wipe stale per-worker metric files from a previous run so restarts
@@ -322,9 +326,12 @@ services:
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
       - HF_CLIENT_ID=${HF_CLIENT_ID:-}
       - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
+      - BOX_CLIENT_ID=${BOX_CLIENT_ID:-}
+      - BOX_CLIENT_SECRET=${BOX_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
-    command: ["rq", "worker", "--url", "${REDIS_URL:-redis://cache:6379/0}", "warm"]
+    # The scheduler runs jobs queued for later, e.g., the daily Box keepalive
+    command: ["rq", "worker", "--with-scheduler", "--url", "${REDIS_URL:-redis://cache:6379/0}", "warm"]
 
   backend-dvc:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
@@ -385,6 +392,8 @@ services:
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
       - HF_CLIENT_ID=${HF_CLIENT_ID:-}
       - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
+      - BOX_CLIENT_ID=${BOX_CLIENT_ID:-}
+      - BOX_CLIENT_SECRET=${BOX_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # Wipe stale per-worker metric files from a previous run so restarts

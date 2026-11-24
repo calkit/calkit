@@ -23,6 +23,11 @@ import {
 } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
+import {
+  getStorageLabel,
+  getStorageServiceName,
+  getStorageUrl,
+} from "../../lib/storage"
 
 interface DeleteProps {
   type: string
@@ -204,15 +209,12 @@ const Delete = ({
                   </Checkbox>
                   {connectedStorage.length > 0 && (
                     <Text mt={2} fontSize="sm" color="ui.dim">
-                      Stays on Hugging Face. To delete, go to{" "}
+                      Connected storage stays. To delete, go to{" "}
                       {connectedStorage.map((r, i) => (
                         <React.Fragment key={r.id}>
                           {i > 0 && ", "}
-                          <Link
-                            href={`https://huggingface.co/buckets/${r.bucket}`}
-                            isExternal
-                          >
-                            {r.bucket}
+                          <Link href={getStorageUrl(r)} isExternal>
+                            {getStorageServiceName(r.kind)} {getStorageLabel(r)}
                           </Link>
                         </React.Fragment>
                       ))}

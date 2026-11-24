@@ -2392,12 +2392,13 @@ def test_disconnect_huggingface_with_storage(
                 url, headers=headers, params={"storage_action": "transfer"}
             )
         assert response.status_code == 200
-        q.assert_called_once_with(str(user.id))
+        q.assert_called_once_with(str(user.id), "huggingface")
     assert is_connected()
     assert db.get(StorageResource, resource_id) is not None
     # One at a time
     with patch(
-        "app.tasks.get_storage_transfer_status", return_value=("running", None)
+        "app.tasks.get_storage_transfer_status",
+        return_value=("running", None, "huggingface"),
     ):
         response = client.delete(
             url, headers=headers, params={"storage_action": "transfer"}
@@ -2420,3 +2421,127 @@ def test_disconnect_huggingface_with_storage(
     ):
         response = client.get("/user/connected-accounts", headers=headers)
     assert response.json()["huggingface"]
+
+
+def test_connect_box(client: TestClient, db: Session) -> None:
+    import json
+    import urllib.parse
+    from datetime import timedelta
+
+    from app.core import utcnow
+    from app.models import StorageResource
+
+    email = random_email()
+    headers = authentication_token_from_email(
+        client=client, email=email, db=db
+    )
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    # Unavailable until the hub has a Box app
+    with patch("app.api.routes.users.settings.BOX_CLIENT_ID", None):
+        response = client.post(
+            "/user/box-auth/start", headers=headers, json={"state": "s"}
+        )
+    assert response.status_code == 501
+    with (
+        patch("app.api.routes.users.settings.BOX_CLIENT_ID", "id"),
+        patch("app.api.routes.users.settings.BOX_CLIENT_SECRET", "secret"),
+    ):
+        response = client.post(
+            "/user/box-auth/start", headers=headers, json={"state": "s"}
+        )
+    assert response.status_code == 200
+    started = response.json()
+    assert started["redirect_uri"].endswith("/auth/box")
+    params = urllib.parse.parse_qs(
+        urllib.parse.urlparse(started["authorize_url"]).query
+    )
+    assert params["client_id"] == ["id"]
+    assert params["state"] == ["s"]
+    assert params["scope"] == ["root_readwrite"]
+    assert params["redirect_uri"] == [started["redirect_uri"]]
+
+    def login(account_id: str, me_ok: bool = True) -> int:
+        token = SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "access_token": f"access_{account_id}",
+                "refresh_token": f"refresh_{account_id}",
+                "expires_in": 3600,
+            },
+        )
+        me = SimpleNamespace(
+            ok=me_ok,
+            json=lambda: {
+                "id": account_id,
+                "login": f"{account_id}@example.edu",
+                "name": account_id,
+                "enterprise": {"name": "Some University"},
+            },
+        )
+        with (
+            patch("app.api.routes.users.settings.BOX_CLIENT_ID", "id"),
+            patch("app.api.routes.users.settings.BOX_CLIENT_SECRET", "secret"),
+            patch("requests.post", return_value=token) as post,
+            patch("requests.get", return_value=me),
+        ):
+            response = client.post(
+                "/user/box-auth",
+                headers=headers,
+                json={"code": "code", "redirect_uri": started["redirect_uri"]},
+            )
+        assert post.call_args.kwargs["data"]["client_secret"] == "secret"
+        db.expire_all()
+        return response.status_code
+
+    assert login("1") == 200
+    response = client.get("/user/box-account", headers=headers)
+    assert response.json() == {
+        "login": "1@example.edu",
+        "name": "1",
+        "enterprise": "Some University",
+    }
+    response = client.get("/user/connected-accounts", headers=headers)
+    assert response.json()["box"] is True
+    # HF storage doesn't stop switching Box accounts, but Box storage does
+    resource = StorageResource(
+        owner_account_id=user.account.id,
+        project_id=None,
+        name="hf",
+        kind="hf-bucket",
+        bucket="someone/bucket",
+        credential_user_id=user.id,
+    )
+    db.add(resource)
+    db.commit()
+    assert login("2") == 200
+    resource.kind = "box-folder"
+    db.add(resource)
+    db.commit()
+    resource_id = resource.id
+    assert login("3") == 409
+    assert login("2", me_ok=False) == 502
+    credential = users.get_external_credential(
+        session=db, user=user, provider="box"
+    )
+    assert credential is not None
+    assert credential.provider_account_id == "2"
+    secret = json.loads(users.decrypt_secret(credential.secret_payload))
+    assert secret == {"access_token": "access_2", "refresh_token": "refresh_2"}
+    assert credential.expires is not None
+    assert credential.expires > utcnow() + timedelta(minutes=55)
+    # Disconnecting with Box storage needs a choice about it
+    response = client.delete("/user/external-credentials/box", headers=headers)
+    assert response.status_code == 409
+    response = client.delete(
+        "/user/external-credentials/box",
+        headers=headers,
+        params={"storage_action": "orphan"},
+    )
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(StorageResource, resource_id) is None
+    assert (
+        users.get_external_credential(session=db, user=user, provider="box")
+        is None
+    )

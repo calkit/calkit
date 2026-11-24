@@ -368,3 +368,146 @@ def test_unreachable_storage() -> None:
             storage.set_project_bucket_visibility(session, project, False)  # type: ignore[arg-type]
         assert e.value.resource is resource
     api.return_value.update_bucket_settings.assert_not_called()
+
+
+def test_box_storage(db: Session) -> None:
+    import time
+    import uuid
+    from datetime import timedelta
+
+    from app import users
+    from app.core import utcnow
+    from app.models import Project, ProjectStorageHistory, StorageResource
+    from app.tests import create_random_user
+    from calkit.tests.test_box import FakeBox, make_response
+
+    # Folder IDs from other tests' fakes would collide
+    storage._box_access.clear()
+    storage._box_folder_ids.clear()
+    box = FakeBox()
+    calkit_folder = box.add("folder", "Calkit", "0")["id"]
+    user = create_random_user(db)
+    for provider in ("box", "huggingface"):
+        users.save_external_credential(
+            session=db,
+            user=user,
+            provider=provider,
+            secret_payload=json.dumps(
+                {"access_token": "token", "refresh_token": "r"}
+            ),
+            expires=utcnow() + timedelta(hours=1),
+        )
+    project = Project(
+        name=f"box-{uuid.uuid4().hex[:8]}",
+        title="Box project",
+        git_repo_url="https://github.com/someone/box",
+        owner_account_id=user.account.id,
+        owner_account=user.account,
+    )
+    db.add(project)
+    db.commit()
+    resources = {}
+    for kind, bucket in (("box-folder", calkit_folder), ("hf-bucket", "a/b")):
+        resources[kind] = StorageResource(
+            owner_account_id=user.account.id,
+            name=kind,
+            kind=kind,
+            bucket=bucket,
+            credential_user_id=user.id,
+        )
+        db.add(resources[kind])
+    db.commit()
+    db.add(
+        ProjectStorageHistory(
+            project_id=project.id,
+            storage_resource_id=resources["box-folder"].id,
+        )
+    )
+    project.dvc_storage_id = resources["box-folder"].id
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    # Each provider's connection only reaches its own storage
+    for provider, kind in (
+        ("box", "box-folder"),
+        ("huggingface", "hf-bucket"),
+    ):
+        assert [
+            r.kind
+            for r in storage.get_credential_resources(db, user.id, provider)
+        ] == [kind]
+    owner = user.account.name
+    downscopes = []
+
+    def downscope(url, data, timeout):
+        downscopes.append(data)
+        return make_response(
+            200, {"access_token": "token", "expires_in": 3600}
+        )
+
+    with (
+        patch.object(
+            requests.Session,
+            "request",
+            side_effect=lambda method, url, **kw: box.request(
+                method, url, **kw
+            ),
+        ),
+        patch.object(requests, "post", side_effect=downscope),
+    ):
+        target = storage.get_project_storage(db, project)
+        assert target.backend == "box"
+        locations = storage.get_project_storage_locations(db, project)
+        assert [s.backend for s in locations] == ["box", storage.get_backend()]
+        # Objects go under the owner and project in the Calkit folder
+        path = "files/md5/ab/cdef"
+        storage.put_project_objects(
+            target, owner, project.name, [(path, b"content")]
+        )
+        fpath = target.make_project_path(owner, project.name, path)
+        assert target.fs.cat_file(fpath) == b"content"
+        project_folder = target.fs.get_folder_id(
+            target.make_project_path(owner, project.name)
+        )
+        assert box.items[project_folder]["name"] == project.name.lower()
+        found = storage.find_project_object(db, project, path)
+        assert found is not None and found[0].backend == "box"
+        assert storage.get_project_object_sizes(
+            target, owner, project.name
+        ) == {path: 7}
+        # Clients get tokens downscoped to the project's folder, which are
+        # reused for the same folder and operation
+        for _ in range(2):
+            access = storage.get_box_access(
+                target, owner, project.name, "download"
+            )
+        assert access["folder_id"] == project_folder
+        assert access["expires_at_unixts"] > time.time() + 3000
+        assert len(downscopes) == 1
+        assert downscopes[0]["resource"].endswith(f"/folders/{project_folder}")
+        assert "item_upload" not in downscopes[0]["scope"]
+        storage.get_box_access(target, owner, project.name, "upload")
+        assert "item_upload" in downscopes[1]["scope"]
+        # Uploads to a project with no folder yet make it
+        other = target.make_project_path(owner, "other")
+        with pytest.raises(FileNotFoundError):
+            target.fs.get_folder_id(other)
+        storage.get_box_access(target, owner, "other", "upload")
+        assert target.fs.get_folder_id(other)
+        # Browsers get Box's own short-lived link
+        with patch.object(
+            requests,
+            "get",
+            return_value=make_response(
+                302, headers={"Location": "https://dl.box.test/x"}
+            ),
+        ) as get:
+            assert (
+                storage.get_project_object_url(target, fpath)
+                == "https://dl.box.test/x"
+            )
+        file_id = target.fs.get_file_id(fpath)
+        assert get.call_args.args[0].endswith(f"/files/{file_id}/content")
+        # And nothing is ever deleted from it
+        with pytest.raises(PermissionError):
+            target.fs.rm(fpath)

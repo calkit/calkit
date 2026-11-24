@@ -23,6 +23,7 @@ import type {
   BodyProjectsPostProjectPublication,
   BodyProjectsPostProjectUpload,
   BodyProjectsPutProjectContents,
+  BoxAuthStartRequest,
   CheckIn,
   CommentReply,
   ContentPatch,
@@ -264,23 +265,25 @@ import type {
   GetSubscriptionPlansResponses,
   GetTemplatesErrors,
   GetTemplatesResponses,
+  GetUserBoxAccountResponses,
   GetUserConnectedAccountsResponses,
   GetUserGithubAppInstallationsResponses,
   GetUserGithubReposErrors,
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
   GetUserHuggingfaceAccountResponses,
-  GetUserHuggingfaceStorageResponses,
-  GetUserHuggingfaceStorageTransferResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
   GetUserOverleafSessionResponses,
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
+  GetUserServiceStorageErrors,
+  GetUserServiceStorageResponses,
   GetUserStorageByIdErrors,
   GetUserStorageByIdResponses,
   GetUserStorageResponses,
+  GetUserStorageTransferResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
   GetUserTotpErrors,
@@ -386,6 +389,8 @@ import type {
   PostMachineWakeResponses,
   PostOrgErrors,
   PostOrgResponses,
+  PostProjectBoxFolderErrors,
+  PostProjectBoxFolderResponses,
   PostProjectCollaboratorByEmailErrors,
   PostProjectCollaboratorByEmailResponses,
   PostProjectCommentErrors,
@@ -472,6 +477,10 @@ import type {
   PostProjectZoteroSyncResponses,
   PostReleaseCommentErrors,
   PostReleaseCommentResponses,
+  PostUserBoxAuthErrors,
+  PostUserBoxAuthResponses,
+  PostUserBoxAuthStartErrors,
+  PostUserBoxAuthStartResponses,
   PostUserEmailChangeCodeErrors,
   PostUserEmailChangeCodeResponses,
   PostUserEmailVerificationConfirmErrors,
@@ -2180,6 +2189,100 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/huggingface-account",
+      ...options,
+    })
+  }
+
+  /**
+   * Post User Box Auth Start
+   *
+   * Get the URL to send the user to for connecting Box.
+   *
+   * It's built here since the client ID is only configured on the backend.
+   */
+  public static postUserBoxAuthStart<ThrowOnError extends boolean = true>(
+    parameters: {
+      boxAuthStartRequest: BoxAuthStartRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserBoxAuthStartResponses,
+    PostUserBoxAuthStartErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "boxAuthStartRequest", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserBoxAuthStartResponses,
+      PostUserBoxAuthStartErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/box-auth/start",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post User Box Auth
+   *
+   * Connect Box using an authorization code.
+   */
+  public static postUserBoxAuth<ThrowOnError extends boolean = true>(
+    parameters: {
+      appApiRoutesUsersOAuthCodeExchange: AppApiRoutesUsersOAuthCodeExchange
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserBoxAuthResponses,
+    PostUserBoxAuthErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "appApiRoutesUsersOAuthCodeExchange", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserBoxAuthResponses,
+      PostUserBoxAuthErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/box-auth",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Box Account
+   */
+  public static getUserBoxAccount<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserBoxAccountResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserBoxAccountResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/box-account",
       ...options,
     })
   }
@@ -10546,49 +10649,55 @@ export class StorageService {
   }
 
   /**
-   * Get User Huggingface Storage
+   * Get User Service Storage
    *
-   * Get the storage reached with the current user's HF account, which
-   * disconnecting it would make unreachable.
+   * Get the storage reached with the current user's account on a service,
+   * e.g., HF, which disconnecting it would make unreachable.
    */
-  public static getUserHuggingfaceStorage<ThrowOnError extends boolean = true>(
+  public static getUserServiceStorage<ThrowOnError extends boolean = true>(
+    parameters: {
+      provider: "huggingface" | "box"
+    },
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<GetUserHuggingfaceStorageResponses, unknown, ThrowOnError> {
+  ): RequestResult<
+    GetUserServiceStorageResponses,
+    GetUserServiceStorageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "provider" }] }],
+    )
     return (options?.client ?? client).get<
-      GetUserHuggingfaceStorageResponses,
-      unknown,
+      GetUserServiceStorageResponses,
+      GetUserServiceStorageErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/user/huggingface/storage",
+      url: "/user/{provider}/storage",
       ...options,
+      ...params,
     })
   }
 
   /**
-   * Get User Huggingface Storage Transfer
+   * Get User Storage Transfer
    *
-   * Get the status of moving the storage reached with the current user's
-   * HF account to the hub's own storage.
+   * Get the status of moving the storage reached with one of the current
+   * user's accounts on a service to the hub's own storage.
    */
-  public static getUserHuggingfaceStorageTransfer<
-    ThrowOnError extends boolean = true,
-  >(
+  public static getUserStorageTransfer<ThrowOnError extends boolean = true>(
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    GetUserHuggingfaceStorageTransferResponses,
-    unknown,
-    ThrowOnError
-  > {
+  ): RequestResult<GetUserStorageTransferResponses, unknown, ThrowOnError> {
     return (options?.client ?? client).get<
-      GetUserHuggingfaceStorageTransferResponses,
+      GetUserStorageTransferResponses,
       unknown,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/user/huggingface/storage-transfer",
+      url: "/user/storage-transfer",
       ...options,
     })
   }
@@ -10719,6 +10828,51 @@ export class StorageService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/storage/usage",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Box Folder
+   *
+   * Send a project's new DVC objects to the current user's Box.
+   *
+   * They go in the ``Calkit`` folder at the root of the user's Box, which is
+   * created if it isn't there, under ``{owner}/{project}``. The folder is
+   * shared by every project the owner account has there, so it's kept as
+   * storage the account's projects can select.
+   */
+  public static postProjectBoxFolder<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectBoxFolderResponses,
+    PostProjectBoxFolderErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectBoxFolderResponses,
+      PostProjectBoxFolderErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/storage/box-folder",
       ...options,
       ...params,
     })

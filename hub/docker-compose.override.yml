@@ -132,7 +132,7 @@ services:
       - watchfiles
       - --filter
       - python
-      - "rq worker --url ${REDIS_URL:-redis://cache:6379/0} warm"
+      - "rq worker --with-scheduler --url ${REDIS_URL:-redis://cache:6379/0} warm"
       - app
       - ../../calkit
 

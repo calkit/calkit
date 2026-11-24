@@ -70,7 +70,8 @@ follow, so the model has to fit all of them.
 | HF, connected with OAuth              | dedicated bucket                  | HF doesn't limit bucket count, and a bucket's visibility can match its project's        |
 | HF, with a token scoped to one bucket | dedicated bucket                  | The token can't create buckets, and a Xet read token covers a whole bucket              |
 | S3 and compatible                     | namespace bucket                  | Creating buckets takes broader permissions, and institutions usually provide one bucket |
-| Box, Dropbox, OneDrive, Google Drive  | namespace folder, e.g., `Calkit/` | Their narrower OAuth scopes are limited to a folder like this                           |
+| Box                                   | namespace folder, e.g., `Calkit/` | Tokens can be downscoped to one project's folder, so projects can share it              |
+| Dropbox, OneDrive, Google Drive       | namespace folder, e.g., `Calkit/` | Their narrower OAuth scopes are limited to a folder like this                           |
 
 A service may offer the other kind as an option,
 e.g., a dedicated S3 bucket when the credential can create one.
@@ -79,6 +80,12 @@ and its buckets are always dedicated.
 A Xet read token covers a whole bucket,
 so a reader of one public project in a shared bucket could fetch another
 project's content if they knew its Xet hash.
+
+<!-- TODO: needs human review -->
+
+Box has no OAuth scope narrower than the whole account,
+so the hub holds a token for all of it.
+Clients only get tokens downscoped to one project's folder.
 
 ### Layout
 
@@ -94,6 +101,11 @@ so storage can be used with the service's own tools:
   i.e., `files/md5/{2 characters}/{rest of hash}`.
 - Clients always see paths as `{owner}/{project}/...`,
   whichever kind of resource the objects are in.
+
+Box addresses items by ID, not path,
+so the hub keeps the ID of a Box namespace folder rather than its path,
+and paths under it are resolved by listing folders.
+The folder can then be moved or renamed in Box.
 
 Creating a dedicated bucket fails if the name is taken.
 The hub doesn't adopt the existing bucket,
@@ -126,6 +138,24 @@ and they reuse it and batch transfers until it nearly expires.
 Anything the scoped access can't do,
 e.g., adding paths to an HF bucket,
 clients ask the hub to do in batches.
+
+<!-- TODO: needs human review -->
+
+A Box token downscoped to a project's folder can do everything a client
+needs there, i.e., make folders, upload, list, and download,
+so Box needs nothing from the hub after the token.
+Clients look up where many objects are in one request to the hub,
+and download each by its Box ID.
+
+### Keeping connections alive
+
+<!-- TODO: needs human review -->
+
+Box refresh tokens work once and lapse after 60 days unused,
+so a project nobody touches for that long would lose its storage.
+A daily job on the worker refreshes connections unused for a month.
+Refreshes of one connection take turns under a row lock,
+since a second refresh with the same token would disconnect it.
 
 ### Changing storage
 

@@ -569,3 +569,128 @@ def test_batch_op_answers_every_path(client: TestClient):
     assert exists_results["f1"]["exists"] is True
     assert exists_results["missing"]["exists"] is False
     assert fake_fs.cat_file.call_count == 50
+
+
+def test_box_storage_with_fallback(client: TestClient) -> None:
+    import requests
+    from fsspec.implementations.memory import (  # type: ignore[import-untyped]
+        MemoryFileSystem,
+    )
+
+    from app.storage import ProjectStorage
+    from calkit.box import BoxFileSystem
+    from calkit.tests.test_box import FakeBox
+
+    fake = FakeBox()
+    calkit_folder = fake.add("folder", "Calkit", "0")["id"]
+    with patch.object(
+        requests.Session,
+        "request",
+        side_effect=lambda method, url, **kw: fake.request(method, url, **kw),
+    ):
+        box = ProjectStorage(
+            backend="box",
+            fs=BoxFileSystem("token", calkit_folder),
+            data_prefix="",
+            resource=SimpleNamespace(  # type: ignore[arg-type]
+                bucket=calkit_folder, project_id=None
+            ),
+            token="owner-token",
+        )
+        internal = ProjectStorage(
+            backend="s3", fs=MemoryFileSystem(), data_prefix="/internal/data"
+        )
+        old_path = "files/md5/aa/old"
+        new_path = "files/md5/bb/new"
+        internal.fs.pipe(
+            internal.make_project_path(OWNER, PROJECT, old_path), b"o"
+        )
+        box.fs.pipe_file(
+            box.make_project_path(OWNER, PROJECT, new_path), b"new!"
+        )
+        project_folder = box.fs.get_folder_id(f"{OWNER}/{PROJECT}")
+        file_id = box.fs.get_file_id(f"{OWNER}/{PROJECT}/{new_path}")
+
+        def get_box_access(target, owner, project, operation):
+            assert target is box
+            return {
+                "folder_id": project_folder,
+                "access_token": f"{operation}-token",
+                "expires_at_unixts": 123,
+            }
+
+        with (
+            patch(
+                "app.api.routes.projects.fs.app.projects.get_project",
+                return_value=_fake_project(),
+            ),
+            patch(
+                "app.api.routes.projects.fs.storage.get_project_storage_locations",
+                return_value=[box, internal],
+            ),
+            patch(
+                "app.api.routes.projects.fs.storage.get_project_storage",
+                return_value=box,
+            ),
+            patch(
+                "app.api.routes.projects.fs.storage.get_box_access",
+                side_effect=get_box_access,
+            ),
+            patch(
+                "app.api.routes.projects.fs.get_object_url",
+                return_value="https://signed",
+            ),
+        ):
+            # Objects pushed before the switch are still found
+            for path, exists in [
+                (old_path, True),
+                (new_path, True),
+                ("files/md5/bb/x", False),
+            ]:
+                response = client.post(
+                    FS_OPS_URL, json={"operation": "exists", "path": path}
+                )
+                assert response.json()["result"]["exists"] is exists
+            response = client.post(
+                FS_OPS_URL, json={"operation": "get", "path": old_path}
+            )
+            assert response.json()["access"]["url"] == "https://signed"
+            # Downloads from Box get access to the project's folder
+            response = client.post(
+                FS_OPS_URL, json={"operation": "get", "path": new_path}
+            )
+            assert response.json()["backend"] == "box"
+            assert response.json()["access"] == {
+                "kind": "box",
+                "operation": "download",
+                "folder_id": project_folder,
+                "access_token": "download-token",
+                "expires_at_unixts": 123,
+                "file_id": file_id,
+                "size": 4,
+            }
+            response = client.post(
+                FS_OPS_URL, json={"operation": "get", "path": "files/md5/bb"}
+            )
+            assert response.status_code == 400
+            # And so do uploads
+            response = client.post(
+                FS_OPS_URL, json={"operation": "put", "path": "files/md5/cc/x"}
+            )
+            assert response.json()["access"]["kind"] == "box"
+            assert response.json()["access"]["access_token"] == "upload-token"
+            # Batch info says where each Box object is, so clients needn't
+            # ask per file
+            response = client.post(
+                f"{FS_OPS_URL}/batch",
+                json={
+                    "operation": "info",
+                    "paths": [new_path, old_path],
+                    "include": ["info"],
+                },
+            )
+            results = response.json()["results"]
+            assert results[new_path]["info"]["box_file_id"] == file_id
+            assert results[new_path]["info"]["box_folder_id"] == project_folder
+            assert results[new_path]["info"]["size"] == 4
+            assert "box_file_id" not in results[old_path]["info"]

@@ -929,6 +929,7 @@ class ConnectedAccounts(BaseModel):
     google: bool
     zotero: bool
     huggingface: bool = False
+    box: bool = False
     # Whether a Calkit CLI has ever authenticated as this user, which is the
     # only reliable way to know the CLI is installed: the local server it
     # would otherwise be detected by is usually not running.
@@ -1004,6 +1005,12 @@ def get_user_connected_accounts(
     except HTTPException as e:
         # An outage doesn't mean the account was disconnected
         huggingface_connected = e.status_code == 503
+    box_connected = False
+    try:
+        users.get_box_token(session=session, user=current_user)
+        box_connected = True
+    except HTTPException as e:
+        box_connected = e.status_code == 503
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
@@ -1013,6 +1020,7 @@ def get_user_connected_accounts(
         google=google_connected,
         zotero=zotero_cred is not None,
         huggingface=huggingface_connected,
+        box=box_connected,
         cli=cli_connected,
     )
 
@@ -1187,6 +1195,109 @@ def get_user_huggingface_account(
     return HuggingFaceAccount(
         username=credential.provider_account_id,
         orgs=(credential.metadata_json or {}).get("orgs", []),
+    )
+
+
+class BoxAuthStartRequest(BaseModel):
+    # Generated and checked by the browser, for CSRF protection
+    state: str
+
+
+class BoxAuthStart(BaseModel):
+    authorize_url: str
+    redirect_uri: str
+
+
+# Box has no scope limited to one folder; clients only get tokens downscoped
+# to their project's
+BOX_OAUTH_SCOPES = "root_readwrite"
+
+
+@router.post("/user/box-auth/start")
+def post_user_box_auth_start(
+    current_user: CurrentUser, req: BoxAuthStartRequest
+) -> BoxAuthStart:
+    """Get the URL to send the user to for connecting Box.
+
+    It's built here since the client ID is only configured on the backend.
+    """
+    if not settings.BOX_CLIENT_ID:
+        raise HTTPException(501, "Box isn't configured on this hub")
+    redirect_uri = f"{settings.frontend_host.rstrip('/')}/auth/box"
+    params = urllib.parse.urlencode(
+        dict(
+            client_id=settings.BOX_CLIENT_ID,
+            redirect_uri=redirect_uri,
+            scope=BOX_OAUTH_SCOPES,
+            state=req.state,
+            response_type="code",
+        )
+    )
+    return BoxAuthStart(
+        authorize_url=f"https://account.box.com/api/oauth2/authorize?{params}",
+        redirect_uri=redirect_uri,
+    )
+
+
+@router.post("/user/box-auth")
+def post_user_box_auth(
+    session: SessionDep,
+    current_user: CurrentUser,
+    req: OAuthCodeExchange,
+) -> Message:
+    """Connect Box using an authorization code."""
+    if not settings.BOX_CLIENT_ID or not settings.BOX_CLIENT_SECRET:
+        raise HTTPException(501, "Box isn't configured on this hub")
+    resp = requests.post(
+        users.BOX_TOKEN_URL,
+        data=dict(
+            grant_type="authorization_code",
+            code=req.code,
+            redirect_uri=req.redirect_uri,
+            client_id=settings.BOX_CLIENT_ID,
+            client_secret=settings.BOX_CLIENT_SECRET,
+        ),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        logger.error(f"Box auth failed: {resp.status_code} {resp.text[:200]}")
+        raise HTTPException(400, "Failed to authenticate with Box")
+    first = (
+        users.get_external_credential(
+            session=session, user=current_user, provider="box"
+        )
+        is None
+    )
+    users.save_box_token(
+        session=session,
+        user=current_user,
+        box_resp=resp.json(),
+        new_login=True,
+    )
+    mixpanel.user_connected_box(current_user, first=first)
+    return Message(message="success")
+
+
+class BoxAccount(BaseModel):
+    login: str | None
+    name: str | None
+    # E.g., a university, if the account belongs to one
+    enterprise: str | None
+
+
+@router.get("/user/box-account")
+def get_user_box_account(
+    session: SessionDep, current_user: CurrentUser
+) -> BoxAccount:
+    # Validates, and refreshes if needed
+    users.get_box_token(session=session, user=current_user)
+    credential = current_user.get_external_credential(provider="box")
+    assert credential is not None
+    metadata = credential.metadata_json or {}
+    return BoxAccount(
+        login=metadata.get("login"),
+        name=metadata.get("name"),
+        enterprise=metadata.get("enterprise"),
     )
 
 
@@ -1439,13 +1550,12 @@ def delete_user_external_credential(
         raise HTTPException(
             403, "Cannot disconnect GitHub as it is your login method"
         )
-    resources = (
-        app.storage.get_credential_resources(session, current_user.id)
-        if provider == "huggingface"
-        else []
+    resources = app.storage.get_credential_resources(
+        session, current_user.id, provider=provider
     )
+    service_name = app.storage.STORAGE_PROVIDER_NAMES.get(provider)
     if (
-        provider == "huggingface"
+        service_name is not None
         and app.tasks.get_storage_transfer_status(current_user.id)[0]
         == "running"
     ):
@@ -1488,17 +1598,20 @@ def delete_user_external_credential(
             if used + needed[account.name] > limit:
                 raise HTTPException(
                     413,
-                    f"{needed[account.name]:.2f} GB from Hugging Face "
+                    f"{needed[account.name]:.2f} GB from {service_name} "
                     f"won't fit in {account.name}'s Calkit Hub storage "
                     f"({used:.2f} of {limit} GB used)",
                 )
         # The job switches each project to the hub's own storage before
-        # copying its objects, with reads falling back to HF until then
-        if not app.tasks.enqueue_storage_transfer(str(current_user.id)):
+        # copying its objects, with reads falling back to the service until
+        # then
+        if not app.tasks.enqueue_storage_transfer(
+            str(current_user.id), provider
+        ):
             raise HTTPException(503, "Transfers unavailable")
         return Message(
-            message="Transferring files to Calkit Hub storage; Hugging Face "
-            "disconnects when done"
+            message=f"Transferring files to Calkit Hub storage; "
+            f"{service_name} disconnects when done"
         )
     for resource in resources:
         session.delete(resource)

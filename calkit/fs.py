@@ -287,6 +287,20 @@ class CalkitFileSystem(AbstractFileSystem):
         self._xet_projects: set[tuple[str, str]] = set()
         # Batches concurrent transfers by (owner, project, "put" or "get")
         self._xet_batchers: dict[tuple[str, str, str], _Batcher] = {}
+        # Box access by (owner, project, "put" or "get", folder ID), reused
+        # until it nearly expires; puts always go to current storage, so no
+        # folder
+        self._box_access: dict[
+            tuple[str, str, str, str | None], dict[str, Any]
+        ] = {}
+        # (folder ID, file ID) by (owner, project, path), from info, so a
+        # download needn't ask the hub where it is
+        self._box_files: dict[tuple[str, str, str], tuple[str, str]] = {}
+        # Projects known to have objects in Box
+        self._box_projects: set[tuple[str, str]] = set()
+        # Batches concurrent lookups of where files are in Box, by project
+        self._box_lookup_batchers: dict[tuple[str, str], _Batcher] = {}
+        self._box_fss: dict[tuple[str, str], Any] = {}
 
     @property
     def base_url(self) -> str:
@@ -771,9 +785,9 @@ class CalkitFileSystem(AbstractFileSystem):
         elif kind == "sftp":
             # SFTP access
             raise NotImplementedError("SFTP access not yet implemented")
-        elif kind == "hf-xet":
+        elif kind in ("hf-xet", "box"):
             raise ValueError(
-                "hf-xet access is handled by the transfer methods, "
+                f"{kind} access is handled by the transfer methods, "
                 "not as an HTTP request"
             )
         else:
@@ -882,6 +896,95 @@ class CalkitFileSystem(AbstractFileSystem):
             send = upload if operation == "put" else download
             batcher = self._xet_batchers.setdefault(key, _Batcher(send))
         return batcher
+
+    def _get_box_access(
+        self,
+        owner: str,
+        project: str,
+        operation: str,
+        folder_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Get a project's Box access from an earlier operation, if it's
+        not about to expire.
+        """
+        access = self._box_access.get((owner, project, operation, folder_id))
+        if access is None or access["expires_at_unixts"] < time.time() + 60:
+            return None
+        return access
+
+    def _set_box_access(
+        self, owner: str, project: str, operation: str, access: dict[str, Any]
+    ) -> None:
+        folder_id = access["folder_id"] if operation == "get" else None
+        self._box_access[(owner, project, operation, folder_id)] = access
+        self._box_projects.add((owner, project))
+
+    def _get_box_fs(self, access: dict[str, Any]) -> Any:
+        """Get a filesystem for a project's Box folder, with its access."""
+        from calkit.box import BoxFileSystem
+
+        key = (access["folder_id"], access["access_token"])
+        fs = self._box_fss.get(key)
+        if fs is None:
+            fs = self._box_fss.setdefault(
+                key, BoxFileSystem(access["access_token"], access["folder_id"])
+            )
+        return fs
+
+    def _get_box_lookup_batcher(self, owner: str, project: str) -> _Batcher:
+        """Get what batches looking up where a project's files are in Box.
+
+        DVC downloads one file per call, from many threads, so this asks the
+        hub about many in one request, and each thread then downloads its
+        own file directly.
+        """
+
+        def look_up(file_paths: list[str]) -> list[None]:
+            # Records the Box IDs of each that's in Box
+            self.info_many(
+                [f"{owner}/{project}/{p}" for p in file_paths], content=False
+            )
+            return [None] * len(file_paths)
+
+        key = (owner, project)
+        batcher = self._box_lookup_batchers.get(key)
+        if batcher is None:
+            batcher = self._box_lookup_batchers.setdefault(
+                key, _Batcher(look_up)
+            )
+        return batcher
+
+    def _box_get_file(
+        self,
+        owner: str,
+        project: str,
+        file_path: str,
+        lpath: str,
+        callback: Any,
+    ) -> bool:
+        """Download a file from Box, if that's where it is, checking it
+        against its MD5. Returns whether it was.
+        """
+        key = (owner, project, file_path)
+        if key not in self._box_files:
+            self._get_box_lookup_batcher(owner, project).submit(file_path)
+        obj = self._box_files.get(key)
+        if obj is None:
+            return False
+        folder_id, file_id = obj
+        access = self._get_box_access(owner, project, "get", folder_id)
+        if access is None:
+            info = self._get_fs_op_info(owner, project, file_path, "get")
+            access = info.get("access") or {}
+            if access.get("kind") != "box":
+                return False
+            self._set_box_access(owner, project, "get", access)
+            file_id = access["file_id"]
+        lpath = os.path.abspath(lpath)
+        os.makedirs(os.path.dirname(lpath), exist_ok=True)
+        self._get_box_fs(access).get_file_by_id(file_id, lpath, callback)
+        _check_dvc_md5(file_path, lpath)
+        return True
 
     def _xet_upload(
         self,
@@ -1276,6 +1379,12 @@ class CalkitFileSystem(AbstractFileSystem):
                         if not isinstance(info_payload, dict):
                             continue
                         info = self._normalize_info(file_path, info_payload)
+                        if isinstance(info_payload.get("box_file_id"), str):
+                            self._box_files[(owner, project, file_path)] = (
+                                info_payload["box_folder_id"],
+                                info_payload["box_file_id"],
+                            )
+                            self._box_projects.add((owner, project))
                         if isinstance(info_payload.get("xet_hash"), str):
                             self._xet_objects[(owner, project, file_path)] = (
                                 info_payload.get("bucket"),
@@ -1315,6 +1424,12 @@ class CalkitFileSystem(AbstractFileSystem):
         access = operation_info.get("access") or {}
         if access.get("kind") == "hf-xet":
             return self._xet_read(owner, project, file_path, access)[start:end]
+        if access.get("kind") == "box":
+            return bytes(
+                self._get_box_fs(access).cat_file_by_id(
+                    access["file_id"], start, end
+                )
+            )
         # Add Range header if reading a specific byte range
         headers = {}
         if start is not None and end is not None:
@@ -1387,11 +1502,13 @@ class CalkitFileSystem(AbstractFileSystem):
         owner, project, file_path = _parse_path(rpath)
         size = os.path.getsize(lpath)
         callback.set_size(size)
-        access = self._get_xet_access(owner, project, "put")
+        access = self._get_xet_access(
+            owner, project, "put"
+        ) or self._get_box_access(owner, project, "put")
         operation_info: dict | None = None
         # Twice at most, since the project's storage can change after its
         # access was given, e.g., from HF to the hub's own
-        for _ in range(2):
+        for n in range(2):
             if access is None:
                 operation_info = self._get_fs_op_info(
                     owner,
@@ -1403,6 +1520,24 @@ class CalkitFileSystem(AbstractFileSystem):
                 access = operation_info.get("access") or {}
                 if access.get("kind") == "hf-xet":
                     self._set_xet_access(owner, project, "put", access)
+                elif access.get("kind") == "box":
+                    self._set_box_access(owner, project, "put", access)
+            if access.get("kind") == "box":
+                try:
+                    self._get_box_fs(access).put_file(
+                        lpath, file_path, callback=callback
+                    )
+                    return None
+                except (HTTPError, FileNotFoundError) as e:
+                    # E.g., the project's folder was moved to the trash, so
+                    # the hub makes it again
+                    response = getattr(e, "response", None)
+                    status = 404 if response is None else response.status_code
+                    if n == 1 or status not in (401, 403, 404):
+                        raise
+                self._box_access.pop((owner, project, "put", None), None)
+                access = None
+                continue
             if access.get("kind") != "hf-xet":
                 break
             batcher = self._get_xet_batcher(owner, project, "put")
@@ -1448,6 +1583,10 @@ class CalkitFileSystem(AbstractFileSystem):
             item = (file_path, str(lpath), callback)
             if batcher.submit(item) is not _NotXet:
                 return None
+        if (owner, project) in self._box_projects and self._box_get_file(
+            owner, project, file_path, str(lpath), callback
+        ):
+            return None
         try:
             operation_info = self._get_fs_op_info(
                 owner, project, file_path, "get"
@@ -1470,6 +1609,16 @@ class CalkitFileSystem(AbstractFileSystem):
             if error is not None:
                 raise error
             return None
+        if access.get("kind") == "box":
+            self._set_box_access(owner, project, "get", access)
+            self._box_files[(owner, project, file_path)] = (
+                access["folder_id"],
+                access["file_id"],
+            )
+            if self._box_get_file(
+                owner, project, file_path, str(lpath), callback
+            ):
+                return None
         # Object storage has URLs for prefixes too
         if self.isdir(rpath):
             os.makedirs(lpath, exist_ok=True)
@@ -1563,6 +1712,12 @@ class CalkitFile(AbstractBufferedFile):
                     self.owner, self.project, self.file_path, access
                 )
             return self._xet_content[start:end]
+        if access.get("kind") == "box":
+            return bytes(
+                self.fs._get_box_fs(access).cat_file_by_id(
+                    access["file_id"], start, end
+                )
+            )
         # Add Range header for partial content
         # For backends where range is unsupported, the Calkit hub API can
         # choose to ignore this header or return a backend-specific request
@@ -1606,6 +1761,8 @@ class CalkitFile(AbstractBufferedFile):
                 access,
                 [(self.file_path, data, DEFAULT_CALLBACK)],
             )
+        elif access.get("kind") == "box":
+            self.fs._get_box_fs(access).pipe_file(self.file_path, data)
         else:
             resp = self.fs._execute_operation(
                 self.operation_info,

@@ -25,6 +25,7 @@ import { Route as AuthZoteroRouteImport } from './routes/auth/zotero'
 import { Route as AuthZenodoRouteImport } from './routes/auth/zenodo'
 import { Route as AuthHuggingfaceRouteImport } from './routes/auth/huggingface'
 import { Route as AuthGoogleRouteImport } from './routes/auth/google'
+import { Route as AuthBoxRouteImport } from './routes/auth/box'
 import { Route as LayoutWorkspacesRouteImport } from './routes/_layout/workspaces'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
@@ -131,6 +132,11 @@ const AuthHuggingfaceRoute = AuthHuggingfaceRouteImport.update({
 const AuthGoogleRoute = AuthGoogleRouteImport.update({
   id: '/auth/google',
   path: '/auth/google',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthBoxRoute = AuthBoxRouteImport.update({
+  id: '/auth/box',
+  path: '/auth/box',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LayoutWorkspacesRoute = LayoutWorkspacesRouteImport.update({
@@ -348,6 +354,7 @@ export interface FileRoutesByFullPath {
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
   '/workspaces': typeof LayoutWorkspacesRoute
+  '/auth/box': typeof AuthBoxRoute
   '/auth/google': typeof AuthGoogleRoute
   '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
@@ -397,6 +404,7 @@ export interface FileRoutesByTo {
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
   '/workspaces': typeof LayoutWorkspacesRoute
+  '/auth/box': typeof AuthBoxRoute
   '/auth/google': typeof AuthGoogleRoute
   '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
@@ -446,6 +454,7 @@ export interface FileRoutesById {
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/workspaces': typeof LayoutWorkspacesRoute
+  '/auth/box': typeof AuthBoxRoute
   '/auth/google': typeof AuthGoogleRoute
   '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
@@ -498,6 +507,7 @@ export interface FileRouteTypes {
     | '/projects'
     | '/settings'
     | '/workspaces'
+    | '/auth/box'
     | '/auth/google'
     | '/auth/huggingface'
     | '/auth/zenodo'
@@ -547,6 +557,7 @@ export interface FileRouteTypes {
     | '/projects'
     | '/settings'
     | '/workspaces'
+    | '/auth/box'
     | '/auth/google'
     | '/auth/huggingface'
     | '/auth/zenodo'
@@ -595,6 +606,7 @@ export interface FileRouteTypes {
     | '/_layout/projects'
     | '/_layout/settings'
     | '/_layout/workspaces'
+    | '/auth/box'
     | '/auth/google'
     | '/auth/huggingface'
     | '/auth/zenodo'
@@ -640,6 +652,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
+  AuthBoxRoute: typeof AuthBoxRoute
   AuthGoogleRoute: typeof AuthGoogleRoute
   AuthHuggingfaceRoute: typeof AuthHuggingfaceRoute
   AuthZenodoRoute: typeof AuthZenodoRoute
@@ -747,6 +760,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/google'
       fullPath: '/auth/google'
       preLoaderRoute: typeof AuthGoogleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/box': {
+      id: '/auth/box'
+      path: '/auth/box'
+      fullPath: '/auth/box'
+      preLoaderRoute: typeof AuthBoxRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_layout/workspaces': {
@@ -1148,6 +1168,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
   VerifyEmailRoute: VerifyEmailRoute,
+  AuthBoxRoute: AuthBoxRoute,
   AuthGoogleRoute: AuthGoogleRoute,
   AuthHuggingfaceRoute: AuthHuggingfaceRoute,
   AuthZenodoRoute: AuthZenodoRoute,

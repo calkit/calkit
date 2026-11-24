@@ -169,6 +169,16 @@ def queue_startup_warms() -> None:
     app.tasks.enqueue_startup_warms(settings.WARM_ON_STARTUP)
 
 
+@app.on_event("startup")
+def queue_box_keepalive() -> None:
+    """Make sure Box connections are being kept alive, in case the daily
+    job that does it stopped queueing itself.
+    """
+    import app.tasks
+
+    app.tasks.enqueue_box_keepalive()
+
+
 @app.middleware("http")
 async def log_requests(
     request: Request,

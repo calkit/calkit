@@ -194,20 +194,104 @@ def test_storage_resources_and_project_storage(
     assert response.json() == []
     # While it's being transferred to the hub's own storage, it can't be
     # selected again, and no more can be made with that HF account
-    response = client.get(
-        "/user/huggingface/storage-transfer", headers=owner_headers
-    )
-    assert response.json() == {"status": None, "error": None}
+    response = client.get("/user/storage-transfer", headers=owner_headers)
+    assert response.json() == {"status": None, "error": None, "provider": None}
     with patch(
-        "app.tasks.get_storage_transfer_status", return_value=("running", None)
+        "app.tasks.get_storage_transfer_status",
+        return_value=("running", None, "huggingface"),
     ):
-        response = client.get(
-            "/user/huggingface/storage-transfer", headers=owner_headers
-        )
-        assert response.json()["status"] == "running"
+        response = client.get("/user/storage-transfer", headers=owner_headers)
+        assert response.json() == {
+            "status": "running",
+            "error": None,
+            "provider": "huggingface",
+        }
         response = client.put(
             project_url, headers=owner_headers, json={"dvc_storage_id": hf_id}
         )
         assert response.status_code == 409
         response = client.post(bucket_url, headers=owner_headers, json=bucket)
         assert response.status_code == 409
+
+
+def test_project_box_folder(client: TestClient, db: Session) -> None:
+    import json
+    from datetime import timedelta
+
+    from app.core import utcnow
+
+    email = random_email()
+    headers = authentication_token_from_email(
+        client=client, email=email, db=db
+    )
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    project = Project(
+        name=f"box-{uuid.uuid4().hex[:8]}",
+        title="Box project",
+        git_repo_url="https://github.com/someone/box",
+        owner_account_id=user.account.id,
+        owner_account=user.account,
+    )
+    db.add(project)
+    db.commit()
+    url = f"/projects/{user.account.name}/{project.name}/storage/box-folder"
+    # Box has to be connected
+    assert client.post(url, headers=headers).status_code == 401
+    users.save_external_credential(
+        session=db,
+        user=user,
+        provider="box",
+        secret_payload=json.dumps(
+            {"access_token": "box", "refresh_token": "r"}
+        ),
+        expires=utcnow() + timedelta(hours=1),
+    )
+    # Another resource has the name it would get
+    db.add(
+        StorageResource(
+            owner_account_id=user.account.id,
+            name="box",
+            kind="hf-bucket",
+            bucket="someone/calkit",
+            credential_user_id=user.id,
+        )
+    )
+    db.commit()
+    with patch(
+        "calkit.box.BoxFileSystem.get_folder_id",
+        side_effect=OSError("Box down"),
+    ):
+        assert client.post(url, headers=headers).status_code == 502
+    # The Calkit folder is made, or reused, and the project's new objects go
+    # there
+    with patch(
+        "calkit.box.BoxFileSystem.get_folder_id", return_value="123"
+    ) as get_folder_id:
+        response = client.post(url, headers=headers)
+        assert response.status_code == 200
+        assert get_folder_id.call_args.args == ("Calkit",)
+        assert get_folder_id.call_args.kwargs == {"create": True}
+        dvc = response.json()["dvc"]
+        assert dvc["kind"] == "box-folder"
+        assert dvc["bucket"] == "123"
+        assert dvc["name"] == "box-2"
+        assert dvc["dedicated"] is False
+        # Then reused, by this project and the account's others
+        response = client.post(url, headers=headers)
+        assert response.json()["dvc"]["id"] == dvc["id"]
+        get_folder_id.assert_called_once()
+    listed = client.get(
+        f"/accounts/{user.account.name}/storage", headers=headers
+    ).json()
+    assert dvc["id"] in [r["id"] for r in listed]
+    # It's what disconnecting Box would strand, not HF
+    response = client.get("/user/box/storage", headers=headers)
+    assert [
+        (r["kind"], r["bucket"], r["projects"]) for r in response.json()
+    ] == [("box-folder", "123", [f"{user.account.name}/{project.name}"])]
+    response = client.get("/user/huggingface/storage", headers=headers)
+    assert [r["kind"] for r in response.json()] == ["hf-bucket"]
+    assert (
+        client.get("/user/zenodo/storage", headers=headers).status_code == 422
+    )

@@ -328,6 +328,10 @@ def user_connected_huggingface(user: User, first: bool) -> None:
     track(user, "Connected Hugging Face", add_event_info=dict(first=first))
 
 
+def user_connected_box(user: User, first: bool) -> None:
+    track(user, "Connected Box", add_event_info=dict(first=first))
+
+
 def user_created_project_storage(
     user: User,
     owner_name: str,

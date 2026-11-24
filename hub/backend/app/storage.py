@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -336,7 +337,7 @@ class ProjectStorage:
     the project.
     """
 
-    backend: Literal["s3", "gcs", "hf"]
+    backend: Literal["s3", "gcs", "hf", "box"]
     fs: Any
     data_prefix: str
     resource: "StorageResource | None" = None
@@ -372,6 +373,13 @@ class ProjectStorage:
         return full.removeprefix(self.data_prefix).lstrip("/")
 
 
+# Box folder IDs by path, for each ``Calkit`` folder, since resolving a path
+# takes a request per folder in it
+_box_folder_ids: cachetools.TTLCache[str, dict[str, str]] = (
+    cachetools.TTLCache[str, dict[str, str]](maxsize=1024, ttl=3600)
+)
+
+
 def get_internal_storage() -> ProjectStorage:
     """Get the hub's own object storage."""
     return ProjectStorage(
@@ -389,6 +397,24 @@ def get_resource_storage(
 
     import app.users
 
+    if resource.kind == "box-folder":
+        from calkit.box import BoxFileSystem
+
+        token = app.users.get_box_token(
+            session=session, user=resource.credential_user
+        )
+        # Paths are relative to the ``Calkit`` folder, whose ID is kept as
+        # the resource's bucket
+        folder_ids = _box_folder_ids.get(resource.bucket)
+        if folder_ids is None:
+            folder_ids = _box_folder_ids.setdefault(resource.bucket, {})
+        return ProjectStorage(
+            backend="box",
+            fs=BoxFileSystem(token, resource.bucket, folder_ids=folder_ids),
+            data_prefix="",
+            resource=resource,
+            token=token,
+        )
     if resource.kind != "hf-bucket":
         raise ValueError(f"Unsupported storage kind: {resource.kind}")
     token = app.users.get_huggingface_token(
@@ -532,20 +558,28 @@ def delete_project_objects(project: "Project") -> None:
     invalidate_storage_usage_cache(owner_name)
 
 
+# The kinds of storage resource reached with each provider's credential
+PROVIDER_STORAGE_KINDS = {"huggingface": ["hf-bucket"], "box": ["box-folder"]}
+STORAGE_PROVIDER_NAMES = {"huggingface": "Hugging Face", "box": "Box"}
+
+
 def get_credential_resources(
-    session: "Session", user_id: Any
+    session: "Session", user_id: Any, provider: str
 ) -> list["StorageResource"]:
-    """Get the storage reached with a user's credential, e.g., their HF
-    account, whichever account owns it.
+    """Get the storage reached with a user's credential for a provider,
+    e.g., their HF account, whichever account owns it.
     """
-    from sqlmodel import select
+    from sqlmodel import col, select
 
     from app.models import StorageResource
 
     return list(
         session.exec(
             select(StorageResource).where(
-                StorageResource.credential_user_id == user_id
+                StorageResource.credential_user_id == user_id,
+                col(StorageResource.kind).in_(
+                    PROVIDER_STORAGE_KINDS.get(provider, [])
+                ),
             )
         ).all()
     )
@@ -652,9 +686,12 @@ def copy_resource_to_internal(
     return n_copied
 
 
-def transfer_storage_and_disconnect(user_id: str) -> None:
-    """Move the storage reached with a user's HF account into the hub's own
-    storage, then disconnect the account. Run on the worker.
+def transfer_storage_and_disconnect(
+    user_id: str, provider: str = "huggingface"
+) -> None:
+    """Move the storage reached with a user's account on a service, e.g.,
+    HF, into the hub's own storage, then disconnect the account. Run on the
+    worker.
 
     Each resource's projects switch to the hub's own storage before its
     objects are copied, so nothing new lands there after the copy.
@@ -677,7 +714,9 @@ def transfer_storage_and_disconnect(user_id: str) -> None:
         try:
             # Checked again after each pass, in case any was added meanwhile
             for _ in range(10):
-                resources = get_credential_resources(session, user.id)
+                resources = get_credential_resources(
+                    session, user.id, provider=provider
+                )
                 if not resources:
                     break
                 for resource in resources:
@@ -706,7 +745,7 @@ def transfer_storage_and_disconnect(user_id: str) -> None:
             )
             raise
         credential = app.users.get_external_credential(
-            session=session, user=user, provider="huggingface"
+            session=session, user=user, provider=provider
         )
         if credential is not None:
             session.delete(credential)
@@ -714,6 +753,67 @@ def transfer_storage_and_disconnect(user_id: str) -> None:
         app.mixpanel.user_transferred_storage(
             user, n_storage, n_objects, succeeded=True
         )
+
+
+BOX_TOKEN_URL = "https://api.box.com/oauth2/token"
+# What a token for a project's Box folder can do, by operation
+BOX_SCOPES = {
+    "download": "item_download base_explorer",
+    "upload": "item_upload item_download base_explorer",
+}
+# Downscoped tokens by project folder ID and operation, which last about an
+# hour, so they're reused for half that
+_box_access: cachetools.TTLCache[tuple[str, str], dict[str, Any]] = (
+    cachetools.TTLCache[tuple[str, str], dict[str, Any]](
+        maxsize=4096, ttl=1800
+    )
+)
+
+
+def get_box_access(
+    storage: ProjectStorage,
+    owner_name: str,
+    project_name: str,
+    operation: Literal["upload", "download"],
+) -> dict[str, Any]:
+    """Get a short-lived token for a project's folder in Box.
+
+    It's downscoped to the folder and what the operation needs, so it can
+    be handed to any client with access to the project. For uploads, the
+    folder is created if needed.
+    """
+    import requests
+
+    folder_id = storage.fs.get_folder_id(
+        storage.make_project_path(owner_name, project_name),
+        create=operation == "upload",
+    )
+    key = (folder_id, operation)
+    access = _box_access.get(key)
+    if access is not None:
+        return access
+    resp = requests.post(
+        BOX_TOKEN_URL,
+        data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "subject_token": storage.token,
+            "subject_token_type": (
+                "urn:ietf:params:oauth:token-type:access_token"
+            ),
+            "scope": BOX_SCOPES[operation],
+            "resource": f"https://api.box.com/2.0/folders/{folder_id}",
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    access = {
+        "folder_id": folder_id,
+        "access_token": body["access_token"],
+        "expires_at_unixts": int(time.time()) + int(body["expires_in"]),
+    }
+    _box_access[key] = access
+    return access
 
 
 def get_xet_token(
@@ -810,6 +910,14 @@ def put_project_objects(
         ]
         HfApi(token=target.token).batch_bucket_files(target.bucket, add=add)
         return
+    if target.backend == "box":
+        for path, src in objects:
+            fpath = target.make_project_path(owner_name, project_name, path)
+            if isinstance(src, bytes):
+                target.fs.pipe_file(fpath, src)
+            else:
+                target.fs.put_file(src, fpath)
+        return
     for path, src in objects:
         fpath = target.make_project_path(owner_name, project_name, path)
         with target.fs.open(fpath, "wb") as f_out:
@@ -870,12 +978,36 @@ def get_hf_object_url(storage: ProjectStorage, fpath: str) -> str:
     return str(resp.headers["Location"])
 
 
+def get_box_object_url(storage: ProjectStorage, fpath: str) -> str:
+    """Get a short-lived URL a browser can download a Box file from.
+
+    Box redirects authenticated downloads to a signed URL, which is what
+    gets returned, so the credential never leaves the hub.
+    """
+    import requests
+
+    file_id = storage.fs.get_file_id(fpath)
+    resp = requests.get(
+        f"https://api.box.com/2.0/files/{file_id}/content",
+        headers={"Authorization": f"Bearer {storage.token}"},
+        allow_redirects=False,
+        timeout=15,
+    )
+    if resp.status_code not in (301, 302, 303, 307, 308):
+        raise RuntimeError(
+            f"Failed to get URL for {fpath}: {resp.status_code}"
+        )
+    return str(resp.headers["Location"])
+
+
 def get_project_object_url(
     storage: ProjectStorage, fpath: str, fname: str | None = None
 ) -> str:
     """Get a URL a browser can download a project object from."""
     if storage.backend == "hf":
         return get_hf_object_url(storage, fpath)
+    if storage.backend == "box":
+        return get_box_object_url(storage, fpath)
     return get_object_url(fpath, fname=fname, fs=storage.fs)
 
 

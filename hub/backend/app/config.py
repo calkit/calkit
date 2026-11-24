@@ -366,6 +366,9 @@ class Settings(BaseSettings):
     # Hugging Face, for connecting HF storage; unset disables it
     HF_CLIENT_ID: str | None = None
     HF_CLIENT_SECRET: str | None = None
+    # Box, for connecting Box storage; unset disables it
+    BOX_CLIENT_ID: str | None = None
+    BOX_CLIENT_SECRET: str | None = None
 
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":

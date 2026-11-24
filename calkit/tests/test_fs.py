@@ -134,6 +134,7 @@ def test_put_file_uses_callback(tmp_path):
     fs = ckfs.CalkitFileSystem.__new__(ckfs.CalkitFileSystem)
     fs._session = session
     fs._xet_access = {}
+    fs._box_access = {}
     operation_info = {
         "access": {
             "kind": "presigned-url",
@@ -701,3 +702,167 @@ def test_xet_transfers(tmp_path: Path) -> None:
     assert sorted(download_tokens) == ["old", "xet_token"]
     get_op.assert_called_once()
     assert get_op.call_args.args[2] == other_path
+
+
+def test_box_transfers(tmp_path: Path) -> None:
+    import hashlib
+    import time
+
+    import requests
+
+    from calkit.tests.test_box import FakeBox
+
+    def make_obj(content: bytes) -> tuple[str, Path]:
+        md5 = hashlib.md5(content).hexdigest()
+        lpath = tmp_path / md5
+        lpath.write_bytes(content)
+        return f"files/md5/{md5[:2]}/{md5[2:]}", lpath
+
+    box = FakeBox()
+    project_folder = box.add("folder", "project", "0")["id"]
+    expires = int(time.time()) + 3600
+
+    def get_access(operation: str, folder_id: str, **kw) -> dict:
+        return {
+            "backend": "box",
+            "access": {
+                "kind": "box",
+                "operation": operation,
+                "folder_id": folder_id,
+                "access_token": "token",
+                "expires_at_unixts": expires,
+            }
+            | kw,
+        }
+
+    fs = ckfs.CalkitFileSystem(
+        endpoint_url="https://api.example.com", skip_instance_cache=True
+    )
+    a_path, a_lpath = make_obj(b"content a")
+    b_path, b_lpath = make_obj(b"content b")
+    with (
+        patch.object(
+            requests.Session,
+            "request",
+            side_effect=lambda method, url, **kw: box.request(
+                method, url, **kw
+            ),
+        ),
+        patch("calkit.box.time.sleep"),
+    ):
+        # Uploads go straight to the project's folder, with access that's
+        # reused for the rest
+        with patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value=get_access("upload", project_folder),
+        ) as put_op:
+            fs.put_file(str(a_lpath), f"ck://owner/project/{a_path}")
+            fs.put_file(str(b_lpath), f"ck://owner/project/{b_path}")
+        put_op.assert_called_once()
+        box_fs = ckfs.CalkitFileSystem(
+            endpoint_url="https://api.example.com", skip_instance_cache=True
+        )
+        from calkit.box import BoxFileSystem
+
+        reader = BoxFileSystem("token", project_folder)
+        assert reader.cat_file(a_path) == b"content a"
+        # If the folder was moved to the trash, the hub makes another
+        trashed = {project_folder}
+        while True:
+            more = {
+                i for i, item in box.items.items() if item["parent"] in trashed
+            } - trashed
+            if not more:
+                break
+            trashed |= more
+        for item_id in trashed:
+            del box.items[item_id]
+        new_folder = box.add("folder", "project", "0")["id"]
+        c_path, c_lpath = make_obj(b"content c")
+        with patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value=get_access("upload", new_folder),
+        ) as put_op:
+            fs.put_file(str(c_lpath), f"ck://owner/project/{c_path}")
+        put_op.assert_called_once()
+        assert BoxFileSystem("token", new_folder).cat_file(c_path) == (
+            b"content c"
+        )
+        # A download asks where the first file is, then the rest are looked
+        # up in batches and downloaded with the same access
+        file_ids = {
+            p: BoxFileSystem("token", new_folder).get_file_id(p)
+            for p in [c_path]
+        }
+        box.content[file_ids[c_path]] = b"content c"
+        d_path, d_lpath = make_obj(b"content d")
+        BoxFileSystem("token", new_folder).put_file(str(d_lpath), d_path)
+        d_id = BoxFileSystem("token", new_folder).get_file_id(d_path)
+        batch_response = {
+            "backend": "box",
+            "results": {
+                d_path: {
+                    "info": {
+                        "name": d_path,
+                        "size": 9,
+                        "type": "file",
+                        "box_file_id": d_id,
+                        "box_folder_id": new_folder,
+                    }
+                }
+            },
+        }
+        with (
+            patch.object(
+                box_fs,
+                "_get_fs_op_info",
+                side_effect=lambda o, p, path, operation, **kw: (
+                    {
+                        "backend": "box",
+                        "result": {"name": path, "size": 9, "type": "file"},
+                    }
+                    if operation == "info"
+                    else get_access(
+                        "download", new_folder, file_id=file_ids[c_path]
+                    )
+                ),
+            ) as get_op,
+            patch.object(
+                box_fs, "_get_fs_op_info_batch", return_value=batch_response
+            ) as batch_op,
+        ):
+            box_fs.get_file(
+                f"ck://owner/project/{c_path}", str(tmp_path / "out" / "c")
+            )
+            box_fs.get_file(
+                f"ck://owner/project/{d_path}", str(tmp_path / "out" / "d")
+            )
+            assert (
+                box_fs.cat_file(f"ck://owner/project/{c_path}", start=2, end=5)
+                == b"nte"
+            )
+            with box_fs.open(f"ck://owner/project/{c_path}", "rb") as f:
+                assert f.read() == b"content c"
+        assert (tmp_path / "out" / "c").read_bytes() == b"content c"
+        assert (tmp_path / "out" / "d").read_bytes() == b"content d"
+        # Once for the first download, then for each read, which doesn't
+        # reuse access, and the info opening a file needs
+        assert get_op.call_count == 4
+        batch_op.assert_called_once()
+        # Content that doesn't match its MD5 is an error, not bad data
+        box.content[d_id] = b"tampered"
+        with (
+            patch.object(
+                box_fs,
+                "_get_fs_op_info",
+                return_value=get_access(
+                    "download", new_folder, file_id=d_id, size=8
+                ),
+            ),
+            pytest.raises(OSError, match="doesn't match its MD5"),
+        ):
+            box_fs.get_file(
+                f"ck://owner/project/{d_path}", str(tmp_path / "out" / "d2")
+            )

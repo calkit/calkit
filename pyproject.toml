@@ -71,9 +71,8 @@ dependencies = [
   "toml>=0.10.2",
   "texsoup>=0.3.3",
   "fsspec>=2026.4.0",
-  # Transfers for projects whose DVC storage is on Hugging Face; wheels
-  # only exist for these architectures, same as huggingface-hub's marker
-  "hf-xet>=1.4.0,<2; platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'",
+  # Transfers for projects whose DVC storage is on Hugging Face
+  "hf-xet>=1.4.0,<2",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

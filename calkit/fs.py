@@ -70,6 +70,7 @@ or providers through a unified API.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import os
 import re
@@ -117,8 +118,6 @@ def _check_dvc_md5(file_path: str, local_path: str) -> None:
     Storage the hub routes to may be editable outside of Calkit, so this
     turns a wrong object into an error rather than bad data.
     """
-    import hashlib
-
     match = _DVC_MD5_PATH_RE.search(file_path)
     if match is None:
         return
@@ -133,17 +132,6 @@ def _check_dvc_md5(file_path: str, local_path: str) -> None:
             f"Downloaded content for {file_path} doesn't match its MD5 "
             f"(got {md5.hexdigest()})"
         )
-
-
-def _import_hf_xet() -> Any:
-    try:
-        import hf_xet
-    except ImportError as e:
-        raise RuntimeError(
-            "This project's storage is on Hugging Face, which needs the "
-            "hf-xet package, and it isn't available on this platform"
-        ) from e
-    return hf_xet
 
 
 class _Batcher:
@@ -192,12 +180,16 @@ class _Batcher:
         return entry.outcome
 
 
-# What a batched transfer returns for a file it can't send with Xet, e.g.,
-# one in the hub's own storage, which the caller then sends on its own
-_NOT_XET = object()
-# What a batched upload returns when the project's storage changed after
-# its access was given, so the caller starts over with new access
-_STORAGE_CHANGED = object()
+class _NotXet:
+    """What a batched transfer returns for a file it can't send with Xet,
+    e.g., one in the hub's own storage, which the caller then sends itself.
+    """
+
+
+class _StorageChanged:
+    """What a batched upload returns when the project's storage changed after
+    its access was given, so the caller starts over with new access.
+    """
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:
@@ -798,14 +790,14 @@ class CalkitFileSystem(AbstractFileSystem):
         not about to expire.
         """
         access = self._xet_access.get((owner, project, operation, bucket))
-        if access is None or access["expires_at_unix"] < time.time() + 60:
+        if access is None or access["expires_at_unixts"] < time.time() + 60:
             return None
         return access
 
     def _set_xet_access(
         self, owner: str, project: str, operation: str, access: dict[str, Any]
     ) -> None:
-        bucket = access.get("bucket") if operation == "get" else None
+        bucket = access.get("bucket_id") if operation == "get" else None
         self._xet_access[(owner, project, operation, bucket)] = access
         self._xet_projects.add((owner, project))
 
@@ -825,13 +817,13 @@ class CalkitFileSystem(AbstractFileSystem):
                 info = self._get_fs_op_info(owner, project, items[0][0], "put")
                 access = info.get("access") or {}
                 if access.get("kind") != "hf-xet":
-                    return [_STORAGE_CHANGED] * len(items)
+                    return [_StorageChanged] * len(items)
                 self._set_xet_access(owner, project, "put", access)
             try:
                 self._xet_upload(owner, project, access, items)
             except HTTPError as e:
                 if e.response is not None and e.response.status_code == 409:
-                    return [_STORAGE_CHANGED] * len(items)
+                    return [_StorageChanged] * len(items)
                 raise
             return [None] * len(items)
 
@@ -844,7 +836,7 @@ class CalkitFileSystem(AbstractFileSystem):
             if unknown:
                 # Records the Xet hash of each that's in HF
                 self.info_many(unknown, content=False)
-            outcomes: list[Any] = [_NOT_XET] * len(items)
+            outcomes: list[Any] = [_NotXet] * len(items)
             # A project's objects can be in more than one bucket, each with
             # its own token
             by_bucket: dict[str | None, list[int]] = {}
@@ -897,7 +889,8 @@ class CalkitFileSystem(AbstractFileSystem):
         progress callback. The Xet token can only upload content, so the
         paths are added by the hub with the storage owner's credential.
         """
-        hf_xet = _import_hf_xet()
+        import hf_xet
+
         files = [u for u in uploads if isinstance(u[1], str)]
         datas = [u for u in uploads if isinstance(u[1], bytes)]
         callbacks = {str(u[1]): u[2] for u in files}
@@ -909,7 +902,7 @@ class CalkitFileSystem(AbstractFileSystem):
             self._set_xet_access(owner, project, "put", info["access"])
             return (
                 info["access"]["access_token"],
-                info["access"]["expires_at_unix"],
+                info["access"]["expires_at_unixts"],
             )
 
         def update_progress(total_update: Any, item_updates: Any) -> None:
@@ -924,7 +917,7 @@ class CalkitFileSystem(AbstractFileSystem):
 
         args = (
             access["cas_url"],
-            (access["access_token"], access["expires_at_unix"]),
+            (access["access_token"], access["expires_at_unixts"]),
             refresh_token,
             update_progress,
             "bucket",
@@ -953,7 +946,7 @@ class CalkitFileSystem(AbstractFileSystem):
                     "operation": "register",
                     "paths": list(xet_hashes),
                     "xet_hashes": xet_hashes,
-                    "bucket": access.get("bucket"),
+                    "bucket_id": access.get("bucket_id"),
                 },
                 base_url=self.base_url,
             )
@@ -977,7 +970,8 @@ class CalkitFileSystem(AbstractFileSystem):
         and size, and a progress callback. Returns each one's error, if its
         content doesn't match.
         """
-        hf_xet = _import_hf_xet()
+        import hf_xet
+
         infos = []
         callbacks = []
         for _, lpath, xet_hash, size, callback in downloads:
@@ -999,14 +993,14 @@ class CalkitFileSystem(AbstractFileSystem):
             self._set_xet_access(owner, project, "get", info["access"])
             return (
                 info["access"]["access_token"],
-                info["access"]["expires_at_unix"],
+                info["access"]["expires_at_unixts"],
             )
 
         if infos:
             hf_xet.download_files(
                 infos,
                 access["cas_url"],
-                (access["access_token"], access["expires_at_unix"]),
+                (access["access_token"], access["expires_at_unixts"]),
                 refresh_token,
                 callbacks,
             )
@@ -1276,7 +1270,7 @@ class CalkitFileSystem(AbstractFileSystem):
                         info = self._normalize_info(file_path, info_payload)
                         if isinstance(info_payload.get("xet_hash"), str):
                             self._xet_objects[(owner, project, file_path)] = (
-                                info_payload.get("bucket"),
+                                info_payload.get("bucket_id"),
                                 info_payload["xet_hash"],
                                 info["size"],
                             )
@@ -1405,7 +1399,7 @@ class CalkitFileSystem(AbstractFileSystem):
                 break
             batcher = self._get_xet_batcher(owner, project, "put")
             item = (file_path, str(lpath), callback)
-            if batcher.submit(item) is not _STORAGE_CHANGED:
+            if batcher.submit(item) is not _StorageChanged:
                 return None
             access = None
         else:
@@ -1444,7 +1438,7 @@ class CalkitFileSystem(AbstractFileSystem):
         if (owner, project) in self._xet_projects:
             batcher = self._get_xet_batcher(owner, project, "get")
             item = (file_path, str(lpath), callback)
-            if batcher.submit(item) is not _NOT_XET:
+            if batcher.submit(item) is not _NotXet:
                 return None
         try:
             operation_info = self._get_fs_op_info(

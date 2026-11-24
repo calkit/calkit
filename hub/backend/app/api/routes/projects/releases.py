@@ -121,7 +121,7 @@ def _get_pipeline_output_staleness(
     path: str | None,
     owner_name: str,
     project_name: str,
-    storages: list[ProjectStorage] | None = None,
+    storage_locations: list[ProjectStorage] | None = None,
 ) -> ReleaseStaleness:
     """Report whether the pipeline stage that produces *path* is up-to-date.
 
@@ -149,7 +149,7 @@ def _get_pipeline_output_staleness(
             tree=tree,
             owner_name=owner_name,
             project_name=project_name,
-            storages=storages,
+            storage_locations=storage_locations,
             cache_token=git_rev,
         )
         ss = statuses.get(stage)
@@ -632,7 +632,9 @@ def post_project_release(
             release_in.path,
             project.owner_account_name,
             project.name,
-            storages=app.projects.get_storages_for_project(project),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
         )
         if not staleness.up_to_date:
             raise HTTPException(
@@ -1325,7 +1327,9 @@ def get_release_staleness(
         path,
         project.owner_account_name,
         project.name,
-        storages=app.projects.get_storages_for_project(project),
+        storage_locations=app.projects.get_storage_locations_for_project(
+            project
+        ),
     )
 
 

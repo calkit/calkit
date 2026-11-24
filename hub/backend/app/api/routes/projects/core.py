@@ -2096,7 +2096,7 @@ def get_project_dvc_outputs(
     zip_path_map = app.projects.get_ck_info_and_dvc_outs_from_tree(
         project=project, tree=tree
     ).zip_path_map
-    storages = app.projects.get_storages_for_project(project)
+    storage_locations = app.projects.get_storage_locations_for_project(project)
     resp = []
     for path, out in sorted(outs.items()):
         md5 = out.get("md5") or ""
@@ -2107,7 +2107,7 @@ def get_project_dvc_outputs(
                 owner_name=project.owner_account_name,
                 project_name=project.name,
                 md5=md5,
-                storages=storages,
+                storage_locations=storage_locations,
             )
             if found is not None:
                 url = get_project_object_url(
@@ -2958,7 +2958,9 @@ def _build_questions_public(
                 tree=tree,
                 owner_name=project.owner_account_name,
                 project_name=project.name,
-                storages=app.projects.get_storages_for_project(project),
+                storage_locations=app.projects.get_storage_locations_for_project(
+                    project
+                ),
                 cache_token=resolve_commit_sha(repo, ev_ref),
             )
             frozen_stages = find_frozen_tainted_stages(
@@ -3615,9 +3617,9 @@ def _resolve_figures(
     # have to be loaded before the pool starts, not inside it.
     # `owner_account_name` is a computed field over `owner_account`;
     # `file_locks` is iterated by `get_contents_from_tree` for every path,
-    # which also needs the project's storages. Storages go first, since
-    # refreshing a token for one commits, which expires the rest.
-    storages = app.projects.get_storages_for_project(project)
+    # which also needs the project's storage locations. Those go first,
+    # since refreshing a token for one commits, which expires the rest.
+    storage_locations = app.projects.get_storage_locations_for_project(project)
     _ = project.name
     _ = project.owner_account_name
     _ = len(project.file_locks)
@@ -3650,7 +3652,7 @@ def _resolve_figures(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            storages=storages,
+            storage_locations=storage_locations,
             cache_token=sha,
         )
     except Exception as e:
@@ -3703,7 +3705,7 @@ def _resolve_figures(
             ck_info=ctx.ck_info_full,
             dvc_lock_outs=ctx.dvc_lock_outs,
             zip_path_map=ctx.zip_path_map,
-            storages=storages,
+            storage_locations=storage_locations,
         )
         fig["content"] = item.content
         fig["url"] = item.url
@@ -4093,8 +4095,8 @@ def _build_tables(
     if not tables:
         return []
     # Resolved here, since the Session isn't safe to use from the pool below,
-    # storages first, since refreshing a token for one commits
-    storages = app.projects.get_storages_for_project(project)
+    # storage locations first, since refreshing a token for one commits
+    storage_locations = app.projects.get_storage_locations_for_project(project)
     _ = project.name
     _ = project.owner_account_name
     _ = len(project.file_locks)
@@ -4110,7 +4112,7 @@ def _build_tables(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            storages=storages,
+            storage_locations=storage_locations,
             cache_token=resolve_commit_sha(repo, ref),
         )
     except Exception as e:
@@ -4135,7 +4137,7 @@ def _build_tables(
                 ck_info=ck_info_full,
                 dvc_lock_outs=dvc_lock_outs,
                 zip_path_map=zip_path_map,
-                storages=storages,
+                storage_locations=storage_locations,
             )
         except Exception as e:
             # A declared table can point at a path that no longer exists at
@@ -4247,7 +4249,9 @@ def get_project_results(
         ref,
         project.owner_account_name,
         project.name,
-        storages=app.projects.get_storages_for_project(project),
+        storage_locations=app.projects.get_storage_locations_for_project(
+            project
+        ),
     )
     for result in results:
         result.stage = result.stage or find_stage_for_path(
@@ -5325,7 +5329,9 @@ def get_project_dataset(
             dvc_lock,
             owner_name=owner_name,
             project_name=project_name,
-            storages=app.projects.get_storages_for_project(project),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             get_sizes=True,
         )
         logger.info(f"Read {len(dvc_lock_outs)} DVC lock outputs")
@@ -6060,7 +6066,9 @@ def get_project_publications(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            storages=app.projects.get_storages_for_project(project),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             cache_token=resolve_commit_sha(repo, ref),
         )
     except Exception as e:
@@ -7951,7 +7959,9 @@ def get_project_overleaf_sync_status(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            storages=app.projects.get_storages_for_project(project),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             cache_token=resolve_commit_sha(repo, None),
         )
     except Exception as e:
@@ -8408,7 +8418,9 @@ def get_project_pipeline(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            storages=app.projects.get_storages_for_project(project),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             cache_token=commit_sha,
         )
         overall_status = calc_overall_pipeline_status(stage_statuses)
@@ -11863,7 +11875,9 @@ def get_project_showcase(
             tree=showcase_tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            storages=app.projects.get_storages_for_project(project),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             cache_token=resolve_commit_sha(repo, ref),
         )
     except Exception as e:

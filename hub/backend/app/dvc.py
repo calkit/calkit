@@ -223,11 +223,11 @@ def find_md5_object(
     owner_name: str,
     project_name: str,
     md5: str,
-    storages: list[ProjectStorage] | None = None,
+    storage_locations: list[ProjectStorage] | None = None,
 ) -> tuple[ProjectStorage, str] | None:
     """Find the first storage holding a DVC object, and its path there.
 
-    Storages are tried in order, defaulting to just the hub's own.
+    Storage locations are tried in order, defaulting to just the hub's own.
 
     Deliberately uncached: the result feeds pipeline staleness checks, where
     an object that has gone away must be observed as missing. Callers that
@@ -237,9 +237,9 @@ def find_md5_object(
     # is checked to be one before it goes into a storage path
     if not md5 or not _MD5_RE.fullmatch(md5):
         return None
-    if storages is None:
-        storages = [get_internal_storage()]
-    for storage in storages:
+    if storage_locations is None:
+        storage_locations = [get_internal_storage()]
+    for storage in storage_locations:
         for fpath in make_md5_fpaths(storage, owner_name, project_name, md5):
             try:
                 if storage.fs.exists(fpath):
@@ -264,12 +264,12 @@ def expand_dvc_lock_outs(
     owner_name: str,
     project_name: str,
     get_sizes: bool = False,
-    storages: list[ProjectStorage] | None = None,
+    storage_locations: list[ProjectStorage] | None = None,
 ) -> dict:
     """Expand all outs in a DVC lock file.
 
     Will only pick up those in object storage, i.e., not ones that are
-    committed to Git. Objects are looked up in ``storages`` in order,
+    committed to Git. Objects are looked up in ``storage_locations`` in order,
     defaulting to just the hub's own.
 
     Output dictionary structure will look like:
@@ -302,8 +302,8 @@ def expand_dvc_lock_outs(
         }
 
     """
-    if storages is None:
-        storages = [get_internal_storage()]
+    if storage_locations is None:
+        storage_locations = [get_internal_storage()]
     stages = dvc_lock.get("stages", {})
     dvc_lock_outs = {}
     # Collect all unique .dir md5s upfront, along with every path each may
@@ -317,7 +317,7 @@ def expand_dvc_lock_outs(
     md5_to_candidates: dict[str, list[tuple[Any, str]]] = {
         md5: [
             (storage.fs, fpath)
-            for storage in storages
+            for storage in storage_locations
             for fpath in make_md5_fpaths(
                 storage, owner_name, project_name, md5
             )
@@ -360,7 +360,7 @@ def expand_dvc_lock_outs(
                 owner_name=owner_name,
                 project_name=project_name,
                 md5=md5,
-                storages=storages,
+                storage_locations=storage_locations,
             )
         return md5_to_object[md5]
 

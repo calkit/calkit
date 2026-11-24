@@ -358,8 +358,10 @@ def test_unreachable_storage() -> None:
         patch("huggingface_hub.HfApi") as api,
     ):
         # Reads skip it, so everything else stays readable
-        storages = storage.get_project_storages(session, project)  # type: ignore[arg-type]
-        assert [st.resource for st in storages] == [None]
+        storage_locations = storage.get_project_storage_locations(
+            session, project
+        )  # type: ignore[arg-type]
+        assert [st.resource for st in storage_locations] == [None]
         # Changing visibility doesn't, so nothing is left public without
         # anyone knowing
         with pytest.raises(storage.UnreachableStorageError) as e:

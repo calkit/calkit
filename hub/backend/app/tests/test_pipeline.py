@@ -55,7 +55,7 @@ class FakeFS:
         ]
 
 
-def _storages(fs: FakeFS) -> list[ProjectStorage]:
+def _make_storage_locations(fs: FakeFS) -> list[ProjectStorage]:
     return [ProjectStorage(backend="s3", fs=fs, data_prefix="s3://b/data")]
 
 
@@ -113,7 +113,7 @@ def test_up_to_date_stage(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "up-to-date"
     assert calc_overall_pipeline_status(statuses) == "up-to-date"
@@ -147,7 +147,7 @@ def test_modified_command(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "stale"
     assert statuses["run"].modified_command is True
@@ -180,7 +180,7 @@ def test_modified_input(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "stale"
     assert "script.py" in statuses["run"].modified_inputs
@@ -211,7 +211,7 @@ def test_missing_output_found_in_object_storage(tmp_path):
     }
     fs = FakeFS(existing_md5s={out_md5})
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(fs)
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(fs)
     )
     assert statuses["run"].status == "up-to-date"
 
@@ -239,7 +239,7 @@ def test_missing_output_not_in_object_storage(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "stale"
     assert "data/out.bin" in statuses["run"].missing_outputs
@@ -281,7 +281,7 @@ def test_zip_stored_output_is_not_stale(tmp_path):
     # FakeFS has no objects, so presence is False -- only the zip mapping
     # keeps this from being flagged stale.
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "up-to-date"
     assert not statuses["run"].missing_outputs
@@ -316,7 +316,7 @@ def test_cache_false_output_not_flagged_stale(tmp_path):
     # FakeFS has no objects and paper/figures isn't in the tree, so without the
     # cache:false handling this would be wrongly flagged missing/stale.
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "up-to-date"
     assert not statuses["run"].missing_outputs
@@ -352,7 +352,12 @@ def test_orphaned_lock_stage_is_ignored(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS({_md5("r\n")}))
+        dvc_yaml,
+        dvc_lock,
+        tree,
+        "o",
+        "p",
+        _make_storage_locations(FakeFS({_md5("r\n")})),
     )
     assert "gone" not in statuses
     assert statuses["keep"].status == "up-to-date"
@@ -388,7 +393,12 @@ def test_matrix_bare_lock_entry_is_ignored(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS({_md5("r\n")}))
+        dvc_yaml,
+        dvc_lock,
+        tree,
+        "o",
+        "p",
+        _make_storage_locations(FakeFS({_md5("r\n")})),
     )
     assert "bench" not in statuses
     assert statuses["bench@1"].status == "up-to-date"
@@ -426,7 +436,12 @@ def test_leftover_matrix_expansion_is_ignored(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS({_md5("r\n")}))
+        dvc_yaml,
+        dvc_lock,
+        tree,
+        "o",
+        "p",
+        _make_storage_locations(FakeFS({_md5("r\n")})),
     )
     assert statuses["bench@1"].status == "up-to-date"
     assert "bench@2" not in statuses
@@ -465,7 +480,12 @@ def test_leftover_matrix_naming_change_is_ignored(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS({_md5("r\n")}))
+        dvc_yaml,
+        dvc_lock,
+        tree,
+        "o",
+        "p",
+        _make_storage_locations(FakeFS({_md5("r\n")})),
     )
     assert statuses["bench@_arg00"].status == "up-to-date"
     assert "bench@1-3" not in statuses
@@ -501,7 +521,12 @@ def test_committed_dep_beats_stale_producer_out_md5(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS({_md5("r\n")}))
+        dvc_yaml,
+        dvc_lock,
+        tree,
+        "o",
+        "p",
+        _make_storage_locations(FakeFS({_md5("r\n")})),
     )
     assert statuses["consume"].status == "up-to-date"
     assert "cleaned.ipynb" not in statuses["consume"].modified_inputs
@@ -562,7 +587,7 @@ def test_dead_lock_stage_does_not_resolve_a_dep(tmp_path):
         tree,
         "o",
         "p",
-        _storages(FakeFS({current, _md5("r\n")})),
+        _make_storage_locations(FakeFS({current, _md5("r\n")})),
     )
     assert "produce-old" not in statuses
     assert statuses["consume"].modified_inputs == []
@@ -584,7 +609,7 @@ def test_not_run_stage(tmp_path):
     }
     dvc_lock = {"stages": {}}
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "not-run"
     assert calc_overall_pipeline_status(statuses) == "stale"
@@ -627,7 +652,7 @@ def test_cache_token_short_circuits_recompute(tmp_path):
         tree,
         "o",
         "p",
-        _storages(FakeFS()),
+        _make_storage_locations(FakeFS()),
         cache_token=token,
     )
     assert first["run"].status == "up-to-date"
@@ -648,7 +673,7 @@ def test_cache_token_short_circuits_recompute(tmp_path):
         tree,
         "o",
         "p",
-        _storages(FakeFS()),
+        _make_storage_locations(FakeFS()),
         cache_token=token,
     )
     assert cached["run"].status == "up-to-date"
@@ -659,7 +684,7 @@ def test_cache_token_short_circuits_recompute(tmp_path):
         tree,
         "o",
         "p",
-        _storages(FakeFS()),
+        _make_storage_locations(FakeFS()),
         cache_token="tok-other",
     )
     assert fresh["run"].status == "stale"
@@ -697,7 +722,7 @@ def test_unobservable_dep_does_not_make_stage_stale(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["nb"].status == "up-to-date"
 
@@ -729,7 +754,7 @@ def test_always_run_stage_is_not_stale(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "always-run"
     assert calc_overall_pipeline_status(statuses) == "up-to-date"
@@ -764,7 +789,7 @@ def test_always_run_stage_stays_always_run_despite_changes(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "always-run"
 
@@ -795,7 +820,7 @@ def test_frozen_stage_with_real_change_is_not_stale(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "frozen"
 
@@ -845,7 +870,7 @@ def test_declared_deps_and_outs_missing_from_lock(tmp_path):
         }
     }
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["added"].status == "stale"
     assert statuses["added"].modified_inputs == ["new.csv"]
@@ -865,7 +890,7 @@ def test_without_cache_token_always_recomputes(tmp_path):
     tree = get_repo_tree_for_ref(repo, None)
     dvc_yaml, dvc_lock = _simple_pipeline(script)
     up = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert up["run"].status == "up-to-date"
     stale_lock = {
@@ -878,7 +903,7 @@ def test_without_cache_token_always_recomputes(tmp_path):
         }
     }
     stale = compute_stage_statuses(
-        dvc_yaml, stale_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, stale_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert stale["run"].status == "stale"
 
@@ -903,7 +928,7 @@ def test_precompute_storage_presence_lists_then_falls_back() -> None:
     # missing, and no per-md5 probing at all
     fs = FakeFS(existing_md5s={present, dep_only})
     presence = _precompute_storage_presence(
-        dvc_lock, "owner", "proj", _storages(fs)
+        dvc_lock, "owner", "proj", _make_storage_locations(fs)
     )
     assert presence == {present: True, absent: False}
     assert fs.find_calls == 3
@@ -914,13 +939,13 @@ def test_precompute_storage_presence_lists_then_falls_back() -> None:
         existing_md5s={present}, find_error=OSError("listing unavailable")
     )
     fallback = _precompute_storage_presence(
-        dvc_lock, "owner", "proj", _storages(fallback_fs)
+        dvc_lock, "owner", "proj", _make_storage_locations(fallback_fs)
     )
     assert fallback == presence
     assert fallback_fs.exists_calls > 0
     # A project that has pushed nothing reports everything missing
     empty = _precompute_storage_presence(
-        dvc_lock, "owner", "proj", _storages(FakeFS())
+        dvc_lock, "owner", "proj", _make_storage_locations(FakeFS())
     )
     assert empty == {present: False, absent: False}
     # A project switched to HF storage still finds objects pushed to the
@@ -940,22 +965,24 @@ def test_precompute_storage_presence_lists_then_falls_back() -> None:
             credential_user_id=uuid.uuid4(),
         ),
     )
-    storages = [hf] + _storages(internal_fs)
+    storage_locations = [hf] + _make_storage_locations(internal_fs)
     switched = _precompute_storage_presence(
-        dvc_lock, "owner", "proj", storages
+        dvc_lock, "owner", "proj", storage_locations
     )
     assert switched == {present: True, absent: True}
     assert hf_fs.find_calls == 2
     assert internal_fs.find_calls == 1
-    # Probing falls back through the storages the same way
+    # Probing falls back through the storage locations the same way
     hf_fs._find_error = OSError("listing unavailable")
-    probed = _precompute_storage_presence(dvc_lock, "owner", "proj", storages)
+    probed = _precompute_storage_presence(
+        dvc_lock, "owner", "proj", storage_locations
+    )
     assert probed == {present: True, absent: True}
     # Something that isn't an md5 never makes it into a storage path
     bad_lock = {"stages": {"s": {"outs": [{"path": "x", "md5": "../.."}]}}}
     bad_fs = FakeFS()
     assert _precompute_storage_presence(
-        bad_lock, "o", "p", _storages(bad_fs)
+        bad_lock, "o", "p", _make_storage_locations(bad_fs)
     ) == {"../..": False}
     assert bad_fs.find_calls == 0
 
@@ -991,7 +1018,7 @@ def test_cached_missing_outputs_are_rechecked(tmp_path):
         tree,
         "o",
         "p",
-        _storages(FakeFS()),
+        _make_storage_locations(FakeFS()),
         cache_token=token,
     )
     assert first["run"].status == "stale"
@@ -1005,7 +1032,7 @@ def test_cached_missing_outputs_are_rechecked(tmp_path):
         tree,
         "o",
         "p",
-        _storages(fs),
+        _make_storage_locations(fs),
         cache_token=token,
     )
     assert cached["run"].missing_outputs == ["out.txt"]
@@ -1017,7 +1044,7 @@ def test_cached_missing_outputs_are_rechecked(tmp_path):
         tree,
         "o",
         "p",
-        _storages(FakeFS(existing_md5s={out_md5})),
+        _make_storage_locations(FakeFS(existing_md5s={out_md5})),
         cache_token=token,
     )
     assert pushed["run"].status == "up-to-date"
@@ -1029,7 +1056,7 @@ def test_cached_missing_outputs_are_rechecked(tmp_path):
         tree,
         "o",
         "p",
-        _storages(fs),
+        _make_storage_locations(fs),
         cache_token=token,
     )
     assert again["run"].status == "up-to-date"
@@ -1107,14 +1134,14 @@ def test_cleaned_notebook_dep_tracks_the_notebook(tmp_path):
     )
     tree = get_repo_tree_for_ref(repo, None)
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "up-to-date"
     # An edit to a cell changes the cleaned copy, so the stage is stale
     _commit(repo, {"notebook.ipynb": notebook("x = 2", [])}, "edit")
     tree = get_repo_tree_for_ref(repo, None)
     statuses = compute_stage_statuses(
-        dvc_yaml, dvc_lock, tree, "o", "p", _storages(FakeFS())
+        dvc_yaml, dvc_lock, tree, "o", "p", _make_storage_locations(FakeFS())
     )
     assert statuses["run"].status == "stale"
     assert cleaned_dep in statuses["run"].modified_inputs

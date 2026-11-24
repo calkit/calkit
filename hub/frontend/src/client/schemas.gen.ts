@@ -3172,7 +3172,7 @@ export const FsOpBatchRequestSchema = {
       ],
       title: "Xet Hashes",
     },
-    bucket: {
+    bucket_id: {
       anyOf: [
         {
           type: "string",
@@ -3181,7 +3181,7 @@ export const FsOpBatchRequestSchema = {
           type: "null",
         },
       ],
-      title: "Bucket",
+      title: "Bucket Id",
     },
   },
   type: "object",
@@ -14264,7 +14264,7 @@ export const XetAccessSchema = {
       enum: ["upload", "download"],
       title: "Operation",
     },
-    bucket: {
+    bucket_id: {
       anyOf: [
         {
           type: "string",
@@ -14273,7 +14273,7 @@ export const XetAccessSchema = {
           type: "null",
         },
       ],
-      title: "Bucket",
+      title: "Bucket Id",
     },
     cas_url: {
       type: "string",
@@ -14283,9 +14283,9 @@ export const XetAccessSchema = {
       type: "string",
       title: "Access Token",
     },
-    expires_at_unix: {
+    expires_at_unixts: {
       type: "integer",
-      title: "Expires At Unix",
+      title: "Expires At Unixts",
     },
     xet_hash: {
       anyOf: [
@@ -14311,7 +14311,7 @@ export const XetAccessSchema = {
     },
   },
   type: "object",
-  required: ["operation", "cas_url", "access_token", "expires_at_unix"],
+  required: ["operation", "cas_url", "access_token", "expires_at_unixts"],
   title: "XetAccess",
   description:
     "Access to Hugging Face storage through the Xet protocol.\n\nThe client uploads or downloads content with ``hf_xet`` using this\nshort-lived token, which covers the whole bucket, so a client can reuse\nit until it expires. After uploads, the client sends a batch\n``register`` operation with their Xet hashes so the hub can add the\npaths to the bucket, which the token alone can't do.",

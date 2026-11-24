@@ -247,7 +247,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
             return_value=_fake_project(),
         ),
         patch(
-            "app.api.routes.projects.fs.storage.get_project_storages",
+            "app.api.routes.projects.fs.storage.get_project_storage_locations",
             return_value=[hf, internal],
         ),
         patch(
@@ -283,7 +283,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         access = response.json()["access"]
         assert access["kind"] == "hf-xet"
         assert access["operation"] == "download"
-        assert access["bucket"] == "ns/bkt"
+        assert access["bucket_id"] == "ns/bkt"
         assert access["xet_hash"] == "a" * 64
         assert access["size"] == 4
         get_xet_token.assert_called_with(hf, "read")
@@ -315,10 +315,10 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         assert access == {
             "kind": "hf-xet",
             "operation": "upload",
-            "bucket": "ns/bkt",
+            "bucket_id": "ns/bkt",
             "cas_url": "https://cas",
             "access_token": "xet",
-            "expires_at_unix": 123,
+            "expires_at_unixts": 123,
             "xet_hash": None,
             "size": None,
         }
@@ -352,7 +352,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         register |= {"xet_hashes": {"files/md5/cc/x": "b" * 64}}
         batch.reset_mock()
         response = client.post(
-            f"{FS_OPS_URL}/batch", json=register | {"bucket": "ns/old"}
+            f"{FS_OPS_URL}/batch", json=register | {"bucket_id": "ns/old"}
         )
         assert response.status_code == 409
         batch.assert_not_called()
@@ -366,7 +366,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
             ]
         )
         response = client.post(
-            f"{FS_OPS_URL}/batch", json=register | {"bucket": "ns/bkt"}
+            f"{FS_OPS_URL}/batch", json=register | {"bucket_id": "ns/bkt"}
         )
         assert response.status_code == 422
         assert "1 of 1 files: files/md5/cc/x" in response.json()["detail"]
@@ -408,7 +408,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
         assert results[new_path]["content_base64"] == "bmV3IQ=="
         # HF objects come with what a client needs to download them
         assert results[new_path]["info"]["xet_hash"] == "a" * 64
-        assert results[new_path]["info"]["bucket"] == "ns/bkt"
+        assert results[new_path]["info"]["bucket_id"] == "ns/bkt"
         assert "xet_hash" not in results[old_path]["info"]
     # A project on the hub's storage has nothing to register, which a client
     # that still has HF access learns from a 409, so it gets new access
@@ -418,7 +418,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
             return_value=_fake_project(),
         ),
         patch(
-            "app.api.routes.projects.fs.storage.get_project_storages",
+            "app.api.routes.projects.fs.storage.get_project_storage_locations",
             return_value=[internal],
         ),
         patch(
@@ -453,7 +453,7 @@ def test_hf_storage_with_fallback(client: TestClient) -> None:
             return_value=_fake_project(),
         ),
         patch(
-            "app.api.routes.projects.fs.storage.get_project_storages",
+            "app.api.routes.projects.fs.storage.get_project_storage_locations",
             return_value=[dedicated, internal],
         ),
         patch(
@@ -525,7 +525,7 @@ def test_batch_op_answers_every_path(client: TestClient):
             return_value=_fake_project(),
         ),
         patch(
-            "app.api.routes.projects.fs.storage.get_project_storages",
+            "app.api.routes.projects.fs.storage.get_project_storage_locations",
             return_value=[
                 ProjectStorage(
                     backend="s3", fs=fake_fs, data_prefix="s3://data"

@@ -482,10 +482,10 @@ def test_xet_transfers(tmp_path: Path) -> None:
     )
     access = {
         "kind": "hf-xet",
-        "bucket": "someone/one",
+        "bucket_id": "someone/one",
         "cas_url": "https://cas.example.com",
         "access_token": "xet_token",
-        "expires_at_unix": 2_000_000_000,
+        "expires_at_unixts": 2_000_000_000,
     }
     fs = ckfs.CalkitFileSystem(
         endpoint_url="https://api.example.com", skip_instance_cache=True
@@ -494,7 +494,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
     local.write_bytes(content)
     # Uploading a file registers its Xet hash at the same path
     with (
-        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
         patch.object(
             fs,
             "_get_fs_op_info",
@@ -509,7 +509,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
             "operation": "register",
             "paths": [obj_path],
             "xet_hashes": {obj_path: "xethash"},
-            "bucket": "someone/one",
+            "bucket_id": "someone/one",
         }
         assert stored["xethash"] == content
         # The access covers the whole bucket, so the next upload reuses it
@@ -551,7 +551,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
         # Access that's about to expire isn't reused
         post.side_effect = None
         fs._xet_access[("owner", "project", "put", None)] = access | {
-            "expires_at_unix": 0
+            "expires_at_unixts": 0
         }
         fs.put_file(str(local), "ck://owner/project/later.bin")
         assert get_op.call_count == 2
@@ -584,7 +584,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
     # Writing through a file object uploads its bytes the same way
     stored.clear()
     with (
-        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
         patch.object(
             fs,
             "_get_fs_op_info",
@@ -604,7 +604,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
         "size": len(content),
     }
     with (
-        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
         patch.object(
             fs,
             "_get_fs_op_info_batch",
@@ -638,12 +638,12 @@ def test_xet_transfers(tmp_path: Path) -> None:
         "results": {
             obj_path: {
                 "info": {"name": obj_path, "size": len(content)}
-                | {"xet_hash": "xethash", "bucket": "someone/one"}
+                | {"xet_hash": "xethash", "bucket_id": "someone/one"}
             }
         },
     }
     with (
-        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
         patch.object(fs, "_get_fs_op_info_batch", return_value=batch) as bop,
         patch.object(fs, "_get_fs_op_info") as get_op,
     ):
@@ -663,12 +663,12 @@ def test_xet_transfers(tmp_path: Path) -> None:
     stored["otherhash"] = other
     batch["results"][other_path] = {
         "info": {"name": other_path, "size": len(other)}
-        | {"xet_hash": "otherhash", "bucket": "someone/two"}
+        | {"xet_hash": "otherhash", "bucket_id": "someone/two"}
     }
-    old_access = access | {"bucket": "someone/two", "access_token": "old"}
+    old_access = access | {"bucket_id": "someone/two", "access_token": "old"}
     download_tokens.clear()
     with (
-        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
         patch.object(fs, "_get_fs_op_info_batch", return_value=batch),
         patch.object(
             fs, "_get_fs_op_info", return_value={"access": old_access}

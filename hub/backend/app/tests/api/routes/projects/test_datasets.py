@@ -220,7 +220,7 @@ def test_imported_dataset_reads_from_source_project(
             return io.BytesIO(b"a,b\n1,2\n")
 
     def fake_find(
-        owner_name: str, project_name: str, md5: str, storages: object
+        owner_name: str, project_name: str, md5: str, storage_locations: object
     ) -> tuple[SimpleNamespace, str] | None:
         looked_up.append((owner_name, project_name))
         if owner_name != "src":
@@ -247,7 +247,7 @@ def test_imported_dataset_reads_from_source_project(
     assert resp.status_code == 200, resp.text
     assert _csv(resp).splitlines() == ["a,b", "1,2"]
     # Looked up in the source project's storage, after an access check on it,
-    # and the source is fetched again to find its storages
+    # and the source is fetched again to find its storage locations
     assert looked_up == [("src", "proj")]
     assert seen_projects == ["o/p", "src/proj", "src/proj"]
 

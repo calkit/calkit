@@ -100,12 +100,13 @@ class XetAccess(BaseModel):
 
     kind: Literal["hf-xet"] = "hf-xet"
     operation: Literal["upload", "download"]
-    # The bucket the token is for, since a project's objects can be in more
-    # than one
-    bucket: str | None = None
+    # HF's ID of the bucket the token is for, i.e., ``{namespace}/{name}``,
+    # since a project's objects can be in more than one
+    bucket_id: str | None = None
+    # Xet's content-addressable storage (CAS) service
     cas_url: str
     access_token: str
-    expires_at_unix: int
+    expires_at_unixts: int
     # For downloads
     xet_hash: str | None = None
     size: int | None = None
@@ -236,9 +237,9 @@ def post_project_fs_op(
     )
     # New objects go to the first storage, and reads fall back through the
     # rest, since objects aren't moved when a project switches storage
-    storages = storage.get_project_storages(session, project)
-    backend = storages[0].backend
-    for st in storages:
+    storage_locations = storage.get_project_storage_locations(session, project)
+    backend = storage_locations[0].backend
+    for st in storage_locations:
         if (
             st.backend != "hf"
             and settings.ENVIRONMENT == "local"
@@ -247,7 +248,7 @@ def post_project_fs_op(
             st.fs.makedir(st.data_prefix)
     if operation == "exists":
         exists = False
-        for st in storages:
+        for st in storage_locations:
             # Use ls here since some backends (like GCS) don't have an
             # efficient way to check for existence
             try:
@@ -265,7 +266,7 @@ def post_project_fs_op(
             result=ExistsResult(exists=exists),
         )
     if operation == "info":
-        for st in storages:
+        for st in storage_locations:
             try:
                 info_dict = st.fs.info(
                     st.make_project_path(owner_name, project_name, path)
@@ -283,9 +284,9 @@ def post_project_fs_op(
             )
         raise HTTPException(404, "Path not found")
     if operation in ("list", "find"):
-        # Merge results across storages, keeping the first seen per name
+        # Merge results across storage locations, keeping the first per name
         merged: dict[str, dict[str, Any] | str] = {}
-        for st in storages:
+        for st in storage_locations:
             full_path = st.make_project_path(owner_name, project_name, path)
             try:
                 if operation == "list":
@@ -338,7 +339,7 @@ def post_project_fs_op(
         )
     if operation == "get":
         found_obj = storage.find_project_object(
-            session, project, path, storages=storages
+            session, project, path, storage_locations=storage_locations
         )
         if found_obj is None:
             raise HTTPException(404, "Path not found")
@@ -362,10 +363,10 @@ def post_project_fs_op(
                 backend=st.backend,
                 access=XetAccess(
                     operation="download",
-                    bucket=st.bucket,
+                    bucket_id=st.bucket,
                     cas_url=token["casUrl"],
                     access_token=token["accessToken"],
-                    expires_at_unix=token["exp"],
+                    expires_at_unixts=token["exp"],
                     xet_hash=info_dict["xet_hash"],
                     size=info_dict["size"],
                 ),
@@ -403,10 +404,10 @@ def post_project_fs_op(
             | PresignedUrlAccess
         ) = XetAccess(
             operation="upload",
-            bucket=target.bucket,
+            bucket_id=target.bucket,
             cas_url=token["casUrl"],
             access_token=token["accessToken"],
-            expires_at_unix=token["exp"],
+            expires_at_unixts=token["exp"],
         )
     # Determine if we need chunked upload for large puts
     elif storage.upload_should_be_chunked(content_length):
@@ -488,7 +489,7 @@ class FsOpBatchRequest(BaseModel):
         | None
     ) = None
     # For register, the bucket the content was uploaded to
-    bucket: str | None = None
+    bucket_id: str | None = None
 
 
 class FsOpBatchResult(BaseModel):
@@ -516,27 +517,27 @@ def post_project_fs_batch_op(
 
     def get_result(path: str) -> FsOpBatchResult:
         # Use the first storage that has the path, or the first overall
-        found = storages[0]
-        full_path = storages[0].make_project_path(
+        found = storage_locations[0]
+        full_path = storage_locations[0].make_project_path(
             owner_name, project_name, path
         )
         # What HF said about the path, if it's in HF storage
         hf_info = None
-        for i, st in enumerate(storages):
+        for i, st in enumerate(storage_locations):
             candidate = st.make_project_path(owner_name, project_name, path)
             if i in hf_infos:
                 hf_info = hf_infos[i].get(
                     st.make_container_path(owner_name, project_name, path)
                 )
-                if hf_info is not None or len(storages) == 1:
+                if hf_info is not None or len(storage_locations) == 1:
                     found, full_path = st, candidate
                     break
                 continue
-            if len(storages) == 1 or st.fs.exists(candidate):
+            if len(storage_locations) == 1 or st.fs.exists(candidate):
                 found, full_path = st, candidate
                 break
         fs = found.fs
-        from_hf = storages.index(found) in hf_infos
+        from_hf = storage_locations.index(found) in hf_infos
         path_result: dict[str, Any] = {}
         # Handle exists
         if operation == "exists" or "exists" in include:
@@ -570,7 +571,7 @@ def post_project_fs_batch_op(
                 # So clients can download from HF without asking per file
                 if info_dict.get("xet_hash") and found.bucket is not None:
                     path_result["info"]["xet_hash"] = info_dict["xet_hash"]
-                    path_result["info"]["bucket"] = found.bucket
+                    path_result["info"]["bucket_id"] = found.bucket
         # Handle content (if requested via include)
         if "content" in include and info_dict is not None:
             path_result["content_base64"] = None
@@ -632,7 +633,7 @@ def post_project_fs_batch_op(
         assert target.bucket is not None
         # Content uploaded to a bucket the project no longer uses can't be
         # added to the new one
-        if req.bucket is not None and req.bucket != target.bucket:
+        if req.bucket_id is not None and req.bucket_id != target.bucket:
             raise HTTPException(409, "Project storage changed; push again")
         xet_hashes = req.xet_hashes or {}
         if set(paths) != set(xet_hashes):
@@ -675,9 +676,9 @@ def post_project_fs_batch_op(
                 n_files=len(ops),
             )
         return FsOpBatchResponse(backend=target.backend, results={})
-    storages = storage.get_project_storages(session, project)
-    backend = storages[0].backend
-    for st in storages:
+    storage_locations = storage.get_project_storage_locations(session, project)
+    backend = storage_locations[0].backend
+    for st in storage_locations:
         if (
             st.backend != "hf"
             and settings.ENVIRONMENT == "local"
@@ -687,7 +688,7 @@ def post_project_fs_batch_op(
     # HF looks up files in batches, rather than a request per path. Only
     # files are found that way, which is all DVC's objects are.
     hf_infos: dict[int, dict[str, dict[str, Any]]] = {}
-    for i, st in enumerate(storages):
+    for i, st in enumerate(storage_locations):
         if st.backend != "hf":
             continue
         try:

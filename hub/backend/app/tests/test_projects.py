@@ -981,15 +981,15 @@ def test_find_out_object(monkeypatch: pytest.MonkeyPatch) -> None:
         owner_name: str,
         project_name: str,
         md5: str,
-        storages: list[ProjectStorage],
+        storage_locations: list[ProjectStorage],
     ) -> tuple[ProjectStorage, str]:
-        calls.append((owner_name, project_name, md5, storages))
+        calls.append((owner_name, project_name, md5, storage_locations))
         return storage, f"/{owner_name}/{project_name}/{md5}"
 
     monkeypatch.setattr(app.projects, "find_md5_object", fake_lookup)
     project = _make_project()
     owner = project.owner_account_name
-    # A plain output is looked up in the project's own storages
+    # A plain output is looked up in the project's own storage locations
     out = {"md5": "abc", "size": 3}
     assert app.projects.find_out_object(project, out, [storage]) == (
         storage,
@@ -1021,7 +1021,7 @@ def test_find_out_object(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
-def test_dvc_objects_fall_back_through_storages(
+def test_dvc_objects_fall_back_through_storage_locations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import io
@@ -1065,7 +1065,7 @@ def test_dvc_objects_fall_back_through_storages(
     internal = ProjectStorage(
         backend="s3", fs=_DictFs(), data_prefix="s3://b/data"
     )
-    storages = [hf, internal]
+    storage_locations = [hf, internal]
     current = "files/md5/{}/{}"
     dir_md5 = "d0b6bbbdd9a3dcd765978cda2c754fe7.dir"
     in_dir_md5 = "c3dddc7bf94809e09559b0ae327037f7"
@@ -1092,7 +1092,7 @@ def test_dvc_objects_fall_back_through_storages(
             owner, name, current.format(new_md5[:2], new_md5[2:])
         )
     ] = b"png!"
-    for st in storages:
+    for st in storage_locations:
         st.fs.objects[
             st.make_project_path(
                 owner, name, current.format(both_md5[:2], both_md5[2:])
@@ -1110,10 +1110,10 @@ def test_dvc_objects_fall_back_through_storages(
     )
     app.dvc._dvc_dir_cache.clear()
     app.projects._ck_dvc_cache.clear()
-    # Lookups go through the storages in order
-    found = find_md5_object(owner, name, both_md5, storages)
+    # Lookups go through the storage locations in order
+    found = find_md5_object(owner, name, both_md5, storage_locations)
     assert found is not None and found[0] is hf
-    found = find_md5_object(owner, name, old_md5, storages)
+    found = find_md5_object(owner, name, old_md5, storage_locations)
     assert found is not None and found[0] is internal
     assert find_md5_object(owner, name, old_md5, [hf]) is None
     # A directory output expands from the old .dir object, with sizes from
@@ -1123,13 +1123,13 @@ def test_dvc_objects_fall_back_through_storages(
         owner_name=owner,
         project_name=name,
         get_sizes=True,
-        storages=storages,
+        storage_locations=storage_locations,
     )
     assert outs["app"]["type"] == "dir"
     assert outs["app/index.html"]["md5"] == in_dir_md5
     assert outs["app/index.html"]["size"] == len(b"<h1>app</h1>")
     # Files and URLs come from whichever storage has them, with the
-    # project's storages looked up when not given
+    # project's storage locations looked up when not given
     repo_dir = tmp_path / "repo"
     repo = git.Repo.init(repo_dir)
     repo.git.config(["user.name", "CI Test"])
@@ -1146,7 +1146,9 @@ def test_dvc_objects_fall_back_through_storages(
     repo.git.commit(["-m", "Track with DVC"])
     tree = get_repo_tree_for_ref(repo, None)
     monkeypatch.setattr(
-        app.projects, "get_storages_for_project", lambda project: storages
+        app.projects,
+        "get_storage_locations_for_project",
+        lambda project: storage_locations,
     )
     old_item = app.projects.get_contents_from_tree(
         project=project,
@@ -1166,7 +1168,7 @@ def test_dvc_objects_fall_back_through_storages(
         ck_info={},
         dvc_lock_outs={},
         zip_path_map={},
-        storages=storages,
+        storage_locations=storage_locations,
     )
     assert new_item.content is not None
     assert base64.b64decode(new_item.content) == b"png!"

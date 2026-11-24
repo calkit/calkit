@@ -157,7 +157,7 @@ def _md5_in_object_storage(
     md5: str | None,
     owner_name: str,
     project_name: str,
-    storages: list[ProjectStorage],
+    storage_locations: list[ProjectStorage],
 ) -> bool:
     if not md5:
         return False
@@ -167,7 +167,7 @@ def _md5_in_object_storage(
                 owner_name=owner_name,
                 project_name=project_name,
                 md5=md5,
-                storages=storages,
+                storage_locations=storage_locations,
             )
             is not None
         )
@@ -180,9 +180,9 @@ def _check_storage_presence(
     md5s: set[str],
     owner_name: str,
     project_name: str,
-    storages: list[ProjectStorage],
+    storage_locations: list[ProjectStorage],
 ) -> dict[str, bool]:
-    """Whether each of ``md5s`` is in any of a project's storages.
+    """Whether each of ``md5s`` is in any of a project's storage locations.
 
     Every layout `app.dvc.make_md5_fpaths` names puts an object at
     ``<project prefix>/<idx>/<rest>``, with ``idx`` its md5's first two
@@ -202,7 +202,7 @@ def _check_storage_presence(
         found: set[str] = set()
         # Every layout in every storage, as `app.dvc.make_md5_fpaths` names
         # them, where an md5 of just ``idx`` gives the directory
-        for storage in storages:
+        for storage in storage_locations:
             for dir_path in make_md5_fpaths(
                 storage, owner_name, project_name, idx
             ):
@@ -224,7 +224,7 @@ def _check_storage_presence(
                         m
                         for m in remaining
                         if _md5_in_object_storage(
-                            m, owner_name, project_name, storages
+                            m, owner_name, project_name, storage_locations
                         )
                     }
                     return found & group
@@ -249,7 +249,7 @@ def _precompute_storage_presence(
     dvc_lock: dict[str, Any],
     owner_name: str,
     project_name: str,
-    storages: list[ProjectStorage],
+    storage_locations: list[ProjectStorage],
 ) -> dict[str, bool]:
     """Existence in object storage for every out md5.
 
@@ -266,7 +266,9 @@ def _precompute_storage_presence(
                 md5s.add(m)
     if not md5s:
         return {}
-    return _check_storage_presence(md5s, owner_name, project_name, storages)
+    return _check_storage_presence(
+        md5s, owner_name, project_name, storage_locations
+    )
 
 
 def _build_stage_status_cache_key(
@@ -433,7 +435,7 @@ def compute_stage_statuses(
     tree: RepoTree,
     owner_name: str,
     project_name: str,
-    storages: list[ProjectStorage] | None = None,
+    storage_locations: list[ProjectStorage] | None = None,
     cache_token: str | None = None,
 ) -> dict[str, StageStatus]:
     """Compute per-stage status for a pipeline.
@@ -451,7 +453,7 @@ def compute_stage_statuses(
     bytes alone do NOT (a dep can change while the lock stays the same, which
     is exactly what staleness detects).
 
-    ``storages`` are where to check output presence, in order; when omitted
+    ``storage_locations`` are where to check output presence, in order; when omitted
     it's just the hub's own storage.
     """
 
@@ -479,10 +481,10 @@ def compute_stage_statuses(
     if hit is not None and not hit[1]:
         log_timing("hit", 0, md5s_checked=0, md5s_missing=0)
         return hit[0]
-    if storages is None:
+    if storage_locations is None:
         from app.storage import get_internal_storage
 
-        storages = [get_internal_storage()]
+        storage_locations = [get_internal_storage()]
     cache_outcome = "uncached" if cache_key is None else "miss"
     storage_s = 0.0
     if hit is not None:
@@ -490,7 +492,7 @@ def compute_stage_statuses(
         # the token, so look for just those before trusting the cached result
         storage_start = time.perf_counter()
         pushed = _check_storage_presence(
-            set(hit[1]), owner_name, project_name, storages
+            set(hit[1]), owner_name, project_name, storage_locations
         )
         storage_s += time.perf_counter() - storage_start
         if not any(pushed.values()):
@@ -510,7 +512,10 @@ def compute_stage_statuses(
     outs_index = _build_outs_index(live_lock_stages)
     storage_start = time.perf_counter()
     presence = _precompute_storage_presence(
-        {"stages": live_lock_stages}, owner_name, project_name, storages
+        {"stages": live_lock_stages},
+        owner_name,
+        project_name,
+        storage_locations,
     )
     storage_s += time.perf_counter() - storage_start
     # DVC outputs that calkit stores as a zip live under .calkit/zip/, not at
@@ -870,7 +875,7 @@ def pipeline_at_ref(
     ref: str | None,
     owner_name: str,
     project_name: str,
-    storages: list[ProjectStorage],
+    storage_locations: list[ProjectStorage],
 ) -> PipelineAtRef:
     """Read the pipeline at a ref and work out each stage's status.
 
@@ -893,7 +898,7 @@ def pipeline_at_ref(
             tree=tree,
             owner_name=owner_name,
             project_name=project_name,
-            storages=storages,
+            storage_locations=storage_locations,
             cache_token=resolve_commit_sha(repo, ref),
         )
         frozen = find_frozen_tainted_stages(dvc_yaml, dvc_lock, statuses)

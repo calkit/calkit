@@ -1823,9 +1823,9 @@ export type FsOpBatchRequest = {
     [key: string]: string
   } | null
   /**
-   * Bucket
+   * Bucket Id
    */
-  bucket?: string | null
+  bucket_id?: string | null
 }
 
 /**
@@ -8133,9 +8133,9 @@ export type XetAccess = {
    */
   operation: "upload" | "download"
   /**
-   * Bucket
+   * Bucket Id
    */
-  bucket?: string | null
+  bucket_id?: string | null
   /**
    * Cas Url
    */
@@ -8145,9 +8145,9 @@ export type XetAccess = {
    */
   access_token: string
   /**
-   * Expires At Unix
+   * Expires At Unixts
    */
-  expires_at_unix: number
+  expires_at_unixts: number
   /**
    * Xet Hash
    */
@@ -11115,7 +11115,7 @@ export type DeleteProjectData = {
   }
   query?: {
     /**
-     * Delete Storage
+     * Delete Hub Storage
      */
     delete_hub_storage?: boolean
   }
@@ -11229,7 +11229,7 @@ export type DeleteProjectByIdData = {
   }
   query?: {
     /**
-     * Delete Storage
+     * Delete Hub Storage
      */
     delete_hub_storage?: boolean
   }

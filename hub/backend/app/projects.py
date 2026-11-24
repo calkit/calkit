@@ -79,7 +79,7 @@ from app.storage import (
     get_object_fs,
     get_object_url,
     get_project_object_url,
-    get_project_storages,
+    get_project_storage_locations,
     make_data_fpath,
     remove_gcs_content_type,
 )
@@ -290,7 +290,9 @@ def get_project(
     return project
 
 
-def get_storages_for_project(project: Project) -> list[ProjectStorage]:
+def get_storage_locations_for_project(
+    project: Project,
+) -> list[ProjectStorage]:
     """Get every storage a project's DVC objects may be in, in lookup order.
 
     Uses the session the project was loaded in, so this must run on that
@@ -301,21 +303,21 @@ def get_storages_for_project(project: Project) -> list[ProjectStorage]:
     if session is None:
         # Not from the database, so it can only use the hub's own storage
         return [get_internal_storage()]
-    return get_project_storages(cast(Session, session), project)
+    return get_project_storage_locations(cast(Session, session), project)
 
 
 def find_out_object(
     project: Project,
     dvc_out: dict[str, Any],
-    storages: list[ProjectStorage] | None = None,
+    storage_locations: list[ProjectStorage] | None = None,
 ) -> tuple[ProjectStorage, str] | None:
     """Where a DVC output's bytes sit in storage, or None if not pushed.
 
     An output imported from another Calkit project is a pointer whose
     ``remote`` names that project (``calkit:owner/project``) and is
     ``push: false``, so its bytes only ever live in the source project's
-    storages. That is where such a lookup goes; anything else is looked up
-    in ``storages``, which default to this project's.
+    storage locations. That is where such a lookup goes; anything else is
+    looked up in ``storage_locations``, which default to this project's.
     """
     md5 = dvc_out.get("md5")
     if not md5:
@@ -333,8 +335,8 @@ def find_out_object(
                 )
             except HTTPException:
                 source = None
-            source_storages = (
-                get_storages_for_project(source)
+            source_storage_locations = (
+                get_storage_locations_for_project(source)
                 if source is not None
                 else [get_internal_storage()]
             )
@@ -342,15 +344,15 @@ def find_out_object(
                 owner_name=owner_name,
                 project_name=project_name,
                 md5=md5,
-                storages=source_storages,
+                storage_locations=source_storage_locations,
             )
-    if storages is None:
-        storages = get_storages_for_project(project)
+    if storage_locations is None:
+        storage_locations = get_storage_locations_for_project(project)
     return find_md5_object(
         owner_name=project.owner_account_name,
         project_name=project.name,
         md5=md5,
-        storages=storages,
+        storage_locations=storage_locations,
     )
 
 
@@ -528,7 +530,7 @@ def read_app_file(
         return tree.read_bytes(full_path)
     owner_name = project.owner_account_name
     project_name = project.name
-    storages = get_storages_for_project(project)
+    storage_locations = get_storage_locations_for_project(project)
     # dvc.lock outs are expanded per file and cached on the bytes of
     # dvc.lock, so the whole app resolves out of one cached mapping. Only a
     # directory tracked with `dvc add` needs the pointer-file scan below,
@@ -548,7 +550,7 @@ def read_app_file(
             owner_name=owner_name,
             project_name=project_name,
             md5=md5,
-            storages=storages,
+            storage_locations=storage_locations,
         )
         # The .dir object is a JSON list of {"md5": ..., "relpath": ...},
         # which is how we map a request path onto the object holding its
@@ -573,7 +575,7 @@ def read_app_file(
         owner_name=owner_name,
         project_name=project_name,
         md5=file_md5,
-        storages=storages,
+        storage_locations=storage_locations,
     )
     if file_obj is None:
         return None
@@ -963,7 +965,7 @@ def get_ck_info_and_dvc_outs_from_tree(
         dvc_lock,
         owner_name=owner_name,
         project_name=project_name,
-        storages=get_storages_for_project(project),
+        storage_locations=get_storage_locations_for_project(project),
     )
     t_expand = time.perf_counter() - t2
     logger.info(f"Expanded DVC lock outs in {t_expand * 1000:.0f}ms")
@@ -1007,11 +1009,11 @@ def get_contents_from_tree(
     dvc_lock_outs: dict | None = None,
     zip_path_map: dict | None = None,
     dvc_lock: dict | None = None,
-    storages: list[ProjectStorage] | None = None,
+    storage_locations: list[ProjectStorage] | None = None,
 ) -> ContentsItem:
     """Get a file or directory listing from a tree.
 
-    DVC objects are looked up in ``storages``, which default to the
+    DVC objects are looked up in ``storage_locations``, which default to the
     project's, looked up through the session it was loaded in. Callers on a
     worker thread must pass them.
     """
@@ -1342,7 +1344,9 @@ def get_contents_from_tree(
         url = None
         if md5:
             found = find_out_object(
-                project=project, dvc_out=dvc_out, storages=storages
+                project=project,
+                dvc_out=dvc_out,
+                storage_locations=storage_locations,
             )
             if found is not None:
                 url = get_project_object_url(
@@ -1385,7 +1389,9 @@ def get_contents_from_tree(
                 dvc_out = dvc_lock_outs[path]
             md5 = dvc_out["md5"]
             found = find_out_object(
-                project=project, dvc_out=dvc_out, storages=storages
+                project=project,
+                dvc_out=dvc_out,
+                storage_locations=storage_locations,
             )
             url = (
                 get_project_object_url(

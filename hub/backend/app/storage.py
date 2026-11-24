@@ -415,7 +415,7 @@ class UnreachableStorageError(RuntimeError):
         super().__init__(f"Can't reach {resource.bucket}")
 
 
-def get_project_storages(
+def get_project_storage_locations(
     session: "Session", project: "Project"
 ) -> list[ProjectStorage]:
     """Get every storage a project's DVC objects may be in, for reading.
@@ -437,10 +437,10 @@ def get_project_storages(
     ):
         if record.storage_resource_id != project.dvc_storage_id:
             resources.append(record.storage_resource)
-    storages = []
+    storage_locations = []
     for resource in resources:
         try:
-            storages.append(get_resource_storage(session, resource))
+            storage_locations.append(get_resource_storage(session, resource))
         except HTTPException as e:
             logger.warning(
                 f"Skipping unavailable storage {resource.name} "
@@ -448,8 +448,8 @@ def get_project_storages(
             )
     internal = get_internal_storage()
     if project.dvc_storage is None:
-        return [internal] + storages
-    return storages + [internal]
+        return [internal] + storage_locations
+    return storage_locations + [internal]
 
 
 def get_project_storage(
@@ -469,17 +469,17 @@ def find_project_object(
     session: "Session",
     project: "Project",
     path: str,
-    storages: list[ProjectStorage] | None = None,
+    storage_locations: list[ProjectStorage] | None = None,
 ) -> tuple[ProjectStorage, str] | None:
-    """Find which of a project's storages holds an object.
+    """Find which of a project's storage locations holds an object.
 
     Returns the storage and the object's full path in it, or ``None`` if no
     storage has it.
     """
-    if storages is None:
-        storages = get_project_storages(session, project)
+    if storage_locations is None:
+        storage_locations = get_project_storage_locations(session, project)
     owner_name = project.owner_account_name
-    for storage in storages:
+    for storage in storage_locations:
         fpath = storage.make_project_path(owner_name, project.name, path)
         if storage.fs.exists(fpath):
             return storage, fpath

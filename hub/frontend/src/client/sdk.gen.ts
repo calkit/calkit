@@ -2442,15 +2442,15 @@ export class UsersService {
    * unreachable, so if there is any, ``storage_action`` says what to do with
    * it: ``transfer`` its objects to the hub's own storage first, which
    * happens on the worker, with the account disconnected once it's done,
-   * ``delete`` them, or ``orphan`` them, i.e., leave them where they are,
-   * out of reach of their projects.
+   * or ``orphan`` them, i.e., leave them where they are, out of reach of
+   * their projects. Nothing is deleted from the service either way.
    */
   public static deleteUserExternalCredential<
     ThrowOnError extends boolean = true,
   >(
     parameters: {
       provider: string
-      storage_action?: "transfer" | "delete" | "orphan" | null
+      storage_action?: "transfer" | "orphan" | null
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3330,8 +3330,8 @@ export class ProjectsService {
   /**
    * Delete Project
    *
-   * Delete a project, and optionally its DVC objects in every storage it
-   * has used.
+   * Delete a project, and optionally its DVC objects in the hub's own
+   * storage. Connected storage, e.g., an HF bucket, is left alone.
    */
   public static deleteProject<ThrowOnError extends boolean = true>(
     parameters: {
@@ -3448,8 +3448,8 @@ export class ProjectsService {
   /**
    * Delete Project By Id
    *
-   * Delete a project, and optionally its DVC objects in every storage it
-   * has used.
+   * Delete a project, and optionally its DVC objects in the hub's own
+   * storage. Connected storage, e.g., an HF bucket, is left alone.
    */
   public static deleteProjectById<ThrowOnError extends boolean = true>(
     parameters: {

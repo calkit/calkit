@@ -259,10 +259,14 @@ def test_find_md5_object_takes_only_hashes():
         exists = isfile
 
     fs = FakeFs()
-    storages = [ProjectStorage(backend="s3", fs=fs, data_prefix="s3://b")]
+    storage_locations = [
+        ProjectStorage(backend="s3", fs=fs, data_prefix="s3://b")
+    ]
     md5 = "0123456789abcdef0123456789abcdef"
     for valid in (md5, md5 + ".dir"):
-        found = find_md5_object("me", "proj", valid, storages=storages)
+        found = find_md5_object(
+            "me", "proj", valid, storage_locations=storage_locations
+        )
         assert found is not None and found[1].endswith(valid[2:])
     # The hash comes from the project's own files, so anything that isn't
     # one never makes it into a storage path
@@ -276,5 +280,10 @@ def test_find_md5_object_takes_only_hashes():
         "",
     ]
     for bad in crafted:
-        assert find_md5_object("me", "proj", bad, storages=storages) is None
+        assert (
+            find_md5_object(
+                "me", "proj", bad, storage_locations=storage_locations
+            )
+            is None
+        )
     assert fs.looked_up == []

@@ -84,7 +84,9 @@ def get_project_provenance(
         ref,
         project.owner_account_name,
         project.name,
-        storages=app.projects.get_storages_for_project(project),
+        storage_locations=app.projects.get_storage_locations_for_project(
+            project
+        ),
     )
     out = Provenance.model_validate(
         calkit.provenance.get_path_provenance(

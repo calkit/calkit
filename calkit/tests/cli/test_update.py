@@ -1603,3 +1603,30 @@ def test_update_markdown(tmp_dir):
     assert "2 imported image(s) don't match their imports" in (
         res.stdout + res.stderr
     )
+
+
+def test_update_license(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "config", "user.name", "Some Person"])
+    subprocess.check_call(["git", "config", "user.email", "sp@example.org"])
+    # The copyright holder defaults to Git's user.name
+    subprocess.check_call(["calkit", "update", "license"])
+    with open("LICENSE") as f:
+        assert f"Copyright (c) {calkit.utcnow().year} Some Person" in (
+            f.read()
+        )
+    # An explicit one wins
+    subprocess.check_call(
+        ["calkit", "update", "license", "-c", "Other Person"]
+    )
+    with open("LICENSE") as f:
+        assert f"Copyright (c) {calkit.utcnow().year} Other Person" in (
+            f.read()
+        )
+    # With neither set, the command says what to pass
+    subprocess.check_call(["git", "config", "user.name", ""])
+    res = subprocess.run(
+        ["calkit", "update", "license"], capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "--copyright-holder" in res.stderr

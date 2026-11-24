@@ -55,6 +55,7 @@ from TexSoup import TexSoup
 import app.imports
 import app.index
 import app.projects
+import app.storage
 import app.tasks
 import calkit
 import calkit.core
@@ -98,7 +99,7 @@ from app.core import (
 )
 from app.dvc import (
     expand_dvc_lock_outs,
-    get_data_fpath_for_md5,
+    find_md5_object,
     make_mermaid_diagram,
     output_from_pipeline,
     run_dvc_command,
@@ -205,9 +206,10 @@ from app.pipeline import (
 )
 from app.security import generate_refresh_token, hash_refresh_token
 from app.storage import (
-    get_object_fs,
-    get_object_url,
-    make_data_fpath,
+    ProjectStorage,
+    get_project_object_url,
+    get_project_storage,
+    put_project_objects,
     remove_gcs_content_type,
 )
 from calkit.models import ProjectStatus
@@ -551,11 +553,12 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
 
 def _push_dvc_cache_to_storage(
     repo_dir: str,
+    target: ProjectStorage,
     owner_name: str,
     project_name: str,
     skip: set[str] | None = None,
 ) -> int:
-    """Copy a repo's local DVC cache into this project's object storage.
+    """Copy a repo's local DVC cache into the project's storage.
 
     Walking the cache rather than reading each .dvc file covers directory
     outputs and their .dir objects the same way single files are covered,
@@ -567,8 +570,7 @@ def _push_dvc_cache_to_storage(
     cache_dir = os.path.join(repo_dir, ".dvc", "cache", "files", "md5")
     if not os.path.isdir(cache_dir):
         return 0
-    fs = get_object_fs()
-    count = 0
+    objects: list[tuple[str, str | bytes]] = []
     for idx in sorted(os.listdir(cache_dir)):
         idx_dir = os.path.join(cache_dir, idx)
         if not os.path.isdir(idx_dir):
@@ -577,18 +579,9 @@ def _push_dvc_cache_to_storage(
             src = os.path.join(idx_dir, rest)
             if not os.path.isfile(src) or f"{idx}/{rest}" in (skip or ()):
                 continue
-            fpath = make_data_fpath(
-                owner_name=owner_name,
-                project_name=project_name,
-                idx=idx,
-                md5=rest,
-            )
-            with open(src, "rb") as f_in, fs.open(fpath, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            if settings.ENVIRONMENT != "local":
-                remove_gcs_content_type(fpath)
-            count += 1
-    return count
+            objects.append((f"files/md5/{idx}/{rest}", src))
+    put_project_objects(target, owner_name, project_name, objects)
+    return len(objects)
 
 
 @router.post(
@@ -685,6 +678,7 @@ def post_project_upload(
     # storage is what `dvc push` would do, and the server is the remote.
     n_objects = _push_dvc_cache_to_storage(
         repo_dir=str(repo.working_dir),
+        target=get_project_storage(session, project),
         owner_name=project.owner_account_name,
         project_name=project.name,
     )
@@ -1477,6 +1471,14 @@ def patch_project(
     current_user: CurrentUser,
     req: ProjectPatch,
 ) -> ProjectPublic:
+    def restore_bucket_visibility(is_public: bool) -> None:
+        try:
+            app.storage.set_project_bucket_visibility(
+                session, project, is_public
+            )
+        except Exception:
+            logger.exception("Failed to change bucket visibility back")
+
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -1487,27 +1489,65 @@ def patch_project(
     if req.title is not None:
         project.title = req.title
     project.description = req.description
-    if req.is_public is not None:
-        project.is_public = req.is_public
+    if req.is_public is not None and req.is_public != project.is_public:
+        was_public = project.is_public
+        # Buckets dedicated to the project follow its visibility, and go
+        # first, so one that can't be reached stops GitHub changing too
+        try:
+            n_buckets = app.storage.set_project_bucket_visibility(
+                session, project, req.is_public
+            )
+        except app.storage.UnreachableStorageError as e:
+            raise HTTPException(
+                409,
+                f"Can't reach Hugging Face bucket {e.resource.bucket}; "
+                "reconnect Hugging Face first",
+            )
+        except Exception:
+            logger.exception(
+                f"Failed to change bucket visibility for {owner_name}/"
+                f"{project_name}"
+            )
+            # Some may have changed before the failure
+            restore_bucket_visibility(was_public)
+            raise HTTPException(
+                502, "Failed to change Hugging Face bucket visibility"
+            )
         visibility = "public" if req.is_public else "private"
         # Make call to GitHub API to change repo visibility
-        gh_owner, gh_repo = project.git_repo_url.split("/")[-2:]
-        url = f"https://api.github.com/repos/{gh_owner}/{gh_repo}"
-        token = users.get_github_token(session=session, user=current_user)
-        headers = {"Authorization": f"Bearer {token}"}
-        resp = requests.patch(
-            url,
-            json={"visibility": visibility},
-            headers=headers,
+        try:
+            gh_owner, gh_repo = project.git_repo_url.split("/")[-2:]
+            url = f"https://api.github.com/repos/{gh_owner}/{gh_repo}"
+            token = users.get_github_token(session=session, user=current_user)
+            headers = {"Authorization": f"Bearer {token}"}
+            resp = requests.patch(
+                url,
+                json={"visibility": visibility},
+                headers=headers,
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Failed to change repo visibility for "
+                    f"{owner_name}/{project_name}: {resp.text}"
+                )
+                raise HTTPException(
+                    resp.status_code, "Failed to change GitHub repo visibility"
+                )
+        except Exception as e:
+            restore_bucket_visibility(was_public)
+            if isinstance(e, HTTPException):
+                raise
+            logger.exception("Failed to change GitHub repo visibility")
+            raise HTTPException(502, "Failed to change GitHub repo visibility")
+        project.is_public = req.is_public
+        mixpanel.user_changed_project_visibility(
+            current_user,
+            owner_name,
+            project_name,
+            is_public=req.is_public,
+            n_buckets=n_buckets,
         )
-        if resp.status_code != 200:
-            logger.warning(
-                "Failed to change repo visibility for "
-                f"{owner_name}/{project_name}: {resp.text}"
-            )
-            raise HTTPException(
-                resp.status_code, "Failed to change GitHub repo visibility"
-            )
     session.commit()
     session.refresh(project)
     return ProjectPublic.model_validate(project)
@@ -1519,7 +1559,11 @@ def delete_project(
     project_name: str,
     session: SessionDep,
     current_user: CurrentUser,
+    delete_hub_storage: bool = False,
 ) -> Message:
+    """Delete a project, and optionally its DVC objects in the hub's own
+    storage. Connected storage, e.g., an HF bucket, is left alone.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -1527,9 +1571,27 @@ def delete_project(
         current_user=current_user,
         min_access_level="owner",
     )
+    if delete_hub_storage:
+        _delete_project_objects(project)
+    mixpanel.user_deleted_project(
+        current_user,
+        project.owner_account_name,
+        project.name,
+        delete_hub_storage=delete_hub_storage,
+        n_external_storage=len(project.storage_history),
+    )
     session.delete(project)
     session.commit()
     return Message(message="success")
+
+
+def _delete_project_objects(project: Project) -> None:
+    # Before the project itself, so a failure leaves it to try again
+    try:
+        app.storage.delete_project_objects(project)
+    except Exception:
+        logger.exception(f"Failed to delete storage for {project.name}")
+        raise HTTPException(502, "Failed to delete project storage")
 
 
 @router.delete("/projects/{project_id}")
@@ -1537,13 +1599,26 @@ def delete_project_by_id(
     project_id: uuid.UUID,
     session: SessionDep,
     current_user: CurrentUser,
+    delete_hub_storage: bool = False,
 ) -> Message:
+    """Delete a project, and optionally its DVC objects in the hub's own
+    storage. Connected storage, e.g., an HF bucket, is left alone.
+    """
     project = session.get(Project, project_id)
     if project is None:
         raise HTTPException(404)
     # TODO: Check for collaborator access
     if project.owner != current_user:
         raise HTTPException(403)
+    if delete_hub_storage:
+        _delete_project_objects(project)
+    mixpanel.user_deleted_project(
+        current_user,
+        project.owner_account_name,
+        project.name,
+        delete_hub_storage=delete_hub_storage,
+        n_external_storage=len(project.storage_history),
+    )
     session.delete(project)
     session.commit()
     return Message(message="success")
@@ -2021,22 +2096,22 @@ def get_project_dvc_outputs(
     zip_path_map = app.projects.get_ck_info_and_dvc_outs_from_tree(
         project=project, tree=tree
     ).zip_path_map
-    fs = get_object_fs()
+    storage_locations = app.projects.get_storage_locations_for_project(project)
     resp = []
     for path, out in sorted(outs.items()):
         md5 = out.get("md5") or ""
         is_dir = out.get("type") == "dir" or md5.endswith(".dir")
         url = None
         if md5 and not is_dir:
-            fpath = get_data_fpath_for_md5(
+            found = find_md5_object(
                 owner_name=project.owner_account_name,
                 project_name=project.name,
                 md5=md5,
-                fs=fs,
+                storage_locations=storage_locations,
             )
-            if fpath is not None:
-                url = get_object_url(
-                    fpath, fname=os.path.basename(path), fs=fs
+            if found is not None:
+                url = get_project_object_url(
+                    found[0], found[1], fname=os.path.basename(path)
                 )
         resp.append(
             DvcOutput(
@@ -2883,7 +2958,9 @@ def _build_questions_public(
                 tree=tree,
                 owner_name=project.owner_account_name,
                 project_name=project.name,
-                fs=get_object_fs(),
+                storage_locations=app.projects.get_storage_locations_for_project(
+                    project
+                ),
                 cache_token=resolve_commit_sha(repo, ev_ref),
             )
             frozen_stages = find_frozen_tainted_stages(
@@ -3539,7 +3616,11 @@ def _resolve_figures(
     # safe to hit from the several threads that run `_resolve` -- so they
     # have to be loaded before the pool starts, not inside it.
     # `owner_account_name` is a computed field over `owner_account`;
-    # `file_locks` is iterated by `get_contents_from_tree` for every path.
+    # `file_locks` is iterated by `get_contents_from_tree` for every path,
+    # which also needs the project's storage locations. Those go first,
+    # since refreshing a token for one commits, which expires the rest.
+    storage_locations = app.projects.get_storage_locations_for_project(project)
+    _ = project.name
     _ = project.owner_account_name
     _ = len(project.file_locks)
     # Build comment count map from DB, restricted to the figures we're
@@ -3571,7 +3652,7 @@ def _resolve_figures(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            fs=get_object_fs(),
+            storage_locations=storage_locations,
             cache_token=sha,
         )
     except Exception as e:
@@ -3624,6 +3705,7 @@ def _resolve_figures(
             ck_info=ctx.ck_info_full,
             dvc_lock_outs=ctx.dvc_lock_outs,
             zip_path_map=ctx.zip_path_map,
+            storage_locations=storage_locations,
         )
         fig["content"] = item.content
         fig["url"] = item.url
@@ -4012,6 +4094,12 @@ def _build_tables(
     tables += sorted(auto, key=lambda t: t["path"])
     if not tables:
         return []
+    # Resolved here, since the Session isn't safe to use from the pool below,
+    # storage locations first, since refreshing a token for one commits
+    storage_locations = app.projects.get_storage_locations_for_project(project)
+    _ = project.name
+    _ = project.owner_account_name
+    _ = len(project.file_locks)
     # Staleness is best-effort: never let it block the listing.
     stage_statuses = {}
     try:
@@ -4024,16 +4112,11 @@ def _build_tables(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            fs=get_object_fs(),
+            storage_locations=storage_locations,
             cache_token=resolve_commit_sha(repo, ref),
         )
     except Exception as e:
         logger.warning(f"Failed to compute pipeline status for tables: {e}")
-    # See ``_resolve_figures``: these lazy-loading attributes are warmed on
-    # the calling thread, since the Session behind them isn't safe to touch
-    # from the pool below.
-    _ = project.owner_account_name
-    _ = len(project.file_locks)
 
     def _resolve(tbl: dict[str, Any]) -> dict[str, Any]:
         if not tbl.get("stage"):
@@ -4054,6 +4137,7 @@ def _build_tables(
                 ck_info=ck_info_full,
                 dvc_lock_outs=dvc_lock_outs,
                 zip_path_map=zip_path_map,
+                storage_locations=storage_locations,
             )
         except Exception as e:
             # A declared table can point at a path that no longer exists at
@@ -4161,7 +4245,13 @@ def get_project_results(
     results = _build_results(project=project, repo=repo, ref=ref)
     # Whether each is out of date, like a figure or table
     pipeline = pipeline_at_ref(
-        repo, ref, project.owner_account_name, project.name
+        repo,
+        ref,
+        project.owner_account_name,
+        project.name,
+        storage_locations=app.projects.get_storage_locations_for_project(
+            project
+        ),
     )
     for result in results:
         result.stage = result.stage or find_stage_for_path(
@@ -4352,18 +4442,18 @@ def post_project_figure(
         with open(os.path.join(repo.working_dir, path + ".dvc")) as f:
             dvc_yaml = yaml.safe_load(f)
         md5 = dvc_yaml["outs"][0]["md5"]
-        fs = get_object_fs()
-        fpath = make_data_fpath(
-            owner_name=owner_name,
-            project_name=project_name,
-            idx=md5[:2],
-            md5=md5[2:],
+        # New objects go to the project's current storage
+        target = get_project_storage(session, project)
+        fpath = target.make_project_path(
+            owner_name, project_name, f"files/md5/{md5[:2]}/{md5[2:]}"
         )
-        with fs.open(fpath, "wb") as f:
+        with target.fs.open(fpath, "wb") as f:
             f.write(file_data)  # type: ignore[arg-type]
-        if settings.ENVIRONMENT != "local":
+        if target.backend != "hf" and settings.ENVIRONMENT != "local":
             remove_gcs_content_type(fpath)
-        url = get_object_url(fpath=fpath, fname=os.path.basename(path))
+        url = get_project_object_url(
+            target, fpath, fname=os.path.basename(path)
+        )
         # Finally, remove the figure from the cached repo
         os.remove(full_fig_path)
     return Figure(
@@ -5235,12 +5325,13 @@ def get_project_dataset(
         with open(dvc_lock_fpath) as f:
             dvc_lock = yaml.safe_load(f)
         # Expand all DVC lock outs
-        fs = get_object_fs()
         dvc_lock_outs = expand_dvc_lock_outs(
             dvc_lock,
             owner_name=owner_name,
             project_name=project_name,
-            fs=fs,
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             get_sizes=True,
         )
         logger.info(f"Read {len(dvc_lock_outs)} DVC lock outputs")
@@ -5729,6 +5820,7 @@ def post_project_dataset(
         # object storage so a clone can pull them
         _push_dvc_cache_to_storage(
             repo_dir=str(repo.working_dir),
+            target=get_project_storage(session, project),
             owner_name=project.owner_account_name,
             project_name=project.name,
         )
@@ -5872,18 +5964,18 @@ def post_project_dataset_upload(
         with open(os.path.join(repo.working_dir, path + ".dvc")) as f:
             dvc_yaml = yaml.safe_load(f)
         md5 = dvc_yaml["outs"][0]["md5"]
-        fs = get_object_fs()
-        fpath = make_data_fpath(
-            owner_name=owner_name,
-            project_name=project_name,
-            idx=md5[:2],
-            md5=md5[2:],
+        # New objects go to the project's current storage
+        target = get_project_storage(session, project)
+        fpath = target.make_project_path(
+            owner_name, project_name, f"files/md5/{md5[:2]}/{md5[2:]}"
         )
-        with fs.open(fpath, "wb") as f:
+        with target.fs.open(fpath, "wb") as f:
             f.write(file_data)
-        if settings.ENVIRONMENT != "local":
+        if target.backend != "hf" and settings.ENVIRONMENT != "local":
             remove_gcs_content_type(fpath)
-        url = get_object_url(fpath=fpath, fname=os.path.basename(path))
+        url = get_project_object_url(
+            target, fpath, fname=os.path.basename(path)
+        )
         # Finally, remove the dataset from the cached repo
         os.remove(full_ds_path)
     # TODO: Put this dataset into the database
@@ -5974,7 +6066,9 @@ def get_project_publications(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            fs=get_object_fs(),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             cache_token=resolve_commit_sha(repo, ref),
         )
     except Exception as e:
@@ -7187,18 +7281,18 @@ def post_project_publication(
         with open(os.path.join(repo.working_dir, path + ".dvc")) as f:
             dvc_yaml = yaml.safe_load(f)
         md5 = dvc_yaml["outs"][0]["md5"]
-        fs = get_object_fs()
-        fpath = make_data_fpath(
-            owner_name=owner_name,
-            project_name=project_name,
-            idx=md5[:2],
-            md5=md5[2:],
+        # New objects go to the project's current storage
+        target = get_project_storage(session, project)
+        fpath = target.make_project_path(
+            owner_name, project_name, f"files/md5/{md5[:2]}/{md5[2:]}"
         )
-        with fs.open(fpath, "wb") as f:
+        with target.fs.open(fpath, "wb") as f:
             f.write(file_data)  # type: ignore
-        if settings.ENVIRONMENT != "local":
+        if target.backend != "hf" and settings.ENVIRONMENT != "local":
             remove_gcs_content_type(fpath)
-        url = get_object_url(fpath=fpath, fname=os.path.basename(path))
+        url = get_project_object_url(
+            target, fpath, fname=os.path.basename(path)
+        )
         # Finally, remove the figure from the cached repo
         os.remove(full_fig_path)
     return Publication(
@@ -7865,7 +7959,9 @@ def get_project_overleaf_sync_status(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            fs=get_object_fs(),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             cache_token=resolve_commit_sha(repo, None),
         )
     except Exception as e:
@@ -8322,6 +8418,9 @@ def get_project_pipeline(
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             cache_token=commit_sha,
         )
         overall_status = calc_overall_pipeline_status(stage_statuses)
@@ -11776,7 +11875,9 @@ def get_project_showcase(
             tree=showcase_tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            fs=get_object_fs(),
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
             cache_token=resolve_commit_sha(repo, ref),
         )
     except Exception as e:

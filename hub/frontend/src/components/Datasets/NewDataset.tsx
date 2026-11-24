@@ -108,6 +108,9 @@ export function ImportedFromFields<T extends ImportedFromForm>({
             {...register(field("url"), { required: "A URL is required." })}
             placeholder="https://example.org/data/measurements.csv"
             autoComplete="off"
+            data-form-type="other"
+            data-1p-ignore
+            data-lpignore="true"
           />
           {errors.url ? (
             <FormErrorMessage>{errors.url.message}</FormErrorMessage>
@@ -122,6 +125,9 @@ export function ImportedFromFields<T extends ImportedFromForm>({
             {...register(field("doi"), { required: "A DOI is required." })}
             placeholder="10.5281/zenodo.1234567"
             autoComplete="off"
+            data-form-type="other"
+            data-1p-ignore
+            data-lpignore="true"
           />
           {errors.doi ? (
             <FormErrorMessage>{errors.doi.message}</FormErrorMessage>
@@ -139,6 +145,9 @@ export function ImportedFromFields<T extends ImportedFromForm>({
               })}
               placeholder="https://github.com/owner/repo"
               autoComplete="off"
+              data-form-type="other"
+              data-1p-ignore
+              data-lpignore="true"
             />
             {errors.repo_url ? (
               <FormErrorMessage>{errors.repo_url.message}</FormErrorMessage>
@@ -159,6 +168,9 @@ export function ImportedFromFields<T extends ImportedFromForm>({
               })}
               placeholder="Blank for the latest commit on the default branch"
               autoComplete="off"
+              data-form-type="other"
+              data-1p-ignore
+              data-lpignore="true"
             />
             {errors.repo_rev ? (
               <FormErrorMessage>{errors.repo_rev.message}</FormErrorMessage>
@@ -176,6 +188,9 @@ export function ImportedFromFields<T extends ImportedFromForm>({
               {...register(field("repo_path"))}
               placeholder="Leave blank for the whole repo"
               autoComplete="off"
+              data-form-type="other"
+              data-1p-ignore
+              data-lpignore="true"
             />
           </FormControl>
         </>
@@ -438,7 +453,16 @@ const NewDataset = ({
       motionPreset="none"
     >
       <ModalOverlay />
-      <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>
+      <ModalContent
+        as="form"
+        onSubmit={handleSubmit(onSubmit)}
+        autoComplete="off"
+        // Opt the whole form out of password managers too, since Dashlane
+        // fills fields named like "title"
+        data-form-type="other"
+        data-1p-ignore
+        data-lpignore="true"
+      >
         <ModalHeader>Add a dataset</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={6}>
@@ -533,6 +557,9 @@ const NewDataset = ({
                 {...register("created_by")}
                 placeholder={currentUser?.email ?? "you@example.org"}
                 autoComplete="off"
+                data-form-type="other"
+                data-1p-ignore
+                data-lpignore="true"
               />
               <FormHelperText>
                 Defaults to you. Naming who created or collected the data is
@@ -568,6 +595,9 @@ const NewDataset = ({
                 {...register("path", { required: "A path is required." })}
                 placeholder="Ex: data/raw/measurements.csv"
                 autoComplete="off"
+                data-form-type="other"
+                data-1p-ignore
+                data-lpignore="true"
               />
             )}
             {errors.path ? (
@@ -604,6 +634,9 @@ const NewDataset = ({
               })}
               placeholder="Ex: Wake velocity profiles"
               autoComplete="off"
+              data-form-type="other"
+              data-1p-ignore
+              data-lpignore="true"
             />
             {errors.title ? (
               <FormErrorMessage>{errors.title.message}</FormErrorMessage>

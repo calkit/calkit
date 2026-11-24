@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+import urllib.parse
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Sequence
@@ -15,7 +16,9 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import Field, col, func, or_, select
 
 import app.projects
+import app.storage
 import app.stripe
+import app.tasks
 from app import mixpanel, users, zotero
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
@@ -73,7 +76,12 @@ from app.security import (
     verify_password,
 )
 from app.storage import get_storage_usage
-from app.subscriptions import PLAN_IDS, get_monthly_price, get_storage_limit
+from app.subscriptions import (
+    PLAN_IDS,
+    get_account_storage_limit,
+    get_monthly_price,
+    get_storage_limit,
+)
 from app.zenodo import AUTH_URL as ZENODO_AUTH_URL
 from calkit.overleaf import AuthError, WebClient
 
@@ -920,6 +928,7 @@ class ConnectedAccounts(BaseModel):
     overleaf_session: bool = False
     google: bool
     zotero: bool
+    huggingface: bool = False
     # Whether a Calkit CLI has ever authenticated as this user, which is the
     # only reliable way to know the CLI is installed: the local server it
     # would otherwise be detected by is usually not running.
@@ -988,6 +997,13 @@ def get_user_connected_accounts(
         ).one()
         > 0
     )
+    huggingface_connected = False
+    try:
+        users.get_huggingface_token(session=session, user=current_user)
+        huggingface_connected = True
+    except HTTPException as e:
+        # An outage doesn't mean the account was disconnected
+        huggingface_connected = e.status_code == 503
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
@@ -996,6 +1012,7 @@ def get_user_connected_accounts(
         overleaf_session=overleaf_session,
         google=google_connected,
         zotero=zotero_cred is not None,
+        huggingface=huggingface_connected,
         cli=cli_connected,
     )
 
@@ -1071,6 +1088,106 @@ class TokenPut(BaseModel):
 class OAuthCodeExchange(BaseModel):
     code: str
     redirect_uri: str
+
+
+class HuggingFaceAuthStartRequest(BaseModel):
+    # Generated and checked by the browser, for CSRF protection
+    state: str
+
+
+class HuggingFaceAuthStart(BaseModel):
+    authorize_url: str
+    redirect_uri: str
+
+
+# Enough to create buckets
+HF_OAUTH_SCOPES = "openid profile manage-repos"
+
+
+@router.post("/user/huggingface-auth/start")
+def post_user_huggingface_auth_start(
+    current_user: CurrentUser, req: HuggingFaceAuthStartRequest
+) -> HuggingFaceAuthStart:
+    """Get the URL to send the user to for connecting Hugging Face.
+
+    It's built here since the client ID is only configured on the backend.
+    """
+    if not settings.HF_CLIENT_ID:
+        raise HTTPException(501, "Hugging Face isn't configured on this hub")
+    redirect_uri = f"{settings.frontend_host.rstrip('/')}/auth/huggingface"
+    params = urllib.parse.urlencode(
+        dict(
+            client_id=settings.HF_CLIENT_ID,
+            redirect_uri=redirect_uri,
+            scope=HF_OAUTH_SCOPES,
+            state=req.state,
+            response_type="code",
+        )
+    )
+    return HuggingFaceAuthStart(
+        authorize_url=f"https://huggingface.co/oauth/authorize?{params}",
+        redirect_uri=redirect_uri,
+    )
+
+
+@router.post("/user/huggingface-auth")
+def post_user_huggingface_auth(
+    session: SessionDep,
+    current_user: CurrentUser,
+    req: OAuthCodeExchange,
+) -> Message:
+    """Connect Hugging Face using an authorization code."""
+    if not settings.HF_CLIENT_ID or not settings.HF_CLIENT_SECRET:
+        raise HTTPException(501, "Hugging Face isn't configured on this hub")
+    resp = requests.post(
+        users.HF_TOKEN_URL,
+        data=dict(
+            grant_type="authorization_code",
+            code=req.code,
+            redirect_uri=req.redirect_uri,
+        ),
+        auth=(settings.HF_CLIENT_ID, settings.HF_CLIENT_SECRET),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        logger.error(
+            f"Hugging Face auth failed: {resp.status_code} {resp.text[:200]}"
+        )
+        raise HTTPException(400, "Failed to authenticate with Hugging Face")
+    first = (
+        users.get_external_credential(
+            session=session, user=current_user, provider="huggingface"
+        )
+        is None
+    )
+    users.save_huggingface_token(
+        session=session,
+        user=current_user,
+        hf_resp=resp.json(),
+        new_login=True,
+    )
+    mixpanel.user_connected_huggingface(current_user, first=first)
+    return Message(message="success")
+
+
+class HuggingFaceAccount(BaseModel):
+    username: str | None
+    # Namespaces the user granted access to, where storage can be created
+    orgs: list[str]
+
+
+@router.get("/user/huggingface-account")
+def get_user_huggingface_account(
+    session: SessionDep, current_user: CurrentUser
+) -> HuggingFaceAccount:
+    # Validates, and refreshes if needed
+    users.get_huggingface_token(session=session, user=current_user)
+    credential = current_user.get_external_credential(provider="huggingface")
+    assert credential is not None
+    return HuggingFaceAccount(
+        username=credential.provider_account_id,
+        orgs=(credential.metadata_json or {}).get("orgs", []),
+    )
 
 
 @router.put("/user/overleaf-token")
@@ -1304,13 +1421,87 @@ def get_user_overleaf_token(
 
 @router.delete("/user/external-credentials/{provider}")
 def delete_user_external_credential(
-    session: SessionDep, current_user: CurrentUser, provider: str
+    session: SessionDep,
+    current_user: CurrentUser,
+    provider: str,
+    storage_action: Literal["transfer", "orphan"] | None = None,
 ) -> Message:
-    """Disconnect an external account by deleting its credential."""
+    """Disconnect an external account by deleting its credential.
+
+    Storage reached with the account, e.g., HF buckets, would become
+    unreachable, so if there is any, ``storage_action`` says what to do with
+    it: ``transfer`` its objects to the hub's own storage first, which
+    happens on the worker, with the account disconnected once it's done,
+    or ``orphan`` them, i.e., leave them where they are, out of reach of
+    their projects. Nothing is deleted from the service either way.
+    """
     if provider == "github":
         raise HTTPException(
             403, "Cannot disconnect GitHub as it is your login method"
         )
+    resources = (
+        app.storage.get_credential_resources(session, current_user.id)
+        if provider == "huggingface"
+        else []
+    )
+    if (
+        provider == "huggingface"
+        and app.tasks.get_storage_transfer_status(current_user.id)[0]
+        == "running"
+    ):
+        raise HTTPException(
+            409, "Transfer to Calkit Hub storage already running"
+        )
+    if resources and storage_action is None:
+        raise HTTPException(
+            409, "Storage uses this account; transfer or orphan it"
+        )
+    if resources:
+        assert storage_action is not None
+        mixpanel.user_disconnected_with_storage(
+            current_user,
+            provider,
+            storage_action,
+            n_storage=len(resources),
+            n_projects=len(
+                {
+                    p.id
+                    for r in resources
+                    for p in app.storage.get_resource_projects(session, r)
+                }
+            ),
+        )
+    if resources and storage_action == "transfer":
+        # Everything has to fit in each owner's plan
+        needed: dict[str, float] = {}
+        for resource in resources:
+            for owner_name, gb in app.storage.get_resource_gb_to_copy(
+                session, resource
+            ).items():
+                needed[owner_name] = needed.get(owner_name, 0) + gb
+        for resource in resources:
+            account = resource.owner_account
+            if account.name not in needed:
+                continue
+            used = get_storage_usage(account.name)
+            limit = get_account_storage_limit(account)
+            if used + needed[account.name] > limit:
+                raise HTTPException(
+                    413,
+                    f"{needed[account.name]:.2f} GB from Hugging Face "
+                    f"won't fit in {account.name}'s Calkit Hub storage "
+                    f"({used:.2f} of {limit} GB used)",
+                )
+        # The job switches each project to the hub's own storage before
+        # copying its objects, with reads falling back to HF until then
+        if not app.tasks.enqueue_storage_transfer(str(current_user.id)):
+            raise HTTPException(503, "Transfers unavailable")
+        return Message(
+            message="Transferring files to Calkit Hub storage; Hugging Face "
+            "disconnects when done"
+        )
+    for resource in resources:
+        session.delete(resource)
     credential = users.get_external_credential(
         session=session,
         user=current_user,

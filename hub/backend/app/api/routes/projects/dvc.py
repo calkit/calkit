@@ -26,6 +26,11 @@ from app.storage import (
 
 router = APIRouter()
 
+EXTERNAL_STORAGE_MESSAGE = (
+    "Project's DVC storage isn't on this hub, so HTTP remote won't work; "
+    "switch DVC remote to ck://{owner}/{project}"
+)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,9 @@ async def post_project_dvc_file(
         current_user=current_user,
         min_access_level="write",
     )
+    # This streams through the hub's own storage only
+    if project.dvc_storage_id is not None:
+        raise HTTPException(400, EXTERNAL_STORAGE_MESSAGE)
     logger.info(f"{current_user.email} requesting to POST data")
     # Check if user has not exceeded their storage limit
     fs = get_object_fs()
@@ -181,13 +189,16 @@ async def get_project_dvc_file(
         user=current_user, owner_name=owner_name, project_name=project_name
     )
     logger.info(f"{current_user.email} requesting to GET data")
-    app.projects.get_project(
+    project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
         project_name=project_name,
         current_user=current_user,
         min_access_level="read",
     )
+    if project.dvc_storage_id is not None:
+        raise HTTPException(400, EXTERNAL_STORAGE_MESSAGE)
+    used_external_storage = bool(project.storage_history)
     # Release the DB connection before streaming: FastAPI finalizes the
     # session dependency only after the response body is fully sent, so an
     # open session would pin a pool connection (idle in transaction) for the
@@ -201,6 +212,9 @@ async def get_project_dvc_file(
     logger.info(f"Checking for {fpath}")
     if not fs.exists(fpath):
         logger.info(f"{fpath} does not exist")
+        # It may be in storage the project used before
+        if used_external_storage:
+            raise HTTPException(400, EXTERNAL_STORAGE_MESSAGE)
         raise HTTPException(404)
 
     # Stream the file contents back to the user

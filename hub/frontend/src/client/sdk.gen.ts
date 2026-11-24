@@ -33,6 +33,8 @@ import type {
   CreateUserErrors,
   CreateUserResponses,
   DatasetPost,
+  DeleteAccountStorageErrors,
+  DeleteAccountStorageResponses,
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
@@ -99,6 +101,8 @@ import type {
   FsOpRequest,
   GetAccountErrors,
   GetAccountResponses,
+  GetAccountStorageErrors,
+  GetAccountStorageResponses,
   GetArxivPdfErrors,
   GetArxivPdfResponses,
   GetCurrentUserResponses,
@@ -229,6 +233,10 @@ import type {
   GetProjectSoftwareErrors,
   GetProjectSoftwareResponses,
   GetProjectsResponses,
+  GetProjectStorageErrors,
+  GetProjectStorageResponses,
+  GetProjectStorageUsageErrors,
+  GetProjectStorageUsageResponses,
   GetProjectTablesErrors,
   GetProjectTablesResponses,
   GetProjectWorkspacesErrors,
@@ -261,6 +269,9 @@ import type {
   GetUserGithubReposErrors,
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
+  GetUserHuggingfaceAccountResponses,
+  GetUserHuggingfaceStorageResponses,
+  GetUserHuggingfaceStorageTransferResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
   GetUserOverleafSessionResponses,
@@ -280,6 +291,7 @@ import type {
   GitHubTokenReq,
   GlobalSearchErrors,
   GlobalSearchResponses,
+  HuggingFaceAuthStartRequest,
   ImportGithubReleasesErrors,
   ImportGithubReleasesResponses,
   ImportUpdatePost,
@@ -401,6 +413,8 @@ import type {
   PostProjectFsOpResponses,
   PostProjectGithubReleaseErrors,
   PostProjectGithubReleaseResponses,
+  PostProjectHfBucketErrors,
+  PostProjectHfBucketResponses,
   PostProjectImportUpdateErrors,
   PostProjectImportUpdateResponses,
   PostProjectInvitationErrors,
@@ -467,6 +481,10 @@ import type {
   PostUserGithubAuthResponses,
   PostUserGoogleAuthErrors,
   PostUserGoogleAuthResponses,
+  PostUserHuggingfaceAuthErrors,
+  PostUserHuggingfaceAuthResponses,
+  PostUserHuggingfaceAuthStartErrors,
+  PostUserHuggingfaceAuthStartResponses,
   PostUserSessionsEndOthersResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
@@ -484,11 +502,13 @@ import type {
   PostVerifyEmailResponses,
   ProjectCommentPatch,
   ProjectCommentPost,
+  ProjectHfBucketPost,
   ProjectInvitationPost,
   ProjectPatch,
   ProjectPost,
   ProjectPushEventPost,
   ProjectStatusPost,
+  ProjectStoragePut,
   PutOrgSubscriptionErrors,
   PutOrgSubscriptionResponses,
   PutProjectCollaboratorErrors,
@@ -507,6 +527,8 @@ import type {
   PutProjectReferenceItemResponses,
   PutProjectReferenceNotesErrors,
   PutProjectReferenceNotesResponses,
+  PutProjectStorageErrors,
+  PutProjectStorageResponses,
   PutUserOnboardingFlagErrors,
   PutUserOnboardingFlagResponses,
   PutUserOverleafSessionErrors,
@@ -2067,6 +2089,102 @@ export class UsersService {
   }
 
   /**
+   * Post User Huggingface Auth Start
+   *
+   * Get the URL to send the user to for connecting Hugging Face.
+   *
+   * It's built here since the client ID is only configured on the backend.
+   */
+  public static postUserHuggingfaceAuthStart<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      huggingFaceAuthStartRequest: HuggingFaceAuthStartRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserHuggingfaceAuthStartResponses,
+    PostUserHuggingfaceAuthStartErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "huggingFaceAuthStartRequest", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserHuggingfaceAuthStartResponses,
+      PostUserHuggingfaceAuthStartErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/huggingface-auth/start",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post User Huggingface Auth
+   *
+   * Connect Hugging Face using an authorization code.
+   */
+  public static postUserHuggingfaceAuth<ThrowOnError extends boolean = true>(
+    parameters: {
+      appApiRoutesUsersOAuthCodeExchange: AppApiRoutesUsersOAuthCodeExchange
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserHuggingfaceAuthResponses,
+    PostUserHuggingfaceAuthErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "appApiRoutesUsersOAuthCodeExchange", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserHuggingfaceAuthResponses,
+      PostUserHuggingfaceAuthErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/huggingface-auth",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Huggingface Account
+   */
+  public static getUserHuggingfaceAccount<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserHuggingfaceAccountResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserHuggingfaceAccountResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/huggingface-account",
+      ...options,
+    })
+  }
+
+  /**
    * Get User Overleaf Token
    */
   public static getUserOverleafToken<ThrowOnError extends boolean = true>(
@@ -2319,12 +2437,20 @@ export class UsersService {
    * Delete User External Credential
    *
    * Disconnect an external account by deleting its credential.
+   *
+   * Storage reached with the account, e.g., HF buckets, would become
+   * unreachable, so if there is any, ``storage_action`` says what to do with
+   * it: ``transfer`` its objects to the hub's own storage first, which
+   * happens on the worker, with the account disconnected once it's done,
+   * or ``orphan`` them, i.e., leave them where they are, out of reach of
+   * their projects. Nothing is deleted from the service either way.
    */
   public static deleteUserExternalCredential<
     ThrowOnError extends boolean = true,
   >(
     parameters: {
       provider: string
+      storage_action?: "transfer" | "orphan" | null
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -2334,7 +2460,14 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "provider" }] }],
+      [
+        {
+          args: [
+            { in: "path", key: "provider" },
+            { in: "query", key: "storage_action" },
+          ],
+        },
+      ],
     )
     return (options?.client ?? client).delete<
       DeleteUserExternalCredentialResponses,
@@ -3196,11 +3329,15 @@ export class ProjectsService {
 
   /**
    * Delete Project
+   *
+   * Delete a project, and optionally its DVC objects in the hub's own
+   * storage. Connected storage, e.g., an HF bucket, is left alone.
    */
   public static deleteProject<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
+      delete_hub_storage?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<DeleteProjectResponses, DeleteProjectErrors, ThrowOnError> {
@@ -3211,6 +3348,7 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
+            { in: "query", key: "delete_hub_storage" },
           ],
         },
       ],
@@ -3309,10 +3447,14 @@ export class ProjectsService {
 
   /**
    * Delete Project By Id
+   *
+   * Delete a project, and optionally its DVC objects in the hub's own
+   * storage. Connected storage, e.g., an HF bucket, is left alone.
    */
   public static deleteProjectById<ThrowOnError extends boolean = true>(
     parameters: {
       project_id: string
+      delete_hub_storage?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3322,7 +3464,14 @@ export class ProjectsService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "project_id" }] }],
+      [
+        {
+          args: [
+            { in: "path", key: "project_id" },
+            { in: "query", key: "delete_hub_storage" },
+          ],
+        },
+      ],
     )
     return (options?.client ?? client).delete<
       DeleteProjectByIdResponses,
@@ -10317,6 +10466,312 @@ export class FeedbackService {
       security: [{ scheme: "bearer", type: "http" }],
       url: "/feature-votes",
       ...options,
+    })
+  }
+}
+
+export class StorageService {
+  /**
+   * Get Account Storage
+   */
+  public static getAccountStorage<ThrowOnError extends boolean = true>(
+    parameters: {
+      account_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetAccountStorageResponses,
+    GetAccountStorageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "account_name" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetAccountStorageResponses,
+      GetAccountStorageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/accounts/{account_name}/storage",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete Account Storage
+   *
+   * Disconnect storage from an account.
+   *
+   * Nothing is deleted from the storage itself. Storage any project has
+   * used can't be disconnected, since those projects may still need to read
+   * objects from it.
+   */
+  public static deleteAccountStorage<ThrowOnError extends boolean = true>(
+    parameters: {
+      account_name: string
+      storage_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteAccountStorageResponses,
+    DeleteAccountStorageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "account_name" },
+            { in: "path", key: "storage_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteAccountStorageResponses,
+      DeleteAccountStorageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/accounts/{account_name}/storage/{storage_name}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get User Huggingface Storage
+   *
+   * Get the storage reached with the current user's HF account, which
+   * disconnecting it would make unreachable.
+   */
+  public static getUserHuggingfaceStorage<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserHuggingfaceStorageResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserHuggingfaceStorageResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/huggingface/storage",
+      ...options,
+    })
+  }
+
+  /**
+   * Get User Huggingface Storage Transfer
+   *
+   * Get the status of moving the storage reached with the current user's
+   * HF account to the hub's own storage.
+   */
+  public static getUserHuggingfaceStorageTransfer<
+    ThrowOnError extends boolean = true,
+  >(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserHuggingfaceStorageTransferResponses,
+    unknown,
+    ThrowOnError
+  > {
+    return (options?.client ?? client).get<
+      GetUserHuggingfaceStorageTransferResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/huggingface/storage-transfer",
+      ...options,
+    })
+  }
+
+  /**
+   * Get Project Storage
+   */
+  public static getProjectStorage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectStorageResponses,
+    GetProjectStorageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectStorageResponses,
+      GetProjectStorageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/storage",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Put Project Storage
+   *
+   * Change where a project's new DVC objects go.
+   *
+   * Existing objects aren't moved. Reads fall back through every storage the
+   * project has used, so nothing needs to move for pulls to keep working.
+   */
+  public static putProjectStorage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      projectStoragePut: ProjectStoragePut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutProjectStorageResponses,
+    PutProjectStorageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "projectStoragePut", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutProjectStorageResponses,
+      PutProjectStorageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/storage",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Storage Usage
+   *
+   * Get how much of the hub's storage a project and its owner use.
+   *
+   * It's separate from the project's storage settings since it's slow to
+   * measure.
+   */
+  public static getProjectStorageUsage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectStorageUsageResponses,
+    GetProjectStorageUsageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectStorageUsageResponses,
+      GetProjectStorageUsageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/storage/usage",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Hf Bucket
+   *
+   * Create an HF bucket dedicated to a project, with the current user's
+   * HF account, and send the project's new DVC objects there.
+   *
+   * The bucket is public if the project is, and its visibility follows the
+   * project's from then on.
+   */
+  public static postProjectHfBucket<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      projectHfBucketPost: ProjectHfBucketPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectHfBucketResponses,
+    PostProjectHfBucketErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "projectHfBucketPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectHfBucketResponses,
+      PostProjectHfBucketErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/storage/hf-bucket",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

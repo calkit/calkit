@@ -80,6 +80,14 @@ const ActionsMenu = ({
           id={value.id}
           isOpen={deleteModal.isOpen}
           onClose={deleteModal.onClose}
+          projectOwner={
+            type === "Project"
+              ? (value as ProjectPublic).owner_account_name
+              : undefined
+          }
+          projectName={
+            type === "Project" ? (value as ProjectPublic).name : undefined
+          }
         />
       </Menu>
     </>

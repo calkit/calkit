@@ -5,7 +5,7 @@ import json
 import os
 import uuid
 from types import SimpleNamespace
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import git
 import pytest
@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, delete, select
 
 import app.index
+import app.storage
 from app import projects as projects_module
 from app import users, zotero
 from app.api.routes.projects.core import (
@@ -5861,6 +5862,7 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
     import io as _io
 
     from app.api.routes.projects.core import _push_dvc_cache_to_storage
+    from app.storage import ProjectStorage
 
     repo_dir = tmp_path / "repo"
     cache = repo_dir / ".dvc" / "cache" / "files" / "md5"
@@ -5884,15 +5886,12 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
             buf.close = close  # type: ignore[method-assign]
             return buf
 
-    with (
-        patch(
-            "app.api.routes.projects.core.get_object_fs",
-            return_value=FakeFS(),
-        ),
-        patch("app.config.settings.ENVIRONMENT", "local"),
-    ):
+    with patch("app.config.settings.ENVIRONMENT", "local"):
         count = _push_dvc_cache_to_storage(
             repo_dir=str(repo_dir),
+            target=ProjectStorage(
+                backend="s3", fs=FakeFS(), data_prefix="data"
+            ),
             owner_name="someone",
             project_name="a-project",
         )
@@ -5902,17 +5901,46 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
         ["cd", "ef456789.dir"],
     ]
     assert list(written.values())[0] == b"file contents"
+    # For HF, they're all added in one batch, under the project's folder
+    hf = ProjectStorage(
+        backend="hf",
+        fs=None,
+        data_prefix="buckets/someone/bucket",
+        resource=SimpleNamespace(  # type: ignore[arg-type]
+            bucket="someone/bucket", project_id=None
+        ),
+        token="hf-token",
+    )
+    with patch("huggingface_hub.HfApi") as api:
+        count = _push_dvc_cache_to_storage(
+            repo_dir=str(repo_dir),
+            target=hf,
+            owner_name="someone",
+            project_name="a-project",
+        )
+    assert count == 2
+    api.assert_called_once_with(token="hf-token")
+    batch = api.return_value.batch_bucket_files
+    batch.assert_called_once()
+    assert batch.call_args.args == ("someone/bucket",)
+    assert [dst for _, dst in batch.call_args.kwargs["add"]] == [
+        "someone/a-project/files/md5/ab/cdef0123",
+        "someone/a-project/files/md5/cd/ef456789.dir",
+    ]
     # A repo with nothing in DVC has nothing to push, and that isn't an error.
     empty = tmp_path / "empty"
     empty.mkdir()
-    with patch("app.api.routes.projects.core.get_object_fs") as fs:
-        assert (
-            _push_dvc_cache_to_storage(
-                repo_dir=str(empty), owner_name="a", project_name="b"
-            )
-            == 0
+    fs = MagicMock()
+    assert (
+        _push_dvc_cache_to_storage(
+            repo_dir=str(empty),
+            target=ProjectStorage(backend="s3", fs=fs, data_prefix="data"),
+            owner_name="a",
+            project_name="b",
         )
-    fs.assert_not_called()
+        == 0
+    )
+    fs.open.assert_not_called()
 
 
 def _set_identity(repo: git.Repo) -> None:
@@ -6239,3 +6267,122 @@ def test_get_user_overleaf_sync_scans_lazily(
     resp = _lookup(refresh=True)
     assert resp.status_code == 200
     assert resp.json()["projects_scanned"] == 1
+
+
+def test_project_storage_follows_project(
+    client: TestClient, db: Session
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    project_id = project.id
+    # Its buckets change visibility with it, before GitHub does
+    github = SimpleNamespace(status_code=200, text="")
+    with (
+        patch("app.users.get_github_token", return_value="gh-token"),
+        patch(
+            "app.api.routes.projects.core.requests.patch",
+            return_value=github,
+        ) as gh_patch,
+        patch("app.storage.set_project_bucket_visibility") as set_visibility,
+    ):
+        response = client.patch(
+            base, headers=headers, json={"is_public": True}
+        )
+        assert response.status_code == 200, response.text
+        assert set_visibility.call_args.args[2] is True
+        gh_patch.assert_called_once()
+        # Not just a title change, or a visibility it already has
+        client.patch(base, headers=headers, json={"title": "New title"})
+        client.patch(base, headers=headers, json={"is_public": True})
+        set_visibility.assert_called_once()
+        # A bucket that can't be reached stops GitHub changing too
+        set_visibility.side_effect = app.storage.UnreachableStorageError(
+            SimpleNamespace(bucket="someone/proj")  # type: ignore[arg-type]
+        )
+        gh_patch.reset_mock()
+        response = client.patch(
+            base, headers=headers, json={"is_public": False}
+        )
+        assert response.status_code == 409
+        assert "someone/proj" in response.json()["detail"]
+        gh_patch.assert_not_called()
+        # If GitHub fails, the buckets go back
+        set_visibility.side_effect = None
+        set_visibility.reset_mock()
+        github.status_code = 500
+        response = client.patch(
+            base, headers=headers, json={"is_public": False}
+        )
+        assert response.status_code == 500
+        assert [c.args[2] for c in set_visibility.call_args_list] == [
+            False,
+            True,
+        ]
+        db.expire_all()
+        project_after = db.get(Project, project_id)
+        assert project_after is not None and project_after.is_public
+        # Including when GitHub can't be reached
+        set_visibility.reset_mock()
+        gh_patch.side_effect = ConnectionError("GitHub down")
+        response = client.patch(
+            base, headers=headers, json={"is_public": False}
+        )
+        assert response.status_code == 502
+        assert [c.args[2] for c in set_visibility.call_args_list] == [
+            False,
+            True,
+        ]
+        gh_patch.side_effect = None
+        # A bucket failing partway puts the others back, before GitHub
+        set_visibility.reset_mock()
+        gh_patch.reset_mock()
+        set_visibility.side_effect = [RuntimeError("HF down"), 1]
+        response = client.patch(
+            base, headers=headers, json={"is_public": False}
+        )
+        assert response.status_code == 502
+        assert [c.args[2] for c in set_visibility.call_args_list] == [
+            False,
+            True,
+        ]
+        gh_patch.assert_not_called()
+        set_visibility.side_effect = None
+        db.expire_all()
+        project_after = db.get(Project, project_id)
+        assert project_after is not None and project_after.is_public
+    # Deleting it deletes its storage only when asked, and if that fails,
+    # the project stays so it can be tried again
+    with patch("app.storage.delete_project_objects") as delete_objects:
+        delete_objects.side_effect = RuntimeError("HF down")
+        response = client.delete(
+            f"/projects/{project_id}",
+            headers=headers,
+            params={"delete_hub_storage": True},
+        )
+        assert response.status_code == 502
+        db.expire_all()
+        assert db.get(Project, project_id) is not None
+        delete_objects.side_effect = None
+        delete_objects.reset_mock()
+        with patch("app.api.routes.projects.core.mixpanel") as mp:
+            response = client.delete(
+                f"/projects/{project_id}",
+                headers=headers,
+                params={"delete_hub_storage": True},
+            )
+        assert response.status_code == 200
+        delete_objects.assert_called_once()
+        assert mp.user_deleted_project.call_args.kwargs == {
+            "delete_hub_storage": True,
+            "n_external_storage": 0,
+        }
+        db.expire_all()
+        assert db.get(Project, project_id) is None
+    other, headers = _make_owner_with_project(db, client)
+    with patch("app.storage.delete_project_objects") as delete_objects:
+        response = client.delete(
+            f"/projects/{other.owner_account.name}/{other.name}",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        delete_objects.assert_not_called()

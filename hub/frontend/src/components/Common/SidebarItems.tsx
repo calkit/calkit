@@ -21,6 +21,7 @@ import {
   FiHome,
   FiImage,
   FiMonitor,
+  FiSettings,
   FiServer,
   FiTag,
   FiUsers,
@@ -70,6 +71,12 @@ export const projectNavItems: ProjectNavItem[] = [
     icon: FiServer,
     title: "Workspaces",
     path: "/workspaces",
+    requiresLogin: true,
+  },
+  {
+    icon: FiSettings,
+    title: "Settings",
+    path: "/settings",
     requiresLogin: true,
   },
 ]

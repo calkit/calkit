@@ -6364,6 +6364,19 @@ def test_project_storage_follows_project(
         )
         assert response.status_code == 409
         assert "someone/proj" in response.json()["detail"]
+        # So does a bucket that changed outside Calkit
+        delete_objects.side_effect = app.storage.UnsafeStorageDeleteError(
+            "someone/proj"
+        )
+        response = client.delete(
+            f"/projects/{project_id}",
+            headers=headers,
+            params={"delete_storage": True},
+        )
+        assert response.status_code == 409
+        assert "someone/proj" in response.json()["detail"]
+        db.expire_all()
+        assert db.get(Project, project_id) is not None
         delete_objects.side_effect = RuntimeError("HF down")
         response = client.delete(
             f"/projects/{project_id}",

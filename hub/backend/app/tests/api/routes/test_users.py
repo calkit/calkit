@@ -12,6 +12,7 @@ from app import mixpanel, users
 from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
+from app.storage import UnsafeStorageDeleteError
 from app.tests import (
     authentication_token_from_email,
     random_email,
@@ -2363,8 +2364,21 @@ def test_disconnect_huggingface_with_storage(
     project_id, resource_id = add_bucket()
     with (
         patch("app.storage.get_resource_storage"),
+        patch("app.storage.check_safe_to_delete") as check_safe,
         patch("app.storage.delete_objects_from") as delete_objects,
     ):
+        # Unless it changed outside Calkit, which leaves everything in place
+        check_safe.side_effect = UnsafeStorageDeleteError("a/b")
+        response = client.delete(
+            url, headers=headers, params={"storage_action": "delete"}
+        )
+        assert response.status_code == 409
+        assert "a/b" in response.json()["detail"]
+        delete_objects.assert_not_called()
+        assert is_connected()
+        db.expire_all()
+        assert db.get(StorageResource, resource_id) is not None
+        check_safe.side_effect = None
         response = client.delete(
             url, headers=headers, params={"storage_action": "delete"}
         )

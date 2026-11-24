@@ -3,11 +3,14 @@
 import dataclasses
 import io
 import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
 import pytest
 import requests
+from huggingface_hub.errors import BucketNotFoundError
 from sqlmodel import Session
 
 from app import storage
@@ -73,7 +76,9 @@ def test_dedicated_storage() -> None:
         fs=MemoryFileSystem(),
         data_prefix="/buckets/someone/my-project",
         resource=SimpleNamespace(  # type: ignore[arg-type]
-            bucket="someone/my-project", project_id="project-id"
+            bucket="someone/my-project",
+            project_id="project-id",
+            created=datetime(2026, 11, 1),
         ),
         token="hf-token",
     )
@@ -137,13 +142,63 @@ def test_dedicated_storage() -> None:
         ),
         patch("huggingface_hub.HfApi") as api,
     ):
+        hf_created = datetime(2026, 11, 1, tzinfo=timezone.utc)
+        dvc_object = SimpleNamespace(
+            type="file", path=f"files/md5/ab/{'c' * 30}"
+        )
+        dvc_dir = SimpleNamespace(
+            type="file", path=f"files/md5/ab/{'d' * 30}.dir"
+        )
+        folder = SimpleNamespace(type="directory", path="files")
+        api.return_value.bucket_info.return_value = SimpleNamespace(
+            created_at=hf_created
+        )
+        api.return_value.list_bucket_tree.return_value = [
+            folder,
+            dvc_object,
+            dvc_dir,
+        ]
+        # A bucket recreated since, or with anything else in it, stops
+        # everything before any storage is touched
+        for created_at, files in (
+            (hf_created + timedelta(days=1), [dvc_object]),
+            (hf_created, [dvc_object, SimpleNamespace(type="file", path="a")]),
+            (
+                hf_created,
+                [SimpleNamespace(type="file", path="files/md5/ab/cd")],
+            ),
+        ):
+            api.return_value.bucket_info.return_value.created_at = created_at
+            api.return_value.list_bucket_tree.return_value = files
+            with pytest.raises(storage.UnsafeStorageDeleteError):
+                storage.delete_project_objects(None, project)  # type: ignore[arg-type]
+        api.return_value.delete_bucket.assert_not_called()
+        api.return_value.batch_bucket_files.assert_not_called()
+        assert internal.fs.exists(f"/internal/data/someone/my-project/{path}")
+        # Clock differences between the hub and HF are allowed for
+        api.return_value.bucket_info.return_value.created_at = (
+            hf_created + timedelta(minutes=1)
+        )
+        api.return_value.list_bucket_tree.return_value = [
+            folder,
+            dvc_object,
+            dvc_dir,
+        ]
         storage.delete_project_objects(None, project)  # type: ignore[arg-type]
-    api.return_value.delete_bucket.assert_called_once_with(
-        "someone/my-project", missing_ok=True
-    )
-    api.return_value.batch_bucket_files.assert_called_once_with(
-        "someone/calkit", delete=[f"someone/my-project/{path}"]
-    )
+        api.return_value.delete_bucket.assert_called_once_with(
+            "someone/my-project", missing_ok=True
+        )
+        api.return_value.batch_bucket_files.assert_called_once_with(
+            "someone/calkit", delete=[f"someone/my-project/{path}"]
+        )
+        # A bucket already gone is fine
+        api.return_value.bucket_info.side_effect = BucketNotFoundError(
+            "gone",
+            response=httpx.Response(
+                404, request=httpx.Request("GET", "https://huggingface.co")
+            ),
+        )
+        storage.check_safe_to_delete(dedicated)
     assert not internal.fs.exists("/internal/data/someone/my-project")
     assert internal.fs.exists(f"/internal/data/someone/other/{path}")
 

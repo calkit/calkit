@@ -1595,6 +1595,8 @@ def _delete_project_objects(session: Session, project: Project) -> None:
             f"Can't reach Hugging Face bucket {e.resource.bucket}; reconnect "
             "Hugging Face, or delete without stored files",
         )
+    except app.storage.UnsafeStorageDeleteError as e:
+        raise HTTPException(409, f"{e}; delete without stored files")
     except Exception:
         logger.exception(f"Failed to delete storage for {project.name}")
         raise HTTPException(502, "Failed to delete project storage")

@@ -3,8 +3,10 @@
 import json
 import logging
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -522,13 +524,55 @@ def set_project_bucket_visibility(
     return len(targets)
 
 
+# Objects at the root of a dedicated bucket
+DVC_OBJECT_PATH_RE = re.compile(r"files/md5/[0-9a-f]{2}/[0-9a-f]{30}(\.dir)?")
+MAX_STORAGE_CLOCK_SKEW = timedelta(minutes=5)
+
+
+class UnsafeStorageDeleteError(RuntimeError):
+    """Storage isn't safe to delete, since it changed outside Calkit."""
+
+    def __init__(self, bucket: str):
+        self.bucket = bucket
+        super().__init__(f"Not deleting {bucket}: changed outside Calkit")
+
+
+def check_safe_to_delete(target: ProjectStorage) -> None:
+    """Check that a dedicated bucket is still the one the hub created, with
+    only DVC objects in it, since HF identifies buckets by name.
+
+    Raises ``UnsafeStorageDeleteError`` if not. A missing bucket is safe.
+    """
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import BucketNotFoundError
+
+    if not target.is_dedicated:
+        return
+    assert target.bucket is not None and target.resource is not None
+    api = HfApi(token=target.token)
+    try:
+        info = api.bucket_info(target.bucket)
+    except BucketNotFoundError:
+        return
+    # The hub saves its record right after creating the bucket
+    recorded = target.resource.created
+    if recorded.tzinfo is None:
+        recorded = recorded.replace(tzinfo=timezone.utc)
+    if info.created_at > recorded + MAX_STORAGE_CLOCK_SKEW:
+        raise UnsafeStorageDeleteError(target.bucket)
+    for item in api.list_bucket_tree(target.bucket, recursive=True):
+        if item.type == "file" and not DVC_OBJECT_PATH_RE.fullmatch(item.path):
+            raise UnsafeStorageDeleteError(target.bucket)
+
+
 def delete_objects_from(
     target: ProjectStorage, owner_name: str, project_name: str
 ) -> None:
     """Delete a project's DVC objects from one storage.
 
     Storage dedicated to the project is deleted entirely, e.g., its HF
-    bucket, and otherwise the project's folder is removed.
+    bucket, and otherwise the project's folder is removed. Callers run
+    ``check_safe_to_delete`` on everything they'll delete first.
     """
     from huggingface_hub import HfApi
 
@@ -557,12 +601,14 @@ def delete_project_objects(session: "Session", project: "Project") -> None:
 
     Raises ``UnreachableStorageError`` before deleting anything if any of
     that storage can't be reached, rather than leaving objects behind with
-    no record of them.
+    no record of them, and ``UnsafeStorageDeleteError`` if any changed
+    outside Calkit.
     """
     owner_name = project.owner_account_name
-    for target in get_project_storages(
-        session, project, skip_unreachable=False
-    ):
+    targets = get_project_storages(session, project, skip_unreachable=False)
+    for target in targets:
+        check_safe_to_delete(target)
+    for target in targets:
         delete_objects_from(target, owner_name, project.name)
     invalidate_storage_usage_cache(owner_name)
 

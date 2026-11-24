@@ -1500,6 +1500,18 @@ def delete_user_external_credential(
             message="Transferring files to Calkit Hub storage; Hugging Face "
             "disconnects when done"
         )
+    if resources and storage_action == "delete":
+        # Before deleting any, so a refusal leaves all of them in place
+        try:
+            for resource in resources:
+                app.storage.check_safe_to_delete(
+                    app.storage.get_resource_storage(session, resource)
+                )
+        except app.storage.UnsafeStorageDeleteError as e:
+            raise HTTPException(409, f"{e}; orphan instead")
+        except Exception:
+            logger.exception("Failed to check storage before deleting")
+            raise HTTPException(502, "Failed to check Hugging Face storage")
     for resource in resources:
         if storage_action == "delete":
             try:

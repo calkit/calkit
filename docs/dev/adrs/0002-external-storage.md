@@ -162,6 +162,18 @@ Two other events would strand a connection's resources the same way:
   The hub refuses while resources use the old account,
   so it has to be removed first.
 
+### Deleting storage
+
+HF identifies a bucket by name,
+so a recorded name can come to mean a different bucket,
+e.g., if one is deleted on HF and another takes its name.
+Before deleting anything,
+the hub checks every dedicated bucket involved,
+and refuses if one was created after the hub recorded it,
+or holds anything other than DVC objects.
+The hub only calls HF's bucket API to delete,
+never its repo API.
+
 ### Released datasets
 
 Publishing a dataset,

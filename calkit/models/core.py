@@ -16,6 +16,7 @@ from pydantic import (
     Discriminator,
     Field,
     Tag,
+    WithJsonSchema,
     computed_field,
     field_validator,
     model_validator,
@@ -661,14 +662,83 @@ class Publication(_CalkitObject):
         return self.doi is not None
 
 
-class ReferenceFile(Model):
-    path: str
-    key: str
+class ReferenceValue(Model):
+    """A value a document quotes from a reference, and where and in what
+    context the reference uses it.
+
+    A document cites it with ``\\ckrefval{<citation key>}{<name>}``, which
+    is checked against the reference's PDF.
+    """
+
+    value: float | int | str = Field(
+        description="The value, as the reference gives it, e.g., 0.1 or "
+        "'12.5%'."
+    )
+    page: int | None = Field(
+        default=None,
+        ge=1,
+        description="The page of the reference's PDF it's on, counting "
+        "from 1, which may differ from the number printed on the page.",
+    )
+    context: str | None = Field(
+        default=None,
+        description="The passage the value is used in, copied from the "
+        "reference, which is how it's found and checked; spacing and case "
+        "don't have to match.",
+    )
+    description: str | None = Field(
+        default=None, description="What the value is."
+    )
+
+
+def _reference_files_by_key(v: object) -> object:
+    """A collection's files by citation key, reading the list of key and
+    path Calkit wrote before.
+    """
+    from calkit.references.values import get_reference_files
+
+    if isinstance(v, list):
+        return get_reference_files({"files": v})
+    return v
 
 
 class ReferenceCollection(Model):
     path: str
-    files: list[ReferenceFile] = []
+    files: Annotated[
+        dict[str, str],
+        BeforeValidator(_reference_files_by_key),
+        # Editors validating calkit.yaml accept the list Calkit wrote before
+        WithJsonSchema(
+            {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                            },
+                            "required": ["key", "path"],
+                        },
+                    },
+                ]
+            }
+        ),
+    ] = Field(
+        default={},
+        description="PDFs of the collection's entries, by citation key, "
+        "relative to the project.",
+    )
+    values: dict[str, dict[str, ReferenceValue]] = Field(
+        default={},
+        description="Values documents quote from the collection's entries, "
+        "by citation key, and then by a name unique within the entry.",
+    )
 
 
 # The kinds that describe a machine, so can have 'requirements'

@@ -30,9 +30,6 @@ import calkit
 import calkit.merge
 import calkit.progress
 from calkit import (
-    AUTO_IGNORE_PATHS,
-    AUTO_IGNORE_PREFIXES,
-    AUTO_IGNORE_SUFFIXES,
     DVC_EXTENSIONS,
     FIGURE_DVC_SIZE_THRESH_BYTES,
     FIGURE_EXTENSIONS,
@@ -890,7 +887,7 @@ def get_status(
     can_ask = not as_json and calkit.core.is_tty()
     spinner: AbstractContextManager = nullcontext()
     mintty = calkit.core.is_mintty(sys.stderr)
-    if not as_json and (sys.stderr.isatty() or mintty):
+    if not as_json and (calkit.core.is_terminal(sys.stderr) or mintty):
         import logging
 
         from rich.console import Console
@@ -1689,32 +1686,20 @@ def add(
                         "run 'calkit pull' to fetch their data"
                     )
             if not disable_auto_ignore and not existing_only:
+                auto_ignored = set()
                 for untracked_file in untracked_git_files:
-                    if (
-                        any(
-                            [
-                                untracked_file.endswith(suffix)
-                                for suffix in AUTO_IGNORE_SUFFIXES
-                            ]
-                        )
-                        or any(
-                            [
-                                untracked_file.startswith(prefix)
-                                for prefix in AUTO_IGNORE_PREFIXES
-                            ]
-                        )
-                        or untracked_file in AUTO_IGNORE_PATHS
-                    ):
-                        if dry_run:
-                            typer.echo(f"Would ignore {untracked_file}")
-                        else:
-                            typer.echo(
-                                f"Automatically ignoring {untracked_file}"
-                            )
-                            with open(".gitignore", "a") as f:
-                                f.write("\n" + untracked_file + "\n")
-                            if ".gitignore" not in paths:
-                                paths.append(".gitignore")
+                    ignore_path = calkit.get_auto_ignore_path(untracked_file)
+                    if ignore_path is None or ignore_path in auto_ignored:
+                        continue
+                    auto_ignored.add(ignore_path)
+                    if dry_run:
+                        typer.echo(f"Would ignore {ignore_path}")
+                    else:
+                        typer.echo(f"Automatically ignoring {ignore_path}")
+                        with open(".gitignore", "a") as f:
+                            f.write("\n" + ignore_path + "\n")
+                        if ".gitignore" not in paths:
+                            paths.append(".gitignore")
             # TODO: Figure out if we should group large folders for dvc
             # Now add untracked files automatically
             if not existing_only:
@@ -4168,7 +4153,9 @@ def run(
     can_ask = is_tty()
     spinner: Any = None
     mintty = calkit.core.is_mintty(sys.stderr)
-    if not (quiet or verbose) and (sys.stderr.isatty() or mintty):
+    if not (quiet or verbose) and (
+        calkit.core.is_terminal(sys.stderr) or mintty
+    ):
         from rich.console import Console
 
         # mintty takes ANSI and UTF-8, though it isn't a console

@@ -147,6 +147,94 @@ def describe_subprojects(
         _echo_description(desc, indent="    ")
 
 
+@describe_app.command(name="storage")
+def describe_storage(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """Describe project's Git and DVC storage.
+
+    Git storage is the project's Git remote, e.g., on GitHub, and DVC storage
+    is set in the project's settings on the hub.
+    """
+
+    def get_dvc_storage_name(resource: dict | None) -> str:
+        if resource is None:
+            return "Calkit Hub storage"
+        if resource.get("kind") == "hf-bucket":
+            return f"Hugging Face bucket {resource['bucket']}"
+        if resource.get("kind") == "box-folder":
+            return f"Box, connected by {resource['connected_by']}"
+        return str(resource["bucket"])
+
+    def get_git_storage_name(url: str | None) -> str | None:
+        if url is None:
+            return None
+        owner_and_name = calkit.get_owner_and_name_from_git_url(url)
+        if "github.com" in url and owner_and_name is not None:
+            return f"GitHub repo {'/'.join(owner_and_name)}"
+        return url
+
+    def format_gb(gb: float) -> str:
+        return f"{gb * 1000:.1f} MB" if gb < 1 else f"{gb:.2f} GB"
+
+    project = calkit.detect_project_name()
+    try:
+        git_url: str | None = calkit.git.get_repo().remote().url
+    except Exception:
+        git_url = None
+    # A token in an HTTPS remote, e.g., ``https://user:token@host``, isn't
+    # printed
+    if git_url is not None and "://" in git_url:
+        scheme, rest = git_url.split("://", 1)
+        host_and_path = (
+            rest.split("@", 1)[-1] if "@" in rest.split("/")[0] else rest
+        )
+        git_url = f"{scheme}://{host_and_path}"
+    try:
+        settings = calkit.hub.get(f"/projects/{project}/storage")
+        usage = calkit.hub.get(f"/projects/{project}/storage/usage")
+    except Exception as e:
+        raise_error(f"Couldn't get storage for {project}: {e}")
+    # Reads fall back through earlier storage, then the hub's own
+    previous = [get_dvc_storage_name(r) for r in settings["previous"]]
+    if settings["dvc"] is not None:
+        previous.append(get_dvc_storage_name(None))
+    account = usage.get("account")
+    git_storage = get_git_storage_name(git_url)
+    dvc_storage = get_dvc_storage_name(settings["dvc"])
+    desc = {
+        "project": project,
+        "git": {"storage": git_storage, "url": git_url},
+        "dvc": {
+            "storage": dvc_storage,
+            "previous_storage": previous,
+            "hub_used_gb": usage["project_used_gb"],
+            "account_hub_used_gb": account["used_gb"] if account else None,
+            "account_hub_limit_gb": account["limit_gb"] if account else None,
+        },
+    }
+    if json_output:
+        echo_json(desc)
+        return
+    _echo_description(
+        {
+            "project": project,
+            "git storage": git_storage,
+            "dvc storage": dvc_storage,
+            "dvc also read from": ", ".join(previous) or None,
+            "hub storage used": format_gb(usage["project_used_gb"]),
+            "account hub storage used": (
+                f"{format_gb(account['used_gb'])} of "
+                f"{account['limit_gb']:g} GB"
+                if account
+                else None
+            ),
+        }
+    )
+
+
 @describe_app.command(name="schema")
 def describe_schema(
     output: Annotated[

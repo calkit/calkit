@@ -893,6 +893,7 @@ Create a new Calkit object.
 | [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                                             |
 | [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                                                       |
 | [`question`](#subcommand-new-create-question)                             | Add a new question.                                                                               |
+| [`ref-value`](#subcommand-new-create-ref-value)                           | Record a value a document quotes from a reference, to cite with \ckrefval.                        |
 | [`comment`](#subcommand-new-create-comment)                               | Start a review comment thread above a paragraph of a LaTeX or Markdown document, printing its ID. |
 | [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                                               |
 | [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                                                  |
@@ -1070,6 +1071,38 @@ Options:
 | Option     | Type    | Required | Default | Description |
 | ---------- | ------- | -------- | ------- | ----------- |
 | `--commit` | boolean | no       | False   |             |
+
+<a id="subcommand-new-create-ref-value"></a>
+
+#### `calkit new|create ref-value`
+
+Record a value a document quotes from a reference, to cite with \ckrefval.
+
+It's checked against the reference's PDF, if one can be found, unless --no-check is given.
+
+Usage:
+
+```text
+calkit new|create ref-value [OPTIONS] KEY NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                        |
+| -------- | ---- | -------- | ------- | -------------------------------------------------- |
+| `key`    | str  | yes      |         | Citation key of the reference.                     |
+| `name`   | str  | yes      |         | A name for the value, unique within the reference. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                     |
+| --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------- |
+| `--value`             | str     | yes      |         | The value, as the reference gives it.                                           |
+| `--page`              | int     | no       |         | The page of the reference's PDF, counting from 1.                               |
+| `--context`           | str     | no       |         | The passage the value is used in, copied from the reference.                    |
+| `--description`, `-d` | str     | no       |         | What the value is.                                                              |
+| `--collection`        | str     | no       |         | The reference collection, e.g., references.bib, if the key is in more than one. |
+| `--no-check`          | boolean | no       | False   | Don't check it against the reference's PDF.                                     |
 
 <a id="subcommand-new-create-comment"></a>
 
@@ -2732,6 +2765,7 @@ Describe things.
 | [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
 | [`subprojects`](#subcommand-describe-desc-subprojects)              | Describe subprojects, including nested ones.                       |
+| [`storage`](#subcommand-describe-desc-storage)                      | Describe project's Git and DVC storage.                            |
 | [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
@@ -2802,6 +2836,26 @@ Usage:
 
 ```text
 calkit describe|desc subprojects [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-storage"></a>
+
+#### `calkit describe|desc storage`
+
+Describe project's Git and DVC storage.
+
+Git storage is the project's Git remote, e.g., on GitHub, and DVC storage is set in the project's settings on the hub.
+
+Usage:
+
+```text
+calkit describe|desc storage [OPTIONS]
 ```
 
 Options:
@@ -3332,10 +3386,10 @@ calkit update license [OPTIONS]
 
 Options:
 
-| Option                     | Type    | Required | Default | Description                                         |
-| -------------------------- | ------- | -------- | ------- | --------------------------------------------------- |
-| `--copyright-holder`, `-c` | str     | yes      |         | Copyright holder, e.g., your full name.             |
-| `--no-commit`              | boolean | no       | False   | Do not create a Git commit for the updated license. |
+| Option                     | Type    | Required | Default | Description                                                                 |
+| -------------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------- |
+| `--copyright-holder`, `-c` | str     | no       |         | Copyright holder, e.g., your full name. Defaults to Git's user.name config. |
+| `--no-commit`              | boolean | no       | False   | Do not create a Git commit for the updated license.                         |
 
 <a id="subcommand-update-release"></a>
 
@@ -3918,6 +3972,8 @@ Check things.
 
 Check the reproducibility of a project.
 
+Values quoted from references with \ckrefval are checked against the references' PDFs, from a file the collection names, Zotero, or an open-access copy downloaded into .calkit/local, which isn't stored in the project. So are numbers typed into a sentence citing a reference.
+
 Reports one line per check. Where a line counts something, ask for that category to see what it counted, e.g., 'calkit check repro -c retyped' for values in a manuscript the pipeline already computes.
 
 Exits with an error when the project types out a value its own pipeline computes, which is a defect rather than a matter of taste. Everything else here is advice and does not affect the exit code.
@@ -3930,11 +3986,12 @@ calkit check repro [OPTIONS]
 
 Options:
 
-| Option             | Type      | Required | Default | Description                                                                                        |
-| ------------------ | --------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `--wdir`           | str       | no       | .       | Project working directory.                                                                         |
-| `--category`, `-c` | list[str] | no       |         | Show the findings behind one summary line instead of the summary. Can be specified multiple times. |
-| `--json`           | boolean   | no       | False   | Output result as JSON.                                                                             |
+| Option             | Type      | Required | Default | Description                                                                                                          |
+| ------------------ | --------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `--wdir`           | str       | no       | .       | Project working directory.                                                                                           |
+| `--category`, `-c` | list[str] | no       |         | Show the findings behind one summary line instead of the summary. Can be specified multiple times.                   |
+| `--json`           | boolean   | no       | False   | Output result as JSON.                                                                                               |
+| `--offline`        | boolean   | no       | False   | Don't download open-access copies of references to check values quoted from them, or the Calkit Cloud's Zotero PDFs. |
 
 <a id="subcommand-check-environment"></a>
 

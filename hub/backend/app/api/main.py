@@ -11,6 +11,7 @@ from app.api.routes import (
     orgs,
     projects,
     references,
+    storage,
     users,
 )
 from app.api.routes.projects import releases
@@ -27,4 +28,5 @@ api_router.include_router(releases.router, tags=["releases"])
 api_router.include_router(orgs.router, tags=["orgs"])
 api_router.include_router(datasets.router, tags=["datasets"])
 api_router.include_router(feedback.router, tags=["feedback"])
+api_router.include_router(storage.router, tags=["storage"])
 api_router.include_router(machines.router, tags=["machines"])

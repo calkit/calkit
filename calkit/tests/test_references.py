@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import calkit.references as refs
+import calkit.references.check as refs
 
 BIB = r"""
 @article{real2020thing,

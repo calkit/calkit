@@ -666,6 +666,89 @@ export const Body_projects_put_project_contentsSchema = {
   title: "Body_projects-put_project_contents",
 } as const
 
+export const BoxAccessSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      const: "box",
+      title: "Kind",
+      default: "box",
+    },
+    operation: {
+      type: "string",
+      enum: ["upload", "download"],
+      title: "Operation",
+    },
+    folder_id: {
+      type: "string",
+      title: "Folder Id",
+    },
+    access_token: {
+      type: "string",
+      title: "Access Token",
+    },
+    expires_at_unixts: {
+      type: "integer",
+      title: "Expires At Unixts",
+    },
+    file_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "File Id",
+    },
+    size: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Size",
+    },
+  },
+  type: "object",
+  required: ["operation", "folder_id", "access_token", "expires_at_unixts"],
+  title: "BoxAccess",
+  description:
+    "Access to a project's folder in Box.\n\nThe token is downscoped to the folder and lasts about an hour, so a\nclient can reuse it for every file in the project until it expires.",
+} as const
+
+export const BoxAuthStartSchema = {
+  properties: {
+    authorize_url: {
+      type: "string",
+      title: "Authorize Url",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+  },
+  type: "object",
+  required: ["authorize_url", "redirect_uri"],
+  title: "BoxAuthStart",
+} as const
+
+export const BoxAuthStartRequestSchema = {
+  properties: {
+    state: {
+      type: "string",
+      title: "State",
+    },
+  },
+  type: "object",
+  required: ["state"],
+  title: "BoxAuthStartRequest",
+} as const
+
 export const CheckInSchema = {
   properties: {
     calkit_version: {
@@ -963,6 +1046,24 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Zotero",
     },
+    huggingface: {
+      type: "boolean",
+      title: "Huggingface",
+      default: false,
+    },
+    box: {
+      type: "boolean",
+      title: "Box",
+      default: false,
+    },
+    account_names: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Account Names",
+      default: {},
+    },
     cli: {
       type: "boolean",
       title: "Cli",
@@ -1208,6 +1309,43 @@ export const CreatorPostSchema = {
   title: "CreatorPost",
   description:
     "Someone credited with creating a dataset.\n\nEverything is optional here; that a person needs an email or an ORCID\nis enforced by the calkit model this is validated through, so the rule\nlives in one place rather than being restated and left to drift.",
+} as const
+
+export const CredentialStoragePublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    bucket: {
+      type: "string",
+      title: "Bucket",
+    },
+    dedicated: {
+      type: "boolean",
+      title: "Dedicated",
+    },
+    owner: {
+      type: "string",
+      title: "Owner",
+    },
+    projects: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Projects",
+    },
+  },
+  type: "object",
+  required: ["id", "kind", "bucket", "dedicated", "owner", "projects"],
+  title: "CredentialStoragePublic",
+  description: "Storage reached with the current user's account on a service.",
 } as const
 
 export const DVCImportSchema = {
@@ -3094,7 +3232,7 @@ export const FsOpBatchRequestSchema = {
   properties: {
     operation: {
       type: "string",
-      enum: ["exists", "info"],
+      enum: ["exists", "info", "register"],
       title: "Operation",
     },
     paths: {
@@ -3118,6 +3256,32 @@ export const FsOpBatchRequestSchema = {
         },
       ],
       title: "Include",
+    },
+    xet_hashes: {
+      anyOf: [
+        {
+          additionalProperties: {
+            type: "string",
+            pattern: "^[0-9a-f]{64}$",
+          },
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Xet Hashes",
+    },
+    bucket: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Bucket",
     },
   },
   type: "object",
@@ -3257,10 +3421,18 @@ export const FsOpResponseSchema = {
             {
               $ref: "#/components/schemas/SftpAccess",
             },
+            {
+              $ref: "#/components/schemas/XetAccess",
+            },
+            {
+              $ref: "#/components/schemas/BoxAccess",
+            },
           ],
           discriminator: {
             propertyName: "kind",
             mapping: {
+              box: "#/components/schemas/BoxAccess",
+              "hf-xet": "#/components/schemas/XetAccess",
               "http-request": "#/components/schemas/HttpRequestAccess",
               "presigned-chunked":
                 "#/components/schemas/PresignedChunkedAccess",
@@ -3944,6 +4116,60 @@ export const HubVersionSchema = {
   type: "object",
   required: ["version"],
   title: "HubVersion",
+} as const
+
+export const HuggingFaceAccountSchema = {
+  properties: {
+    username: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Username",
+    },
+    orgs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Orgs",
+    },
+  },
+  type: "object",
+  required: ["username", "orgs"],
+  title: "HuggingFaceAccount",
+} as const
+
+export const HuggingFaceAuthStartSchema = {
+  properties: {
+    authorize_url: {
+      type: "string",
+      title: "Authorize Url",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+  },
+  type: "object",
+  required: ["authorize_url", "redirect_uri"],
+  title: "HuggingFaceAuthStart",
+} as const
+
+export const HuggingFaceAuthStartRequestSchema = {
+  properties: {
+    state: {
+      type: "string",
+      title: "State",
+    },
+  },
+  type: "object",
+  required: ["state"],
+  title: "HuggingFaceAuthStartRequest",
 } as const
 
 export const ImportInfoSchema = {
@@ -7392,6 +7618,18 @@ export const ProjectCommentPostSchema = {
   title: "ProjectCommentPost",
 } as const
 
+export const ProjectHfBucketPostSchema = {
+  properties: {
+    bucket: {
+      type: "string",
+      title: "Bucket",
+    },
+  },
+  type: "object",
+  required: ["bucket"],
+  title: "ProjectHfBucketPost",
+} as const
+
 export const ProjectInvitationCreatedSchema = {
   properties: {
     id: {
@@ -8358,6 +8596,73 @@ export const ProjectStatusPostSchema = {
   type: "object",
   required: ["status"],
   title: "ProjectStatusPost",
+} as const
+
+export const ProjectStoragePutSchema = {
+  properties: {
+    dvc_storage_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dvc Storage Id",
+    },
+  },
+  type: "object",
+  required: ["dvc_storage_id"],
+  title: "ProjectStoragePut",
+} as const
+
+export const ProjectStorageSettingsSchema = {
+  properties: {
+    dvc: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StorageResourcePublic",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    previous: {
+      items: {
+        $ref: "#/components/schemas/StorageResourcePublic",
+      },
+      type: "array",
+      title: "Previous",
+    },
+  },
+  type: "object",
+  required: ["dvc", "previous"],
+  title: "ProjectStorageSettings",
+} as const
+
+export const ProjectStorageUsageSchema = {
+  properties: {
+    project_used_gb: {
+      type: "number",
+      title: "Project Used Gb",
+    },
+    account: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StorageUsage",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  required: ["project_used_gb"],
+  title: "ProjectStorageUsage",
 } as const
 
 export const ProjectsPublicSchema = {
@@ -11387,6 +11692,27 @@ export const ReproCheckSchema = {
       type: "array",
       title: "Unattributed Numbers",
     },
+    n_refvals: {
+      type: "integer",
+      title: "N Refvals",
+      default: 0,
+    },
+    refval_problems: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Refval Problems",
+    },
+    refvals_unchecked: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Refvals Unchecked",
+    },
     recommendation: {
       anyOf: [
         {
@@ -12200,6 +12526,100 @@ export const StageStatusSchema = {
   type: "object",
   required: ["status"],
   title: "StageStatus",
+} as const
+
+export const StorageResourcePublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    bucket: {
+      type: "string",
+      title: "Bucket",
+    },
+    dedicated: {
+      type: "boolean",
+      title: "Dedicated",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    connected_by: {
+      type: "string",
+      title: "Connected By",
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "name",
+    "kind",
+    "bucket",
+    "dedicated",
+    "created",
+    "connected_by",
+  ],
+  title: "StorageResourcePublic",
+} as const
+
+export const StorageTransferStatusSchema = {
+  properties: {
+    status: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Status",
+    },
+    error: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Error",
+    },
+    provider: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Provider",
+    },
+  },
+  type: "object",
+  required: ["status"],
+  title: "StorageTransferStatus",
 } as const
 
 export const StorageUsageSchema = {
@@ -13967,6 +14387,72 @@ export const WorkspaceInfoSchema = {
   description: "A workspace as a machine reports it at check-in.",
 } as const
 
+export const XetAccessSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      const: "hf-xet",
+      title: "Kind",
+      default: "hf-xet",
+    },
+    operation: {
+      type: "string",
+      enum: ["upload", "download"],
+      title: "Operation",
+    },
+    bucket: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Bucket",
+    },
+    cas_url: {
+      type: "string",
+      title: "Cas Url",
+    },
+    access_token: {
+      type: "string",
+      title: "Access Token",
+    },
+    expires_at_unixts: {
+      type: "integer",
+      title: "Expires At Unixts",
+    },
+    xet_hash: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Xet Hash",
+    },
+    size: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Size",
+    },
+  },
+  type: "object",
+  required: ["operation", "cas_url", "access_token", "expires_at_unixts"],
+  title: "XetAccess",
+  description:
+    "Access to Hugging Face storage through the Xet protocol.\n\nThe client uploads or downloads content with ``hf_xet`` using this\nshort-lived token, which covers the whole bucket, so a client can reuse\nit until it expires. After uploads, the client sends a batch\n``register`` operation with their Xet hashes so the hub can add the\npaths to the bucket, which the token alone can't do.",
+} as const
+
 export const ZoteroAuthFinishSchema = {
   properties: {
     oauth_token: {
@@ -14819,6 +15305,27 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Unattributed Numbers",
+    },
+    n_refvals: {
+      type: "integer",
+      title: "N Refvals",
+      default: 0,
+    },
+    refval_problems: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Refval Problems",
+    },
+    refvals_unchecked: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Refvals Unchecked",
     },
   },
   type: "object",

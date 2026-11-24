@@ -1,11 +1,14 @@
 """Functionality for working with subscriptions."""
 
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
 import app.stripe
+
+if TYPE_CHECKING:
+    from app.models import Account
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -73,6 +76,22 @@ def get_storage_limit(
 ) -> int:
     """Return the storage limit for a given plan in GB."""
     return STORAGE_LIMITS_BY_PLAN_NAME[plan_name]
+
+
+def get_account_storage_limit(account: "Account") -> int:
+    """Return an account's storage limit in GB, from its user's or org's
+    plan.
+    """
+    subscription = (
+        account.user.subscription
+        if account.user is not None
+        else account.org.subscription
+        if account.org is not None
+        else None
+    )
+    if subscription is None:
+        return get_storage_limit("free")
+    return subscription.storage_limit
 
 
 def get_private_projects_limit(

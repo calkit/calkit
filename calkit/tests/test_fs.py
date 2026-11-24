@@ -3,10 +3,11 @@
 import os
 import subprocess
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from requests.exceptions import Timeout
+from requests.exceptions import HTTPError, Timeout
 
 import calkit
 from calkit import fs as ckfs
@@ -132,6 +133,8 @@ def test_put_file_uses_callback(tmp_path):
     session.request.return_value = put_resp
     fs = ckfs.CalkitFileSystem.__new__(ckfs.CalkitFileSystem)
     fs._session = session
+    fs._xet_access = {}
+    fs._box_access = {}
     operation_info = {
         "access": {
             "kind": "presigned-url",
@@ -399,3 +402,470 @@ def test_calkitfilesystem_dvc_staging(monkeypatch, tmp_dir):
     subprocess.run(["calkit", "dvc", "add", "data.txt"], check=True)
     subprocess.run(["calkit", "dvc", "push"], check=True)
     subprocess.run(["calkit", "dvc", "pull"], check=True)
+
+
+def test_get_file_from_object_storage(tmp_path: Path) -> None:
+    import hashlib
+    import io
+
+    fs = ckfs.CalkitFileSystem(
+        endpoint_url="https://api.example.com", skip_instance_cache=True
+    )
+    op_info = {"access": {"kind": "presigned-url", "url": "u"}}
+    with (
+        patch.object(fs, "_get_fs_op_info", return_value=op_info),
+        patch.object(fs, "isdir", return_value=False),
+        patch.object(fs, "open", return_value=io.BytesIO(b"content")),
+    ):
+        nested = tmp_path / "new" / "dir" / "f.txt"
+        fs.get_file("ck://o/p/f.txt", str(nested))
+        assert nested.read_bytes() == b"content"
+    with (
+        patch.object(fs, "_get_fs_op_info", return_value=op_info),
+        patch.object(fs, "isdir", return_value=True),
+        patch.object(fs, "open") as open_remote,
+    ):
+        directory = tmp_path / "new" / "d"
+        fs.get_file("ck://o/p/d", str(directory))
+        assert directory.is_dir()
+        open_remote.assert_not_called()
+    # DVC directory manifests are checked like other objects
+    manifest = tmp_path / "manifest"
+    manifest.write_bytes(b'[{"md5": "abc", "relpath": "a.txt"}]')
+    md5 = hashlib.md5(manifest.read_bytes()).hexdigest()
+    obj_path = f"files/md5/{md5[:2]}/{md5[2:]}.dir"
+    ckfs._check_dvc_md5(obj_path, str(manifest))
+    manifest.write_bytes(b'[{"md5": "def", "relpath": "a.txt"}]')
+    with pytest.raises(OSError, match="doesn't match its MD5"):
+        ckfs._check_dvc_md5(obj_path, str(manifest))
+    assert not manifest.exists()
+
+
+def test_xet_transfers(tmp_path: Path) -> None:
+    import hashlib
+    import threading
+    import time
+    from types import SimpleNamespace
+    from typing import Any
+
+    content = b"some DVC object content"
+    md5 = hashlib.md5(content).hexdigest()
+    obj_path = f"files/md5/{md5[:2]}/{md5[2:]}"
+    stored: dict[str, bytes] = {}
+    upload_calls: list[list[str]] = []
+
+    def upload_files(paths: list[str], *a: Any, **k: Any) -> list[Any]:
+        upload_calls.append(paths)
+        if len(upload_calls) == 1 and upload_gate is not None:
+            upload_gate()
+        for path in paths:
+            with open(path, "rb") as f:
+                stored["xethash"] = f.read()
+        return [SimpleNamespace(hash="xethash") for _ in paths]
+
+    def upload_bytes(datas: list[bytes], *a: Any, **k: Any) -> list[Any]:
+        stored["xethash"] = datas[0]
+        return [SimpleNamespace(hash="xethash")]
+
+    def download_files(infos: list[Any], *a: Any) -> None:
+        download_tokens.append(a[1][0])
+        for info in infos:
+            with open(info.destination_path, "wb") as f:
+                f.write(stored[info.hash])
+
+    upload_gate = None
+    download_tokens: list[str] = []
+    fake_xet = SimpleNamespace(
+        upload_files=upload_files,
+        upload_bytes=upload_bytes,
+        download_files=download_files,
+        PyXetDownloadInfo=lambda **kw: SimpleNamespace(**kw),
+    )
+    access = {
+        "kind": "hf-xet",
+        "bucket": "someone/one",
+        "cas_url": "https://cas.example.com",
+        "access_token": "xet_token",
+        "expires_at_unixts": 2_000_000_000,
+    }
+    fs = ckfs.CalkitFileSystem(
+        endpoint_url="https://api.example.com", skip_instance_cache=True
+    )
+    local = tmp_path / "upload.bin"
+    local.write_bytes(content)
+    # Platforms without hf-xet get a clear error before anything is sent
+    with (
+        patch.dict("sys.modules", {"hf_xet": None}),
+        patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value={"access": access | {"operation": "upload"}},
+        ),
+        patch.object(ckfs.calkit.hub, "post") as post,
+        pytest.raises(RuntimeError, match="hf-xet"),
+    ):
+        fs.put_file(str(local), f"ck://owner/project/{obj_path}")
+    post.assert_not_called()
+    # Uploading a file registers its Xet hash at the same path
+    with (
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
+        patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value={"access": access | {"operation": "upload"}},
+        ) as get_op,
+        patch.object(ckfs.calkit.hub, "post") as post,
+    ):
+        fs.put_file(str(local), f"ck://owner/project/{obj_path}")
+        post.assert_called_once()
+        assert post.call_args.args[0] == "/projects/owner/project/fs/ops/batch"
+        assert post.call_args.kwargs["json"] == {
+            "operation": "register",
+            "paths": [obj_path],
+            "xet_hashes": {obj_path: "xethash"},
+            "bucket": "someone/one",
+        }
+        assert stored["xethash"] == content
+        # The access covers the whole bucket, so the next upload reuses it
+        fs.put_file(str(local), "ck://owner/project/again.bin")
+        get_op.assert_called_once()
+        # Files DVC puts while an upload is in flight go up together next,
+        # in one Xet session and one registration
+        n = 8
+        batcher = fs._xet_batchers[("owner", "project", "put")]
+        upload_calls.clear()
+        post.reset_mock()
+
+        def wait_for_others() -> None:
+            deadline = time.time() + 10
+            while len(batcher._waiting) < n - 1:
+                assert time.time() < deadline
+                time.sleep(0.01)
+
+        upload_gate = wait_for_others
+        threads = [
+            threading.Thread(
+                target=fs.put_file,
+                args=(str(local), f"ck://owner/project/f{i}.bin"),
+            )
+            for i in range(n)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        upload_gate = None
+        assert [len(c) for c in upload_calls] == [1, n - 1]
+        assert post.call_count == 2
+        assert len(post.call_args.kwargs["json"]["paths"]) == n - 1
+        # A failed registration fails the uploads waiting on it
+        post.side_effect = RuntimeError("hub down")
+        with pytest.raises(RuntimeError, match="hub down"):
+            fs.put_file(str(local), "ck://owner/project/fails.bin")
+        # Access that's about to expire isn't reused
+        post.side_effect = None
+        fs._xet_access[("owner", "project", "put", None)] = access | {
+            "expires_at_unixts": 0
+        }
+        fs.put_file(str(local), "ck://owner/project/later.bin")
+        assert get_op.call_count == 2
+        # If the project's storage changed since the access was given, the
+        # upload starts over with new access
+        conflict = MagicMock(status_code=409)
+        post.reset_mock()
+        post.side_effect = [HTTPError("409: changed", response=conflict), None]
+        fs.put_file(str(local), "ck://owner/project/switched.bin")
+        assert get_op.call_count == 3
+        assert post.call_count == 2
+        # If it keeps changing, it's an error rather than a loop
+        post.side_effect = HTTPError("409: changed", response=conflict)
+        with pytest.raises(OSError, match="keeps changing"):
+            fs.put_file(str(local), "ck://owner/project/flapping.bin")
+        post.side_effect = None
+        # And storage that's no longer HF gets a regular upload
+        presigned = {"access": {"kind": "presigned-url", "url": "u"}}
+        get_op.return_value = presigned
+        post.side_effect = HTTPError("409: changed", response=conflict)
+        response = MagicMock()
+        with patch.object(
+            fs, "_execute_operation", return_value=response
+        ) as execute:
+            fs.put_file(str(local), "ck://owner/project/to-hub.bin")
+        assert execute.call_args.args[0] == presigned
+        response.raise_for_status.assert_called_once()
+        post.side_effect = None
+        get_op.return_value = {"access": access | {"operation": "upload"}}
+    # Writing through a file object uploads its bytes the same way
+    stored.clear()
+    with (
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
+        patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value={"access": access | {"operation": "upload"}},
+        ),
+        patch.object(ckfs.calkit.hub, "post") as post,
+    ):
+        with fs.open("ck://owner/project/other.txt", "wb") as f:
+            f.write(content)
+    assert stored["xethash"] == content
+    assert post.call_args.kwargs["json"]["paths"] == ["other.txt"]
+    # Downloading checks the content against the MD5 in the path, and a
+    # file the batch lookup doesn't find in HF is fetched on its own
+    download = access | {
+        "operation": "download",
+        "xet_hash": "xethash",
+        "size": len(content),
+    }
+    with (
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
+        patch.object(
+            fs,
+            "_get_fs_op_info_batch",
+            return_value={"backend": "s3", "results": {}},
+        ),
+        patch.object(fs, "_get_fs_op_info", return_value={"access": download}),
+    ):
+        out = tmp_path / "out.bin"
+        fs.get_file(f"ck://owner/project/{obj_path}", str(out))
+        assert out.read_bytes() == content
+        assert fs.cat_file(f"ck://owner/project/{obj_path}", 5, 8) == b"DVC"
+        # Content that doesn't match its MD5 is an error, and not left behind
+        stored["xethash"] = b"tampered"
+        bad = tmp_path / "bad.bin"
+        with pytest.raises(OSError, match="doesn't match its MD5"):
+            fs.get_file(f"ck://owner/project/{obj_path}", str(bad))
+        assert not bad.exists()
+        # Empty files don't need a download
+        empty = download | {"xet_hash": "x", "size": 0}
+        with patch.object(
+            fs, "_get_fs_op_info", return_value={"access": empty}
+        ):
+            out = tmp_path / "empty.bin"
+            fs.get_file("ck://owner/project/empty.txt", str(out))
+            assert out.read_bytes() == b""
+    # With the hash from a batch lookup, a download doesn't ask the hub
+    # about the file
+    stored["xethash"] = content
+    batch = {
+        "backend": "hf",
+        "results": {
+            obj_path: {
+                "info": {"name": obj_path, "size": len(content)}
+                | {"xet_hash": "xethash", "bucket": "someone/one"}
+            }
+        },
+    }
+    with (
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
+        patch.object(fs, "_get_fs_op_info_batch", return_value=batch) as bop,
+        patch.object(fs, "_get_fs_op_info") as get_op,
+    ):
+        out = tmp_path / "out2.bin"
+        fs.get_file(f"ck://owner/project/{obj_path}", str(out))
+        assert out.read_bytes() == content
+        get_op.assert_not_called()
+        bop.assert_called_once()
+        # And one already looked up isn't looked up again
+        fs.get_file(f"ck://owner/project/{obj_path}", str(out))
+        bop.assert_called_once()
+    # A project that moved between buckets downloads each object with the
+    # token for the bucket it's in
+    other = b"in the previous bucket"
+    other_md5 = hashlib.md5(other).hexdigest()
+    other_path = f"files/md5/{other_md5[:2]}/{other_md5[2:]}"
+    stored["otherhash"] = other
+    batch["results"][other_path] = {
+        "info": {"name": other_path, "size": len(other)}
+        | {"xet_hash": "otherhash", "bucket": "someone/two"}
+    }
+    old_access = access | {"bucket": "someone/two", "access_token": "old"}
+    download_tokens.clear()
+    with (
+        patch.dict("sys.modules", {"hf_xet": fake_xet}),
+        patch.object(fs, "_get_fs_op_info_batch", return_value=batch),
+        patch.object(
+            fs, "_get_fs_op_info", return_value={"access": old_access}
+        ) as get_op,
+    ):
+        fs._xet_objects.clear()
+        batcher = fs._xet_batchers[("owner", "project", "get")]
+        outcomes = batcher._send(
+            [
+                (obj_path, str(tmp_path / "a.bin"), ckfs.DEFAULT_CALLBACK),
+                (other_path, str(tmp_path / "b.bin"), ckfs.DEFAULT_CALLBACK),
+            ]
+        )
+    assert outcomes == [None, None]
+    assert (tmp_path / "a.bin").read_bytes() == content
+    assert (tmp_path / "b.bin").read_bytes() == other
+    assert sorted(download_tokens) == ["old", "xet_token"]
+    get_op.assert_called_once()
+    assert get_op.call_args.args[2] == other_path
+
+
+def test_box_transfers(tmp_path: Path) -> None:
+    import hashlib
+    import time
+
+    import requests
+
+    from calkit.tests.test_box import FakeBox
+
+    def make_obj(content: bytes) -> tuple[str, Path]:
+        md5 = hashlib.md5(content).hexdigest()
+        lpath = tmp_path / md5
+        lpath.write_bytes(content)
+        return f"files/md5/{md5[:2]}/{md5[2:]}", lpath
+
+    box = FakeBox()
+    project_folder = box.add("folder", "project", "0")["id"]
+    expires = int(time.time()) + 3600
+
+    def get_access(operation: str, folder_id: str, **kw) -> dict:
+        return {
+            "backend": "box",
+            "access": {
+                "kind": "box",
+                "operation": operation,
+                "folder_id": folder_id,
+                "access_token": "token",
+                "expires_at_unixts": expires,
+            }
+            | kw,
+        }
+
+    fs = ckfs.CalkitFileSystem(
+        endpoint_url="https://api.example.com", skip_instance_cache=True
+    )
+    a_path, a_lpath = make_obj(b"content a")
+    b_path, b_lpath = make_obj(b"content b")
+    with (
+        patch.object(
+            requests.Session,
+            "request",
+            side_effect=lambda method, url, **kw: box.request(
+                method, url, **kw
+            ),
+        ),
+        patch("calkit.box.time.sleep"),
+    ):
+        # Uploads go straight to the project's folder, with access that's
+        # reused for the rest
+        with patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value=get_access("upload", project_folder),
+        ) as put_op:
+            fs.put_file(str(a_lpath), f"ck://owner/project/{a_path}")
+            fs.put_file(str(b_lpath), f"ck://owner/project/{b_path}")
+        put_op.assert_called_once()
+        # Only for a few minutes, so a change of storage is picked up soon
+        cached = fs._box_access[("owner", "project", "put", None)]
+        assert cached["expires_at_unixts"] <= time.time() + 300
+        box_fs = ckfs.CalkitFileSystem(
+            endpoint_url="https://api.example.com", skip_instance_cache=True
+        )
+        from calkit.box import BoxFileSystem
+
+        reader = BoxFileSystem("token", project_folder)
+        assert reader.cat_file(a_path) == b"content a"
+        # If the folder was moved to the trash, the hub makes another
+        trashed = {project_folder}
+        while True:
+            more = {
+                i for i, item in box.items.items() if item["parent"] in trashed
+            } - trashed
+            if not more:
+                break
+            trashed |= more
+        for item_id in trashed:
+            del box.items[item_id]
+        new_folder = box.add("folder", "project", "0")["id"]
+        c_path, c_lpath = make_obj(b"content c")
+        with patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value=get_access("upload", new_folder),
+        ) as put_op:
+            fs.put_file(str(c_lpath), f"ck://owner/project/{c_path}")
+        put_op.assert_called_once()
+        assert BoxFileSystem("token", new_folder).cat_file(c_path) == (
+            b"content c"
+        )
+        # A download asks where the first file is, then the rest are looked
+        # up in batches and downloaded with the same access
+        file_ids = {
+            p: BoxFileSystem("token", new_folder).get_file_id(p)
+            for p in [c_path]
+        }
+        box.content[file_ids[c_path]] = b"content c"
+        d_path, d_lpath = make_obj(b"content d")
+        BoxFileSystem("token", new_folder).put_file(str(d_lpath), d_path)
+        d_id = BoxFileSystem("token", new_folder).get_file_id(d_path)
+        batch_response = {
+            "backend": "box",
+            "results": {
+                d_path: {
+                    "info": {
+                        "name": d_path,
+                        "size": 9,
+                        "type": "file",
+                        "box_file_id": d_id,
+                        "box_folder_id": new_folder,
+                    }
+                }
+            },
+        }
+        with (
+            patch.object(
+                box_fs,
+                "_get_fs_op_info",
+                side_effect=lambda o, p, path, operation, **kw: (
+                    {
+                        "backend": "box",
+                        "result": {"name": path, "size": 9, "type": "file"},
+                    }
+                    if operation == "info"
+                    else get_access(
+                        "download", new_folder, file_id=file_ids[c_path]
+                    )
+                ),
+            ) as get_op,
+            patch.object(
+                box_fs, "_get_fs_op_info_batch", return_value=batch_response
+            ) as batch_op,
+        ):
+            box_fs.get_file(
+                f"ck://owner/project/{c_path}", str(tmp_path / "out" / "c")
+            )
+            box_fs.get_file(
+                f"ck://owner/project/{d_path}", str(tmp_path / "out" / "d")
+            )
+            assert (
+                box_fs.cat_file(f"ck://owner/project/{c_path}", start=2, end=5)
+                == b"nte"
+            )
+            with box_fs.open(f"ck://owner/project/{c_path}", "rb") as f:
+                assert f.read() == b"content c"
+        assert (tmp_path / "out" / "c").read_bytes() == b"content c"
+        assert (tmp_path / "out" / "d").read_bytes() == b"content d"
+        # Once for the first download, then for each read, which doesn't
+        # reuse access, and the info opening a file needs
+        assert get_op.call_count == 4
+        batch_op.assert_called_once()
+        # Content that doesn't match its MD5 is an error, not bad data
+        box.content[d_id] = b"tampered"
+        with (
+            patch.object(
+                box_fs,
+                "_get_fs_op_info",
+                return_value=get_access(
+                    "download", new_folder, file_id=d_id, size=8
+                ),
+            ),
+            pytest.raises(OSError, match="doesn't match its MD5"),
+        ):
+            box_fs.get_file(
+                f"ck://owner/project/{d_path}", str(tmp_path / "out" / "d2")
+            )

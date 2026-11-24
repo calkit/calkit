@@ -6,15 +6,28 @@ import {
   AlertDialogHeader,
   AlertDialogOverlay,
   Button,
+  Checkbox,
+  Link,
+  Text,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { AxiosError } from "axios"
 import React from "react"
 import { useForm } from "react-hook-form"
 
-import { OrgsService, ProjectsService, UsersService } from "../../client"
+import {
+  OrgsService,
+  ProjectsService,
+  StorageService,
+  UsersService,
+} from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
+import {
+  getStorageLabel,
+  getStorageServiceName,
+  getStorageUrl,
+} from "../../lib/storage"
 
 interface DeleteProps {
   type: string
@@ -50,11 +63,29 @@ const Delete = ({
     handleSubmit,
     formState: { isSubmitting },
   } = useForm()
+  // Files in Calkit Hub storage can go with it, but never connected storage
+  const [deleteHubStorage, setDeleteHubStorage] = React.useState(false)
+  const storageQuery = useQuery({
+    queryKey: ["projects", projectOwner, projectName, "storage"],
+    queryFn: () =>
+      StorageService.getProjectStorage({
+        owner_name: projectOwner as string,
+        project_name: projectName as string,
+      }).then((response) => response.data),
+    enabled: isOpen && type === "Project" && !!projectOwner && !!projectName,
+  })
+  const connectedStorage = storageQuery.data
+    ? [
+        ...(storageQuery.data.dvc ? [storageQuery.data.dvc] : []),
+        ...storageQuery.data.previous,
+      ]
+    : []
 
   const deleteEntity = async (id: string) => {
     if (type === "Project") {
       await ProjectsService.deleteProjectById({
         project_id: id,
+        delete_hub_storage: deleteHubStorage,
       }).then((response) => response.data)
     } else if (type === "User") {
       await UsersService.deleteUser({ user_id: id }).then(
@@ -106,9 +137,9 @@ const Delete = ({
       onDeleted?.()
     },
     onError: (err: AxiosError) => {
-      // A refusal to remove an org member has a reason worth showing, e.g.,
-      // that they're its last owner
-      if (type === "Org member") {
+      // Some refusals have a reason worth showing, e.g., an org member who's
+      // its last owner, or project storage that can't be reached
+      if (type === "Org member" || type === "Project") {
         handleError(err, showToast)
         return
       }
@@ -167,6 +198,30 @@ const Delete = ({
                 </span>
               )}
               Are you sure? You will not be able to undo this action.
+              {type === "Project" && (
+                <>
+                  <Checkbox
+                    mt={4}
+                    isChecked={deleteHubStorage}
+                    onChange={(e) => setDeleteHubStorage(e.target.checked)}
+                  >
+                    Delete files in Calkit Hub storage
+                  </Checkbox>
+                  {connectedStorage.length > 0 && (
+                    <Text mt={2} fontSize="sm" color="ui.dim">
+                      Connected storage stays. To delete, go to{" "}
+                      {connectedStorage.map((r, i) => (
+                        <React.Fragment key={r.id}>
+                          {i > 0 && ", "}
+                          <Link href={getStorageUrl(r)} isExternal>
+                            {getStorageServiceName(r.kind)} {getStorageLabel(r)}
+                          </Link>
+                        </React.Fragment>
+                      ))}
+                    </Text>
+                  )}
+                </>
+              )}
             </AlertDialogBody>
             <AlertDialogFooter gap={3}>
               <Button

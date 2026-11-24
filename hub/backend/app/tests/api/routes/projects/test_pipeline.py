@@ -287,7 +287,7 @@ def test_post_project_stage_from_script_or_notebook(
 
     import fsspec
 
-    from app.storage import make_data_fpath
+    from app.storage import ProjectStorage, get_data_prefix, make_data_fpath
 
     store = fsspec.filesystem("memory")
     paper = (
@@ -342,8 +342,10 @@ def test_post_project_stage_from_script_or_notebook(
                 return_value={},
             ),
             patch(
-                "app.api.routes.projects.core.get_object_fs",
-                return_value=store,
+                "app.api.routes.projects.pipeline.get_project_storage",
+                return_value=ProjectStorage(
+                    backend="s3", fs=store, data_prefix=get_data_prefix()
+                ),
             ),
         ):
             return client.post(
@@ -627,6 +629,7 @@ def test_post_project_pipeline_stage(
     import fsspec
 
     import calkit.export
+    from app.storage import ProjectStorage, get_data_prefix
     from calkit.models.pipeline import InkscapeExportStage
 
     repo, origin = _make_repo(
@@ -656,8 +659,10 @@ def test_post_project_pipeline_stage(
                 "app.api.routes.projects.pipeline.get_repo", return_value=repo
             ),
             patch(
-                "app.api.routes.projects.pipeline.get_object_fs",
-                return_value=store,
+                "app.api.routes.projects.pipeline.get_project_storage",
+                return_value=ProjectStorage(
+                    backend="s3", fs=store, data_prefix=get_data_prefix()
+                ),
             ),
             patch("app.api.routes.projects.pipeline.FILE_GIT_MAX_BYTES", 10),
         ):

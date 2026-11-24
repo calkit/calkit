@@ -71,6 +71,24 @@ Judgment, done here:
    rewrite a sentence to make a check pass, and never invent a stage to
    compute a number somebody else measured.
 
+   <!-- TODO: needs human review -->
+
+   A number in a sentence citing a reference is looked for in the
+   reference's PDF. Where it's found (`found`, shown as the page), it's the
+   reference's number: record it with the `calkit new ref-value` command the
+   check prints, giving it a short name, and replace the typed number with
+   `\ckrefval{<key>}{<name>}`, `{{< ckrefval <key> <name> >}}`, or
+   `<!-- ckrefval <key> <name> --><!-- /ckrefval -->`, keeping the
+   citation where it is. Where it isn't (`searched`, shown as "not in"),
+   the cited reference doesn't have it, which may be a misquote, a rounded
+   value, or a number from somewhere else: tell the user, and don't record
+   it.
+
+   `refval_problems` (`calkit check repro -c refvals`) are values quoted
+   from references that don't match the PDF, aren't recorded, or whose
+   reference the document never cites. Fix what's recorded only from what
+   the PDF says, never to make the check pass.
+
    A line ending in a `% calkit: ignore` comment, optionally with a reason,
    e.g., `% calkit: ignore, from the pump's datasheet`, is left out of both
    checks, as it is by the Overleaf extension. In Markdown, including

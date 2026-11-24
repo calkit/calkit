@@ -256,7 +256,14 @@ over <!-- ckvalue results.json n -->401<!-- /ckvalue --> samples.
 ```
 
 A marker reads like a call: a results file, a key, and optionally a
-format. The spelling matches [`\ckvalue`](../latex.md) in LaTeX, so the
+format.
+A value quoted from a reference uses `ckrefval` with its citation key and
+name instead, e.g.,
+`<!-- ckrefval liu2025 noise-sigma .2f -->0.10<!-- /ckrefval -->`; see
+[quoting values from references](../references.md#quoting-values-from-references).
+
+<!-- TODO: needs human review --> The spelling matches [`\ckvalue`](../latex.md) in LaTeX, so the
+
 two sides of a project look the same.
 After every run, the text between each pair is rewritten from the results
 file, so the file says what was actually computed.

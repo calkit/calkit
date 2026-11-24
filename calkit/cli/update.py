@@ -64,13 +64,16 @@ def update_devcontainer(
 @update_app.command(name="license")
 def update_license(
     copyright_holder: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--copyright-holder",
             "-c",
-            help="Copyright holder, e.g., your full name.",
+            help=(
+                "Copyright holder, e.g., your full name. "
+                "Defaults to Git's user.name config."
+            ),
         ),
-    ],
+    ] = None,
     no_commit: Annotated[
         bool,
         typer.Option(
@@ -82,6 +85,24 @@ def update_license(
     """Update license with a reasonable default
     (MIT for code, CC-BY-4.0 for other files).
     """
+    if copyright_holder is None:
+        # Git's user.name is the name it already knows them by
+        from git.exc import InvalidGitRepositoryError
+
+        try:
+            user_name = (
+                calkit.git.get_repo()
+                .config_reader()
+                .get_value("user", "name", default=None)
+            )
+        except InvalidGitRepositoryError:
+            user_name = None
+        copyright_holder = str(user_name) if user_name else None
+        if copyright_holder is None:
+            raise_error(
+                "No copyright holder given and Git's user.name is not "
+                "set; pass --copyright-holder"
+            )
     with open("LICENSE", "w") as f:
         f.write(
             calkit.licenses.LICENSE_TEMPLATE_DUAL.format(
@@ -558,6 +579,13 @@ def update_markdown(
             "No Markdown files given, and none are declared as markdown stages"
         )
     results = calkit.markdown.results_by_name(ck_info)
+    # Values quoted from references come from calkit.yaml, so a check needs
+    # no file, and the file Calkit writes them to is brought up to date
+    import calkit.references.values
+
+    refvals = calkit.references.values.get_values_data(ck_info)
+    if not check:
+        calkit.references.values.write_values_file(ck_info)
     stale = []
     problems = []
     for path in paths:
@@ -584,7 +612,7 @@ def update_markdown(
                 )
         try:
             new_text, changed = calkit.markdown.set_values(
-                text, path, results=results
+                text, path, results=results, data=refvals
             )
         except calkit.markdown.MarkdownParseError as e:
             raise_error(str(e))

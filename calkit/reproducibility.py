@@ -108,6 +108,8 @@ DETAIL_CATEGORIES = {
     "gaps": "provenance_gaps",
     "imports": "unchecked_imports",
     "line-endings": "eol_unpinned",
+    "refvals": "refval_problems",
+    "unchecked-refvals": "refvals_unchecked",
 }
 
 
@@ -168,6 +170,14 @@ class ReproCheck(BaseModel):
     # rather than a list of defects, and it is not counted against the
     # project.
     unattributed_numbers: list[dict] = Field(default_factory=list)
+    #: How many values the project records as quoted from references
+    n_refvals: int = 0
+    #: What's wrong with values quoted from references: one that doesn't
+    #: match its reference's PDF, one a document quotes that isn't
+    #: recorded, or a reference quoted but never cited
+    refval_problems: list[dict] = Field(default_factory=list)
+    #: Values quoted from references with no PDF to check them against
+    refvals_unchecked: list[dict] = Field(default_factory=list)
     # TODO: Check calkit remotes are authenticated
 
     @computed_field  # type: ignore[prop-decorator]
@@ -417,6 +427,19 @@ class ReproCheck(BaseModel):
                 f"{len(self.unattributed_numbers)} (worth a look)"
                 f"{self._tag('numbers')}\n"
             )
+        if self.n_refvals or self.refval_problems:
+            txt += (
+                "Problems with values quoted from references: "
+                f"{len(self.refval_problems)} "
+                f"{calkit.check_or_x(not self.refval_problems)}"
+                f"{self._tag('refvals')}\n"
+            )
+        if self.refvals_unchecked:
+            txt += (
+                "Values quoted from references with no PDF to check: "
+                f"{len(self.refvals_unchecked)} (worth a look)"
+                f"{self._tag('unchecked-refvals')}\n"
+            )
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
@@ -590,6 +613,7 @@ def _mask_latex_macros(masked: str) -> str:
         r"\\includesvg(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\ckfigure\s*(?:\[[^\]]*\])?\s*\{[^}]*\}",
         r"\\ckvalue\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
+        r"\\ckrefval\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
         r"\\cktable\s*\{[^}]*\}",
         r"\\ckinclude\s*\{[^}]*\}",
         r"\\usepackage(?:\[[^\]]*\])?\{[^}]*\}",
@@ -628,7 +652,7 @@ def _mask_markdown_zones(source: str) -> str:
     masked = re.sub(r"``[^\n]+?``|`[^`\n]+`", _mask_match, masked)
     # A Markdown stage writes each value between markers, so it's computed
     masked = re.sub(
-        r"<!--\s*ckvalue\b.*?-->.*?<!--\s*/ckvalue\s*-->",
+        r"<!--\s*(ckvalue|ckrefval)\b.*?-->.*?<!--\s*/\1\s*-->",
         _mask_match,
         masked,
         flags=re.DOTALL,
@@ -918,7 +942,8 @@ def _project_values(
     for tex_path in sorted(tex_paths):
         _, components = read_ck_usage(tex_path)
         for c in components:
-            if c.kind != "value":
+            # A value quoted from a reference isn't one the pipeline computes
+            if c.kind != "value" or c.ref is not None:
                 continue
             rel, _ = component_path(
                 c, lambda p: os.path.isfile(os.path.join(wdir, p))
@@ -1148,7 +1173,9 @@ def find_literals_in_project(
         out["retyped"] += find_retyped_values(
             content, rel, values, via_json_to_latex
         )
-        out["unattributed"] += find_unattributed_numbers(content, rel, values)
+        out["unattributed"] += _with_cited_keys(
+            find_unattributed_numbers(content, rel, values), content, False
+        )
     for path in sorted(_markdown_sources(wdir, ck_info)):
         rel = os.path.relpath(path, wdir).replace(os.sep, "/")
         try:
@@ -1156,8 +1183,10 @@ def find_literals_in_project(
         except OSError:
             continue
         for content, cell in parts:
-            for finding in find_unattributed_numbers(
-                content, rel, values, markdown=True
+            for finding in _with_cited_keys(
+                find_unattributed_numbers(content, rel, values, markdown=True),
+                content,
+                True,
             ):
                 if cell is not None:
                     finding["cell"] = cell
@@ -1165,10 +1194,125 @@ def find_literals_in_project(
     return out
 
 
+# Words ending in a period that don't end a sentence, lowercased
+_ABBREVIATIONS = {
+    "al",
+    "approx",
+    "cf",
+    "ch",
+    "e.g",
+    "ed",
+    "eds",
+    "eq",
+    "eqs",
+    "etc",
+    "fig",
+    "figs",
+    "i.e",
+    "no",
+    "nos",
+    "p",
+    "pp",
+    "ref",
+    "refs",
+    "resp",
+    "sec",
+    "secs",
+    "tab",
+    "vol",
+    "vs",
+}
+# Where a sentence may end: a full stop, question, or exclamation mark,
+# then space and something that starts a sentence
+_SENTENCE_END_RE = re.compile(r"[.!?]['\")\]]*(?=\s+[^\sa-z])")
+
+
+def get_sentence(text: str, offset: int) -> str:
+    """The sentence of some text that an offset is in, across lines.
+
+    An abbreviation, e.g., "et al." or "Fig.", or an initial, e.g., "A."
+    in "A. Liu", doesn't end one.
+    """
+    ends = []
+    for m in _SENTENCE_END_RE.finditer(text):
+        word = re.search(r"([\w.]+)\.?['\")\]]*$", text[: m.end()])
+        token = word.group(1).rstrip(".").lower() if word else ""
+        if token in _ABBREVIATIONS or re.fullmatch(r"[a-z]", token):
+            continue
+        ends.append(m.end())
+    start = max([e for e in ends if e <= offset], default=0)
+    end = min([e for e in ends if e > offset], default=len(text))
+    return text[start:end]
+
+
+def _with_cited_keys(
+    findings: list[dict], content: str, markdown: bool
+) -> list[dict]:
+    """Findings, each marked as cited when its sentence cites a reference,
+    with the keys it cites, so the number can be looked for in them.
+
+    A sentence is read across the lines of its paragraph, since one in a
+    hard-wrapped document often cites on another line than its number.
+    """
+    from calkit.references.values import get_line_cited_keys
+
+    lines = content.splitlines()
+    for finding in findings:
+        index = finding["line"] - 1
+        if not 0 <= index < len(lines):
+            continue
+        first = index
+        while first > 0 and lines[first - 1].strip():
+            first -= 1
+        last = index
+        while last + 1 < len(lines) and lines[last + 1].strip():
+            last += 1
+        paragraph = "\n".join(lines[first : last + 1])
+        offset = sum(len(line) + 1 for line in lines[first:index])
+        offset += max(finding.get("column", 1) - 1, 0)
+        keys = get_line_cited_keys(get_sentence(paragraph, offset), markdown)
+        finding["cited"] = bool(keys)
+        if keys:
+            finding["cited_keys"] = keys
+        else:
+            finding.pop("cited_keys", None)
+    return findings
+
+
+def get_document_paths(wdir: str, ck_info: dict, stages: dict) -> list[str]:
+    """The project-relative documents the checks read: LaTeX documents,
+    not the files they input, and Markdown, Quarto, and notebook ones.
+    """
+    documents = []
+    for path in sorted(_tex_sources(wdir, ck_info, stages)):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                if "\\documentclass" not in f.read():
+                    continue
+        except OSError:
+            continue
+        documents.append(path)
+    documents += sorted(_markdown_sources(wdir, ck_info))
+    return [
+        os.path.relpath(path, wdir).replace(os.sep, "/") for path in documents
+    ]
+
+
 def check_reproducibility(
-    wdir: str = ".", log_func: Callable | None = None
+    wdir: str = ".",
+    log_func: Callable | None = None,
+    offline: bool = False,
+    zotero_desktop: bool = True,
 ) -> ReproCheck:
-    """Check the reproducibility of a project."""
+    """Check the reproducibility of a project.
+
+    Values quoted from references are checked against the references' PDFs,
+    and typed numbers in sentences citing a reference are looked for in
+    them. Without ``offline``, open-access PDFs are downloaded into
+    ``.calkit/local`` for that, but never stored in the project. With
+    ``zotero_desktop``, Zotero desktop on this machine is asked for them
+    too, which a server shouldn't do.
+    """
     from git.exc import InvalidGitRepositoryError
 
     from calkit.detect import (
@@ -1320,4 +1464,35 @@ def check_reproducibility(
     )
     res["retyped_values"] = literals["retyped"]
     res["unattributed_numbers"] = literals["unattributed"]
+    # Values quoted from references, and numbers in sentences citing one
+    from calkit.references import values as refvalues
+
+    res["n_refvals"] = len(refvalues.iter_declared_values(ck_info))
+    cited = [f for f in literals["unattributed"] if f.get("cited_keys")]
+    if res["n_refvals"] or cited or ck_info.get("references"):
+        from calkit.references import Lookup
+
+        lookup = Lookup(wdir=wdir, offline=offline)
+        # Shared, so each reference's PDF is found and read once
+        finder = refvalues.PdfFinder(
+            ck_info,
+            wdir=wdir,
+            download=not offline,
+            lookup=lookup,
+            zotero_desktop=zotero_desktop,
+        )
+        checked = refvalues.check_project(
+            ck_info,
+            get_document_paths(wdir, ck_info, stages),
+            wdir=wdir,
+            finder=finder,
+        )
+        res["refval_problems"] = checked["problems"]
+        res["refvals_unchecked"] = checked["unchecked"]
+        if cited:
+            refvalues.search_cited(cited, ck_info, wdir=wdir, finder=finder)
+        try:
+            lookup.save()
+        except OSError:
+            pass
     return ReproCheck.model_validate(res)

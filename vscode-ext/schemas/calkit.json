@@ -9246,16 +9246,51 @@
     "ReferenceCollection": {
       "properties": {
         "files": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/ReferenceFile"
-          },
-          "title": "Files",
-          "type": "array"
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "items": {
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "path"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "default": {},
+          "description": "PDFs of the collection's entries, by citation key, relative to the project.",
+          "title": "Files"
         },
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ReferenceValue"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Values documents quote from the collection's entries, by citation key, and then by a name unique within the entry.",
+          "title": "Values",
+          "type": "object"
         }
       },
       "required": [
@@ -9264,22 +9299,69 @@
       "title": "ReferenceCollection",
       "type": "object"
     },
-    "ReferenceFile": {
+    "ReferenceValue": {
+      "description": "A value a document quotes from a reference, and where and in what\ncontext the reference uses it.\n\nA document cites it with ``\\ckrefval{<citation key>}{<name>}``, which\nis checked against the reference's PDF.",
       "properties": {
-        "key": {
-          "title": "Key",
-          "type": "string"
+        "context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The passage the value is used in, copied from the reference, which is how it's found and checked; spacing and case don't have to match.",
+          "title": "Context"
         },
-        "path": {
-          "title": "Path",
-          "type": "string"
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the value is.",
+          "title": "Description"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The page of the reference's PDF it's on, counting from 1, which may differ from the number printed on the page.",
+          "title": "Page"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "The value, as the reference gives it, e.g., 0.1 or '12.5%'.",
+          "title": "Value"
         }
       },
       "required": [
-        "path",
-        "key"
+        "value"
       ],
-      "title": "ReferenceFile",
+      "title": "ReferenceValue",
       "type": "object"
     },
     "ReferencesCheckStage": {

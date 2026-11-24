@@ -205,3 +205,300 @@ def test_get_github_token_refreshes_only_when_due(db: Session) -> None:
     with mock.patch.object(users.requests, "post") as post:
         assert users.get_github_token(db, user) == "gho_new"
         post.assert_not_called()
+
+
+def test_get_huggingface_token(db: Session) -> None:
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(), password=random_lower_string()
+        ),
+    )
+
+    def save(access_token: str, expires_in_minutes: int) -> None:
+        users.save_external_credential(
+            session=db,
+            user=user,
+            provider="huggingface",
+            secret_payload=json.dumps(
+                {"access_token": access_token, "refresh_token": "hf_refresh"}
+            ),
+            expires=utcnow() + timedelta(minutes=expires_in_minutes),
+        )
+
+    # One with plenty of life left isn't refreshed
+    save("hf_current", 60)
+    with mock.patch.object(users.requests, "post") as post:
+        assert users.get_huggingface_token(db, user) == "hf_current"
+        post.assert_not_called()
+    # One about to expire is
+    save("hf_current", 1)
+    userinfo = SimpleNamespace(
+        ok=True, json=lambda: {"preferred_username": "someone", "orgs": []}
+    )
+    with (
+        mock.patch.object(
+            users.requests,
+            "post",
+            return_value=SimpleNamespace(
+                status_code=200,
+                json=lambda: {"access_token": "hf_new", "expires_in": 3600},
+            ),
+        ) as post,
+        mock.patch.object(users.requests, "get", return_value=userinfo),
+    ):
+        assert users.get_huggingface_token(db, user) == "hf_new"
+        assert post.call_count == 1
+    # One another request refreshed while this one waited for the lock isn't
+    # refreshed again
+    save("hf_current", 1)
+    get_credential = users.get_external_credential
+
+    def get_then_refresh_elsewhere(**kwargs):
+        credential = get_credential(**kwargs)
+        with Session(db.get_bind()) as other:
+            row = other.get(type(credential), credential.id)
+            row.secret_payload = users.encrypt_secret(
+                json.dumps({"access_token": "hf_other"})
+            )
+            row.expires = utcnow() + timedelta(hours=1)
+            other.add(row)
+            other.commit()
+        return credential
+
+    with (
+        mock.patch.object(
+            users,
+            "get_external_credential",
+            side_effect=get_then_refresh_elsewhere,
+        ),
+        mock.patch.object(users.requests, "post") as post,
+    ):
+        assert users.get_huggingface_token(db, user) == "hf_other"
+        post.assert_not_called()
+    # An outage doesn't disconnect the account
+    save("hf_current", 1)
+    for post_kwargs in (
+        {"side_effect": users.requests.ConnectionError("down")},
+        {"return_value": SimpleNamespace(status_code=500, text="down")},
+    ):
+        with (
+            mock.patch.object(users.requests, "post", **post_kwargs),
+            pytest.raises(HTTPException) as e,
+        ):
+            users.get_huggingface_token(db, user)
+        assert e.value.status_code == 503
+        assert (
+            users.get_external_credential(
+                session=db, user=user, provider="huggingface"
+            )
+            is not None
+        )
+    # Nor does failing to get account details while refreshing
+    with (
+        mock.patch.object(
+            users.requests,
+            "post",
+            return_value=SimpleNamespace(
+                status_code=200,
+                json=lambda: {"access_token": "hf_new", "expires_in": 3600},
+            ),
+        ),
+        mock.patch.object(
+            users.requests,
+            "get",
+            side_effect=users.requests.ConnectionError("down"),
+        ),
+    ):
+        assert users.get_huggingface_token(db, user) == "hf_new"
+    # A rejected refresh disconnects the account
+    save("hf_current", 1)
+    with (
+        mock.patch.object(
+            users.requests,
+            "post",
+            return_value=SimpleNamespace(status_code=400, text="bad"),
+        ),
+        pytest.raises(HTTPException) as e,
+    ):
+        users.get_huggingface_token(db, user)
+    assert e.value.status_code == 401
+    assert (
+        users.get_external_credential(
+            session=db, user=user, provider="huggingface"
+        )
+        is None
+    )
+
+
+def test_get_box_token(db: Session) -> None:
+    from app.models import UserExternalCredential
+
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(), password=random_lower_string()
+        ),
+    )
+
+    def save(access_token: str, expires_in_minutes: int, idle_days: int = 0):
+        credential = users.save_external_credential(
+            session=db,
+            user=user,
+            provider="box",
+            secret_payload=json.dumps(
+                {"access_token": access_token, "refresh_token": "refresh_1"}
+            ),
+            provider_account_id="42",
+            metadata_json={"login": "someone@example.edu"},
+            expires=utcnow() + timedelta(minutes=expires_in_minutes),
+            refresh_token_expires=utcnow()
+            + users.BOX_REFRESH_TOKEN_LIFETIME
+            - timedelta(days=idle_days),
+        )
+        return credential
+
+    def get_tokens() -> dict:
+        credential = users.get_external_credential(
+            session=db, user=user, provider="box"
+        )
+        assert credential is not None
+        return dict(
+            json.loads(users.decrypt_secret(credential.secret_payload))
+        )
+
+    refreshed = SimpleNamespace(
+        status_code=200,
+        json=lambda: {
+            "access_token": "new",
+            "refresh_token": "refresh_2",
+            "expires_in": 3600,
+        },
+    )
+    me = SimpleNamespace(
+        ok=True,
+        json=lambda: {
+            "id": "42",
+            "login": "someone@example.edu",
+            "name": "Someone",
+            "enterprise": {"name": "Some University"},
+        },
+    )
+    # One with plenty of life left isn't refreshed, unless forced
+    save("current", 60)
+    with mock.patch.object(users.requests, "post") as post:
+        assert users.get_box_token(db, user) == "current"
+        post.assert_not_called()
+    with (
+        mock.patch.object(
+            users.requests, "post", return_value=refreshed
+        ) as post,
+        mock.patch.object(users.requests, "get", return_value=me),
+    ):
+        assert users.get_box_token(db, user, force=True) == "new"
+    # Each refresh token works once, so the new one replaces it, and the
+    # connection's life starts over
+    assert post.call_args.kwargs["data"]["refresh_token"] == "refresh_1"
+    assert get_tokens()["refresh_token"] == "refresh_2"
+    credential = users.get_external_credential(
+        session=db, user=user, provider="box"
+    )
+    assert credential is not None and credential.refresh_token_expires
+    assert credential.refresh_token_expires > utcnow() + timedelta(days=59)
+    assert credential.metadata_json == {
+        "login": "someone@example.edu",
+        "name": "Someone",
+        "enterprise": "Some University",
+    }
+    # Neither an outage nor the hub's own client credentials being wrong
+    # disconnect the account
+    save("current", 1)
+    for status, error in ((500, None), (400, "invalid_client")):
+        with (
+            mock.patch.object(
+                users.requests,
+                "post",
+                return_value=SimpleNamespace(
+                    status_code=status, text="", json=lambda: {"error": error}
+                ),
+            ),
+            pytest.raises(HTTPException) as e,
+        ):
+            users.get_box_token(db, user)
+        assert e.value.status_code == 503
+        assert get_tokens()["access_token"] == "current"
+    # A spent or expired refresh token does, but which Box account it was is
+    # kept, so storage in it can't be taken over by another
+    with (
+        mock.patch.object(
+            users.requests,
+            "post",
+            return_value=SimpleNamespace(
+                status_code=400,
+                text="",
+                json=lambda: {"error": "invalid_grant"},
+            ),
+        ),
+        mock.patch("app.mixpanel.user_connection_lapsed") as lapsed,
+        pytest.raises(HTTPException) as e,
+    ):
+        users.get_box_token(db, user)
+    assert e.value.status_code == 401
+    assert get_tokens() == {}
+    lapsed.assert_called_once_with(user, "box")
+    credential = users.get_external_credential(
+        session=db, user=user, provider="box"
+    )
+    assert credential is not None and credential.provider_account_id == "42"
+    with (
+        mock.patch.object(users.requests, "post") as post,
+        pytest.raises(HTTPException) as e,
+    ):
+        users.get_box_token(db, user)
+    assert e.value.status_code == 401
+    post.assert_not_called()
+    # The daily job refreshes only connections unused for a month, then
+    # queues itself for the next day
+    save("current", 60, idle_days=31)
+    other = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(), password=random_lower_string()
+        ),
+    )
+    users.save_external_credential(
+        session=db,
+        user=other,
+        provider="box",
+        secret_payload=json.dumps(
+            {"access_token": "other", "refresh_token": "other_refresh"}
+        ),
+        expires=utcnow() + timedelta(hours=1),
+        refresh_token_expires=utcnow() + timedelta(days=59),
+    )
+    from sqlmodel import col, select
+
+    idle_ids = {
+        c.user_id
+        for c in db.exec(
+            select(UserExternalCredential).where(
+                UserExternalCredential.provider == "box",
+                col(UserExternalCredential.refresh_token_expires)
+                < utcnow() + timedelta(days=30),
+            )
+        ).all()
+    }
+    with (
+        mock.patch.object(
+            users.requests, "post", return_value=refreshed
+        ) as post,
+        mock.patch.object(users.requests, "get", return_value=me),
+    ):
+        assert users.refresh_idle_box_tokens() == len(idle_ids)
+    refreshed_tokens = {
+        c.kwargs["data"]["refresh_token"] for c in post.call_args_list
+    }
+    assert "refresh_1" in refreshed_tokens
+    assert "other_refresh" not in refreshed_tokens
+    db.expire_all()
+    assert get_tokens()["refresh_token"] == "refresh_2"

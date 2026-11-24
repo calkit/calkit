@@ -1305,3 +1305,26 @@ def test_write_json_waits_for_reader_on_windows(tmp_path: Path) -> None:
         timer.join()
         reader.close()
     assert json.loads(path.read_text()) == [5]
+
+
+def test_get_auto_ignore_path():
+    assert (
+        calkit.get_auto_ignore_path(
+            "notebooks/.ipynb_checkpoints/fade-checkpoint.ipynb"
+        )
+        == "notebooks/.ipynb_checkpoints/"
+    )
+    assert (
+        calkit.get_auto_ignore_path(".ipynb_checkpoints/a-checkpoint.ipynb")
+        == ".ipynb_checkpoints/"
+    )
+    assert (
+        calkit.get_auto_ignore_path("src/pkg/__pycache__/mod.cpython-312.pyc")
+        == "src/pkg/__pycache__/"
+    )
+    assert calkit.get_auto_ignore_path("sub/.DS_Store") == "sub/.DS_Store"
+    assert (
+        calkit.get_auto_ignore_path(".venv/bin/python") == ".venv/bin/python"
+    )
+    assert calkit.get_auto_ignore_path("notebooks/fade.ipynb") is None
+    assert calkit.get_auto_ignore_path("notes/.ipynb_checkpoints.md") is None

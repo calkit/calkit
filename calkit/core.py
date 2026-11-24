@@ -586,15 +586,40 @@ AUTO_IGNORE_SUFFIXES = [
     ".pyc",
     ".synctex.gz",
     ".auxlock",
-    ".ipynb_checkpoints",
 ]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
 AUTO_IGNORE_PREFIXES = [
     ".venv",
-    "__pycache__",
-    ".ipynb_checkpoints",
     ".calkit/overleaf/",
 ]
+# Directories ignored wherever they are in the project, e.g., the
+# checkpoints Jupyter writes next to each notebook
+AUTO_IGNORE_DIR_NAMES = [".ipynb_checkpoints", "__pycache__"]
+
+
+def get_auto_ignore_path(path: str) -> str | None:
+    """The path to ignore so ``path`` isn't committed, if it's one Calkit
+    ignores automatically.
+
+    A file in a directory that's always ignored gives that directory, so it
+    takes one line of ``.gitignore`` however many files it holds.
+    """
+    from pathlib import Path
+
+    path = Path(path).as_posix()
+    parts = path.split("/")
+    for n, part in enumerate(parts[:-1]):
+        if part in AUTO_IGNORE_DIR_NAMES:
+            return "/".join(parts[: n + 1]) + "/"
+    if (
+        any(path.endswith(s) for s in AUTO_IGNORE_SUFFIXES)
+        or any(path.startswith(p) for p in AUTO_IGNORE_PREFIXES)
+        or path in {Path(p).as_posix() for p in AUTO_IGNORE_PATHS}
+    ):
+        return path
+    return None
+
+
 # Constants for version control auto-add to DVC
 DVC_EXTENSIONS = [
     ".gif",
@@ -1276,6 +1301,41 @@ def update_readme_content(
     return heading + intro + ("\n" + body if body else "")
 
 
+def is_terminal(stream: Any) -> bool:
+    """True when a stream is a terminal.
+
+    On Windows, ``isatty`` is also true of the NUL device, e.g., for
+    ``2>NUL`` or ``subprocess.DEVNULL``, so only a stream with a console
+    mode counts there. Python writes to NUL with the ANSI code page, so
+    taking it for a terminal, e.g., to draw a spinner, fails on the first
+    character it can't encode. mintty isn't a console either; see
+    :func:`is_mintty`.
+    """
+    try:
+        if not stream.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetConsoleMode.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    mode = wintypes.DWORD()
+    return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
 def is_tty() -> bool:
     """True only when both stdin and stdout are TTYs.
 
@@ -1283,36 +1343,9 @@ def is_tty() -> bool:
     we need to read the user's answer. CI environments fail at least one
     and fall through to the abort-with-fix-command path.
 
-    On Windows, ``isatty`` is also true of the NUL device, which is what a
-    child given ``subprocess.DEVNULL`` reads, so only a stream with a console
-    mode counts there.
+    Neither counts on Windows when it's the NUL device; see
+    :func:`is_terminal`.
     """
-
-    def is_terminal(stream: Any) -> bool:
-        try:
-            if not stream.isatty():
-                return False
-        except (AttributeError, ValueError):
-            return False
-        if sys.platform != "win32":
-            return True
-        import ctypes
-        import msvcrt
-        from ctypes import wintypes
-
-        try:
-            handle = msvcrt.get_osfhandle(stream.fileno())
-        except (AttributeError, OSError, ValueError):
-            return False
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.GetConsoleMode.argtypes = [
-            wintypes.HANDLE,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        kernel32.GetConsoleMode.restype = wintypes.BOOL
-        mode = wintypes.DWORD()
-        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
-
     return is_terminal(sys.stdin) and is_terminal(sys.stdout)
 
 

@@ -78,6 +78,13 @@ so a change to a value renders the document again.
 
 <!-- TODO: needs human review -->
 
+<!-- TODO: needs human review -->
+
+A value quoted from a reference is shown with
+`{{< ckrefval citation-key name format >}}`, from what `calkit.yaml`
+records for the reference.
+See [quoting values from references](references.md#quoting-values-from-references).
+
 To show a value saved from a notebook cell, use the notebook's path
 instead of a results file, e.g., `{{< ckvalue fit.ipynb k_25 .3f >}}`.
 See [saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells)

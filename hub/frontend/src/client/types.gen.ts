@@ -365,6 +365,69 @@ export type BodyProjectsPutProjectContents = {
 }
 
 /**
+ * BoxAccess
+ *
+ * Access to a project's folder in Box.
+ *
+ * The token is downscoped to the folder and lasts about an hour, so a
+ * client can reuse it for every file in the project until it expires.
+ */
+export type BoxAccess = {
+  /**
+   * Kind
+   */
+  kind?: "box"
+  /**
+   * Operation
+   */
+  operation: "upload" | "download"
+  /**
+   * Folder Id
+   */
+  folder_id: string
+  /**
+   * Access Token
+   */
+  access_token: string
+  /**
+   * Expires At Unixts
+   */
+  expires_at_unixts: number
+  /**
+   * File Id
+   */
+  file_id?: string | null
+  /**
+   * Size
+   */
+  size?: number | null
+}
+
+/**
+ * BoxAuthStart
+ */
+export type BoxAuthStart = {
+  /**
+   * Authorize Url
+   */
+  authorize_url: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
+}
+
+/**
+ * BoxAuthStartRequest
+ */
+export type BoxAuthStartRequest = {
+  /**
+   * State
+   */
+  state: string
+}
+
+/**
  * CheckIn
  *
  * What a machine reports each time it checks in.
@@ -559,6 +622,20 @@ export type ConnectedAccounts = {
    */
   zotero: boolean
   /**
+   * Huggingface
+   */
+  huggingface?: boolean
+  /**
+   * Box
+   */
+  box?: boolean
+  /**
+   * Account Names
+   */
+  account_names?: {
+    [key: string]: string
+  }
+  /**
    * Cli
    */
   cli?: boolean
@@ -673,6 +750,38 @@ export type CreatorPost = {
    * With Ai
    */
   with_ai?: string | Array<string> | null
+}
+
+/**
+ * CredentialStoragePublic
+ *
+ * Storage reached with the current user's account on a service.
+ */
+export type CredentialStoragePublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Bucket
+   */
+  bucket: string
+  /**
+   * Dedicated
+   */
+  dedicated: boolean
+  /**
+   * Owner
+   */
+  owner: string
+  /**
+   * Projects
+   */
+  projects: Array<string>
 }
 
 /**
@@ -1775,7 +1884,7 @@ export type FsOpBatchRequest = {
   /**
    * Operation
    */
-  operation: "exists" | "info"
+  operation: "exists" | "info" | "register"
   /**
    * Paths
    */
@@ -1784,6 +1893,16 @@ export type FsOpBatchRequest = {
    * Include
    */
   include?: Array<"exists" | "info" | "content"> | null
+  /**
+   * Xet Hashes
+   */
+  xet_hashes?: {
+    [key: string]: string
+  } | null
+  /**
+   * Bucket
+   */
+  bucket?: string | null
 }
 
 /**
@@ -1880,6 +1999,12 @@ export type FsOpResponse = {
     | ({
         kind: "sftp"
       } & SftpAccess)
+    | ({
+        kind: "hf-xet"
+      } & XetAccess)
+    | ({
+        kind: "box"
+      } & BoxAccess)
     | null
   /**
    * Result
@@ -2313,6 +2438,44 @@ export type HubVersion = {
    * Version
    */
   version: string
+}
+
+/**
+ * HuggingFaceAccount
+ */
+export type HuggingFaceAccount = {
+  /**
+   * Username
+   */
+  username: string | null
+  /**
+   * Orgs
+   */
+  orgs: Array<string>
+}
+
+/**
+ * HuggingFaceAuthStart
+ */
+export type HuggingFaceAuthStart = {
+  /**
+   * Authorize Url
+   */
+  authorize_url: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
+}
+
+/**
+ * HuggingFaceAuthStartRequest
+ */
+export type HuggingFaceAuthStartRequest = {
+  /**
+   * State
+   */
+  state: string
 }
 
 /**
@@ -4348,6 +4511,16 @@ export type ProjectCommentPost = {
 }
 
 /**
+ * ProjectHfBucketPost
+ */
+export type ProjectHfBucketPost = {
+  /**
+   * Bucket
+   */
+  bucket: string
+}
+
+/**
  * ProjectInvitationCreated
  */
 export type ProjectInvitationCreated = {
@@ -4819,6 +4992,38 @@ export type ProjectStatusPost = {
    * Message
    */
   message?: string | null
+}
+
+/**
+ * ProjectStoragePut
+ */
+export type ProjectStoragePut = {
+  /**
+   * Dvc Storage Id
+   */
+  dvc_storage_id: string | null
+}
+
+/**
+ * ProjectStorageSettings
+ */
+export type ProjectStorageSettings = {
+  dvc: StorageResourcePublic | null
+  /**
+   * Previous
+   */
+  previous: Array<StorageResourcePublic>
+}
+
+/**
+ * ProjectStorageUsage
+ */
+export type ProjectStorageUsage = {
+  /**
+   * Project Used Gb
+   */
+  project_used_gb: number
+  account?: StorageUsage | null
 }
 
 /**
@@ -6486,6 +6691,22 @@ export type ReproCheck = {
     [key: string]: unknown
   }>
   /**
+   * N Refvals
+   */
+  n_refvals?: number
+  /**
+   * Refval Problems
+   */
+  refval_problems?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * Refvals Unchecked
+   */
+  refvals_unchecked?: Array<{
+    [key: string]: unknown
+  }>
+  /**
    * Recommendation
    *
    * Formulate a recommendation for the project.
@@ -6960,6 +7181,58 @@ export type StageStatus = {
    * Missing Outputs
    */
   missing_outputs?: Array<string>
+}
+
+/**
+ * StorageResourcePublic
+ */
+export type StorageResourcePublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Name
+   */
+  name: string | null
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Bucket
+   */
+  bucket: string
+  /**
+   * Dedicated
+   */
+  dedicated: boolean
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Connected By
+   */
+  connected_by: string
+}
+
+/**
+ * StorageTransferStatus
+ */
+export type StorageTransferStatus = {
+  /**
+   * Status
+   */
+  status: string | null
+  /**
+   * Error
+   */
+  error?: string | null
+  /**
+   * Provider
+   */
+  provider?: string | null
 }
 
 /**
@@ -7940,6 +8213,52 @@ export type WorkspaceInfo = {
 }
 
 /**
+ * XetAccess
+ *
+ * Access to Hugging Face storage through the Xet protocol.
+ *
+ * The client uploads or downloads content with ``hf_xet`` using this
+ * short-lived token, which covers the whole bucket, so a client can reuse
+ * it until it expires. After uploads, the client sends a batch
+ * ``register`` operation with their Xet hashes so the hub can add the
+ * paths to the bucket, which the token alone can't do.
+ */
+export type XetAccess = {
+  /**
+   * Kind
+   */
+  kind?: "hf-xet"
+  /**
+   * Operation
+   */
+  operation: "upload" | "download"
+  /**
+   * Bucket
+   */
+  bucket?: string | null
+  /**
+   * Cas Url
+   */
+  cas_url: string
+  /**
+   * Access Token
+   */
+  access_token: string
+  /**
+   * Expires At Unixts
+   */
+  expires_at_unixts: number
+  /**
+   * Xet Hash
+   */
+  xet_hash?: string | null
+  /**
+   * Size
+   */
+  size?: number | null
+}
+
+/**
  * ZoteroAuthFinish
  */
 export type ZoteroAuthFinish = {
@@ -8472,6 +8791,22 @@ export type ReproCheckWritable = {
    * Unattributed Numbers
    */
   unattributed_numbers?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * N Refvals
+   */
+  n_refvals?: number
+  /**
+   * Refval Problems
+   */
+  refval_problems?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * Refvals Unchecked
+   */
+  refvals_unchecked?: Array<{
     [key: string]: unknown
   }>
 }
@@ -9856,6 +10191,131 @@ export type GetUserGithubTokenResponses = {
 export type GetUserGithubTokenResponse =
   GetUserGithubTokenResponses[keyof GetUserGithubTokenResponses]
 
+export type PostUserHuggingfaceAuthStartData = {
+  body: HuggingFaceAuthStartRequest
+  path?: never
+  query?: never
+  url: "/user/huggingface-auth/start"
+}
+
+export type PostUserHuggingfaceAuthStartErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserHuggingfaceAuthStartError =
+  PostUserHuggingfaceAuthStartErrors[keyof PostUserHuggingfaceAuthStartErrors]
+
+export type PostUserHuggingfaceAuthStartResponses = {
+  /**
+   * Successful Response
+   */
+  200: HuggingFaceAuthStart
+}
+
+export type PostUserHuggingfaceAuthStartResponse =
+  PostUserHuggingfaceAuthStartResponses[keyof PostUserHuggingfaceAuthStartResponses]
+
+export type PostUserHuggingfaceAuthData = {
+  body: AppApiRoutesUsersOAuthCodeExchange
+  path?: never
+  query?: never
+  url: "/user/huggingface-auth"
+}
+
+export type PostUserHuggingfaceAuthErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserHuggingfaceAuthError =
+  PostUserHuggingfaceAuthErrors[keyof PostUserHuggingfaceAuthErrors]
+
+export type PostUserHuggingfaceAuthResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserHuggingfaceAuthResponse =
+  PostUserHuggingfaceAuthResponses[keyof PostUserHuggingfaceAuthResponses]
+
+export type GetUserHuggingfaceAccountData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/huggingface-account"
+}
+
+export type GetUserHuggingfaceAccountResponses = {
+  /**
+   * Successful Response
+   */
+  200: HuggingFaceAccount
+}
+
+export type GetUserHuggingfaceAccountResponse =
+  GetUserHuggingfaceAccountResponses[keyof GetUserHuggingfaceAccountResponses]
+
+export type PostUserBoxAuthStartData = {
+  body: BoxAuthStartRequest
+  path?: never
+  query?: never
+  url: "/user/box-auth/start"
+}
+
+export type PostUserBoxAuthStartErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserBoxAuthStartError =
+  PostUserBoxAuthStartErrors[keyof PostUserBoxAuthStartErrors]
+
+export type PostUserBoxAuthStartResponses = {
+  /**
+   * Successful Response
+   */
+  200: BoxAuthStart
+}
+
+export type PostUserBoxAuthStartResponse =
+  PostUserBoxAuthStartResponses[keyof PostUserBoxAuthStartResponses]
+
+export type PostUserBoxAuthData = {
+  body: AppApiRoutesUsersOAuthCodeExchange
+  path?: never
+  query?: never
+  url: "/user/box-auth"
+}
+
+export type PostUserBoxAuthErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserBoxAuthError =
+  PostUserBoxAuthErrors[keyof PostUserBoxAuthErrors]
+
+export type PostUserBoxAuthResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserBoxAuthResponse =
+  PostUserBoxAuthResponses[keyof PostUserBoxAuthResponses]
+
 export type GetUserOverleafTokenData = {
   body?: never
   path?: never
@@ -10050,7 +10510,12 @@ export type DeleteUserExternalCredentialData = {
      */
     provider: string
   }
-  query?: never
+  query?: {
+    /**
+     * Storage Action
+     */
+    storage_action?: "transfer" | "orphan" | null
+  }
   url: "/user/external-credentials/{provider}"
 }
 
@@ -10818,7 +11283,12 @@ export type DeleteProjectData = {
      */
     project_name: string
   }
-  query?: never
+  query?: {
+    /**
+     * Delete Hub Storage
+     */
+    delete_hub_storage?: boolean
+  }
   url: "/projects/{owner_name}/{project_name}"
 }
 
@@ -10927,7 +11397,12 @@ export type DeleteProjectByIdData = {
      */
     project_id: string
   }
-  query?: never
+  query?: {
+    /**
+     * Delete Hub Storage
+     */
+    delete_hub_storage?: boolean
+  }
   url: "/projects/{project_id}"
 }
 
@@ -17224,6 +17699,304 @@ export type GetFeatureVotesResponses = {
 
 export type GetFeatureVotesResponse =
   GetFeatureVotesResponses[keyof GetFeatureVotesResponses]
+
+export type GetAccountStorageData = {
+  body?: never
+  path: {
+    /**
+     * Account Name
+     */
+    account_name: string
+  }
+  query?: never
+  url: "/accounts/{account_name}/storage"
+}
+
+export type GetAccountStorageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetAccountStorageError =
+  GetAccountStorageErrors[keyof GetAccountStorageErrors]
+
+export type GetAccountStorageResponses = {
+  /**
+   * Response Storage-Get Account Storage
+   *
+   * Successful Response
+   */
+  200: Array<StorageResourcePublic>
+}
+
+export type GetAccountStorageResponse =
+  GetAccountStorageResponses[keyof GetAccountStorageResponses]
+
+export type DeleteAccountStorageData = {
+  body?: never
+  path: {
+    /**
+     * Account Name
+     */
+    account_name: string
+    /**
+     * Storage Name
+     */
+    storage_name: string
+  }
+  query?: never
+  url: "/accounts/{account_name}/storage/{storage_name}"
+}
+
+export type DeleteAccountStorageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteAccountStorageError =
+  DeleteAccountStorageErrors[keyof DeleteAccountStorageErrors]
+
+export type DeleteAccountStorageResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
+
+export type GetUserServiceStorageData = {
+  body?: never
+  path: {
+    /**
+     * Provider
+     */
+    provider: "huggingface" | "box"
+  }
+  query?: never
+  url: "/user/{provider}/storage"
+}
+
+export type GetUserServiceStorageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserServiceStorageError =
+  GetUserServiceStorageErrors[keyof GetUserServiceStorageErrors]
+
+export type GetUserServiceStorageResponses = {
+  /**
+   * Response Storage-Get User Service Storage
+   *
+   * Successful Response
+   */
+  200: Array<CredentialStoragePublic>
+}
+
+export type GetUserServiceStorageResponse =
+  GetUserServiceStorageResponses[keyof GetUserServiceStorageResponses]
+
+export type GetUserStorageTransferData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/storage-transfer"
+}
+
+export type GetUserStorageTransferResponses = {
+  /**
+   * Successful Response
+   */
+  200: StorageTransferStatus
+}
+
+export type GetUserStorageTransferResponse =
+  GetUserStorageTransferResponses[keyof GetUserStorageTransferResponses]
+
+export type GetProjectStorageData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage"
+}
+
+export type GetProjectStorageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectStorageError =
+  GetProjectStorageErrors[keyof GetProjectStorageErrors]
+
+export type GetProjectStorageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectStorageSettings
+}
+
+export type GetProjectStorageResponse =
+  GetProjectStorageResponses[keyof GetProjectStorageResponses]
+
+export type PutProjectStorageData = {
+  body: ProjectStoragePut
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage"
+}
+
+export type PutProjectStorageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutProjectStorageError =
+  PutProjectStorageErrors[keyof PutProjectStorageErrors]
+
+export type PutProjectStorageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectStorageSettings
+}
+
+export type PutProjectStorageResponse =
+  PutProjectStorageResponses[keyof PutProjectStorageResponses]
+
+export type GetProjectStorageUsageData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage/usage"
+}
+
+export type GetProjectStorageUsageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectStorageUsageError =
+  GetProjectStorageUsageErrors[keyof GetProjectStorageUsageErrors]
+
+export type GetProjectStorageUsageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectStorageUsage
+}
+
+export type GetProjectStorageUsageResponse =
+  GetProjectStorageUsageResponses[keyof GetProjectStorageUsageResponses]
+
+export type PostProjectBoxFolderData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage/box-folder"
+}
+
+export type PostProjectBoxFolderErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectBoxFolderError =
+  PostProjectBoxFolderErrors[keyof PostProjectBoxFolderErrors]
+
+export type PostProjectBoxFolderResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectStorageSettings
+}
+
+export type PostProjectBoxFolderResponse =
+  PostProjectBoxFolderResponses[keyof PostProjectBoxFolderResponses]
+
+export type PostProjectHfBucketData = {
+  body: ProjectHfBucketPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage/hf-bucket"
+}
+
+export type PostProjectHfBucketErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectHfBucketError =
+  PostProjectHfBucketErrors[keyof PostProjectHfBucketErrors]
+
+export type PostProjectHfBucketResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectStorageSettings
+}
+
+export type PostProjectHfBucketResponse =
+  PostProjectHfBucketResponses[keyof PostProjectHfBucketResponses]
 
 export type GetMachinesData = {
   body?: never

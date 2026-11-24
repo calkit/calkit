@@ -266,3 +266,94 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
     assert [line.split(": ", 1)[1].strip() for line in got[:-1]] == expected
     # A value that can't be read shows as missing
     assert got[-1].strip() == "Gone: ??"
+
+
+def test_refvals(tmp_path):
+    # A value quoted from a reference is read from the file Calkit writes
+    # its reference's values to, by name, in document order
+    from calkit.references.values import get_values_path, write_values_file
+
+    path = get_values_path("liu.2025")
+
+    text = (
+        "Noise of {{< ckrefval liu.2025 noise-sigma .2f >}} "
+        "[@liu.2025], and {{< ckvalue results/r.json rms >}}.\n"
+        "Again {{< ckrefval liu.2025 noise-sigma format=.1f >}}.\n"
+    )
+    values = calkit.quarto.extract_values(text, "index.qmd")
+    assert [(v.path, v.key, v.format, v.ref) for v in values] == [
+        (path, "noise-sigma", ".2f", ("liu.2025", "noise-sigma")),
+        ("results/r.json", "rms", None, None),
+        (path, "noise-sigma", ".1f", ("liu.2025", "noise-sigma")),
+    ]
+    refvals = [v for v in values if v.ref]
+    with pytest.raises(MarkdownParseError, match="records no value"):
+        calkit.quarto.check_values(refvals, "index.qmd", wdir=str(tmp_path))
+    write_values_file(
+        {
+            "references": [
+                {
+                    "path": "r.bib",
+                    "values": {"liu.2025": {"noise-sigma": {"value": 0.1}}},
+                }
+            ]
+        },
+        wdir=str(tmp_path),
+    )
+    calkit.quarto.check_values(refvals, "index.qmd", wdir=str(tmp_path))
+    missing = calkit.quarto.extract_values(
+        "{{< ckrefval liu.2025 other >}}", "index.qmd"
+    )
+    with pytest.raises(
+        MarkdownParseError,
+        match="calkit.yaml records no value 'other' quoted from 'liu.2025'",
+    ):
+        calkit.quarto.check_values(missing, "index.qmd", wdir=str(tmp_path))
+    with pytest.raises(MarkdownParseError, match="takes a citation key"):
+        calkit.quarto.extract_values(
+            "{{< ckrefval path=liu.2025 key=x >}}", "index.qmd"
+        )
+
+
+@pytest.mark.skipif(shutil.which("quarto") is None, reason="needs Quarto")
+def test_refval_shortcode(tmp_path, monkeypatch):
+    # Quarto renders the shortcode itself, finding the file of a
+    # reference's values as Python names it, whatever the key, and a
+    # missing one as ??
+    from calkit.references.values import write_values_file
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "calkit.yaml").write_text("name: t\n")
+    write_values_file(
+        {
+            "references": [
+                {
+                    "path": "r.bib",
+                    "values": {
+                        "liu.2025": {
+                            "noise-sigma": {"value": 0.1},
+                            "label": {"value": "α"},
+                        },
+                        "smith:2020/b+é": {"n": {"value": 7}},
+                    },
+                }
+            ]
+        },
+        wdir=str(tmp_path),
+    )
+    (tmp_path / "index.qmd").write_text(
+        "---\ntitle: T\n---\n\n"
+        "A {{< ckrefval liu.2025 noise-sigma .2f >}} "
+        "B {{< ckrefval liu.2025 label >}} "
+        "C {{< ckrefval liu.2025 nope >}} "
+        "D {{< ckrefval liu.2025 key=noise-sigma format=.1f >}} "
+        "E {{< ckrefval smith:2020/b+é n >}}\n"
+    )
+    calkit.quarto.write_components("index.qmd", wdir=str(tmp_path))
+    subprocess.check_call(
+        ["quarto", "render", "index.qmd", "--to", "md"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    out = (tmp_path / "index.md").read_text()
+    assert "A 0.10 B α C ?? D 0.1 E 7" in out

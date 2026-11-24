@@ -414,16 +414,30 @@ def user_disconnected_with_storage(
 
 
 def user_transferred_storage(
-    user: User, n_storage: int, n_objects: int, succeeded: bool
+    user: User,
+    n_storage: int,
+    n_objects: int,
+    succeeded: bool,
+    provider: str = "huggingface",
 ) -> None:
     """A transfer of external storage to the hub's own finished."""
     track(
         user,
         "Transferred storage to hub",
         add_event_info=dict(
-            n_storage=n_storage, n_objects=n_objects, succeeded=succeeded
+            n_storage=n_storage,
+            n_objects=n_objects,
+            succeeded=succeeded,
+            provider=provider,
         ),
     )
+
+
+def user_connection_lapsed(user: User, provider: str) -> None:
+    """A connected account stopped working, e.g., a Box connection unused
+    for 60 days, so its user has to connect it again.
+    """
+    track(user, "Connection lapsed", add_event_info=dict(provider=provider))
 
 
 def user_deleted_project(

@@ -439,11 +439,13 @@ def test_get_box_token(db: Session) -> None:
                 json=lambda: {"error": "invalid_grant"},
             ),
         ),
+        mock.patch("app.mixpanel.user_connection_lapsed") as lapsed,
         pytest.raises(HTTPException) as e,
     ):
         users.get_box_token(db, user)
     assert e.value.status_code == 401
     assert get_tokens() == {}
+    lapsed.assert_called_once_with(user, "box")
     credential = users.get_external_credential(
         session=db, user=user, provider="box"
     )

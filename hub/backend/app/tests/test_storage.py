@@ -279,7 +279,10 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
     ):
         with pytest.raises(OSError):
             storage.transfer_storage_and_disconnect(str(user.id))
-    assert tracked.call_args.kwargs == {"succeeded": False}
+    assert tracked.call_args.kwargs == {
+        "succeeded": False,
+        "provider": "huggingface",
+    }
     db.expire_all()
     assert db.get(StorageResource, resource_id) is not None
     with (
@@ -291,7 +294,10 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
         storage.transfer_storage_and_disconnect(str(user.id))
     copy.assert_called_once()
     assert tracked.call_args.args[1:] == (1, 3)
-    assert tracked.call_args.kwargs == {"succeeded": True}
+    assert tracked.call_args.kwargs == {
+        "succeeded": True,
+        "provider": "huggingface",
+    }
     db.expire_all()
     assert db.get(StorageResource, resource_id) is None
     # Its project went to the hub's own storage before the copy

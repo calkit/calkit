@@ -4,6 +4,7 @@ import { Container, Text } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
+import mixpanel from "mixpanel-browser"
 import { z } from "zod"
 
 import type { AxiosError } from "axios"
@@ -78,6 +79,11 @@ function BoxAuth() {
     isMounted.current = true
     // The returned state must match the one this browser stored
     if (error || !code) {
+      // E.g., access_denied, which may mean an institution blocks the app
+      mixpanel.track("Canceled connecting account", {
+        provider: "box",
+        error,
+      })
       consumeBoxOAuthState()
       showToast(
         "Connection canceled",

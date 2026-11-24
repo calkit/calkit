@@ -754,7 +754,7 @@ def transfer_storage_and_disconnect(
                 )
         except Exception:
             app.mixpanel.user_transferred_storage(
-                user, n_storage, n_objects, succeeded=False
+                user, n_storage, n_objects, succeeded=False, provider=provider
             )
             raise
         credential = app.users.get_external_credential(
@@ -766,7 +766,7 @@ def transfer_storage_and_disconnect(
             session.delete(credential)
             session.commit()
         app.mixpanel.user_transferred_storage(
-            user, n_storage, n_objects, succeeded=True
+            user, n_storage, n_objects, succeeded=True, provider=provider
         )
 
 

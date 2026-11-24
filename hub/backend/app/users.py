@@ -1468,6 +1468,7 @@ def get_box_token(session: Session, user: User, force: bool = False) -> str:
         credential.refresh_token_expires = None
         session.add(credential)
         session.commit()
+        app.mixpanel.user_connection_lapsed(user, "box")
         raise HTTPException(401, "Box connection lapsed; reconnect Box")
     box_resp = resp.json()
     save_box_token(session=session, user=user, box_resp=box_resp)

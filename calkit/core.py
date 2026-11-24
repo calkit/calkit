@@ -1535,7 +1535,7 @@ def _normalize_requirement(req) -> dict:
         )
 
     def check_search(out: dict) -> None:
-        if "search" in out and out["kind"] != "path-env-var":
+        if out.get("search") is not None and out["kind"] != "path-env-var":
             raise ValueError(
                 f"Malformed requirement {req!r}; only a 'path-env-var' can "
                 "have 'search', since it's what names a path to look for"
@@ -2170,7 +2170,12 @@ _normalize_dep = _normalize_requirement
 
 
 def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
-    """Get a list of all environment variable names used in the project."""
+    """Get the names of the project's ``env-var`` requirements.
+
+    ``path-env-var`` requirements are left out, since what these are for,
+    passing them into Docker containers, would hand a container a path on
+    the host.
+    """
     if ck_info is None:
         ck_info = load_calkit_info()
     env_vars = []

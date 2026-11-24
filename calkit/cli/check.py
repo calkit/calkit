@@ -2130,7 +2130,7 @@ def check_env_vars(
                 if verbose:
                     typer.echo(f"Checking for environmental variable '{name}'")
                 is_set = (
-                    calkit.requirements.is_path_env_var_set(name)
+                    calkit.requirements.resolve_path_env_var(name) is not None
                     if req["kind"] == "path-env-var"
                     else name in os.environ
                 )

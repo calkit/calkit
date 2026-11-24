@@ -141,10 +141,10 @@ requirements:
     description: Path to the MyApp 2.1 executable.
     notes: MyApp needs a license. Download it from https://example.com.
     search:
-      - ~/apps/MyApp_2.1*/MyApp.exe
-      - C:/Program Files/MyApp_2.1*/MyApp.exe
+      - ~/apps/MyApp_2.1.*/MyApp.exe
+      - C:/Program Files/MyApp_2.1.*/MyApp.exe
       - /Applications/MyApp.app/Contents/MacOS/MyApp
-      - /opt/myapp-2.1*/bin/myapp
+      - /opt/myapp-2.1.*/bin/myapp
 ```
 
 List every platform's locations in one requirement,
@@ -152,7 +152,9 @@ since patterns that match nothing on a machine are passed over.
 They may use `~` and environmental variables, but not `**`,
 which keeps the search quick.
 Putting the version in a pattern keeps other versions from being
-suggested.
+suggested,
+e.g., `MyApp_2.1.*` matches 2.1.3 but not 2.10,
+and of several matches, the highest version is suggested first.
 
 On a terminal, `calkit check reqs` asks about everything the project
 needs at once,
@@ -173,6 +175,10 @@ and pressing Enter searches again.
 The answer is saved in `.env`,
 so it's asked once per clone,
 and asked again if the path stops existing, e.g., after an upgrade.
+If the variable is also set elsewhere, e.g., in the shell,
+to a path that doesn't exist,
+Calkit uses the one saved in `.env` and says so,
+since other programs will still see the old one.
 Entering `skip` leaves it unset,
 so someone without the app can still run the stages that don't need it,
 if it's declared on those stages rather than on the whole project.

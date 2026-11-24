@@ -88,7 +88,8 @@ class Requirement(Model):
         "terminal and printed as the fix otherwise. For an 'app', it "
         "installs it, e.g., 'brew install colima', in place of any installer "
         "Calkit has for it. For an 'env-var', it's run before the value is "
-        "asked for, e.g., 'claude setup-token'.",
+        "asked for, e.g., 'claude setup-token'. For a 'path-env-var', it's "
+        "offered when the search finds nothing.",
     )
     # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
     # integer number of seconds. Setup requirements cache successful checks
@@ -116,8 +117,8 @@ class Requirement(Model):
     search: str | list[str] | None = Field(
         default=None,
         description="Glob patterns for where a 'path-env-var' is usually "
-        "found, which may use '~' and environmental variables, e.g., "
-        "'~/apps/MyApp_*/MyApp.exe'. Matches are suggested, and the version "
+        "found, which may use `~` and environmental variables, e.g., "
+        "`~/apps/MyApp_*/MyApp.exe`. Matches are suggested, and the version "
         "that sorts highest in a pattern comes first.",
     )
     notes: str | None = None

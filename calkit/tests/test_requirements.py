@@ -379,6 +379,15 @@ def test_get_path_env_var_candidates(tmp_dir, monkeypatch):
         "App_2.9/app.exe",
         "App_1.0/app.exe",
     ]
+    # Including where one version is the start of another
+    for version in ("2.9.3", "2.9.10"):
+        (tmp_dir / f"App_{version}").mkdir()
+        (tmp_dir / f"App_{version}" / "app.exe").touch()
+    assert names(search="App_2.9*/app.exe") == [
+        "App_2.9.10/app.exe",
+        "App_2.9.3/app.exe",
+        "App_2.9/app.exe",
+    ]
     # Patterns keep their order, may use ~ and env vars, and don't repeat
     assert names(
         search=["other.exe", "~/App_1*/app.exe", "$CK_APPS/App_1*/app.exe"]
@@ -390,9 +399,15 @@ def test_get_path_env_var_candidates(tmp_dir, monkeypatch):
     ]
     assert names(default="nope.exe", search=["nope/*"]) == []
     assert names() == []
+    # A default is a path, so one with glob characters in it is still found
+    (tmp_dir / "[x]").mkdir()
+    (tmp_dir / "[x]" / "app.exe").touch()
+    assert names(default="[x]/app.exe") == ["[x]/app.exe"]
 
 
 def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+
     def ask(req, *answers):
         monkeypatch.delenv("CK_APP", raising=False)
         replies = iter(answers)
@@ -424,7 +439,7 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
         tmp_dir / "elsewhere.exe"
     )
     # A path that doesn't exist or a number out of range is asked again
-    assert ask(req, "nope.exe", "9", "1") == str(tmp_dir / "app2.exe")
+    assert ask(req, "nope.exe", "9", "²", "1") == str(tmp_dir / "app2.exe")
     assert "doesn't exist" in capsys.readouterr().out
     # Skipping leaves it unset, for those without the app
     assert ask(req, "skip") is None
@@ -457,6 +472,13 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
     )
     assert ask(setup, "y", "") == str(tmp_dir / "made" / "app.exe")
     assert ask(setup, "") == str(tmp_dir / "made" / "app.exe")
+    # Without a terminal, it's only shown, so piped input is the path
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    other = dict(setup, search="other/*.exe", setup_command="mkdir other")
+    assert ask(other, str(tmp_dir / "app1.exe")) == str(tmp_dir / "app1.exe")
+    assert not (tmp_dir / "other").exists()
+    assert "To install it, run:  mkdir other" in capsys.readouterr().out
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
     # Without a search there's nothing to retry, so Enter gives up
     assert ask({"kind": "path-env-var", "name": "CK_APP"}, "") is None
     # A bad value set outside .env would come back, so that's said
@@ -465,13 +487,13 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda *a: "")
     assert reqs.prompt_for_path_env_var_req(req) == str(tmp_dir / "app2.exe")
     out = capsys.readouterr().out
-    assert "doesn't exist" in out and "also set outside" in out
+    assert "doesn't exist" in out and "also set elsewhere" in out
     # While one that only .env holds is simply replaced
     dotenv_value = str(tmp_dir / "gone.exe")
     (tmp_dir / ".env").write_text(f"CK_APP='{dotenv_value}'\n")
     monkeypatch.setenv("CK_APP", dotenv_value)
     assert reqs.prompt_for_path_env_var_req(req) == str(tmp_dir / "app2.exe")
-    assert "also set outside" not in capsys.readouterr().out
+    assert "also set elsewhere" not in capsys.readouterr().out
 
 
 def test_check_path_env_var_req(tmp_dir, monkeypatch):
@@ -498,8 +520,21 @@ def test_check_path_env_var_req(tmp_dir, monkeypatch):
     with mock.patch("builtins.input", side_effect=AssertionError):
         calkit.check_requirements(requirements=[req], interactive=True)
     # Being set isn't enough if the path has since gone away
+    (tmp_dir / ".env").unlink()
     monkeypatch.setenv("CK_APP", str(tmp_dir / "moved.exe"))
     with pytest.raises(ValueError, match="doesn't exist.*moved.exe"):
+        calkit.check_requirements(requirements=[req], interactive=False)
+    # The fix the error gives works even when the bad value is the shell's,
+    # since .env doesn't override it
+    import dotenv
+
+    dotenv.set_key(".env", "CK_APP", str(app))
+    calkit.check_requirements(requirements=[req], interactive=False)
+    assert os.environ["CK_APP"] == str(app)
+    # Quotes that are part of the value are pointed out
+    monkeypatch.setenv("CK_APP", f'"{tmp_dir / "moved.exe"}"')
+    (tmp_dir / ".env").unlink()
+    with pytest.raises(ValueError, match="quotes are part of the value"):
         calkit.check_requirements(requirements=[req], interactive=False)
     # Skipping leaves the requirement unmet
     monkeypatch.delenv("CK_APP")
@@ -511,6 +546,11 @@ def test_check_path_env_var_req(tmp_dir, monkeypatch):
     assert reqs.resolve_env_var_deps(ck_info, interactive=False) == ["CK_APP"]
     monkeypatch.setenv("CK_APP", str(app))
     assert reqs.resolve_env_var_deps(ck_info, interactive=False) == []
+    # An empty search is no search, whatever the kind
+    calkit.check_requirements(
+        requirements=[{"kind": "env-var", "name": "CK_APP", "search": None}],
+        interactive=False,
+    )
     # Only this kind can search
     for kind in ("env-var", "app"):
         with pytest.raises(ValueError, match="only a 'path-env-var'"):
@@ -523,6 +563,38 @@ def test_check_path_env_var_req(tmp_dir, monkeypatch):
             requirements=[{"X": {"kind": "env-var", "search": "*"}}],
             interactive=False,
         )
+
+
+def test_resolve_path_env_var(tmp_dir, monkeypatch, capsys):
+    import dotenv
+
+    app = tmp_dir / "app.exe"
+    app.touch()
+    monkeypatch.delenv("CK_APP", raising=False)
+    # Unset, and nothing saved
+    assert reqs.resolve_path_env_var("CK_APP") is None
+    # Set to a path that exists
+    monkeypatch.setenv("CK_APP", str(app))
+    assert reqs.resolve_path_env_var("CK_APP") == str(app)
+    assert capsys.readouterr().err == ""
+    # Set elsewhere to a path that doesn't exist, with a good one saved
+    monkeypatch.setenv("CK_APP", str(tmp_dir / "moved.exe"))
+    dotenv.set_key(".env", "CK_APP", str(app))
+    assert reqs.resolve_path_env_var("CK_APP") == str(app)
+    assert os.environ["CK_APP"] == str(app)
+    assert "moved.exe" in capsys.readouterr().err
+    # A subproject's .env is what it saves to, so a stale value from the
+    # parent's doesn't win over it
+    sub = tmp_dir / "sub"
+    sub.mkdir()
+    monkeypatch.setenv("CK_APP", str(tmp_dir / "moved.exe"))
+    dotenv.set_key(str(sub / ".env"), "CK_APP", str(app))
+    monkeypatch.chdir(sub)
+    assert reqs.resolve_path_env_var("CK_APP") == str(app)
+    # A saved path that doesn't exist either is no help
+    dotenv.set_key(".env", "CK_APP", str(tmp_dir / "gone.exe"))
+    monkeypatch.setenv("CK_APP", str(tmp_dir / "moved.exe"))
+    assert reqs.resolve_path_env_var("CK_APP") is None
 
 
 def test_check_aws_credentials_req(tmp_dir, monkeypatch):

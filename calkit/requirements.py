@@ -463,37 +463,81 @@ def _offer_setup_command(setup_command: str, purpose: str) -> None:
             print(f"  {setup_command!r} exited {result.returncode}.")
 
 
-def is_path_env_var_set(name: str) -> bool:
-    """Whether an env var holds a path that exists on this machine."""
+def resolve_path_env_var(name: str, dotenv_path: str = ".env") -> str | None:
+    """Get the path an env var resolves to on this machine, if it exists.
+
+    ``.env`` doesn't override a variable that's already set, so when the
+    value set elsewhere, e.g., in the shell or a parent project's ``.env``,
+    is a path that doesn't exist, the one saved in this ``.env`` is used
+    instead, and set on ``os.environ`` for the rest of the run. Otherwise
+    a path saved after the other went stale would never take effect.
+    """
+    import sys
+
+    import dotenv
+
     value = os.environ.get(name)
-    return bool(value and os.path.exists(value))
+    if value and os.path.exists(value):
+        return value
+    saved = (
+        dotenv.dotenv_values(dotenv_path).get(name)
+        if os.path.isfile(dotenv_path)
+        else None
+    )
+    if not saved or not os.path.exists(saved):
+        return None
+    if value:
+        # On stderr, so it can't corrupt, e.g., 'calkit status --json'
+        print(
+            f"Using '{name}' from {dotenv_path}, since it's also set "
+            f"elsewhere, to a path that doesn't exist: {value}",
+            file=sys.stderr,
+        )
+    os.environ[name] = saved
+    return saved
+
+
+def _describe_missing_path(value: str) -> str:
+    """Say what's wrong with a ``path-env-var`` value that isn't a path."""
+    msg = f"is a path that doesn't exist: {value}"
+    if value.strip()[:1] in ("'", '"'):
+        msg += " (its quotes are part of the value, so remove them)"
+    return msg
 
 
 def get_path_env_var_candidates(req: dict[str, Any]) -> list[str]:
     """Get the existing paths a ``path-env-var`` requirement could be.
 
-    They're in the order of its ``default`` then its ``search`` patterns,
-    with what sorts as the highest version first within a pattern, so
-    ``App_2.10`` is suggested ahead of ``App_2.9``.
+    They're in the order of its ``default``, which is a path rather than a
+    pattern, then its ``search`` patterns, with what sorts as the highest
+    version first within a pattern, so ``App_2.10`` is suggested ahead of
+    ``App_2.9``, and ``App_2.1.3`` ahead of ``App_2.1``.
     """
     import glob
 
-    def get_version_key(path: str) -> list[int | str]:
-        # Splitting on a captured group puts the digits at the odd indices
+    def get_version_key(path: str) -> list[list[int | str]]:
+        # Part by part, so where a part ends sorts below more of it. Splitting
+        # on a captured group puts the digits at the odd indices.
         return [
-            int(part) if i % 2 else part.lower()
-            for i, part in enumerate(re.split(r"(\d+)", path))
+            [
+                int(piece) if i % 2 else piece.lower()
+                for i, piece in enumerate(re.split(r"(\d+)", part))
+            ]
+            for part in re.split(r"[\\/]", path)
         ]
+
+    def expand(path: str) -> str:
+        return os.path.expanduser(os.path.expandvars(path))
 
     search = req.get("search") or []
     patterns = [search] if isinstance(search, str) else list(search)
-    if req.get("default"):
-        patterns.insert(0, req["default"])
     found: dict[str, str] = {}
+    if req.get("default") and os.path.exists(expand(req["default"])):
+        path = os.path.abspath(expand(req["default"]))
+        found[os.path.normcase(path)] = path
     for pattern in patterns:
-        expanded = os.path.expanduser(os.path.expandvars(pattern))
         for path in sorted(
-            glob.glob(expanded), key=get_version_key, reverse=True
+            glob.glob(expand(pattern)), key=get_version_key, reverse=True
         ):
             path = os.path.abspath(path)
             found.setdefault(os.path.normcase(path), path)
@@ -513,18 +557,25 @@ def prompt_for_path_env_var_req(
     """
     import dotenv
 
+    from calkit.core import is_tty
+
     name = req["name"]
     current = os.environ.get(name)
     if current:
-        print(f"Env var '{name}' is a path that doesn't exist: {current}")
+        print(f"Env var '{name}' {_describe_missing_path(current)}")
     else:
         print(f"Missing env var '{name}', which is a path")
     for key in ("description", "notes"):
         if req.get(key):
             print(f"  {str(req[key]).strip()}")
+    searchable = bool(req.get("search") or req.get("default"))
+    setup_command = req.get("setup_command")
     candidates = get_path_env_var_candidates(req)
-    if not candidates and req.get("setup_command"):
-        _offer_setup_command(req["setup_command"], "to install it")
+    if not candidates and setup_command and not is_tty():
+        # Piped input is the answer to the question below, not this one
+        print(f"  To install it, run:  {setup_command}")
+    elif not candidates and setup_command:
+        _offer_setup_command(setup_command, "to install it")
         candidates = get_path_env_var_candidates(req)
     while True:
         if candidates:
@@ -532,7 +583,7 @@ def prompt_for_path_env_var_req(
             for n, path in enumerate(candidates, start=1):
                 print(f"  {n}. {path}")
             prompt = "Select a number, enter a path, or enter 'skip' [1]: "
-        elif req.get("search"):
+        elif searchable:
             print("Not found where it's usually installed.")
             prompt = (
                 "Install it and press Enter to search again, "
@@ -549,12 +600,14 @@ def prompt_for_path_env_var_req(
             return None
         if not answer and candidates:
             value = candidates[0]
-        elif not answer and req.get("search"):
+        elif not answer and searchable:
             candidates = get_path_env_var_candidates(req)
             continue
         elif not answer:
             return None
-        elif answer.isdigit() and 1 <= int(answer) <= len(candidates):
+        elif re.fullmatch("[0-9]+", answer) and (
+            1 <= int(answer) <= len(candidates)
+        ):
             value = candidates[int(answer) - 1]
         else:
             value = os.path.abspath(
@@ -564,12 +617,12 @@ def prompt_for_path_env_var_req(
                 print(f"That path doesn't exist: {value}")
                 continue
         break
-    # .env doesn't override what the shell sets, so a bad value set there
-    # would come back on the next run
+    # Calkit uses the saved path from now on, but nothing else does
     if current and dotenv.dotenv_values(dotenv_path).get(name) != current:
         print(
-            f"Saving to {dotenv_path}, but '{name}' is also set outside it, "
-            "which takes priority in new shells. Update or remove it there."
+            f"'{name}' is also set elsewhere, e.g., in the shell. Calkit will "
+            f"use the path saved in {dotenv_path}, but other programs will "
+            "see the old one until it's updated or removed there."
         )
     dotenv.set_key(
         dotenv_path=dotenv_path, key_to_set=name, value_to_set=value
@@ -589,13 +642,13 @@ def check_path_env_var_req(req: dict[str, Any], interactive: bool) -> None:
         so the fix can be copied.
     """
     name = req["name"]
-    if is_path_env_var_set(name):
+    if resolve_path_env_var(name) is not None:
         return
     if interactive and prompt_for_path_env_var_req(req) is not None:
         return
     current = os.environ.get(name)
     msg = (
-        f"path-env-var '{name}' is a path that doesn't exist: {current}"
+        f"path-env-var '{name}' {_describe_missing_path(current)}"
         if current
         else f"path-env-var '{name}' not found"
     )
@@ -631,7 +684,7 @@ def resolve_env_var_deps(
     for raw in get_requirements(ck_info):
         req = _normalize_requirement(raw)
         if req["kind"] == "path-env-var":
-            if is_path_env_var_set(req["name"]):
+            if resolve_path_env_var(req["name"]) is not None:
                 continue
         elif req["kind"] != "env-var" or os.environ.get(req["name"]):
             continue

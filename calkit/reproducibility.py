@@ -1,5 +1,6 @@
 """Checking how reproducible a project is."""
 
+import json
 import os
 import posixpath
 import re
@@ -553,6 +554,13 @@ def _mask_exclusion_zones(tex_source: str) -> str:
     masked = tex_source
     # Comments: % to end of line, but not an escaped \%
     masked = re.sub(r"(?<!\\)%.*$", _mask_match, masked, flags=re.MULTILINE)
+    return _mask_latex_macros(masked)
+
+
+def _mask_latex_macros(masked: str) -> str:
+    """Blank LaTeX environments and macros whose contents aren't results,
+    which Markdown's math can have too.
+    """
     # Environments whose contents are never results
     for env in ["thebibliography"]:
         pattern = (
@@ -595,6 +603,50 @@ def _mask_exclusion_zones(tex_source: str) -> str:
     for macro_pattern in macros_to_mask:
         masked = re.sub(macro_pattern, _mask_match, masked, flags=re.DOTALL)
     return masked
+
+
+def _mask_markdown_zones(source: str) -> str:
+    """Blank the places in Markdown, including Quarto's, where a number can
+    appear without being a result.
+    """
+    masked = source
+    # YAML front matter
+    masked = re.sub(
+        r"\A---\n.*?\n---[ \t]*$",
+        _mask_match,
+        masked,
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    # Code blocks, and inline code, which includes Quarto's inline
+    # expressions, e.g., `{python} f"{r2:.2f}"`, whose numbers are computed
+    masked = re.sub(
+        r"^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[^\n]*$",
+        _mask_match,
+        masked,
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    masked = re.sub(r"``[^\n]+?``|`[^`\n]+`", _mask_match, masked)
+    # A Markdown stage writes each value between markers, so it's computed
+    masked = re.sub(
+        r"<!--\s*ckvalue\b.*?-->.*?<!--\s*/ckvalue\s*-->",
+        _mask_match,
+        masked,
+        flags=re.DOTALL,
+    )
+    masked = re.sub(r"<!--.*?-->", _mask_match, masked, flags=re.DOTALL)
+    # Where links and images point, and bare URLs
+    masked = re.sub(r"\]\([^)]*\)", _mask_match, masked)
+    masked = re.sub(r"<[a-z]+://[^>]*>|https?://\S+", _mask_match, masked)
+    # Citations and cross-references, e.g., [@liu2025, p. 3] and @fig-a1
+    masked = re.sub(r"\[[^\]\n]*@[^\]\n]*\]", _mask_match, masked)
+    masked = re.sub(r"(?<![\w.])@[\w:.-]*\w", _mask_match, masked)
+    # Shortcodes, attributes, e.g., {#fig-a width=50%}, and HTML tags
+    masked = re.sub(r"\{\{<.*?>\}\}", _mask_match, masked, flags=re.DOTALL)
+    masked = re.sub(
+        r"\{[#.][^}\n]*\}|\{[^}\n=]*=[^}\n]*\}", _mask_match, masked
+    )
+    masked = re.sub(r"</?[a-zA-Z][^>\n]*>", _mask_match, masked)
+    return _mask_latex_macros(masked)
 
 
 #: A value the project computes has to be this distinctive before its
@@ -717,13 +769,13 @@ def find_retyped_values(
 #: What a result looks like when it is written out, most specific first,
 #: so a value with uncertainty is read whole rather than as a bare decimal
 _RESULT_LIKE_PATTERNS = [
-    # Values with uncertainty, e.g., 0.42 \pm 0.03
-    r"(\b\d+(?:\.\d+)?\s*\\pm\s*\d+(?:\.\d+)?\b)",
+    # Values with uncertainty, e.g., 0.42 \pm 0.03, or 0.42 ± 0.03
+    r"(\b\d+(?:\.\d+)?\s*(?:\\pm|±)\s*\d+(?:\.\d+)?\b)",
     # Scientific notation, e.g., 1.2e-3 and 1.2\times10^{-3}
     r"(\b\d+(?:\.\d+)?"
     r"(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
-    # Percentages, e.g., 12.7\%
-    r"(\b\d+(?:\.\d+)?\s*\\%)",
+    # Percentages, e.g., 12.7\%, or 12.7% in Markdown
+    r"(\b\d+(?:\.\d+)?\s*\\?%)",
     # Plain decimals, e.g., 0.42
     r"(\b\d+\.\d+\b)",
 ]
@@ -732,12 +784,39 @@ _RESULT_LIKE_PATTERNS = [
 _CITE_RE = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\])*\{")
 # A line saying its numbers aren't results, e.g., ones from a datasheet
 _IGNORE_RE = re.compile(r"(?<!\\)%.*calkit:\s*ignore\b")
+# The same in Markdown, where a citation is a key after @, as opposed to a
+# cross-reference, e.g., @fig-orbit
+_MD_IGNORE_RE = re.compile(r"<!--.*calkit:\s*ignore\b")
+_MD_CITE_RE = re.compile(
+    r"(?<![\w.])@(?!(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|"
+    r"sol|rem|alg)-)[A-Za-z_][\w:.-]*"
+)
+# A name and a number after it, e.g., Python 3.13, which is its version
+_VERSION_RE = re.compile(r"(?:\b[A-Z][\w-]*|\bversion|\bv)\s*$")
+#: Documents read as Markdown, a notebook's Markdown cells included
+MARKDOWN_EXTENSIONS = (".md", ".qmd", ".rmd", ".ipynb")
+
+
+#: How much of a line to show on either side of a number. A paragraph is
+#: often one line, especially in Markdown.
+CONTEXT_CHARS = 60
+
+
+def _get_context(line: str, start: int, length: int) -> str:
+    """The part of a line around a number, with ellipses where cut."""
+    if len(line.strip()) <= 2 * CONTEXT_CHARS + length:
+        return line.strip()
+    begin = max(0, start - CONTEXT_CHARS)
+    end = start + length + CONTEXT_CHARS
+    text = line[begin:end].strip()
+    return ("…" if begin > 0 else "") + text + ("…" if end < len(line) else "")
 
 
 def find_unattributed_numbers(
     tex_source: str,
     filepath: str,
     project_values: dict[str, str] | None = None,
+    markdown: bool = False,
 ) -> list[dict[str, Any]]:
     """Result-like numbers in a document with nothing recorded behind them.
 
@@ -751,10 +830,16 @@ def find_unattributed_numbers(
 
     ``project_values`` are values the project computes; anything matching
     one is left to :func:`find_retyped_values`, which has more to say
-    about it.
+    about it. With ``markdown``, the source is Markdown, e.g., Quarto's,
+    rather than LaTeX.
     """
     known = set(project_values or {})
-    masked_source = _mask_exclusion_zones(tex_source)
+    if markdown:
+        masked_source = _mask_markdown_zones(tex_source)
+        ignore_re, cite_re = _MD_IGNORE_RE, _MD_CITE_RE
+    else:
+        masked_source = _mask_exclusion_zones(tex_source)
+        ignore_re, cite_re = _IGNORE_RE, _CITE_RE
     lines = tex_source.splitlines()
     findings: list[dict[str, Any]] = []
     matched: list[tuple[int, int]] = []
@@ -770,18 +855,21 @@ def find_unattributed_numbers(
             if text.replace(" ", "") in {v.replace(" ", "") for v in known}:
                 continue
             preceding = tex_source[:start]
+            if _VERSION_RE.search(preceding):
+                continue
             line_idx = preceding.count("\n")
             line = lines[line_idx] if line_idx < len(lines) else ""
-            if _IGNORE_RE.search(line):
+            if ignore_re.search(line):
                 continue
+            column = len(preceding) - preceding.rfind("\n")
             findings.append(
                 {
                     "value": text,
                     "file": filepath,
                     "line": line_idx + 1,
-                    "column": len(preceding) - preceding.rfind("\n"),
-                    "context": line.strip(),
-                    "cited": bool(_CITE_RE.search(line)),
+                    "column": column,
+                    "context": _get_context(line, column - 1, end - start),
+                    "cited": bool(cite_re.search(line)),
                 }
             )
     findings.sort(key=lambda f: (f["line"], f["column"]))
@@ -979,6 +1067,58 @@ def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
     return found
 
 
+def _markdown_sources(wdir: str, ck_info: dict) -> set[str]:
+    """Documents written in Markdown, including Quarto's, and notebooks,
+    that are publications or that a Quarto or Markdown stage renders.
+
+    Notebooks a stage only executes are left out, since their prose is
+    more like comments on the analysis than a document's.
+    """
+    targets: set[str] = set()
+    for pub in ck_info.get("publications", []) or []:
+        path = pub.get("path", "") if isinstance(pub, dict) else ""
+        targets.add(str(path))
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        if stage.get("kind") in ("quarto", "markdown") and stage.get(
+            "target_path"
+        ):
+            targets.add(
+                os.path.join(stage.get("wdir") or "", stage["target_path"])
+            )
+    return {
+        os.path.abspath(os.path.join(wdir, target))
+        for target in targets
+        if target.lower().endswith(MARKDOWN_EXTENSIONS)
+        and os.path.isfile(os.path.join(wdir, target))
+    }
+
+
+def _markdown_parts(path: str) -> list[tuple[str, int | None]]:
+    """A document's Markdown, as one part, or a notebook's, as one part per
+    Markdown cell with its index.
+    """
+    with open(path, encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    if not path.lower().endswith(".ipynb"):
+        return [(content, None)]
+    try:
+        cells = json.loads(content).get("cells", [])
+    except (ValueError, AttributeError):
+        return []
+    parts = []
+    for n, cell in enumerate(cells):
+        if not isinstance(cell, dict) or cell.get("cell_type") != "markdown":
+            continue
+        source = cell.get("source", "")
+        parts.append(
+            ("".join(source) if isinstance(source, list) else source, n)
+        )
+    return parts
+
+
 def find_literals_in_project(
     wdir: str, ck_info: dict, stages: dict
 ) -> dict[str, list[dict]]:
@@ -1009,6 +1149,19 @@ def find_literals_in_project(
             content, rel, values, via_json_to_latex
         )
         out["unattributed"] += find_unattributed_numbers(content, rel, values)
+    for path in sorted(_markdown_sources(wdir, ck_info)):
+        rel = os.path.relpath(path, wdir).replace(os.sep, "/")
+        try:
+            parts = _markdown_parts(path)
+        except OSError:
+            continue
+        for content, cell in parts:
+            for finding in find_unattributed_numbers(
+                content, rel, values, markdown=True
+            ):
+                if cell is not None:
+                    finding["cell"] = cell
+                out["unattributed"].append(finding)
     return out
 
 

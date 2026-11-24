@@ -2557,9 +2557,9 @@ _VALUES_END_RE = re.compile(r"<!--\s*/calkit values\s*-->")
 # 'calkit values' directive above it, so nothing has to be implied from
 # elsewhere in the document.
 _CKVALUE_RE = re.compile(
-    r"<!--\s*ckvalue\b(?P<args>.*?)-->"
+    r"<!--\s*(?P<cmd>ckvalue|ckrefval)\b(?P<args>.*?)-->"
     r"(?P<ctext>.*?)"
-    r"<!--\s*/ckvalue\s*-->"
+    r"<!--\s*/(?P=cmd)\s*-->"
 )
 # One argument of a compact marker: `key=value`, with the value optionally
 # quoted so a format can hold spaces, or a bare positional.
@@ -2618,6 +2618,9 @@ class MarkdownValue:
     # kept so an error can quote what was written rather than what it resolved
     # to. None for the long form, which names its path outright.
     source: str | None = None
+    # For a value quoted from a reference with ckrefval, its citation key and
+    # name, since it's read from the file of them all with the two joined
+    ref: tuple[str, str] | None = None
 
 
 def _value_attrs(attrs_text: str, path: str | None, line: int) -> dict:
@@ -2872,6 +2875,30 @@ def extract_values(
                     )
                 blocks.pop()
                 continue
+            if m.group("ctext") is not None and m.group("cmd") == "ckrefval":
+                # A citation key, a name, and a format, read the same way
+                from calkit.refvalues import VALUES_PATH
+
+                got = _ckvalue_args(m.group("args"), path, i + 1)
+                if got["kind"]:
+                    raise MarkdownParseError(
+                        "'ckrefval' takes a citation key and a name, not "
+                        f"{got['kind']}=",
+                        path=path,
+                        line=i + 1,
+                    )
+                values.append(
+                    MarkdownValue(
+                        key=f"{got['source']}.{got['key']}",
+                        path=VALUES_PATH,
+                        text=m.group("ctext"),
+                        format=_ck_format(got.get("format")),
+                        line=i + 1,
+                        source=got["source"],
+                        ref=(got["source"], got["key"]),
+                    )
+                )
+                continue
             if m.group("ctext") is not None:
                 got = _ckvalue_args(
                     m.group("args"), path, i + 1, block_source=block_path
@@ -3066,8 +3093,11 @@ def set_values(
         fpath = os.path.join(wdir, value.path) if wdir else value.path
         if not os.path.isfile(fpath):
             raise MarkdownParseError(
-                f"Results file '{value.path}' for value '{value.key}' does "
-                "not exist; is it an output of a stage that has run?",
+                f"calkit.yaml records no value '{value.ref[1]}' quoted from "
+                f"'{value.ref[0]}'"
+                if value.ref is not None
+                else f"Results file '{value.path}' for value '{value.key}' "
+                "does not exist; is it an output of a stage that has run?",
                 path=path,
                 line=value.line,
             )
@@ -3093,7 +3123,10 @@ def set_values(
             raw = resolve_key(data_by_path[value.path], value.key)
         except KeyError:
             raise MarkdownParseError(
-                f"Results file '{value.path}' has no key '{value.key}'",
+                f"calkit.yaml records no value '{value.ref[1]}' quoted from "
+                f"'{value.ref[0]}'"
+                if value.ref is not None
+                else f"Results file '{value.path}' has no key '{value.key}'",
                 path=path,
                 line=value.line,
             )

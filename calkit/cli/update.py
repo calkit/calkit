@@ -558,6 +558,12 @@ def update_markdown(
             "No Markdown files given, and none are declared as markdown stages"
         )
     results = calkit.markdown.results_by_name(ck_info)
+    # Values quoted from references are read from the file Calkit writes
+    # them to, which is brought up to date with calkit.yaml first
+    if not check:
+        import calkit.refvalues
+
+        calkit.refvalues.write_values_file(ck_info)
     stale = []
     problems = []
     for path in paths:

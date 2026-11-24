@@ -256,7 +256,7 @@ Some skips still fail the run, after the stages that can run have run:
   `calkit run fetch`, is out of date and can't run.
 - A stage is out of date and can't run because something is wrong
   rather than because the project says so, e.g., its machine can't be
-  reached.
+  reached, or one of its environments failed its check.
 - Any stage is out of date and can't run, with `calkit run --strict`,
   e.g., in CI for a project whose stages should all run there.
   The `calkit/run` action takes it as `run_args: --strict`.
@@ -353,7 +353,7 @@ Apps currently in the registry:
 
 | Name                          | Installer                                                                                                                 |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `pixi`                        | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                                                 |
+| `pixi`                        | `curl -fsSL https://pixi.sh/install.sh \| sh` on Unix, `winget` on Windows                                                |
 | `uv`                          | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                                        |
 | `rustup`, `cargo`             | upstream `rustup` script on Unix, `winget` on Windows                                                                     |
 | `juliaup`, `julia`            | upstream `juliaup` script on Unix, `winget` on Windows                                                                    |

@@ -10,9 +10,11 @@ import sys
 import pytest
 
 import calkit
+import calkit.progress
 from calkit.conda import (
     _check_list,
     _check_single,
+    _create_env,
     _enrich_pip_deps_from_freeze,
     _get_pip_dependency_list,
     _split_env_dependencies,
@@ -336,6 +338,7 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     failing_pinned: set[str] = set()
 
     slow: set[str] = set()
+    extra_links: list[dict] = []
 
     def fake_run(
         cmd: list[str],
@@ -362,7 +365,7 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
             {"name": "python", "version": "3.12.11", "build_string": "h_0"},
             {"name": "six", "version": "1.17.0", "build_string": "pyh_0"},
             {"name": "numpy", "version": "2.3.0", "build_string": "py_0"},
-        ]
+        ] + extra_links
         return types.SimpleNamespace(
             stdout=json.dumps({"actions": {"LINK": links}})
         )
@@ -529,6 +532,37 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         assert locks() == []
         assert not os.path.isfile(osx) and not os.path.isfile(win)
         write_spec(["iniconfig"])
+    # A package from a channel only a dependency names keeps that channel,
+    # given by name or URL, since the lock's channels can't find it
+    channel_url = "https://conda.anaconda.org/sea-lab"
+    extra_links.append(
+        {
+            "name": "open-flash",
+            "version": "1.0.41",
+            "build_string": "py_0",
+            "channel": "sea-lab",
+            "base_url": channel_url,
+        }
+    )
+    pin = "open-flash=1.0.41=py_0"
+    for dep_channel, listed, expected in [
+        ("sea-lab", [], f"sea-lab::{pin}"),
+        (channel_url, [], f"{channel_url}::{pin}"),
+        ("sea-lab", ["sea-lab"], pin),
+    ]:
+        spec = {
+            "name": "main",
+            "channels": ["conda-forge"] + listed,
+            "dependencies": ["python=3.12", f"{dep_channel}::open-flash>=1"],
+        }
+        with open("environment.yml", "w") as f:
+            calkit.ryaml.dump(spec, f)
+        assert locks() == [osx, win]
+        with open(win) as f:
+            lock = calkit.ryaml.load(f)
+        assert expected in lock["dependencies"]
+        assert lock["channels"] == spec["channels"]
+    extra_links.clear()
     # Solving on the same OS assumes nothing about its virtual packages
     write_spec(["iniconfig"])
     monkeypatch.setattr(
@@ -1005,3 +1039,43 @@ def test_find_named_env_prefix(tmp_path, monkeypatch):
     elsewhere = make_env(tmp_path / "elsewhere" / "d")
     (home / ".conda" / "environments.txt").write_text(elsewhere + "\n")
     assert find_named_env_prefix("d", str(conda_exe)) is None
+
+
+def test_create_env_reports_steps(capsys):
+    # What Conda prints as it goes, with one step split across writes and
+    # one skipped
+    script = (
+        "import sys, time\n"
+        "for text in [\n"
+        "    'Channels:\\n',\n"
+        "    'Solving envir', 'onment: done\\n',\n"
+        "    'Downloading and Extracting Packages: done\\n',\n"
+        "    'Preparing transaction: done\\n',\n"
+        "    'Installing pip dependencies: done\\n',\n"
+        "]:\n"
+        "    sys.stdout.write(text)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.05)\n"
+        "sys.exit(int(sys.argv[1]))\n"
+    )
+    reported: list[str] = []
+    doing = "Creating environment 'main' from its lock file"
+    with calkit.progress.reporting(reported.append, label="main"):
+        _create_env([sys.executable, "-c", script, "0"], doing=doing)
+    assert reported == [
+        doing,
+        f"{doing}: solving",
+        f"{doing}: downloading packages",
+        f"{doing}: installing packages",
+        f"{doing}: installing pip dependencies",
+    ]
+    # Shown only if it fails
+    assert "Channels" not in capsys.readouterr().err
+    with calkit.progress.reporting(reported.append):
+        with pytest.raises(subprocess.CalledProcessError):
+            _create_env([sys.executable, "-c", script, "1"], doing=doing)
+    assert "Channels:" in capsys.readouterr().err
+    # With nobody watching, nothing's reported
+    reported.clear()
+    _create_env([sys.executable, "-c", script, "0"], doing=doing)
+    assert reported == []

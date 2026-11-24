@@ -102,6 +102,24 @@ def test_get_project_checkouts(tmp_path, monkeypatch):
     assert in_documents in found
 
 
+def test_output_storage_and_dates(monkeypatch):
+    assert calkit.core.get_dvc_size_thresh_bytes("f/a.PNG") == 1_000_000
+    assert calkit.core.get_dvc_size_thresh_bytes("f/a.pdf") == 1_000_000
+    assert calkit.core.get_dvc_size_thresh_bytes("data.csv") == 5_000_000
+    for ext in calkit.core.FIGURE_EXTENSIONS:
+        assert ext not in calkit.core.DVC_EXTENSIONS
+    monkeypatch.delenv("CALKIT_PIPELINE_RUNNING", raising=False)
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+    assert calkit.core.get_output_date_env_vars() == {}
+    monkeypatch.setenv("CALKIT_PIPELINE_RUNNING", "1")
+    assert calkit.core.get_output_date_env_vars() == {
+        "SOURCE_DATE_EPOCH": calkit.core.OUTPUT_SOURCE_DATE_EPOCH
+    }
+    # Whoever set it knows better
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1000")
+    assert calkit.core.get_output_date_env_vars() == {}
+
+
 def test_to_kebab_case():
     assert calkit.to_kebab_case("THIS IS") == "this-is"
     assert calkit.to_kebab_case("this_is_my-Project") == "this-is-my-project"

@@ -11560,6 +11560,14 @@ export const ReproCheckSchema = {
       title: "Paths Outside Project",
       default: [],
     },
+    eol_unpinned: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Eol Unpinned",
+      default: [],
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -15132,6 +15140,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Paths Outside Project",
+      default: [],
+    },
+    eol_unpinned: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Eol Unpinned",
       default: [],
     },
     n_dvc_remotes: {

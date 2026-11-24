@@ -2671,8 +2671,8 @@ class NotebookCellOutput(Model):
     )
     storage: Literal["git", "dvc"] | None = Field(
         default=None,
-        description="Where to store a figure or table; by its extension if "
-        "not set, as for other outputs.",
+        description="Where to store a figure or table. New figures are set "
+        "to Git when added.",
     )
     model_config = ConfigDict(extra="forbid")
 
@@ -2765,6 +2765,9 @@ class NotebookCellOutput(Model):
         if self.storage is not None:
             return self.storage
         ext = os.path.splitext(str(self.output_path))[1].lower()
+        # Figures added before they defaulted to Git stay in DVC
+        if self.kind == "figure" and ext != ".svg":
+            return "dvc"
         return "dvc" if ext in DVC_EXTENSIONS else "git"
 
     def to_arg(self) -> str:

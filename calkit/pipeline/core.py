@@ -1037,6 +1037,7 @@ def get_gated_stages(
     manual: bool = True,
     requirements_by_stage: dict[str, list] | None = None,
     blocked_by: dict[str, set[str]] | None = None,
+    failed_environments: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -1060,6 +1061,9 @@ def get_gated_stages(
     later, e.g., by ``calkit run`` for a stage it would run. Each of those,
     and each stage skipped for an output a skipped stage hasn't made, that
     needs such an output is added to ``blocked_by`` with those stages.
+
+    ``failed_environments`` maps environments that failed their check to a
+    reason, which a stage using one is skipped for, as for a requirement.
     """
     import contextlib
     import json
@@ -1300,6 +1304,10 @@ def get_gated_stages(
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )
+        failed = [e for e in env_names if e in (failed_environments or {})]
+        if failed:
+            gated[name] = (failed_environments or {})[failed[0]]
+            continue
         resolved: list[tuple[str, dict]] = []
         reason = None
         is_error = False
@@ -2538,6 +2546,12 @@ def get_output_storage_map(
             if isinstance(out, dict) and "path" in out and "storage" in out:
                 path = Path(os.path.normpath(os.path.join(wdir, out["path"])))
                 result[path.as_posix()] = out["storage"]
+        for out in stage.get("cell_outputs") or []:
+            if out.get("output_path") and out.get("storage"):
+                path = Path(
+                    os.path.normpath(os.path.join(wdir, out["output_path"]))
+                )
+                result[path.as_posix()] = out["storage"]
     return result
 
 
@@ -2983,6 +2997,49 @@ def _stage_revision_key(
     """A revision key over what this stage reads."""
     paths = [p for p in stage.dvc_deps if not p.startswith(".calkit/")]
     return _revision_key(wdir, paths)
+
+
+# Stage kinds whose code imports packages, so on _system gets whatever this
+# machine has installed, with the command to make an environment for it.
+# MATLAB is an app, so _system is how it's usually run.
+SYSTEM_ENV_RISKY_KINDS = {
+    "python-script": ("a Python script", "calkit new uv-env"),
+    "r-script": ("an R script", "calkit new renv"),
+    "julia-script": ("a Julia script", "calkit new julia-env"),
+    "julia-command": ("Julia", "calkit new julia-env"),
+}
+
+
+def _warn_on_system_env(stage_name: str, stage) -> None:
+    """Warn that a stage runs code that imports packages with ``_system``,
+    which uses whatever this machine has installed.
+    """
+    from calkit.cli import warn
+
+    if stage.environment != "_system":
+        return
+    if stage.kind == "jupyter-notebook":
+        language = getattr(stage, "language", None) or "python"
+        if language == "matlab":
+            return
+        what = "a notebook"
+        new_cmd = (
+            "calkit new julia-env"
+            if language == "julia"
+            else "calkit new uv-env"
+        )
+    elif stage.kind in SYSTEM_ENV_RISKY_KINDS:
+        what, new_cmd = SYSTEM_ENV_RISKY_KINDS[stage.kind]
+    else:
+        return
+    warn(
+        f"Stage '{stage_name}' runs {what} with the '_system' environment, "
+        "so it uses whatever version and packages each machine has "
+        "installed, and may fail or give different results elsewhere. "
+        f"Create an environment for it, e.g., with '{new_cmd}', and set the "
+        "stage's environment to it.",
+        err=True,
+    )
 
 
 def to_dvc(
@@ -3478,6 +3535,7 @@ def to_dvc(
     output_dvcignores: list[str] = []
     output_gitignores: list[str] = []
     for stage_name, stage in pipeline.stages.items():
+        _warn_on_system_env(stage_name, stage)
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
         if stage.kind == "jupyter-notebook":

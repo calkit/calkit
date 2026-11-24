@@ -1620,7 +1620,8 @@ def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     assert result.returncode == 0, result.stderr
 
 
-def test_get_source_date_epoch(tmp_dir):
+def test_get_source_date_epoch(tmp_dir, monkeypatch):
+    from calkit.core import OUTPUT_SOURCE_DATE_EPOCH
     from calkit.latex import get_source_date_epoch
 
     # Outside a repo there's nothing to read a date from
@@ -1635,6 +1636,12 @@ def test_get_source_date_epoch(tmp_dir):
         ["git", "log", "-1", "--format=%ct"], text=True
     ).strip()
     assert get_source_date_epoch("paper/main.tex") == committed
+    # One set on purpose wins, but not a pipeline's date for Python's outputs
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1000")
+    assert get_source_date_epoch("paper/main.tex") == "1000"
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", OUTPUT_SOURCE_DATE_EPOCH)
+    assert get_source_date_epoch("paper/main.tex") == committed
+    monkeypatch.delenv("SOURCE_DATE_EPOCH")
     # A commit elsewhere doesn't restamp a document it didn't touch
     with open("notes.txt", "w") as f:
         f.write("sup\n")

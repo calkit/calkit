@@ -126,6 +126,7 @@ def _calkit_restore_figures():
 
 
 def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
+    import contextlib
     import json
     import os
 
@@ -224,7 +225,15 @@ def _calkit_save_cell_outputs(where, outputs, values_path, tables_dir):
         if not callable(getattr(fig, "savefig", None)):
             fig = getattr(fig, "figure", None) or fig
         if callable(getattr(fig, "savefig", None)):
-            fig.savefig(path, bbox_inches="tight")
+            # An SVG's IDs are random otherwise, so reruns would differ
+            try:
+                import matplotlib
+
+                context = matplotlib.rc_context({"svg.hashsalt": "calkit"})
+            except ImportError:
+                context = contextlib.nullcontext()
+            with context:
+                fig.savefig(path, bbox_inches="tight")
         elif callable(getattr(fig, "write_image", None)):
             fig.write_image(path)
         elif callable(getattr(fig, "save", None)):
@@ -786,6 +795,7 @@ def add_cell_outputs(
     from pydantic import ValidationError
 
     import calkit
+    import calkit.dvc
     from calkit.models.pipeline import JupyterNotebookStage, NotebookCellOutput
 
     def get_message(e: ValidationError) -> str:
@@ -839,6 +849,34 @@ def add_cell_outputs(
         if saved.count(item) > 1:
             raise ValueError(f"'{item}' is given twice")
     stage_dict = ck_info["pipeline"]["stages"][name]
+    # New figures go in Git. An edited one keeps its storage, and one DVC
+    # already caches, e.g., removed and added back, stays there.
+    existing = {
+        get_normalized_output_path(str(o["output_path"])): o
+        for o in stage_dict.get("cell_outputs") or []
+        if o.get("kind") != "value" and o.get("output_path")
+    }
+    try:
+        cached = calkit.dvc.get_cached_out_paths(wdir)
+    except Exception:
+        cached = set()
+    for output in added:
+        if output["kind"] != "figure" or "storage" in output:
+            continue
+        path = get_normalized_output_path(output["output_path"])
+        if path in existing:
+            try:
+                output["storage"] = NotebookCellOutput.model_validate(
+                    dict(existing[path])
+                ).stored_with
+            except ValidationError:
+                output["storage"] = existing[path].get("storage") or "dvc"
+            continue
+        # DVC's paths are from the project, a cell output's from the stage
+        project_path = posixpath.normpath(
+            posixpath.join(stage_dict.get("wdir") or "", path)
+        )
+        output["storage"] = "dvc" if project_path in cached else "git"
     updated = [dict(o) for o in stage_dict.get("cell_outputs") or []]
     for output in added:
         updated = get_cell_outputs_with(updated, output)

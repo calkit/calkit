@@ -18,6 +18,7 @@ import calkit.cli.check
 import calkit.environments
 import calkit.environments.core
 import calkit.environments.texlive
+import calkit.progress
 from calkit.environments.core import relock
 
 
@@ -2993,3 +2994,59 @@ def test_check_app_in_env(tmp_path, monkeypatch):
     # Environments whose commands don't run here aren't checked
     ck_info["environments"]["img"] = {"kind": "docker", "image": "x"}
     assert check_app_in_env("myapp", "img", ck_info) is None
+
+
+def test_check_all_in_pipeline_quiet(tmp_dir, monkeypatch, capfd):
+    # Behind a spinner, what the tools print isn't shown, but the end of it
+    # is kept for a failure, and the check can say what it's doing
+    ck_info = {
+        "environments": {
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "pipeline": {
+            "stages": {
+                "thing": {
+                    "kind": "shell-command",
+                    "environment": "py",
+                    "command": "echo hi",
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+
+    def failing_check(env_name, verbose=False):
+        calkit.progress.report(f"Creating environment '{env_name}'")
+        print("from Python")
+        # As a tool does, to what it inherits
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "for i in range(30): print(f'line {i}')",
+            ],
+            check=True,
+        )
+        raise typer.Exit(1)
+
+    monkeypatch.setattr(calkit.cli.check, "check_environment", failing_check)
+    reported: list[str] = []
+    res = calkit.environments.check_all_in_pipeline(
+        quiet=True, progress=reported.append
+    )
+    assert not res["py"]["success"]
+    output = res["py"]["output"].splitlines()
+    assert len(output) == calkit.environments.core.FAILED_CHECK_OUTPUT_LINES
+    assert output[-1] == "line 29"
+    assert reported == [
+        "Checking environment 'py'",
+        "Creating environment 'py'",
+    ]
+    out, err = capfd.readouterr()
+    assert "line 29" not in out + err
+    # Shown as it happens otherwise, so not kept
+    res = calkit.environments.check_all_in_pipeline()
+    assert not res["py"]["success"]
+    assert "output" not in res["py"]
+    assert "line 29" in capfd.readouterr().out

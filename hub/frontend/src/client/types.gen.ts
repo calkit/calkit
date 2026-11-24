@@ -6591,6 +6591,10 @@ export type ReproCheck = {
    */
   paths_outside_project?: Array<string>
   /**
+   * Eol Unpinned
+   */
+  eol_unpinned?: Array<string>
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
@@ -8669,6 +8673,10 @@ export type ReproCheckWritable = {
    * Paths Outside Project
    */
   paths_outside_project?: Array<string>
+  /**
+   * Eol Unpinned
+   */
+  eol_unpinned?: Array<string>
   /**
    * N Dvc Remotes
    */

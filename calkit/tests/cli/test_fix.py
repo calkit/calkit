@@ -11,7 +11,10 @@ import calkit.dvc
 
 def test_fix_merge_conflicts(tmp_dir):
     def write(path: str, text: str) -> None:
-        with open(path, "w") as f:
+        # With LF, as Git checks them out, since on Windows a file written
+        # with CRLF hashes differently from its own checkout, which would
+        # put more stages out of date after switching branches
+        with open(path, "w", newline="\n") as f:
             f.write(text + "\n")
 
     def commit(message: str) -> None:

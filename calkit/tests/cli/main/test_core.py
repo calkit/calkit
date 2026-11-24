@@ -832,6 +832,69 @@ def test_run_in_env_system(tmp_dir):
     assert "'user'" not in combined
 
 
+def test_open_env_shell(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from calkit.environments import shell as env_shell
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CALKIT_SHELL", raising=False)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "py": {"kind": "uv", "path": "pyproject.toml"},
+                    "jl": {"kind": "julia", "path": "Project.toml"},
+                }
+            },
+            f,
+        )
+    opened = {}
+
+    def start(shell, activation, base_env=None):
+        opened["shell"] = shell
+        opened["activation"] = activation
+        return 4
+
+    monkeypatch.setattr(env_shell, "start", start)
+
+    def shell(*args: str):
+        return CliRunner().invoke(calkit_app, ["shell", *args])
+
+    # The environment has to be named
+    res = shell()
+    assert res.exit_code == 1
+    assert "Name the environment to open with '-e', one of: py, jl" in (
+        res.output
+    )
+    # Ones with nothing to activate in a shell are refused
+    res = shell("-e", "_system")
+    assert res.exit_code == 1
+    assert "nothing to activate" in res.output
+    res = shell("-e", "nope")
+    assert "Environment 'nope' does not exist" in res.output
+    res = shell("-e", "jl")
+    assert res.exit_code == 1
+    assert "calkit xenv -n jl -- <command>" in res.output
+    assert not opened
+    # The shell opens with the environment activated, and its exit status
+    # is this one's
+    res = shell("-e", "py", "--no-check", "--shell", "/bin/zsh")
+    assert res.exit_code == 4, res.output
+    assert "Opening zsh in environment 'py'; run 'exit' to leave" in (
+        res.output
+    )
+    assert opened["shell"] == "/bin/zsh"
+    assert opened["activation"].env_vars["VIRTUAL_ENV"] == os.path.join(
+        str(tmp_path), ".venv"
+    )
+    # Not inside another
+    monkeypatch.setenv("CALKIT_SHELL", "py")
+    res = shell("-e", "py", "--no-check")
+    assert res.exit_code == 1
+    assert "Already in a shell for environment 'py'" in res.output
+
+
 def test_to_shell_cmd():
     cmd = ["python", "-c", "import math; print('hello world')"]
     subprocess.check_call(cmd)
@@ -1068,6 +1131,177 @@ def test_add_pipeline_output_storage(tmp_dir):
     assert "dvc.lock" in out
     assert not os.path.exists("figure.png.dvc")
     assert "dvc.lock" in calkit.git.get_staged_files()
+
+
+def test_figure_storage(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import _offer_dvc_for_large_figures
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    subprocess.check_call(["calkit", "init"])
+    # A small figure goes in Git and a big one in DVC, saying the real limit
+    with open("small.png", "wb") as f:
+        f.write(os.urandom(1000))
+    with open("big.pdf", "wb") as f:
+        f.write(os.urandom(1_100_000))
+    out = subprocess.check_output(
+        ["calkit", "add", "small.png", "big.pdf"], text=True
+    )
+    assert "greater than 1 MB" in out
+    assert git("ls-files", "small.png").strip() == "small.png"
+    assert not git("ls-files", "big.pdf").strip()
+    assert os.path.isfile("big.pdf.dvc")
+    # An output DVC will cache isn't Git's, even before its first run
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": (
+                    'python -c "import os; '
+                    "[open(p, 'wb').write(os.urandom(1_100_000)) "
+                    "for p in ('kept.png', 'moved.png')]; "
+                    "open('declared.png', 'wb').write(b'png')\""
+                ),
+                "outputs": [
+                    {"path": "kept.png", "storage": "git"},
+                    {"path": "moved.png", "storage": "git"},
+                    "declared.png",
+                ],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "status"], stdout=subprocess.DEVNULL)
+    with open("declared.png", "wb") as f:
+        f.write(b"png")
+    subprocess.check_call(
+        ["calkit", "add", "declared.png"], stdout=subprocess.DEVNULL
+    )
+    assert not git("ls-files", "declared.png").strip()
+    assert not os.path.isfile("declared.png.dvc")
+    subprocess.check_call(["calkit", "run"], stdout=subprocess.DEVNULL)
+    git("add", "-A")
+    git("reset", "-q", "--", "kept.png", "moved.png")
+    git("commit", "-qm", "Set up")
+    # Without a terminal it says how
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+    assert _offer_dvc_for_large_figures() == []
+    assert "path-storage kept.png --to dvc" in capsys.readouterr().out
+    # With one, each is up to the person
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr(
+        "typer.confirm", lambda text, default=None: "moved.png" in text
+    )
+    assert _offer_dvc_for_large_figures() == ["moved.png"]
+    assert not git("ls-files", "moved.png").strip()
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["make"]
+    assert "moved.png" in stage["outputs"]
+    # One left in Git at that size isn't asked about again
+    git("add", "-A")
+    git("commit", "-qm", "Keep it")
+
+    def fail(*args, **kwargs):
+        raise AssertionError("Asked again")
+
+    monkeypatch.setattr("typer.confirm", fail)
+    assert _offer_dvc_for_large_figures() == []
+    # A pipeline's Python keeps the time out of what it writes
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"sys": {"kind": "system"}}
+    calkit.save_calkit_info(ck_info)
+    env = os.environ | {"CALKIT_PIPELINE_RUNNING": "1"}
+    env.pop("SOURCE_DATE_EPOCH", None)
+    code = "import os; print(os.environ.get('SOURCE_DATE_EPOCH'))"
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "sys", "--", "python", "-c", code],
+        env=env,
+        text=True,
+    )
+    assert out.strip().splitlines()[-1] == calkit.core.OUTPUT_SOURCE_DATE_EPOCH
+
+
+def test_save_moves_large_figure(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import _offer_dvc_for_large_figures, save
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def run() -> None:
+        p = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+        assert p.returncode == 0, p.stdout + p.stderr
+
+    # A project in a subdirectory of its repo, where Git runs from above it
+    git("init", "-q")
+    git("commit", "-q", "--allow-empty", "-m", "Start")
+    os.makedirs("proj")
+    monkeypatch.chdir("proj")
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    with open("make.py", "w") as f:
+        f.write(
+            "import os\n"
+            "n = int(open('size.txt').read())\n"
+            "open('fig.png', 'wb').write(os.urandom(n))\n"
+        )
+    with open("size.txt", "w") as f:
+        f.write("1000")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "python make.py",
+                "inputs": ["make.py", "size.txt"],
+                "outputs": [{"path": "fig.png", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    run()
+    git("add", "-A", ".")
+    git("commit", "-qm", "Set up")
+    with open("size.txt", "w") as f:
+        f.write("2000000")
+    run()
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr("typer.confirm", lambda text, default=None: True)
+    # One that can't move, here since its stage is out of date, says why,
+    # and the rest is still saved
+    with open("make.py", "a") as f:
+        f.write("# Edited\n")
+    with open("notes.md", "w") as f:
+        f.write("Notes\n")
+    git("add", "notes.md")
+    save(paths=["notes.md"], message="Notes", no_push=True)
+    assert "is out of date" in capsys.readouterr().err
+    assert git("log", "-1", "--format=%s").strip() == "Notes"
+    assert git("ls-files", "fig.png").strip() == "fig.png"
+    # Moving it commits taking it out of Git too, not only what says to
+    run()
+    with open("notes.md", "a") as f:
+        f.write("More\n")
+    save(paths=["notes.md", "make.py"], message="Move", no_push=True)
+    committed = git("ls-tree", "-r", "--name-only", "HEAD").split()
+    assert "proj/fig.png" not in committed
+    assert "/fig.png" in git("show", "HEAD:proj/.gitignore")
+    assert "proj/calkit.yaml" not in git("diff", "--name-only", "HEAD")
+    assert not git("ls-files", "fig.png").strip()
+    # One left in Git at that size isn't asked about again
+    subprocess.check_call(
+        ["calkit", "update", "path-storage", "fig.png", "--to", "git"],
+        stdout=subprocess.DEVNULL,
+    )
+    git("add", "-A", ".")
+    git("commit", "-qm", "Keep it in Git")
+
+    def fail(*args, **kwargs):
+        raise AssertionError("Asked again")
+
+    monkeypatch.setattr("typer.confirm", fail)
+    assert _offer_dvc_for_large_figures() == []
 
 
 def test_git_outputs_with_ignored_files(
@@ -5726,3 +5960,58 @@ def test_run_jupyter(tmp_dir):
     assert out.returncode == 0, out.stderr
     assert "other" not in out.stdout
     assert "Application directory" in out.stdout
+
+
+def test_run_skips_for_failed_env(tmp_dir):
+    # A stage whose environment couldn't be built is skipped rather than
+    # failing with its own error, e.g., that a tool isn't in it, which
+    # would hide the real one. The stages that need its outputs are skipped
+    # too, the rest run, and then the run fails.
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("./does-not-exist\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        }
+    }
+    ck_info["pipeline"] = {
+        "stages": {
+            "thing": {
+                "kind": "shell-command",
+                "environment": "py",
+                "command": "echo hi > out.txt",
+                "outputs": ["out.txt"],
+            },
+            "after": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "cat out.txt > after.txt",
+                "inputs": ["out.txt"],
+                "outputs": ["after.txt"],
+            },
+            "other": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo other > other.txt",
+                "outputs": ["other.txt"],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, out
+    assert "Stage 'thing' is out of date and couldn't run" in out
+    assert (
+        "Failed to check environment 'py', so skipping out-of-date stage "
+        "'thing'" in out
+    )
+    assert "calkit check env -n py" in out
+    assert not os.path.exists("out.txt")
+    assert not os.path.exists("after.txt")
+    assert os.path.exists("other.txt")

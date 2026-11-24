@@ -22,6 +22,7 @@
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
+| [`shell`](#top-command-shell)                    | Open a shell with an environment activated.                                                                  |
 | [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
 | [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                         |
 | [`calc`](#top-command-calc)                      | Run a project's calculation.                                                                                 |
@@ -433,6 +434,31 @@ Options:
 | `--setup-file`     | str       | no       |         | Path to a JSON list of setup commands, used instead of --setup. This is what a compiled pipeline stage carries, since a path survives being parsed by cmd.exe on Windows and by a POSIX shell elsewhere, and quoted commands don't. |
 | `--env-var`        | list[str] | no       |         | Environmental variable to set for the command, as KEY=VALUE. Can be given multiple times. Set in the process the command runs in, and passed into a container for an environment that runs in one.                                  |
 | `--verbose`, `-v`  | boolean   | no       | False   | Print verbose output.                                                                                                                                                                                                               |
+
+<a id="top-command-shell"></a>
+
+### `calkit shell`
+
+Open a shell with an environment activated.
+
+The environment is checked, and created if it doesn't exist yet, as `calkit xenv` does. In the shell, its programs come first on PATH, and the prompt starts with its name. Run `exit` to leave.
+
+Conda, uv, venv, and Pixi environments open in a shell on this machine, and a Docker environment in its container's shell.
+
+Usage:
+
+```text
+calkit shell [OPTIONS]
+```
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                 |
+| --------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e` | str     | no       |         | Environment to activate in the shell. There's no default.                                                   |
+| `--shell`             | str     | no       |         | Shell to open, e.g., bash, zsh, fish, pwsh, or cmd. Defaults to the one in SHELL, or PowerShell on Windows. |
+| `--no-check`          | boolean | no       | False   | Don't check the environment is valid before opening it.                                                     |
+| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                       |
 
 <a id="top-command-install"></a>
 
@@ -3947,11 +3973,11 @@ calkit check environment [OPTIONS]
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                                |
-| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`  | str     | yes      |         | Name of the environment to check.                                                                          |
-| `--verbose`     | boolean | no       | False   | Print verbose output.                                                                                      |
-| `--force`, `-f` | boolean | no       | False   | Rebuild the environment from scratch, e.g., after something it was built from changed outside the project. |
+| Option            | Type    | Required | Default | Description                                                                                                |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`    | str     | yes      |         | Name of the environment to check.                                                                          |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                      |
+| `--force`, `-f`   | boolean | no       | False   | Rebuild the environment from scratch, e.g., after something it was built from changed outside the project. |
 
 <a id="subcommand-check-julia-env"></a>
 
@@ -4344,10 +4370,11 @@ Options:
 
 Fix things.
 
-| Command                                              | Description                                                     |
-| ---------------------------------------------------- | --------------------------------------------------------------- |
-| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.      |
-| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC). |
+| Command                                              | Description                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------ |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.         |
+| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC).    |
+| [`line-endings`](#subcommand-fix-line-endings)       | Check text files out with the same line endings on every platform. |
 
 <a id="subcommand-fix-merge-conflicts"></a>
 
@@ -4384,6 +4411,22 @@ Usage:
 
 ```text
 calkit fix storage
+```
+
+<a id="subcommand-fix-line-endings"></a>
+
+#### `calkit fix line-endings`
+
+Check text files out with the same line endings on every platform.
+
+Puts rules first in .gitattributes that check text files out with LF everywhere, including Windows, whose Git converts them to CRLF by default, so the files the pipeline hashes match across machines. Then rewrites any file in this checkout whose line endings don't match, e.g., on Windows, keeping uncommitted changes. No committed file changes, so there's nothing to renormalize; commit .gitattributes afterwards.
+
+Submodules that don't pin their own line endings are set to check their files out as committed, in this clone only.
+
+Usage:
+
+```text
+calkit fix line-endings
 ```
 
 <a id="command-group-latex-tex"></a>

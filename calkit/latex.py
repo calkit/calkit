@@ -819,19 +819,27 @@ class CkComponent:
     # How calkit.sty formats a value: siunitx options, or a Python format
     # spec, e.g., .2f
     format: str = ""
-    # For a value quoted from a reference, its citation key and name, since
-    # it's read from the file of them all with the key and name joined
+    # For a value quoted from a reference, its citation key and name
     ref: tuple[str, str] | None = None
+    # What calkit.sty names a value by, when not its path, e.g., a value
+    # quoted from a reference by its citation key, since TeX can't name the
+    # file its values are written to
+    label: str | None = None
 
 
 def ref_component(key: str, name: str, format: str = "") -> CkComponent:
-    """The value a \\ckrefval quotes, as a component read from the file of
-    every value quoted from a reference.
+    """The value a \\ckrefval quotes, as a component read from the file
+    of its reference's values, which calkit.sty names ``ref:<key>``.
     """
-    from calkit.refvalues import VALUES_PATH
+    from calkit.refvalues import get_values_path
 
     return CkComponent(
-        "value", VALUES_PATH, f"{key}.{name}", format, ref=(key, name)
+        "value",
+        get_values_path(key),
+        name,
+        format,
+        ref=(key, name),
+        label=f"ref:{key}",
     )
 
 
@@ -1251,10 +1259,17 @@ def plan_ck_components(
         written.add((c.path, c.key))
         rel, problem, here = find(c)
         if rel is None:
-            problems.append(str(problem))
+            # A reference with no values recorded has no file of them
+            problems.append(
+                f"calkit.yaml records no value '{c.ref[1]}' quoted from "
+                f"'{c.ref[0]}'"
+                if c.ref
+                else str(problem)
+            )
             continue
+        name = c.label or c.path
         if not here:
-            start = f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{"
+            start = f"\\cksetvalue{{{name}}}{{{c.key}}}{{"
             kept_line = next(
                 (
                     line + "\n"
@@ -1284,7 +1299,7 @@ def plan_ck_components(
             problems.append(f"{c.key} from {c.path}: {e}")
             continue
         lines.append(
-            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
+            f"\\cksetvalue{{{name}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
         )
     return CkMapping(files=files, values="".join(lines), problems=problems)
 

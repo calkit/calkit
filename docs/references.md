@@ -186,9 +186,12 @@ The format is optional, and works as it does for
 [`\ckvalue`](latex.md#formatting-values).
 Values computed by the pipeline use `ckvalue`, and values quoted from a
 reference use `ckrefval`, so a reader can tell which a number is.
-Calkit writes every recorded value to `.calkit/reference-values.json`
-when the pipeline compiles, which documents read and depend on, so editing
-the rest of `calkit.yaml` doesn't rebuild them.
+When the pipeline compiles, Calkit writes each reference's recorded
+values to a file of its own in `.calkit/reference-values/`, which
+documents read and depend on, so a document is rebuilt when a value it
+quotes changes, and not when anything else in `calkit.yaml` does.
+Commit them, like `dvc.yaml`, so the Calkit Cloud and Overleaf sync can
+read them.
 
 `calkit check repro` checks that:
 

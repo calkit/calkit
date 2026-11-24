@@ -643,10 +643,15 @@ return {
       end
     end
     local key, name, fmt = slots[1], slots[2], slots[3]
-    local data = load_data(".calkit/reference-values.json")
+    -- One file per reference, named for its key percent-encoded, as
+    -- Python's urllib.parse.quote(key, safe="") writes it
+    local file = key:gsub("[^A-Za-z0-9_%.~%-]", function(c)
+      return string.format("%%%02X", string.byte(c))
+    end)
+    local data = load_data(".calkit/reference-values/" .. file .. ".json")
     local value = nil
-    if type(data) == "table" and type(data[key]) == "table" then
-      value = data[key][name]
+    if type(data) == "table" then
+      value = data[name]
     end
     if value == nil then
       quarto.log.warning(
@@ -724,7 +729,7 @@ def extract_values(
         _ckvalue_args,
         _resolve_source,
     )
-    from calkit.refvalues import VALUES_PATH
+    from calkit.refvalues import get_values_path
 
     path = Path(document_path).as_posix()
     values = []
@@ -765,9 +770,9 @@ def extract_values(
                     m.start(),
                     QuartoValue(
                         source=got["source"],
-                        key=f"{got['source']}.{got['key']}",
+                        key=got["key"],
                         format=got.get("format"),
-                        path=VALUES_PATH,
+                        path=get_values_path(got["source"]),
                         line=i + 1,
                         ref=(got["source"], got["key"]),
                     ),

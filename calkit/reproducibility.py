@@ -1194,20 +1194,88 @@ def find_literals_in_project(
     return out
 
 
+# Words ending in a period that don't end a sentence, lowercased
+_ABBREVIATIONS = {
+    "al",
+    "approx",
+    "cf",
+    "ch",
+    "e.g",
+    "ed",
+    "eds",
+    "eq",
+    "eqs",
+    "etc",
+    "fig",
+    "figs",
+    "i.e",
+    "no",
+    "nos",
+    "p",
+    "pp",
+    "ref",
+    "refs",
+    "resp",
+    "sec",
+    "secs",
+    "tab",
+    "vol",
+    "vs",
+}
+# Where a sentence may end: a full stop, question, or exclamation mark,
+# then space and something that starts a sentence
+_SENTENCE_END_RE = re.compile(r"[.!?]['\")\]]*(?=\s+[^\sa-z])")
+
+
+def get_sentence(text: str, offset: int) -> str:
+    """The sentence of some text that an offset is in, across lines.
+
+    An abbreviation, e.g., "et al." or "Fig.", or an initial, e.g., "A."
+    in "A. Liu", doesn't end one.
+    """
+    ends = []
+    for m in _SENTENCE_END_RE.finditer(text):
+        word = re.search(r"([\w.]+)\.?['\")\]]*$", text[: m.end()])
+        token = word.group(1).rstrip(".").lower() if word else ""
+        if token in _ABBREVIATIONS or re.fullmatch(r"[a-z]", token):
+            continue
+        ends.append(m.end())
+    start = max([e for e in ends if e <= offset], default=0)
+    end = min([e for e in ends if e > offset], default=len(text))
+    return text[start:end]
+
+
 def _with_cited_keys(
     findings: list[dict], content: str, markdown: bool
 ) -> list[dict]:
-    """Findings, with the keys cited on the line of each that cites any, so
-    the number can be looked for in those references.
+    """Findings, each marked as cited when its sentence cites a reference,
+    with the keys it cites, so the number can be looked for in them.
+
+    A sentence is read across the lines of its paragraph, since one in a
+    hard-wrapped document often cites on another line than its number.
     """
     from calkit.refvalues import get_line_cited_keys
 
     lines = content.splitlines()
     for finding in findings:
-        if finding.get("cited") and 0 < finding["line"] <= len(lines):
-            finding["cited_keys"] = get_line_cited_keys(
-                lines[finding["line"] - 1], markdown
-            )
+        index = finding["line"] - 1
+        if not 0 <= index < len(lines):
+            continue
+        first = index
+        while first > 0 and lines[first - 1].strip():
+            first -= 1
+        last = index
+        while last + 1 < len(lines) and lines[last + 1].strip():
+            last += 1
+        paragraph = "\n".join(lines[first : last + 1])
+        offset = sum(len(line) + 1 for line in lines[first:index])
+        offset += max(finding.get("column", 1) - 1, 0)
+        keys = get_line_cited_keys(get_sentence(paragraph, offset), markdown)
+        finding["cited"] = bool(keys)
+        if keys:
+            finding["cited_keys"] = keys
+        else:
+            finding.pop("cited_keys", None)
     return findings
 
 

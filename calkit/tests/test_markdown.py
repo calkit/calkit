@@ -1824,12 +1824,20 @@ def test_refval_markers(tmp_path):
     import calkit.markdown
 
     # A value quoted from a reference is filled in from the file Calkit
-    # writes them all to, alongside ckvalue markers on the same line
-    from calkit.refvalues import VALUES_PATH
+    # writes its reference's values to, alongside ckvalue markers on the
+    # same line
+    import calkit.refvalues
 
-    (tmp_path / ".calkit").mkdir()
-    (tmp_path / VALUES_PATH).write_text(
-        json.dumps({"liu.2025": {"noise-sigma": 0.1}})
+    calkit.refvalues.write_values_file(
+        {
+            "references": [
+                {
+                    "path": "r.bib",
+                    "values": {"liu.2025": {"noise-sigma": {"value": 0.1}}},
+                }
+            ]
+        },
+        wdir=str(tmp_path),
     )
     (tmp_path / "r.json").write_text(json.dumps({"rms": 0.25}))
     text = (
@@ -1847,7 +1855,7 @@ def test_refval_markers(tmp_path):
     )
     (value, _) = calkit.markdown.extract_values(out, "doc.md")
     assert value.ref == ("liu.2025", "noise-sigma")
-    assert value.path == VALUES_PATH
+    assert value.path == calkit.refvalues.get_values_path("liu.2025")
     # A marker closes with its own command
     assert not calkit.markdown.extract_values(
         "<!-- ckrefval a b -->x<!-- /ckvalue -->", "doc.md"

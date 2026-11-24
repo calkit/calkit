@@ -272,37 +272,47 @@ def check_value(
     if context:
         if not has_number(context, value):
             return f"the context doesn't contain {value}"
-        pattern = _context_pattern(context)
+        # The pages end to end, since a context can run onto the next one,
+        # and it's on the page where it starts
+        import bisect
+
+        starts = []
+        offset = 0
+        for text in pages:
+            starts.append(offset)
+            offset += len(text) + 1
+        whole = " ".join(pages)
+        numbers = find_numbers(whole)
         found: list[tuple[int, list[str]]] = []
-        for n, text in enumerate(pages, start=1):
-            numbers = find_numbers(text)
-            for m in pattern.finditer(text):
-                inside = [
-                    x
-                    for x in numbers
-                    if x.start >= m.start() - 1 and x.end <= m.end()
-                ]
-                # The context's own number has to be a whole number there,
-                # not the start of a longer one
+        for m in _context_pattern(context).finditer(whole):
+            n = bisect.bisect_right(starts, m.start())
+            inside = [
+                x
+                for x in numbers
+                if x.start >= m.start() - 1 and x.end <= m.end()
+            ]
+            # The context's own number has to be a whole number there, not
+            # the start of a longer one
+            if any(_matches(x, wanted) for x in inside):
+                if page is None or page == n:
+                    return None
+                found.append((n, []))
+            else:
                 overlapping = [
-                    x
+                    x.text
                     for x in numbers
                     if x.start < m.end() and x.end > m.start()
                 ]
-                if any(_matches(x, wanted) for x in inside):
-                    if page is None or page == n:
-                        return None
-                    found.append((n, []))
-                else:
-                    found.append((n, [x.text for x in overlapping]))
+                found.append((n, overlapping))
         if not found:
             return "the context isn't in the PDF"
-        right = [n for n, numbers in found if not numbers]
+        right = [n for n, numbers_there in found if not numbers_there]
         if right:
             return f"the context is on page {right[0]}, not {page}"
-        n, numbers = found[0]
+        n, numbers_there = found[0]
         return (
-            f"on page {n}, the context reads {', '.join(numbers)}, not {value}"
+            f"on page {n}, the context reads {', '.join(numbers_there)}, "
+            f"not {value}"
         )
     where = [pages[page - 1]] if page is not None else pages
     if not any(has_number(text, value) for text in where):
@@ -777,13 +787,28 @@ def add_value(
     return collection
 
 
-#: Every value quoted from a reference, by citation key and then name,
-#: which Calkit writes from calkit.yaml for documents to read, so one that
-#: quotes them depends on this rather than on all of calkit.yaml
-VALUES_PATH = ".calkit/reference-values.json"
+#: Where Calkit writes the values quoted from references, from
+#: calkit.yaml, one file per citation key, so a document depends on the
+#: references it quotes rather than on all of calkit.yaml, or on every value
+VALUES_DIR = ".calkit/reference-values"
 
 
-def get_values_data(ck_info: dict) -> dict[str, dict[str, Any]]:
+def get_values_path(key: str) -> str:
+    """The file a reference's values are written to, its citation key
+    percent-encoded, so any key makes a safe and distinct file name.
+    BibTeX keys don't differ only by case, so neither do these.
+    """
+    import urllib.parse
+
+    return f"{VALUES_DIR}/{urllib.parse.quote(key, safe='')}.json"
+
+
+def is_values_path(path: str) -> bool:
+    """Whether a path is one of the files of values quoted from references."""
+    return Path(path).as_posix().startswith(VALUES_DIR + "/")
+
+
+def get_values_by_key(ck_info: dict) -> dict[str, dict[str, Any]]:
     """The values documents can quote, by citation key, then name."""
     data: dict[str, dict[str, Any]] = {}
     for _, key, name, info in iter_declared_values(ck_info):
@@ -791,25 +816,40 @@ def get_values_data(ck_info: dict) -> dict[str, dict[str, Any]]:
     return data
 
 
-def write_values_file(ck_info: dict, wdir: str | None = None) -> bool:
-    """Write the values file from ``calkit.yaml``, if it declares any, and
-    remove it otherwise, returning whether it's there.
+def get_values_data(ck_info: dict) -> dict[str, dict[str, Any]]:
+    """What each values file holds, by its path."""
+    return {
+        get_values_path(key): values
+        for key, values in get_values_by_key(ck_info).items()
+    }
 
-    It's only rewritten when what it holds changes, so what depends on it
-    isn't made out of date by rewriting it.
+
+def write_values_file(ck_info: dict, wdir: str | None = None) -> bool:
+    """Write the files of values from ``calkit.yaml``, one per reference,
+    removing any for a reference with none, and returning whether there
+    are any.
+
+    Each is only rewritten when what it holds changes, so what depends on
+    it isn't made out of date by rewriting it.
     """
-    path = Path(wdir or ".") / VALUES_PATH
+    folder = Path(wdir or ".") / VALUES_DIR
     data = get_values_data(ck_info)
-    if not data:
-        if path.is_file():
-            path.unlink()
-        return False
-    text = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False)
-    text += "\n"
-    if not path.is_file() or path.read_text(encoding="utf-8") != text:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8", newline="\n")
-    return True
+    wanted = set()
+    for rel, values in data.items():
+        path = Path(wdir or ".") / rel
+        wanted.add(path.name)
+        text = json.dumps(values, indent=2, sort_keys=True, ensure_ascii=False)
+        text += "\n"
+        if not path.is_file() or path.read_text(encoding="utf-8") != text:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8", newline="\n")
+    if folder.is_dir():
+        for path in folder.glob("*.json"):
+            if path.name not in wanted:
+                path.unlink()
+        if not any(folder.iterdir()):
+            folder.rmdir()
+    return bool(data)
 
 
 @dataclass

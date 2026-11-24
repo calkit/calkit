@@ -189,18 +189,22 @@
   }
 \cs_new_eq:NN \ck@num \__calkit_num:nn
 % A value quoted from a reference, by its citation key and name, each
-% trimmed, as Calkit writes them, joined with a dot, from the file Calkit
-% writes them all to, its path written out, since names aren't expanded
-\tl_new:N \l__calkit_refkey_tl
+% trimmed, as Calkit writes them: the key as ref:<key>, since Calkit, not
+% TeX, knows which file a reference's values are in
+\tl_new:N \l__calkit_refsource_tl
+\tl_new:N \l__calkit_refname_tl
+\cs_new:Npn \__calkit_ifvalue:nnTF #1#2 { \ck@if@value {#1} {#2} }
+\cs_generate_variant:Nn \__calkit_ifvalue:nnTF { VV }
+\cs_new_protected:Npn \__calkit_value:nnn #1#2#3 { \ck@value {#1} {#2} {#3} }
+\cs_generate_variant:Nn \__calkit_value:nnn { nVV }
 \cs_new_protected:Npn \__calkit_refval:nnn #1#2#3
   {
-    \tl_set:Nx \l__calkit_refkey_tl
-      { \tl_trim_spaces:n {#2} . \tl_trim_spaces:n {#3} }
-    \exp_args:NnV \ck@if@value { .calkit/reference-values.json }
-      \l__calkit_refkey_tl
+    \tl_set:Nx \l__calkit_refsource_tl { ref: \tl_trim_spaces:n {#2} }
+    \tl_set:Nx \l__calkit_refname_tl { \tl_trim_spaces:n {#3} }
+    \__calkit_ifvalue:VVTF \l__calkit_refsource_tl \l__calkit_refname_tl
       {
-        \exp_args:NnnV \ck@value {#1} { .calkit/reference-values.json }
-          \l__calkit_refkey_tl
+        \__calkit_value:nVV {#1} \l__calkit_refsource_tl
+          \l__calkit_refname_tl
       }
       { \ck@missing { #3 ~ from ~ #2 } }
   }
@@ -217,13 +221,13 @@
     {\ck@missing{#3 from #2}}}
 % \ckrefval[format]{citation key}{name}: a value quoted from a reference,
 % which calkit.yaml records with where in the reference it is, and which
-% Calkit writes with the rest to .calkit/reference-values.json. The
+% Calkit writes to the _calkit/values.tex beside the document. The
 % reference is cited as usual, e.g., with \cite, wherever it belongs.
 \newcommand\ckrefval[3][]{\ck@refval{#1}{#2}{#3}}
 \ifdefined\NewExpandableDocumentCommand
   \NewExpandableDocumentCommand\ck@plainvalue{O{}mm}{\ck@plain{#2}{#3}}
   \NewExpandableDocumentCommand\ck@plainrefval{O{}mm}%
-    {\ck@plain{.calkit/reference-values.json}{#2.#3}}
+    {\ck@plain{ref:#2}{#3}}
   \AtBeginDocument{%
     \ifdefined\pdfstringdefDisableCommands
       \pdfstringdefDisableCommands{%

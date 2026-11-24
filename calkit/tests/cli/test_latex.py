@@ -301,7 +301,10 @@ def test_build_ck_components(tmp_dir):
     ck_info["references"] = [
         {
             "path": "refs.bib",
-            "values": {"liu2025": {"noise-sigma": {"value": 0.1, "page": 4}}},
+            "values": {
+                "liu2025": {"noise-sigma": {"value": 0.1, "page": 4}},
+                "smith:2020": {"n": {"value": 7}},
+            },
         }
     ]
     calkit.save_calkit_info(ck_info)
@@ -343,6 +346,7 @@ def test_build_ck_components(tmp_dir):
             "Quoted: \\ckrefval[.2f]{liu2025}{noise-sigma}.\n"
             "Unrecorded: \\ckrefval{liu2025}{nope}.\n"
             "Spaced: \\ckrefval[.1f]{ liu2025 }{ noise-sigma }.\n"
+            "Colon: \\ckrefval{smith:2020}{n}.\n"
             "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/not-yet.png}\n"
@@ -421,6 +425,7 @@ def test_build_ck_components(tmp_dir):
     assert "Quoted: 0.10." in text
     assert "Unrecorded: ??." in text
     assert "Spaced: 0.1." in text
+    assert "Colon: 7." in text
     assert "Trials: 42." in text
     # A bookmark shows the value as it is, rather than the command
     pdf = pypdfium2.PdfDocument("paper/main.pdf")

@@ -562,9 +562,7 @@ def update_markdown(
     # no file, and the file Calkit writes them to is brought up to date
     import calkit.refvalues
 
-    refvals = {
-        calkit.refvalues.VALUES_PATH: calkit.refvalues.get_values_data(ck_info)
-    }
+    refvals = calkit.refvalues.get_values_data(ck_info)
     if not check:
         calkit.refvalues.write_values_file(ck_info)
     stale = []

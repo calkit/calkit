@@ -388,8 +388,9 @@ def test_get_zotero_local_pdf(tmp_path, monkeypatch):
 
 
 def test_values_file_and_latex_deps(tmp_dir):
-    # Values are written to a file of their own when the pipeline compiles,
-    # and a LaTeX stage quoting one depends on it, not on calkit.yaml
+    # Each reference's values are written to a file of their own when the
+    # pipeline compiles, and a LaTeX stage depends on the files of the
+    # references it quotes, not on calkit.yaml or the others
     import subprocess
 
     import calkit
@@ -405,22 +406,27 @@ def test_values_file_and_latex_deps(tmp_dir):
             "Noise \\ckrefval[.2f]{liu.2025}{noise-sigma} \\cite{liu.2025}.\n"
             "\\end{document}\n"
         )
+    path = rv.get_values_path("liu.2025")
     loads, components = calkit.latex.read_ck_usage("paper/main.tex")
     assert loads
     assert components == [
         calkit.latex.CkComponent(
             "value",
-            rv.VALUES_PATH,
-            "liu.2025.noise-sigma",
+            path,
+            "noise-sigma",
             ".2f",
             ref=("liu.2025", "noise-sigma"),
+            label="ref:liu.2025",
         )
     ]
     ck_info = calkit.load_calkit_info()
     ck_info["references"] = [
         {
             "path": "refs.bib",
-            "values": {"liu.2025": {"noise-sigma": {"value": 0.1}}},
+            "values": {
+                "liu.2025": {"noise-sigma": {"value": 0.1}},
+                "wu:2024": {"speed": {"value": 3.5}},
+            },
         }
     ]
     ck_info["environments"] = {"tex": {"kind": "texlive"}}
@@ -435,22 +441,35 @@ def test_values_file_and_latex_deps(tmp_dir):
     }
     calkit.save_calkit_info(ck_info)
     stages = calkit.pipeline.to_dvc(write=True)
-    with open(rv.VALUES_PATH) as f:
-        assert json.load(f) == {"liu.2025": {"noise-sigma": 0.1}}
-    assert rv.VALUES_PATH in stages["paper"]["deps"]
+    with open(path) as f:
+        assert json.load(f) == {"noise-sigma": 0.1}
+    other = rv.get_values_path("wu:2024")
+    assert other == f"{rv.VALUES_DIR}/wu%3A2024.json"
+    assert os.path.isfile(other)
+    assert path in stages["paper"]["deps"]
+    assert other not in stages["paper"]["deps"]
     assert "calkit.yaml" not in stages["paper"]["deps"]
-    # A citation key with dots is found by the dotted lookup
+    # calkit.sty names it by citation key, since TeX can't name its file
     calkit.latex.map_ck_components("paper/main.tex")
     with open("paper/_calkit/values.tex") as f:
-        assert (
-            f"\\cksetvalue{{{rv.VALUES_PATH}}}{{liu.2025.noise-sigma}}{{n}}"
-            "{0.1}"
-        ) in f.read()
-    # With none declared, the file goes away
+        assert "\\cksetvalue{ref:liu.2025}{noise-sigma}{n}{0.1}" in f.read()
+    # A file is rewritten only when its reference's values change
+    mtime = os.path.getmtime(path)
+    ck_info["references"][0]["values"]["wu:2024"]["speed"]["value"] = 4
+    calkit.save_calkit_info(ck_info)
+    calkit.pipeline.to_dvc(write=True)
+    assert os.path.getmtime(path) == mtime
+    with open(other) as f:
+        assert json.load(f) == {"speed": 4}
+    # One with no values goes away, and the folder with the last
+    del ck_info["references"][0]["values"]["wu:2024"]
+    calkit.save_calkit_info(ck_info)
+    calkit.pipeline.to_dvc(write=True)
+    assert not os.path.exists(other)
     ck_info["references"] = [{"path": "refs.bib"}]
     calkit.save_calkit_info(ck_info)
     calkit.pipeline.to_dvc(write=True)
-    assert not os.path.exists(rv.VALUES_PATH)
+    assert not os.path.exists(rv.VALUES_DIR)
 
 
 def _make_project(with_wrong_page: bool = True) -> None:
@@ -740,9 +759,9 @@ def test_check_latex_project(tmp_dir):
     res = check_reproducibility(log_func=lambda *a: None, offline=True)
     assert res.retyped_values == []
     assert not any(
-        rv.VALUES_PATH in str(gap) for gap in res.provenance_gaps or []
+        rv.VALUES_DIR in str(gap) for gap in res.provenance_gaps or []
     )
-    assert rv.VALUES_PATH not in res.to_pretty()
+    assert rv.VALUES_DIR not in res.to_pretty()
     assert res.refval_problems == []
     # A document using only \ckrefval gets the package too
     Path("other.tex").write_text(
@@ -801,17 +820,60 @@ def test_new_ref_value_and_markdown_check(tmp_dir):
         ],
         stdout=subprocess.DEVNULL,
     )
-    with open(rv.VALUES_PATH) as f:
-        assert json.load(f) == {"liu2025": {"lr": 0.001}}
-    os.remove(rv.VALUES_PATH)
+    path = rv.get_values_path("liu2025")
+    with open(path) as f:
+        assert json.load(f) == {"lr": 0.001}
+    os.remove(path)
     import calkit.markdown
 
     text = "Rate <!-- ckrefval liu2025 lr -->x<!-- /ckrefval -->.\n"
     out, changed = calkit.markdown.set_values(
         text,
         "doc.md",
-        data={rv.VALUES_PATH: rv.get_values_data(calkit.load_calkit_info())},
+        data=rv.get_values_data(calkit.load_calkit_info()),
     )
     assert changed
     assert "-->0.001<!--" in out
-    assert not os.path.exists(rv.VALUES_PATH)
+    assert not os.path.exists(path)
+
+
+def test_cited_by_sentence():
+    # A sentence is read across lines, and an abbreviation or an initial
+    # doesn't end it, so a number is searched for in what its own sentence
+    # cites, wherever on its line or the next that is
+    from calkit.reproducibility import _with_cited_keys, get_sentence
+
+    text = (
+        "We follow Liu et al. and A. Wu here. Their noise of\n"
+        "0.1 was chosen by \\citet{liu2025}, as in Fig. 3. Ours is 0.42.\n"
+        "\n"
+        "Unrelated 0.77 \\cite{wu2024}.\n"
+    )
+    assert get_sentence(text, text.index("0.1 was")) == (
+        " Their noise of\n0.1 was chosen by \\citet{liu2025}, as in Fig. 3."
+    )
+    assert get_sentence(text, text.index("Liu")).startswith("We follow Liu")
+    findings = [
+        {"value": "0.1", "line": 2, "column": 1, "cited": False},
+        {"value": "0.42", "line": 2, "column": 57, "cited": True},
+        {"value": "0.77", "line": 4, "column": 11, "cited": True},
+    ]
+    _with_cited_keys(findings, text, markdown=False)
+    assert [(f["cited"], f.get("cited_keys")) for f in findings] == [
+        (True, ["liu2025"]),
+        (False, None),
+        (True, ["wu2024"]),
+    ]
+
+
+def test_context_across_pages():
+    # A context can run onto the next page, and is on the one it starts on
+    pages = [
+        rv.normalize_text("Intro. Positions are perturbed by Gaussian"),
+        rv.normalize_text("noise with σ = 0.1 during training."),
+    ]
+    context = "perturbed by Gaussian noise with σ = 0.1"
+    assert rv.check_value(pages, 0.1, page=1, context=context) is None
+    assert rv.check_value(pages, 0.1, page=2, context=context) == (
+        "the context is on page 1, not 2"
+    )

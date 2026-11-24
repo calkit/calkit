@@ -1496,7 +1496,7 @@ def expand_ck_info(
             # What it shows, and calkit.yaml for the questions its values
             # link to, and for the values it quotes from references, so not
             # the file Calkit writes those to, which isn't there without any
-            from calkit.refvalues import VALUES_PATH
+            from calkit.refvalues import is_values_path
 
             inputs = (
                 list(md_cfg.get("inputs") or [])
@@ -1505,7 +1505,7 @@ def expand_ck_info(
                     for p in pdf_inputs(
                         text, md_path, results=results_by_name(ck_info)
                     )
-                    if p != VALUES_PATH
+                    if not is_values_path(p)
                 ]
                 + ["calkit.yaml"]
             )
@@ -2886,7 +2886,7 @@ def extract_values(
                 continue
             if m.group("ctext") is not None and m.group("cmd") == "ckrefval":
                 # A citation key, a name, and a format, read the same way
-                from calkit.refvalues import VALUES_PATH
+                from calkit.refvalues import get_values_path
 
                 got = _ckvalue_args(m.group("args"), path, i + 1)
                 if got["kind"]:
@@ -2898,8 +2898,8 @@ def extract_values(
                     )
                 values.append(
                     MarkdownValue(
-                        key=f"{got['source']}.{got['key']}",
-                        path=VALUES_PATH,
+                        key=got["key"],
+                        path=get_values_path(got["source"]),
                         text=m.group("ctext"),
                         format=_ck_format(got.get("format")),
                         line=i + 1,

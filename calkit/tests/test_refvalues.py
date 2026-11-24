@@ -107,6 +107,8 @@ def test_check_value_and_find_number():
     ]
     quote = "perturbed by Gaussian noise with σ = 0.1"
     assert rv.check_value(pages, 0.1, page=2, quote=quote) is None
+    # Spacing doesn't count, since text extraction spaces things its own way
+    assert rv.check_value(pages, 0.1, page=2, quote="noise with σ=0.1") is None
     assert rv.check_value(pages, 0.1, page=2) is None
     assert rv.check_value(pages, 0.1) is None
     assert rv.check_value(pages, 0.1, page=1, quote=quote) == (

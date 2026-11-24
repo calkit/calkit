@@ -218,11 +218,15 @@ def check_value(
         wanted = normalize_text(quote)
         if not pattern.search(wanted):
             return f"the quote doesn't contain {value}"
-        folded = wanted.casefold()
+
+        # Text extraction spaces things its own way, e.g., a subscript run
+        # into what it's on, so spaces don't count
+        def fold(text: str) -> str:
+            return re.sub(r"\s+", "", text).casefold()
+
+        folded = fold(wanted)
         on = [
-            n
-            for n, text in enumerate(pages, start=1)
-            if folded in text.casefold()
+            n for n, text in enumerate(pages, start=1) if folded in fold(text)
         ]
         if not on:
             return "the quote isn't in the PDF"

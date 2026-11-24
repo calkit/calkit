@@ -219,20 +219,22 @@ def test_check_env_vars(tmp_dir):
             ["calkit", "check", "env-vars"],
             env=os.environ.copy() | {"MY_ENV_VAR": "value1"},
         )
-    # A path one must be a path that exists
+    # A path one must be an absolute path that exists
     ck_info["dependencies"].append({"kind": "path-env-var", "name": "MY_APP"})
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     env = os.environ.copy() | {"MY_ENV_VAR": "v1", "MY_OTHER_ENV_VAR": "v2"}
     subprocess.check_call(
-        ["calkit", "check", "env-vars"], env=env | {"MY_APP": "calkit.yaml"}
+        ["calkit", "check", "env-vars"],
+        env=env | {"MY_APP": os.path.abspath("calkit.yaml")},
     )
-    with pytest.raises(subprocess.CalledProcessError):
-        subprocess.check_call(
-            ["calkit", "check", "env-vars"],
-            env=env | {"MY_APP": "nope.exe"},
-            stdin=subprocess.DEVNULL,
-        )
+    for value in ("nope.exe", "calkit.yaml"):
+        with pytest.raises(subprocess.CalledProcessError):
+            subprocess.check_call(
+                ["calkit", "check", "env-vars"],
+                env=env | {"MY_APP": value},
+                stdin=subprocess.DEVNULL,
+            )
 
 
 def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:

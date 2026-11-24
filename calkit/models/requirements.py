@@ -49,8 +49,8 @@ class Requirement(Model):
       prints a token, and is offered before the value is asked for.
     - ``path-env-var``: an environmental variable holding a path that must
       exist, e.g., to a licensed app that can't be installed for the user.
-      ``search_paths`` lists where it's usually found, to suggest. ``setup_command``
-      is offered when the search finds nothing.
+      ``search_paths`` lists where it's usually found, to suggest.
+      ``setup_command`` is offered when the search finds nothing.
     - ``setup``: a per-machine precondition that isn't a file---e.g.,
       the user must have authenticated a CLI like ``gh auth login``.
       A ``setup`` requirement declares ``check_command`` (a shell command
@@ -127,8 +127,8 @@ class Requirement(Model):
     def _check_search_paths(self) -> Requirement:
         if self.search_paths is not None and self.kind != "path-env-var":
             raise ValueError(
-                f"A '{self.kind}' requirement can't have 'search_paths', since "
-                "only a 'path-env-var' names a path to look for"
+                f"A '{self.kind}' requirement can't have 'search_paths', "
+                "since only a 'path-env-var' names a path to look for"
             )
         return self
 

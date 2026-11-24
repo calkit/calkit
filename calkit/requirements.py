@@ -476,21 +476,28 @@ def resolve_path_env_var(name: str, dotenv_path: str = ".env") -> str | None:
 
     import dotenv
 
+    def is_usable(path: str | None) -> bool:
+        # A relative path would only hold from one directory, e.g., not a
+        # subproject's or a stage's
+        return (
+            path is not None and os.path.isabs(path) and os.path.exists(path)
+        )
+
     value = os.environ.get(name)
-    if value and os.path.exists(value):
+    if is_usable(value):
         return value
     saved = (
         dotenv.dotenv_values(dotenv_path).get(name)
         if os.path.isfile(dotenv_path)
         else None
     )
-    if not saved or not os.path.exists(saved):
+    if saved is None or not is_usable(saved):
         return None
     if value:
         # On stderr, so it can't corrupt, e.g., 'calkit status --json'
         print(
-            f"Using '{name}' from {dotenv_path}, since it's also set "
-            f"elsewhere, to a path that doesn't exist: {value}",
+            f"Using '{name}' from {dotenv_path}, since it's set elsewhere "
+            f"to a missing path: {value}",
             file=sys.stderr,
         )
     os.environ[name] = saved
@@ -499,6 +506,8 @@ def resolve_path_env_var(name: str, dotenv_path: str = ".env") -> str | None:
 
 def _describe_missing_path(value: str) -> str:
     """Say what's wrong with a ``path-env-var`` value that isn't a path."""
+    if not os.path.isabs(value) and os.path.exists(value):
+        return f"is a relative path, which needs to be absolute: {value}"
     msg = f"is a path that doesn't exist: {value}"
     if value.strip()[:1] in ("'", '"'):
         msg += " (its quotes are part of the value, so remove them)"
@@ -509,22 +518,28 @@ def get_path_env_var_candidates(req: dict[str, Any]) -> list[str]:
     """Get the existing paths a ``path-env-var`` requirement could be.
 
     They're in the order of its ``default``, which is a path rather than a
-    pattern, then its ``search_paths`` patterns, with what sorts as the highest
-    version first within a pattern, so ``App_2.10`` is suggested ahead of
-    ``App_2.9``, and ``App_2.1.3`` ahead of ``App_2.1``.
+    pattern, then its ``search_paths`` patterns, with the highest version
+    first within a pattern, so ``App_2.10`` is suggested ahead of
+    ``App_2.9``, ``App_2.1.3`` ahead of ``App_2.1``, and ``App_3.0`` ahead
+    of ``App_3.0-rc1``.
     """
     import glob
 
-    def get_version_key(path: str) -> list[list[int | str]]:
-        # Part by part, so where a part ends sorts below more of it. Splitting
-        # on a captured group puts the digits at the odd indices.
-        return [
-            [
-                int(piece) if i % 2 else piece.lower()
-                for i, piece in enumerate(re.split(r"(\d+)", part))
-            ]
-            for part in re.split(r"[\\/]", path)
-        ]
+    def get_version_key(path: str) -> list[tuple[tuple[int, ...], int, str]]:
+        # Part by part, by a part's first dotted number, with a release
+        # ahead of anything suffixed to it, e.g., '-rc1', but not a file
+        # extension
+        key: list[tuple[tuple[int, ...], int, str]] = []
+        for part in re.split(r"[\\/]", path.lower()):
+            stem = re.sub(r"\.[a-z]\w*$", "", part)
+            match = re.search(r"\d+(?:[._-]\d+)*", stem)
+            if match is None:
+                key.append(((), 0, part))
+                continue
+            numbers = tuple(int(n) for n in re.split(r"[._-]", match[0]))
+            suffix = stem[match.end() :]
+            key.append((numbers, 0 if suffix else 1, part))
+        return key
 
     def expand(path: str) -> str:
         return os.path.expanduser(os.path.expandvars(path))
@@ -586,7 +601,7 @@ def prompt_for_path_env_var_req(
                 print(f"  {n}. {path}")
             prompt = "Select a number, enter a path, or enter 'skip' [1]: "
         elif searchable:
-            print("Not found where it's usually installed.")
+            print("Not found")
             prompt = (
                 "Install it and press Enter to search again, "
                 "or enter its path or 'skip': "
@@ -622,9 +637,8 @@ def prompt_for_path_env_var_req(
     # Calkit uses the saved path from now on, but nothing else does
     if current and dotenv.dotenv_values(dotenv_path).get(name) != current:
         print(
-            f"'{name}' is also set elsewhere, e.g., in the shell. Calkit will "
-            f"use the path saved in {dotenv_path}, but other programs will "
-            "see the old one until it's updated or removed there."
+            f"'{name}' is also set elsewhere, e.g., in the shell, so programs "
+            "other than Calkit still see the old path"
         )
     dotenv.set_key(
         dotenv_path=dotenv_path, key_to_set=name, value_to_set=value
@@ -658,7 +672,11 @@ def check_path_env_var_req(req: dict[str, Any], interactive: bool) -> None:
     value = candidates[0] if candidates else "<path>"
     if candidates:
         msg += f"; found {value}"
+    elif req.get("setup_command"):
+        msg += f"; install it with '{req['setup_command']}'"
     msg += f"; set it with 'calkit set-env-var {name} \"{value}\"'"
+    if req.get("notes"):
+        msg += f" ({str(req['notes']).strip()})"
     raise ValueError(msg)
 
 

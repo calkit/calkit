@@ -1940,10 +1940,11 @@ def get_requirement_key(req: Any, wdir: str | None = None) -> str:
     """Identify a requirement however it's written, e.g., to cache its check.
 
     One checked by running something in the project, e.g., a setup step's
-    ``check_command``, is identified by that project's directory too.
+    ``check_command``, or by reading its ``.env``, is identified by that
+    project's directory too.
     """
     normalized = _normalize_requirement(req)
-    if normalized["kind"] in ("setup", "aws-credentials"):
+    if normalized["kind"] in ("setup", "aws-credentials", "path-env-var"):
         normalized = normalized | {"_wdir": os.path.abspath(wdir or ".")}
     return json.dumps(normalized, sort_keys=True, default=str)
 

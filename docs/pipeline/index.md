@@ -1073,8 +1073,8 @@ Six kinds are supported:
   prints a token, and is offered before the value is asked for.
 - `path-env-var`: an environmental variable holding a path that must
   exist, e.g., to a licensed app that can't be installed for the user.
-  `search_paths` lists where it's usually found, to suggest. `setup_command`
-  is offered when the search finds nothing.
+  `search_paths` lists where it's usually found, to suggest.
+  `setup_command` is offered when the search finds nothing.
 - `setup`: a per-machine precondition that isn't a file---e.g.,
   the user must have authenticated a CLI like `gh auth login`.
   A `setup` requirement declares `check_command` (a shell command

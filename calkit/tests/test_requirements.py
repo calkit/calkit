@@ -388,6 +388,21 @@ def test_get_path_env_var_candidates(tmp_dir, monkeypatch):
         "App_2.9.3/app.exe",
         "App_2.9/app.exe",
     ]
+    # A release comes ahead of its pre-releases and of suffixed versions,
+    # and a letter before the number doesn't count, but an extension does not
+    # make a release look suffixed
+    for name in ("3.0.0", "3.0.0-rc1", "v2.2", "2.1b"):
+        (tmp_dir / "Pre").joinpath(f"App_{name}").mkdir(parents=True)
+    for name in ("4.1", "4.1-beta"):
+        (tmp_dir / "Pre" / f"App_{name}.exe").touch()
+    assert names(search_paths="Pre/App_*") == [
+        "Pre/App_4.1.exe",
+        "Pre/App_4.1-beta.exe",
+        "Pre/App_3.0.0",
+        "Pre/App_3.0.0-rc1",
+        "Pre/App_v2.2",
+        "Pre/App_2.1b",
+    ]
     # Patterns keep their order, may use ~ and env vars, and don't repeat
     assert names(
         search_paths=[
@@ -503,6 +518,8 @@ def test_prompt_for_path_env_var_req(tmp_dir, monkeypatch, capsys):
 
 
 def test_check_path_env_var_req(tmp_dir, monkeypatch):
+    import dotenv
+
     app = tmp_dir / "app.exe"
     app.touch()
     req = {
@@ -517,11 +534,36 @@ def test_check_path_env_var_req(tmp_dir, monkeypatch):
     ):
         calkit.check_requirements(requirements=[req], interactive=False)
     assert not (tmp_dir / ".env").exists()
-    # With nothing found, it still says how to set it
+    # With nothing found, it still says how to set it, and how to install
+    # it, with the notes, e.g., where to get a license
     with pytest.raises(ValueError, match="not found.*<path>"):
         calkit.check_requirements(
             requirements=[dict(req, search_paths="nope/*")], interactive=False
         )
+    with pytest.raises(
+        ValueError,
+        match="install it with 'get-app'; set it .*<path>.*Get a license",
+    ):
+        calkit.check_requirements(
+            requirements=[
+                dict(
+                    req,
+                    search_paths="nope/*",
+                    setup_command="get-app",
+                    notes="Get a license.",
+                )
+            ],
+            interactive=False,
+        )
+    # Its check is cached per project, since each has its own .env
+    assert calkit.core.get_requirement_key(
+        req, wdir="a"
+    ) != calkit.core.get_requirement_key(req, wdir="b")
+    # A relative path is refused, since it holds from one directory only
+    monkeypatch.setenv("CK_APP", "app.exe")
+    with pytest.raises(ValueError, match="relative path.*absolute"):
+        calkit.check_requirements(requirements=[req], interactive=False)
+    monkeypatch.delenv("CK_APP")
     # On a terminal it's asked for
     with mock.patch("builtins.input", return_value=""):
         calkit.check_requirements(requirements=[req], interactive=True)
@@ -536,8 +578,6 @@ def test_check_path_env_var_req(tmp_dir, monkeypatch):
         calkit.check_requirements(requirements=[req], interactive=False)
     # The fix the error gives works even when the bad value is the shell's,
     # since .env doesn't override it
-    import dotenv
-
     dotenv.set_key(".env", "CK_APP", str(app))
     calkit.check_requirements(requirements=[req], interactive=False)
     assert os.environ["CK_APP"] == str(app)
@@ -605,6 +645,10 @@ def test_resolve_path_env_var(tmp_dir, monkeypatch, capsys):
     dotenv.set_key(str(sub / ".env"), "CK_APP", str(app))
     monkeypatch.chdir(sub)
     assert reqs.resolve_path_env_var("CK_APP") == str(app)
+    # Nor is a relative one, which a subproject or stage would misread
+    dotenv.set_key(".env", "CK_APP", "../app.exe")
+    monkeypatch.setenv("CK_APP", "../app.exe")
+    assert reqs.resolve_path_env_var("CK_APP") is None
     # A saved path that doesn't exist either is no help
     dotenv.set_key(".env", "CK_APP", str(tmp_dir / "gone.exe"))
     monkeypatch.setenv("CK_APP", str(tmp_dir / "moved.exe"))

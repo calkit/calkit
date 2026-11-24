@@ -411,6 +411,26 @@ def test_list_files_paths(tmp_dir):
     assert "file1.txt" in calkit.dvc.list_paths()
 
 
+def test_get_missing_outs(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    assert calkit.dvc.get_missing_outs() == []
+    os.makedirs("data")
+    Path("data/a.txt").write_text("a")
+    Path("b.txt").write_text("b")
+    subprocess.check_call(["dvc", "add", "-q", "data", "b.txt"])
+    Path("dvc.yaml").write_text(
+        "stages:\n  never-run:\n    cmd: echo hi\n    outs:\n      - c.txt\n"
+    )
+    assert calkit.dvc.get_missing_outs() == []
+    os.remove("b.txt")
+    assert calkit.dvc.get_missing_outs() == ["b.txt"]
+    # A directory that's lost part of its contents is missing too
+    Path("data/a.txt").unlink()
+    Path("data/other.txt").write_text("other")
+    assert calkit.dvc.get_missing_outs() == ["b.txt", "data"]
+
+
 def test_detect_calkit_remote_type():
     http_name = calkit.dvc.make_remote_name(use_ck=False)
     ck_name = calkit.dvc.make_remote_name(use_ck=True)

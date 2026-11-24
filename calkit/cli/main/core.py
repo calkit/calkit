@@ -455,12 +455,15 @@ def clone(
             calkit.hub.HUB_URLS["local"] if url == "http://localhost" else url
         )
 
+    # GitHub's SSH URL can also be written the way uv and pip write it
+    if url.startswith("ssh://git@github.com/"):
+        url = "git@github.com:" + url.removeprefix("ssh://git@github.com/")
     # A project named by its owner and name, and maybe its hub, has its repo
     # URL fetched from that hub
     parts = url.split("/")
     if url.startswith(("github.com/", "gitlab.com/")):
         url = "https://" + url
-    elif not url.startswith(("https://", "http://", "git@")):
+    elif not url.startswith(("https://", "http://", "git@", "ssh://")):
         if len(parts) == 3:
             if hub is not None and hub_url(hub) != hub_url(parts[0]):
                 raise_error(
@@ -563,15 +566,37 @@ def clone(
             if name == "calkit" or name.startswith("calkit:"):
                 typer.echo(f"Setting up authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
-    # DVC pull
+    # DVC pull, where outputs of stages that haven't run and data no remote
+    # has don't fail the clone, but a remote that can't be reached does
     if not no_dvc_pull:
         try:
-            result = calkit.dvc.run_dvc_command(["pull"])
+            result = calkit.dvc.run_dvc_command(["pull", "--allow-missing"])
             if result != 0:
                 raise_error("Failed to pull from DVC remote(s)")
         except Exception as e:
             raise_error(f"Failed to pull from DVC remote(s): {e}")
         calkit.dvc.zip.sync_all(direction="to-workspace")
+        zipped = {
+            zip_path: workspace_path
+            for workspace_path, zip_path in (
+                calkit.dvc.zip.get_zip_path_map().items()
+            )
+        }
+        missing = [zipped.get(p, p) for p in calkit.dvc.get_missing_outs()]
+        if missing:
+            reason = (
+                "they aren't in the project's DVC remote"
+                if calkit.dvc.get_remotes()
+                else "the project has no DVC remote"
+            )
+            listed = "\n".join(f"  {path}" for path in missing[:10])
+            if len(missing) > 10:
+                listed += f"\n  ...and {len(missing) - 10} more"
+            warn(
+                f"These outputs weren't pulled, since {reason}:\n{listed}\n"
+                "Copy them from a machine that has them, or run "
+                "'calkit push' there to store them"
+            )
 
 
 def _format_dvc_data_status(status: dict, zip_path_map: dict[str, str]) -> str:

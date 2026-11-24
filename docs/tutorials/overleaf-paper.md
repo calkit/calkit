@@ -1,4 +1,4 @@
-# Making an Overleaf paper reproducible
+# Making a paper on Overleaf single-button reproducible and coding agent-friendly
 
 <!--
 First pass, written ahead of the features it describes; see the PR for

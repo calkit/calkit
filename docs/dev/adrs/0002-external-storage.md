@@ -6,7 +6,7 @@
 
 - Status: accepted
 - Date: 2026-11-22
-- Issues: #1739 (Hugging Face buckets)
+- Issues: #1739 (Hugging Face buckets), #2170 (Box)
 - User docs: [storage.md](../../storage.md)
 - Notes on later work, e.g., storage per path, Git LFS, and HF Datasets:
   [original design notes](https://github.com/calkit/calkit/blob/55e3628d1665fb5e72ca1f4cc74acea94810af0a/docs/storage.md#design-notes)

@@ -990,11 +990,11 @@ def new_ref_value(
             "--page", help="The page of the reference's PDF, counting from 1."
         ),
     ] = None,
-    quote: Annotated[
+    context: Annotated[
         str | None,
         typer.Option(
-            "--quote",
-            help="A short passage around the value, copied from the "
+            "--context",
+            help="The passage the value is used in, copied from the "
             "reference.",
         ),
     ] = None,
@@ -1040,7 +1040,7 @@ def new_ref_value(
             name=name,
             value=parsed,
             page=page,
-            quote=quote,
+            context=context,
             description=description,
             collection=collection,
         )
@@ -1071,7 +1071,7 @@ def new_ref_value(
                 calkit.refvalues.read_pdf_pages(source.path),
                 parsed,
                 page=page,
-                quote=quote,
+                context=context,
             )
             if problem is not None:
                 raise_error(

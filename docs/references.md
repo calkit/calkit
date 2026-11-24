@@ -149,7 +149,8 @@ its claim still takes a person reading it.
 
 A number a document quotes from a reference, e.g., a parameter it reuses
 or a result it compares against, can be recorded in `calkit.yaml`, under
-the collection it's from, with where in the reference it appears:
+the collection it's from, with where in the reference it appears and the
+passage it's used in, its context:
 
 ```yaml
 references:
@@ -161,7 +162,7 @@ references:
         noise-sigma:
           value: 0.1
           page: 4
-          quote: "positions perturbed by Gaussian noise with σ = 0.1"
+          context: "positions perturbed by Gaussian noise with σ = 0.1"
 ```
 
 Record one with `calkit new ref-value`, which checks it against the
@@ -169,7 +170,7 @@ reference's PDF first:
 
 ```sh
 calkit new ref-value liu2025 noise-sigma --value 0.1 --page 4 \
-  --quote "positions perturbed by Gaussian noise with σ = 0.1"
+  --context "positions perturbed by Gaussian noise with σ = 0.1"
 ```
 
 A document then quotes it by citation key and name, and cites the
@@ -191,7 +192,8 @@ the rest of `calkit.yaml` doesn't rebuild them.
 
 `calkit check repro` checks that:
 
-- each recorded value's quote is on the page given, with the value in it
+- each recorded value's context is on the page given, with the value in
+  it, ignoring spacing and case, so it has to be copied from the reference
 - each value a document quotes is recorded, under a collection the
   document's bibliography uses, and that the document cites the reference
 - no citation key is defined twice in one `.bib` file, or as different
@@ -199,7 +201,7 @@ the rest of `calkit.yaml` doesn't rebuild them.
 
 It also looks for each number typed into a sentence that cites a
 reference in that reference's PDF, and suggests the
-`calkit new ref-value` command to record it, with its page and quote.
+`calkit new ref-value` command to record it, with its page and context.
 A number the cited reference doesn't have may be a misquote.
 See the problems with `calkit check repro -c refvals`, and the numbers with
 `-c numbers`.

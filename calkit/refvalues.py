@@ -10,11 +10,11 @@ comes from, in ``calkit.yaml``, with where in the reference it appears::
             noise-sigma:
               value: 0.1
               page: 4
-              quote: "positions perturbed by Gaussian noise with σ = 0.1"
+              context: "positions perturbed by Gaussian noise with σ = 0.1"
 
 The document cites it with ``\\ckrefval{liu2025}{noise-sigma}``, or its
 Quarto and Markdown counterparts. This module finds the reference's PDF,
-reads its text, and checks the value and quote against it, or searches it
+reads its text, and checks the value and its context against it, or searches it
 for a number a document typed in.
 
 PDFs are never stored in the project. They come from, in order: a file the
@@ -61,7 +61,7 @@ class Match:
 
     page: int
     text: str
-    quote: str
+    context: str
 
 
 @dataclass
@@ -193,7 +193,7 @@ def find_number(pages: list[str], value: Any) -> list[Match]:
                 Match(
                     page=n,
                     text=m.group(0),
-                    quote=_context(text, m.start(), m.end()),
+                    context=_context(text, m.start(), m.end()),
                 )
             )
     return matches
@@ -203,21 +203,21 @@ def check_value(
     pages: list[str],
     value: Any,
     page: int | None = None,
-    quote: str | None = None,
+    context: str | None = None,
 ) -> str | None:
     """Why a declared value doesn't match its reference's PDF, if it
-    doesn't: the quote must be on the page, and the value in the quote, or
-    without a quote, the value on the page.
+    doesn't: the context must be on the page, and the value in it, or
+    without one, the value on the page.
     """
     pattern = get_number_pattern(value)
     if pattern is None:
         return f"{value!r} isn't a number"
     if page is not None and not 1 <= page <= len(pages):
         return f"the PDF has {len(pages)} pages, not {page}"
-    if quote:
-        wanted = normalize_text(quote)
+    if context:
+        wanted = normalize_text(context)
         if not pattern.search(wanted):
-            return f"the quote doesn't contain {value}"
+            return f"the context doesn't contain {value}"
 
         # Text extraction spaces things its own way, e.g., a subscript run
         # into what it's on, so spaces don't count
@@ -229,9 +229,9 @@ def check_value(
             n for n, text in enumerate(pages, start=1) if folded in fold(text)
         ]
         if not on:
-            return "the quote isn't in the PDF"
+            return "the context isn't in the PDF"
         if page is not None and page not in on:
-            return f"the quote is on page {on[0]}, not {page}"
+            return f"the context is on page {on[0]}, not {page}"
         return None
     where = [pages[page - 1]] if page is not None else pages
     if not any(pattern.search(text) for text in where):
@@ -538,7 +538,7 @@ def add_value(
     name: str,
     value: Any,
     page: int | None = None,
-    quote: str | None = None,
+    context: str | None = None,
     description: str | None = None,
     collection: str | None = None,
     wdir: str | None = None,
@@ -572,8 +572,8 @@ def add_value(
     info: dict[str, Any] = {"value": value}
     if page is not None:
         info["page"] = page
-    if quote:
-        info["quote"] = quote
+    if context:
+        info["context"] = context
     if description:
         info["description"] = description
     ReferenceValue.model_validate(info)
@@ -901,7 +901,7 @@ def check_project(
             )
             continue
         found = check_value(
-            pages, info.get("value"), info.get("page"), info.get("quote")
+            pages, info.get("value"), info.get("page"), info.get("context")
         )
         if found is not None:
             problem(
@@ -1041,7 +1041,7 @@ def search_cited(
                     {
                         "key": key,
                         "page": match.page,
-                        "quote": match.quote,
+                        "context": match.context,
                         "source": got[0],
                     }
                 )

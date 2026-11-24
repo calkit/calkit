@@ -530,12 +530,12 @@ def _echo_unattributed(findings: list[dict]) -> None:
         )
     for finding in found:
         match = finding["found"][0]
-        quote = match["quote"].replace('"', '\\"')
+        context = match["context"].replace('"', '\\"')
         calkit.echo(
             f"\n{finding['file']}:{finding['line']}, {finding['value']}:\n"
             f"  calkit new ref-value {match['key']} <name> "
             f"--value {finding['value'].rstrip('%').strip()} "
-            f'--page {match["page"]} --quote "{quote}"'
+            f'--page {match["page"]} --context "{context}"'
         )
 
 
@@ -566,7 +566,7 @@ def _echo_refval_problems(problems: list[dict]) -> None:
     calkit.echo(
         "\nA value quoted from a reference is recorded in calkit.yaml, under "
         "the reference collection it's from, with 'calkit new ref-value', "
-        "and checked against the reference's PDF: its quote has to be on "
+        "and checked against the reference's PDF: its context has to be on "
         "the page given, with the value in it. A document quoting it with "
         "ckrefval should also cite the reference."
     )

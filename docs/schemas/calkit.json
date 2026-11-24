@@ -9259,8 +9259,21 @@
       "type": "object"
     },
     "ReferenceValue": {
-      "description": "A value a document quotes from a reference, and where it appears.\n\nA document cites it with ``\\ckrefval{<citation key>}{<name>}``, which\nis checked against the reference's PDF.",
+      "description": "A value a document quotes from a reference, and where and in what\ncontext the reference uses it.\n\nA document cites it with ``\\ckrefval{<citation key>}{<name>}``, which\nis checked against the reference's PDF.",
       "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The passage the value is used in, copied from the reference, which is how it's found and checked; spacing and case don't have to match.",
+          "title": "Context"
+        },
         "description": {
           "anyOf": [
             {
@@ -9287,19 +9300,6 @@
           "default": null,
           "description": "The page of the reference's PDF it's on, counting from 1, which may differ from the number printed on the page.",
           "title": "Page"
-        },
-        "quote": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A short passage around the value, copied from the reference, which is how it's found and checked.",
-          "title": "Quote"
         },
         "value": {
           "anyOf": [

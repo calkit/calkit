@@ -662,7 +662,8 @@ class Publication(_CalkitObject):
 
 
 class ReferenceValue(Model):
-    """A value a document quotes from a reference, and where it appears.
+    """A value a document quotes from a reference, and where and in what
+    context the reference uses it.
 
     A document cites it with ``\\ckrefval{<citation key>}{<name>}``, which
     is checked against the reference's PDF.
@@ -678,10 +679,11 @@ class ReferenceValue(Model):
         description="The page of the reference's PDF it's on, counting "
         "from 1, which may differ from the number printed on the page.",
     )
-    quote: str | None = Field(
+    context: str | None = Field(
         default=None,
-        description="A short passage around the value, copied from the "
-        "reference, which is how it's found and checked.",
+        description="The passage the value is used in, copied from the "
+        "reference, which is how it's found and checked; spacing and case "
+        "don't have to match.",
     )
     description: str | None = Field(
         default=None, description="What the value is."

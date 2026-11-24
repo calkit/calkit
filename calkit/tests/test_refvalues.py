@@ -106,19 +106,21 @@ def test_check_value_and_find_number():
         ),
     ]
     quote = "perturbed by Gaussian noise with σ = 0.1"
-    assert rv.check_value(pages, 0.1, page=2, quote=quote) is None
+    assert rv.check_value(pages, 0.1, page=2, context=quote) is None
     # Spacing doesn't count, since text extraction spaces things its own way
-    assert rv.check_value(pages, 0.1, page=2, quote="noise with σ=0.1") is None
+    assert (
+        rv.check_value(pages, 0.1, page=2, context="noise with σ=0.1") is None
+    )
     assert rv.check_value(pages, 0.1, page=2) is None
     assert rv.check_value(pages, 0.1) is None
-    assert rv.check_value(pages, 0.1, page=1, quote=quote) == (
-        "the quote is on page 2, not 1"
+    assert rv.check_value(pages, 0.1, page=1, context=quote) == (
+        "the context is on page 2, not 1"
     )
-    assert rv.check_value(pages, 0.2, page=2, quote=quote) == (
-        "the quote doesn't contain 0.2"
+    assert rv.check_value(pages, 0.2, page=2, context=quote) == (
+        "the context doesn't contain 0.2"
     )
-    assert rv.check_value(pages, 0.1, quote="noise with σ = 0.1 always") == (
-        "the quote isn't in the PDF"
+    assert rv.check_value(pages, 0.1, context="noise with σ = 0.1 always") == (
+        "the context isn't in the PDF"
     )
     assert rv.check_value(pages, 0.1, page=1) == "0.1 isn't on page 1"
     assert rv.check_value(pages, 0.1, page=3) == "the PDF has 2 pages, not 3"
@@ -126,7 +128,7 @@ def test_check_value_and_find_number():
     (match,) = rv.find_number(pages, 0.1)
     assert match.page == 2
     assert match.text == "0.1"
-    assert "Gaussian noise with σ = 0.1 during" in match.quote
+    assert "Gaussian noise with σ = 0.1 during" in match.context
 
 
 def test_read_pdf_pages(tmp_path):
@@ -381,7 +383,7 @@ def _make_project(with_wrong_page: bool = True) -> None:
                     "lr": {
                         "value": 0.001,
                         "page": 1 if with_wrong_page else 2,
-                        "quote": "at a learning rate of 0.001",
+                        "context": "at a learning rate of 0.001",
                     }
                 },
                 "wu2024": {"speed": {"value": 3.5}},
@@ -416,7 +418,7 @@ def test_check_reproducibility_refvals(tmp_dir):
             0,
             "liu2025",
             "lr",
-            "in refs/liu2025.pdf, the quote is on page 2, not 1",
+            "in refs/liu2025.pdf, the context is on page 2, not 1",
         ),
         (
             "index.qmd",
@@ -445,7 +447,7 @@ def test_check_reproducibility_refvals(tmp_dir):
         2,
         "refs/liu2025.pdf",
     )
-    assert "noise with sigma = 0.1 during" in found["quote"]
+    assert "noise with sigma = 0.1 during" in found["context"]
     assert by_value["0.77"]["searched"] == ["liu2025"]
     assert "Problems with values quoted from references: 3" in res.to_pretty()
 
@@ -470,7 +472,7 @@ def test_check_repro_refvals_cli(tmp_dir):
         text=True,
         env=env,
     )
-    assert "the quote is on page 2, not 1" in out
+    assert "the context is on page 2, not 1" in out
     # Recording one checks it against the PDF first
     p = subprocess.run(
         [
@@ -483,14 +485,14 @@ def test_check_repro_refvals_cli(tmp_dir):
             "0.2",
             "--page",
             "2",
-            "--quote",
+            "--context",
             "Gaussian noise with sigma = 0.1",
         ],
         capture_output=True,
         text=True,
     )
     assert p.returncode != 0
-    assert "the quote doesn't contain 0.2" in p.stderr
+    assert "the context doesn't contain 0.2" in p.stderr
     subprocess.check_call(
         [
             "calkit",
@@ -502,7 +504,7 @@ def test_check_repro_refvals_cli(tmp_dir):
             "0.1",
             "--page",
             "2",
-            "--quote",
+            "--context",
             "Gaussian noise with sigma = 0.1",
         ],
         stdout=subprocess.DEVNULL,
@@ -513,7 +515,7 @@ def test_check_repro_refvals_cli(tmp_dir):
     assert values["noise"] == {
         "value": 0.1,
         "page": 2,
-        "quote": "Gaussian noise with sigma = 0.1",
+        "context": "Gaussian noise with sigma = 0.1",
     }
     p = subprocess.run(
         ["calkit", "new", "ref-value", "nobody", "x", "--value", "1"],

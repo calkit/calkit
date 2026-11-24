@@ -1099,7 +1099,7 @@ Options:
 | --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------- |
 | `--value`             | str     | yes      |         | The value, as the reference gives it.                                           |
 | `--page`              | int     | no       |         | The page of the reference's PDF, counting from 1.                               |
-| `--quote`             | str     | no       |         | A short passage around the value, copied from the reference.                    |
+| `--context`           | str     | no       |         | The passage the value is used in, copied from the reference.                    |
 | `--description`, `-d` | str     | no       |         | What the value is.                                                              |
 | `--collection`        | str     | no       |         | The reference collection, e.g., references.bib, if the key is in more than one. |
 | `--no-check`          | boolean | no       | False   | Don't check it against the reference's PDF.                                     |

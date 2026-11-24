@@ -6154,5 +6154,8 @@ def test_run_with_stderr_discarded(tmp_dir):
         p = subprocess.run(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
-        assert p.returncode == 0, p.stdout
+        if p.returncode != 0:
+            # Run again with stderr kept, to show why
+            shown = subprocess.run(cmd, capture_output=True, text=True)
+            raise AssertionError(p.stdout + shown.stdout + shown.stderr)
     assert os.path.isfile("out.txt")

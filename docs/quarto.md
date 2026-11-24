@@ -85,6 +85,15 @@ for more info.
 
 <!-- TODO: needs human review -->
 
+`calkit check repro -c numbers` lists numbers typed into a Quarto document
+that has a stage, including a notebook's Markdown cells,
+that look like results but have nothing recorded behind them,
+so they can be read from the pipeline instead.
+Numbers in shortcodes, inline expressions, and code are left out,
+as is a line with a `<!-- calkit: ignore -->` comment.
+
+<!-- TODO: needs human review -->
+
 When the pipeline is compiled,
 Calkit writes the shortcode as a Quarto extension in `_extensions/calkit/`,
 in the Quarto project's folder, i.e., where `_quarto.yml` is,

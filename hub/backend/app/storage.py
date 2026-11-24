@@ -395,16 +395,22 @@ def get_internal_storage() -> ProjectStorage:
 def get_resource_storage(
     session: "Session", resource: "StorageResource"
 ) -> ProjectStorage:
-    """Get the storage for an external storage resource."""
+    """Get the storage for an external storage resource, through the
+    connection that reaches it.
+    """
+    from fastapi import HTTPException
     from huggingface_hub import HfFileSystem
 
     import app.users
 
+    if resource.credential is None:
+        raise HTTPException(401, "Storage's connection is gone")
+    label = resource.credential.label
     if resource.kind == "box-folder":
         from calkit.box import BoxFileSystem
 
         token = app.users.get_box_token(
-            session=session, user=resource.credential_user
+            session=session, user=resource.credential_user, label=label
         )
         # Paths are relative to the ``Calkit`` folder, whose ID is kept as
         # the resource's bucket
@@ -421,7 +427,7 @@ def get_resource_storage(
     if resource.kind != "hf-bucket":
         raise ValueError(f"Unsupported storage kind: {resource.kind}")
     token = app.users.get_huggingface_token(
-        session=session, user=resource.credential_user
+        session=session, user=resource.credential_user, label=label
     )
     # Skip fsspec's instance cache so listings aren't stale across requests
     fs = HfFileSystem(token=token, skip_instance_cache=True)
@@ -573,22 +579,19 @@ STORAGE_PROVIDER_NAMES = {"huggingface": "Hugging Face", "box": "Box"}
 
 
 def get_credential_resources(
-    session: "Session", user_id: Any, provider: str
+    session: "Session", credential_id: Any
 ) -> list["StorageResource"]:
-    """Get the storage reached with a user's credential for a provider,
-    e.g., their HF account, whichever account owns it.
+    """Get the storage reached with a connection, e.g., to an HF account,
+    whichever account owns it.
     """
-    from sqlmodel import col, select
+    from sqlmodel import select
 
     from app.models import StorageResource
 
     return list(
         session.exec(
             select(StorageResource).where(
-                StorageResource.credential_user_id == user_id,
-                col(StorageResource.kind).in_(
-                    PROVIDER_STORAGE_KINDS.get(provider, [])
-                ),
+                StorageResource.credential_id == credential_id
             )
         ).all()
     )
@@ -696,11 +699,11 @@ def copy_resource_to_internal(
 
 
 def transfer_storage_and_disconnect(
-    user_id: str, provider: str = "huggingface"
+    user_id: str, provider: str = "huggingface", label: str = "default"
 ) -> None:
-    """Move the storage reached with a user's account on a service, e.g.,
-    HF, into the hub's own storage, then disconnect the account. Run on the
-    worker.
+    """Move the storage reached with one of a user's connections, e.g., to
+    an HF account, into the hub's own storage, then disconnect it. Run on
+    the worker.
 
     Each resource's projects switch to the hub's own storage before its
     objects are copied, so nothing new lands there after the copy.
@@ -718,14 +721,17 @@ def transfer_storage_and_disconnect(
         user = session.get(User, uuid.UUID(user_id))
         if user is None:
             return
+        credential = app.users.get_external_credential(
+            session=session, user=user, provider=provider, label=label
+        )
+        if credential is None:
+            return
         n_storage = 0
         n_objects = 0
         try:
             # Checked again after each pass, in case any was added meanwhile
             for _ in range(10):
-                resources = get_credential_resources(
-                    session, user.id, provider=provider
-                )
+                resources = get_credential_resources(session, credential.id)
                 if not resources:
                     break
                 for resource in resources:
@@ -757,14 +763,10 @@ def transfer_storage_and_disconnect(
                 user, n_storage, n_objects, succeeded=False, provider=provider
             )
             raise
-        credential = app.users.get_external_credential(
-            session=session, user=user, provider=provider
-        )
-        if credential is not None:
-            if provider == "box":
-                app.users.revoke_box_token(credential)
-            session.delete(credential)
-            session.commit()
+        if provider == "box":
+            app.users.revoke_box_token(credential)
+        session.delete(credential)
+        session.commit()
         app.mixpanel.user_transferred_storage(
             user, n_storage, n_objects, succeeded=True, provider=provider
         )

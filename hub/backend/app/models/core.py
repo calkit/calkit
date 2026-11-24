@@ -269,6 +269,9 @@ class User(UserBase, table=True):
     email_verification: Union["UserEmailVerification", None] = Relationship(
         back_populates="user", cascade_delete=True
     )
+    emails: list["UserEmail"] = Relationship(
+        back_populates="user", cascade_delete=True
+    )
     dvc_pushes: list["ProjectDvcPush"] = Relationship(
         back_populates="user", cascade_delete=True
     )
@@ -340,6 +343,33 @@ class UserPublic(UserBase):
     can_link_machines: bool
     subscription: Union["UserSubscription", None]
     analytics_consent: bool | None = None
+
+
+class UserEmail(SQLModel, table=True):
+    """An email of a user's besides their primary one, e.g., one a connected
+    Box account vouched for.
+
+    Each is verified and belongs to one user, so no other user can claim
+    it, and it's stored lowercase so that's checked whatever the case. One
+    from a connected account goes with the connection.
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", index=True, ondelete="CASCADE"
+    )
+    email: str = Field(max_length=255, unique=True)
+    # The connected account it came from, e.g., "box"
+    source: str = Field(max_length=64)
+    credential_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="userexternalcredential.id",
+        index=True,
+        ondelete="CASCADE",
+    )
+    verified_at: datetime = Field(default_factory=utcnow)
+    # Relationships
+    user: User = Relationship(back_populates="emails")
 
 
 class UserEmailVerification(SQLModel, table=True):
@@ -1163,10 +1193,20 @@ class StorageResource(SQLModel, table=True):
     credential_user_id: uuid.UUID = Field(
         foreign_key="user.id", ondelete="CASCADE"
     )
+    # Which of the user's connections reaches it, since they may have more
+    # than one, e.g., two Box accounts; null for storage from before that
+    # whose connection was gone
+    credential_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="userexternalcredential.id",
+        index=True,
+        ondelete="CASCADE",
+    )
     created: datetime = Field(default_factory=utcnow)
     # Relationships
     owner_account: Account = Relationship()
     credential_user: User = Relationship()
+    credential: UserExternalCredential | None = Relationship()
 
 
 class ProjectStorageHistory(SQLModel, table=True):

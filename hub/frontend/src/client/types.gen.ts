@@ -636,9 +636,35 @@ export type ConnectedAccounts = {
     [key: string]: string
   }
   /**
+   * Connections
+   */
+  connections?: Array<Connection>
+  /**
    * Cli
    */
   cli?: boolean
+}
+
+/**
+ * Connection
+ */
+export type Connection = {
+  /**
+   * Provider
+   */
+  provider: string
+  /**
+   * Label
+   */
+  label: string
+  /**
+   * Name
+   */
+  name: string | null
+  /**
+   * Active
+   */
+  active: boolean
 }
 
 /**
@@ -4518,6 +4544,10 @@ export type ProjectHfBucketPost = {
    * Bucket
    */
   bucket: string
+  /**
+   * Label
+   */
+  label?: string
 }
 
 /**
@@ -7199,6 +7229,10 @@ export type StorageResourcePublic = {
    * Connected By
    */
   connected_by: string
+  /**
+   * Service Account
+   */
+  service_account?: string | null
 }
 
 /**
@@ -7731,6 +7765,20 @@ export type UserCreate = {
    * Github Username
    */
   github_username?: string | null
+}
+
+/**
+ * UserEmailPublic
+ */
+export type UserEmailPublic = {
+  /**
+   * Email
+   */
+  email: string
+  /**
+   * Source
+   */
+  source: string
 }
 
 /**
@@ -10081,6 +10129,25 @@ export type GetUserGithubAppInstallationsResponses = {
 export type GetUserGithubAppInstallationsResponse =
   GetUserGithubAppInstallationsResponses[keyof GetUserGithubAppInstallationsResponses]
 
+export type GetUserEmailsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/emails"
+}
+
+export type GetUserEmailsResponses = {
+  /**
+   * Response Users-Get User Emails
+   *
+   * Successful Response
+   */
+  200: Array<UserEmailPublic>
+}
+
+export type GetUserEmailsResponse =
+  GetUserEmailsResponses[keyof GetUserEmailsResponses]
+
 export type GetUserConnectedAccountsData = {
   body?: never
   path?: never
@@ -10216,9 +10283,24 @@ export type PostUserHuggingfaceAuthResponse =
 export type GetUserHuggingfaceAccountData = {
   body?: never
   path?: never
-  query?: never
+  query?: {
+    /**
+     * Label
+     */
+    label?: string
+  }
   url: "/user/huggingface-account"
 }
+
+export type GetUserHuggingfaceAccountErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserHuggingfaceAccountError =
+  GetUserHuggingfaceAccountErrors[keyof GetUserHuggingfaceAccountErrors]
 
 export type GetUserHuggingfaceAccountResponses = {
   /**
@@ -10483,6 +10565,10 @@ export type DeleteUserExternalCredentialData = {
      * Storage Action
      */
     storage_action?: "transfer" | "orphan" | null
+    /**
+     * Label
+     */
+    label?: string
   }
   url: "/user/external-credentials/{provider}"
 }
@@ -17743,7 +17829,12 @@ export type GetUserServiceStorageData = {
      */
     provider: "huggingface" | "box"
   }
-  query?: never
+  query?: {
+    /**
+     * Label
+     */
+    label?: string
+  }
   url: "/user/{provider}/storage"
 }
 
@@ -17906,7 +17997,12 @@ export type PostProjectBoxFolderData = {
      */
     project_name: string
   }
-  query?: never
+  query?: {
+    /**
+     * Label
+     */
+    label?: string
+  }
   url: "/projects/{owner_name}/{project_name}/storage/box-folder"
 }
 

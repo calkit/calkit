@@ -39,6 +39,7 @@ from app.models import (
     User,
     UserCreate,
     UserDailyCount,
+    UserEmail,
     UserEmailVerification,
     UserExternalCredential,
     UserGitHubToken,
@@ -163,6 +164,9 @@ def check_email_allowed(email: str | None) -> None:
 
 def create_user(*, session: Session, user_create: UserCreate) -> User:
     check_email_allowed(user_create.email)
+    # E.g., signing in through GitHub with an address another user connected,
+    # which isn't treated as theirs, since accounts aren't linked by email
+    check_email_unclaimed(session, None, user_create.email)
     # A name they typed is checked; one derived from a GitHub handle or an
     # email address is cleaned up, since they never chose it and an address
     # like "a.b+c@x.com" would otherwise be refused a signup.
@@ -245,6 +249,11 @@ def update_user(
         end_sign_in_sessions(session=session, user=db_user)
     db_user.sqlmodel_update(user_data, update=extra_data)
     session.add(db_user)
+    # One of their other emails becoming their primary one isn't both
+    if "email" in user_data:
+        for other in db_user.emails:
+            if other.email == db_user.email.lower():
+                session.delete(other)
     session.commit()
     session.refresh(db_user)
     return db_user
@@ -1151,6 +1160,87 @@ def check_external_account_unclaimed(
         )
 
 
+def get_connection_label(
+    session: Session, user: User, provider: str, provider_account_id: str
+) -> str:
+    """Get the label to save a connection to an account on a service under.
+
+    That's the one it's already under, "default" for a user's first, or
+    else the account's ID, since someone can connect several accounts on a
+    service, e.g., Box.
+    """
+    credentials = session.exec(
+        select(UserExternalCredential).where(
+            UserExternalCredential.user_id == user.id,
+            UserExternalCredential.provider == provider,
+        )
+    ).all()
+    for credential in credentials:
+        account_id = credential.provider_account_id or ""
+        if account_id.lower() == provider_account_id.lower():
+            return credential.label
+    if not any(c.label == "default" for c in credentials):
+        return "default"
+    return provider_account_id
+
+
+def get_email_owner(session: Session, email: str) -> User | None:
+    """Get the user an email belongs to, as their primary email or another
+    of theirs.
+    """
+    user = get_user_by_email(session=session, email=email)
+    if user is not None:
+        return user
+    other = session.exec(
+        select(UserEmail).where(UserEmail.email == email.lower())
+    ).first()
+    return other.user if other is not None else None
+
+
+def check_email_unclaimed(
+    session: Session, user: User | None, email: str
+) -> None:
+    """Refuse an email that belongs to another user, e.g., when connecting a
+    Box account whose login is theirs, since accounts aren't linked or
+    merged by email.
+    """
+    owner = get_email_owner(session, email)
+    if owner is not None and (user is None or owner.id != user.id):
+        raise HTTPException(409, f"{email} belongs to another Calkit account")
+
+
+def save_connected_email(
+    session: Session,
+    user: User,
+    credential: UserExternalCredential,
+    email: str,
+) -> None:
+    """Record an email a connected account vouched for, which goes with the
+    connection, unless it's the user's primary email.
+    """
+    email = email.lower()
+    for old in session.exec(
+        select(UserEmail).where(
+            UserEmail.credential_id == credential.id, UserEmail.email != email
+        )
+    ).all():
+        session.delete(old)
+    if email != user.email.lower():
+        row = session.exec(
+            select(UserEmail).where(UserEmail.email == email)
+        ).first()
+        if row is None:
+            row = UserEmail(user_id=user.id, email=email, source="")
+        if row.user_id != user.id:
+            raise HTTPException(
+                409, f"{email} belongs to another Calkit account"
+            )
+        row.source = credential.provider
+        row.credential_id = credential.id
+        session.add(row)
+    session.commit()
+
+
 HF_TOKEN_URL = "https://huggingface.co/oauth/token"
 
 
@@ -1159,20 +1249,18 @@ def save_huggingface_token(
     user: User,
     hf_resp: dict[str, Any],
     new_login: bool = False,
+    label: str = "default",
 ) -> None:
     """Save a Hugging Face OAuth token response, keeping the existing refresh
     token and account details when the response doesn't include them.
 
-    A new login can't replace the HF account storage is using.
+    A refresh is saved to the connection under ``label``, and a new login to
+    the user's connection to that HF account, which is a new one if they
+    have others.
     """
     existing = get_external_credential(
-        session=session, user=user, provider="huggingface"
+        session=session, user=user, provider="huggingface", label=label
     )
-    refresh_token = hf_resp.get("refresh_token")
-    if not refresh_token and existing is not None:
-        refresh_token = json.loads(
-            decrypt_secret(existing.secret_payload)
-        ).get("refresh_token")
     # The username and orgs are what storage can be created under
     headers = {"Authorization": f"Bearer {hf_resp['access_token']}"}
     try:
@@ -1201,25 +1289,23 @@ def save_huggingface_token(
         check_external_account_unclaimed(
             session, user, "huggingface", str(username)
         )
-    if (
-        new_login
-        and existing is not None
-        and existing.provider_account_id
-        and str(username).lower() != existing.provider_account_id.lower()
-    ):
-        from app.storage import get_credential_resources
-
-        if get_credential_resources(session, user.id, provider="huggingface"):
-            raise HTTPException(
-                409,
-                "Storage uses Hugging Face account "
-                f"{existing.provider_account_id}; disconnect first",
-            )
+        label = get_connection_label(
+            session, user, "huggingface", str(username)
+        )
+        existing = get_external_credential(
+            session=session, user=user, provider="huggingface", label=label
+        )
+    refresh_token = hf_resp.get("refresh_token")
+    if not refresh_token and existing is not None:
+        refresh_token = json.loads(
+            decrypt_secret(existing.secret_payload)
+        ).get("refresh_token")
     expires_in = hf_resp.get("expires_in")
     save_external_credential(
         session=session,
         user=user,
         provider="huggingface",
+        label=label,
         secret_payload=json.dumps(
             {
                 "access_token": hf_resp["access_token"],
@@ -1238,8 +1324,13 @@ def save_huggingface_token(
     )
 
 
-def get_huggingface_token(session: Session, user: User) -> str:
-    """Get a user's Hugging Face access token, refreshing it if needed."""
+def get_huggingface_token(
+    session: Session, user: User, label: str = "default"
+) -> str:
+    """Get a user's Hugging Face access token, refreshing it if needed.
+
+    ``label`` says which of their HF connections, if they have several.
+    """
 
     def get_needs_refresh(credential: UserExternalCredential) -> bool:
         return (
@@ -1248,7 +1339,7 @@ def get_huggingface_token(session: Session, user: User) -> str:
         )
 
     credential = get_external_credential(
-        session=session, user=user, provider="huggingface"
+        session=session, user=user, provider="huggingface", label=label
     )
     if credential is None:
         raise HTTPException(
@@ -1310,7 +1401,9 @@ def get_huggingface_token(session: Session, user: User) -> str:
             "Please reconnect your account.",
         )
     hf_resp = resp.json()
-    save_huggingface_token(session=session, user=user, hf_resp=hf_resp)
+    save_huggingface_token(
+        session=session, user=user, hf_resp=hf_resp, label=label
+    )
     return str(hf_resp["access_token"])
 
 
@@ -1325,14 +1418,18 @@ def save_box_token(
     user: User,
     box_resp: dict[str, Any],
     new_login: bool = False,
+    label: str = "default",
 ) -> None:
     """Save a Box OAuth token response.
 
     Box refresh tokens are single-use, so each response replaces the last.
-    A new login can't replace the Box account storage is using.
+    A refresh is saved to the connection under ``label``, and a new login to
+    the user's connection to that Box account, which is a new one if they
+    have others. A new login's email is recorded as one of the user's, so
+    it can't be another user's.
     """
     existing = get_external_credential(
-        session=session, user=user, provider="box"
+        session=session, user=user, provider="box", label=label
     )
     headers = {"Authorization": f"Bearer {box_resp['access_token']}"}
     try:
@@ -1360,27 +1457,18 @@ def save_box_token(
         metadata = existing.metadata_json or {}
     else:
         raise HTTPException(502, "Failed to get Box account info")
+    login = metadata.get("login")
     if new_login:
         check_external_account_unclaimed(session, user, "box", account_id)
-    if (
-        new_login
-        and existing is not None
-        and existing.provider_account_id
-        and account_id != existing.provider_account_id
-    ):
-        from app.storage import get_credential_resources
-
-        if get_credential_resources(session, user.id, provider="box"):
-            login = (existing.metadata_json or {}).get("login")
-            raise HTTPException(
-                409,
-                f"Storage uses Box account {login}; disconnect first",
-            )
+        if login:
+            check_email_unclaimed(session, user, login)
+        label = get_connection_label(session, user, "box", account_id)
     now = utcnow()
-    save_external_credential(
+    credential = save_external_credential(
         session=session,
         user=user,
         provider="box",
+        label=label,
         secret_payload=json.dumps(
             {
                 "access_token": box_resp["access_token"],
@@ -1393,11 +1481,17 @@ def save_box_token(
         expires=now + timedelta(seconds=int(box_resp["expires_in"])),
         refresh_token_expires=now + BOX_REFRESH_TOKEN_LIFETIME,
     )
+    if new_login and login:
+        save_connected_email(session, user, credential, login)
 
 
-def get_box_token(session: Session, user: User, force: bool = False) -> str:
+def get_box_token(
+    session: Session, user: User, force: bool = False, label: str = "default"
+) -> str:
     """Get a user's Box access token, refreshing it if needed, or always
     with ``force``, e.g., to keep an unused connection from lapsing.
+
+    ``label`` says which of their Box connections, if they have several.
     """
 
     def get_needs_refresh(credential: UserExternalCredential) -> bool:
@@ -1407,7 +1501,7 @@ def get_box_token(session: Session, user: User, force: bool = False) -> str:
         )
 
     credential = get_external_credential(
-        session=session, user=user, provider="box"
+        session=session, user=user, provider="box", label=label
     )
     if credential is None:
         raise HTTPException(401, "User needs to authenticate with Box")
@@ -1471,7 +1565,7 @@ def get_box_token(session: Session, user: User, force: bool = False) -> str:
         app.mixpanel.user_connection_lapsed(user, "box")
         raise HTTPException(401, "Box connection lapsed; reconnect Box")
     box_resp = resp.json()
-    save_box_token(session=session, user=user, box_resp=box_resp)
+    save_box_token(session=session, user=user, box_resp=box_resp, label=label)
     return str(box_resp["access_token"])
 
 
@@ -1493,7 +1587,12 @@ def refresh_idle_box_tokens() -> int:
         ).all()
         for credential in credentials:
             try:
-                get_box_token(session, credential.user, force=True)
+                get_box_token(
+                    session,
+                    credential.user,
+                    force=True,
+                    label=credential.label,
+                )
                 n_refreshed += 1
             except HTTPException as e:
                 logger.warning(

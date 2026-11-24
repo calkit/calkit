@@ -29,6 +29,13 @@ def test_storage_resources_and_project_storage(
     # Other users can't see the account's storage
     response = client.get(base, headers=other_headers)
     assert response.status_code == 403
+    hf_credential = users.save_external_credential(
+        session=db,
+        user=owner,
+        provider="huggingface",
+        secret_payload="{}",
+        provider_account_id="someone",
+    )
     # Storage shared by the account's projects, e.g., S3 later, which can't
     # be added through the API yet
     for name in ("hf", "unused"):
@@ -39,6 +46,7 @@ def test_storage_resources_and_project_storage(
                 kind="hf-bucket",
                 bucket="someone/calkit",
                 credential_user_id=owner.id,
+                credential_id=hf_credential.id,
             )
         )
     db.commit()
@@ -311,7 +319,12 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
         (r["kind"], r["bucket"], r["projects"]) for r in response.json()
     ] == [("box-folder", "123", [f"{user.account.name}/{project.name}"])]
     response = client.get("/user/huggingface/storage", headers=headers)
-    assert [r["kind"] for r in response.json()] == ["hf-bucket"]
+    assert response.json() == []
+    # Nor through another Box connection
+    response = client.get(
+        "/user/box/storage", headers=headers, params={"label": "other"}
+    )
+    assert response.json() == []
     assert (
         client.get("/user/zenodo/storage", headers=headers).status_code == 422
     )

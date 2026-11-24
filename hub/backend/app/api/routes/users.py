@@ -4,6 +4,7 @@ import logging
 import secrets
 import urllib.parse
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Sequence
 
@@ -59,6 +60,7 @@ from app.models import (
     User,
     UserAdminPublic,
     UserCreate,
+    UserExternalCredential,
     UserOnboardingFlag,
     UserPublic,
     UserRegister,
@@ -188,7 +190,7 @@ def read_users(
 @router.post("/users", dependencies=[Depends(get_current_active_superuser)])
 def create_user(*, session: SessionDep, user_in: UserCreate) -> UserPublic:
     """Create new user."""
-    user = users.get_user_by_email(session=session, email=user_in.email)
+    user = users.get_email_owner(session=session, email=user_in.email)
     if user:
         raise HTTPException(
             status_code=400,
@@ -226,7 +228,7 @@ def update_current_user(
         current_user.email = user_in.email
     elif user_in.email:
         signed_in = get_current_session(session, token)
-        existing_user = users.get_user_by_email(
+        existing_user = users.get_email_owner(
             session=session, email=user_in.email
         )
         if existing_user and existing_user.id != current_user.id:
@@ -400,7 +402,7 @@ def register_user(session: SessionDep, user_in: UserRegister) -> UserPublic:
     Such users can collaborate on projects (e.g. via invite links) but cannot
     own projects until git hosting is decoupled from GitHub.
     """
-    user = users.get_user_by_email(session=session, email=user_in.email)
+    user = users.get_email_owner(session=session, email=user_in.email)
     if user:
         raise HTTPException(
             status_code=400,
@@ -476,7 +478,7 @@ def update_user(
             detail="A user with this ID does not exist in the system",
         )
     if user_in.email:
-        existing_user = users.get_user_by_email(
+        existing_user = users.get_email_owner(
             session=session, email=user_in.email
         )
         if existing_user and existing_user.id != user_id:
@@ -918,6 +920,15 @@ def get_user_github_app_installations(
     return GitHubInstallations.model_validate(resp_json)
 
 
+class Connection(BaseModel):
+    provider: str
+    # Which of the user's connections to the service, for choosing one
+    label: str
+    name: str | None
+    # False if it needs connecting again, e.g., after going unused too long
+    active: bool
+
+
 class ConnectedAccounts(BaseModel):
     github: bool
     zenodo: bool
@@ -933,10 +944,37 @@ class ConnectedAccounts(BaseModel):
     # Which account each connected service is, where known, e.g., a username
     # or email, by provider
     account_names: dict[str, str] = {}
+    # Each connection to a service someone can connect several accounts on,
+    # e.g., Box
+    connections: list[Connection] = []
     # Whether a Calkit CLI has ever authenticated as this user, which is the
     # only reliable way to know the CLI is installed: the local server it
     # would otherwise be detected by is usually not running.
     cli: bool = False
+
+
+# Services someone can connect several accounts on, with how to check one
+MULTI_ACCOUNT_PROVIDERS: dict[str, Callable[..., str]] = {
+    "huggingface": users.get_huggingface_token,
+    "box": users.get_box_token,
+}
+
+
+class UserEmailPublic(BaseModel):
+    email: str
+    # The connected account it came from, e.g., "box"
+    source: str
+
+
+@router.get("/user/emails")
+def get_user_emails(current_user: CurrentUser) -> list[UserEmailPublic]:
+    """Get the current user's emails besides their primary one, e.g., ones
+    connected accounts vouched for.
+    """
+    return [
+        UserEmailPublic(email=e.email, source=e.source)
+        for e in sorted(current_user.emails, key=lambda e: e.email)
+    ]
 
 
 @router.get("/user/connected-accounts")
@@ -1001,39 +1039,55 @@ def get_user_connected_accounts(
         ).one()
         > 0
     )
-    huggingface_connected = False
-    try:
-        users.get_huggingface_token(session=session, user=current_user)
-        huggingface_connected = True
-    except HTTPException as e:
-        # An outage doesn't mean the account was disconnected
-        huggingface_connected = e.status_code == 503
-    box_connected = False
-    try:
-        users.get_box_token(session=session, user=current_user)
-        box_connected = True
-    except HTTPException as e:
-        box_connected = e.status_code == 503
+
+    def get_account_name(credential: UserExternalCredential) -> str | None:
+        metadata = credential.metadata_json or {}
+        name = metadata.get("login") or metadata.get("username")
+        name = name or credential.provider_account_id
+        # Since one may be at a university, for example
+        if name and metadata.get("enterprise"):
+            name = f"{name} ({metadata['enterprise']})"
+        return str(name) if name else None
+
+    connections = []
+    for credential in current_user.external_credentials:
+        get_token = MULTI_ACCOUNT_PROVIDERS.get(credential.provider)
+        if get_token is None:
+            continue
+        try:
+            get_token(
+                session=session, user=current_user, label=credential.label
+            )
+            active = True
+        except HTTPException as e:
+            # An outage doesn't mean the account was disconnected
+            active = e.status_code == 503
+        connections.append(
+            Connection(
+                provider=credential.provider,
+                label=credential.label,
+                name=get_account_name(credential),
+                active=active,
+            )
+        )
+    connections.sort(key=lambda c: (c.provider, c.label != "default", c.name))
+    huggingface_connected = any(
+        c.active for c in connections if c.provider == "huggingface"
+    )
+    box_connected = any(c.active for c in connections if c.provider == "box")
     account_names = {}
     if github_connected and current_user.github_username:
         account_names["github"] = current_user.github_username
     for provider, connected in (
         ("google", google_connected),
-        ("huggingface", huggingface_connected),
-        ("box", box_connected),
         ("zotero", zotero_cred is not None),
     ):
-        credential = current_user.get_external_credential(provider=provider)
-        if not connected or credential is None:
+        single = current_user.get_external_credential(provider=provider)
+        if not connected or single is None:
             continue
-        metadata = credential.metadata_json or {}
-        name = metadata.get("login") or metadata.get("username")
-        name = name or credential.provider_account_id
-        # Since one may be at a university, for example
-        if metadata.get("enterprise"):
-            name = f"{name} ({metadata['enterprise']})"
+        name = get_account_name(single)
         if name:
-            account_names[provider] = str(name)
+            account_names[provider] = name
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
@@ -1045,6 +1099,7 @@ def get_user_connected_accounts(
         huggingface=huggingface_connected,
         box=box_connected,
         account_names=account_names,
+        connections=connections,
         cli=cli_connected,
     )
 
@@ -1210,11 +1265,16 @@ class HuggingFaceAccount(BaseModel):
 
 @router.get("/user/huggingface-account")
 def get_user_huggingface_account(
-    session: SessionDep, current_user: CurrentUser
+    session: SessionDep, current_user: CurrentUser, label: str = "default"
 ) -> HuggingFaceAccount:
+    """Get one of the user's HF connections, by its label."""
     # Validates, and refreshes if needed
-    users.get_huggingface_token(session=session, user=current_user)
-    credential = current_user.get_external_credential(provider="huggingface")
+    users.get_huggingface_token(
+        session=session, user=current_user, label=label
+    )
+    credential = current_user.get_external_credential(
+        provider="huggingface", label=label
+    )
     assert credential is not None
     return HuggingFaceAccount(
         username=credential.provider_account_id,
@@ -1537,8 +1597,12 @@ def delete_user_external_credential(
     current_user: CurrentUser,
     provider: str,
     storage_action: Literal["transfer", "orphan"] | None = None,
+    label: str = "default",
 ) -> Message:
     """Disconnect an external account by deleting its credential.
+
+    ``label`` says which, for a service someone can connect several accounts
+    on, e.g., Box.
 
     Storage reached with the account, e.g., HF buckets, would become
     unreachable, so if there is any, ``storage_action`` says what to do with
@@ -1551,8 +1615,13 @@ def delete_user_external_credential(
         raise HTTPException(
             403, "Cannot disconnect GitHub as it is your login method"
         )
-    resources = app.storage.get_credential_resources(
-        session, current_user.id, provider=provider
+    credential = users.get_external_credential(
+        session=session, user=current_user, provider=provider, label=label
+    )
+    resources = (
+        app.storage.get_credential_resources(session, credential.id)
+        if credential is not None
+        else []
     )
     service_name = app.storage.STORAGE_PROVIDER_NAMES.get(provider)
     if (
@@ -1607,7 +1676,7 @@ def delete_user_external_credential(
         # copying its objects, with reads falling back to the service until
         # then
         if not app.tasks.enqueue_storage_transfer(
-            str(current_user.id), provider
+            str(current_user.id), provider, label
         ):
             raise HTTPException(503, "Transfers unavailable")
         return Message(
@@ -1616,12 +1685,6 @@ def delete_user_external_credential(
         )
     for resource in resources:
         session.delete(resource)
-    credential = users.get_external_credential(
-        session=session,
-        user=current_user,
-        provider=provider,
-        label="default",
-    )
     if credential:
         if provider == "box":
             users.revoke_box_token(credential)

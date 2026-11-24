@@ -57,14 +57,6 @@ function BoxAuth() {
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
-      // A different Box user needs a choice about the old one's storage
-      if (err.response?.status === 409) {
-        navigate({
-          to: "/settings",
-          search: { tab: "connected-accounts", disconnect: "box" },
-        })
-        return
-      }
       setTimeout(goToSettings, 2000)
     },
   })

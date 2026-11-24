@@ -266,10 +266,12 @@ import type {
   GetTemplatesErrors,
   GetTemplatesResponses,
   GetUserConnectedAccountsResponses,
+  GetUserEmailsResponses,
   GetUserGithubAppInstallationsResponses,
   GetUserGithubReposErrors,
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
+  GetUserHuggingfaceAccountErrors,
   GetUserHuggingfaceAccountResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
@@ -2008,6 +2010,27 @@ export class UsersService {
   }
 
   /**
+   * Get User Emails
+   *
+   * Get the current user's emails besides their primary one, e.g., ones
+   * connected accounts vouched for.
+   */
+  public static getUserEmails<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserEmailsResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserEmailsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/emails",
+      ...options,
+    })
+  }
+
+  /**
    * Get User Connected Accounts
    */
   public static getUserConnectedAccounts<ThrowOnError extends boolean = true>(
@@ -2176,19 +2199,33 @@ export class UsersService {
 
   /**
    * Get User Huggingface Account
+   *
+   * Get one of the user's HF connections, by its label.
    */
   public static getUserHuggingfaceAccount<ThrowOnError extends boolean = true>(
+    parameters?: {
+      label?: string
+    },
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<GetUserHuggingfaceAccountResponses, unknown, ThrowOnError> {
+  ): RequestResult<
+    GetUserHuggingfaceAccountResponses,
+    GetUserHuggingfaceAccountErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "query", key: "label" }] }],
+    )
     return (options?.client ?? client).get<
       GetUserHuggingfaceAccountResponses,
-      unknown,
+      GetUserHuggingfaceAccountErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/huggingface-account",
       ...options,
+      ...params,
     })
   }
 
@@ -2522,6 +2559,9 @@ export class UsersService {
    *
    * Disconnect an external account by deleting its credential.
    *
+   * ``label`` says which, for a service someone can connect several accounts
+   * on, e.g., Box.
+   *
    * Storage reached with the account, e.g., HF buckets, would become
    * unreachable, so if there is any, ``storage_action`` says what to do with
    * it: ``transfer`` its objects to the hub's own storage first, which
@@ -2535,6 +2575,7 @@ export class UsersService {
     parameters: {
       provider: string
       storage_action?: "transfer" | "orphan" | null
+      label?: string
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -2549,6 +2590,7 @@ export class UsersService {
           args: [
             { in: "path", key: "provider" },
             { in: "query", key: "storage_action" },
+            { in: "query", key: "label" },
           ],
         },
       ],
@@ -10632,12 +10674,13 @@ export class StorageService {
   /**
    * Get User Service Storage
    *
-   * Get the storage reached with the current user's account on a service,
-   * e.g., HF, which disconnecting it would make unreachable.
+   * Get the storage reached with one of the current user's connections to
+   * a service, e.g., HF, which disconnecting it would make unreachable.
    */
   public static getUserServiceStorage<ThrowOnError extends boolean = true>(
     parameters: {
       provider: "huggingface" | "box"
+      label?: string
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -10647,7 +10690,14 @@ export class StorageService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "provider" }] }],
+      [
+        {
+          args: [
+            { in: "path", key: "provider" },
+            { in: "query", key: "label" },
+          ],
+        },
+      ],
     )
     return (options?.client ?? client).get<
       GetUserServiceStorageResponses,
@@ -10817,7 +10867,8 @@ export class StorageService {
   /**
    * Post Project Box Folder
    *
-   * Send a project's new DVC objects to the current user's Box.
+   * Send a project's new DVC objects to the current user's Box, through
+   * the connection under ``label``, if they've connected several.
    *
    * They go in the ``Calkit`` folder at the root of the user's Box, which is
    * created if it isn't there, under ``{owner}/{project}``. The folder is
@@ -10828,6 +10879,7 @@ export class StorageService {
     parameters: {
       owner_name: string
       project_name: string
+      label?: string
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -10842,6 +10894,7 @@ export class StorageService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
+            { in: "query", key: "label" },
           ],
         },
       ],

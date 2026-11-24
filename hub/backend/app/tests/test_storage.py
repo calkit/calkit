@@ -233,7 +233,7 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
     from app.tests import create_random_user
 
     user = create_random_user(db)
-    users.save_external_credential(
+    credential = users.save_external_credential(
         session=db,
         user=user,
         provider="huggingface",
@@ -255,6 +255,7 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
         kind="hf-bucket",
         bucket=f"someone/{project.name}",
         credential_user_id=user.id,
+        credential_id=credential.id,
     )
     db.add(resource)
     db.commit()
@@ -393,8 +394,9 @@ def test_box_storage(db: Session) -> None:
     box = FakeBox()
     calkit_folder = box.add("folder", "Calkit", "0")["id"]
     user = create_random_user(db)
+    credentials = {}
     for provider in ("box", "huggingface"):
-        users.save_external_credential(
+        credentials[provider] = users.save_external_credential(
             session=db,
             user=user,
             provider=provider,
@@ -413,13 +415,17 @@ def test_box_storage(db: Session) -> None:
     db.add(project)
     db.commit()
     resources = {}
-    for kind, bucket in (("box-folder", calkit_folder), ("hf-bucket", "a/b")):
+    for kind, bucket, provider in (
+        ("box-folder", calkit_folder, "box"),
+        ("hf-bucket", "a/b", "huggingface"),
+    ):
         resources[kind] = StorageResource(
             owner_account_id=user.account.id,
             name=kind,
             kind=kind,
             bucket=bucket,
             credential_user_id=user.id,
+            credential_id=credentials[provider].id,
         )
         db.add(resources[kind])
     db.commit()
@@ -433,14 +439,16 @@ def test_box_storage(db: Session) -> None:
     db.add(project)
     db.commit()
     db.refresh(project)
-    # Each provider's connection only reaches its own storage
+    # Each connection only reaches its own storage
     for provider, kind in (
         ("box", "box-folder"),
         ("huggingface", "hf-bucket"),
     ):
         assert [
             r.kind
-            for r in storage.get_credential_resources(db, user.id, provider)
+            for r in storage.get_credential_resources(
+                db, credentials[provider].id
+            )
         ] == [kind]
     owner = user.account.name
     downscopes = []

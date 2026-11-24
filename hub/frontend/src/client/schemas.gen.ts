@@ -1064,6 +1064,14 @@ export const ConnectedAccountsSchema = {
       title: "Account Names",
       default: {},
     },
+    connections: {
+      items: {
+        $ref: "#/components/schemas/Connection",
+      },
+      type: "array",
+      title: "Connections",
+      default: [],
+    },
     cli: {
       type: "boolean",
       title: "Cli",
@@ -1073,6 +1081,37 @@ export const ConnectedAccountsSchema = {
   type: "object",
   required: ["github", "zenodo", "overleaf", "google", "zotero"],
   title: "ConnectedAccounts",
+} as const
+
+export const ConnectionSchema = {
+  properties: {
+    provider: {
+      type: "string",
+      title: "Provider",
+    },
+    label: {
+      type: "string",
+      title: "Label",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    active: {
+      type: "boolean",
+      title: "Active",
+    },
+  },
+  type: "object",
+  required: ["provider", "label", "name", "active"],
+  title: "Connection",
 } as const
 
 export const ContentPatchSchema = {
@@ -7624,6 +7663,11 @@ export const ProjectHfBucketPostSchema = {
       type: "string",
       title: "Bucket",
     },
+    label: {
+      type: "string",
+      title: "Label",
+      default: "default",
+    },
   },
   type: "object",
   required: ["bucket"],
@@ -12546,6 +12590,17 @@ export const StorageResourcePublicSchema = {
       type: "string",
       title: "Connected By",
     },
+    service_account: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Service Account",
+    },
   },
   type: "object",
   required: [
@@ -13427,6 +13482,22 @@ export const UserCreateSchema = {
   type: "object",
   required: ["email", "password"],
   title: "UserCreate",
+} as const
+
+export const UserEmailPublicSchema = {
+  properties: {
+    email: {
+      type: "string",
+      title: "Email",
+    },
+    source: {
+      type: "string",
+      title: "Source",
+    },
+  },
+  type: "object",
+  required: ["email", "source"],
+  title: "UserEmailPublic",
 } as const
 
 export const UserPublicSchema = {

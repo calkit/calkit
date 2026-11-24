@@ -51,8 +51,10 @@ const tabSearchSchema = z.object({
   tab: z.string().catch(""),
   verify: z.boolean().optional().catch(undefined),
   verify_2fa: z.boolean().optional().catch(undefined),
-  // A connected account being disconnected, e.g., "huggingface"
+  // A connected account being disconnected, e.g., "huggingface", and which
+  // one, for a service someone can connect several accounts on
   disconnect: z.string().optional().catch(undefined),
+  disconnect_label: z.string().optional().catch(undefined),
 })
 
 export const Route = createFileRoute("/_layout/settings")({

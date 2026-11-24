@@ -9015,7 +9015,8 @@ def post_project_collaborator_by_email(
         current_user=current_user,
         min_access_level="admin",
     )
-    user = users.get_user_by_email(session=session, email=req.email)
+    # Any of their emails, e.g., a university one from a connected account
+    user = users.get_email_owner(session=session, email=req.email)
     if user is None:
         raise HTTPException(
             404,

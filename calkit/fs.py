@@ -797,7 +797,15 @@ class CalkitFileSystem(AbstractFileSystem):
     def _set_xet_access(
         self, owner: str, project: str, operation: str, access: dict[str, Any]
     ) -> None:
-        bucket = access.get("bucket_id") if operation == "get" else None
+        # It's only installed on architectures with wheels
+        try:
+            import hf_xet  # noqa: F401
+        except ImportError as e:
+            raise RuntimeError(
+                "Hugging Face storage needs hf-xet, which isn't available "
+                "on this platform"
+            ) from e
+        bucket = access.get("bucket") if operation == "get" else None
         self._xet_access[(owner, project, operation, bucket)] = access
         self._xet_projects.add((owner, project))
 
@@ -946,7 +954,7 @@ class CalkitFileSystem(AbstractFileSystem):
                     "operation": "register",
                     "paths": list(xet_hashes),
                     "xet_hashes": xet_hashes,
-                    "bucket_id": access.get("bucket_id"),
+                    "bucket": access.get("bucket"),
                 },
                 base_url=self.base_url,
             )
@@ -1270,7 +1278,7 @@ class CalkitFileSystem(AbstractFileSystem):
                         info = self._normalize_info(file_path, info_payload)
                         if isinstance(info_payload.get("xet_hash"), str):
                             self._xet_objects[(owner, project, file_path)] = (
-                                info_payload.get("bucket_id"),
+                                info_payload.get("bucket"),
                                 info_payload["xet_hash"],
                                 info["size"],
                             )

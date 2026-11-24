@@ -100,9 +100,9 @@ class XetAccess(BaseModel):
 
     kind: Literal["hf-xet"] = "hf-xet"
     operation: Literal["upload", "download"]
-    # HF's ID of the bucket the token is for, i.e., ``{namespace}/{name}``,
-    # since a project's objects can be in more than one
-    bucket_id: str | None = None
+    # The bucket the token is for, as ``{namespace}/{name}``, since a
+    # project's objects can be in more than one
+    bucket: str | None = None
     # Xet's content-addressable storage (CAS) service
     cas_url: str
     access_token: str
@@ -363,7 +363,7 @@ def post_project_fs_op(
                 backend=st.backend,
                 access=XetAccess(
                     operation="download",
-                    bucket_id=st.bucket,
+                    bucket=st.bucket,
                     cas_url=token["casUrl"],
                     access_token=token["accessToken"],
                     expires_at_unixts=token["exp"],
@@ -404,7 +404,7 @@ def post_project_fs_op(
             | PresignedUrlAccess
         ) = XetAccess(
             operation="upload",
-            bucket_id=target.bucket,
+            bucket=target.bucket,
             cas_url=token["casUrl"],
             access_token=token["accessToken"],
             expires_at_unixts=token["exp"],
@@ -488,8 +488,9 @@ class FsOpBatchRequest(BaseModel):
         dict[str, Annotated[str, StringConstraints(pattern=XET_HASH_RE)]]
         | None
     ) = None
-    # For register, the bucket the content was uploaded to
-    bucket_id: str | None = None
+    # For register, the bucket the content was uploaded to, as
+    # ``{namespace}/{name}``
+    bucket: str | None = None
 
 
 class FsOpBatchResult(BaseModel):
@@ -571,7 +572,7 @@ def post_project_fs_batch_op(
                 # So clients can download from HF without asking per file
                 if info_dict.get("xet_hash") and found.bucket is not None:
                     path_result["info"]["xet_hash"] = info_dict["xet_hash"]
-                    path_result["info"]["bucket_id"] = found.bucket
+                    path_result["info"]["bucket"] = found.bucket
         # Handle content (if requested via include)
         if "content" in include and info_dict is not None:
             path_result["content_base64"] = None
@@ -633,7 +634,7 @@ def post_project_fs_batch_op(
         assert target.bucket is not None
         # Content uploaded to a bucket the project no longer uses can't be
         # added to the new one
-        if req.bucket_id is not None and req.bucket_id != target.bucket:
+        if req.bucket is not None and req.bucket != target.bucket:
             raise HTTPException(409, "Project storage changed; push again")
         xet_hashes = req.xet_hashes or {}
         if set(paths) != set(xet_hashes):

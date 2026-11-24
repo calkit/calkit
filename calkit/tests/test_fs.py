@@ -482,7 +482,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
     )
     access = {
         "kind": "hf-xet",
-        "bucket_id": "someone/one",
+        "bucket": "someone/one",
         "cas_url": "https://cas.example.com",
         "access_token": "xet_token",
         "expires_at_unixts": 2_000_000_000,
@@ -492,6 +492,19 @@ def test_xet_transfers(tmp_path: Path) -> None:
     )
     local = tmp_path / "upload.bin"
     local.write_bytes(content)
+    # Platforms without hf-xet get a clear error before anything is sent
+    with (
+        patch.dict("sys.modules", {"hf_xet": None}),
+        patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value={"access": access | {"operation": "upload"}},
+        ),
+        patch.object(ckfs.calkit.hub, "post") as post,
+        pytest.raises(RuntimeError, match="hf-xet"),
+    ):
+        fs.put_file(str(local), f"ck://owner/project/{obj_path}")
+    post.assert_not_called()
     # Uploading a file registers its Xet hash at the same path
     with (
         patch.dict("sys.modules", {"hf_xet": fake_xet}),
@@ -509,7 +522,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
             "operation": "register",
             "paths": [obj_path],
             "xet_hashes": {obj_path: "xethash"},
-            "bucket_id": "someone/one",
+            "bucket": "someone/one",
         }
         assert stored["xethash"] == content
         # The access covers the whole bucket, so the next upload reuses it
@@ -638,7 +651,7 @@ def test_xet_transfers(tmp_path: Path) -> None:
         "results": {
             obj_path: {
                 "info": {"name": obj_path, "size": len(content)}
-                | {"xet_hash": "xethash", "bucket_id": "someone/one"}
+                | {"xet_hash": "xethash", "bucket": "someone/one"}
             }
         },
     }
@@ -663,9 +676,9 @@ def test_xet_transfers(tmp_path: Path) -> None:
     stored["otherhash"] = other
     batch["results"][other_path] = {
         "info": {"name": other_path, "size": len(other)}
-        | {"xet_hash": "otherhash", "bucket_id": "someone/two"}
+        | {"xet_hash": "otherhash", "bucket": "someone/two"}
     }
-    old_access = access | {"bucket_id": "someone/two", "access_token": "old"}
+    old_access = access | {"bucket": "someone/two", "access_token": "old"}
     download_tokens.clear()
     with (
         patch.dict("sys.modules", {"hf_xet": fake_xet}),

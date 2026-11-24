@@ -1823,9 +1823,9 @@ export type FsOpBatchRequest = {
     [key: string]: string
   } | null
   /**
-   * Bucket Id
+   * Bucket
    */
-  bucket_id?: string | null
+  bucket?: string | null
 }
 
 /**
@@ -8133,9 +8133,9 @@ export type XetAccess = {
    */
   operation: "upload" | "download"
   /**
-   * Bucket Id
+   * Bucket
    */
-  bucket_id?: string | null
+  bucket?: string | null
   /**
    * Cas Url
    */

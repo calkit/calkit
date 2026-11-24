@@ -3172,7 +3172,7 @@ export const FsOpBatchRequestSchema = {
       ],
       title: "Xet Hashes",
     },
-    bucket_id: {
+    bucket: {
       anyOf: [
         {
           type: "string",
@@ -3181,7 +3181,7 @@ export const FsOpBatchRequestSchema = {
           type: "null",
         },
       ],
-      title: "Bucket Id",
+      title: "Bucket",
     },
   },
   type: "object",
@@ -14264,7 +14264,7 @@ export const XetAccessSchema = {
       enum: ["upload", "download"],
       title: "Operation",
     },
-    bucket_id: {
+    bucket: {
       anyOf: [
         {
           type: "string",
@@ -14273,7 +14273,7 @@ export const XetAccessSchema = {
           type: "null",
         },
       ],
-      title: "Bucket Id",
+      title: "Bucket",
     },
     cas_url: {
       type: "string",

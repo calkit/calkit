@@ -190,14 +190,21 @@ The copy skips objects already copied,
 so a failed transfer can be rerun,
 and its status is read from the job.
 
-Two other events would strand a connection's resources the same way:
+Removing an org member whose credential a connection uses would strand
+its resources the same way.
+This takes the same choice, from an org admin,
+and isn't built yet.
+Connecting a different external account on the same service adds a
+connection rather than replacing one,
+since each resource records which connection reaches it.
 
-- Removing an org member whose credential a connection uses.
-  This takes the same choice, from an org admin,
-  and isn't built yet.
-- Reconnecting a service as a different external account.
-  The hub refuses while resources use the old account,
-  so it has to be removed first.
+<!-- TODO: needs human review -->
+
+An external account can only be connected to one Calkit user,
+and an email one vouches for, e.g., a Box login,
+is recorded as one of its user's,
+so it can't be another user's primary email or another of theirs.
+Accounts are never linked or merged by email.
 
 ### Deleting storage
 

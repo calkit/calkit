@@ -64,19 +64,29 @@ function ConnectedAccounts() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const { disconnect } = useSearch({ from: "/_layout/settings" })
+  const { disconnect, disconnect_label } = useSearch({
+    from: "/_layout/settings",
+  })
+  const disconnectLabel = disconnect_label ?? "default"
   const navigate = useNavigate({ from: "/settings" })
-  const setDisconnect = (provider: string | undefined) =>
-    navigate({ search: (prev) => ({ ...prev, disconnect: provider }) })
+  const setDisconnect = (provider: string | undefined, label?: string) =>
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        disconnect: provider,
+        disconnect_label: label,
+      }),
+    })
   // A service whose storage disconnecting would strand, e.g., Hugging Face
   const storageProvider =
     disconnect && disconnect in STORAGE_SERVICES ? disconnect : undefined
   const serviceName = storageProvider ? STORAGE_SERVICES[storageProvider] : ""
   const serviceStorageQuery = useQuery({
-    queryKey: ["user", storageProvider, "storage"],
+    queryKey: ["user", storageProvider, "storage", disconnectLabel],
     queryFn: () =>
       StorageService.getUserServiceStorage({
         provider: storageProvider as "huggingface" | "box",
+        label: disconnectLabel,
       }).then((response) => response.data),
     enabled: storageProvider !== undefined,
   })
@@ -105,6 +115,7 @@ function ConnectedAccounts() {
     mutationFn: () =>
       UsersService.deleteUserExternalCredential({
         provider: storageProvider as string,
+        label: disconnectLabel,
         storage_action: serviceStorageQuery.data?.length ? storageAction : null,
       }).then((response) => response.data),
     onSuccess: (data) => {
@@ -187,6 +198,63 @@ function ConnectedAccounts() {
   const getAccountNameText = (provider: string) => {
     const name = connectedAccountsQuery.data?.account_names?.[provider]
     return name ? <Text color="ui.dim">{name}</Text> : null
+  }
+  // A service someone can connect several accounts on, each listed with its
+  // own disconnect
+  const renderConnections = (
+    provider: "huggingface" | "box",
+    name: string,
+    connect: () => void,
+    isConnecting: boolean,
+  ) => {
+    const connections =
+      connectedAccountsQuery.data?.connections?.filter(
+        (c) => c.provider === provider,
+      ) ?? []
+    const transfer =
+      transferQuery.data?.provider === provider ? transferQuery.data : null
+    return (
+      <Stack mt={4} spacing={1}>
+        <HStack>
+          <Text>{name}:</Text>
+          <Button
+            variant={connections.length ? "outline" : "primary"}
+            size="xs"
+            onClick={connect}
+            isLoading={isConnecting}
+          >
+            {connections.length ? "Connect another" : "Connect"}
+          </Button>
+        </HStack>
+        {connections.map((c) => (
+          <HStack key={c.label} pl={4}>
+            <Icon
+              as={c.active ? FaCheck : FaTimes}
+              color={c.active ? "green.500" : "ui.danger"}
+            />
+            <Text color="ui.dim">{c.name ?? c.label}</Text>
+            {!c.active && <Text color="ui.danger">Lapsed; connect again</Text>}
+            {transfer?.status === "running" ? (
+              <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
+            ) : (
+              <IconButton
+                aria-label={`Disconnect ${c.name ?? name}`}
+                icon={<FaTrash />}
+                size="xs"
+                variant="ghost"
+                colorScheme="red"
+                onClick={() => setDisconnect(provider, c.label)}
+              />
+            )}
+          </HStack>
+        ))}
+        {transfer?.status === "failed" && (
+          <Text color="ui.danger" pl={4}>
+            Transfer failed{transfer.error ? `: ${transfer.error}` : ""}
+          </Text>
+        )}
+      </Stack>
+    )
   }
   const ghInstallQuery = useQuery({
     queryFn: () =>
@@ -474,86 +542,18 @@ function ConnectedAccounts() {
               </Button>
             )}
           </HStack>
-          <HStack mt={4}>
-            <Text>Hugging Face:</Text>
-            {connectedAccountsQuery.data?.huggingface ? (
-              <>
-                <Icon as={FaCheck} color="green.500" />
-                {getAccountNameText("huggingface")}
-                {transferQuery.data?.provider === "huggingface" &&
-                transferQuery.data.status === "running" ? (
-                  <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
-                ) : (
-                  <IconButton
-                    aria-label="Disconnect Hugging Face"
-                    icon={<FaTrash />}
-                    size="xs"
-                    variant="ghost"
-                    colorScheme="red"
-                    onClick={() => setDisconnect("huggingface")}
-                  />
-                )}
-                {transferQuery.data?.provider === "huggingface" &&
-                  transferQuery.data?.status === "failed" && (
-                    <Text color="ui.danger">
-                      Transfer failed
-                      {transferQuery.data.error
-                        ? `: ${transferQuery.data.error}`
-                        : ""}
-                    </Text>
-                  )}
-              </>
-            ) : (
-              <Button
-                variant="primary"
-                size="xs"
-                onClick={() => connectHuggingFaceMutation.mutate()}
-                isLoading={connectHuggingFaceMutation.isPending}
-              >
-                Connect
-              </Button>
-            )}
-          </HStack>
-          <HStack mt={4}>
-            <Text>Box:</Text>
-            {connectedAccountsQuery.data?.box ? (
-              <>
-                <Icon as={FaCheck} color="green.500" />
-                {getAccountNameText("box")}
-                {transferQuery.data?.provider === "box" &&
-                transferQuery.data.status === "running" ? (
-                  <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
-                ) : (
-                  <IconButton
-                    aria-label="Disconnect Box"
-                    icon={<FaTrash />}
-                    size="xs"
-                    variant="ghost"
-                    colorScheme="red"
-                    onClick={() => setDisconnect("box")}
-                  />
-                )}
-                {transferQuery.data?.provider === "box" &&
-                  transferQuery.data.status === "failed" && (
-                    <Text color="ui.danger">
-                      Transfer failed
-                      {transferQuery.data.error
-                        ? `: ${transferQuery.data.error}`
-                        : ""}
-                    </Text>
-                  )}
-              </>
-            ) : (
-              <Button
-                variant="primary"
-                size="xs"
-                onClick={() => connectBoxMutation.mutate()}
-                isLoading={connectBoxMutation.isPending}
-              >
-                Connect
-              </Button>
-            )}
-          </HStack>
+          {renderConnections(
+            "huggingface",
+            "Hugging Face",
+            () => connectHuggingFaceMutation.mutate(),
+            connectHuggingFaceMutation.isPending,
+          )}
+          {renderConnections(
+            "box",
+            "Box",
+            () => connectBoxMutation.mutate(),
+            connectBoxMutation.isPending,
+          )}
           <UpdateOverleafToken
             isOpen={overleafTokenModal.isOpen}
             onClose={overleafTokenModal.onClose}

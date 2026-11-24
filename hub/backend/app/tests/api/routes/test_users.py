@@ -2253,18 +2253,19 @@ def test_huggingface_login_keeps_storage_account(
             ok=True, json=lambda: {"preferred_username": username, "orgs": []}
         )
 
-    # A different HF user can't take over storage, nor one that can't be
-    # identified
-    assert login(info("second")) == 409
+    # A different HF user is connected alongside, leaving the connection
+    # storage uses as it was, but not one that can't be identified
     assert login(SimpleNamespace(ok=False)) == 502
+    assert login(info("second")) == 200
     assert get_account() == ("first", "hf_old")
-    # The same one can log in again
+    second = users.get_external_credential(
+        session=db, user=user, provider="huggingface", label="second"
+    )
+    assert second is not None and second.provider_account_id == "second"
+    # The same one logging in again updates its own connection
     assert login(info("First")) == 200
     assert get_account()[1] == "hf_new"
-    # And with no storage, so can anyone
-    db.delete(db.get(StorageResource, resource.id))
-    db.commit()
-    # But not one connected to another Calkit account
+    # But one connected to another Calkit account can't be
     from app.tests import create_random_user
 
     users.save_external_credential(
@@ -2275,8 +2276,8 @@ def test_huggingface_login_keeps_storage_account(
         provider_account_id="Taken",
     )
     assert login(info("taken")) == 409
-    assert login(info("second")) == 200
-    assert get_account()[0] == "second"
+    db.refresh(resource)
+    assert resource.credential_user_id == user.id
 
 
 def test_disconnect_huggingface_with_storage(
@@ -2324,12 +2325,17 @@ def test_disconnect_huggingface_with_storage(
         )
         db.add(project)
         db.commit()
+        credential = users.get_external_credential(
+            session=db, user=user, provider="huggingface"
+        )
+        assert credential is not None
         resource = StorageResource(
             owner_account_id=user.account.id,
             project_id=project.id,
             kind="hf-bucket",
             bucket=f"someone/{project.name}",
             credential_user_id=user.id,
+            credential_id=credential.id,
         )
         db.add(resource)
         db.commit()
@@ -2403,7 +2409,7 @@ def test_disconnect_huggingface_with_storage(
                 url, headers=headers, params={"storage_action": "transfer"}
             )
         assert response.status_code == 200
-        q.assert_called_once_with(str(user.id), "huggingface")
+        q.assert_called_once_with(str(user.id), "huggingface", "default")
     assert is_connected()
     assert db.get(StorageResource, resource_id) is not None
     # One at a time
@@ -2508,58 +2514,89 @@ def test_connect_box(client: TestClient, db: Session) -> None:
     assert login("1") == 200
     response = client.get("/user/connected-accounts", headers=headers)
     assert response.json()["box"] is True
-    assert response.json()["account_names"]["box"] == (
-        "1@example.edu (Some University)"
+    assert response.json()["connections"] == [
+        {
+            "provider": "box",
+            "label": "default",
+            "name": "1@example.edu (Some University)",
+            "active": True,
+        }
+    ]
+    # Its email is recorded as one of the user's
+    response = client.get("/user/emails", headers=headers)
+    assert response.json() == [{"email": "1@example.edu", "source": "box"}]
+    # Another Box account is connected alongside, and the first one again
+    # updates its own connection, but one that can't be identified isn't
+    assert login("2") == 200
+    assert login("1") == 200
+    assert login("3", me_ok=False) == 502
+    response = client.get("/user/connected-accounts", headers=headers)
+    assert [
+        (c["label"], c["name"]) for c in response.json()["connections"]
+    ] == [
+        ("default", "1@example.edu (Some University)"),
+        ("2", "2@example.edu (Some University)"),
+    ]
+    response = client.get("/user/emails", headers=headers)
+    assert [e["email"] for e in response.json()] == [
+        "1@example.edu",
+        "2@example.edu",
+    ]
+    # Any of them finds the user, e.g., for invites
+    owner = users.get_email_owner(session=db, email="2@EXAMPLE.edu")
+    assert owner is not None and owner.id == user.id
+    first = users.get_external_credential(
+        session=db, user=user, provider="box"
     )
-    # HF storage doesn't stop switching Box accounts, but Box storage does
+    assert first is not None
+    secret = json.loads(users.decrypt_secret(first.secret_payload))
+    assert secret == {"access_token": "access_1", "refresh_token": "refresh_1"}
+    assert first.expires is not None
+    assert first.expires > utcnow() + timedelta(minutes=55)
+    # Disconnecting one with storage needs a choice about it
     resource = StorageResource(
         owner_account_id=user.account.id,
-        project_id=None,
-        name="hf",
-        kind="hf-bucket",
-        bucket="someone/bucket",
+        name="box",
+        kind="box-folder",
+        bucket="123",
         credential_user_id=user.id,
+        credential_id=first.id,
     )
-    db.add(resource)
-    db.commit()
-    assert login("2") == 200
-    resource.kind = "box-folder"
     db.add(resource)
     db.commit()
     resource_id = resource.id
-    assert login("3") == 409
-    assert login("2", me_ok=False) == 502
-    credential = users.get_external_credential(
-        session=db, user=user, provider="box"
-    )
-    assert credential is not None
-    assert credential.provider_account_id == "2"
-    secret = json.loads(users.decrypt_secret(credential.secret_payload))
-    assert secret == {"access_token": "access_2", "refresh_token": "refresh_2"}
-    assert credential.expires is not None
-    assert credential.expires > utcnow() + timedelta(minutes=55)
-    # Disconnecting with Box storage needs a choice about it
-    response = client.delete("/user/external-credentials/box", headers=headers)
+    url = "/user/external-credentials/box"
+    response = client.delete(url, headers=headers)
     assert response.status_code == 409
+    # The other has none
+    response = client.get(
+        "/user/box/storage", headers=headers, params={"label": "2"}
+    )
+    assert response.json() == []
     # And the tokens are revoked at Box too
     with patch("requests.post") as revoke:
         response = client.delete(
-            "/user/external-credentials/box",
-            headers=headers,
-            params={"storage_action": "orphan"},
+            url, headers=headers, params={"storage_action": "orphan"}
         )
     assert response.status_code == 200
     assert {c.kwargs["data"]["token"] for c in revoke.call_args_list} == {
-        "access_2",
-        "refresh_2",
+        "access_1",
+        "refresh_1",
     }
     db.expire_all()
     assert db.get(StorageResource, resource_id) is None
+    # Its email goes with it, and the other connection stays
+    response = client.get("/user/emails", headers=headers)
+    assert [e["email"] for e in response.json()] == ["2@example.edu"]
     assert (
-        users.get_external_credential(session=db, user=user, provider="box")
-        is None
+        users.get_external_credential(
+            session=db, user=user, provider="box", label="2"
+        )
+        is not None
     )
-    # A Box account can only belong to one Calkit account
+    # A Box account can only belong to one Calkit account, nor can its email
+    # be another user's, primary or not
+    from app.models import UserEmail
     from app.tests import create_random_user
 
     users.save_external_credential(
@@ -2570,4 +2607,18 @@ def test_connect_box(client: TestClient, db: Session) -> None:
         provider_account_id="7",
     )
     assert login("7") == 409
-    assert login("8") == 200
+    other = create_random_user(db)
+    other.email = "8@example.edu"
+    db.add(other)
+    db.add(UserEmail(user_id=other.id, email="9@example.edu", source="box"))
+    db.commit()
+    assert login("8") == 409
+    assert login("9") == 409
+    assert login("10") == 200
+    # Nor can a new user sign up with one of another user's emails
+    with pytest.raises(HTTPException) as e:
+        users.create_user(
+            session=db,
+            user_create=UserCreate(email="10@example.edu", password="x" * 12),
+        )
+    assert e.value.status_code == 409

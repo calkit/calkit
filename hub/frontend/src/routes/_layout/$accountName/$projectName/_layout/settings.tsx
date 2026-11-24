@@ -7,6 +7,10 @@ import {
   HStack,
   Heading,
   Input,
+  Menu,
+  MenuButton,
+  MenuItem,
+  MenuList,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -27,6 +31,7 @@ import { type SubmitHandler, useForm } from "react-hook-form"
 import { z } from "zod"
 
 import {
+  type Connection,
   type StorageResourcePublic,
   StorageService,
   UsersService,
@@ -55,11 +60,14 @@ interface NewHfBucketProps {
   isOpen: boolean
   onClose: () => void
   hfConnected: boolean | undefined
+  // The user's working HF connections, to pick one when there are several
+  hfConnections: Connection[]
   onConnect: () => void
   isConnecting: boolean
 }
 
 interface NewHfBucketForm {
+  label: string
   namespace: string
   name: string
 }
@@ -70,28 +78,31 @@ const NewHfBucket = ({
   isOpen,
   onClose,
   hfConnected,
+  hfConnections,
   onConnect,
   isConnecting,
 }: NewHfBucketProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const hfAccountQuery = useQuery({
-    queryKey: ["user", "huggingface-account"],
-    queryFn: () =>
-      UsersService.getUserHuggingfaceAccount().then(
-        (response) => response.data,
-      ),
-    enabled: isOpen && !!hfConnected,
-  })
   const {
     register,
     handleSubmit,
     reset,
     setValue,
+    watch,
     formState: { errors },
   } = useForm<NewHfBucketForm>({
     mode: "onBlur",
-    defaultValues: { namespace: "", name: projectName },
+    defaultValues: { label: "default", namespace: "", name: projectName },
+  })
+  const label = watch("label")
+  const hfAccountQuery = useQuery({
+    queryKey: ["user", "huggingface-account", label],
+    queryFn: () =>
+      UsersService.getUserHuggingfaceAccount({ label }).then(
+        (response) => response.data,
+      ),
+    enabled: isOpen && !!hfConnected,
   })
   // The user's HF account, then their orgs
   const hfUsername = hfAccountQuery.data?.username
@@ -109,11 +120,14 @@ const NewHfBucket = ({
       StorageService.postProjectHfBucket({
         owner_name: accountName,
         project_name: projectName,
-        projectHfBucketPost: { bucket: `${data.namespace}/${data.name}` },
+        projectHfBucketPost: {
+          bucket: `${data.namespace}/${data.name}`,
+          label: data.label,
+        },
       }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Bucket created.", "success")
-      reset({ namespace: hfUsername ?? "", name: projectName })
+      reset({ label, namespace: hfUsername ?? "", name: projectName })
       onClose()
     },
     onError: (err: AxiosError) => {
@@ -157,6 +171,18 @@ const NewHfBucket = ({
             <Text>Hugging Face not connected</Text>
           ) : (
             <>
+              {hfConnections.length > 1 && (
+                <FormControl mb={4}>
+                  <FormLabel htmlFor="hf-connection">Connection</FormLabel>
+                  <Select id="hf-connection" {...register("label")}>
+                    {hfConnections.map((c) => (
+                      <option key={c.label} value={c.label}>
+                        {c.name ?? c.label}
+                      </option>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
               <FormControl>
                 <FormLabel htmlFor="namespace">Hugging Face account</FormLabel>
                 <Select id="namespace" {...register("namespace")}>
@@ -303,13 +329,19 @@ function ProjectSettings() {
   })
   const describe = (r: StorageResourcePublic) =>
     r.kind === "box-folder"
-      ? `Box (${r.connected_by})`
+      ? `Box (${r.service_account ?? r.connected_by})`
       : r.kind === "hf-bucket"
         ? `${getStorageServiceName(r.kind)} bucket ${r.bucket}`
         : r.bucket
   const boxConnected = connectedAccountsQuery.data
     ? Boolean(connectedAccountsQuery.data.box)
     : undefined
+  // Working connections, to pick one when there are several
+  const getActiveConnections = (provider: string) =>
+    connectedAccountsQuery.data?.connections?.filter(
+      (c) => c.provider === provider && c.active,
+    ) ?? []
+  const boxConnections = getActiveConnections("box")
   // Comes back here once connected, to click again
   const connectBoxMutation = useMutation({
     mutationFn: () => {
@@ -321,10 +353,11 @@ function ProjectSettings() {
     },
   })
   const selectBoxMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (label: string) =>
       StorageService.postProjectBoxFolder({
         owner_name: accountName,
         project_name: projectName,
+        label,
       }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Storage updated.", "success")
@@ -425,23 +458,53 @@ function ProjectSettings() {
               >
                 New Hugging Face bucket
               </Button>
-              <Button
-                flexShrink={0}
-                onClick={() => {
-                  mixpanel.track("Clicked use Box", {
-                    box_connected: boxConnected,
-                  })
-                  boxConnected
-                    ? selectBoxMutation.mutate()
-                    : connectBoxMutation.mutate()
-                }}
-                isLoading={
-                  selectBoxMutation.isPending || connectBoxMutation.isPending
-                }
-                isDisabled={boxConnected === undefined}
-              >
-                Use Box
-              </Button>
+              {boxConnections.length > 1 ? (
+                <Menu>
+                  <MenuButton
+                    as={Button}
+                    flexShrink={0}
+                    isLoading={selectBoxMutation.isPending}
+                  >
+                    Use Box
+                  </MenuButton>
+                  <MenuList>
+                    {boxConnections.map((c) => (
+                      <MenuItem
+                        key={c.label}
+                        onClick={() => {
+                          mixpanel.track("Clicked use Box", {
+                            box_connected: true,
+                            n_connections: boxConnections.length,
+                          })
+                          selectBoxMutation.mutate(c.label)
+                        }}
+                      >
+                        {c.name ?? c.label}
+                      </MenuItem>
+                    ))}
+                  </MenuList>
+                </Menu>
+              ) : (
+                <Button
+                  flexShrink={0}
+                  onClick={() => {
+                    mixpanel.track("Clicked use Box", {
+                      box_connected: boxConnected,
+                    })
+                    boxConnected
+                      ? selectBoxMutation.mutate(
+                          boxConnections[0]?.label ?? "default",
+                        )
+                      : connectBoxMutation.mutate()
+                  }}
+                  isLoading={
+                    selectBoxMutation.isPending || connectBoxMutation.isPending
+                  }
+                  isDisabled={boxConnected === undefined}
+                >
+                  Use Box
+                </Button>
+              )}
             </HStack>
           )}
         </>
@@ -457,6 +520,7 @@ function ProjectSettings() {
             })
           }
           hfConnected={hfConnected}
+          hfConnections={getActiveConnections("huggingface")}
           onConnect={() => connectMutation.mutate()}
           isConnecting={connectMutation.isPending}
         />

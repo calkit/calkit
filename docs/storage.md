@@ -96,8 +96,8 @@ If you disconnect your HF account while projects are storing files with it,
 you'll need to choose whether to transfer those files to Calkit Hub storage
 or leave them on HF, where those projects can no longer reach them.
 Either way, your buckets stay on HF.
-To switch to a different HF account,
-disconnect the current one first.
+You can connect more than one HF account,
+and each project's storage stays with the account it was set up with.
 
 Connecting your HF account gives Calkit access to everything in that HF
 account or organization.
@@ -167,6 +167,13 @@ Connecting your Box account gives Calkit access to everything in it,
 but Calkit only uses the `Calkit` folder,
 and collaborators only get access to their project's folder,
 for an hour at a time.
+
+You can connect more than one Box account,
+e.g., a personal one and a university one,
+and "Use Box" asks which.
+A Box account can only be connected to one Calkit account,
+and its email shows as one of yours in your profile,
+so it can't belong to another Calkit account too.
 
 ## Changing where files are stored
 

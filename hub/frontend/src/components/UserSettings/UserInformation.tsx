@@ -13,7 +13,7 @@ import {
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
@@ -130,8 +130,21 @@ const VerifyEmailCode = ({ email }: { email: string }) => {
   )
 }
 
+// Where a user's other emails came from, by connected account
+const EMAIL_SOURCES: Record<string, string> = {
+  box: "Box",
+  github: "GitHub",
+  google: "Google",
+}
+
 const UserInformation = () => {
   const queryClient = useQueryClient()
+  // E.g., ones connected accounts vouched for
+  const otherEmailsQuery = useQuery({
+    queryKey: ["user", "emails"],
+    queryFn: () =>
+      UsersService.getUserEmails().then((response) => response.data),
+  })
   const color = useColorModeValue("inherit", "ui.light")
   const showToast = useCustomToast()
   const [editMode, setEditMode] = useState(false)
@@ -372,6 +385,20 @@ const UserInformation = () => {
               </Flex>
             </FormControl>
           ) : null}
+          {otherEmailsQuery.data && otherEmailsQuery.data.length > 0 && (
+            <FormControl mt={4}>
+              <FormLabel>Other emails</FormLabel>
+              {otherEmailsQuery.data.map((e) => (
+                <Flex key={e.email} align="center" gap={2} py={1} wrap="wrap">
+                  <Text size="md">{e.email}</Text>
+                  <Badge colorScheme="green">Verified</Badge>
+                  <Text fontSize="sm" color="ui.dim">
+                    From {EMAIL_SOURCES[e.source] ?? e.source}
+                  </Text>
+                </Flex>
+              ))}
+            </FormControl>
+          )}
           <Flex mt={4} gap={3}>
             <Button
               variant="primary"

@@ -42,9 +42,19 @@ class StorageResourcePublic(BaseModel):
     dedicated: bool
     created: datetime
     connected_by: str
+    # Which account on the service, e.g., a Box login, since someone can
+    # connect several
+    service_account: str | None = None
 
 
 def to_public(resource: StorageResource) -> StorageResourcePublic:
+    credential = resource.credential
+    service_account = None
+    if credential is not None:
+        metadata = credential.metadata_json or {}
+        service_account = (
+            metadata.get("login") or credential.provider_account_id
+        )
     return StorageResourcePublic(
         id=resource.id,
         name=resource.name,
@@ -53,6 +63,7 @@ def to_public(resource: StorageResource) -> StorageResourcePublic:
         dedicated=resource.project_id is not None,
         created=resource.created,
         connected_by=resource.credential_user.account.name,
+        service_account=service_account,
     )
 
 
@@ -161,10 +172,16 @@ def get_user_service_storage(
     provider: Literal["huggingface", "box"],
     session: SessionDep,
     current_user: CurrentUser,
+    label: str = "default",
 ) -> list[CredentialStoragePublic]:
-    """Get the storage reached with the current user's account on a service,
-    e.g., HF, which disconnecting it would make unreachable.
+    """Get the storage reached with one of the current user's connections to
+    a service, e.g., HF, which disconnecting it would make unreachable.
     """
+    credential = users.get_external_credential(
+        session=session, user=current_user, provider=provider, label=label
+    )
+    if credential is None:
+        return []
     return [
         CredentialStoragePublic(
             id=r.id,
@@ -177,9 +194,7 @@ def get_user_service_storage(
                 for p in storage.get_resource_projects(session, r)
             ],
         )
-        for r in storage.get_credential_resources(
-            session, current_user.id, provider=provider
-        )
+        for r in storage.get_credential_resources(session, credential.id)
     ]
 
 
@@ -215,6 +230,8 @@ class ProjectHfBucketPost(BaseModel):
     # ``{namespace}/{bucket_name}``, where the namespace is the user's HF
     # username or one of their HF orgs
     bucket: str
+    # Which of the user's HF connections, if they have several
+    label: str = "default"
 
 
 def is_transferring(user_id: uuid.UUID, provider: str) -> bool:
@@ -406,8 +423,10 @@ def post_project_box_folder(
     project_name: str,
     session: SessionDep,
     current_user: CurrentUser,
+    label: str = "default",
 ) -> ProjectStorageSettings:
-    """Send a project's new DVC objects to the current user's Box.
+    """Send a project's new DVC objects to the current user's Box, through
+    the connection under ``label``, if they've connected several.
 
     They go in the ``Calkit`` folder at the root of the user's Box, which is
     created if it isn't there, under ``{owner}/{project}``. The folder is
@@ -428,12 +447,17 @@ def post_project_box_folder(
         raise HTTPException(
             409, "Box storage being transferred to Calkit Hub storage"
         )
-    token = users.get_box_token(session=session, user=current_user)
+    token = users.get_box_token(
+        session=session, user=current_user, label=label
+    )
+    credential = users.get_external_credential(
+        session=session, user=current_user, provider="box", label=label
+    )
+    assert credential is not None
     resource = session.exec(
         select(StorageResource).where(
             StorageResource.owner_account_id == project.owner_account_id,
-            StorageResource.kind == "box-folder",
-            StorageResource.credential_user_id == current_user.id,
+            StorageResource.credential_id == credential.id,
         )
     ).first()
     created = resource is None
@@ -470,7 +494,9 @@ def post_project_box_folder(
             kind="box-folder",
             bucket=folder_id,
             credential_user_id=current_user.id,
+            credential_id=credential.id,
         )
+        resource.credential = credential
         resource.credential_user = current_user
         session.add(resource)
     from_kind = (
@@ -527,7 +553,16 @@ def post_project_hf_bucket(
         raise HTTPException(
             409, "Hugging Face storage being transferred to Calkit Hub storage"
         )
-    token = users.get_huggingface_token(session=session, user=current_user)
+    token = users.get_huggingface_token(
+        session=session, user=current_user, label=req.label
+    )
+    credential = users.get_external_credential(
+        session=session,
+        user=current_user,
+        provider="huggingface",
+        label=req.label,
+    )
+    assert credential is not None
     try:
         create_bucket(req.bucket, private=not project.is_public, token=token)
     except HfHubHTTPError as e:
@@ -544,15 +579,16 @@ def post_project_hf_bucket(
         kind="hf-bucket",
         bucket=req.bucket,
         credential_user_id=current_user.id,
+        credential_id=credential.id,
     )
     resource.credential_user = current_user
+    resource.credential = credential
     session.add(resource)
     from_kind = (
         project.dvc_storage.kind if project.dvc_storage is not None else "hub"
     )
     set_project_storage(session, project, resource)
-    credential = current_user.get_external_credential(provider="huggingface")
-    hf_username = credential.provider_account_id if credential else None
+    hf_username = credential.provider_account_id
     mixpanel.user_created_project_storage(
         current_user,
         project.owner_account_name,

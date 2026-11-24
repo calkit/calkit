@@ -2,9 +2,11 @@
 
 Calkit keeps the history of every file in your project.
 By default,
-small text files like code and LaTeX source go to the project's Git repo,
+small text files like code and LaTeX source,
+and figures under 1 MB,
+go to the project's Git repo,
 and everything else,
-e.g., datasets, figures, and simulation results,
+e.g., datasets, larger figures, and simulation results,
 goes to the Calkit Hub (calkit.io).
 
 <!-- TODO: needs human review -->

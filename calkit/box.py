@@ -33,6 +33,9 @@ UPLOAD_URL = "https://upload.box.com/api/2.0"
 CHUNKED_UPLOAD_MIN_BYTES = 20 * 1024 * 1024
 ITEM_FIELDS = "type,id,name,size,sha1,modified_at"
 MAX_TRIES = 6
+# Folders listed at once when finding what's under a path; Box allows about
+# 1000 requests a minute, and rate limits are waited out
+FIND_WORKERS = 8
 # How long a client reuses access to upload, so it asks the hub again soon
 # after a project's storage changes, rather than uploading to Box for the
 # rest of the token's hour
@@ -288,6 +291,52 @@ class BoxFileSystem(AbstractFileSystem):
             for name, child in sorted(self._list_folder(item["id"]).items())
         ]
         return infos if detail else [i["name"] for i in infos]
+
+    def find(
+        self,
+        path: str,
+        maxdepth: int | None = None,
+        withdirs: bool = False,
+        detail: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Find what's under a path, listing each level's folders at once,
+        since each is a request to Box, and DVC's layout has up to 256.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        path = self._strip_protocol(path)
+        try:
+            item = self._get_item(path)
+        except FileNotFoundError:
+            return {} if detail else []
+        found = {}
+        if item["type"] == "file":
+            found[path] = self._make_info(path, item)
+        level = [(path, item["id"], 0)] if item["type"] == "folder" else []
+        with ThreadPoolExecutor(FIND_WORKERS) as pool:
+            while level:
+                listings = pool.map(lambda e: self._list_folder(e[1]), level)
+                next_level = []
+                for (folder_path, _, depth), children in zip(level, listings):
+                    for name, child in children.items():
+                        child_path = (
+                            f"{folder_path}/{name}" if folder_path else name
+                        )
+                        info = self._make_info(child_path, child)
+                        if child["type"] != "folder":
+                            found[child_path] = info
+                            continue
+                        self._folder_ids[child_path] = child["id"]
+                        if withdirs:
+                            found[child_path] = info
+                        if maxdepth is None or depth + 1 < maxdepth:
+                            next_level.append(
+                                (child_path, child["id"], depth + 1)
+                            )
+                level = next_level
+        names = sorted(found)
+        return {name: found[name] for name in names} if detail else names
 
     def get_file_id(self, path: str) -> str:
         item = self._get_item(path)

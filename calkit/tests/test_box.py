@@ -249,9 +249,19 @@ def test_box_filesystem(tmp_path):
     assert fs2.ls("proj/many", detail=False) == [
         f"proj/many/{n}" for n in range(5)
     ]
-    assert sorted(fs2.find("proj")) == sorted(
+    assert fs2.find("proj") == sorted(
         ["proj/files/md5/ab/cd"] + [f"proj/many/{n}" for n in range(5)]
     )
+    assert fs2.find("proj", maxdepth=1) == []
+    assert fs2.find("proj", maxdepth=2, withdirs=True) == [
+        "proj/files",
+        "proj/files/md5",
+        "proj/many",
+    ] + [f"proj/many/{n}" for n in range(5)]
+    found = fs2.find("proj/files", detail=True)
+    assert found["proj/files/md5/ab/cd"]["size"] == len(b"changed")
+    assert fs2.find("proj/files/md5/ab/cd") == ["proj/files/md5/ab/cd"]
+    assert fs2.find("proj/nope") == []
     # A name another client took meanwhile is used, rather than failing
     fs3 = make_fs(box)
     fs3.ls("proj")

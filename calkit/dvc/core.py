@@ -1637,6 +1637,24 @@ def get_remotes(wdir: str | None = None) -> dict[str, str]:
         repo.close()
 
 
+def get_missing_outs(wdir: str | None = None) -> list[str]:
+    """Get the paths of DVC outputs whose recorded data isn't in the
+    workspace.
+
+    An output of a stage that has never run has no recorded data, so it
+    isn't missing.
+    """
+    repo = get_dvc_repo(wdir)
+    try:
+        return sorted(
+            str(out).replace(os.sep, "/")
+            for out in repo.index.outs
+            if out.use_cache and out.hash_info and out.workspace_status()
+        )
+    finally:
+        repo.close()
+
+
 def list_paths(wdir: str | None = None, recursive=False) -> list[str]:
     """List paths tracked with DVC."""
     return [

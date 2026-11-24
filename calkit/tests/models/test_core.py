@@ -227,6 +227,23 @@ def test_requirement_forms_match_what_the_runtime_accepts():
     for bad in [{"kind": "app"}, {"kind": "env-var"}]:
         with pytest.raises(ValidationError):
             ProjectInfo.model_validate({"requirements": [bad]})
+    # Only a path-env-var has somewhere to search, in either form
+    for search in ("~/apps/*/app.exe", ["~/apps/*/app.exe", "/opt/app"]):
+        ProjectInfo.model_validate(
+            {
+                "requirements": [
+                    {"kind": "path-env-var", "name": "APP", "search": search},
+                    {"APP2": {"kind": "path-env-var", "search": search}},
+                ]
+            }
+        )
+    for bad in [
+        {"kind": "env-var", "name": "APP", "search": "*"},
+        {"kind": "app", "name": "APP", "search": "*"},
+        {"kind": "path-env-var", "search": "*"},
+    ]:
+        with pytest.raises(ValidationError):
+            ProjectInfo.model_validate({"requirements": [bad]})
     # 'dependencies' is the old name for the same key and still validates
     old = ProjectInfo.model_validate({"dependencies": ["git"]})
     assert old.dependencies == ["git"]

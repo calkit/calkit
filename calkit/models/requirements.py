@@ -17,7 +17,12 @@ class RequirementAttrs(Model):
     """
 
     kind: Literal[
-        "app", "env-var", "setup", "aws-credentials", "calkit-config"
+        "app",
+        "env-var",
+        "path-env-var",
+        "setup",
+        "aws-credentials",
+        "calkit-config",
     ] = "app"
     check_command: str | None = None
     setup_command: str | None = None
@@ -27,13 +32,14 @@ class RequirementAttrs(Model):
     version_spec: str | None = None
     account_id: str | None = None
     profile: str | None = None
+    search: str | list[str] | None = None
     notes: str | None = None
 
 
 class Requirement(Model):
     """Something that must be true of a machine before the project runs.
 
-    Five kinds are supported:
+    Six kinds are supported:
 
     - ``app``: an executable that must be on ``PATH``, optionally
       satisfying a ``version_spec``. ``setup_command`` says how to install
@@ -41,6 +47,10 @@ class Requirement(Model):
     - ``env-var``: an environmental variable that must be defined.
       ``setup_command`` says how to get a value, e.g., a login flow that
       prints a token, and is offered before the value is asked for.
+    - ``path-env-var``: an environmental variable holding a path that must
+      exist, e.g., to a licensed app that can't be installed for the user.
+      ``search`` lists where it's usually found, to suggest. ``setup_command``
+      is offered when the search finds nothing.
     - ``setup``: a per-machine precondition that isn't a file---e.g.,
       the user must have authenticated a CLI like ``gh auth login``.
       A ``setup`` requirement declares ``check_command`` (a shell command
@@ -62,7 +72,12 @@ class Requirement(Model):
     """
 
     kind: Literal[
-        "app", "env-var", "setup", "aws-credentials", "calkit-config"
+        "app",
+        "env-var",
+        "path-env-var",
+        "setup",
+        "aws-credentials",
+        "calkit-config",
     ] = "app"
     name: str
     # ``setup``-kind field; ignored for other kinds.
@@ -98,7 +113,23 @@ class Requirement(Model):
         description="AWS profile 'aws-credentials' are checked with, if not "
         "the default.",
     )
+    search: str | list[str] | None = Field(
+        default=None,
+        description="Glob patterns for where a 'path-env-var' is usually "
+        "found, which may use '~' and environmental variables, e.g., "
+        "'~/apps/MyApp_*/MyApp.exe'. Matches are suggested, and the version "
+        "that sorts highest in a pattern comes first.",
+    )
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _check_search(self) -> Requirement:
+        if self.search is not None and self.kind != "path-env-var":
+            raise ValueError(
+                f"A '{self.kind}' requirement can't have 'search', since "
+                "only a 'path-env-var' names a path to look for"
+            )
+        return self
 
 
 class SetupRequirement(Requirement):

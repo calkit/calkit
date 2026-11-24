@@ -135,6 +135,25 @@
           "description": "AWS profile 'aws-credentials' are checked with, if not the default.",
           "title": "Profile"
         },
+        "search": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Glob patterns for where a 'path-env-var' is usually found, which may use '~' and environmental variables, e.g., '~/apps/MyApp_*/MyApp.exe'. Matches are suggested, and the version that sorts highest in a pattern comes first.",
+          "title": "Search"
+        },
         "setup_command": {
           "anyOf": [
             {
@@ -9663,7 +9682,7 @@
       "type": "object"
     },
     "Requirement": {
-      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``. ``setup_command`` says how to install\n  it, and is offered in place of any installer Calkit has for it.\n- ``env-var``: an environmental variable that must be defined.\n  ``setup_command`` says how to get a value, e.g., a login flow that\n  prints a token, and is offered before the value is asked for.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
+      "description": "Something that must be true of a machine before the project runs.\n\nSix kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``. ``setup_command`` says how to install\n  it, and is offered in place of any installer Calkit has for it.\n- ``env-var``: an environmental variable that must be defined.\n  ``setup_command`` says how to get a value, e.g., a login flow that\n  prints a token, and is offered before the value is asked for.\n- ``path-env-var``: an environmental variable holding a path that must\n  exist, e.g., to a licensed app that can't be installed for the user.\n  ``search`` lists where it's usually found, to suggest. ``setup_command``\n  is offered when the search finds nothing.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
       "properties": {
         "account_id": {
           "anyOf": [
@@ -9734,6 +9753,7 @@
           "enum": [
             "app",
             "env-var",
+            "path-env-var",
             "setup",
             "aws-credentials",
             "calkit-config"
@@ -9769,6 +9789,25 @@
           "default": null,
           "description": "AWS profile 'aws-credentials' are checked with, if not the default.",
           "title": "Profile"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Glob patterns for where a 'path-env-var' is usually found, which may use '~' and environmental variables, e.g., '~/apps/MyApp_*/MyApp.exe'. Matches are suggested, and the version that sorts highest in a pattern comes first.",
+          "title": "Search"
         },
         "setup_command": {
           "anyOf": [
@@ -9874,6 +9913,7 @@
           "enum": [
             "app",
             "env-var",
+            "path-env-var",
             "setup",
             "aws-credentials",
             "calkit-config"
@@ -9904,6 +9944,24 @@
           ],
           "default": null,
           "title": "Profile"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search"
         },
         "setup_command": {
           "anyOf": [
@@ -10522,6 +10580,25 @@
           "default": null,
           "description": "AWS profile 'aws-credentials' are checked with, if not the default.",
           "title": "Profile"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Glob patterns for where a 'path-env-var' is usually found, which may use '~' and environmental variables, e.g., '~/apps/MyApp_*/MyApp.exe'. Matches are suggested, and the version that sorts highest in a pattern comes first.",
+          "title": "Search"
         },
         "setup_command": {
           "anyOf": [

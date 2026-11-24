@@ -122,6 +122,73 @@ requirements:
 In non-interactive contexts (CI), the same missing variable still
 raises a clear error so failures aren't silent.
 
+## Apps collaborators install themselves
+
+<!-- TODO: needs human review -->
+
+Some apps can't be installed for someone,
+e.g., because they need a license or a download behind a login,
+and each collaborator may put them somewhere different.
+A `path-env-var` requirement is an environmental variable holding a path
+that must exist,
+and its `search` patterns say where that path usually is,
+so a project doesn't need its own setup script to find it:
+
+```yaml
+requirements:
+  - kind: path-env-var
+    name: MYAPP_EXE
+    description: Path to the MyApp 2.1 executable.
+    notes: MyApp needs a license. Download it from https://example.com.
+    search:
+      - ~/apps/MyApp_2.1*/MyApp.exe
+      - C:/Program Files/MyApp_2.1*/MyApp.exe
+      - /Applications/MyApp.app/Contents/MacOS/MyApp
+      - /opt/myapp-2.1*/bin/myapp
+```
+
+List every platform's locations in one requirement,
+since patterns that match nothing on a machine are passed over.
+They may use `~` and environmental variables, but not `**`,
+which keeps the search quick.
+Putting the version in a pattern keeps other versions from being
+suggested.
+
+On a terminal, `calkit check reqs` asks about everything the project
+needs at once,
+and `calkit run` asks about what the stages it's about to run need:
+
+```text
+Missing env var 'MYAPP_EXE', which is a path
+  Path to the MyApp 2.1 executable.
+  MyApp needs a license. Download it from https://example.com.
+Found:
+  1. C:\Users\me\apps\MyApp_2.1.3\MyApp.exe
+Select a number, enter a path, or enter 'skip' [1]:
+```
+
+If nothing is found, a `setup_command` is offered if there is one.
+Otherwise, it can be installed while Calkit waits,
+and pressing Enter searches again.
+The answer is saved in `.env`,
+so it's asked once per clone,
+and asked again if the path stops existing, e.g., after an upgrade.
+Entering `skip` leaves it unset,
+so someone without the app can still run the stages that don't need it,
+if it's declared on those stages rather than on the whole project.
+
+Without a terminal, e.g., in CI, a missing path is an error that
+gives the `calkit set-env-var` command to fix it,
+including what the search found.
+On another machine, i.e., for a stage in an environment with a `host`,
+the variable is read from that machine's shell and its path is
+checked there, without a search.
+
+This only says the path exists.
+To check something about what's there, e.g., its version or license,
+follow it with a [`setup` requirement](#setup-requirements),
+which runs after and can read the variable.
+
 ## Machine requirements
 
 It is possible to define requirements of the system on which the
@@ -517,8 +584,8 @@ requirements in four phases regardless of the order they appear in
 
 1. **machine properties**: First, because a machine too small to run
    the project at all should say so before anything is installed on it.
-2. **`env-var`**: Prompted next so installers and setup steps can
-   read newly-set variables.
+2. **`env-var` and `path-env-var`**: Prompted next so installers and
+   setup steps can read newly-set variables.
 3. **`app`**: Environment managers like `pixi` and `uv` must exist before
    any setup step that runs inside one of those environments. Missing
    apps with a `setup_command` or a registered installer trigger the

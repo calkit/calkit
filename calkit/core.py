@@ -1534,6 +1534,13 @@ def _normalize_requirement(req) -> dict:
             "'kind', e.g., '- kind: env-var' with 'name: TOKEN'"
         )
 
+    def check_search(out: dict) -> None:
+        if "search" in out and out["kind"] != "path-env-var":
+            raise ValueError(
+                f"Malformed requirement {req!r}; only a 'path-env-var' can "
+                "have 'search', since it's what names a path to look for"
+            )
+
     if isinstance(req, str):
         # Split on the first version operator so a string like
         # ``calkit>=0.38`` produces both a clean name and a version spec
@@ -1582,6 +1589,7 @@ def _normalize_requirement(req) -> dict:
                 f"Malformed requirement {req!r}; its 'name' must be text, "
                 'so quote it if it\'s in braces, e.g., name: "{var}"'
             )
+        check_search(out)
         return out
     if len(keys) != 1:
         raise malformed()
@@ -1593,6 +1601,7 @@ def _normalize_requirement(req) -> dict:
     out = dict(attrs)
     out["name"] = name
     out.setdefault("kind", "app")
+    check_search(out)
     return out
 
 
@@ -1957,6 +1966,7 @@ def check_requirements(
     buckets: dict[str, list[dict]] = {
         "_property": [],
         "env-var": [],
+        "path-env-var": [],
         "app": [],
         "setup": [],
         "aws-credentials": [],
@@ -1980,6 +1990,7 @@ def check_requirements(
         for bucket in (
             "_property",
             "env-var",
+            "path-env-var",
             "app",
             "_other",
             "setup",
@@ -2044,6 +2055,10 @@ def check_requirements(
                 f"with 'calkit set-env-var {req_name} <value>'"
             )
         raise ValueError(msg)
+    for req in buckets["path-env-var"]:
+        from calkit.requirements import check_path_env_var_req
+
+        check_path_env_var_req(req, interactive=interactive)
     for req in buckets["app"]:
         declared_name = req["name"]
         # Checked and installed as the binary it provides, e.g., code for

@@ -337,3 +337,209 @@ def test_values_file_and_latex_deps(tmp_dir):
     calkit.save_calkit_info(ck_info)
     calkit.pipeline.to_dvc(write=True)
     assert not os.path.exists(rv.VALUES_PATH)
+
+
+def _make_project(with_wrong_page: bool = True) -> None:
+    """A project with a Quarto document quoting values from a reference
+    whose PDF the collection names.
+    """
+    import subprocess
+
+    import calkit
+
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    write_pdf(
+        Path("refs/liu2025.pdf"),
+        [
+            ["Title page"],
+            [
+                "Positions are perturbed by Gaussian noise with",
+                "sigma = 0.1 during training, at a learning rate of 0.001.",
+            ],
+        ],
+    )
+    Path("refs.bib").write_text(
+        "@article{liu2025, title={Orbits}, author={Liu, A.}}\n"
+        "@article{wu2024, title={Other}, author={Wu, B.}}\n"
+    )
+    Path("index.qmd").write_text(
+        "---\ntitle: Test\nbibliography: refs.bib\n---\n\n"
+        "We perturb inputs with noise of 0.10, as in [@liu2025].\n\n"
+        "The rate is {{< ckrefval liu2025 lr >}} [@liu2025], and the batch "
+        "is {{< ckrefval liu2025 batch >}}.\n\n"
+        "Wu reports {{< ckrefval wu2024 speed >}}, and 0.77 [@liu2025].\n"
+    )
+    ck_info = calkit.load_calkit_info()
+    ck_info["references"] = [
+        {
+            "path": "refs.bib",
+            "files": [{"key": "liu2025", "path": "refs/liu2025.pdf"}],
+            "values": {
+                "liu2025": {
+                    "lr": {
+                        "value": 0.001,
+                        "page": 1 if with_wrong_page else 2,
+                        "quote": "at a learning rate of 0.001",
+                    }
+                },
+                "wu2024": {"speed": {"value": 3.5}},
+            },
+        }
+    ]
+    ck_info["environments"] = {"py": {"kind": "uv", "path": "pyproject.toml"}}
+    ck_info["pipeline"] = {
+        "stages": {
+            "pub": {
+                "kind": "quarto",
+                "target_path": "index.qmd",
+                "environment": "py",
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+
+
+def test_check_reproducibility_refvals(tmp_dir):
+    from calkit.reproducibility import check_reproducibility
+
+    _make_project()
+    res = check_reproducibility(log_func=lambda *a: None, offline=True)
+    assert res.n_refvals == 2
+    assert [
+        (p["file"], p["line"], p["key"], p["name"], p["problem"])
+        for p in res.refval_problems
+    ] == [
+        (
+            "calkit.yaml",
+            0,
+            "liu2025",
+            "lr",
+            "in refs/liu2025.pdf, the quote is on page 2, not 1",
+        ),
+        (
+            "index.qmd",
+            8,
+            "liu2025",
+            "batch",
+            "calkit.yaml records no value 'batch' quoted from 'liu2025'",
+        ),
+        (
+            "index.qmd",
+            10,
+            "wu2024",
+            "speed",
+            "it quotes wu2024 but never cites it",
+        ),
+    ]
+    assert [(u["key"], u["name"]) for u in res.refvals_unchecked] == [
+        ("wu2024", "speed")
+    ]
+    # A typed number in a sentence citing the reference is looked for in
+    # its PDF: one is found, and one isn't there
+    by_value = {f["value"]: f for f in res.unattributed_numbers}
+    (found,) = by_value["0.10"]["found"]
+    assert (found["key"], found["page"], found["source"]) == (
+        "liu2025",
+        2,
+        "refs/liu2025.pdf",
+    )
+    assert "noise with sigma = 0.1 during" in found["quote"]
+    assert by_value["0.77"]["searched"] == ["liu2025"]
+    assert "Problems with values quoted from references: 3" in res.to_pretty()
+
+
+def test_check_repro_refvals_cli(tmp_dir):
+    import subprocess
+
+    _make_project()
+    env = os.environ | {"COLUMNS": "200"}
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "--offline", "-c", "numbers"],
+        text=True,
+        env=env,
+    )
+    # Brackets come through, rather than reading as Rich's markup
+    assert "as in [@liu2025]" in out
+    assert "p. 2 of liu2025" in out
+    assert "not in liu2025" in out
+    assert "calkit new ref-value liu2025 <name> --value 0.10 --page 2" in out
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "--offline", "-c", "refvals"],
+        text=True,
+        env=env,
+    )
+    assert "the quote is on page 2, not 1" in out
+    # Recording one checks it against the PDF first
+    p = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "ref-value",
+            "liu2025",
+            "noise",
+            "--value",
+            "0.2",
+            "--page",
+            "2",
+            "--quote",
+            "Gaussian noise with sigma = 0.1",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert p.returncode != 0
+    assert "the quote doesn't contain 0.2" in p.stderr
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "ref-value",
+            "liu2025",
+            "noise",
+            "--value",
+            "0.1",
+            "--page",
+            "2",
+            "--quote",
+            "Gaussian noise with sigma = 0.1",
+        ],
+        stdout=subprocess.DEVNULL,
+    )
+    import calkit
+
+    values = calkit.load_calkit_info()["references"][0]["values"]["liu2025"]
+    assert values["noise"] == {
+        "value": 0.1,
+        "page": 2,
+        "quote": "Gaussian noise with sigma = 0.1",
+    }
+    p = subprocess.run(
+        ["calkit", "new", "ref-value", "nobody", "x", "--value", "1"],
+        capture_output=True,
+        text=True,
+    )
+    assert "No reference collection defines 'nobody'" in p.stderr
+
+
+def test_check_project_bibliographies(tmp_dir):
+    # A key is checked against the bibliographies the citing document names
+    import calkit
+
+    _make_project(with_wrong_page=False)
+    Path("other.bib").write_text(
+        "@article{liu2025, title={Something else}, author={Liu, A.}}\n"
+        "@article{dup, title={A}}\n@article{dup, title={B}}\n"
+    )
+    Path("index.qmd").write_text(
+        "---\nbibliography: [refs.bib, other.bib]\n---\n\n"
+        "Rate {{< ckrefval liu2025 lr >}} [@liu2025].\n"
+    )
+    ck_info = calkit.load_calkit_info()
+    ck_info["references"].append({"path": "other.bib"})
+    found = rv.check_project(ck_info, ["index.qmd"], download=False)[
+        "problems"
+    ]
+    assert [p["problem"] for p in found] == [
+        "dup is defined 2 times",
+        "liu2025 is a different entry in refs.bib and other.bib",
+    ]

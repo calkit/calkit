@@ -521,7 +521,9 @@ def _join_lines(lines: list[Any]) -> tuple[str, list[int]]:
     return "\n".join(texts), starts
 
 
-def find_cited_keys(lines: list[Any]) -> dict[str, list[str]]:
+def find_cited_keys(
+    lines: list[Any], include_nocite: bool = True
+) -> dict[str, list[str]]:
     """Citation keys in a flattened document, and where each appears.
 
     Parameters
@@ -529,6 +531,9 @@ def find_cited_keys(lines: list[Any]) -> dict[str, list[str]]:
     lines : list of calkit.latex.SourceLine
         The document's lines with their file and number, as
         ``calkit.latex.flatten`` returns them.
+    include_nocite : bool
+        Whether keys only ``\\nocite`` names count, which puts an entry in
+        the bibliography without citing it in the text.
 
     Returns
     -------
@@ -557,6 +562,8 @@ def find_cited_keys(lines: list[Any]) -> dict[str, list[str]]:
 
     found: list[tuple[int, str]] = []
     for match in _CITE_COMMAND_RE.finditer(text):
+        if match.group(1) == "nocite" and not include_nocite:
+            continue
         multi = match.group(1) in _MULTICITE_COMMANDS
         pos = match.end()
         while True:

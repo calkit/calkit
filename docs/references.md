@@ -143,6 +143,89 @@ It can't catch the third: a real, correctly described work that doesn't
 say what it's cited for is `verified`, so whether each source supports
 its claim still takes a person reading it.
 
+## Quoting values from references
+
+<!-- TODO: needs human review -->
+
+A number a document quotes from a reference, e.g., a parameter it reuses
+or a result it compares against, can be recorded in `calkit.yaml`, under
+the collection it's from, with where in the reference it appears:
+
+```yaml
+references:
+  - path: references.bib
+    files:
+      - key: liu2025
+        path: refs/liu2025.pdf
+    values:
+      liu2025:
+        noise-sigma:
+          value: 0.1
+          page: 4
+          quote: "positions perturbed by Gaussian noise with σ = 0.1"
+```
+
+Record one with `calkit new ref-value`, which checks it against the
+reference's PDF first:
+
+```sh
+calkit new ref-value liu2025 noise-sigma --value 0.1 --page 4 \
+  --quote "positions perturbed by Gaussian noise with σ = 0.1"
+```
+
+A document then quotes it by citation key and name, and cites the
+reference as usual, wherever the citation belongs:
+
+| Document       | Quoting a value                                               |
+| -------------- | ------------------------------------------------------------- |
+| LaTeX          | `\ckrefval[.2f]{liu2025}{noise-sigma}`                        |
+| Quarto         | `{{< ckrefval liu2025 noise-sigma .2f >}}`                    |
+| Markdown stage | `<!-- ckrefval liu2025 noise-sigma .2f --><!-- /ckrefval -->` |
+
+The format is optional, and works as it does for
+[`\ckvalue`](latex.md#formatting-values).
+Values computed by the pipeline use `ckvalue`, and values quoted from a
+reference use `ckrefval`, so a reader can tell which a number is.
+Calkit writes every recorded value to `.calkit/reference-values.json`
+when the pipeline compiles, which documents read and depend on, so editing
+the rest of `calkit.yaml` doesn't rebuild them.
+
+`calkit check repro` checks that:
+
+- each recorded value's quote is on the page given, with the value in it
+- each value a document quotes is recorded, under a collection the
+  document's bibliography uses, and that the document cites the reference
+- no citation key is defined twice in one `.bib` file, or as different
+  entries in two that one document uses
+
+It also looks for each number typed into a sentence that cites a
+reference in that reference's PDF, and suggests the
+`calkit new ref-value` command to record it, with its page and quote.
+A number the cited reference doesn't have may be a misquote.
+See the problems with `calkit check repro -c refvals`, and the numbers with
+`-c numbers`.
+
+### Where the PDFs come from
+
+PDFs are never stored in the project, since most papers can't be
+redistributed.
+Calkit looks for each reference's PDF in this order:
+
+1. The file the collection's `files` names for the key.
+2. Zotero desktop, for a collection linked to Zotero, through its local
+   API, which works offline and also has files synced with WebDAV or
+   linked from disk.
+   Turn it on in Zotero's settings, under Advanced, with "Allow other
+   applications on this computer to communicate with Zotero".
+3. The Calkit Cloud, for a collection linked to Zotero there, when you're
+   logged in.
+4. An open-access copy, from arXiv or the copy OpenAlex lists for the
+   entry's DOI, downloaded into `.calkit/local`, which Git ignores.
+   `calkit check repro --offline` skips this and the Cloud.
+
+A value whose reference has no PDF is reported as unchecked
+(`calkit check repro -c unchecked-refvals`), rather than as a problem.
+
 ## Checking references in the pipeline
 
 A `references-check` stage runs the check as part of the pipeline,

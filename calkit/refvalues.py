@@ -423,6 +423,14 @@ def get_pdf(
     cached = base / PDF_CACHE_DIR / f"{safe_key}.pdf"
     if cached.is_file():
         return PdfSource(path=cached, source="downloaded")
+    # What's fetched goes in the local directory, which keeps itself out of
+    # Git, since most papers can't be redistributed
+    from calkit.core import ensure_local_dir
+
+    def make_cache_dir() -> None:
+        ensure_local_dir(str(base))
+        cached.parent.mkdir(parents=True, exist_ok=True)
+
     linked = get_zotero_link(collection_path, key, wdir=wdir)
     if linked is not None:
         tried("Zotero desktop")
@@ -430,12 +438,14 @@ def get_pdf(
         if path is not None:
             return PdfSource(path=path, source="Zotero desktop")
         tried("the Calkit Cloud's Zotero link")
+        make_cache_dir()
         path = get_cloud_pdf(collection_path, key, cached, wdir=wdir)
         if path is not None:
             return PdfSource(path=path, source="Zotero, through the Cloud")
     if download and entry is not None:
         for url in get_open_access_urls(entry, lookup):
             tried(url)
+            make_cache_dir()
             path = download_pdf(url, cached)
             if path is not None:
                 return PdfSource(path=path, source=url)
@@ -584,3 +594,435 @@ def write_values_file(ck_info: dict, wdir: str | None = None) -> bool:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
     return True
+
+
+@dataclass
+class Use:
+    """A document quoting a value from a reference, on a 1-based line, or a
+    line of a notebook's Markdown and raw cells.
+    """
+
+    document: str
+    line: int
+    key: str
+    name: str
+
+
+def is_markdown_like(path: str) -> bool:
+    """Whether a document is Markdown, including Quarto's and notebooks."""
+    return path.lower().endswith(
+        (".md", ".markdown", ".qmd", ".rmd", ".ipynb")
+    )
+
+
+def read_markdown_lines(path: str) -> list[str]:
+    """A Markdown document's lines, or a notebook's Markdown and raw cells',
+    which is where its prose and front matter are.
+    """
+    from calkit.quarto import read_document_text
+
+    text = read_document_text(path)
+    return text.splitlines() if text is not None else []
+
+
+def find_uses(documents: list[str], wdir: str | None = None) -> list[Use]:
+    """Every ``ckrefval`` in the documents, in LaTeX, Quarto, or Markdown,
+    with project-relative paths.
+    """
+    from calkit.latex import _CK_REFVAL_RE, _strip_comments, flatten
+    from calkit.markdown import (
+        _CKVALUE_RE,
+        MarkdownParseError,
+        _ckvalue_args,
+    )
+    from calkit.quarto import _REFVAL_SHORTCODE_RE
+
+    base = wdir or "."
+    uses = []
+    for document in documents:
+        full = os.path.join(base, document)
+        if is_markdown_like(document):
+            for n, line in enumerate(read_markdown_lines(full), start=1):
+                found = [
+                    m.group("args")
+                    for m in _REFVAL_SHORTCODE_RE.finditer(line)
+                ] + [
+                    m.group("args")
+                    for m in _CKVALUE_RE.finditer(line)
+                    if m.group("cmd") == "ckrefval"
+                ]
+                for args in found:
+                    try:
+                        got = _ckvalue_args(args, document, n)
+                    except MarkdownParseError:
+                        continue
+                    uses.append(Use(document, n, got["source"], got["key"]))
+            continue
+        for line in flatten(full):
+            for m in _CK_REFVAL_RE.finditer(_strip_comments(line.text)):
+                key, name = m.group("first").strip(), m.group("second").strip()
+                if "#" in key + name:
+                    continue
+                rel = os.path.relpath(line.path, base).replace(os.sep, "/")
+                uses.append(Use(rel, line.lineno, key, name))
+    return uses
+
+
+def get_document_bibliographies(
+    document: str, wdir: str | None = None
+) -> list[str]:
+    """The project-relative bibliographies a document names."""
+    import yaml
+
+    from calkit.latex import flatten
+    from calkit.references import get_named_collection_paths
+
+    base = wdir or "."
+    full = os.path.join(base, document)
+    if not is_markdown_like(document):
+        try:
+            return get_named_collection_paths(
+                document, flatten(full), wdir=wdir
+            )
+        except Exception:
+            return []
+    lines = read_markdown_lines(full)
+    if not lines or lines[0].strip() != "---":
+        return []
+    try:
+        end = next(
+            i
+            for i, line in enumerate(lines[1:], start=1)
+            if line.strip() in ("---", "...")
+        )
+        meta = yaml.safe_load("\n".join(lines[1:end])) or {}
+    except (StopIteration, yaml.YAMLError):
+        return []
+    named = meta.get("bibliography") if isinstance(meta, dict) else None
+    if isinstance(named, str):
+        named = [named]
+    folder = os.path.dirname(document)
+    return [
+        Path(os.path.normpath(os.path.join(folder, str(p)))).as_posix()
+        for p in named or []
+    ]
+
+
+def get_cited_keys(document: str, wdir: str | None = None) -> set[str]:
+    """The citation keys a document cites in its text, not counting
+    ``\\\\nocite``, or a Quarto cross-reference.
+    """
+    from calkit.latex import flatten
+    from calkit.references import (
+        _MD_SKIP_RE,
+        CROSSREF_RE,
+        MARKDOWN_CITE_RE,
+        find_cited_keys,
+    )
+
+    full = os.path.join(wdir or ".", document)
+    if not is_markdown_like(document):
+        try:
+            return set(find_cited_keys(flatten(full), include_nocite=False))
+        except Exception:
+            return set()
+    text = _MD_SKIP_RE.sub(" ", "\n".join(read_markdown_lines(full)))
+    keys = set()
+    for m in MARKDOWN_CITE_RE.finditer(text):
+        key = m.group(1) or m.group(2)
+        if not CROSSREF_RE.match(key):
+            keys.add(key)
+    return keys
+
+
+def get_line_cited_keys(line: str, markdown: bool) -> list[str]:
+    """The citation keys one line of a document cites, in order."""
+    from calkit.latex import SourceLine
+    from calkit.references import (
+        CROSSREF_RE,
+        MARKDOWN_CITE_RE,
+        find_cited_keys,
+    )
+
+    if markdown:
+        keys = []
+        for m in MARKDOWN_CITE_RE.finditer(line):
+            key = m.group(1) or m.group(2)
+            if not CROSSREF_RE.match(key) and key not in keys:
+                keys.append(key)
+        return keys
+    return list(
+        find_cited_keys(
+            [SourceLine(path="doc.tex", lineno=1, text=line)],
+            include_nocite=False,
+        )
+    )
+
+
+def _same_entry(a: dict, b: dict) -> bool:
+    """Whether two collections' entries for a key are the same work."""
+    from calkit.references import normalize_doi, normalize_title
+
+    doi_a, doi_b = normalize_doi(a.get("doi")), normalize_doi(b.get("doi"))
+    if doi_a and doi_b:
+        return doi_a == doi_b
+    return normalize_title(a.get("title")) == normalize_title(b.get("title"))
+
+
+def _count_keys(path: str) -> dict[str, int]:
+    """How many times each citation key is defined in a ``.bib`` file."""
+    from calkit.releases import parse_bibtex
+
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    counts: dict[str, int] = {}
+    for entry in parse_bibtex(text):
+        if entry.get("ID"):
+            counts[entry["ID"]] = counts.get(entry["ID"], 0) + 1
+    return counts
+
+
+def check_project(
+    ck_info: dict,
+    documents: list[str],
+    wdir: str | None = None,
+    download: bool = True,
+    lookup: Any = None,
+    read: Callable[[Path], list[str]] | None = None,
+) -> dict[str, list[dict]]:
+    """Check the values a project quotes from references.
+
+    Returns ``problems``, each with the ``file`` and ``line`` it's about,
+    the ``key`` and ``name``, and the ``problem``, and ``unchecked``, the
+    values whose reference has no PDF to check them against.
+    """
+    from calkit.references import (
+        get_declared_collection_paths,
+        load_collections,
+    )
+
+    read = read or cached_pages()
+    base = wdir or "."
+    problems: list[dict] = []
+    unchecked: list[dict] = []
+
+    def problem(
+        file: str, line: int, key: str, name: str | None, text: str
+    ) -> None:
+        problems.append(
+            {
+                "file": file,
+                "line": line,
+                "key": key,
+                "name": name,
+                "problem": text,
+            }
+        )
+
+    declared = iter_declared_values(ck_info)
+    uses = find_uses(documents, wdir=wdir)
+    if not declared and not uses:
+        return {"problems": [], "unchecked": []}
+    bibs = {d: get_document_bibliographies(d, wdir=wdir) for d in documents}
+    paths = list(
+        dict.fromkeys(
+            get_declared_collection_paths(ck_info)
+            + [p for named in bibs.values() for p in named]
+        )
+    )
+    loaded = load_collections(wdir=wdir, paths=paths)
+    # A key defined twice in one file is one BibTeX would refuse, which
+    # reading it hides by keeping the last
+    for path in paths:
+        for key, count in _count_keys(os.path.join(base, path)).items():
+            if count > 1:
+                problem(path, 0, key, None, f"{key} is defined {count} times")
+    collections = {
+        c["path"]: c
+        for c in ck_info.get("references") or []
+        if isinstance(c, dict) and c.get("path")
+    }
+    by_value: dict[tuple[str, str], list[str]] = {}
+    for path, key, name, info in declared:
+        by_value.setdefault((key, name), []).append(path)
+        if path in loaded and key not in loaded[path]:
+            problem(
+                "calkit.yaml",
+                0,
+                key,
+                name,
+                f"{path} doesn't define {key}",
+            )
+            continue
+        search = PdfSearch()
+        source = get_pdf(
+            path,
+            key,
+            entry=loaded.get(path, {}).get(key),
+            file=get_entry_file(collections.get(path, {}), key),
+            wdir=wdir,
+            download=download,
+            lookup=lookup,
+            search=search,
+        )
+        if source is None:
+            unchecked.append({"key": key, "name": name, "tried": search.tried})
+            continue
+        try:
+            pages = read(source.path)
+        except Exception as e:
+            unchecked.append(
+                {"key": key, "name": name, "tried": [f"{source.source}: {e}"]}
+            )
+            continue
+        found = check_value(
+            pages, info.get("value"), info.get("page"), info.get("quote")
+        )
+        if found is not None:
+            problem(
+                "calkit.yaml", 0, key, name, f"in {source.source}, {found}"
+            )
+    for use in uses:
+        named = bibs.get(use.document) or []
+        recorded = by_value.get((use.key, use.name), [])
+        if not recorded:
+            problem(
+                use.document,
+                use.line,
+                use.key,
+                use.name,
+                f"calkit.yaml records no value '{use.name}' quoted from "
+                f"'{use.key}'",
+            )
+        if named:
+            defining = [p for p in named if use.key in loaded.get(p, {})]
+            if not defining:
+                problem(
+                    use.document,
+                    use.line,
+                    use.key,
+                    use.name,
+                    f"{use.key} isn't in the bibliographies it names "
+                    f"({', '.join(named)})",
+                )
+            elif len(defining) > 1:
+                first = loaded[defining[0]][use.key]
+                if not all(
+                    _same_entry(first, loaded[p][use.key]) for p in defining
+                ):
+                    problem(
+                        use.document,
+                        use.line,
+                        use.key,
+                        use.name,
+                        f"{use.key} is a different entry in "
+                        f"{' and '.join(defining)}",
+                    )
+            if recorded and not set(recorded) & set(named):
+                problem(
+                    use.document,
+                    use.line,
+                    use.key,
+                    use.name,
+                    f"'{use.name}' is recorded for {use.key} in "
+                    f"{', '.join(recorded)}, which it doesn't use",
+                )
+        if len(recorded) > 1:
+            problem(
+                use.document,
+                use.line,
+                use.key,
+                use.name,
+                f"'{use.name}' is recorded for {use.key} in both "
+                f"{' and '.join(recorded)}",
+            )
+        if use.key not in get_cited_keys(use.document, wdir=wdir):
+            problem(
+                use.document,
+                use.line,
+                use.key,
+                use.name,
+                f"it quotes {use.key} but never cites it",
+            )
+    # One problem per thing wrong, though a value is quoted many times
+    unique = list(
+        {json.dumps(p, sort_keys=True): p for p in problems}.values()
+    )
+    return {"problems": unique, "unchecked": unchecked}
+
+
+def search_cited(
+    findings: list[dict],
+    ck_info: dict,
+    wdir: str | None = None,
+    download: bool = True,
+    lookup: Any = None,
+    read: Callable[[Path], list[str]] | None = None,
+) -> None:
+    """For each typed number in a sentence citing a reference, look for it
+    in the reference's PDF, adding where it was ``found``, or the keys
+    ``searched`` without finding it.
+
+    Each finding needs ``value`` and ``cited_keys``.
+    """
+    from calkit.references import (
+        get_declared_collection_paths,
+        load_collections,
+    )
+
+    read = read or cached_pages()
+    paths = get_declared_collection_paths(ck_info)
+    loaded = load_collections(wdir=wdir, paths=paths)
+    collections = {
+        c["path"]: c
+        for c in ck_info.get("references") or []
+        if isinstance(c, dict) and c.get("path")
+    }
+    pages_by_key: dict[str, tuple[str, list[str]] | None] = {}
+
+    def get_pages(key: str) -> tuple[str, list[str]] | None:
+        if key in pages_by_key:
+            return pages_by_key[key]
+        pages_by_key[key] = None
+        for path in paths:
+            if key not in loaded.get(path, {}):
+                continue
+            source = get_pdf(
+                path,
+                key,
+                entry=loaded[path][key],
+                file=get_entry_file(collections.get(path, {}), key),
+                wdir=wdir,
+                download=download,
+                lookup=lookup,
+            )
+            if source is not None:
+                try:
+                    pages_by_key[key] = (source.source, read(source.path))
+                except Exception:
+                    pass
+                break
+        return pages_by_key[key]
+
+    for finding in findings:
+        found, searched = [], []
+        for key in finding.get("cited_keys") or []:
+            got = get_pages(key)
+            if got is None:
+                continue
+            searched.append(key)
+            for match in find_number(got[1], finding["value"]):
+                found.append(
+                    {
+                        "key": key,
+                        "page": match.page,
+                        "quote": match.quote,
+                        "source": got[0],
+                    }
+                )
+        if found:
+            finding["found"] = found
+        elif searched:
+            finding["searched"] = searched

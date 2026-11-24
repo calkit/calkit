@@ -6486,6 +6486,22 @@ export type ReproCheck = {
     [key: string]: unknown
   }>
   /**
+   * N Refvals
+   */
+  n_refvals?: number
+  /**
+   * Refval Problems
+   */
+  refval_problems?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * Refvals Unchecked
+   */
+  refvals_unchecked?: Array<{
+    [key: string]: unknown
+  }>
+  /**
    * Recommendation
    *
    * Formulate a recommendation for the project.
@@ -8472,6 +8488,22 @@ export type ReproCheckWritable = {
    * Unattributed Numbers
    */
   unattributed_numbers?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * N Refvals
+   */
+  n_refvals?: number
+  /**
+   * Refval Problems
+   */
+  refval_problems?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * Refvals Unchecked
+   */
+  refvals_unchecked?: Array<{
     [key: string]: unknown
   }>
 }

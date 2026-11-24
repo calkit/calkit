@@ -1080,7 +1080,12 @@ def new_ref_value(
                 )
     calkit.save_calkit_info(ck_info)
     typer.echo(f"Added '{name}' to '{key}' in {collection}")
-    typer.echo(f"Cite it with \\ckrefval{{{key}}}{{{name}}}")
+    typer.echo(
+        f"Quote it with \\ckrefval{{{key}}}{{{name}}} in LaTeX, "
+        f"{{{{< ckrefval {key} {name} >}}}} in Quarto, or "
+        f"<!-- ckrefval {key} {name} --><!-- /ckrefval --> in a Markdown "
+        "stage's document, and cite the reference as usual"
+    )
 
 
 @new_app.command(name="comment")

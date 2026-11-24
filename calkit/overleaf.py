@@ -2176,27 +2176,17 @@ def sync(
     # .auxlock) in the synced folder so they don't get committed during sync
     gitignore_modified = False
     path_prefix = path_in_project.rstrip("/") + "/"
-    auto_ignore_paths = {Path(p).as_posix() for p in calkit.AUTO_IGNORE_PATHS}
     for untracked in main_repo.untracked_files:
         untracked_posix = Path(untracked).as_posix()
         if not untracked_posix.startswith(path_prefix):
             continue
-        if (
-            any(
-                untracked_posix.endswith(s)
-                for s in calkit.AUTO_IGNORE_SUFFIXES
-            )
-            or any(
-                untracked_posix.startswith(p)
-                for p in calkit.AUTO_IGNORE_PREFIXES
-            )
-            or untracked_posix in auto_ignore_paths
-            # Written by Calkit on every sync, and pushed rather than
-            # committed
-            or untracked_posix == path_prefix + STYLE_FNAME
-        ):
-            if calkit.git.ensure_path_is_ignored(main_repo, untracked_posix):
-                print_info(f"Automatically ignoring {untracked_posix}")
+        ignore_path = calkit.get_auto_ignore_path(untracked_posix)
+        # Written by Calkit on every sync, and pushed rather than committed
+        if untracked_posix == path_prefix + STYLE_FNAME:
+            ignore_path = untracked_posix
+        if ignore_path is not None:
+            if calkit.git.ensure_path_is_ignored(main_repo, ignore_path):
+                print_info(f"Automatically ignoring {ignore_path}")
                 main_repo.git.add(".gitignore")
                 gitignore_modified = True
     # Mapping ignores calkit.sty when it's first written, maybe during an

@@ -2055,6 +2055,27 @@ def test_save(tmp_dir):
         os.rename(".git-moved", ".git")
 
 
+def test_save_ignores_nested_notebook_checkpoints(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("notebooks/.ipynb_checkpoints")
+    with open("notebooks/fade.ipynb", "w") as f:
+        f.write("{}")
+    for name in ["fade-checkpoint.ipynb", "other-checkpoint.ipynb"]:
+        with open(
+            os.path.join("notebooks/.ipynb_checkpoints", name), "w"
+        ) as f:
+            f.write("{}")
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Add notebook", "--no-push"]
+    )
+    repo = git.Repo()
+    assert repo.git.ls_files("notebooks/fade.ipynb")
+    assert not repo.git.ls_files("notebooks/.ipynb_checkpoints")
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert lines.count("notebooks/.ipynb_checkpoints/") == 1
+
+
 def test_save_data_not_in_cache(tmp_dir):
     # We should skip DVC-tracked paths that are missing from both the
     # workspace and the cache, e.g., because they were never pulled

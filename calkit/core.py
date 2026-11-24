@@ -586,15 +586,40 @@ AUTO_IGNORE_SUFFIXES = [
     ".pyc",
     ".synctex.gz",
     ".auxlock",
-    ".ipynb_checkpoints",
 ]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
 AUTO_IGNORE_PREFIXES = [
     ".venv",
-    "__pycache__",
-    ".ipynb_checkpoints",
     ".calkit/overleaf/",
 ]
+# Directories ignored wherever they are in the project, e.g., the
+# checkpoints Jupyter writes next to each notebook
+AUTO_IGNORE_DIR_NAMES = [".ipynb_checkpoints", "__pycache__"]
+
+
+def get_auto_ignore_path(path: str) -> str | None:
+    """The path to ignore so ``path`` isn't committed, if it's one Calkit
+    ignores automatically.
+
+    A file in a directory that's always ignored gives that directory, so it
+    takes one line of ``.gitignore`` however many files it holds.
+    """
+    from pathlib import Path
+
+    path = Path(path).as_posix()
+    parts = path.split("/")
+    for n, part in enumerate(parts[:-1]):
+        if part in AUTO_IGNORE_DIR_NAMES:
+            return "/".join(parts[: n + 1]) + "/"
+    if (
+        any(path.endswith(s) for s in AUTO_IGNORE_SUFFIXES)
+        or any(path.startswith(p) for p in AUTO_IGNORE_PREFIXES)
+        or path in {Path(p).as_posix() for p in AUTO_IGNORE_PATHS}
+    ):
+        return path
+    return None
+
+
 # Constants for version control auto-add to DVC
 DVC_EXTENSIONS = [
     ".gif",

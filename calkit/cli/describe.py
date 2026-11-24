@@ -256,6 +256,6 @@ def describe_schema(
         typer.echo(txt, nl=False)
         return
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
-    with open(output, "w", encoding="utf-8") as f:
+    with open(output, "w", encoding="utf-8", newline="\n") as f:
         f.write(txt)
     typer.echo(f"Wrote schema to {output}")

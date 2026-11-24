@@ -35,6 +35,10 @@ RULES = [
     "*.cmd text=auto eol=crlf",
 ]
 
+#: Most characters of paths to give one Git command, well within the 32,767
+#: of a whole command line on Windows
+MAX_PATH_CHARS = 16_000
+
 
 @dataclass
 class TrackedEol:
@@ -69,6 +73,44 @@ class TrackedEol:
         return self.index == "lf" and self.worktree == "crlf"
 
 
+def _run_git_on_paths(
+    args: list[str], paths: list[str], wdir: str = "."
+) -> bytes:
+    """Run ``git`` with ``args``, then ``--`` and ``paths``, and return its
+    output.
+
+    Paths are split across as many calls as it takes to keep each command
+    line short enough for Windows, which refuses one over 32,767 characters,
+    e.g., for every file in a large repo.
+
+    Raises
+    ------
+    OSError
+        If Git can't be run.
+    subprocess.CalledProcessError
+        If Git fails.
+    """
+    chunks: list[list[str]] = [[]]
+    size = 0
+    for path in paths:
+        # Each path may also be quoted and spaced from the next
+        if chunks[-1] and size + len(path) + 3 > MAX_PATH_CHARS:
+            chunks.append([])
+            size = 0
+        chunks[-1].append(path)
+        size += len(path) + 3
+    return b"".join(
+        subprocess.run(
+            ["git", *args, "--", *chunk],
+            cwd=wdir,
+            capture_output=True,
+            check=True,
+        ).stdout
+        for chunk in chunks
+        if chunk
+    )
+
+
 def list_tracked_eol(paths: list[str], wdir: str = ".") -> list[TrackedEol]:
     """Report the line endings of the Git-tracked files at or under
     ``paths``, relative to ``wdir``, in one call to Git.
@@ -87,20 +129,20 @@ def list_tracked_eol(paths: list[str], wdir: str = ".") -> list[TrackedEol]:
     out = ""
     try:
         if top_paths:
-            out = subprocess.run(
-                ["git", "ls-files", "--eol", "-z", "--", *top_paths],
-                cwd=wdir,
-                capture_output=True,
-                check=True,
-            ).stdout.decode("utf-8", errors="replace")
+            out = _run_git_on_paths(
+                ["ls-files", "--eol", "-z"], top_paths, wdir=wdir
+            ).decode("utf-8", errors="replace")
     except (OSError, subprocess.CalledProcessError):
         return []
     res = []
+    # A file under paths in different calls to Git is listed by each
+    seen = set()
     for entry in out.split("\0"):
         # <index> <worktree> attr/<attrs>, padded with spaces, then a tab
         info, sep, path = entry.partition("\t")
-        if not sep:
+        if not sep or path in seen:
             continue
+        seen.add(path)
         fields = info.split()
         if len(fields) < 3:
             continue
@@ -327,34 +369,21 @@ def _refresh_index(paths: list[str], wdir: str = ".") -> None:
         return
     try:
         staged = {}
-        out = subprocess.run(
-            ["git", "ls-files", "-s", "-z", "--", *paths],
-            cwd=wdir,
-            capture_output=True,
-            check=True,
-        ).stdout.decode("utf-8", errors="replace")
+        out = _run_git_on_paths(
+            ["ls-files", "-s", "-z"], paths, wdir=wdir
+        ).decode("utf-8", errors="replace")
         for entry in out.split("\0"):
             info, sep, path = entry.partition("\t")
             if sep:
                 staged[path] = info.split()[1]
         hashes = (
-            subprocess.run(
-                ["git", "hash-object", "--", *paths],
-                cwd=wdir,
-                capture_output=True,
-                check=True,
-            )
-            .stdout.decode()
+            _run_git_on_paths(["hash-object"], paths, wdir=wdir)
+            .decode()
             .split()
         )
         same = [p for p, h in zip(paths, hashes) if staged.get(p) == h]
         if same:
-            subprocess.run(
-                ["git", "update-index", "-q", "--", *same],
-                cwd=wdir,
-                capture_output=True,
-                check=True,
-            )
+            _run_git_on_paths(["update-index", "-q"], same, wdir=wdir)
     except (OSError, subprocess.CalledProcessError, IndexError):
         pass
 

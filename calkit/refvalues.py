@@ -477,12 +477,31 @@ def iter_declared_values(ck_info: dict) -> list[tuple[str, str, str, dict]]:
     return out
 
 
+def get_reference_files(collection: dict) -> dict[str, str]:
+    """A collection's PDFs by citation key, from its ``files``, which maps
+    keys to paths, or is a list of key and path, as Calkit wrote before.
+    """
+    files = collection.get("files") or {}
+    if isinstance(files, dict):
+        return {
+            str(key): path
+            for key, path in files.items()
+            if isinstance(path, str)
+        }
+    out = {}
+    for item in files if isinstance(files, list) else []:
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("key"), str)
+            and isinstance(item.get("path"), str)
+        ):
+            out[item["key"]] = item["path"]
+    return out
+
+
 def get_entry_file(collection: dict, key: str) -> str | None:
     """The PDF a collection's ``files`` names for a key, if any."""
-    for item in collection.get("files") or []:
-        if isinstance(item, dict) and item.get("key") == key:
-            return item.get("path")
-    return None
+    return get_reference_files(collection).get(key)
 
 
 def cached_pages(

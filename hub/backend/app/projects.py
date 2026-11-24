@@ -834,9 +834,14 @@ def normalize_ck_info_paths(ck_info: dict[str, Any]) -> dict[str, Any]:
                 continue
             if isinstance(item.get("path"), str):
                 item["path"] = normalize_artifact_path(item["path"])
-            # References items carry their own files, each with a path
+            # References items carry their own files, by citation key, or
+            # as a list of key and path, as Calkit wrote before
             files = item.get("files")
-            if isinstance(files, list):
+            if isinstance(files, dict):
+                for key, path in files.items():
+                    if isinstance(path, str):
+                        files[key] = normalize_artifact_path(path)
+            elif isinstance(files, list):
                 for f in files:
                     if isinstance(f, dict) and isinstance(f.get("path"), str):
                         f["path"] = normalize_artifact_path(f["path"])
@@ -1077,15 +1082,17 @@ def get_contents_from_tree(
             ck_objects[item["path"]] = item
             # Handle files inside references objects
             if category == "references":
-                ref_item_files = item.get("files", [])
-                for rif in ref_item_files:
-                    if "path" in rif:
-                        ck_objects[rif["path"]] = dict(
-                            kind="references item file",
-                            references_path=item["path"],
-                            path=rif["path"],
-                            key=rif.get("key"),
-                        )
+                import calkit.refvalues
+
+                for key, path in calkit.refvalues.get_reference_files(
+                    item
+                ).items():
+                    ck_objects[path] = dict(
+                        kind="references item file",
+                        references_path=item["path"],
+                        path=path,
+                        key=key,
+                    )
     # Find any DVC outs for Calkit objects
     ck_outs = {}
     for p, obj in ck_objects.items():

@@ -375,7 +375,7 @@ def _make_project(with_wrong_page: bool = True) -> None:
     ck_info["references"] = [
         {
             "path": "refs.bib",
-            "files": [{"key": "liu2025", "path": "refs/liu2025.pdf"}],
+            "files": {"liu2025": "refs/liu2025.pdf"},
             "values": {
                 "liu2025": {
                     "lr": {
@@ -545,3 +545,21 @@ def test_check_project_bibliographies(tmp_dir):
         "dup is defined 2 times",
         "liu2025 is a different entry in refs.bib and other.bib",
     ]
+
+
+def test_reference_files():
+    # Files are by citation key, and the list of key and path Calkit wrote
+    # before still reads
+    from calkit.models.core import ReferenceCollection
+
+    old = {"path": "r.bib", "files": [{"key": "a", "path": "a.pdf"}]}
+    new = {"path": "r.bib", "files": {"a": "a.pdf"}}
+    assert rv.get_reference_files(old) == {"a": "a.pdf"}
+    assert rv.get_reference_files(new) == {"a": "a.pdf"}
+    assert (
+        rv.get_entry_file(old, "a") == rv.get_entry_file(new, "a") == "a.pdf"
+    )
+    assert rv.get_entry_file(new, "b") is None
+    assert rv.get_reference_files({"path": "r.bib"}) == {}
+    assert ReferenceCollection.model_validate(old).files == {"a": "a.pdf"}
+    assert ReferenceCollection.model_validate(new).files == {"a": "a.pdf"}

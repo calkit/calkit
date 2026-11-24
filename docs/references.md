@@ -155,8 +155,7 @@ the collection it's from, with where in the reference it appears:
 references:
   - path: references.bib
     files:
-      - key: liu2025
-        path: refs/liu2025.pdf
+      liu2025: refs/liu2025.pdf
     values:
       liu2025:
         noise-sigma:
@@ -211,7 +210,8 @@ PDFs are never stored in the project, since most papers can't be
 redistributed.
 Calkit looks for each reference's PDF in this order:
 
-1. The file the collection's `files` names for the key.
+1. The file the collection's `files` names for the key, a map of citation
+   keys to PDFs in the project.
 2. Zotero desktop, for a collection linked to Zotero, through its local
    API, which works offline and also has files synced with WebDAV or
    linked from disk.

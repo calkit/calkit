@@ -661,11 +661,6 @@ class Publication(_CalkitObject):
         return self.doi is not None
 
 
-class ReferenceFile(Model):
-    path: str
-    key: str
-
-
 class ReferenceValue(Model):
     """A value a document quotes from a reference, and where it appears.
 
@@ -693,9 +688,26 @@ class ReferenceValue(Model):
     )
 
 
+def _reference_files_by_key(v: object) -> object:
+    """A collection's files by citation key, reading the list of key and
+    path Calkit wrote before.
+    """
+    from calkit.refvalues import get_reference_files
+
+    if isinstance(v, list):
+        return get_reference_files({"files": v})
+    return v
+
+
 class ReferenceCollection(Model):
     path: str
-    files: list[ReferenceFile] = []
+    files: Annotated[
+        dict[str, str], BeforeValidator(_reference_files_by_key)
+    ] = Field(
+        default={},
+        description="PDFs of the collection's entries, by citation key, "
+        "relative to the project.",
+    )
     values: dict[str, dict[str, ReferenceValue]] = Field(
         default={},
         description="Values documents quote from the collection's entries, "

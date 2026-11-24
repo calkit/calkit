@@ -9227,12 +9227,13 @@
     "ReferenceCollection": {
       "properties": {
         "files": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/ReferenceFile"
+          "additionalProperties": {
+            "type": "string"
           },
+          "default": {},
+          "description": "PDFs of the collection's entries, by citation key, relative to the project.",
           "title": "Files",
-          "type": "array"
+          "type": "object"
         },
         "path": {
           "title": "Path",
@@ -9255,24 +9256,6 @@
         "path"
       ],
       "title": "ReferenceCollection",
-      "type": "object"
-    },
-    "ReferenceFile": {
-      "properties": {
-        "key": {
-          "title": "Key",
-          "type": "string"
-        },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path",
-        "key"
-      ],
-      "title": "ReferenceFile",
       "type": "object"
     },
     "ReferenceValue": {

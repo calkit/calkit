@@ -66,6 +66,7 @@ import calkit.latex
 import calkit.pipeline
 import calkit.provenance
 import calkit.questions
+import calkit.refvalues
 import calkit.resources
 import calkit.templates
 from app import (
@@ -9658,9 +9659,9 @@ def get_project_references(
                 logger.warning(f"Failed to parse BibTeX file {path}: {e}")
                 entries = []
             final_entries = []
-            file_paths = {
-                f["key"]: f["path"] for f in ref_collection.get("files", [])
-            }
+            # Keyed by citation key, or a list of key and path, as Calkit
+            # wrote before
+            file_paths = calkit.refvalues.get_reference_files(ref_collection)
             for entry in entries:
                 key = entry.pop("ID")
                 reftype = entry.pop("ENTRYTYPE")
@@ -9702,6 +9703,14 @@ def get_project_references(
                     )
                 )
             ref_collection["entries"] = final_entries
+        # The API keeps listing files with their keys, however calkit.yaml
+        # writes them
+        ref_collection["files"] = [
+            {"key": key, "path": path}
+            for key, path in calkit.refvalues.get_reference_files(
+                ref_collection
+            ).items()
+        ]
         resp.append(References.model_validate(ref_collection))
     return resp
 

@@ -721,47 +721,6 @@ export const BoxAccessSchema = {
     "Access to a project's folder in Box.\n\nThe token is downscoped to the folder and lasts about an hour, so a\nclient can reuse it for every file in the project until it expires.",
 } as const
 
-export const BoxAccountSchema = {
-  properties: {
-    login: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Login",
-    },
-    name: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Name",
-    },
-    enterprise: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Enterprise",
-    },
-  },
-  type: "object",
-  required: ["login", "name", "enterprise"],
-  title: "BoxAccount",
-} as const
-
 export const BoxAuthStartSchema = {
   properties: {
     authorize_url: {
@@ -1096,6 +1055,14 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Box",
       default: false,
+    },
+    account_names: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Account Names",
+      default: {},
     },
     cli: {
       type: "boolean",

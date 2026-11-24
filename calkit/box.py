@@ -33,6 +33,10 @@ UPLOAD_URL = "https://upload.box.com/api/2.0"
 CHUNKED_UPLOAD_MIN_BYTES = 20 * 1024 * 1024
 ITEM_FIELDS = "type,id,name,size,sha1,modified_at"
 MAX_TRIES = 6
+# How long a client reuses access to upload, so it asks the hub again soon
+# after a project's storage changes, rather than uploading to Box for the
+# rest of the token's hour
+UPLOAD_ACCESS_REUSE_SECONDS = 300
 
 
 def get_sha1(f: Any, start: int = 0, size: int | None = None) -> str:
@@ -112,9 +116,11 @@ class BoxFileSystem(AbstractFileSystem):
                 renewed = True
                 self._token = self._get_token()
                 continue
+            # A download of a file uploaded just before can be not ready yet
             if (
                 resp.status_code == 429
                 or resp.status_code >= 500
+                or (resp.status_code == 202 and method == "GET")
                 or self._get_error_code(resp) == "operation_blocked_temporary"
             ):
                 if n == MAX_TRIES - 1:
@@ -158,11 +164,7 @@ class BoxFileSystem(AbstractFileSystem):
                     params=params,
                 )
                 if resp.status_code == 404:
-                    # E.g., moved to the trash in Box, so it's looked up
-                    # again next time
-                    for path, cached_id in list(self._folder_ids.items()):
-                        if cached_id == folder_id:
-                            self._folder_ids.pop(path, None)
+                    self._forget_folders()
                     raise FileNotFoundError(folder_id)
                 resp.raise_for_status()
                 body = resp.json()
@@ -174,6 +176,17 @@ class BoxFileSystem(AbstractFileSystem):
                 params["marker"] = marker
             self._listings[folder_id] = items
             return items
+
+    def _forget_folders(self) -> None:
+        """Forget what's known of the folder tree once a folder is found to be
+        gone, e.g., moved to the trash in Box, so paths are looked up again.
+
+        Everything is forgotten, since the parents' listings may be from
+        before, and it's rare enough that listing again is cheap.
+        """
+        self._folder_ids.clear()
+        with self._lock:
+            self._listings.clear()
 
     def _add_to_listing(self, folder_id: str, item: dict[str, Any]) -> None:
         with self._lock:
@@ -203,6 +216,9 @@ class BoxFileSystem(AbstractFileSystem):
                 params={"fields": ITEM_FIELDS},
                 json={"name": name, "parent": {"id": parent_id}},
             )
+            if resp.status_code == 404:
+                self._forget_folders()
+                raise FileNotFoundError(parent)
             # Created meanwhile, e.g., by another thread
             if resp.status_code == 409:
                 item = self._get_conflict(resp)
@@ -228,6 +244,11 @@ class BoxFileSystem(AbstractFileSystem):
             raise FileNotFoundError(path)
         item = self._list_folder(parent_id).get(name)
         if item is None:
+            # A folder at it may have been moved to the trash since its ID was
+            # cached
+            for cached in list(self._folder_ids):
+                if cached == path or cached.startswith(f"{path}/"):
+                    self._folder_ids.pop(cached, None)
             raise FileNotFoundError(path)
         return item
 
@@ -349,6 +370,17 @@ class BoxFileSystem(AbstractFileSystem):
         self._add_to_listing(parent_id, item)
         return item
 
+    def _check_parent_found(
+        self, resp: requests.Response, parent_id: str
+    ) -> None:
+        """Raise for a failed upload, forgetting its folder if it's gone,
+        e.g., moved to the trash, so it's looked up again next time.
+        """
+        if resp.status_code == 404:
+            self._forget_folders()
+            raise FileNotFoundError(parent_id)
+        resp.raise_for_status()
+
     def _send(
         self,
         f: Any,
@@ -389,7 +421,7 @@ class BoxFileSystem(AbstractFileSystem):
         if resp.status_code == 409 and file_id is None:
             self._add_to_listing(parent_id, self._get_conflict(resp))
             return None
-        resp.raise_for_status()
+        self._check_parent_found(resp, parent_id)
         callback.relative_update(size)
         return dict(resp.json()["entries"][0])
 
@@ -423,7 +455,7 @@ class BoxFileSystem(AbstractFileSystem):
         if resp.status_code == 409 and file_id is None:
             self._add_to_listing(parent_id, self._get_conflict(resp))
             return None
-        resp.raise_for_status()
+        self._check_parent_found(resp, parent_id)
         session = resp.json()
         part_size = int(session["part_size"])
         endpoints = session["session_endpoints"]
@@ -461,6 +493,8 @@ class BoxFileSystem(AbstractFileSystem):
             if resp.status_code != 202:
                 break
             time.sleep(float(resp.headers.get("retry-after") or 1))
+        else:
+            raise OSError(f"Box didn't finish processing {name}")
         resp.raise_for_status()
         return dict(resp.json()["entries"][0])
 

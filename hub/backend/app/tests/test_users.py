@@ -410,36 +410,51 @@ def test_get_box_token(db: Session) -> None:
         "name": "Someone",
         "enterprise": "Some University",
     }
-    # An outage doesn't disconnect the account
+    # Neither an outage nor the hub's own client credentials being wrong
+    # disconnect the account
     save("current", 1)
-    with (
-        mock.patch.object(
-            users.requests,
-            "post",
-            return_value=SimpleNamespace(status_code=500, text="down"),
-        ),
-        pytest.raises(HTTPException) as e,
-    ):
-        users.get_box_token(db, user)
-    assert e.value.status_code == 503
-    assert get_tokens()["access_token"] == "current"
-    # A rejected refresh, e.g., after 60 days unused, does
+    for status, error in ((500, None), (400, "invalid_client")):
+        with (
+            mock.patch.object(
+                users.requests,
+                "post",
+                return_value=SimpleNamespace(
+                    status_code=status, text="", json=lambda: {"error": error}
+                ),
+            ),
+            pytest.raises(HTTPException) as e,
+        ):
+            users.get_box_token(db, user)
+        assert e.value.status_code == 503
+        assert get_tokens()["access_token"] == "current"
+    # A spent or expired refresh token does, but which Box account it was is
+    # kept, so storage in it can't be taken over by another
     with (
         mock.patch.object(
             users.requests,
             "post",
             return_value=SimpleNamespace(
-                status_code=400, text="invalid_grant"
+                status_code=400,
+                text="",
+                json=lambda: {"error": "invalid_grant"},
             ),
         ),
         pytest.raises(HTTPException) as e,
     ):
         users.get_box_token(db, user)
     assert e.value.status_code == 401
-    assert (
-        users.get_external_credential(session=db, user=user, provider="box")
-        is None
+    assert get_tokens() == {}
+    credential = users.get_external_credential(
+        session=db, user=user, provider="box"
     )
+    assert credential is not None and credential.provider_account_id == "42"
+    with (
+        mock.patch.object(users.requests, "post") as post,
+        pytest.raises(HTTPException) as e,
+    ):
+        users.get_box_token(db, user)
+    assert e.value.status_code == 401
+    post.assert_not_called()
     # The daily job refreshes only connections unused for a month, then
     # queues itself for the next day
     save("current", 60, idle_days=31)
@@ -476,7 +491,6 @@ def test_get_box_token(db: Session) -> None:
             users.requests, "post", return_value=refreshed
         ) as post,
         mock.patch.object(users.requests, "get", return_value=me),
-        mock.patch("app.tasks.enqueue_box_keepalive") as enqueue,
     ):
         assert users.refresh_idle_box_tokens() == len(idle_ids)
     refreshed_tokens = {
@@ -484,6 +498,5 @@ def test_get_box_token(db: Session) -> None:
     }
     assert "refresh_1" in refreshed_tokens
     assert "other_refresh" not in refreshed_tokens
-    enqueue.assert_called_once_with(timedelta(days=1))
     db.expire_all()
     assert get_tokens()["refresh_token"] == "refresh_2"

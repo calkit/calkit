@@ -327,6 +327,10 @@ def test_box_filesystem_retries():
     ]
     fs.makedirs("b")
     assert box.find("0", "b") is not None
+    # So is a file that was uploaded just before, which isn't ready yet
+    file_id = fs.get_file_id("a")
+    box.queued = [make_response(202, headers={"retry-after": "0"})]
+    assert fs.cat_file_by_id(file_id) == b"a"
     # Until they've lasted too long
     box.queued = [make_response(500)] * calkit.box.MAX_TRIES
     with pytest.raises(requests.HTTPError):
@@ -343,3 +347,10 @@ def test_box_filesystem_retries():
     assert "c" not in folder_ids
     make_fs(box, folder_ids=folder_ids).pipe_file("c/d", b"d")
     assert folder_ids["c"] != old_id
+    # Including by the instance that found it gone, whose listing of the
+    # parent still had it
+    del box.items[folder_ids["c"]]
+    with pytest.raises(FileNotFoundError):
+        fs.pipe_file("c/f", b"f")
+    fs.pipe_file("c/f", b"f")
+    assert make_fs(box).cat_file("c/f") == b"f"

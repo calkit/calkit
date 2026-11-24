@@ -2264,6 +2264,17 @@ def test_huggingface_login_keeps_storage_account(
     # And with no storage, so can anyone
     db.delete(db.get(StorageResource, resource.id))
     db.commit()
+    # But not one connected to another Calkit account
+    from app.tests import create_random_user
+
+    users.save_external_credential(
+        session=db,
+        user=create_random_user(db),
+        provider="huggingface",
+        secret_payload=json.dumps({"access_token": "hf_other"}),
+        provider_account_id="Taken",
+    )
+    assert login(info("taken")) == 409
     assert login(info("second")) == 200
     assert get_account()[0] == "second"
 
@@ -2495,14 +2506,11 @@ def test_connect_box(client: TestClient, db: Session) -> None:
         return response.status_code
 
     assert login("1") == 200
-    response = client.get("/user/box-account", headers=headers)
-    assert response.json() == {
-        "login": "1@example.edu",
-        "name": "1",
-        "enterprise": "Some University",
-    }
     response = client.get("/user/connected-accounts", headers=headers)
     assert response.json()["box"] is True
+    assert response.json()["account_names"]["box"] == (
+        "1@example.edu (Some University)"
+    )
     # HF storage doesn't stop switching Box accounts, but Box storage does
     resource = StorageResource(
         owner_account_id=user.account.id,
@@ -2533,15 +2541,33 @@ def test_connect_box(client: TestClient, db: Session) -> None:
     # Disconnecting with Box storage needs a choice about it
     response = client.delete("/user/external-credentials/box", headers=headers)
     assert response.status_code == 409
-    response = client.delete(
-        "/user/external-credentials/box",
-        headers=headers,
-        params={"storage_action": "orphan"},
-    )
+    # And the tokens are revoked at Box too
+    with patch("requests.post") as revoke:
+        response = client.delete(
+            "/user/external-credentials/box",
+            headers=headers,
+            params={"storage_action": "orphan"},
+        )
     assert response.status_code == 200
+    assert {c.kwargs["data"]["token"] for c in revoke.call_args_list} == {
+        "access_2",
+        "refresh_2",
+    }
     db.expire_all()
     assert db.get(StorageResource, resource_id) is None
     assert (
         users.get_external_credential(session=db, user=user, provider="box")
         is None
     )
+    # A Box account can only belong to one Calkit account
+    from app.tests import create_random_user
+
+    users.save_external_credential(
+        session=db,
+        user=create_random_user(db),
+        provider="box",
+        secret_payload=json.dumps({"access_token": "a", "refresh_token": "r"}),
+        provider_account_id="7",
+    )
+    assert login("7") == 409
+    assert login("8") == 200

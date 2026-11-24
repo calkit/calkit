@@ -217,11 +217,12 @@ class ProjectHfBucketPost(BaseModel):
     bucket: str
 
 
-def is_transferring(user_id: uuid.UUID) -> bool:
-    """Whether storage reached with one of a user's accounts on a service is
-    being moved to the hub's own storage.
+def is_transferring(user_id: uuid.UUID, provider: str) -> bool:
+    """Whether storage reached with a user's account on a service, e.g.,
+    ``"huggingface"``, is being moved to the hub's own storage.
     """
-    return app.tasks.get_storage_transfer_status(user_id)[0] == "running"
+    status, _, transferring = app.tasks.get_storage_transfer_status(user_id)
+    return status == "running" and transferring == provider
 
 
 def set_project_storage(
@@ -229,7 +230,24 @@ def set_project_storage(
 ) -> None:
     """Send a project's new DVC objects to storage, keeping a record of every
     storage it has used so reads can fall back through them.
+
+    For Box, the project's folder there is claimed first, so it can't be
+    one holding another project's files.
     """
+    if resource is not None and resource.kind == "box-folder":
+        try:
+            storage.claim_box_project_folder(
+                storage.get_resource_storage(session, resource), project
+            )
+        except storage.BoxFolderTakenError as e:
+            raise HTTPException(
+                409, f"{e}; rename or move it in Box, then try again"
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("Failed to claim Box folder")
+            raise HTTPException(502, "Couldn't reach Box")
     project.dvc_storage = resource
     project.dvc_storage_id = resource.id if resource is not None else None
     if resource is not None and not any(
@@ -358,7 +376,10 @@ def put_project_storage(
         ):
             raise HTTPException(404, "Storage not found")
         # It's about to be removed
-        if is_transferring(resource.credential_user_id):
+        if is_transferring(
+            resource.credential_user_id,
+            storage.STORAGE_KIND_PROVIDERS.get(resource.kind, ""),
+        ):
             raise HTTPException(
                 409, "Storage being transferred to Calkit Hub storage"
             )
@@ -403,7 +424,7 @@ def post_project_box_folder(
         min_access_level="owner",
     )
     # Its storage is about to be removed, along with the account
-    if is_transferring(current_user.id):
+    if is_transferring(current_user.id, "box"):
         raise HTTPException(
             409, "Box storage being transferred to Calkit Hub storage"
         )
@@ -502,7 +523,7 @@ def post_project_hf_bucket(
     if not HF_BUCKET_RE.match(req.bucket):
         raise HTTPException(422, "Bucket must be like 'namespace/name'")
     # Its storage is about to be removed, along with the account
-    if is_transferring(current_user.id):
+    if is_transferring(current_user.id, "huggingface"):
         raise HTTPException(
             409, "Hugging Face storage being transferred to Calkit Hub storage"
         )

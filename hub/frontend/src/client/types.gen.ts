@@ -404,24 +404,6 @@ export type BoxAccess = {
 }
 
 /**
- * BoxAccount
- */
-export type BoxAccount = {
-  /**
-   * Login
-   */
-  login: string | null
-  /**
-   * Name
-   */
-  name: string | null
-  /**
-   * Enterprise
-   */
-  enterprise: string | null
-}
-
-/**
  * BoxAuthStart
  */
 export type BoxAuthStart = {
@@ -647,6 +629,12 @@ export type ConnectedAccounts = {
    * Box
    */
   box?: boolean
+  /**
+   * Account Names
+   */
+  account_names?: {
+    [key: string]: string
+  }
   /**
    * Cli
    */
@@ -10295,23 +10283,6 @@ export type PostUserBoxAuthResponses = {
 
 export type PostUserBoxAuthResponse =
   PostUserBoxAuthResponses[keyof PostUserBoxAuthResponses]
-
-export type GetUserBoxAccountData = {
-  body?: never
-  path?: never
-  query?: never
-  url: "/user/box-account"
-}
-
-export type GetUserBoxAccountResponses = {
-  /**
-   * Successful Response
-   */
-  200: BoxAccount
-}
-
-export type GetUserBoxAccountResponse =
-  GetUserBoxAccountResponses[keyof GetUserBoxAccountResponses]
 
 export type GetUserOverleafTokenData = {
   body?: never

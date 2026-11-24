@@ -476,38 +476,77 @@ def test_box_storage(db: Session) -> None:
             target, owner, project.name
         ) == {path: 7}
         # Clients get tokens downscoped to the project's folder, which are
-        # reused for the same folder and operation
+        # reused for the same folder and operation while they have a while
+        # left
         for _ in range(2):
-            access = storage.get_box_access(
-                target, owner, project.name, "download"
-            )
+            access = storage.get_box_access(target, project, "download")
         assert access["folder_id"] == project_folder
         assert access["expires_at_unixts"] > time.time() + 3000
         assert len(downscopes) == 1
         assert downscopes[0]["resource"].endswith(f"/folders/{project_folder}")
         assert "item_upload" not in downscopes[0]["scope"]
-        storage.get_box_access(target, owner, project.name, "upload")
-        assert "item_upload" in downscopes[1]["scope"]
-        # Uploads to a project with no folder yet make it
-        other = target.make_project_path(owner, "other")
-        with pytest.raises(FileNotFoundError):
-            target.fs.get_folder_id(other)
-        storage.get_box_access(target, owner, "other", "upload")
-        assert target.fs.get_folder_id(other)
-        # Browsers get Box's own short-lived link
-        with patch.object(
-            requests,
-            "get",
-            return_value=make_response(
-                302, headers={"Location": "https://dl.box.test/x"}
-            ),
-        ) as get:
-            assert (
-                storage.get_project_object_url(target, fpath)
-                == "https://dl.box.test/x"
+        storage._box_access[(project_folder, "download")][
+            "expires_at_unixts"
+        ] = int(time.time()) + 60
+        storage.get_box_access(target, project, "download")
+        assert len(downscopes) == 2
+        # Uploading claims the project's folder, including one it already
+        # has files in from before folders were claimed
+        storage.get_box_access(target, project, "upload")
+        assert "item_upload" in downscopes[2]["scope"]
+        marker = target.make_project_path(
+            owner, project.name, storage.BOX_PROJECT_FILE
+        )
+        assert target.fs.cat_file(marker) == str(project.id).encode()
+
+        def make_project(name: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                owner_account_name=owner, name=name, id=uuid.uuid4()
             )
+
+        # Another project with its name, e.g., after it's deleted, can't
+        # have it
+        with pytest.raises(storage.BoxFolderTakenError):
+            storage.claim_box_project_folder(
+                target, make_project(project.name)
+            )
+        with pytest.raises(storage.BoxFolderTakenError):
+            storage.get_box_access(
+                target, make_project(project.name), "upload"
+            )
+        # Nor can one switching to Box take a folder of files from before
+        # folders were claimed, but one already using it can
+        unclaimed = make_project("unclaimed")
+        target.fs.pipe_file(
+            target.make_project_path(owner, "unclaimed", path), b"old"
+        )
+        with pytest.raises(storage.BoxFolderTakenError):
+            storage.claim_box_project_folder(target, unclaimed)
+        storage.claim_box_project_folder(target, unclaimed, adopt=True)
+        storage.claim_box_project_folder(target, unclaimed)
+        # Uploads to a project with no folder yet make it
+        new = make_project("new")
+        new_path = target.make_project_path(owner, "new")
+        with pytest.raises(FileNotFoundError):
+            target.fs.get_folder_id(new_path)
+        storage.get_box_access(target, new, "upload")
+        assert target.fs.get_folder_id(new_path)
+        # Including after it's moved to the trash, as a later request, which
+        # gets the storage again
+        del box.items[target.fs.get_folder_id(new_path)]
+        target = storage.get_project_storage(db, project)
+        access = storage.get_box_access(target, new, "upload")
+        assert access["folder_id"] in box.items
+        # Browsers get Box's own short-lived link
         file_id = target.fs.get_file_id(fpath)
-        assert get.call_args.args[0].endswith(f"/files/{file_id}/content")
+        box.queued = [
+            make_response(302, headers={"Location": "https://dl.box.test/x"})
+        ]
+        assert (
+            storage.get_project_object_url(target, fpath)
+            == "https://dl.box.test/x"
+        )
+        assert box.calls[-1][1].endswith(f"/files/{file_id}/content")
         # And nothing is ever deleted from it
         with pytest.raises(PermissionError):
             target.fs.rm(fpath)

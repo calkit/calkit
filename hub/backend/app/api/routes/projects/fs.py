@@ -395,9 +395,7 @@ def post_project_fs_op(
             if info_dict["type"] != "file":
                 raise HTTPException(400, "Path is not a file")
             try:
-                box_access = storage.get_box_access(
-                    st, owner_name, project_name, "download"
-                )
+                box_access = storage.get_box_access(st, project, "download")
             except Exception:
                 logger.exception(f"Failed to get Box access for {path}")
                 raise HTTPException(502, "Failed to get download access")
@@ -460,9 +458,9 @@ def post_project_fs_op(
         )
     elif target.backend == "box":
         try:
-            box_access = storage.get_box_access(
-                target, owner_name, project_name, "upload"
-            )
+            box_access = storage.get_box_access(target, project, "upload")
+        except storage.BoxFolderTakenError as e:
+            raise HTTPException(409, str(e))
         except Exception:
             logger.exception(f"Failed to get Box access for {path}")
             raise HTTPException(502, "Failed to get upload access")

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app import users
+from app import storage, users
 from app.models import Project, StorageResource
 from app.tests import authentication_token_from_email, random_email
 
@@ -263,11 +263,29 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
         side_effect=OSError("Box down"),
     ):
         assert client.post(url, headers=headers).status_code == 502
+    # A project's folder in Box holding another project's files isn't
+    # taken over
+    with (
+        patch("calkit.box.BoxFileSystem.get_folder_id", return_value="123"),
+        patch(
+            "app.api.routes.storage.storage.claim_box_project_folder",
+            side_effect=storage.BoxFolderTakenError("Calkit/a/b"),
+        ),
+    ):
+        response = client.post(url, headers=headers)
+        assert response.status_code == 409
+        assert "Calkit/a/b" in response.json()["detail"]
     # The Calkit folder is made, or reused, and the project's new objects go
     # there
-    with patch(
-        "calkit.box.BoxFileSystem.get_folder_id", return_value="123"
-    ) as get_folder_id:
+    with (
+        patch(
+            "calkit.box.BoxFileSystem.get_folder_id", return_value="123"
+        ) as get_folder_id,
+        patch(
+            "app.api.routes.storage.storage.claim_box_project_folder",
+            return_value="456",
+        ) as claim,
+    ):
         response = client.post(url, headers=headers)
         assert response.status_code == 200
         assert get_folder_id.call_args.args == ("Calkit",)
@@ -281,6 +299,8 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
         response = client.post(url, headers=headers)
         assert response.json()["dvc"]["id"] == dvc["id"]
         get_folder_id.assert_called_once()
+        # The project's folder is checked each time
+        assert claim.call_count == 2
     listed = client.get(
         f"/accounts/{user.account.name}/storage", headers=headers
     ).json()

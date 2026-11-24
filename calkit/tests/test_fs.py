@@ -760,6 +760,9 @@ def test_box_transfers(tmp_path: Path) -> None:
             fs.put_file(str(a_lpath), f"ck://owner/project/{a_path}")
             fs.put_file(str(b_lpath), f"ck://owner/project/{b_path}")
         put_op.assert_called_once()
+        # Only for a few minutes, so a change of storage is picked up soon
+        cached = fs._box_access[("owner", "project", "put", None)]
+        assert cached["expires_at_unixts"] <= time.time() + 300
         box_fs = ckfs.CalkitFileSystem(
             endpoint_url="https://api.example.com", skip_instance_cache=True
         )

@@ -183,6 +183,11 @@ function ConnectedAccounts() {
       UsersService.getUserConnectedAccounts().then((response) => response.data),
     queryKey: ["user", "connected-accounts"],
   })
+  // Which account each service is connected as, e.g., a username
+  const getAccountNameText = (provider: string) => {
+    const name = connectedAccountsQuery.data?.account_names?.[provider]
+    return name ? <Text color="ui.dim">{name}</Text> : null
+  }
   const ghInstallQuery = useQuery({
     queryFn: () =>
       UsersService.getUserGithubAppInstallations().then(
@@ -269,7 +274,10 @@ function ConnectedAccounts() {
           <HStack align="center">
             <Text>GitHub:</Text>
             {connectedAccountsQuery.data?.github ? (
-              <Icon as={FaCheck} color="green.500" />
+              <>
+                <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("github")}
+              </>
             ) : (
               // Accounts created through Google or email start without a
               // GitHub identity, which project creation needs
@@ -422,6 +430,7 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.google ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("google")}
                 <IconButton
                   aria-label="Disconnect Google"
                   icon={<FaTrash />}
@@ -443,6 +452,7 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.zotero ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("zotero")}
                 <IconButton
                   aria-label="Disconnect Zotero"
                   icon={<FaTrash />}
@@ -469,6 +479,7 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.huggingface ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("huggingface")}
                 {transferQuery.data?.provider === "huggingface" &&
                 transferQuery.data.status === "running" ? (
                   <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
@@ -508,6 +519,7 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.box ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("box")}
                 {transferQuery.data?.provider === "box" &&
                 transferQuery.data.status === "running" ? (
                   <Text color="ui.dim">Transferring to Calkit Hub storage</Text>

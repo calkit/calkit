@@ -611,7 +611,7 @@ def test_box_storage_with_fallback(client: TestClient) -> None:
         project_folder = box.fs.get_folder_id(f"{OWNER}/{PROJECT}")
         file_id = box.fs.get_file_id(f"{OWNER}/{PROJECT}/{new_path}")
 
-        def get_box_access(target, owner, project, operation):
+        def get_box_access(target, project, operation):
             assert target is box
             return {
                 "folder_id": project_folder,

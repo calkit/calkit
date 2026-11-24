@@ -265,7 +265,6 @@ import type {
   GetSubscriptionPlansResponses,
   GetTemplatesErrors,
   GetTemplatesResponses,
-  GetUserBoxAccountResponses,
   GetUserConnectedAccountsResponses,
   GetUserGithubAppInstallationsResponses,
   GetUserGithubReposErrors,
@@ -2266,24 +2265,6 @@ export class UsersService {
         ...options?.headers,
         ...params.headers,
       },
-    })
-  }
-
-  /**
-   * Get User Box Account
-   */
-  public static getUserBoxAccount<ThrowOnError extends boolean = true>(
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<GetUserBoxAccountResponses, unknown, ThrowOnError> {
-    return (options?.client ?? client).get<
-      GetUserBoxAccountResponses,
-      unknown,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/user/box-account",
-      ...options,
     })
   }
 

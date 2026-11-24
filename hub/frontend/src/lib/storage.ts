@@ -5,8 +5,13 @@ interface ConnectedStorage {
   bucket: string
 }
 
+const STORAGE_SERVICE_NAMES: Record<string, string> = {
+  "box-folder": "Box",
+  "hf-bucket": "Hugging Face",
+}
+
 export const getStorageServiceName = (kind: string): string =>
-  kind === "box-folder" ? "Box" : "Hugging Face"
+  STORAGE_SERVICE_NAMES[kind] ?? kind
 
 // For Box, the bucket is the ID of the Calkit folder, which holds every
 // project's files

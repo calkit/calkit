@@ -14,7 +14,6 @@ is a no-op, and the first viewer pays for the work as they did before.
 """
 
 import re
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app import cache
@@ -144,33 +143,6 @@ def enqueue_storage_transfer(user_id: str, provider: str) -> bool:
         )
     except Exception as e:
         logger.warning(f"Could not queue a storage transfer: {e}")
-        return False
-    return True
-
-
-def enqueue_box_keepalive(delay: timedelta = timedelta(0)) -> bool:
-    """Queue refreshing Box connections nobody has used in a while, since
-    they lapse after 60 days unused. True if it was queued.
-
-    The job queues itself again for the next day, and there's one per day,
-    so every API process doing this on boot still results in one. It needs
-    the worker's scheduler, i.e., ``rq worker --with-scheduler``.
-    """
-    queue = get_queue()
-    if queue is None:
-        return False
-    run_at = datetime.now(timezone.utc) + delay
-    job_id = f"box-keepalive-{run_at:%Y-%m-%d}"
-    try:
-        from rq.job import Job
-
-        if Job.exists(job_id, connection=queue.connection):
-            return False
-        queue.enqueue_at(
-            run_at, "app.users.refresh_idle_box_tokens", job_id=job_id
-        )
-    except Exception as e:
-        logger.warning(f"Could not queue Box keepalive: {e}")
         return False
     return True
 

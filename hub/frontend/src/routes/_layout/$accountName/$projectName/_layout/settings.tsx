@@ -304,7 +304,9 @@ function ProjectSettings() {
   const describe = (r: StorageResourcePublic) =>
     r.kind === "box-folder"
       ? `Box (${r.connected_by})`
-      : `${getStorageServiceName(r.kind)} bucket ${r.bucket}`
+      : r.kind === "hf-bucket"
+        ? `${getStorageServiceName(r.kind)} bucket ${r.bucket}`
+        : r.bucket
   const boxConnected = connectedAccountsQuery.data
     ? Boolean(connectedAccountsQuery.data.box)
     : undefined

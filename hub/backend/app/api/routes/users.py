@@ -930,6 +930,9 @@ class ConnectedAccounts(BaseModel):
     zotero: bool
     huggingface: bool = False
     box: bool = False
+    # Which account each connected service is, where known, e.g., a username
+    # or email, by provider
+    account_names: dict[str, str] = {}
     # Whether a Calkit CLI has ever authenticated as this user, which is the
     # only reliable way to know the CLI is installed: the local server it
     # would otherwise be detected by is usually not running.
@@ -1011,6 +1014,26 @@ def get_user_connected_accounts(
         box_connected = True
     except HTTPException as e:
         box_connected = e.status_code == 503
+    account_names = {}
+    if github_connected and current_user.github_username:
+        account_names["github"] = current_user.github_username
+    for provider, connected in (
+        ("google", google_connected),
+        ("huggingface", huggingface_connected),
+        ("box", box_connected),
+        ("zotero", zotero_cred is not None),
+    ):
+        credential = current_user.get_external_credential(provider=provider)
+        if not connected or credential is None:
+            continue
+        metadata = credential.metadata_json or {}
+        name = metadata.get("login") or metadata.get("username")
+        name = name or credential.provider_account_id
+        # Since one may be at a university, for example
+        if metadata.get("enterprise"):
+            name = f"{name} ({metadata['enterprise']})"
+        if name:
+            account_names[provider] = str(name)
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
@@ -1021,6 +1044,7 @@ def get_user_connected_accounts(
         zotero=zotero_cred is not None,
         huggingface=huggingface_connected,
         box=box_connected,
+        account_names=account_names,
         cli=cli_connected,
     )
 
@@ -1276,29 +1300,6 @@ def post_user_box_auth(
     )
     mixpanel.user_connected_box(current_user, first=first)
     return Message(message="success")
-
-
-class BoxAccount(BaseModel):
-    login: str | None
-    name: str | None
-    # E.g., a university, if the account belongs to one
-    enterprise: str | None
-
-
-@router.get("/user/box-account")
-def get_user_box_account(
-    session: SessionDep, current_user: CurrentUser
-) -> BoxAccount:
-    # Validates, and refreshes if needed
-    users.get_box_token(session=session, user=current_user)
-    credential = current_user.get_external_credential(provider="box")
-    assert credential is not None
-    metadata = credential.metadata_json or {}
-    return BoxAccount(
-        login=metadata.get("login"),
-        name=metadata.get("name"),
-        enterprise=metadata.get("enterprise"),
-    )
 
 
 @router.put("/user/overleaf-token")
@@ -1622,6 +1623,8 @@ def delete_user_external_credential(
         label="default",
     )
     if credential:
+        if provider == "box":
+            users.revoke_box_token(credential)
         session.delete(credential)
     # Also delete legacy tokens if they exist
     if provider == "zenodo" and current_user.zenodo_token:

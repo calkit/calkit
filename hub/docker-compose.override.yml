@@ -114,7 +114,7 @@ services:
   # Without this the worker runs whatever was baked into the image while
   # everything else runs the mounted source, so a signature change breaks
   # every job until someone rebuilds.
-  worker:
+  worker: &worker
     restart: "no"
     env_file:
       - .env
@@ -132,10 +132,20 @@ services:
       - watchfiles
       - --filter
       - python
-      - "rq worker --with-scheduler --url ${REDIS_URL:-redis://cache:6379/0} warm"
+      - "rq worker --url ${REDIS_URL:-redis://cache:6379/0} warm"
       - app
       - ../../calkit
 
+
+  cron:
+    <<: *worker
+    command:
+      - watchfiles
+      - --filter
+      - python
+      - "rq cron --url ${REDIS_URL:-redis://cache:6379/0} app.cron"
+      - app
+      - ../../calkit
   backend-dvc:
     restart: "no"
     env_file:

@@ -915,7 +915,17 @@ class CalkitFileSystem(AbstractFileSystem):
     def _set_box_access(
         self, owner: str, project: str, operation: str, access: dict[str, Any]
     ) -> None:
+        from calkit.box import UPLOAD_ACCESS_REUSE_SECONDS
+
         folder_id = access["folder_id"] if operation == "get" else None
+        if operation == "put":
+            # Asked for again soon, in case the project's storage changes
+            access = access | {
+                "expires_at_unixts": min(
+                    access["expires_at_unixts"],
+                    time.time() + UPLOAD_ACCESS_REUSE_SECONDS,
+                )
+            }
         self._box_access[(owner, project, operation, folder_id)] = access
         self._box_projects.add((owner, project))
 

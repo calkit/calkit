@@ -18,6 +18,9 @@ from google.cloud import storage as gcs
 from google.oauth2 import service_account as gcs_service_account
 
 from app.config import settings
+from calkit.box import (
+    UPLOAD_ACCESS_REUSE_SECONDS as BOX_UPLOAD_ACCESS_REUSE_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -560,6 +563,12 @@ def delete_project_objects(project: "Project") -> None:
 
 # The kinds of storage resource reached with each provider's credential
 PROVIDER_STORAGE_KINDS = {"huggingface": ["hf-bucket"], "box": ["box-folder"]}
+# And the reverse, e.g., "huggingface" for "hf-bucket"
+STORAGE_KIND_PROVIDERS = {
+    kind: provider
+    for provider, kinds in PROVIDER_STORAGE_KINDS.items()
+    for kind in kinds
+}
 STORAGE_PROVIDER_NAMES = {"huggingface": "Hugging Face", "box": "Box"}
 
 
@@ -726,6 +735,10 @@ def transfer_storage_and_disconnect(
                             project.dvc_storage_id = None
                             session.add(project)
                     session.commit()
+                    # Clients keep uploading to Box with access they
+                    # already have, until they ask again
+                    if resource.kind == "box-folder":
+                        time.sleep(BOX_UPLOAD_ACCESS_REUSE_SECONDS + 60)
                     n_copied = copy_resource_to_internal(session, resource)
                     logger.info(
                         f"Copied {n_copied} objects from {resource.bucket} "
@@ -748,6 +761,8 @@ def transfer_storage_and_disconnect(
             session=session, user=user, provider=provider
         )
         if credential is not None:
+            if provider == "box":
+                app.users.revoke_box_token(credential)
             session.delete(credential)
             session.commit()
         app.mixpanel.user_transferred_storage(
@@ -770,10 +785,56 @@ _box_access: cachetools.TTLCache[tuple[str, str], dict[str, Any]] = (
 )
 
 
+# In each project's folder in Box, holding the project's ID, so a folder left
+# by a deleted or renamed project isn't given to another with its name
+BOX_PROJECT_FILE = ".calkit-project"
+
+
+class BoxFolderTakenError(RuntimeError):
+    """A project's folder in Box holds another project's files."""
+
+    def __init__(self, path: str):
+        self.path = path
+        super().__init__(f"Box folder {path} holds another project's files")
+
+
+def claim_box_project_folder(
+    storage: ProjectStorage, project: "Project", adopt: bool = False
+) -> str:
+    """Get the ID of a project's folder in Box, making it if needed.
+
+    Raises ``BoxFolderTakenError`` if it holds files from another project,
+    e.g., a deleted one with the same name, since Calkit never deletes them.
+    With ``adopt``, for a project already using the storage, which it was
+    checked for when it started, a folder with files but no record of its
+    project is taken as the project's.
+    """
+    fs = storage.fs
+    path = storage.make_project_path(project.owner_account_name, project.name)
+    marker = f"{path}/{BOX_PROJECT_FILE}"
+    project_id = str(project.id)
+    names = None
+    # Twice, since a folder moved to the trash since its ID was cached is
+    # only found to be gone by trying
+    for _ in range(2):
+        try:
+            names = {p.rsplit("/", 1)[-1] for p in fs.ls(path, detail=False)}
+            break
+        except FileNotFoundError:
+            continue
+    if names is not None and BOX_PROJECT_FILE in names:
+        if fs.cat_file(marker).decode().strip() != project_id:
+            raise BoxFolderTakenError(path)
+    elif names and not adopt:
+        raise BoxFolderTakenError(path)
+    else:
+        fs.pipe_file(marker, project_id.encode())
+    return str(fs.get_folder_id(path))
+
+
 def get_box_access(
     storage: ProjectStorage,
-    owner_name: str,
-    project_name: str,
+    project: "Project",
     operation: Literal["upload", "download"],
 ) -> dict[str, Any]:
     """Get a short-lived token for a project's folder in Box.
@@ -784,13 +845,16 @@ def get_box_access(
     """
     import requests
 
-    folder_id = storage.fs.get_folder_id(
-        storage.make_project_path(owner_name, project_name),
-        create=operation == "upload",
-    )
+    if operation == "upload":
+        folder_id = claim_box_project_folder(storage, project, adopt=True)
+    else:
+        folder_id = storage.fs.get_folder_id(
+            storage.make_project_path(project.owner_account_name, project.name)
+        )
     key = (folder_id, operation)
     access = _box_access.get(key)
-    if access is not None:
+    # Only while it has a while left, since how long Box's last is up to Box
+    if access is not None and access["expires_at_unixts"] > time.time() + 900:
         return access
     resp = requests.post(
         BOX_TOKEN_URL,
@@ -984,14 +1048,12 @@ def get_box_object_url(storage: ProjectStorage, fpath: str) -> str:
     Box redirects authenticated downloads to a signed URL, which is what
     gets returned, so the credential never leaves the hub.
     """
-    import requests
-
     file_id = storage.fs.get_file_id(fpath)
-    resp = requests.get(
+    # Through the filesystem, which waits if the file isn't ready yet
+    resp = storage.fs._request(
+        "GET",
         f"https://api.box.com/2.0/files/{file_id}/content",
-        headers={"Authorization": f"Bearer {storage.token}"},
         allow_redirects=False,
-        timeout=15,
     )
     if resp.status_code not in (301, 302, 303, 307, 308):
         raise RuntimeError(

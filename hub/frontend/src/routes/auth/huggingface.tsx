@@ -10,9 +10,13 @@ import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import { consumeHuggingFaceOAuthState } from "../../lib/huggingface"
 
+// Without a code if the person denied access, or their institution blocks
+// the app
 const authParamsSchema = z.object({
-  code: z.string(),
-  state: z.string(),
+  code: z.string().optional(),
+  state: z.string().optional(),
+  error: z.string().optional(),
+  error_description: z.string().optional(),
 })
 
 export const Route = createFileRoute("/auth/huggingface")({
@@ -61,7 +65,7 @@ function HuggingFaceAuth() {
       setTimeout(goToSettings, 2000)
     },
   })
-  const { code, state } = Route.useSearch()
+  const { code, state, error, error_description } = Route.useSearch()
   const isMounted = useRef(false)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once on arrival from Hugging Face
@@ -71,6 +75,16 @@ function HuggingFaceAuth() {
     }
     isMounted.current = true
     // The returned state must match the one this browser stored
+    if (error || !code) {
+      consumeHuggingFaceOAuthState()
+      showToast(
+        "Connection canceled",
+        error_description ?? error ?? "No authorization code",
+        "error",
+      )
+      goToSettings()
+      return
+    }
     const expected = consumeHuggingFaceOAuthState()
     if (expected.state && expected.redirectUri && state === expected.state) {
       mutation.mutate({

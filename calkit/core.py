@@ -1276,6 +1276,41 @@ def update_readme_content(
     return heading + intro + ("\n" + body if body else "")
 
 
+def is_terminal(stream: Any) -> bool:
+    """True when a stream is a terminal.
+
+    On Windows, ``isatty`` is also true of the NUL device, e.g., for
+    ``2>NUL`` or ``subprocess.DEVNULL``, so only a stream with a console
+    mode counts there. Python writes to NUL with the ANSI code page, so
+    taking it for a terminal, e.g., to draw a spinner, fails on the first
+    character it can't encode. mintty isn't a console either; see
+    :func:`is_mintty`.
+    """
+    try:
+        if not stream.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetConsoleMode.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    mode = wintypes.DWORD()
+    return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
 def is_tty() -> bool:
     """True only when both stdin and stdout are TTYs.
 
@@ -1283,36 +1318,9 @@ def is_tty() -> bool:
     we need to read the user's answer. CI environments fail at least one
     and fall through to the abort-with-fix-command path.
 
-    On Windows, ``isatty`` is also true of the NUL device, which is what a
-    child given ``subprocess.DEVNULL`` reads, so only a stream with a console
-    mode counts there.
+    Neither counts on Windows when it's the NUL device; see
+    :func:`is_terminal`.
     """
-
-    def is_terminal(stream: Any) -> bool:
-        try:
-            if not stream.isatty():
-                return False
-        except (AttributeError, ValueError):
-            return False
-        if sys.platform != "win32":
-            return True
-        import ctypes
-        import msvcrt
-        from ctypes import wintypes
-
-        try:
-            handle = msvcrt.get_osfhandle(stream.fileno())
-        except (AttributeError, OSError, ValueError):
-            return False
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.GetConsoleMode.argtypes = [
-            wintypes.HANDLE,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        kernel32.GetConsoleMode.restype = wintypes.BOOL
-        mode = wintypes.DWORD()
-        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
-
     return is_terminal(sys.stdin) and is_terminal(sys.stdout)
 
 

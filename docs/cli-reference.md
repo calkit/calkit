@@ -3332,10 +3332,10 @@ calkit update license [OPTIONS]
 
 Options:
 
-| Option                     | Type    | Required | Default | Description                                         |
-| -------------------------- | ------- | -------- | ------- | --------------------------------------------------- |
-| `--copyright-holder`, `-c` | str     | yes      |         | Copyright holder, e.g., your full name.             |
-| `--no-commit`              | boolean | no       | False   | Do not create a Git commit for the updated license. |
+| Option                     | Type    | Required | Default | Description                                                                 |
+| -------------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------- |
+| `--copyright-holder`, `-c` | str     | no       |         | Copyright holder, e.g., your full name. Defaults to Git's user.name config. |
+| `--no-commit`              | boolean | no       | False   | Do not create a Git commit for the updated license.                         |
 
 <a id="subcommand-update-release"></a>
 

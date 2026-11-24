@@ -164,6 +164,8 @@ def describe_storage(
             return "Calkit Hub storage"
         if resource.get("kind") == "hf-bucket":
             return f"Hugging Face bucket {resource['bucket']}"
+        if resource.get("kind") == "box-folder":
+            return f"Box, connected by {resource['connected_by']}"
         return str(resource["bucket"])
 
     def get_git_storage_name(url: str | None) -> str | None:

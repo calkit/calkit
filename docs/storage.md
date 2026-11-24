@@ -10,7 +10,7 @@ goes to the Calkit Hub (calkit.io).
 <!-- TODO: needs human review -->
 
 Those larger files can also go somewhere else,
-e.g., a Hugging Face bucket.
+e.g., a Hugging Face bucket or Box.
 
 <!-- TODO: needs human review -->
 
@@ -51,7 +51,8 @@ To use your own:
    [hub account settings](https://calkit.io/settings).
 2. In the project's settings on the hub,
    select where its large files should go,
-   or create a new Hugging Face bucket.
+   create a new Hugging Face bucket,
+   or click "Use Box."
 
 To see where a project's files are stored
 and how much Calkit Hub storage it's using,
@@ -125,6 +126,48 @@ From then on, use `calkit push` and `calkit pull`.
 A separately installed `dvc` can't reach the hub,
 so `dvc push` and `dvc pull` may not work.
 
+## Box
+
+<!-- TODO: needs human review -->
+
+Many universities give everyone Box storage,
+so a project's files can live alongside the rest of your work there.
+Usage counts toward your Box storage, not your Calkit plan.
+
+To use it,
+go to the project's settings on the hub and click "Use Box,"
+connecting your Box account if asked,
+then click it again.
+Files go in a folder named `Calkit` at the top of your Box,
+under the project's owner and name,
+and every project you send to Box shares that folder.
+You can move or rename it in Box,
+and Calkit will still find it.
+
+The folder stays private even if the project is public.
+Calkit gives people who can see the project access to its files,
+so they don't need Box accounts.
+Each file can be as large as your Box plan allows,
+e.g., 250 MB on a free account,
+and Box allows about 240 uploads a minute,
+so pushing thousands of small files takes a while.
+
+If your Box account belongs to an institution,
+it may need to approve Calkit first.
+If Box says the app has been disabled by your administrator,
+ask your IT department to enable it.
+
+Box connections lapse after 60 days without use,
+so Calkit keeps yours active.
+If it does lapse, connect Box again.
+Disconnecting works like it does for Hugging Face,
+and your files stay in Box either way.
+
+Connecting your Box account gives Calkit access to everything in it,
+but Calkit only uses the `Calkit` folder,
+and collaborators only get access to their project's folder,
+for an hour at a time.
+
 ## Changing where files are stored
 
 <!-- TODO: needs human review -->
@@ -139,8 +182,8 @@ so you and your collaborators don't need to do anything.
 When deleting a project,
 you can choose to delete its files from Calkit Hub storage too.
 Calkit never deletes anything from storage you've connected,
-so if you no longer need a project's bucket,
-delete it on HF.
+so if you no longer need a project's bucket or folder,
+delete it on HF or Box.
 
 ## Using your storage without Calkit
 
@@ -166,7 +209,6 @@ to hydrate the DVC cache and make checking them out seamless.
 
 - Google Drive
 - OneDrive
-- Box
 - S3 and storage that works with it,
   e.g., Amazon S3, Cloudflare R2, Wasabi, or MinIO
 - Connecting AWS without creating access keys

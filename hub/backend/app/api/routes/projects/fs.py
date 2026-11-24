@@ -112,6 +112,24 @@ class XetAccess(BaseModel):
     size: int | None = None
 
 
+class BoxAccess(BaseModel):
+    """Access to a project's folder in Box.
+
+    The token is downscoped to the folder and lasts about an hour, so a
+    client can reuse it for every file in the project until it expires.
+    """
+
+    kind: Literal["box"] = "box"
+    operation: Literal["upload", "download"]
+    # The project's folder, which paths in the project are relative to
+    folder_id: str
+    access_token: str
+    expires_at_unixts: int
+    # For downloads
+    file_id: str | None = None
+    size: int | None = None
+
+
 class FsListResult(BaseModel):
     paths: list[str] | list[dict]  # Depends on detail flag in request
 
@@ -147,7 +165,8 @@ class FsOpResponse(BaseModel):
             | PresignedChunkedAccess
             | HttpRequestAccess
             | SftpAccess
-            | XetAccess,
+            | XetAccess
+            | BoxAccess,
             Field(discriminator="kind"),
         ]
         | None
@@ -241,7 +260,7 @@ def post_project_fs_op(
     backend = storage_locations[0].backend
     for st in storage_locations:
         if (
-            st.backend != "hf"
+            st.backend in ("s3", "gcs")
             and settings.ENVIRONMENT == "local"
             and not st.fs.exists(st.data_prefix)
         ):
@@ -371,6 +390,33 @@ def post_project_fs_op(
                     size=info_dict["size"],
                 ),
             )
+        if st.backend == "box":
+            info_dict = st.fs.info(full_path)
+            if info_dict["type"] != "file":
+                raise HTTPException(400, "Path is not a file")
+            try:
+                box_access = storage.get_box_access(st, project, "download")
+            except Exception:
+                logger.exception(f"Failed to get Box access for {path}")
+                raise HTTPException(502, "Failed to get download access")
+            # Once per pull, since clients reuse the access for the rest
+            if current_user is not None:
+                mixpanel.user_performed_fs_op(
+                    current_user,
+                    owner_name,
+                    project_name,
+                    "get",
+                    backend="box",
+                )
+            return FsOpResponse(
+                backend=st.backend,
+                access=BoxAccess(
+                    operation="download",
+                    file_id=info_dict["box_id"],
+                    size=info_dict["size"],
+                    **box_access,
+                ),
+            )
         url = get_object_url(
             fpath=full_path,
             fname=None,
@@ -399,6 +445,7 @@ def post_project_fs_op(
             raise HTTPException(502, "Failed to get upload access")
         access: (
             XetAccess
+            | BoxAccess
             | PresignedMultipartAccess
             | PresignedChunkedAccess
             | PresignedUrlAccess
@@ -409,6 +456,15 @@ def post_project_fs_op(
             access_token=token["accessToken"],
             expires_at_unixts=token["exp"],
         )
+    elif target.backend == "box":
+        try:
+            box_access = storage.get_box_access(target, project, "upload")
+        except storage.BoxFolderTakenError as e:
+            raise HTTPException(409, str(e))
+        except Exception:
+            logger.exception(f"Failed to get Box access for {path}")
+            raise HTTPException(502, "Failed to get upload access")
+        access = BoxAccess(operation="upload", **box_access)
     # Determine if we need chunked upload for large puts
     elif storage.upload_should_be_chunked(content_length):
         # At this point, content_length is guaranteed to be not None
@@ -573,6 +629,14 @@ def post_project_fs_batch_op(
                 if info_dict.get("xet_hash") and found.bucket is not None:
                     path_result["info"]["xet_hash"] = info_dict["xet_hash"]
                     path_result["info"]["bucket"] = found.bucket
+                # Or from Box, with access to the folder it's in
+                if found.backend == "box" and info_dict.get("box_id"):
+                    path_result["info"]["box_file_id"] = info_dict["box_id"]
+                    path_result["info"]["box_folder_id"] = (
+                        found.fs.get_folder_id(
+                            found.make_project_path(owner_name, project_name)
+                        )
+                    )
         # Handle content (if requested via include)
         if "content" in include and info_dict is not None:
             path_result["content_base64"] = None
@@ -681,7 +745,7 @@ def post_project_fs_batch_op(
     backend = storage_locations[0].backend
     for st in storage_locations:
         if (
-            st.backend != "hf"
+            st.backend in ("s3", "gcs")
             and settings.ENVIRONMENT == "local"
             and not st.fs.exists(st.data_prefix)
         ):

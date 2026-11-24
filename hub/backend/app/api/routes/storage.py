@@ -4,6 +4,7 @@ import logging
 import re
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -146,6 +147,8 @@ class CredentialStoragePublic(BaseModel):
     """Storage reached with the current user's account on a service."""
 
     id: uuid.UUID
+    kind: str
+    # For HF, the bucket, and for Box, the ID of the ``Calkit`` folder
     bucket: str
     dedicated: bool
     owner: str
@@ -153,16 +156,19 @@ class CredentialStoragePublic(BaseModel):
     projects: list[str]
 
 
-@router.get("/user/huggingface/storage")
-def get_user_huggingface_storage(
-    session: SessionDep, current_user: CurrentUser
+@router.get("/user/{provider}/storage")
+def get_user_service_storage(
+    provider: Literal["huggingface", "box"],
+    session: SessionDep,
+    current_user: CurrentUser,
 ) -> list[CredentialStoragePublic]:
-    """Get the storage reached with the current user's HF account, which
-    disconnecting it would make unreachable.
+    """Get the storage reached with the current user's account on a service,
+    e.g., HF, which disconnecting it would make unreachable.
     """
     return [
         CredentialStoragePublic(
             id=r.id,
+            kind=r.kind,
             bucket=r.bucket,
             dedicated=r.project_id is not None,
             owner=r.owner_account.name,
@@ -171,7 +177,9 @@ def get_user_huggingface_storage(
                 for p in storage.get_resource_projects(session, r)
             ],
         )
-        for r in storage.get_credential_resources(session, current_user.id)
+        for r in storage.get_credential_resources(
+            session, current_user.id, provider=provider
+        )
     ]
 
 
@@ -179,17 +187,21 @@ class StorageTransferStatus(BaseModel):
     # "running", "failed", or null if there's no transfer
     status: str | None
     error: str | None = None
+    # Where it's from, e.g., "huggingface"
+    provider: str | None = None
 
 
-@router.get("/user/huggingface/storage-transfer")
-def get_user_huggingface_storage_transfer(
+@router.get("/user/storage-transfer")
+def get_user_storage_transfer(
     current_user: CurrentUser,
 ) -> StorageTransferStatus:
-    """Get the status of moving the storage reached with the current user's
-    HF account to the hub's own storage.
+    """Get the status of moving the storage reached with one of the current
+    user's accounts on a service to the hub's own storage.
     """
-    status, error = app.tasks.get_storage_transfer_status(current_user.id)
-    return StorageTransferStatus(status=status, error=error)
+    status, error, provider = app.tasks.get_storage_transfer_status(
+        current_user.id
+    )
+    return StorageTransferStatus(status=status, error=error, provider=provider)
 
 
 class ProjectStoragePut(BaseModel):
@@ -205,11 +217,12 @@ class ProjectHfBucketPost(BaseModel):
     bucket: str
 
 
-def is_transferring(user_id: uuid.UUID) -> bool:
-    """Whether storage reached with a user's HF account is being moved to the
-    hub's own storage.
+def is_transferring(user_id: uuid.UUID, provider: str) -> bool:
+    """Whether storage reached with a user's account on a service, e.g.,
+    ``"huggingface"``, is being moved to the hub's own storage.
     """
-    return app.tasks.get_storage_transfer_status(user_id)[0] == "running"
+    status, _, transferring = app.tasks.get_storage_transfer_status(user_id)
+    return status == "running" and transferring == provider
 
 
 def set_project_storage(
@@ -217,7 +230,24 @@ def set_project_storage(
 ) -> None:
     """Send a project's new DVC objects to storage, keeping a record of every
     storage it has used so reads can fall back through them.
+
+    For Box, the project's folder there is claimed first, so it can't be
+    one holding another project's files.
     """
+    if resource is not None and resource.kind == "box-folder":
+        try:
+            storage.claim_box_project_folder(
+                storage.get_resource_storage(session, resource), project
+            )
+        except storage.BoxFolderTakenError as e:
+            raise HTTPException(
+                409, f"{e}; rename or move it in Box, then try again"
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("Failed to claim Box folder")
+            raise HTTPException(502, "Couldn't reach Box")
     project.dvc_storage = resource
     project.dvc_storage_id = resource.id if resource is not None else None
     if resource is not None and not any(
@@ -346,7 +376,10 @@ def put_project_storage(
         ):
             raise HTTPException(404, "Storage not found")
         # It's about to be removed
-        if is_transferring(resource.credential_user_id):
+        if is_transferring(
+            resource.credential_user_id,
+            storage.STORAGE_KIND_PROVIDERS.get(resource.kind, ""),
+        ):
             raise HTTPException(
                 409, "Storage being transferred to Calkit Hub storage"
             )
@@ -360,6 +393,105 @@ def put_project_storage(
         project.name,
         from_kind=from_kind,
         to_kind=resource.kind if resource is not None else "hub",
+    )
+    return get_project_storage_settings(project)
+
+
+BOX_FOLDER_NAME = "Calkit"
+
+
+@router.post("/projects/{owner_name}/{project_name}/storage/box-folder")
+def post_project_box_folder(
+    owner_name: str,
+    project_name: str,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ProjectStorageSettings:
+    """Send a project's new DVC objects to the current user's Box.
+
+    They go in the ``Calkit`` folder at the root of the user's Box, which is
+    created if it isn't there, under ``{owner}/{project}``. The folder is
+    shared by every project the owner account has there, so it's kept as
+    storage the account's projects can select.
+    """
+    from calkit.box import BoxFileSystem
+
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="owner",
+    )
+    # Its storage is about to be removed, along with the account
+    if is_transferring(current_user.id, "box"):
+        raise HTTPException(
+            409, "Box storage being transferred to Calkit Hub storage"
+        )
+    token = users.get_box_token(session=session, user=current_user)
+    resource = session.exec(
+        select(StorageResource).where(
+            StorageResource.owner_account_id == project.owner_account_id,
+            StorageResource.kind == "box-folder",
+            StorageResource.credential_user_id == current_user.id,
+        )
+    ).first()
+    created = resource is None
+    if resource is None:
+        account = get_storage_account(
+            session, current_user, project.owner_account_name, manage=True
+        )
+        # Reused if it's there, e.g., from an earlier connection, so the
+        # objects in it can be read again
+        try:
+            folder_id = BoxFileSystem(token, "0").get_folder_id(
+                BOX_FOLDER_NAME, create=True
+            )
+        except Exception as e:
+            logger.info(f"Failed to create Box folder: {e}")
+            raise HTTPException(
+                502, f"Couldn't create '{BOX_FOLDER_NAME}' folder in Box"
+            )
+        taken = set(
+            session.exec(
+                select(StorageResource.name).where(
+                    StorageResource.owner_account_id == account.id
+                )
+            ).all()
+        )
+        name = "box"
+        n = 2
+        while name in taken:
+            name = f"box-{n}"
+            n += 1
+        resource = StorageResource(
+            owner_account_id=account.id,
+            name=name,
+            kind="box-folder",
+            bucket=folder_id,
+            credential_user_id=current_user.id,
+        )
+        resource.credential_user = current_user
+        session.add(resource)
+    from_kind = (
+        project.dvc_storage.kind if project.dvc_storage is not None else "hub"
+    )
+    set_project_storage(session, project, resource)
+    if created:
+        mixpanel.user_created_project_storage(
+            current_user,
+            project.owner_account_name,
+            project.name,
+            kind="box-folder",
+            is_public=project.is_public,
+            in_org=project.owner_account.org_id is not None,
+        )
+    mixpanel.user_changed_project_storage(
+        current_user,
+        project.owner_account_name,
+        project.name,
+        from_kind=from_kind,
+        to_kind="box-folder",
     )
     return get_project_storage_settings(project)
 
@@ -391,7 +523,7 @@ def post_project_hf_bucket(
     if not HF_BUCKET_RE.match(req.bucket):
         raise HTTPException(422, "Bucket must be like 'namespace/name'")
     # Its storage is about to be removed, along with the account
-    if is_transferring(current_user.id):
+    if is_transferring(current_user.id, "huggingface"):
         raise HTTPException(
             409, "Hugging Face storage being transferred to Calkit Hub storage"
         )

@@ -1131,6 +1131,26 @@ def save_google_token(
     )
 
 
+def check_external_account_unclaimed(
+    session: Session, user: User, provider: str, provider_account_id: str
+) -> None:
+    """Refuse connecting an account on a service that's connected to another
+    Calkit user, since each can only belong to one.
+    """
+    others = session.exec(
+        select(UserExternalCredential).where(
+            UserExternalCredential.provider == provider,
+            UserExternalCredential.user_id != user.id,
+            func.lower(UserExternalCredential.provider_account_id)
+            == provider_account_id.lower(),
+        )
+    ).first()
+    if others is not None:
+        raise HTTPException(
+            409, "That account is connected to another Calkit account"
+        )
+
+
 HF_TOKEN_URL = "https://huggingface.co/oauth/token"
 
 
@@ -1177,6 +1197,10 @@ def save_huggingface_token(
         metadata = existing.metadata_json or {}
     else:
         raise HTTPException(502, "Failed to get Hugging Face account info")
+    if new_login:
+        check_external_account_unclaimed(
+            session, user, "huggingface", str(username)
+        )
     if (
         new_login
         and existing is not None
@@ -1185,7 +1209,7 @@ def save_huggingface_token(
     ):
         from app.storage import get_credential_resources
 
-        if get_credential_resources(session, user.id):
+        if get_credential_resources(session, user.id, provider="huggingface"):
             raise HTTPException(
                 409,
                 "Storage uses Hugging Face account "
@@ -1288,6 +1312,218 @@ def get_huggingface_token(session: Session, user: User) -> str:
     hf_resp = resp.json()
     save_huggingface_token(session=session, user=user, hf_resp=hf_resp)
     return str(hf_resp["access_token"])
+
+
+BOX_TOKEN_URL = "https://api.box.com/oauth2/token"
+BOX_API_URL = "https://api.box.com/2.0"
+# Box refresh tokens lapse after this long unused
+BOX_REFRESH_TOKEN_LIFETIME = timedelta(days=60)
+
+
+def save_box_token(
+    session: Session,
+    user: User,
+    box_resp: dict[str, Any],
+    new_login: bool = False,
+) -> None:
+    """Save a Box OAuth token response.
+
+    Box refresh tokens are single-use, so each response replaces the last.
+    A new login can't replace the Box account storage is using.
+    """
+    existing = get_external_credential(
+        session=session, user=user, provider="box"
+    )
+    headers = {"Authorization": f"Bearer {box_resp['access_token']}"}
+    try:
+        resp = requests.get(
+            f"{BOX_API_URL}/users/me",
+            params={"fields": "id,login,name,enterprise"},
+            headers=headers,
+            timeout=15,
+        )
+    except requests.RequestException:
+        resp = None
+    if resp is not None and resp.ok:
+        info = resp.json()
+        account_id = str(info["id"])
+        # The enterprise, e.g., a university, decides which apps its users
+        # can authorize
+        enterprise = info.get("enterprise") or {}
+        metadata = {
+            "login": info.get("login"),
+            "name": info.get("name"),
+            "enterprise": enterprise.get("name"),
+        }
+    elif existing is not None and not new_login:
+        account_id = str(existing.provider_account_id)
+        metadata = existing.metadata_json or {}
+    else:
+        raise HTTPException(502, "Failed to get Box account info")
+    if new_login:
+        check_external_account_unclaimed(session, user, "box", account_id)
+    if (
+        new_login
+        and existing is not None
+        and existing.provider_account_id
+        and account_id != existing.provider_account_id
+    ):
+        from app.storage import get_credential_resources
+
+        if get_credential_resources(session, user.id, provider="box"):
+            login = (existing.metadata_json or {}).get("login")
+            raise HTTPException(
+                409,
+                f"Storage uses Box account {login}; disconnect first",
+            )
+    now = utcnow()
+    save_external_credential(
+        session=session,
+        user=user,
+        provider="box",
+        secret_payload=json.dumps(
+            {
+                "access_token": box_resp["access_token"],
+                "refresh_token": box_resp["refresh_token"],
+            }
+        ),
+        credential_type="oauth2",
+        provider_account_id=account_id,
+        metadata_json=metadata,
+        expires=now + timedelta(seconds=int(box_resp["expires_in"])),
+        refresh_token_expires=now + BOX_REFRESH_TOKEN_LIFETIME,
+    )
+
+
+def get_box_token(session: Session, user: User, force: bool = False) -> str:
+    """Get a user's Box access token, refreshing it if needed, or always
+    with ``force``, e.g., to keep an unused connection from lapsing.
+    """
+
+    def get_needs_refresh(credential: UserExternalCredential) -> bool:
+        return force or (
+            credential.expires is not None
+            and (utcnow() + timedelta(minutes=5)) >= credential.expires
+        )
+
+    credential = get_external_credential(
+        session=session, user=user, provider="box"
+    )
+    if credential is None:
+        raise HTTPException(401, "User needs to authenticate with Box")
+    tokens = json.loads(decrypt_secret(credential.secret_payload))
+    if not tokens.get("refresh_token"):
+        raise HTTPException(401, "Box connection lapsed; reconnect Box")
+    if not get_needs_refresh(credential):
+        return str(tokens["access_token"])
+    # Concurrent refreshes take turns under a row lock, since each refresh
+    # token works once, and a second refresh with it would disconnect the
+    # account
+    credential_id = credential.id
+    updated = credential.updated
+    session.expire(credential)
+    credential = session.exec(
+        select(UserExternalCredential)
+        .where(UserExternalCredential.id == credential_id)
+        .with_for_update()
+    ).first()
+    if credential is None:
+        raise HTTPException(401, "User needs to authenticate with Box")
+    tokens = json.loads(decrypt_secret(credential.secret_payload))
+    # Another request refreshed it while this one waited
+    if credential.updated != updated or not get_needs_refresh(credential):
+        return str(tokens["access_token"])
+    logger.info(f"Refreshing Box token for {user.email}")
+    try:
+        resp = requests.post(
+            BOX_TOKEN_URL,
+            data=dict(
+                grant_type="refresh_token",
+                refresh_token=tokens["refresh_token"],
+                client_id=settings.BOX_CLIENT_ID or "",
+                client_secret=settings.BOX_CLIENT_SECRET or "",
+            ),
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        logger.error(f"Failed to reach Box: {e}")
+        raise HTTPException(503, "Box unavailable") from e
+    if resp.status_code != 200:
+        logger.error(
+            f"Failed to refresh Box token for {user.email}: "
+            f"{resp.status_code} {resp.text[:200]}"
+        )
+        try:
+            error = resp.json().get("error")
+        except ValueError:
+            error = None
+        # Anything else, e.g., the hub's own client credentials being wrong,
+        # isn't the connection's fault
+        if error != "invalid_grant":
+            raise HTTPException(503, "Box unavailable")
+        # Kept, without its tokens, so which Box account the storage it
+        # reaches is in is still known when the user reconnects
+        credential.secret_payload = encrypt_secret(json.dumps({}))
+        credential.expires = None
+        credential.refresh_token_expires = None
+        session.add(credential)
+        session.commit()
+        app.mixpanel.user_connection_lapsed(user, "box")
+        raise HTTPException(401, "Box connection lapsed; reconnect Box")
+    box_resp = resp.json()
+    save_box_token(session=session, user=user, box_resp=box_resp)
+    return str(box_resp["access_token"])
+
+
+def refresh_idle_box_tokens() -> int:
+    """Refresh Box connections nobody has used for a month, so they don't
+    lapse at 60 days. Run daily on the worker, by ``app.cron``. Returns how
+    many were refreshed.
+    """
+    from app.db import engine
+
+    n_refreshed = 0
+    with Session(engine) as session:
+        credentials = session.exec(
+            select(UserExternalCredential).where(
+                UserExternalCredential.provider == "box",
+                col(UserExternalCredential.refresh_token_expires)
+                < utcnow() + timedelta(days=30),
+            )
+        ).all()
+        for credential in credentials:
+            try:
+                get_box_token(session, credential.user, force=True)
+                n_refreshed += 1
+            except HTTPException as e:
+                logger.warning(
+                    f"Failed to refresh Box token for "
+                    f"{credential.user.email}: {e.detail}"
+                )
+    logger.info(f"Refreshed {n_refreshed} idle Box connections")
+    return n_refreshed
+
+
+def revoke_box_token(credential: UserExternalCredential) -> None:
+    """Revoke a Box connection's tokens at Box, so they stop working there
+    too. Best effort, since the connection is being removed either way.
+    """
+    tokens = json.loads(decrypt_secret(credential.secret_payload))
+    for token in (tokens.get("refresh_token"), tokens.get("access_token")):
+        if not token:
+            continue
+        try:
+            requests.post(
+                "https://api.box.com/oauth2/revoke",
+                data={
+                    "client_id": settings.BOX_CLIENT_ID or "",
+                    "client_secret": settings.BOX_CLIENT_SECRET or "",
+                    "token": token,
+                },
+                timeout=15,
+            )
+        except requests.RequestException as e:
+            logger.warning(f"Failed to revoke Box token: {e}")
 
 
 def save_zotero_request_token(

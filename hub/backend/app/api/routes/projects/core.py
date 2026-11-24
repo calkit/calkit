@@ -4450,7 +4450,7 @@ def post_project_figure(
         )
         with target.fs.open(fpath, "wb") as f:
             f.write(file_data)  # type: ignore[arg-type]
-        if target.backend != "hf" and settings.ENVIRONMENT != "local":
+        if target.backend == "gcs" and settings.ENVIRONMENT != "local":
             remove_gcs_content_type(fpath)
         url = get_project_object_url(
             target, fpath, fname=os.path.basename(path)
@@ -5972,7 +5972,7 @@ def post_project_dataset_upload(
         )
         with target.fs.open(fpath, "wb") as f:
             f.write(file_data)
-        if target.backend != "hf" and settings.ENVIRONMENT != "local":
+        if target.backend == "gcs" and settings.ENVIRONMENT != "local":
             remove_gcs_content_type(fpath)
         url = get_project_object_url(
             target, fpath, fname=os.path.basename(path)
@@ -7294,7 +7294,7 @@ def post_project_publication(
         )
         with target.fs.open(fpath, "wb") as f:
             f.write(file_data)  # type: ignore
-        if target.backend != "hf" and settings.ENVIRONMENT != "local":
+        if target.backend == "gcs" and settings.ENVIRONMENT != "local":
             remove_gcs_content_type(fpath)
         url = get_project_object_url(
             target, fpath, fname=os.path.basename(path)

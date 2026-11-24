@@ -666,6 +666,89 @@ export const Body_projects_put_project_contentsSchema = {
   title: "Body_projects-put_project_contents",
 } as const
 
+export const BoxAccessSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      const: "box",
+      title: "Kind",
+      default: "box",
+    },
+    operation: {
+      type: "string",
+      enum: ["upload", "download"],
+      title: "Operation",
+    },
+    folder_id: {
+      type: "string",
+      title: "Folder Id",
+    },
+    access_token: {
+      type: "string",
+      title: "Access Token",
+    },
+    expires_at_unixts: {
+      type: "integer",
+      title: "Expires At Unixts",
+    },
+    file_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "File Id",
+    },
+    size: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Size",
+    },
+  },
+  type: "object",
+  required: ["operation", "folder_id", "access_token", "expires_at_unixts"],
+  title: "BoxAccess",
+  description:
+    "Access to a project's folder in Box.\n\nThe token is downscoped to the folder and lasts about an hour, so a\nclient can reuse it for every file in the project until it expires.",
+} as const
+
+export const BoxAuthStartSchema = {
+  properties: {
+    authorize_url: {
+      type: "string",
+      title: "Authorize Url",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+  },
+  type: "object",
+  required: ["authorize_url", "redirect_uri"],
+  title: "BoxAuthStart",
+} as const
+
+export const BoxAuthStartRequestSchema = {
+  properties: {
+    state: {
+      type: "string",
+      title: "State",
+    },
+  },
+  type: "object",
+  required: ["state"],
+  title: "BoxAuthStartRequest",
+} as const
+
 export const CheckInSchema = {
   properties: {
     calkit_version: {
@@ -968,6 +1051,19 @@ export const ConnectedAccountsSchema = {
       title: "Huggingface",
       default: false,
     },
+    box: {
+      type: "boolean",
+      title: "Box",
+      default: false,
+    },
+    account_names: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Account Names",
+      default: {},
+    },
     cli: {
       type: "boolean",
       title: "Cli",
@@ -1222,6 +1318,10 @@ export const CredentialStoragePublicSchema = {
       format: "uuid",
       title: "Id",
     },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
     bucket: {
       type: "string",
       title: "Bucket",
@@ -1243,7 +1343,7 @@ export const CredentialStoragePublicSchema = {
     },
   },
   type: "object",
-  required: ["id", "bucket", "dedicated", "owner", "projects"],
+  required: ["id", "kind", "bucket", "dedicated", "owner", "projects"],
   title: "CredentialStoragePublic",
   description: "Storage reached with the current user's account on a service.",
 } as const
@@ -3324,10 +3424,14 @@ export const FsOpResponseSchema = {
             {
               $ref: "#/components/schemas/XetAccess",
             },
+            {
+              $ref: "#/components/schemas/BoxAccess",
+            },
           ],
           discriminator: {
             propertyName: "kind",
             mapping: {
+              box: "#/components/schemas/BoxAccess",
               "hf-xet": "#/components/schemas/XetAccess",
               "http-request": "#/components/schemas/HttpRequestAccess",
               "presigned-chunked":
@@ -12500,6 +12604,17 @@ export const StorageTransferStatusSchema = {
         },
       ],
       title: "Error",
+    },
+    provider: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Provider",
     },
   },
   type: "object",

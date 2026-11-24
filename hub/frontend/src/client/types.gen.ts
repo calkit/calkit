@@ -365,6 +365,69 @@ export type BodyProjectsPutProjectContents = {
 }
 
 /**
+ * BoxAccess
+ *
+ * Access to a project's folder in Box.
+ *
+ * The token is downscoped to the folder and lasts about an hour, so a
+ * client can reuse it for every file in the project until it expires.
+ */
+export type BoxAccess = {
+  /**
+   * Kind
+   */
+  kind?: "box"
+  /**
+   * Operation
+   */
+  operation: "upload" | "download"
+  /**
+   * Folder Id
+   */
+  folder_id: string
+  /**
+   * Access Token
+   */
+  access_token: string
+  /**
+   * Expires At Unixts
+   */
+  expires_at_unixts: number
+  /**
+   * File Id
+   */
+  file_id?: string | null
+  /**
+   * Size
+   */
+  size?: number | null
+}
+
+/**
+ * BoxAuthStart
+ */
+export type BoxAuthStart = {
+  /**
+   * Authorize Url
+   */
+  authorize_url: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
+}
+
+/**
+ * BoxAuthStartRequest
+ */
+export type BoxAuthStartRequest = {
+  /**
+   * State
+   */
+  state: string
+}
+
+/**
  * CheckIn
  *
  * What a machine reports each time it checks in.
@@ -563,6 +626,16 @@ export type ConnectedAccounts = {
    */
   huggingface?: boolean
   /**
+   * Box
+   */
+  box?: boolean
+  /**
+   * Account Names
+   */
+  account_names?: {
+    [key: string]: string
+  }
+  /**
    * Cli
    */
   cli?: boolean
@@ -689,6 +762,10 @@ export type CredentialStoragePublic = {
    * Id
    */
   id: string
+  /**
+   * Kind
+   */
+  kind: string
   /**
    * Bucket
    */
@@ -1925,6 +2002,9 @@ export type FsOpResponse = {
     | ({
         kind: "hf-xet"
       } & XetAccess)
+    | ({
+        kind: "box"
+      } & BoxAccess)
     | null
   /**
    * Result
@@ -7149,6 +7229,10 @@ export type StorageTransferStatus = {
    * Error
    */
   error?: string | null
+  /**
+   * Provider
+   */
+  provider?: string | null
 }
 
 /**
@@ -10177,6 +10261,60 @@ export type GetUserHuggingfaceAccountResponses = {
 
 export type GetUserHuggingfaceAccountResponse =
   GetUserHuggingfaceAccountResponses[keyof GetUserHuggingfaceAccountResponses]
+
+export type PostUserBoxAuthStartData = {
+  body: BoxAuthStartRequest
+  path?: never
+  query?: never
+  url: "/user/box-auth/start"
+}
+
+export type PostUserBoxAuthStartErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserBoxAuthStartError =
+  PostUserBoxAuthStartErrors[keyof PostUserBoxAuthStartErrors]
+
+export type PostUserBoxAuthStartResponses = {
+  /**
+   * Successful Response
+   */
+  200: BoxAuthStart
+}
+
+export type PostUserBoxAuthStartResponse =
+  PostUserBoxAuthStartResponses[keyof PostUserBoxAuthStartResponses]
+
+export type PostUserBoxAuthData = {
+  body: AppApiRoutesUsersOAuthCodeExchange
+  path?: never
+  query?: never
+  url: "/user/box-auth"
+}
+
+export type PostUserBoxAuthErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserBoxAuthError =
+  PostUserBoxAuthErrors[keyof PostUserBoxAuthErrors]
+
+export type PostUserBoxAuthResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserBoxAuthResponse =
+  PostUserBoxAuthResponses[keyof PostUserBoxAuthResponses]
 
 export type GetUserOverleafTokenData = {
   body?: never
@@ -17629,41 +17767,56 @@ export type DeleteAccountStorageResponses = {
   200: unknown
 }
 
-export type GetUserHuggingfaceStorageData = {
+export type GetUserServiceStorageData = {
   body?: never
-  path?: never
+  path: {
+    /**
+     * Provider
+     */
+    provider: "huggingface" | "box"
+  }
   query?: never
-  url: "/user/huggingface/storage"
+  url: "/user/{provider}/storage"
 }
 
-export type GetUserHuggingfaceStorageResponses = {
+export type GetUserServiceStorageErrors = {
   /**
-   * Response Storage-Get User Huggingface Storage
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserServiceStorageError =
+  GetUserServiceStorageErrors[keyof GetUserServiceStorageErrors]
+
+export type GetUserServiceStorageResponses = {
+  /**
+   * Response Storage-Get User Service Storage
    *
    * Successful Response
    */
   200: Array<CredentialStoragePublic>
 }
 
-export type GetUserHuggingfaceStorageResponse =
-  GetUserHuggingfaceStorageResponses[keyof GetUserHuggingfaceStorageResponses]
+export type GetUserServiceStorageResponse =
+  GetUserServiceStorageResponses[keyof GetUserServiceStorageResponses]
 
-export type GetUserHuggingfaceStorageTransferData = {
+export type GetUserStorageTransferData = {
   body?: never
   path?: never
   query?: never
-  url: "/user/huggingface/storage-transfer"
+  url: "/user/storage-transfer"
 }
 
-export type GetUserHuggingfaceStorageTransferResponses = {
+export type GetUserStorageTransferResponses = {
   /**
    * Successful Response
    */
   200: StorageTransferStatus
 }
 
-export type GetUserHuggingfaceStorageTransferResponse =
-  GetUserHuggingfaceStorageTransferResponses[keyof GetUserHuggingfaceStorageTransferResponses]
+export type GetUserStorageTransferResponse =
+  GetUserStorageTransferResponses[keyof GetUserStorageTransferResponses]
 
 export type GetProjectStorageData = {
   body?: never
@@ -17772,6 +17925,42 @@ export type GetProjectStorageUsageResponses = {
 
 export type GetProjectStorageUsageResponse =
   GetProjectStorageUsageResponses[keyof GetProjectStorageUsageResponses]
+
+export type PostProjectBoxFolderData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage/box-folder"
+}
+
+export type PostProjectBoxFolderErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectBoxFolderError =
+  PostProjectBoxFolderErrors[keyof PostProjectBoxFolderErrors]
+
+export type PostProjectBoxFolderResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectStorageSettings
+}
+
+export type PostProjectBoxFolderResponse =
+  PostProjectBoxFolderResponses[keyof PostProjectBoxFolderResponses]
 
 export type PostProjectHfBucketData = {
   body: ProjectHfBucketPost

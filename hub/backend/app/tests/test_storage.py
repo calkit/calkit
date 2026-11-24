@@ -279,7 +279,10 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
     ):
         with pytest.raises(OSError):
             storage.transfer_storage_and_disconnect(str(user.id))
-    assert tracked.call_args.kwargs == {"succeeded": False}
+    assert tracked.call_args.kwargs == {
+        "succeeded": False,
+        "provider": "huggingface",
+    }
     db.expire_all()
     assert db.get(StorageResource, resource_id) is not None
     with (
@@ -291,7 +294,10 @@ def test_transfer_storage_and_disconnect(db: Session) -> None:
         storage.transfer_storage_and_disconnect(str(user.id))
     copy.assert_called_once()
     assert tracked.call_args.args[1:] == (1, 3)
-    assert tracked.call_args.kwargs == {"succeeded": True}
+    assert tracked.call_args.kwargs == {
+        "succeeded": True,
+        "provider": "huggingface",
+    }
     db.expire_all()
     assert db.get(StorageResource, resource_id) is None
     # Its project went to the hub's own storage before the copy
@@ -368,3 +374,185 @@ def test_unreachable_storage() -> None:
             storage.set_project_bucket_visibility(session, project, False)  # type: ignore[arg-type]
         assert e.value.resource is resource
     api.return_value.update_bucket_settings.assert_not_called()
+
+
+def test_box_storage(db: Session) -> None:
+    import time
+    import uuid
+    from datetime import timedelta
+
+    from app import users
+    from app.core import utcnow
+    from app.models import Project, ProjectStorageHistory, StorageResource
+    from app.tests import create_random_user
+    from calkit.tests.test_box import FakeBox, make_response
+
+    # Folder IDs from other tests' fakes would collide
+    storage._box_access.clear()
+    storage._box_folder_ids.clear()
+    box = FakeBox()
+    calkit_folder = box.add("folder", "Calkit", "0")["id"]
+    user = create_random_user(db)
+    for provider in ("box", "huggingface"):
+        users.save_external_credential(
+            session=db,
+            user=user,
+            provider=provider,
+            secret_payload=json.dumps(
+                {"access_token": "token", "refresh_token": "r"}
+            ),
+            expires=utcnow() + timedelta(hours=1),
+        )
+    project = Project(
+        name=f"box-{uuid.uuid4().hex[:8]}",
+        title="Box project",
+        git_repo_url="https://github.com/someone/box",
+        owner_account_id=user.account.id,
+        owner_account=user.account,
+    )
+    db.add(project)
+    db.commit()
+    resources = {}
+    for kind, bucket in (("box-folder", calkit_folder), ("hf-bucket", "a/b")):
+        resources[kind] = StorageResource(
+            owner_account_id=user.account.id,
+            name=kind,
+            kind=kind,
+            bucket=bucket,
+            credential_user_id=user.id,
+        )
+        db.add(resources[kind])
+    db.commit()
+    db.add(
+        ProjectStorageHistory(
+            project_id=project.id,
+            storage_resource_id=resources["box-folder"].id,
+        )
+    )
+    project.dvc_storage_id = resources["box-folder"].id
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    # Each provider's connection only reaches its own storage
+    for provider, kind in (
+        ("box", "box-folder"),
+        ("huggingface", "hf-bucket"),
+    ):
+        assert [
+            r.kind
+            for r in storage.get_credential_resources(db, user.id, provider)
+        ] == [kind]
+    owner = user.account.name
+    downscopes = []
+
+    def downscope(url, data, timeout):
+        downscopes.append(data)
+        return make_response(
+            200, {"access_token": "token", "expires_in": 3600}
+        )
+
+    with (
+        patch.object(
+            requests.Session,
+            "request",
+            side_effect=lambda method, url, **kw: box.request(
+                method, url, **kw
+            ),
+        ),
+        patch.object(requests, "post", side_effect=downscope),
+    ):
+        target = storage.get_project_storage(db, project)
+        assert target.backend == "box"
+        locations = storage.get_project_storage_locations(db, project)
+        assert [s.backend for s in locations] == ["box", storage.get_backend()]
+        # Objects go under the owner and project in the Calkit folder
+        path = "files/md5/ab/cdef"
+        storage.put_project_objects(
+            target, owner, project.name, [(path, b"content")]
+        )
+        fpath = target.make_project_path(owner, project.name, path)
+        assert target.fs.cat_file(fpath) == b"content"
+        project_folder = target.fs.get_folder_id(
+            target.make_project_path(owner, project.name)
+        )
+        assert box.items[project_folder]["name"] == project.name.lower()
+        found = storage.find_project_object(db, project, path)
+        assert found is not None and found[0].backend == "box"
+        assert storage.get_project_object_sizes(
+            target, owner, project.name
+        ) == {path: 7}
+        # Clients get tokens downscoped to the project's folder, which are
+        # reused for the same folder and operation while they have a while
+        # left
+        for _ in range(2):
+            access = storage.get_box_access(target, project, "download")
+        assert access["folder_id"] == project_folder
+        assert access["expires_at_unixts"] > time.time() + 3000
+        assert len(downscopes) == 1
+        assert downscopes[0]["resource"].endswith(f"/folders/{project_folder}")
+        assert "item_upload" not in downscopes[0]["scope"]
+        storage._box_access[(project_folder, "download")][
+            "expires_at_unixts"
+        ] = int(time.time()) + 60
+        storage.get_box_access(target, project, "download")
+        assert len(downscopes) == 2
+        # Uploading claims the project's folder, including one it already
+        # has files in from before folders were claimed
+        storage.get_box_access(target, project, "upload")
+        assert "item_upload" in downscopes[2]["scope"]
+        marker = target.make_project_path(
+            owner, project.name, storage.BOX_PROJECT_FILE
+        )
+        assert target.fs.cat_file(marker) == str(project.id).encode()
+
+        def make_project(name: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                owner_account_name=owner, name=name, id=uuid.uuid4()
+            )
+
+        # Another project with its name, e.g., after it's deleted, can't
+        # have it
+        with pytest.raises(storage.BoxFolderTakenError):
+            storage.claim_box_project_folder(
+                target, make_project(project.name)
+            )
+        with pytest.raises(storage.BoxFolderTakenError):
+            storage.get_box_access(
+                target, make_project(project.name), "upload"
+            )
+        # Nor can one switching to Box take a folder of files from before
+        # folders were claimed, but one already using it can
+        unclaimed = make_project("unclaimed")
+        target.fs.pipe_file(
+            target.make_project_path(owner, "unclaimed", path), b"old"
+        )
+        with pytest.raises(storage.BoxFolderTakenError):
+            storage.claim_box_project_folder(target, unclaimed)
+        storage.claim_box_project_folder(target, unclaimed, adopt=True)
+        storage.claim_box_project_folder(target, unclaimed)
+        # Uploads to a project with no folder yet make it
+        new = make_project("new")
+        new_path = target.make_project_path(owner, "new")
+        with pytest.raises(FileNotFoundError):
+            target.fs.get_folder_id(new_path)
+        storage.get_box_access(target, new, "upload")
+        assert target.fs.get_folder_id(new_path)
+        # Including after it's moved to the trash, as a later request, which
+        # gets the storage again
+        del box.items[target.fs.get_folder_id(new_path)]
+        target = storage.get_project_storage(db, project)
+        access = storage.get_box_access(target, new, "upload")
+        assert access["folder_id"] in box.items
+        # Browsers get Box's own short-lived link
+        file_id = target.fs.get_file_id(fpath)
+        box.queued = [
+            make_response(302, headers={"Location": "https://dl.box.test/x"})
+        ]
+        assert (
+            storage.get_project_object_url(target, fpath)
+            == "https://dl.box.test/x"
+        )
+        assert box.calls[-1][1].endswith(f"/files/{file_id}/content")
+        # And nothing is ever deleted from it
+        with pytest.raises(PermissionError):
+            target.fs.rm(fpath)

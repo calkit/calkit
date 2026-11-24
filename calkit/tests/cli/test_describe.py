@@ -212,6 +212,19 @@ def test_describe_storage():
         assert "dvc storage: Hugging Face bucket someone/proj" in result.output
         assert "dvc also read from: Calkit Hub storage" in result.output
         assert "hub storage used: 250.0 MB" in result.output
+        # Box storage is one folder for all of an account's projects, named
+        # by who connected it
+        box = {"kind": "box-folder", "bucket": "123", "connected_by": "pete"}
+        responses["/projects/someone/proj/storage"] = {
+            "dvc": box,
+            "previous": [hf],
+        }
+        result = runner.invoke(app, ["describe", "storage"])
+        assert "dvc storage: Box, connected by pete" in result.output
+        assert (
+            "dvc also read from: Hugging Face bucket someone/proj, "
+            "Calkit Hub storage"
+        ) in result.output
         assert "account hub storage used: 3.00 GB of 10 GB" in result.output
         # Someone who doesn't manage the account only sees the project's,
         # a project on the hub's own storage reads from nothing else, and a

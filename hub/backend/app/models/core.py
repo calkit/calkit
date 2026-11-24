@@ -1155,9 +1155,10 @@ class StorageResource(SQLModel, table=True):
     )
     # Only namespace storage has a name, which projects select it by
     name: str | None = Field(default=None, min_length=2, max_length=64)
-    # Only "hf-bucket" for now
+    # "hf-bucket" or "box-folder"
     kind: str = Field(max_length=32)
-    # For HF buckets, the bucket ID, i.e., ``{namespace}/{bucket_name}``
+    # For HF buckets, the bucket ID, i.e., ``{namespace}/{bucket_name}``,
+    # and for Box, the ID of the ``Calkit`` folder
     bucket: str = Field(max_length=255)
     credential_user_id: uuid.UUID = Field(
         foreign_key="user.id", ondelete="CASCADE"

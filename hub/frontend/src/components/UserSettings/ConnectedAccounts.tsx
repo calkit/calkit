@@ -42,7 +42,9 @@ import {
   getGoogleAuthUrl,
   getGoogleRedirectUri,
 } from "../../lib/google"
+import { startBoxAuth } from "../../lib/box"
 import { startHuggingFaceAuth } from "../../lib/huggingface"
+import { getStorageLabel, getStorageUrl } from "../../lib/storage"
 import {
   getZenodoAuthUrl,
   getZenodoRedirectUri,
@@ -51,6 +53,11 @@ import {
 import UpdateOverleafToken from "./UpdateOverleafToken"
 
 type StorageAction = "transfer" | "orphan"
+// Services storage can be connected from, by provider
+const STORAGE_SERVICES: Record<string, string> = {
+  huggingface: "Hugging Face",
+  box: "Box",
+}
 
 function ConnectedAccounts() {
   const clientId = import.meta.env.VITE_ZENODO_CLIENT_ID
@@ -61,27 +68,28 @@ function ConnectedAccounts() {
   const navigate = useNavigate({ from: "/settings" })
   const setDisconnect = (provider: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, disconnect: provider }) })
-  // Storage reached with the HF account, which disconnecting would strand
-  const hfStorageQuery = useQuery({
-    queryKey: ["user", "huggingface-storage"],
+  // A service whose storage disconnecting would strand, e.g., Hugging Face
+  const storageProvider =
+    disconnect && disconnect in STORAGE_SERVICES ? disconnect : undefined
+  const serviceName = storageProvider ? STORAGE_SERVICES[storageProvider] : ""
+  const serviceStorageQuery = useQuery({
+    queryKey: ["user", storageProvider, "storage"],
     queryFn: () =>
-      StorageService.getUserHuggingfaceStorage().then(
-        (response) => response.data,
-      ),
-    enabled: disconnect === "huggingface",
+      StorageService.getUserServiceStorage({
+        provider: storageProvider as "huggingface" | "box",
+      }).then((response) => response.data),
+    enabled: storageProvider !== undefined,
   })
   // A transfer to Calkit Hub storage runs on the server, so it's checked
   // until it's done
   const transferQuery = useQuery({
-    queryKey: ["user", "huggingface-storage-transfer"],
+    queryKey: ["user", "storage-transfer"],
     queryFn: () =>
-      StorageService.getUserHuggingfaceStorageTransfer().then(
-        (response) => response.data,
-      ),
+      StorageService.getUserStorageTransfer().then((response) => response.data),
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 5000 : false,
   })
-  // Once it's done, HF is disconnected
+  // Once it's done, the service is disconnected
   const transferStatus = transferQuery.data?.status
   const lastTransferStatus = useRef(transferStatus)
   useEffect(() => {
@@ -93,15 +101,15 @@ function ConnectedAccounts() {
     lastTransferStatus.current = transferStatus
   }, [transferStatus, queryClient])
   const [storageAction, setStorageAction] = useState<StorageAction>("transfer")
-  const disconnectHuggingFaceMutation = useMutation({
+  const disconnectStorageServiceMutation = useMutation({
     mutationFn: () =>
       UsersService.deleteUserExternalCredential({
-        provider: "huggingface",
-        storage_action: hfStorageQuery.data?.length ? storageAction : null,
+        provider: storageProvider as string,
+        storage_action: serviceStorageQuery.data?.length ? storageAction : null,
       }).then((response) => response.data),
     onSuccess: (data) => {
       mixpanel.track("Disconnected account", {
-        provider: "huggingface",
+        provider: storageProvider,
         storage_action: storageAction,
       })
       showToast("Success!", data.message, "success")
@@ -115,10 +123,10 @@ function ConnectedAccounts() {
         queryKey: ["user", "connected-accounts"],
       })
       queryClient.invalidateQueries({
-        queryKey: ["user", "huggingface-storage"],
+        queryKey: ["user", storageProvider, "storage"],
       })
       queryClient.invalidateQueries({
-        queryKey: ["user", "huggingface-storage-transfer"],
+        queryKey: ["user", "storage-transfer"],
       })
     },
   })
@@ -161,11 +169,25 @@ function ConnectedAccounts() {
       handleError(err, showToast)
     },
   })
+  const connectBoxMutation = useMutation({
+    mutationFn: () => {
+      mixpanel.track("Clicked connect Box", { from: "connected accounts" })
+      return startBoxAuth("/settings?tab=connected-accounts")
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+  })
   const connectedAccountsQuery = useQuery({
     queryFn: () =>
       UsersService.getUserConnectedAccounts().then((response) => response.data),
     queryKey: ["user", "connected-accounts"],
   })
+  // Which account each service is connected as, e.g., a username
+  const getAccountNameText = (provider: string) => {
+    const name = connectedAccountsQuery.data?.account_names?.[provider]
+    return name ? <Text color="ui.dim">{name}</Text> : null
+  }
   const ghInstallQuery = useQuery({
     queryFn: () =>
       UsersService.getUserGithubAppInstallations().then(
@@ -252,7 +274,10 @@ function ConnectedAccounts() {
           <HStack align="center">
             <Text>GitHub:</Text>
             {connectedAccountsQuery.data?.github ? (
-              <Icon as={FaCheck} color="green.500" />
+              <>
+                <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("github")}
+              </>
             ) : (
               // Accounts created through Google or email start without a
               // GitHub identity, which project creation needs
@@ -405,6 +430,7 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.google ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("google")}
                 <IconButton
                   aria-label="Disconnect Google"
                   icon={<FaTrash />}
@@ -426,6 +452,7 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.zotero ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("zotero")}
                 <IconButton
                   aria-label="Disconnect Zotero"
                   icon={<FaTrash />}
@@ -452,7 +479,9 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.huggingface ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
-                {transferQuery.data?.status === "running" ? (
+                {getAccountNameText("huggingface")}
+                {transferQuery.data?.provider === "huggingface" &&
+                transferQuery.data.status === "running" ? (
                   <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
                 ) : (
                   <IconButton
@@ -464,14 +493,15 @@ function ConnectedAccounts() {
                     onClick={() => setDisconnect("huggingface")}
                   />
                 )}
-                {transferQuery.data?.status === "failed" && (
-                  <Text color="ui.danger">
-                    Transfer failed
-                    {transferQuery.data.error
-                      ? `: ${transferQuery.data.error}`
-                      : ""}
-                  </Text>
-                )}
+                {transferQuery.data?.provider === "huggingface" &&
+                  transferQuery.data?.status === "failed" && (
+                    <Text color="ui.danger">
+                      Transfer failed
+                      {transferQuery.data.error
+                        ? `: ${transferQuery.data.error}`
+                        : ""}
+                    </Text>
+                  )}
               </>
             ) : (
               <Button
@@ -484,12 +514,52 @@ function ConnectedAccounts() {
               </Button>
             )}
           </HStack>
+          <HStack mt={4}>
+            <Text>Box:</Text>
+            {connectedAccountsQuery.data?.box ? (
+              <>
+                <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("box")}
+                {transferQuery.data?.provider === "box" &&
+                transferQuery.data.status === "running" ? (
+                  <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
+                ) : (
+                  <IconButton
+                    aria-label="Disconnect Box"
+                    icon={<FaTrash />}
+                    size="xs"
+                    variant="ghost"
+                    colorScheme="red"
+                    onClick={() => setDisconnect("box")}
+                  />
+                )}
+                {transferQuery.data?.provider === "box" &&
+                  transferQuery.data.status === "failed" && (
+                    <Text color="ui.danger">
+                      Transfer failed
+                      {transferQuery.data.error
+                        ? `: ${transferQuery.data.error}`
+                        : ""}
+                    </Text>
+                  )}
+              </>
+            ) : (
+              <Button
+                variant="primary"
+                size="xs"
+                onClick={() => connectBoxMutation.mutate()}
+                isLoading={connectBoxMutation.isPending}
+              >
+                Connect
+              </Button>
+            )}
+          </HStack>
           <UpdateOverleafToken
             isOpen={overleafTokenModal.isOpen}
             onClose={overleafTokenModal.onClose}
           />
           <Modal
-            isOpen={disconnect === "huggingface"}
+            isOpen={storageProvider !== undefined}
             onClose={() => setDisconnect(undefined)}
             size={{ base: "sm", md: "md" }}
             isCentered
@@ -497,22 +567,19 @@ function ConnectedAccounts() {
           >
             <ModalOverlay />
             <ModalContent>
-              <ModalHeader>Disconnect Hugging Face</ModalHeader>
+              <ModalHeader>Disconnect {serviceName}</ModalHeader>
               <ModalCloseButton />
               <ModalBody>
-                {hfStorageQuery.isPending ? (
+                {serviceStorageQuery.isPending ? (
                   <SkeletonText noOfLines={3} />
-                ) : hfStorageQuery.data?.length ? (
+                ) : serviceStorageQuery.data?.length ? (
                   <>
                     <Text>Storage using this account:</Text>
                     <UnorderedList mt={2}>
-                      {hfStorageQuery.data.map((r) => (
+                      {serviceStorageQuery.data.map((r) => (
                         <ListItem key={r.id}>
-                          <Link
-                            href={`https://huggingface.co/buckets/${r.bucket}`}
-                            isExternal
-                          >
-                            {r.bucket}
+                          <Link href={getStorageUrl(r)} isExternal>
+                            {getStorageLabel(r)}
                           </Link>
                           {r.projects.length > 0 &&
                             ` (${r.projects.join(", ")})`}
@@ -531,13 +598,13 @@ function ConnectedAccounts() {
                           Transfer to Calkit Hub storage
                         </Radio>
                         <Radio value="orphan">
-                          Leave on Hugging Face (projects lose access)
+                          Leave on {serviceName} (projects lose access)
                         </Radio>
                       </Stack>
                     </RadioGroup>
                     <Text mt={3} fontSize="sm" color="ui.dim">
-                      Buckets stay on Hugging Face either way. To delete one,
-                      open it there.
+                      Files stay on {serviceName} either way. To delete them, go
+                      there.
                     </Text>
                   </>
                 ) : (
@@ -547,9 +614,9 @@ function ConnectedAccounts() {
               <ModalFooter gap={3}>
                 <Button
                   variant="danger"
-                  onClick={() => disconnectHuggingFaceMutation.mutate()}
-                  isLoading={disconnectHuggingFaceMutation.isPending}
-                  isDisabled={hfStorageQuery.isPending}
+                  onClick={() => disconnectStorageServiceMutation.mutate()}
+                  isLoading={disconnectStorageServiceMutation.isPending}
+                  isDisabled={serviceStorageQuery.isPending}
                 >
                   Disconnect
                 </Button>

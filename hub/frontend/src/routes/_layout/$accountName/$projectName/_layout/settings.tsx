@@ -34,7 +34,9 @@ import {
 import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
 import { handleError } from "../../../../../lib/errors"
+import { startBoxAuth } from "../../../../../lib/box"
 import { startHuggingFaceAuth } from "../../../../../lib/huggingface"
+import { getStorageServiceName } from "../../../../../lib/storage"
 
 const settingsSearchSchema = z.object({
   add_storage: z.boolean().optional(),
@@ -300,7 +302,45 @@ function ProjectSettings() {
     },
   })
   const describe = (r: StorageResourcePublic) =>
-    r.kind === "hf-bucket" ? `Hugging Face bucket ${r.bucket}` : r.bucket
+    r.kind === "box-folder"
+      ? `Box (${r.connected_by})`
+      : r.kind === "hf-bucket"
+        ? `${getStorageServiceName(r.kind)} bucket ${r.bucket}`
+        : r.bucket
+  const boxConnected = connectedAccountsQuery.data
+    ? Boolean(connectedAccountsQuery.data.box)
+    : undefined
+  // Comes back here once connected, to click again
+  const connectBoxMutation = useMutation({
+    mutationFn: () => {
+      mixpanel.track("Clicked connect Box", { from: "project settings" })
+      return startBoxAuth(`/${accountName}/${projectName}/settings`)
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+  })
+  const selectBoxMutation = useMutation({
+    mutationFn: () =>
+      StorageService.postProjectBoxFolder({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    onSuccess: () => {
+      showToast("Success!", "Storage updated.", "success")
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["projects", accountName, projectName, "storage"],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["accounts", accountName, "storage"],
+      })
+    },
+  })
   // What the project can use: its own, and what its account shares
   const options = [
     ...(storageQuery.data?.dvc ? [storageQuery.data.dvc] : []),
@@ -384,6 +424,23 @@ function ProjectSettings() {
                 isDisabled={hfConnected === undefined}
               >
                 New Hugging Face bucket
+              </Button>
+              <Button
+                flexShrink={0}
+                onClick={() => {
+                  mixpanel.track("Clicked use Box", {
+                    box_connected: boxConnected,
+                  })
+                  boxConnected
+                    ? selectBoxMutation.mutate()
+                    : connectBoxMutation.mutate()
+                }}
+                isLoading={
+                  selectBoxMutation.isPending || connectBoxMutation.isPending
+                }
+                isDisabled={boxConnected === undefined}
+              >
+                Use Box
               </Button>
             </HStack>
           )}

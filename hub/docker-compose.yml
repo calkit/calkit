@@ -120,6 +120,8 @@ services:
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
       - HF_CLIENT_ID=${HF_CLIENT_ID:-}
       - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
+      - BOX_CLIENT_ID=${BOX_CLIENT_ID:-}
+      - BOX_CLIENT_SECRET=${BOX_CLIENT_SECRET:-}
 
   backend:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
@@ -189,6 +191,8 @@ services:
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
       - HF_CLIENT_ID=${HF_CLIENT_ID:-}
       - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
+      - BOX_CLIENT_ID=${BOX_CLIENT_ID:-}
+      - BOX_CLIENT_SECRET=${BOX_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # Wipe stale per-worker metric files from a previous run so restarts
@@ -263,7 +267,7 @@ services:
 
   # Runs the work a push makes necessary -- see app/warm.py -- off the
   # API's threadpool, which is what serves requests.
-  worker:
+  worker: &worker
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
     restart: always
     pull_policy: never # We build locally on deploy
@@ -322,9 +326,17 @@ services:
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
       - HF_CLIENT_ID=${HF_CLIENT_ID:-}
       - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
+      - BOX_CLIENT_ID=${BOX_CLIENT_ID:-}
+      - BOX_CLIENT_SECRET=${BOX_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     command: ["rq", "worker", "--url", "${REDIS_URL:-redis://cache:6379/0}", "warm"]
+
+  # Queues jobs that run on a schedule, e.g., keeping Box connections alive,
+  # for the worker to run; the schedule is in app/cron.py
+  cron:
+    <<: *worker
+    command: ["rq", "cron", "--url", "${REDIS_URL:-redis://cache:6379/0}", "app.cron"]
 
   backend-dvc:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
@@ -385,6 +397,8 @@ services:
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
       - HF_CLIENT_ID=${HF_CLIENT_ID:-}
       - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
+      - BOX_CLIENT_ID=${BOX_CLIENT_ID:-}
+      - BOX_CLIENT_SECRET=${BOX_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # Wipe stale per-worker metric files from a previous run so restarts

@@ -79,6 +79,8 @@ jobs:
       ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
       HF_CLIENT_ID: ${{ secrets.HF_CLIENT_ID }}
       HF_CLIENT_SECRET: ${{ secrets.HF_CLIENT_SECRET }}
+      BOX_CLIENT_ID: ${{ secrets.BOX_CLIENT_ID }}
+      BOX_CLIENT_SECRET: ${{ secrets.BOX_CLIENT_SECRET }}
       GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
     steps:
       - name: Validate release tag

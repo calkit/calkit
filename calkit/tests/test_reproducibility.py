@@ -562,3 +562,110 @@ def test_find_unattributed_numbers():
     assert values(tex) == [("0.47", 1, False), ("0.52", 2, True)]
     # One the project computes is left to find_retyped_values
     assert values(tex, {"0.47": "results.json:Deficit"}) == [("0.52", 2, True)]
+
+
+def test_find_unattributed_numbers_markdown():
+    def values(md):
+        return [
+            (f["value"], f["line"], f["cited"])
+            for f in find_unattributed_numbers(md, "index.qmd", markdown=True)
+        ]
+
+    md = (
+        "---\n"
+        "title: Run 2.5\n"
+        "---\n"
+        "The rotation score exceeds $0.97$, and 12.5% of runs fail.\n"
+        "The slope is `{python} f'{slope:.2f}'`, as `x = 0.33` shows.\n"
+        "Liu et al. [@liu2025, p. 3.1] report 0.52, and @liu2025 0.61.\n"
+        "See @fig-orbit-2.1 and [the data](https://example.com/v1.2).\n"
+        "![Orbit](orbit.png){#fig-orbit width=50.5%}\n"
+        "We used Python 3.13 and version 2.1 of it.\n"
+        "The pump draws 1.25 kW. <!-- calkit: ignore, from its datasheet -->\n"
+        "<!-- A note on 0.44 -->\n"
+        "```python\n"
+        "threshold = 0.25\n"
+        "```\n"
+        "It drifts by 0.003 ± 0.001 per step.\n"
+        "The RMS is <!-- ckvalue r.json rms .4f -->0.2933<!-- /ckvalue -->.\n"
+    )
+    assert values(md) == [
+        ("0.97", 4, False),
+        ("12.5%", 4, False),
+        ("0.52", 6, True),
+        ("0.61", 6, True),
+        ("0.003 ± 0.001", 15, False),
+    ]
+    # A long line, e.g., a Markdown paragraph, is shown around the number
+    long = "Words " * 40 + "the score is 0.93 here " + "and more " * 40
+    (finding,) = find_unattributed_numbers(long, "index.md", markdown=True)
+    assert finding["context"].startswith("…")
+    assert finding["context"].endswith("…")
+    assert "the score is 0.93 here" in finding["context"]
+    assert len(finding["context"]) < 140
+
+
+def test_check_reproducibility_markdown_numbers(tmp_dir):
+    # A notebook a Quarto stage renders is read cell by cell, and so is a
+    # Markdown publication, but not a notebook a stage only executes
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "id": "a",
+                "metadata": {},
+                "source": ["# Results\n", "\n", "The score exceeds $0.97$."],
+            },
+            {
+                "cell_type": "code",
+                "id": "b",
+                "metadata": {},
+                "execution_count": None,
+                "outputs": [],
+                "source": "print(0.93)",
+            },
+        ],
+    }
+    for path in ["index.ipynb", "explore.ipynb"]:
+        with open(path, "w") as f:
+            json.dump(nb, f)
+    with open("summary.md", "w") as f:
+        f.write("Errors fell by 4.5%.\n")
+    calkit.save_calkit_info(
+        {
+            "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
+            "publications": [{"path": "summary.md", "kind": "report"}],
+            "pipeline": {
+                "stages": {
+                    "pub": {
+                        "kind": "quarto",
+                        "target_path": "index.ipynb",
+                        "environment": "py",
+                    },
+                    "explore": {
+                        "kind": "jupyter-notebook",
+                        "notebook_path": "explore.ipynb",
+                        "environment": "py",
+                    },
+                }
+            },
+        }
+    )
+    res = check_reproducibility()
+    found = [
+        (f["file"], f.get("cell"), f["line"], f["value"])
+        for f in res.unattributed_numbers
+    ]
+    assert found == [
+        ("index.ipynb", 0, 3, "0.97"),
+        ("summary.md", None, 1, "4.5%"),
+    ]
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "-c", "numbers"],
+        text=True,
+        env=os.environ | {"COLUMNS": "200"},
+    )
+    assert "index.ipynb cell 1, 3:" in out

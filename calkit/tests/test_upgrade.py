@@ -26,7 +26,9 @@ def test_get_install_method(tmp_path, monkeypatch):
 def test_check(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     monkeypatch.delenv("CI", raising=False)
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    # On Windows, a console also needs a console mode, which pytest's
+    # capture doesn't have, so the terminal check itself is patched
+    monkeypatch.setattr(calkit.core, "is_terminal", lambda stream: True)
     monkeypatch.setattr(calkit, "__version__", "1.0.0")
     spawned = []
 
@@ -69,7 +71,7 @@ def test_check(tmp_path, monkeypatch, capsys):
     assert "upgraded from v0.9.0 to v1.0.0" in capsys.readouterr().err
     assert "upgraded_from" not in upgrade.read_state()
     # Nothing is shown when nobody's at a terminal
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    monkeypatch.setattr(calkit.core, "is_terminal", lambda stream: False)
     upgrade.update_state(upgraded_from="0.9.0")
     upgrade.check("status")
     assert not capsys.readouterr().err

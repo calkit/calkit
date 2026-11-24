@@ -463,8 +463,15 @@ def _echo_unattributed(findings: list[dict]) -> None:
     table.add_column("Note", style="dim", no_wrap=True)
     table.add_column("Context")
     for finding in findings:
+        where = f"{finding['file']}:{finding['line']}:{finding['column']}"
+        if finding.get("cell") is not None:
+            # Lines count from the top of a notebook's cell
+            where = (
+                f"{finding['file']} cell {finding['cell'] + 1}, "
+                f"{finding['line']}:{finding['column']}"
+            )
         table.add_row(
-            f"{finding['file']}:{finding['line']}:{finding['column']}",
+            where,
             finding["value"],
             "quoted?" if finding.get("cited") else "",
             finding["context"],

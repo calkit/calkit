@@ -6353,35 +6353,11 @@ def test_project_storage_follows_project(
     # Deleting it deletes its storage only when asked, and if that fails,
     # the project stays so it can be tried again
     with patch("app.storage.delete_project_objects") as delete_objects:
-        # Unreachable storage stops it, saying which
-        delete_objects.side_effect = app.storage.UnreachableStorageError(
-            SimpleNamespace(bucket="someone/proj")  # type: ignore[arg-type]
-        )
-        response = client.delete(
-            f"/projects/{project_id}",
-            headers=headers,
-            params={"delete_storage": True},
-        )
-        assert response.status_code == 409
-        assert "someone/proj" in response.json()["detail"]
-        # So does a bucket that changed outside Calkit
-        delete_objects.side_effect = app.storage.UnsafeStorageDeleteError(
-            "someone/proj"
-        )
-        response = client.delete(
-            f"/projects/{project_id}",
-            headers=headers,
-            params={"delete_storage": True},
-        )
-        assert response.status_code == 409
-        assert "someone/proj" in response.json()["detail"]
-        db.expire_all()
-        assert db.get(Project, project_id) is not None
         delete_objects.side_effect = RuntimeError("HF down")
         response = client.delete(
             f"/projects/{project_id}",
             headers=headers,
-            params={"delete_storage": True},
+            params={"delete_hub_storage": True},
         )
         assert response.status_code == 502
         db.expire_all()
@@ -6392,17 +6368,12 @@ def test_project_storage_follows_project(
             response = client.delete(
                 f"/projects/{project_id}",
                 headers=headers,
-                params={"delete_storage": True},
+                params={"delete_hub_storage": True},
             )
         assert response.status_code == 200
         delete_objects.assert_called_once()
-        # Only the deleting user's own external storage is removed
-        assert (
-            str(delete_objects.call_args.args[2])
-            == client.get("/user", headers=headers).json()["id"]
-        )
         assert mp.user_deleted_project.call_args.kwargs == {
-            "delete_storage": True,
+            "delete_hub_storage": True,
             "n_external_storage": 0,
         }
         db.expire_all()

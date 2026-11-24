@@ -7,6 +7,7 @@ import {
   AlertDialogOverlay,
   Button,
   Checkbox,
+  Link,
   Text,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -18,7 +19,6 @@ import {
   OrgsService,
   ProjectsService,
   StorageService,
-  type StorageResourcePublic,
   UsersService,
 } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
@@ -58,8 +58,8 @@ const Delete = ({
     handleSubmit,
     formState: { isSubmitting },
   } = useForm()
-  // A project's files in storage can go with it
-  const [deleteStorage, setDeleteStorage] = React.useState(false)
+  // Files in Calkit Hub storage can go with it, but never connected storage
+  const [deleteHubStorage, setDeleteHubStorage] = React.useState(false)
   const storageQuery = useQuery({
     queryKey: ["projects", projectOwner, projectName, "storage"],
     queryFn: () =>
@@ -69,30 +69,18 @@ const Delete = ({
       }).then((response) => response.data),
     enabled: isOpen && type === "Project" && !!projectOwner && !!projectName,
   })
-  const storageResources = storageQuery.data
+  const connectedStorage = storageQuery.data
     ? [
         ...(storageQuery.data.dvc ? [storageQuery.data.dvc] : []),
         ...storageQuery.data.previous,
       ]
     : []
-  const getStorageLabel = (r: StorageResourcePublic) =>
-    r.dedicated
-      ? `Hugging Face bucket ${r.bucket}`
-      : `Project folder in Hugging Face bucket ${r.bucket}`
-  const deletableIds = storageQuery.data?.deletable_ids ?? []
-  const storageLocations = storageResources
-    .filter((r) => deletableIds.includes(r.id))
-    .map(getStorageLabel)
-  // Only whoever connected storage can delete it
-  const keptLocations = storageResources
-    .filter((r) => !deletableIds.includes(r.id))
-    .map((r) => `${getStorageLabel(r)} (connected by ${r.connected_by})`)
 
   const deleteEntity = async (id: string) => {
     if (type === "Project") {
       await ProjectsService.deleteProjectById({
         project_id: id,
-        delete_storage: deleteStorage,
+        delete_hub_storage: deleteHubStorage,
       }).then((response) => response.data)
     } else if (type === "User") {
       await UsersService.deleteUser({ user_id: id }).then(
@@ -209,19 +197,25 @@ const Delete = ({
                 <>
                   <Checkbox
                     mt={4}
-                    isChecked={deleteStorage}
-                    onChange={(e) => setDeleteStorage(e.target.checked)}
+                    isChecked={deleteHubStorage}
+                    onChange={(e) => setDeleteHubStorage(e.target.checked)}
                   >
-                    Delete stored files too
+                    Delete files in Calkit Hub storage
                   </Checkbox>
-                  {deleteStorage && (
+                  {connectedStorage.length > 0 && (
                     <Text mt={2} fontSize="sm" color="ui.dim">
-                      {["Calkit Hub storage", ...storageLocations].join(", ")}
-                    </Text>
-                  )}
-                  {deleteStorage && keptLocations.length > 0 && (
-                    <Text mt={2} fontSize="sm" color="ui.dim">
-                      Not deleted: {keptLocations.join(", ")}
+                      Stays on Hugging Face. To delete, go to{" "}
+                      {connectedStorage.map((r, i) => (
+                        <React.Fragment key={r.id}>
+                          {i > 0 && ", "}
+                          <Link
+                            href={`https://huggingface.co/buckets/${r.bucket}`}
+                            isExternal
+                          >
+                            {r.bucket}
+                          </Link>
+                        </React.Fragment>
+                      ))}
                     </Text>
                   )}
                 </>

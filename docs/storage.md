@@ -88,12 +88,13 @@ so making a project public also makes files from its earlier versions
 public.
 To keep those private,
 keep the project private and publish a [release](releases.md) instead.
-Removing old files from a bucket isn't supported yet.
+Calkit doesn't remove old files from a bucket,
+so delete them on HF if you need to.
 
 If you disconnect your HF account while projects are storing files with it,
-you'll need to choose whether to transfer those files to Calkit Hub storage,
-delete them,
+you'll need to choose whether to transfer those files to Calkit Hub storage
 or leave them on HF, where those projects can no longer reach them.
+Either way, your buckets stay on HF.
 To switch to a different HF account,
 disconnect the current one first.
 
@@ -136,8 +137,10 @@ Calkit still finds them there,
 so you and your collaborators don't need to do anything.
 
 When deleting a project,
-you can choose to delete its files from storage too.
-A bucket in someone else's Hugging Face account stays there.
+you can choose to delete its files from Calkit Hub storage too.
+Calkit never deletes anything from storage you've connected,
+so if you no longer need a project's bucket,
+delete it on HF.
 
 ## Using your storage without Calkit
 
@@ -171,7 +174,7 @@ to hydrate the DVC cache and make checking them out seamless.
 - Choosing storage per path, e.g., one dataset on HF and the rest on
   calkit.io, in `calkit.yaml`
 - Moving files to new storage when a project's storage changes
-- Removing files a project no longer uses from its storage
+- Removing files a project no longer uses from Calkit Hub storage
 - Choosing storage for a fork
 - Releasing to HF Datasets
 - Keeping the project's Git repo on GitLab, Codeberg, HF, or calkit.io

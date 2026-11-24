@@ -139,7 +139,6 @@ so nothing has to move.
 Removing a connection would make its resources unreachable,
 so the hub refuses until it's told what to do with them:
 transfer their objects to the hub's own storage,
-delete them,
 or leave them where they are and forget the resources.
 A transfer runs on the worker,
 since it can take as long as the data takes to copy.
@@ -164,18 +163,15 @@ Two other events would strand a connection's resources the same way:
 
 ### Deleting storage
 
-HF identifies a bucket by name,
-so a recorded name can come to mean a different bucket,
-e.g., if one is deleted on HF and another takes its name.
-Before deleting anything,
-the hub checks every dedicated bucket involved,
-and refuses if one was created after the hub recorded it,
-or holds anything other than DVC objects.
-The hub only calls HF's bucket API to delete,
-never its repo API.
-Deleting a project only removes external storage reached with the
-deleting user's own credential,
-so one member can't use another's credential to delete from their account.
+The hub never deletes anything from a connected service,
+including resources it created.
+A connection's credential can reach far more than Calkit's storage,
+e.g., every repo in an HF account,
+a service may identify a resource by a name that can be reused,
+and a deletion there usually can't be undone.
+The hub only deletes from its own storage,
+and stops using a connected resource by removing its record.
+People delete connected resources with the service itself.
 
 ### Released datasets
 
@@ -206,6 +202,10 @@ which only make sense to DVC.
   It keeps the credential from ever having to create buckets,
   but the bucket has to stay private even when projects in it are
   public, and it can't follow each project's visibility.
+- **Deleting connected storage from the hub**,
+  which #1739 first built.
+  It saves a trip to the service,
+  but a bug or a reused name could destroy data the hub can't restore.
 - **Keys in local config**, like the Overleaf integration uses.
   It needs no hub traffic,
   but the hub could never show files stored this way,

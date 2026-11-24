@@ -1559,10 +1559,10 @@ def delete_project(
     project_name: str,
     session: SessionDep,
     current_user: CurrentUser,
-    delete_storage: bool = False,
+    delete_hub_storage: bool = False,
 ) -> Message:
-    """Delete a project, and optionally its DVC objects in every storage it
-    has used.
+    """Delete a project, and optionally its DVC objects in the hub's own
+    storage. Connected storage, e.g., an HF bucket, is left alone.
     """
     project = app.projects.get_project(
         session=session,
@@ -1571,13 +1571,13 @@ def delete_project(
         current_user=current_user,
         min_access_level="owner",
     )
-    if delete_storage:
-        _delete_project_objects(session, project, current_user.id)
+    if delete_hub_storage:
+        _delete_project_objects(project)
     mixpanel.user_deleted_project(
         current_user,
         project.owner_account_name,
         project.name,
-        delete_storage=delete_storage,
+        delete_hub_storage=delete_hub_storage,
         n_external_storage=len(project.storage_history),
     )
     session.delete(project)
@@ -1585,20 +1585,10 @@ def delete_project(
     return Message(message="success")
 
 
-def _delete_project_objects(
-    session: Session, project: Project, user_id: uuid.UUID
-) -> None:
+def _delete_project_objects(project: Project) -> None:
     # Before the project itself, so a failure leaves it to try again
     try:
-        app.storage.delete_project_objects(session, project, user_id)
-    except app.storage.UnreachableStorageError as e:
-        raise HTTPException(
-            409,
-            f"Can't reach Hugging Face bucket {e.resource.bucket}; reconnect "
-            "Hugging Face, or delete without stored files",
-        )
-    except app.storage.UnsafeStorageDeleteError as e:
-        raise HTTPException(409, f"{e}; delete without stored files")
+        app.storage.delete_project_objects(project)
     except Exception:
         logger.exception(f"Failed to delete storage for {project.name}")
         raise HTTPException(502, "Failed to delete project storage")
@@ -1609,10 +1599,10 @@ def delete_project_by_id(
     project_id: uuid.UUID,
     session: SessionDep,
     current_user: CurrentUser,
-    delete_storage: bool = False,
+    delete_hub_storage: bool = False,
 ) -> Message:
-    """Delete a project, and optionally its DVC objects in every storage it
-    has used.
+    """Delete a project, and optionally its DVC objects in the hub's own
+    storage. Connected storage, e.g., an HF bucket, is left alone.
     """
     project = session.get(Project, project_id)
     if project is None:
@@ -1620,13 +1610,13 @@ def delete_project_by_id(
     # TODO: Check for collaborator access
     if project.owner != current_user:
         raise HTTPException(403)
-    if delete_storage:
-        _delete_project_objects(session, project, current_user.id)
+    if delete_hub_storage:
+        _delete_project_objects(project)
     mixpanel.user_deleted_project(
         current_user,
         project.owner_account_name,
         project.name,
-        delete_storage=delete_storage,
+        delete_hub_storage=delete_hub_storage,
         n_external_storage=len(project.storage_history),
     )
     session.delete(project)

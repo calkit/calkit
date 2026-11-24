@@ -50,7 +50,7 @@ import {
 } from "../../lib/zenodo"
 import UpdateOverleafToken from "./UpdateOverleafToken"
 
-type StorageAction = "transfer" | "delete" | "orphan"
+type StorageAction = "transfer" | "orphan"
 
 function ConnectedAccounts() {
   const clientId = import.meta.env.VITE_ZENODO_CLIENT_ID
@@ -508,7 +508,12 @@ function ConnectedAccounts() {
                     <UnorderedList mt={2}>
                       {hfStorageQuery.data.map((r) => (
                         <ListItem key={r.id}>
-                          {r.bucket}
+                          <Link
+                            href={`https://huggingface.co/buckets/${r.bucket}`}
+                            isExternal
+                          >
+                            {r.bucket}
+                          </Link>
                           {r.projects.length > 0 &&
                             ` (${r.projects.join(", ")})`}
                         </ListItem>
@@ -525,12 +530,15 @@ function ConnectedAccounts() {
                         <Radio value="transfer">
                           Transfer to Calkit Hub storage
                         </Radio>
-                        <Radio value="delete">Delete from Hugging Face</Radio>
                         <Radio value="orphan">
                           Leave on Hugging Face (projects lose access)
                         </Radio>
                       </Stack>
                     </RadioGroup>
+                    <Text mt={3} fontSize="sm" color="ui.dim">
+                      Buckets stay on Hugging Face either way. To delete one,
+                      open it there.
+                    </Text>
                   </>
                 ) : (
                   <Text>No storage uses this account.</Text>

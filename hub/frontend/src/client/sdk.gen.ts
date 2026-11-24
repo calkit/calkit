@@ -3337,7 +3337,7 @@ export class ProjectsService {
     parameters: {
       owner_name: string
       project_name: string
-      delete_storage?: boolean
+      delete_hub_storage?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<DeleteProjectResponses, DeleteProjectErrors, ThrowOnError> {
@@ -3348,7 +3348,7 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
-            { in: "query", key: "delete_storage" },
+            { in: "query", key: "delete_hub_storage" },
           ],
         },
       ],
@@ -3454,7 +3454,7 @@ export class ProjectsService {
   public static deleteProjectById<ThrowOnError extends boolean = true>(
     parameters: {
       project_id: string
-      delete_storage?: boolean
+      delete_hub_storage?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3468,7 +3468,7 @@ export class ProjectsService {
         {
           args: [
             { in: "path", key: "project_id" },
-            { in: "query", key: "delete_storage" },
+            { in: "query", key: "delete_hub_storage" },
           ],
         },
       ],

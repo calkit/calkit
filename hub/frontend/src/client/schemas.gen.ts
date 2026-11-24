@@ -8533,17 +8533,9 @@ export const ProjectStorageSettingsSchema = {
       type: "array",
       title: "Previous",
     },
-    deletable_ids: {
-      items: {
-        type: "string",
-        format: "uuid",
-      },
-      type: "array",
-      title: "Deletable Ids",
-    },
   },
   type: "object",
-  required: ["dvc", "previous", "deletable_ids"],
+  required: ["dvc", "previous"],
   title: "ProjectStorageSettings",
 } as const
 

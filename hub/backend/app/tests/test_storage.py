@@ -3,14 +3,11 @@
 import dataclasses
 import io
 import json
-from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import httpx
 import pytest
 import requests
-from huggingface_hub.errors import BucketNotFoundError
 from sqlmodel import Session
 
 from app import storage
@@ -27,6 +24,12 @@ def test_post_hf_bucket_batch() -> None:
         token="hf-token",
     )
     ops = [{"type": "addFile", "path": "a", "xetHash": "x"}]
+    # The hub never deletes from connected storage
+    with patch.object(requests, "post") as post, pytest.raises(ValueError):
+        storage.post_hf_bucket_batch(
+            target, ops + [{"type": "deleteFile", "path": "b"}]
+        )
+    post.assert_not_called()
 
     def respond(status_code: int, body: dict) -> requests.Response:
         resp = requests.Response()
@@ -76,9 +79,7 @@ def test_dedicated_storage() -> None:
         fs=MemoryFileSystem(),
         data_prefix="/buckets/someone/my-project",
         resource=SimpleNamespace(  # type: ignore[arg-type]
-            bucket="someone/my-project",
-            project_id="project-id",
-            created=datetime(2026, 11, 1),
+            bucket="someone/my-project", project_id="project-id"
         ),
         token="hf-token",
     )
@@ -129,76 +130,19 @@ def test_dedicated_storage() -> None:
         True,
     ]
     assert settings.call_args.args == ("someone/my-project",)
-    # Deleting a project's objects deletes its dedicated bucket and its
-    # folders elsewhere, and nothing of other projects
+    # Deleting a project's objects only touches the hub's own storage
     for st in (shared, internal):
         st.fs.pipe(st.make_project_path("someone", "My-Project", path), b"x")
         st.fs.pipe(st.make_project_path("someone", "other", path), b"x")
     with (
-        patch.object(
-            storage,
-            "get_project_storages",
-            return_value=[dedicated, shared, internal],
-        ),
+        patch.object(storage, "get_internal_storage", return_value=internal),
         patch("huggingface_hub.HfApi") as api,
     ):
-        hf_created = datetime(2026, 11, 1, tzinfo=timezone.utc)
-        dvc_object = SimpleNamespace(
-            type="file", path=f"files/md5/ab/{'c' * 30}"
-        )
-        dvc_dir = SimpleNamespace(
-            type="file", path=f"files/md5/ab/{'d' * 30}.dir"
-        )
-        folder = SimpleNamespace(type="directory", path="files")
-        api.return_value.bucket_info.return_value = SimpleNamespace(
-            created_at=hf_created
-        )
-        api.return_value.list_bucket_tree.return_value = [
-            folder,
-            dvc_object,
-            dvc_dir,
-        ]
-        # A bucket recreated since, or with anything else in it, stops
-        # everything before any storage is touched
-        for created_at, files in (
-            (hf_created + timedelta(days=1), [dvc_object]),
-            (hf_created, [dvc_object, SimpleNamespace(type="file", path="a")]),
-            (
-                hf_created,
-                [SimpleNamespace(type="file", path="files/md5/ab/cd")],
-            ),
-        ):
-            api.return_value.bucket_info.return_value.created_at = created_at
-            api.return_value.list_bucket_tree.return_value = files
-            with pytest.raises(storage.UnsafeStorageDeleteError):
-                storage.delete_project_objects(None, project, "user-id")  # type: ignore[arg-type]
-        api.return_value.delete_bucket.assert_not_called()
-        api.return_value.batch_bucket_files.assert_not_called()
-        assert internal.fs.exists(f"/internal/data/someone/my-project/{path}")
-        # Clock differences between the hub and HF are allowed for
-        api.return_value.bucket_info.return_value.created_at = (
-            hf_created + timedelta(minutes=1)
-        )
-        api.return_value.list_bucket_tree.return_value = [
-            folder,
-            dvc_object,
-            dvc_dir,
-        ]
-        storage.delete_project_objects(None, project, "user-id")  # type: ignore[arg-type]
-        api.return_value.delete_bucket.assert_called_once_with(
-            "someone/my-project", missing_ok=True
-        )
-        api.return_value.batch_bucket_files.assert_called_once_with(
-            "someone/calkit", delete=[f"someone/my-project/{path}"]
-        )
-        # A bucket already gone is fine
-        api.return_value.bucket_info.side_effect = BucketNotFoundError(
-            "gone",
-            response=httpx.Response(
-                404, request=httpx.Request("GET", "https://huggingface.co")
-            ),
-        )
-        storage.check_safe_to_delete(dedicated)
+        storage.delete_project_objects(project)  # type: ignore[arg-type]
+    api.assert_not_called()
+    assert shared.fs.exists(
+        shared.make_project_path("someone", "My-Project", path)
+    )
     assert not internal.fs.exists("/internal/data/someone/my-project")
     assert internal.fs.exists(f"/internal/data/someone/other/{path}")
 
@@ -399,11 +343,7 @@ def test_unreachable_storage() -> None:
     from fastapi import HTTPException
 
     resource = SimpleNamespace(
-        id="resource-id",
-        name=None,
-        bucket="someone/proj",
-        project_id="p",
-        credential_user_id="member-id",
+        id="resource-id", name=None, bucket="someone/proj", project_id="p"
     )
     project = SimpleNamespace(
         id="p", dvc_storage=resource, dvc_storage_id="resource-id"
@@ -420,30 +360,9 @@ def test_unreachable_storage() -> None:
         # Reads skip it, so everything else stays readable
         storages = storage.get_project_storages(session, project)  # type: ignore[arg-type]
         assert [st.resource for st in storages] == [None]
-        # Deleting and changing visibility don't, so nothing is left behind
-        # or left public without anyone knowing
+        # Changing visibility doesn't, so nothing is left public without
+        # anyone knowing
         with pytest.raises(storage.UnreachableStorageError) as e:
-            storage.get_project_storages(
-                session,  # type: ignore[arg-type]
-                project,  # type: ignore[arg-type]
-                skip_unreachable=False,
-            )
-        assert e.value.resource is resource
-        # Someone else's storage is left alone, reachable or not
-        storages = storage.get_project_storages(
-            session,  # type: ignore[arg-type]
-            project,  # type: ignore[arg-type]
-            skip_unreachable=False,
-            credential_user_id="other-id",
-        )
-        assert [st.resource for st in storages] == [None]
-        with pytest.raises(storage.UnreachableStorageError):
-            storage.get_project_storages(
-                session,  # type: ignore[arg-type]
-                project,  # type: ignore[arg-type]
-                skip_unreachable=False,
-                credential_user_id="member-id",
-            )
-        with pytest.raises(storage.UnreachableStorageError):
             storage.set_project_bucket_visibility(session, project, False)  # type: ignore[arg-type]
+        assert e.value.resource is resource
     api.return_value.update_bucket_settings.assert_not_called()

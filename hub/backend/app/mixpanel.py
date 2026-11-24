@@ -426,7 +426,7 @@ def user_deleted_project(
     user: User,
     owner_name: str,
     project_name: str,
-    delete_storage: bool,
+    delete_hub_storage: bool,
     n_external_storage: int,
 ) -> None:
     track(
@@ -435,7 +435,7 @@ def user_deleted_project(
         add_event_info=dict(
             owner_name=owner_name,
             project_name=project_name,
-            delete_storage=delete_storage,
+            delete_hub_storage=delete_hub_storage,
             n_external_storage=n_external_storage,
         ),
     )

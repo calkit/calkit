@@ -4933,10 +4933,6 @@ export type ProjectStorageSettings = {
    * Previous
    */
   previous: Array<StorageResourcePublic>
-  /**
-   * Deletable Ids
-   */
-  deletable_ids: Array<string>
 }
 
 /**
@@ -10348,7 +10344,7 @@ export type DeleteUserExternalCredentialData = {
     /**
      * Storage Action
      */
-    storage_action?: "transfer" | "delete" | "orphan" | null
+    storage_action?: "transfer" | "orphan" | null
   }
   url: "/user/external-credentials/{provider}"
 }
@@ -11121,7 +11117,7 @@ export type DeleteProjectData = {
     /**
      * Delete Storage
      */
-    delete_storage?: boolean
+    delete_hub_storage?: boolean
   }
   url: "/projects/{owner_name}/{project_name}"
 }
@@ -11235,7 +11231,7 @@ export type DeleteProjectByIdData = {
     /**
      * Delete Storage
      */
-    delete_storage?: boolean
+    delete_hub_storage?: boolean
   }
   url: "/projects/{project_id}"
 }

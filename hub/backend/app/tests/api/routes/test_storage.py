@@ -65,11 +65,7 @@ def test_storage_resources_and_project_storage(
     db.commit()
     project_url = f"/projects/{account_name}/{project.name}/storage"
     response = client.get(project_url, headers=owner_headers)
-    assert response.json() == {
-        "dvc": None,
-        "previous": [],
-        "deletable_ids": [],
-    }
+    assert response.json() == {"dvc": None, "previous": []}
     response = client.put(
         project_url, headers=other_headers, json={"dvc_storage_id": hf_id}
     )
@@ -136,13 +132,6 @@ def test_storage_resources_and_project_storage(
     assert dedicated["dvc"]["dedicated"] is True
     assert dedicated["dvc"]["name"] is None
     assert [r["name"] for r in dedicated["previous"]] == ["hf"]
-    # Only whoever connected storage can delete it with the project
-    assert set(dedicated["deletable_ids"]) == {
-        dedicated["dvc"]["id"],
-        dedicated["previous"][0]["id"],
-    }
-    response = client.get(project_url, headers=other_headers)
-    assert response.json()["deletable_ids"] == []
     # It's only listed for its project, not the account
     listed = client.get(base, headers=owner_headers).json()
     assert [r["name"] for r in listed] == ["hf", "unused"]

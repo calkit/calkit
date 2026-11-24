@@ -1424,7 +1424,7 @@ def delete_user_external_credential(
     session: SessionDep,
     current_user: CurrentUser,
     provider: str,
-    storage_action: Literal["transfer", "delete", "orphan"] | None = None,
+    storage_action: Literal["transfer", "orphan"] | None = None,
 ) -> Message:
     """Disconnect an external account by deleting its credential.
 
@@ -1432,8 +1432,8 @@ def delete_user_external_credential(
     unreachable, so if there is any, ``storage_action`` says what to do with
     it: ``transfer`` its objects to the hub's own storage first, which
     happens on the worker, with the account disconnected once it's done,
-    ``delete`` them, or ``orphan`` them, i.e., leave them where they are,
-    out of reach of their projects.
+    or ``orphan`` them, i.e., leave them where they are, out of reach of
+    their projects. Nothing is deleted from the service either way.
     """
     if provider == "github":
         raise HTTPException(
@@ -1454,7 +1454,7 @@ def delete_user_external_credential(
         )
     if resources and storage_action is None:
         raise HTTPException(
-            409, "Storage uses this account; transfer, delete, or orphan it"
+            409, "Storage uses this account; transfer or orphan it"
         )
     if resources:
         assert storage_action is not None
@@ -1500,33 +1500,7 @@ def delete_user_external_credential(
             message="Transferring files to Calkit Hub storage; Hugging Face "
             "disconnects when done"
         )
-    if resources and storage_action == "delete":
-        # Before deleting any, so a refusal leaves all of them in place
-        try:
-            for resource in resources:
-                app.storage.check_safe_to_delete(
-                    app.storage.get_resource_storage(session, resource)
-                )
-        except app.storage.UnsafeStorageDeleteError as e:
-            raise HTTPException(409, f"{e}; orphan instead")
-        except Exception:
-            logger.exception("Failed to check storage before deleting")
-            raise HTTPException(502, "Failed to check Hugging Face storage")
     for resource in resources:
-        if storage_action == "delete":
-            try:
-                target = app.storage.get_resource_storage(session, resource)
-                for project in app.storage.get_resource_projects(
-                    session, resource
-                ):
-                    app.storage.delete_objects_from(
-                        target, project.owner_account_name, project.name
-                    )
-            except Exception:
-                logger.exception(f"Failed to delete {resource.bucket}")
-                raise HTTPException(
-                    502, f"Failed to delete files in {resource.bucket}"
-                )
         session.delete(resource)
     credential = users.get_external_credential(
         session=session,

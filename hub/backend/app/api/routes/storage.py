@@ -140,9 +140,6 @@ class ProjectStorageSettings(BaseModel):
     dvc: StorageResourcePublic | None
     # Other storage the project's objects may be in
     previous: list[StorageResourcePublic]
-    # What the current user can delete with the project, i.e., what's in
-    # their own external accounts
-    deletable_ids: list[uuid.UUID]
 
 
 class CredentialStoragePublic(BaseModel):
@@ -236,9 +233,7 @@ def set_project_storage(
     session.refresh(project)
 
 
-def get_project_storage_settings(
-    project: Project, user_id: uuid.UUID | None
-) -> ProjectStorageSettings:
+def get_project_storage_settings(project: Project) -> ProjectStorageSettings:
     return ProjectStorageSettings(
         dvc=(
             to_public(project.dvc_storage)
@@ -253,11 +248,6 @@ def get_project_storage_settings(
                 reverse=True,
             )
             if r.storage_resource_id != project.dvc_storage_id
-        ],
-        deletable_ids=[
-            r.storage_resource_id
-            for r in project.storage_history
-            if r.storage_resource.credential_user_id == user_id
         ],
     )
 
@@ -276,9 +266,7 @@ def get_project_storage(
         current_user=current_user,
         min_access_level="read",
     )
-    return get_project_storage_settings(
-        project, current_user.id if current_user else None
-    )
+    return get_project_storage_settings(project)
 
 
 class ProjectStorageUsage(BaseModel):
@@ -373,7 +361,7 @@ def put_project_storage(
         from_kind=from_kind,
         to_kind=resource.kind if resource is not None else "hub",
     )
-    return get_project_storage_settings(project, current_user.id)
+    return get_project_storage_settings(project)
 
 
 @router.post("/projects/{owner_name}/{project_name}/storage/hf-bucket")
@@ -448,4 +436,4 @@ def post_project_hf_bucket(
         from_kind=from_kind,
         to_kind="hf-bucket",
     )
-    return get_project_storage_settings(project, current_user.id)
+    return get_project_storage_settings(project)

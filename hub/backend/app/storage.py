@@ -3,10 +3,8 @@
 import json
 import logging
 import os
-import re
 import shutil
 from dataclasses import dataclass, field
-from datetime import timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -418,10 +416,7 @@ class UnreachableStorageError(RuntimeError):
 
 
 def get_project_storages(
-    session: "Session",
-    project: "Project",
-    skip_unreachable: bool = True,
-    credential_user_id: Any = None,
+    session: "Session", project: "Project"
 ) -> list[ProjectStorage]:
     """Get every storage a project's DVC objects may be in, for reading.
 
@@ -430,10 +425,7 @@ def get_project_storages(
     previous storage resources, newest first, then the hub's own storage.
     Storage that can't be reached right now, e.g., because the account that
     connected it disconnected Hugging Face, is skipped so everything else
-    stays readable, unless ``skip_unreachable`` is false, in which case it
-    raises ``UnreachableStorageError``. New objects go to
-    ``get_project_storage``. With ``credential_user_id``, the only external
-    storage included is what's reached with that user's credential.
+    stays readable. New objects go to ``get_project_storage``.
     """
     from fastapi import HTTPException
 
@@ -445,17 +437,11 @@ def get_project_storages(
     ):
         if record.storage_resource_id != project.dvc_storage_id:
             resources.append(record.storage_resource)
-    if credential_user_id is not None:
-        resources = [
-            r for r in resources if r.credential_user_id == credential_user_id
-        ]
     storages = []
     for resource in resources:
         try:
             storages.append(get_resource_storage(session, resource))
         except HTTPException as e:
-            if not skip_unreachable:
-                raise UnreachableStorageError(resource) from e
             logger.warning(
                 f"Skipping unavailable storage {resource.name} "
                 f"({resource.bucket}): {e.detail}"
@@ -532,97 +518,17 @@ def set_project_bucket_visibility(
     return len(targets)
 
 
-# Objects at the root of a dedicated bucket
-DVC_OBJECT_PATH_RE = re.compile(r"files/md5/[0-9a-f]{2}/[0-9a-f]{30}(\.dir)?")
-MAX_STORAGE_CLOCK_SKEW = timedelta(minutes=5)
+def delete_project_objects(project: "Project") -> None:
+    """Delete a project's DVC objects from the hub's own storage.
 
-
-class UnsafeStorageDeleteError(RuntimeError):
-    """Storage isn't safe to delete, since it changed outside Calkit."""
-
-    def __init__(self, bucket: str):
-        self.bucket = bucket
-        super().__init__(f"Not deleting {bucket}: changed outside Calkit")
-
-
-def check_safe_to_delete(target: ProjectStorage) -> None:
-    """Check that a dedicated bucket is still the one the hub created, with
-    only DVC objects in it, since HF identifies buckets by name.
-
-    Raises ``UnsafeStorageDeleteError`` if not. A missing bucket is safe.
-    """
-    from huggingface_hub import HfApi
-    from huggingface_hub.errors import BucketNotFoundError
-
-    if not target.is_dedicated:
-        return
-    assert target.bucket is not None and target.resource is not None
-    api = HfApi(token=target.token)
-    try:
-        info = api.bucket_info(target.bucket)
-    except BucketNotFoundError:
-        return
-    # The hub saves its record right after creating the bucket
-    recorded = target.resource.created
-    if recorded.tzinfo is None:
-        recorded = recorded.replace(tzinfo=timezone.utc)
-    if info.created_at > recorded + MAX_STORAGE_CLOCK_SKEW:
-        raise UnsafeStorageDeleteError(target.bucket)
-    for item in api.list_bucket_tree(target.bucket, recursive=True):
-        if item.type == "file" and not DVC_OBJECT_PATH_RE.fullmatch(item.path):
-            raise UnsafeStorageDeleteError(target.bucket)
-
-
-def delete_objects_from(
-    target: ProjectStorage, owner_name: str, project_name: str
-) -> None:
-    """Delete a project's DVC objects from one storage.
-
-    Storage dedicated to the project is deleted entirely, e.g., its HF
-    bucket, and otherwise the project's folder is removed. Callers run
-    ``check_safe_to_delete`` on everything they'll delete first.
-    """
-    from huggingface_hub import HfApi
-
-    if target.is_dedicated:
-        assert target.bucket is not None
-        HfApi(token=target.token).delete_bucket(target.bucket, missing_ok=True)
-        return
-    base = target.make_project_path(owner_name, project_name)
-    if target.backend == "hf":
-        assert target.bucket is not None
-        paths = [
-            p.removeprefix(f"{target.data_prefix}/")
-            for p in target.fs.find(base)
-        ]
-        if paths:
-            HfApi(token=target.token).batch_bucket_files(
-                target.bucket, delete=paths
-            )
-    elif target.fs.exists(base):
-        target.fs.rm(base, recursive=True)
-
-
-def delete_project_objects(
-    session: "Session", project: "Project", user_id: Any
-) -> None:
-    """Delete a project's DVC objects from the hub's own storage and all the
-    storage it has used in the given user's external accounts. Storage in
-    anyone else's account stays there, since only they can delete it.
-
-    Raises ``UnreachableStorageError`` before deleting anything if any of
-    that storage can't be reached, rather than leaving objects behind with
-    no record of them, and ``UnsafeStorageDeleteError`` if any changed
-    outside Calkit.
+    The hub never deletes anything from connected storage, e.g., an HF
+    bucket. Its owner does that with the service.
     """
     owner_name = project.owner_account_name
-    targets = get_project_storages(
-        session, project, skip_unreachable=False, credential_user_id=user_id
-    )
-    for target in targets:
-        check_safe_to_delete(target)
-    for target in targets:
-        delete_objects_from(target, owner_name, project.name)
+    target = get_internal_storage()
+    base = target.make_project_path(owner_name, project.name)
+    if target.fs.exists(base):
+        target.fs.rm(base, recursive=True)
     invalidate_storage_usage_cache(owner_name)
 
 
@@ -847,10 +753,16 @@ class HfBucketBatchError(RuntimeError):
 def post_hf_bucket_batch(
     storage: ProjectStorage, ops: list[dict[str, Any]]
 ) -> None:
-    """Add or delete files in an HF bucket with the owner's credential."""
+    """Add files to an HF bucket with the owner's credential.
+
+    Only adding is allowed, since the hub never deletes from connected
+    storage.
+    """
     import requests
 
     assert storage.bucket is not None
+    if any(op.get("type") != "addFile" for op in ops):
+        raise ValueError("Only adding files to HF buckets is allowed")
     data = b"".join(json.dumps(op).encode() + b"\n" for op in ops)
     resp = requests.post(
         f"{HF_ENDPOINT}/api/buckets/{storage.bucket}/batch",

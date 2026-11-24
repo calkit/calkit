@@ -893,6 +893,7 @@ Create a new Calkit object.
 | [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                                             |
 | [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                                                       |
 | [`question`](#subcommand-new-create-question)                             | Add a new question.                                                                               |
+| [`ref-value`](#subcommand-new-create-ref-value)                           | Record a value a document quotes from a reference, to cite with \ckrefval.                        |
 | [`comment`](#subcommand-new-create-comment)                               | Start a review comment thread above a paragraph of a LaTeX or Markdown document, printing its ID. |
 | [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                                               |
 | [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                                                  |
@@ -1070,6 +1071,38 @@ Options:
 | Option     | Type    | Required | Default | Description |
 | ---------- | ------- | -------- | ------- | ----------- |
 | `--commit` | boolean | no       | False   |             |
+
+<a id="subcommand-new-create-ref-value"></a>
+
+#### `calkit new|create ref-value`
+
+Record a value a document quotes from a reference, to cite with \ckrefval.
+
+It's checked against the reference's PDF, if one can be found, unless --no-check is given.
+
+Usage:
+
+```text
+calkit new|create ref-value [OPTIONS] KEY NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                        |
+| -------- | ---- | -------- | ------- | -------------------------------------------------- |
+| `key`    | str  | yes      |         | Citation key of the reference.                     |
+| `name`   | str  | yes      |         | A name for the value, unique within the reference. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                     |
+| --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------- |
+| `--value`             | str     | yes      |         | The value, as the reference gives it.                                           |
+| `--page`              | int     | no       |         | The page of the reference's PDF, counting from 1.                               |
+| `--quote`             | str     | no       |         | A short passage around the value, copied from the reference.                    |
+| `--description`, `-d` | str     | no       |         | What the value is.                                                              |
+| `--collection`        | str     | no       |         | The reference collection, e.g., references.bib, if the key is in more than one. |
+| `--no-check`          | boolean | no       | False   | Don't check it against the reference's PDF.                                     |
 
 <a id="subcommand-new-create-comment"></a>
 

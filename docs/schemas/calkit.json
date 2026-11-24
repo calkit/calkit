@@ -9226,6 +9226,15 @@
     },
     "ReferenceCollection": {
       "properties": {
+        "entries": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ReferenceEntry"
+          },
+          "default": {},
+          "description": "Entries of the collection the project records something about, e.g., values a document quotes from them, by citation key.",
+          "title": "Entries",
+          "type": "object"
+        },
         "files": {
           "default": [],
           "items": {
@@ -9245,6 +9254,35 @@
       "title": "ReferenceCollection",
       "type": "object"
     },
+    "ReferenceEntry": {
+      "description": "What the project records about one entry of a reference collection,\nby its citation key.",
+      "properties": {
+        "file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The entry's PDF, relative to the project. Without one, it's looked for in Zotero for a collection linked to Zotero, or downloaded, but not stored in the project.",
+          "title": "File"
+        },
+        "values": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ReferenceValue"
+          },
+          "default": {},
+          "description": "Values documents quote from it, by a name unique within the entry.",
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "title": "ReferenceEntry",
+      "type": "object"
+    },
     "ReferenceFile": {
       "properties": {
         "key": {
@@ -9261,6 +9299,71 @@
         "key"
       ],
       "title": "ReferenceFile",
+      "type": "object"
+    },
+    "ReferenceValue": {
+      "description": "A value a document quotes from a reference, and where it appears.\n\nA document cites it with ``\\ckrefval{<citation key>}{<name>}``, which\nis checked against the reference's PDF.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the value is.",
+          "title": "Description"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The page of the reference's PDF it's on, counting from 1, which may differ from the number printed on the page.",
+          "title": "Page"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A short passage around the value, copied from the reference, which is how it's found and checked.",
+          "title": "Quote"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "The value, as the reference gives it, e.g., 0.1 or '12.5%'.",
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "ReferenceValue",
       "type": "object"
     },
     "ReferencesCheckStage": {

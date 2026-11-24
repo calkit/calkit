@@ -971,6 +971,118 @@ def new_question(
         repo.git.commit(["-m", "Add question"])
 
 
+@new_app.command(name="ref-value")
+def new_ref_value(
+    key: Annotated[str, typer.Argument(help="Citation key of the reference.")],
+    name: Annotated[
+        str,
+        typer.Argument(
+            help="A name for the value, unique within the reference."
+        ),
+    ],
+    value: Annotated[
+        str,
+        typer.Option("--value", help="The value, as the reference gives it."),
+    ],
+    page: Annotated[
+        int | None,
+        typer.Option(
+            "--page", help="The page of the reference's PDF, counting from 1."
+        ),
+    ] = None,
+    quote: Annotated[
+        str | None,
+        typer.Option(
+            "--quote",
+            help="A short passage around the value, copied from the "
+            "reference.",
+        ),
+    ] = None,
+    description: Annotated[
+        str | None,
+        typer.Option("--description", "-d", help="What the value is."),
+    ] = None,
+    collection: Annotated[
+        str | None,
+        typer.Option(
+            "--collection",
+            help="The reference collection, e.g., references.bib, if the key "
+            "is in more than one.",
+        ),
+    ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check", help="Don't check it against the reference's PDF."
+        ),
+    ] = False,
+) -> None:
+    """Record a value a document quotes from a reference, to cite with
+    \\ckrefval.
+
+    It's checked against the reference's PDF, if one can be found, unless
+    --no-check is given.
+    """
+    import calkit.refvalues
+
+    ck_info = calkit.load_calkit_info()
+    parsed: str | int | float = value
+    for kind in (int, float):
+        try:
+            parsed = kind(value)
+            break
+        except ValueError:
+            continue
+    try:
+        collection = calkit.refvalues.add_value(
+            ck_info,
+            key=key,
+            name=name,
+            value=parsed,
+            page=page,
+            quote=quote,
+            description=description,
+            collection=collection,
+        )
+    except ValueError as e:
+        raise_error(str(e))
+    if not no_check:
+        from calkit.references import load_collections
+
+        entry = load_collections(paths=[collection]).get(collection, {})
+        source = calkit.refvalues.get_pdf(
+            collection,
+            key,
+            entry=entry.get(key),
+            file=calkit.refvalues.get_entry_file(
+                next(
+                    c
+                    for c in ck_info["references"]
+                    if isinstance(c, dict) and c.get("path") == collection
+                ),
+                key,
+            ),
+            download=True,
+        )
+        if source is None:
+            warn(f"Couldn't find a PDF of '{key}' to check it against")
+        else:
+            problem = calkit.refvalues.check_value(
+                calkit.refvalues.read_pdf_pages(source.path),
+                parsed,
+                page=page,
+                quote=quote,
+            )
+            if problem is not None:
+                raise_error(
+                    f"Not added, since in {source.source}, {problem}; "
+                    "use --no-check to add it anyway"
+                )
+    calkit.save_calkit_info(ck_info)
+    typer.echo(f"Added '{name}' to '{key}' in {collection}")
+    typer.echo(f"Cite it with \\ckrefval{{{key}}}{{{name}}}")
+
+
 @new_app.command(name="comment")
 def new_comment(
     path: Annotated[

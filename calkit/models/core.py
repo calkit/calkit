@@ -666,9 +666,60 @@ class ReferenceFile(Model):
     key: str
 
 
+class ReferenceValue(Model):
+    """A value a document quotes from a reference, and where it appears.
+
+    A document cites it with ``\\ckrefval{<citation key>}{<name>}``, which
+    is checked against the reference's PDF.
+    """
+
+    value: float | int | str = Field(
+        description="The value, as the reference gives it, e.g., 0.1 or "
+        "'12.5%'."
+    )
+    page: int | None = Field(
+        default=None,
+        ge=1,
+        description="The page of the reference's PDF it's on, counting "
+        "from 1, which may differ from the number printed on the page.",
+    )
+    quote: str | None = Field(
+        default=None,
+        description="A short passage around the value, copied from the "
+        "reference, which is how it's found and checked.",
+    )
+    description: str | None = Field(
+        default=None, description="What the value is."
+    )
+
+
+class ReferenceEntry(Model):
+    """What the project records about one entry of a reference collection,
+    by its citation key.
+    """
+
+    file: str | None = Field(
+        default=None,
+        description="The entry's PDF, relative to the project. Without one, "
+        "it's looked for in Zotero for a collection linked to Zotero, or "
+        "downloaded, but not stored in the project.",
+    )
+    values: dict[str, ReferenceValue] = Field(
+        default={},
+        description="Values documents quote from it, by a name unique "
+        "within the entry.",
+    )
+
+
 class ReferenceCollection(Model):
     path: str
     files: list[ReferenceFile] = []
+    entries: dict[str, ReferenceEntry] = Field(
+        default={},
+        description="Entries of the collection the project records "
+        "something about, e.g., values a document quotes from them, by "
+        "citation key.",
+    )
 
 
 # The kinds that describe a machine, so can have 'requirements'

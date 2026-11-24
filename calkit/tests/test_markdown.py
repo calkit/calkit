@@ -1816,3 +1816,56 @@ def test_expand_ck_info_one_stage_per_file(tmp_path, monkeypatch):
     # Two stages reading one file would fight over its derived files
     with pytest.raises(ValueError, match="another markdown stage already"):
         expand_ck_info(ck_info)
+
+
+def test_refval_markers(tmp_path):
+    import json
+
+    import calkit.markdown
+
+    # A value quoted from a reference is filled in from the file Calkit
+    # writes its reference's values to, alongside ckvalue markers on the
+    # same line
+    import calkit.references.values
+
+    calkit.references.values.write_values_file(
+        {
+            "references": [
+                {
+                    "path": "r.bib",
+                    "values": {"liu.2025": {"noise-sigma": {"value": 0.1}}},
+                }
+            ]
+        },
+        wdir=str(tmp_path),
+    )
+    (tmp_path / "r.json").write_text(json.dumps({"rms": 0.25}))
+    text = (
+        "Noise <!-- ckrefval liu.2025 noise-sigma .2f -->x<!-- /ckrefval -->"
+        " [@liu.2025] and <!-- ckvalue r.json rms -->y<!-- /ckvalue -->.\n"
+    )
+    out, changed = calkit.markdown.set_values(
+        text, "doc.md", wdir=str(tmp_path)
+    )
+    assert changed
+    assert out == (
+        "Noise <!-- ckrefval liu.2025 noise-sigma .2f -->0.10"
+        "<!-- /ckrefval --> [@liu.2025] and "
+        "<!-- ckvalue r.json rms -->0.25<!-- /ckvalue -->.\n"
+    )
+    (value, _) = calkit.markdown.extract_values(out, "doc.md")
+    assert value.ref == ("liu.2025", "noise-sigma")
+    assert value.path == calkit.references.values.get_values_path("liu.2025")
+    # A marker closes with its own command
+    assert not calkit.markdown.extract_values(
+        "<!-- ckrefval a b -->x<!-- /ckvalue -->", "doc.md"
+    )
+    with pytest.raises(
+        calkit.markdown.MarkdownParseError,
+        match="calkit.yaml records no value 'other' quoted from 'liu.2025'",
+    ):
+        calkit.markdown.set_values(
+            "<!-- ckrefval liu.2025 other -->x<!-- /ckrefval -->",
+            "doc.md",
+            wdir=str(tmp_path),
+        )

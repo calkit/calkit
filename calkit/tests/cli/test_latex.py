@@ -294,6 +294,20 @@ def test_build_ck_components(tmp_dir):
         )
     with open("results/count.tex", "w") as f:
         f.write("Trials: 42.\n")
+    # A value quoted from a reference, recorded in calkit.yaml
+    with open("refs.bib", "w") as f:
+        f.write("@article{liu2025, title={Orbits}, author={Liu, A.}}\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["references"] = [
+        {
+            "path": "refs.bib",
+            "values": {
+                "liu2025": {"noise-sigma": {"value": 0.1, "page": 4}},
+                "smith:2020": {"n": {"value": 7}},
+            },
+        }
+    ]
+    calkit.save_calkit_info(ck_info)
     # The smallest PNG TeX will read: one white pixel
     raw = zlib.compress(b"\x00\xff\xff\xff")
     png = b"\x89PNG\r\n\x1a\n" + b"".join(
@@ -329,6 +343,10 @@ def test_build_ck_components(tmp_dir):
             "Large: \\ckvalue[.3g]{results/metrics.json}{big}.\n"
             "Label: \\ckvalue[.2f]{results/metrics.json}{label}.\n"
             "Tiny: \\ckvalue[.2f]{results/metrics.json}{tiny}.\n"
+            "Quoted: \\ckrefval[.2f]{liu2025}{noise-sigma}.\n"
+            "Unrecorded: \\ckrefval{liu2025}{nope}.\n"
+            "Spaced: \\ckrefval[.1f]{ liu2025 }{ noise-sigma }.\n"
+            "Colon: \\ckrefval{smith:2020}{n}.\n"
             "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/not-yet.png}\n"
@@ -343,6 +361,9 @@ def test_build_ck_components(tmp_dir):
     )
     assert out.returncode == 0, out.stderr
     assert "figures/not-yet.png is not in the project yet" in out.stdout
+    assert "calkit.yaml records no value 'nope' quoted from 'liu2025'" in (
+        out.stdout
+    )
     assert os.path.isfile("paper/_calkit/figures/plot.png")
     assert os.path.isfile("paper/calkit.sty")
     # Written whenever it's needed, so kept out of Git, even outside a run
@@ -401,6 +422,10 @@ def test_build_ck_components(tmp_dir):
     assert "Label: run a." in text
     # Fixed notation, though the value is written in exponent form
     assert "Tiny: 0.00." in text
+    assert "Quoted: 0.10." in text
+    assert "Unrecorded: ??." in text
+    assert "Spaced: 0.1." in text
+    assert "Colon: 7." in text
     assert "Trials: 42." in text
     # A bookmark shows the value as it is, rather than the command
     pdf = pypdfium2.PdfDocument("paper/main.pdf")

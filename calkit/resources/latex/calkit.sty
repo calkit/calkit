@@ -188,6 +188,27 @@
       { \use:c { \__calkit_value_cs:nn {#1} {#2} } } { ?? }
   }
 \cs_new_eq:NN \ck@num \__calkit_num:nn
+% A value quoted from a reference, by its citation key and name, each
+% trimmed, as Calkit writes them: the key as ref:<key>, since Calkit, not
+% TeX, knows which file a reference's values are in
+\tl_new:N \l__calkit_refsource_tl
+\tl_new:N \l__calkit_refname_tl
+\cs_new:Npn \__calkit_ifvalue:nnTF #1#2 { \ck@if@value {#1} {#2} }
+\cs_generate_variant:Nn \__calkit_ifvalue:nnTF { VV }
+\cs_new_protected:Npn \__calkit_value:nnn #1#2#3 { \ck@value {#1} {#2} {#3} }
+\cs_generate_variant:Nn \__calkit_value:nnn { nVV }
+\cs_new_protected:Npn \__calkit_refval:nnn #1#2#3
+  {
+    \tl_set:Nx \l__calkit_refsource_tl { ref: \tl_trim_spaces:n {#2} }
+    \tl_set:Nx \l__calkit_refname_tl { \tl_trim_spaces:n {#3} }
+    \__calkit_ifvalue:VVTF \l__calkit_refsource_tl \l__calkit_refname_tl
+      {
+        \__calkit_value:nVV {#1} \l__calkit_refsource_tl
+          \l__calkit_refname_tl
+      }
+      { \ck@missing { #3 ~ from ~ #2 } }
+  }
+\cs_new_eq:NN \ck@refval \__calkit_refval:nnn
 \ExplSyntaxOff
 \InputIfFileExists{\ck@dir/values.tex}{}{}
 % \cknum[format]{number}: a number formatted the way \ckvalue formats one,
@@ -198,11 +219,20 @@
   \ck@if@value{#2}{#3}%
     {\ck@link{results?path=#2\string&key=#3}{\ck@value{#1}{#2}{#3}}}%
     {\ck@missing{#3 from #2}}}
+% \ckrefval[format]{citation key}{name}: a value quoted from a reference,
+% which calkit.yaml records with where in the reference it is, and which
+% Calkit writes to the _calkit/values.tex beside the document. The
+% reference is cited as usual, e.g., with \cite, wherever it belongs.
+\newcommand\ckrefval[3][]{\ck@refval{#1}{#2}{#3}}
 \ifdefined\NewExpandableDocumentCommand
   \NewExpandableDocumentCommand\ck@plainvalue{O{}mm}{\ck@plain{#2}{#3}}
+  \NewExpandableDocumentCommand\ck@plainrefval{O{}mm}%
+    {\ck@plain{ref:#2}{#3}}
   \AtBeginDocument{%
     \ifdefined\pdfstringdefDisableCommands
-      \pdfstringdefDisableCommands{\let\ckvalue\ck@plainvalue}%
+      \pdfstringdefDisableCommands{%
+        \let\ckvalue\ck@plainvalue
+        \let\ckrefval\ck@plainrefval}%
     \fi}
 \fi
 % Where a component is in _calkit, with the extension Calkit found for one

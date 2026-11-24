@@ -11588,6 +11588,27 @@ export const ReproCheckSchema = {
       type: "array",
       title: "Unattributed Numbers",
     },
+    n_refvals: {
+      type: "integer",
+      title: "N Refvals",
+      default: 0,
+    },
+    refval_problems: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Refval Problems",
+    },
+    refvals_unchecked: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Refvals Unchecked",
+    },
     recommendation: {
       anyOf: [
         {
@@ -15169,6 +15190,27 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Unattributed Numbers",
+    },
+    n_refvals: {
+      type: "integer",
+      title: "N Refvals",
+      default: 0,
+    },
+    refval_problems: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Refval Problems",
+    },
+    refvals_unchecked: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Refvals Unchecked",
     },
   },
   type: "object",

@@ -66,6 +66,7 @@ import calkit.latex
 import calkit.pipeline
 import calkit.provenance
 import calkit.questions
+import calkit.references.values
 import calkit.resources
 import calkit.templates
 from app import (
@@ -6429,6 +6430,11 @@ def get_project_publication_components(
             document, read=read_source
         )
         for c in ck_components:
+            # Values quoted from references come from calkit.yaml, which
+            # names each one's reference, rather than being a file of the
+            # document's
+            if c.ref is not None:
+                continue
             rel, _ = calkit.latex.component_path(c, is_project_file)
             if (
                 rel is not None
@@ -9658,9 +9664,11 @@ def get_project_references(
                 logger.warning(f"Failed to parse BibTeX file {path}: {e}")
                 entries = []
             final_entries = []
-            file_paths = {
-                f["key"]: f["path"] for f in ref_collection.get("files", [])
-            }
+            # Keyed by citation key, or a list of key and path, as Calkit
+            # wrote before
+            file_paths = calkit.references.values.get_reference_files(
+                ref_collection
+            )
             for entry in entries:
                 key = entry.pop("ID")
                 reftype = entry.pop("ENTRYTYPE")
@@ -9702,6 +9710,14 @@ def get_project_references(
                     )
                 )
             ref_collection["entries"] = final_entries
+        # The API keeps listing files with their keys, however calkit.yaml
+        # writes them
+        ref_collection["files"] = [
+            {"key": key, "path": path}
+            for key, path in calkit.references.values.get_reference_files(
+                ref_collection
+            ).items()
+        ]
         resp.append(References.model_validate(ref_collection))
     return resp
 
@@ -11500,7 +11516,12 @@ def get_project_repro_check(
                 # than recompute past it on every request until it expires.
                 logger.warning(f"Discarding unreadable repro check: {e}")
                 cache.delete(key)
-    res = check_reproducibility(wdir=str(repo.working_dir))
+    # Offline, so the result is a function of the tree, and a page load
+    # never downloads references' PDFs or asks other services, including
+    # anything on the server posing as Zotero desktop
+    res = check_reproducibility(
+        wdir=str(repo.working_dir), offline=True, zotero_desktop=False
+    )
     if key is not None:
         cache.set_json(key, res.model_dump())
     return res

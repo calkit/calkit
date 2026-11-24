@@ -558,6 +558,13 @@ def update_markdown(
             "No Markdown files given, and none are declared as markdown stages"
         )
     results = calkit.markdown.results_by_name(ck_info)
+    # Values quoted from references come from calkit.yaml, so a check needs
+    # no file, and the file Calkit writes them to is brought up to date
+    import calkit.references.values
+
+    refvals = calkit.references.values.get_values_data(ck_info)
+    if not check:
+        calkit.references.values.write_values_file(ck_info)
     stale = []
     problems = []
     for path in paths:
@@ -584,7 +591,7 @@ def update_markdown(
                 )
         try:
             new_text, changed = calkit.markdown.set_values(
-                text, path, results=results
+                text, path, results=results, data=refvals
             )
         except calkit.markdown.MarkdownParseError as e:
             raise_error(str(e))

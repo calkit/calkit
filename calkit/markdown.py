@@ -1494,10 +1494,19 @@ def expand_ck_info(
             with open(read_path, encoding="utf-8") as f:
                 text = f.read()
             # What it shows, and calkit.yaml for the questions its values
-            # link to
+            # link to, and for the values it quotes from references, so not
+            # the file Calkit writes those to, which isn't there without any
+            from calkit.references.values import is_values_path
+
             inputs = (
                 list(md_cfg.get("inputs") or [])
-                + pdf_inputs(text, md_path, results=results_by_name(ck_info))
+                + [
+                    p
+                    for p in pdf_inputs(
+                        text, md_path, results=results_by_name(ck_info)
+                    )
+                    if not is_values_path(p)
+                ]
                 + ["calkit.yaml"]
             )
             sub = {
@@ -2557,9 +2566,9 @@ _VALUES_END_RE = re.compile(r"<!--\s*/calkit values\s*-->")
 # 'calkit values' directive above it, so nothing has to be implied from
 # elsewhere in the document.
 _CKVALUE_RE = re.compile(
-    r"<!--\s*ckvalue\b(?P<args>.*?)-->"
+    r"<!--\s*(?P<cmd>ckvalue|ckrefval)\b(?P<args>.*?)-->"
     r"(?P<ctext>.*?)"
-    r"<!--\s*/ckvalue\s*-->"
+    r"<!--\s*/(?P=cmd)\s*-->"
 )
 # One argument of a compact marker: `key=value`, with the value optionally
 # quoted so a format can hold spaces, or a bare positional.
@@ -2618,6 +2627,9 @@ class MarkdownValue:
     # kept so an error can quote what was written rather than what it resolved
     # to. None for the long form, which names its path outright.
     source: str | None = None
+    # For a value quoted from a reference with ckrefval, its citation key and
+    # name, since it's read from the file of them all with the two joined
+    ref: tuple[str, str] | None = None
 
 
 def _value_attrs(attrs_text: str, path: str | None, line: int) -> dict:
@@ -2872,6 +2884,30 @@ def extract_values(
                     )
                 blocks.pop()
                 continue
+            if m.group("ctext") is not None and m.group("cmd") == "ckrefval":
+                # A citation key, a name, and a format, read the same way
+                from calkit.references.values import get_values_path
+
+                got = _ckvalue_args(m.group("args"), path, i + 1)
+                if got["kind"]:
+                    raise MarkdownParseError(
+                        "'ckrefval' takes a citation key and a name, not "
+                        f"{got['kind']}=",
+                        path=path,
+                        line=i + 1,
+                    )
+                values.append(
+                    MarkdownValue(
+                        key=got["key"],
+                        path=get_values_path(got["source"]),
+                        text=m.group("ctext"),
+                        format=_ck_format(got.get("format")),
+                        line=i + 1,
+                        source=got["source"],
+                        ref=(got["source"], got["key"]),
+                    )
+                )
+                continue
             if m.group("ctext") is not None:
                 got = _ckvalue_args(
                     m.group("args"), path, i + 1, block_source=block_path
@@ -2958,7 +2994,8 @@ def format_value(value: Any, fmt: str | None = None) -> str:
 # A compact marker with calkit.sty's bracketed option, e.g.,
 # ``ckvalue[.4f] metrics rms``, which reads naturally coming from LaTeX
 _BRACKET_CKVALUE_RE = re.compile(
-    r"<!--(?P<lead>\s*)ckvalue\[(?P<bformat>[^\]]*)\](?P<bargs>.*?)-->"
+    r"<!--(?P<lead>\s*)(?P<bcmd>ckvalue|ckrefval)\[(?P<bformat>[^\]]*)\]"
+    r"(?P<bargs>.*?)-->"
 )
 
 
@@ -3026,7 +3063,7 @@ def heal_markers(text: str) -> tuple[str, int]:
             fmt = format_arg(m.group("bformat"), args)
             if fmt is None:
                 continue
-            new = f"<!--{m.group('lead')}ckvalue {args} {fmt} -->"
+            new = f"<!--{m.group('lead')}{m.group('bcmd')} {args} {fmt} -->"
             bare = bare[: m.start()] + new + bare[m.end() :]
             n += 1
         out.append(bare + line[len(line.rstrip("\r\n")) :])
@@ -3038,6 +3075,7 @@ def set_values(
     markdown_path: str,
     wdir: str | None = None,
     results: dict[str, str] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> tuple[str, bool]:
     """Rewrite each value marker's text from its results file.
 
@@ -3059,15 +3097,20 @@ def set_values(
     if not values:
         return text, text != original
     path = Path(markdown_path).as_posix()
-    data_by_path: dict[str, Any] = {}
+    # What's given, e.g., the values quoted from references, read from
+    # calkit.yaml rather than the file Calkit writes them to
+    data_by_path: dict[str, Any] = dict(data or {})
     for value in values:
         if value.path in data_by_path:
             continue
         fpath = os.path.join(wdir, value.path) if wdir else value.path
         if not os.path.isfile(fpath):
             raise MarkdownParseError(
-                f"Results file '{value.path}' for value '{value.key}' does "
-                "not exist; is it an output of a stage that has run?",
+                f"calkit.yaml records no value '{value.ref[1]}' quoted from "
+                f"'{value.ref[0]}'"
+                if value.ref is not None
+                else f"Results file '{value.path}' for value '{value.key}' "
+                "does not exist; is it an output of a stage that has run?",
                 path=path,
                 line=value.line,
             )
@@ -3093,7 +3136,10 @@ def set_values(
             raw = resolve_key(data_by_path[value.path], value.key)
         except KeyError:
             raise MarkdownParseError(
-                f"Results file '{value.path}' has no key '{value.key}'",
+                f"calkit.yaml records no value '{value.ref[1]}' quoted from "
+                f"'{value.ref[0]}'"
+                if value.ref is not None
+                else f"Results file '{value.path}' has no key '{value.key}'",
                 path=path,
                 line=value.line,
             )

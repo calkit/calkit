@@ -106,6 +106,11 @@ Box addresses items by ID, not path,
 so the hub keeps the ID of a Box namespace folder rather than its path,
 and paths under it are resolved by listing folders.
 The folder can then be moved or renamed in Box.
+Since nothing is deleted from it,
+a project's folder can outlive the project,
+so each holds a `.calkit-project` file with its project's ID,
+and a project can't start using a folder that holds another's files,
+e.g., a deleted project's with the same name.
 
 Creating a dedicated bucket fails if the name is taken.
 The hub doesn't adopt the existing bucket,
@@ -153,7 +158,10 @@ and download each by its Box ID.
 
 Box refresh tokens work once and lapse after 60 days unused,
 so a project nobody touches for that long would lose its storage.
-A daily job on the worker refreshes connections unused for a month.
+A daily job on the worker, queued by `rq cron` rather than left waiting in
+Valkey, which can evict it, refreshes connections unused for a month.
+Only a rejected refresh token lapses a connection,
+which keeps its record so the Box account it was is still known.
 Refreshes of one connection take turns under a row lock,
 since a second refresh with the same token would disconnect it.
 

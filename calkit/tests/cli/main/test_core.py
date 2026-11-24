@@ -3989,7 +3989,7 @@ def test_project_dir_option(tmp_dir):
     assert "does not exist" in result.stderr
 
 
-def test_commit(tmp_dir):
+def test_commit(tmp_dir, tmp_path):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("test")
     Path("test/yo.txt").touch()
@@ -4092,6 +4092,30 @@ def test_commit(tmp_dir):
     repo = calkit.git.get_repo()
     assert repo.head.commit.message.strip() == "Resolve conflict"
     assert not repo.is_dirty()
+    # 'commit --push' with a Git remote but no DVC files doesn't try DVC
+    git_remote = tmp_path / "git_remote"
+    git_remote.mkdir()
+    subprocess.check_call(["git", "init", "--bare", str(git_remote)])
+    repo.create_remote("origin", str(git_remote))
+    Path("notes.txt").write_text("notes\n")
+    subprocess.check_call(["git", "add", "notes.txt"])
+    res = subprocess.run(
+        ["calkit", "commit", "--push", "-m", "Add notes"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "DVC" not in res.stdout + res.stderr
+    # One that does include a DVC pointer still tries to push it
+    Path("data2.csv").write_text("data\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data2.csv"])
+    res = subprocess.run(
+        ["calkit", "commit", "--push", "-m", "Add data2"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "DVC" in res.stdout + res.stderr
 
 
 def test_push_only_reports_to_a_connected_hub(monkeypatch, tmp_dir):

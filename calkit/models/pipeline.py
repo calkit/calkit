@@ -1958,7 +1958,7 @@ class QuartoStage(Stage):
                 )
                 if exists(p) or is_output(p)
             ]
-        if "ckvalue" not in text:
+        if "ckvalue" not in text and "ckrefval" not in text:
             return
         try:
             ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)

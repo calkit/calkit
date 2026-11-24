@@ -890,7 +890,7 @@ def get_status(
     can_ask = not as_json and calkit.core.is_tty()
     spinner: AbstractContextManager = nullcontext()
     mintty = calkit.core.is_mintty(sys.stderr)
-    if not as_json and (sys.stderr.isatty() or mintty):
+    if not as_json and (calkit.core.is_terminal(sys.stderr) or mintty):
         import logging
 
         from rich.console import Console
@@ -4168,7 +4168,9 @@ def run(
     can_ask = is_tty()
     spinner: Any = None
     mintty = calkit.core.is_mintty(sys.stderr)
-    if not (quiet or verbose) and (sys.stderr.isatty() or mintty):
+    if not (quiet or verbose) and (
+        calkit.core.is_terminal(sys.stderr) or mintty
+    ):
         from rich.console import Console
 
         # mintty takes ANSI and UTF-8, though it isn't a console

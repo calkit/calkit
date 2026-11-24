@@ -6132,3 +6132,30 @@ def test_run_skips_for_failed_env(tmp_dir):
     assert not os.path.exists("out.txt")
     assert not os.path.exists("after.txt")
     assert os.path.exists("other.txt")
+
+
+def test_run_with_stderr_discarded(tmp_dir):
+    # On Windows, NUL looks like a terminal to isatty, but Python writes to
+    # it with the ANSI code page, so a spinner drawn there failed the run
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo made > out.txt",
+                "outputs": ["out.txt"],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    for cmd in [["calkit", "run"], ["calkit", "status"]]:
+        p = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+        )
+        if p.returncode != 0:
+            # Run again with stderr kept, to show why
+            shown = subprocess.run(cmd, capture_output=True, text=True)
+            raise AssertionError(p.stdout + shown.stdout + shown.stderr)
+    assert os.path.isfile("out.txt")

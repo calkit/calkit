@@ -62,6 +62,7 @@ nav:
   - Releasing/archiving projects and artifacts: releases.md
   - Adding compute resources: compute.md
   - LaTeX documents: latex.md
+  - Quarto documents: quarto.md
   - Overleaf integration: overleaf.md
   - Browser extension: browser-ext/index.md
   - Subprojects: subprojects.md

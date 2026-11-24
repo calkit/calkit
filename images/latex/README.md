@@ -3,7 +3,7 @@
 Based on
 [carteakey/tinytex-docker](https://github.com/carteakey/tinytex-docker),
 the purpose of this image is to provide most of the packages scientific
-articles need without the <!-- ckvalue images/latex/sizes.json texlive_full.unpacked_gb .1f -->6.3<!-- /ckvalue --> GB
+articles need without the <!-- ckvalue images/latex/sizes.json texlive_full.unpacked_gb .1f -->6.4<!-- /ckvalue --> GB
 of `texlive/texlive:latest-full`, a <!-- ckvalue images/latex/sizes.json texlive_full.download_gb .1f -->2.8<!-- /ckvalue --> GB
 download.
 Instead, this one is <!-- ckvalue images/latex/sizes.json calkit.unpacked_mb .0f -->900<!-- /ckvalue --> MB

@@ -1,0 +1,58 @@
+owner: calkit
+name: example-quarto
+title: Quarto example
+description: >-
+  A Julia simulation, a Python notebook that fits it, and an R report that
+  shows values from both, rendered with Quarto.
+
+requirements:
+  - pixi
+  - juliaup
+
+environments:
+  jl:
+    kind: julia
+    path: Project.toml
+    julia: "1.12"
+    description: Julia for the simulation.
+  quarto:
+    kind: pixi
+    path: pixi.toml
+    description: Quarto, with Python and R for the documents.
+
+pipeline:
+  stages:
+    simulate:
+      kind: julia-script
+      script_path: scripts/simulate.jl
+      environment: jl
+      outputs:
+        - path: data/sim.csv
+          storage: git
+        - path: results/sim.json
+          storage: git
+    analysis:
+      kind: quarto
+      target_path: analysis.ipynb
+      environment: quarto
+      args: [--execute]
+      inputs:
+        - from_stage_outputs: simulate
+      outputs:
+        - analysis.html
+        - path: results/fit.json
+          storage: git
+    report:
+      kind: quarto
+      target_path: report.qmd
+      environment: quarto
+      inputs:
+        - data/sim.csv
+      outputs:
+        - report.html
+
+publications:
+  - path: report.html
+    kind: report
+    title: Damped oscillator
+    stage: report

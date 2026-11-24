@@ -1,7 +1,10 @@
 """Tests for ``calkit.notebooks``."""
 
+import base64
 import json
+import os
 import subprocess
+import tempfile
 
 import pytest
 from git.exc import InvalidGitRepositoryError
@@ -124,3 +127,704 @@ def test_is_marimo_notebook():
         "",
     ]:
         assert not calkit.notebooks.is_marimo_notebook(not_a_notebook)
+
+
+def test_get_notebook_values_path():
+    path = calkit.notebooks.get_notebook_values_path("fit.ipynb")
+    assert path == ".calkit/notebooks/outputs/fit.ipynb/values.json"
+    assert calkit.notebooks.get_notebook_of_values_path(path) == "fit.ipynb"
+    path = calkit.notebooks.get_notebook_values_path("nbs/fit.ipynb")
+    assert path == ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+    assert (
+        calkit.notebooks.get_notebook_of_values_path(path) == "nbs/fit.ipynb"
+    )
+    # Parameters name a folder in the notebook's, which isn't how a value is
+    # cited
+    path = calkit.notebooks.get_notebook_values_path("fit.ipynb", {"t": 25})
+    assert path == ".calkit/notebooks/outputs/fit.ipynb/t-25/values.json"
+    assert calkit.notebooks.get_notebook_of_values_path(path) is None
+    assert calkit.notebooks.get_notebook_values_path(".\\nbs\\fit.ipynb") == (
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+    )
+    assert (
+        calkit.notebooks.get_notebook_of_values_path("results/v.json") is None
+    )
+
+
+def test_cell_ids():
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 4,
+        "cells": [{"cell_type": "code", "source": ""} for _ in range(3)],
+    }
+    assert calkit.notebooks.get_cell_ids(nb) == [None, None, None]
+    assert calkit.notebooks.ensure_cell_ids(nb)
+    ids = calkit.notebooks.get_cell_ids(nb)
+    assert all(ids) and len(set(ids)) == 3
+    assert nb["nbformat_minor"] == 5
+    assert not calkit.notebooks.ensure_cell_ids(nb)
+    assert not calkit.notebooks.has_ordinal_cell_ids(nb)
+    # What nbstripout writes without --keep-id
+    for i, cell in enumerate(nb["cells"]):
+        cell["id"] = str(i)
+    assert calkit.notebooks.has_ordinal_cell_ids(nb)
+
+
+def test_capture_cells():
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [
+            {"cell_type": "code", "id": "a", "source": "x = 1"},
+            {"cell_type": "markdown", "id": "b", "source": "# Hi"},
+            {"cell_type": "code", "id": "c", "source": "x = 2"},
+        ],
+    }
+    outputs = [
+        {"kind": "value", "cell_id": "c", "variable_name": "x"},
+        {"kind": "value", "variable_name": "y"},
+        {
+            "kind": "figure",
+            "cell_id": "a",
+            "variable_name": "fig",
+            "output_path": "../f.png",
+        },
+        {"kind": "value", "cell_id": "a", "variable_name": "z"},
+    ]
+    captured = calkit.notebooks.add_capture_cells(nb, outputs, "v.json", "t")
+    sources = [c["source"] for c in captured["cells"]]
+    # The helper first, then one after each cell with outputs, in order, and
+    # one at the end for those with no cell
+    assert sources[0] == calkit.notebooks.CAPTURE_HELPER
+    assert sources[1] == "x = 1"
+    assert sources[2].startswith("_calkit_save_cell_outputs('cell a', ")
+    assert '[[2, {"kind": "figure", "cell_id": "a"' in sources[2]
+    assert (
+        '[3, {"kind": "value", "cell_id": "a", "variable_name": "z"}]'
+        in (sources[2])
+    )
+    assert sources[3:5] == ["# Hi", "x = 2"]
+    assert (
+        '[[0, {"kind": "value", "cell_id": "c", "variable_name": "x"}]]'
+        in (sources[5])
+    )
+    assert sources[6].startswith("_calkit_save_cell_outputs('the last cell'")
+    assert "'v.json', 't')" in sources[6]
+    assert len({c["id"] for c in captured["cells"]}) == 7
+    # The notebook given isn't changed, and the added cells come out again
+    assert len(nb["cells"]) == 3
+    assert calkit.notebooks.remove_capture_cells(captured) == nb
+    # A figure saved from what a cell shows keeps its figures open while it
+    # runs
+    shown = calkit.notebooks.add_capture_cells(
+        nb,
+        [{"kind": "figure", "cell_id": "c", "output_path": "f.pdf"}],
+        "v.json",
+        "t",
+    )
+    sources = [c["source"] for c in shown["cells"]]
+    assert sources[3:6] == [
+        "_calkit_keep_figures()",
+        "x = 2",
+        sources[5],
+    ]
+    assert sources[5].endswith("\n_calkit_restore_figures()")
+    assert calkit.notebooks.remove_capture_cells(shown) == nb
+    with pytest.raises(ValueError, match="no cell zz"):
+        calkit.notebooks.add_capture_cells(
+            nb,
+            [{"kind": "value", "cell_id": "zz", "variable_name": "x"}],
+            "v.json",
+            "t",
+        )
+    # The helper saves values, figures, and tables in the kernel, failing
+    # with what to do about anything it can't
+    namespace: dict = {}
+    exec(calkit.notebooks.CAPTURE_HELPER, namespace)
+    save = namespace["_calkit_save_cell_outputs"]
+    namespace.update(
+        k=0.25,
+        rates={"25C": 0.031, 35: (1, 2), "45C": float("nan")},
+        rows=[{"T": 25, "k": 0.031}, {"T": 35, "k": 0.062}],
+        cols={"T": [25, 35], "k": [0.031, 0.062]},
+        grid=[["T", "k"], [25, 0.031]],
+        bad=object(),
+        big=list(range(30_000)),
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        values = os.path.join(tmp, "v", "values.json")
+        tables = os.path.join(tmp, "tables")
+        save(
+            "cell a",
+            [
+                [0, {"kind": "value", "variable_name": "k"}],
+                [1, {"kind": "value", "variable_name": "rates"}],
+                [2, {"kind": "table", "variable_name": "rows"}],
+                [3, {"kind": "table", "variable_name": "cols"}],
+                [4, {"kind": "table", "variable_name": "grid"}],
+            ],
+            values,
+            tables,
+        )
+        with open(values) as f:
+            assert json.load(f) == {
+                "k": 0.25,
+                "rates": {"25C": 0.031, "35": [1, 2], "45C": None},
+            }
+        expected = {
+            "columns": ["T", "k"],
+            "index": None,
+            "index_name": None,
+            "data": [[25, 0.031], [35, 0.062]],
+        }
+        for i in (2, 3):
+            with open(os.path.join(tables, f"{i}.json")) as f:
+                assert json.load(f) == expected
+        with open(os.path.join(tables, "4.json")) as f:
+            assert json.load(f)["data"] == [[25, 0.031]]
+        # A table can be the result the cell shows, which IPython keeps by
+        # the number of the cell before the saving one
+        namespace["In"] = ["", "rows", "save()"]
+        namespace["Out"] = {1: namespace["rows"]}
+        shown = {"kind": "table", "output_path": "t.tex"}
+        save("cell a", [[5, shown]], values, tables)
+        with open(os.path.join(tables, "5.json")) as f:
+            assert json.load(f) == expected
+        namespace["Out"] = {0: namespace["rows"]}
+        with pytest.raises(ValueError, match="doesn't show a result"):
+            save("cell a", [[5, shown]], values, tables)
+        failures = [
+            (
+                {"kind": "value", "variable_name": "missing"},
+                NameError,
+                "no variable 'missing'",
+            ),
+            (
+                {"kind": "value", "variable_name": "bad"},
+                TypeError,
+                "since it's a object",
+            ),
+            ({"kind": "table", "variable_name": "k"}, TypeError, "as a table"),
+            ({"kind": "value", "variable_name": "big"}, ValueError, "kB"),
+            (
+                {
+                    "kind": "figure",
+                    "variable_name": "k",
+                    "output_path": "f.png",
+                },
+                TypeError,
+                "as a figure",
+            ),
+        ]
+        for out, error, message in failures:
+            with pytest.raises(error, match=message):
+                save("cell a", [[0, out]], values, tables)
+
+
+def test_get_cell_image():
+    png = base64.b64encode(b"png bytes").decode()
+    nb = {
+        "cells": [
+            {
+                "id": "a",
+                "outputs": [
+                    {"output_type": "stream", "text": "hi"},
+                    {"data": {"image/png": png, "text/plain": "<Figure>"}},
+                    {"data": {"image/svg+xml": ["<svg>", "</svg>"]}},
+                ],
+            },
+            {"id": "b", "outputs": [{"data": {"image/png": png}}] * 2},
+            {"id": "c", "outputs": []},
+        ]
+    }
+    assert calkit.notebooks.get_cell_image(nb, "a", ".png") == b"png bytes"
+    assert calkit.notebooks.get_cell_image(nb, "a", ".SVG") == b"<svg></svg>"
+    with pytest.raises(ValueError, match="it shows image/png, image/svg"):
+        calkit.notebooks.get_cell_image(nb, "a", ".jpg")
+    with pytest.raises(ValueError, match="shows 2 images"):
+        calkit.notebooks.get_cell_image(nb, "b", ".png")
+    with pytest.raises(ValueError, match="name the figure's variable"):
+        calkit.notebooks.get_cell_image(nb, "c", ".png")
+    with pytest.raises(ValueError, match="no cell d"):
+        calkit.notebooks.get_cell_image(nb, "d", ".png")
+
+
+def test_cell_output_marks():
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "fit": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "fit.ipynb",
+                },
+                "fit-2": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "./fit.ipynb",
+                },
+                "other": {"kind": "python-script", "script_path": "fit.ipynb"},
+            }
+        }
+    }
+    assert calkit.notebooks.find_notebook_stages(ck_info, "fit.ipynb") == [
+        "fit",
+        "fit-2",
+    ]
+    assert calkit.notebooks.find_notebook_stages({}, "fit.ipynb") == []
+    value = {"kind": "value", "cell_id": "a", "variable_name": "k"}
+    figure = {"kind": "figure", "cell_id": "b", "output_path": "f.png"}
+    table = {
+        "kind": "table",
+        "cell_id": "b",
+        "variable_name": "df",
+        "output_path": "t.tex",
+    }
+    outputs = [value, figure, table]
+    # A value saved again after another cell moves there, and a path takes
+    # over from another output saved to it
+    moved = value | {"cell_id": "c"}
+    marked = calkit.notebooks.get_cell_outputs_with(outputs, moved)
+    assert marked == [moved, figure, table]
+    replacing = {
+        "kind": "figure",
+        "cell_id": "c",
+        "variable_name": "fig",
+        "output_path": "t.tex",
+    }
+    marked = calkit.notebooks.get_cell_outputs_with(outputs, replacing)
+    assert marked == [value, figure, replacing]
+    added = {"kind": "value", "variable_name": "j"}
+    assert calkit.notebooks.get_cell_outputs_with(outputs, added)[-1] == added
+    without = calkit.notebooks.get_cell_outputs_without
+    assert without(outputs, variable_name="k") == [figure, table]
+    assert without(outputs, variable_name="df") == outputs
+    assert without(outputs, output_path="t.tex") == [value, figure]
+    assert without(outputs, cell_id="b") == [value]
+    stage = {
+        "notebook_path": "fit.ipynb",
+        "cell_outputs": outputs
+        + [
+            {
+                "kind": "table",
+                "cell_id": "gone",
+                "variable_name": "df",
+                "output_path": "t.csv",
+            },
+            added,
+        ],
+    }
+    nb = {"cells": [{"id": "a"}, {"id": "x"}, {"id": "b"}]}
+    described = calkit.notebooks.describe_cell_outputs(
+        "fit", stage, nb, values={"k": 0.25}
+    )
+    assert described[0] == {
+        "stage": "fit",
+        "kind": "value",
+        "cell_id": "a",
+        "cell_index": 0,
+        "variable_name": "k",
+        "output_path": None,
+        "format": None,
+        "citation": r"\ckvalue{fit.ipynb}{k}",
+        "citations": {"latex": r"\ckvalue{fit.ipynb}{k}"},
+        "saved_value": 0.25,
+    }
+    assert [d["cell_index"] for d in described] == [0, 2, 2, None, None]
+    assert [d["citation"] for d in described[1:]] == [
+        r"\ckfigure{f.png}",
+        r"\cktable{t.tex}",
+        None,
+        r"\ckvalue{fit.ipynb}{j}",
+    ]
+    assert "saved_value" not in described[4]
+    # Quarto and Markdown documents' syntax too, if a stage builds one
+    md = {"kind": "markdown", "target_path": "README.md"}
+    qmd = {"kind": "quarto", "target_path": "paper.qmd"}
+    described = calkit.notebooks.describe_cell_outputs(
+        "fit",
+        stage
+        | {
+            "cell_outputs": stage["cell_outputs"]
+            + [
+                {
+                    "kind": "table",
+                    "cell_id": "b",
+                    "variable_name": "df",
+                    "output_path": "t.md",
+                }
+            ]
+        },
+        nb,
+        ck_info={"pipeline": {"stages": {"fit": stage, "a": md, "b": qmd}}},
+    )
+    assert [d["citations"] for d in described] == [
+        {
+            "latex": r"\ckvalue{fit.ipynb}{k}",
+            "quarto": "{{< ckvalue fit.ipynb k >}}",
+            "markdown": "<!-- ckvalue fit.ipynb k -->",
+        },
+        {
+            "latex": r"\ckfigure{f.png}",
+            "quarto": "![](f.png)",
+            "markdown": "![](f.png)",
+        },
+        {"latex": r"\cktable{t.tex}"},
+        {},
+        {
+            "latex": r"\ckvalue{fit.ipynb}{j}",
+            "quarto": "{{< ckvalue fit.ipynb j >}}",
+            "markdown": "<!-- ckvalue fit.ipynb j -->",
+        },
+        {"quarto": "{{< include t.md >}}"},
+    ]
+    # A parameterized notebook's values are cited by their file
+    stage["parameters"] = {"t": 25}
+    described = calkit.notebooks.describe_cell_outputs("fit", stage, None)
+    assert described[0]["citation"] == (
+        r"\ckvalue{.calkit/notebooks/outputs/fit.ipynb/t-25/values.json}{k}"
+    )
+    assert described[0]["cell_index"] is None
+    # Including one the project's parameters fill in, as the pipeline does
+    stage["parameters"] = {"t": "{temp}"}
+    described = calkit.notebooks.describe_cell_outputs(
+        "fit", stage, None, ck_info={"parameters": {"temp": 35}}
+    )
+    assert described[0]["citation"] == (
+        r"\ckvalue{.calkit/notebooks/outputs/fit.ipynb/t-35/values.json}{k}"
+    )
+    # A stage's wdir is part of every path cited, and of the notebook's
+    in_sub = {"kind": "jupyter-notebook", "wdir": "sub"} | {
+        k: v for k, v in stage.items() if k != "parameters"
+    }
+    assert calkit.notebooks.find_notebook_stages(
+        {"pipeline": {"stages": {"sub": in_sub}}}, "sub/fit.ipynb"
+    ) == ["sub"]
+    assert calkit.notebooks.get_stage_values_path(in_sub) == (
+        "sub/.calkit/notebooks/outputs/fit.ipynb/values.json"
+    )
+    described = calkit.notebooks.describe_cell_outputs("sub", in_sub, None)
+    assert [d["citation"] for d in described[:2]] == [
+        r"\ckvalue{sub/.calkit/notebooks/outputs/fit.ipynb/values.json}{k}",
+        r"\ckfigure{sub/f.png}",
+    ]
+
+
+def test_find_printed_numbers():
+    assert calkit.notebooks.get_cell_variables(
+        "import numpy as np\n"
+        "fig, ax = plt.subplots()\n"
+        "k_25 = rates['25C']\n"
+        "for t in temps:\n"
+        "    x = 1\n"
+        "with open('f') as f:\n"
+        "    pass\n"
+        "print(f'k = {k_25:.3f}', np.mean(z))\n"
+        "%matplotlib inline\n"
+        "rates"
+    ) == ["k_25", "z", "rates", "f", "ax", "fig", "t"]
+    # A loop printing what it goes through points to that, not to its loop
+    # variables, which only hold the last item
+    assert calkit.notebooks.get_cell_variables(
+        "for temp, k in rates.items():\n    print(f'{temp} C: k = {k:.4f}')"
+    ) == ["rates", "k", "temp"]
+    assert calkit.notebooks.get_cell_variables(
+        "rates = {}\nfor f in files:\n    rates[f] = fit(f)\nfig = plot()"
+    ) == ["fig", "rates", "f"]
+    assert calkit.notebooks.get_cell_variables("x = (") == []
+    nb = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "id": "a",
+                "source": ["k = 0.0309\n", "print(k)"],
+                "outputs": [
+                    {
+                        "output_type": "stream",
+                        "text": ["0.0309\n", "run 2 at 25.0 C, 1e-3 off\n"],
+                    }
+                ],
+            },
+            {"cell_type": "markdown", "id": "b", "source": "0.5"},
+            {
+                "cell_type": "code",
+                "id": "c",
+                "source": "df",
+                "outputs": [
+                    {
+                        "output_type": "execute_result",
+                        "data": {"text/plain": "   T  k\n0  25  0.0309"},
+                    }
+                ],
+            },
+            {"cell_type": "code", "id": "d", "source": "x = 1", "outputs": []},
+            {"cell_type": "code", "source": "y", "outputs": []},
+        ]
+    }
+    assert calkit.notebooks.find_printed_numbers(nb) == [
+        {
+            "cell": "a",
+            "cell_index": 0,
+            "numbers": ["0.0309", "2", "25.0", "1e-3"],
+            "variables": ["k"],
+        },
+        {
+            "cell": "c",
+            "cell_index": 2,
+            "numbers": ["0", "25", "0.0309"],
+            "variables": ["df"],
+        },
+    ]
+
+
+def test_add_cell_outputs(tmp_path):
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 4,
+        "metadata": {},
+        "cells": [
+            {"cell_type": "code", "source": "k = 1  # μs", "outputs": []},
+            {"cell_type": "code", "source": "fig = 2", "outputs": []},
+        ],
+    }
+    (tmp_path / "fit.ipynb").write_text(json.dumps(nb), encoding="utf-8")
+    (tmp_path / "calkit.yaml").write_text(
+        "# The pipeline\n"
+        "pipeline:\n"
+        "  stages:\n"
+        "    fit:\n"
+        "      kind: jupyter-notebook\n"
+        "      notebook_path: fit.ipynb\n"
+        "      environment: py\n"
+    )
+    wdir = str(tmp_path)
+    # A cell named by position gets an ID, as do the rest
+    value = {"kind": "value", "variable_name": "k"}
+    marked = calkit.notebooks.add_cell_outputs(
+        "fit.ipynb", [value], cell_index=0, wdir=wdir
+    )
+    text = (tmp_path / "fit.ipynb").read_text(encoding="utf-8")
+    assert "# μs" in text
+    saved = json.loads(text)
+    ids = calkit.notebooks.get_cell_ids(saved)
+    assert all(ids) and saved["nbformat_minor"] == 5
+    assert marked == {
+        "stage": "fit",
+        "outputs": [
+            {"kind": "value", "cell_id": ids[0], "variable_name": "k"}
+        ],
+        "citations": [r"\ckvalue{fit.ipynb}{k}"],
+        "warning": None,
+    }
+    calkit.notebooks.add_cell_outputs(
+        "fit.ipynb",
+        [
+            {
+                "kind": "figure",
+                "cell_id": ids[1],
+                "variable_name": "fig",
+                "output_path": "f.pdf",
+            }
+        ],
+        wdir=wdir,
+    )
+    text = (tmp_path / "calkit.yaml").read_text()
+    assert text.startswith("# The pipeline\n")
+
+    def get_storage(path: str) -> str | None:
+        stage = calkit.load_calkit_info(wdir=wdir)["pipeline"]["stages"]["fit"]
+        return next(
+            o.get("storage")
+            for o in stage["cell_outputs"]
+            if o.get("output_path") == path
+        )
+
+    def set_storage(path: str, storage: str | None) -> None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+        for o in ck_info["pipeline"]["stages"]["fit"]["cell_outputs"]:
+            if o.get("output_path") == path:
+                o.pop("storage", None)
+                if storage is not None:
+                    o["storage"] = storage
+        calkit.save_calkit_info(ck_info, wdir=wdir)
+
+    def edit(path: str) -> None:
+        # As an editor sends it, without storage
+        calkit.notebooks.add_cell_outputs(
+            "fit.ipynb",
+            [
+                {
+                    "kind": "figure",
+                    "cell_id": ids[1],
+                    "variable_name": "fig",
+                    "output_path": path,
+                }
+            ],
+            wdir=wdir,
+        )
+
+    # A new figure goes in Git, and an edited one keeps its storage,
+    # whether set or, from before figures went in Git, implied
+    assert get_storage("f.pdf") == "git"
+    edit("f.pdf")
+    assert get_storage("f.pdf") == "git"
+    set_storage("f.pdf", "dvc")
+    edit("f.pdf")
+    assert get_storage("f.pdf") == "dvc"
+    set_storage("f.pdf", None)
+    edit("f.pdf")
+    assert get_storage("f.pdf") == "dvc"
+    set_storage("f.pdf", "git")
+    listed = calkit.notebooks.list_cell_outputs("fit.ipynb", wdir=wdir)
+    assert [(m["kind"], m["cell_index"]) for m in listed] == [
+        ("value", 0),
+        ("figure", 1),
+    ]
+    on_first = value | {"cell_id": ids[0]}
+    for args, kwargs, message in [
+        (value | {"cell_id": "zz"}, {}, "has no cell zz"),
+        (value, {"cell_index": 5}, "has 2 cells, not 6"),
+        (on_first, {"cell_index": 0}, "not both"),
+        (on_first, {"stage": "other"}, "doesn't run"),
+        ({"kind": "value", "cell_id": ids[0]}, {}, "Name the variable"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            calkit.notebooks.add_cell_outputs(
+                "fit.ipynb", [args], wdir=wdir, **kwargs
+            )
+    for outputs, message in [
+        ([], "Give an output"),
+        ([on_first, on_first], "'k' is given twice"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            calkit.notebooks.add_cell_outputs("fit.ipynb", outputs, wdir=wdir)
+    with pytest.raises(ValueError, match="isn't in the pipeline yet"):
+        calkit.notebooks.add_cell_outputs("other.ipynb", [value], wdir=wdir)
+    # Quarto saves what a notebook it renders makes its own way
+    quarto_info = {
+        "pipeline": {
+            "stages": {
+                "pub": {
+                    "kind": "quarto",
+                    "target_path": "index.ipynb",
+                    "wdir": "pub",
+                }
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="Quarto stage 'pub'"):
+        calkit.notebooks.get_notebook_stage(quarto_info, "pub/index.ipynb")
+    # Several values at once, each its own output
+    added = calkit.notebooks.add_cell_outputs(
+        "fit.ipynb",
+        [
+            {"kind": "value", "cell_id": ids[0], "variable_name": name}
+            for name in ["a", "b"]
+        ],
+        wdir=wdir,
+    )
+    assert added["citations"] == [
+        r"\ckvalue{fit.ipynb}{a}",
+        r"\ckvalue{fit.ipynb}{b}",
+    ]
+    listed = calkit.notebooks.list_cell_outputs("fit.ipynb", wdir=wdir)
+    assert [m["variable_name"] for m in listed] == ["k", "fig", "a", "b"]
+    remove = calkit.notebooks.remove_cell_outputs
+    assert remove("fit.ipynb", cell_id=ids[1], wdir=wdir) == 1
+    with pytest.raises(ValueError, match="No matching cell output"):
+        remove("fit.ipynb", variable_name="z", wdir=wdir)
+    assert remove("fit.ipynb", variable_name="k", wdir=wdir) == 1
+    assert remove("fit.ipynb", cell_id=ids[0], wdir=wdir) == 2
+    assert "cell_outputs" not in (tmp_path / "calkit.yaml").read_text()
+
+
+def test_clean_all_in_pipeline(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    nb = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "execution_count": 1,
+                "outputs": [{"output_type": "stream", "text": "4"}],
+                "source": "print(2 + 2)",
+            }
+        ],
+        "metadata": {},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    os.makedirs("pub")
+    for path in ["analysis.ipynb", "pub/index.ipynb", "shown.ipynb"]:
+        with open(path, "w") as f:
+            json.dump(nb, f)
+    stages = {
+        "nb": {"kind": "jupyter-notebook", "notebook_path": "analysis.ipynb"},
+        # Quarto rendering a notebook with --execute writes its outputs back
+        # into it, so it's cleaned too, from the stage's working directory
+        "pub": {
+            "kind": "quarto",
+            "target_path": "index.ipynb",
+            "wdir": "pub",
+            "args": ["--execute"],
+        },
+        # Rendered from the outputs saved in it, so it isn't cleaned
+        "shown": {"kind": "quarto", "target_path": "shown.ipynb"},
+        "report": {"kind": "quarto", "target_path": "report.qmd"},
+        "missing": {"kind": "quarto", "target_path": "gone.ipynb"},
+    }
+    cleaned = calkit.notebooks.clean_all_in_pipeline(
+        ck_info={"pipeline": {"stages": stages}}
+    )
+    assert cleaned == ["analysis.ipynb", "pub/index.ipynb"]
+    with open(".calkit/notebooks/cleaned/pub/index.ipynb") as f:
+        assert json.load(f)["cells"][0]["outputs"] == []
+
+
+def test_add_cell_outputs_kept_in_dvc(tmp_dir):
+    # A figure DVC caches stays there when added back, e.g., by an editor
+    # that removes and adds it, including for a stage with a wdir, whose
+    # paths DVC has from the project
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    os.makedirs("nb")
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [
+            {"cell_type": "code", "id": "a", "source": "x", "outputs": []}
+        ],
+    }
+    with open("nb/fit.ipynb", "w") as f:
+        json.dump(nb, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"py": {"kind": "uv", "path": "pyproject.toml"}}
+    ck_info["pipeline"] = {
+        "stages": {
+            "fit": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "fit.ipynb",
+                "wdir": "nb",
+                "environment": "py",
+                "cell_outputs": [
+                    {"kind": "figure", "cell_id": "a", "output_path": "g.png"},
+                    {
+                        "kind": "figure",
+                        "cell_id": "a",
+                        "output_path": "h.png",
+                        "storage": "git",
+                    },
+                ],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    for path in ["g.png", "h.png"]:
+        calkit.notebooks.remove_cell_outputs("nb/fit.ipynb", output_path=path)
+        calkit.notebooks.add_cell_outputs(
+            "nb/fit.ipynb",
+            [{"kind": "figure", "cell_id": "a", "output_path": path}],
+        )
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["fit"]
+    storage = {o["output_path"]: o["storage"] for o in stage["cell_outputs"]}
+    assert storage == {"g.png": "dvc", "h.png": "git"}

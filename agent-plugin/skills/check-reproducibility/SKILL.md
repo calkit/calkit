@@ -22,6 +22,9 @@ hand:
 - which stages run outside a declared environment;
 - which artifacts have no `stage`, `imported_from`, or `created_by`;
 - which scripts no stage refers to;
+- which Git-tracked files the pipeline hashes have line endings Git
+  doesn't pin (`eol_unpinned`), so a Windows checkout hashes them
+  differently and its stages read as out of date;
 - which numbers in the manuscript duplicate a value the pipeline already
   computes (`retyped_values`), and which result-like numbers have nothing
   recorded behind them at all (`unattributed_numbers`).
@@ -45,6 +48,13 @@ Judgment, done here:
 2. **Pipeline and environment findings** come first: a value can't be made
    traceable until there is a pipeline to make it. See the
    `create-pipeline` and `add-pipeline-stage` skills.
+
+   <!-- TODO: needs human review -->
+
+   **`eol_unpinned`** has one fix: `calkit fix line-endings`, then commit
+   `.gitattributes`. It changes no committed file, only how text files are
+   checked out, but it's a project-wide rule, so suggest it rather than
+   doing it unasked, and say it matters for anyone on Windows.
 
 3. **Every `retyped_values` finding is worth fixing.** Each is a number
    the pipeline already computes, typed into the document: right today and
@@ -100,6 +110,16 @@ Judgment, done here:
    existing command is fine there too. Never define a macro that holds the
    number, or edit a generated file by hand: either one is a typed value
    with extra steps.
+
+   <!-- TODO: needs human review -->
+
+   If a pipeline notebook computes the number, e.g., a cell prints it,
+   save the variable as a cell output instead of changing the notebook:
+   `calkit nb add-output <notebook> value --cell-id <id> --variable-name <name>`.
+   Then cite it as `\ckvalue{<notebook>}{<name>}`.
+   Use the cell that printed it, not the last one,
+   since the value is saved right after that cell runs.
+   See the conventions skill's section on notebook cells.
 
 5. **Run the pipeline** (`calkit run`) and check again. Do not run the
    script yourself and paste the number in: that is the failure this whole

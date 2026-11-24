@@ -1,6 +1,7 @@
 """Tests for the ``conda`` module."""
 
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -9,9 +10,11 @@ import sys
 import pytest
 
 import calkit
+import calkit.progress
 from calkit.conda import (
     _check_list,
     _check_single,
+    _create_env,
     _enrich_pip_deps_from_freeze,
     _get_pip_dependency_list,
     _split_env_dependencies,
@@ -335,6 +338,7 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     failing_pinned: set[str] = set()
 
     slow: set[str] = set()
+    extra_links: list[dict] = []
 
     def fake_run(
         cmd: list[str],
@@ -361,7 +365,7 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
             {"name": "python", "version": "3.12.11", "build_string": "h_0"},
             {"name": "six", "version": "1.17.0", "build_string": "pyh_0"},
             {"name": "numpy", "version": "2.3.0", "build_string": "py_0"},
-        ]
+        ] + extra_links
         return types.SimpleNamespace(
             stdout=json.dumps({"actions": {"LINK": links}})
         )
@@ -374,7 +378,13 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         timeout: float | None = None,
     ) -> list[str]:
         compiles.append((pip_deps, constraints))
-        return ["iniconfig==2.1.0", "NumPy==2.3.0"]
+        # uv names an editable install by its URL
+        editable = [
+            "-e " + pathlib.Path(d[3:]).as_uri()
+            for d in pip_deps
+            if d.startswith("-e ") and os.path.isabs(d[3:])
+        ]
+        return ["iniconfig==2.1.0", "NumPy==2.3.0"] + editable
 
     monkeypatch.setattr(calkit.conda.subprocess, "run", fake_run)
     monkeypatch.setattr(calkit.conda, "_compile_pip_deps", fake_compile)
@@ -486,12 +496,73 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         "iniconfig==2.1.0",
         'uvloop==0.19.0; sys_platform != "win32"',
     ]
-    for local in ("-e ./pkg", "./pkg", "pkg @ file:///x", "-r more.txt"):
+    # A path in the project, e.g., its own package, is the same everywhere,
+    # so it's compiled from where it is here and written as the lock here
+    # writes it; one outside the project, or an included file, isn't
+    os.makedirs("pkg")
+    write_local(["iniconfig==2.1.0", "-e ../pkg"])
+    write_spec(["iniconfig", "-e ./pkg"])
+    assert locks() == [osx, win]
+    assert compiles[-1][0] == [
+        "iniconfig==2.1.0",
+        "-e " + os.path.realpath("pkg"),
+    ]
+    with open(win) as f:
+        assert calkit.ryaml.load(f)["dependencies"][-1] == {
+            "pip": ["iniconfig==2.1.0", "-e ../pkg"]
+        }
+    # With extras, which are resolved too, and with '/' on every platform
+    # when the lock here doesn't say how to write it
+    write_local(["iniconfig==2.1.0"])
+    write_spec(["iniconfig", "-e ./pkg[dev]"])
+    assert locks() == [osx, win]
+    assert compiles[-1][0] == [
+        "iniconfig==2.1.0",
+        "-e " + os.path.realpath("pkg") + "[dev]",
+    ]
+    with open(osx) as f:
+        assert calkit.ryaml.load(f)["dependencies"][-1] == {
+            "pip": ["iniconfig==2.1.0", "-e ../pkg[dev]"]
+        }
+    write_local(["iniconfig==2.1.0", "packaging==25.0"])
+    write_spec(["iniconfig"])
+    for local in ("pkg @ file:///x", "-r more.txt"):
         assert locks() == [osx, win]
         write_spec(["iniconfig", local])
         assert locks() == []
         assert not os.path.isfile(osx) and not os.path.isfile(win)
         write_spec(["iniconfig"])
+    # A package from a channel only a dependency names keeps that channel,
+    # given by name or URL, since the lock's channels can't find it
+    channel_url = "https://conda.anaconda.org/sea-lab"
+    extra_links.append(
+        {
+            "name": "open-flash",
+            "version": "1.0.41",
+            "build_string": "py_0",
+            "channel": "sea-lab",
+            "base_url": channel_url,
+        }
+    )
+    pin = "open-flash=1.0.41=py_0"
+    for dep_channel, listed, expected in [
+        ("sea-lab", [], f"sea-lab::{pin}"),
+        (channel_url, [], f"{channel_url}::{pin}"),
+        ("sea-lab", ["sea-lab"], pin),
+    ]:
+        spec = {
+            "name": "main",
+            "channels": ["conda-forge"] + listed,
+            "dependencies": ["python=3.12", f"{dep_channel}::open-flash>=1"],
+        }
+        with open("environment.yml", "w") as f:
+            calkit.ryaml.dump(spec, f)
+        assert locks() == [osx, win]
+        with open(win) as f:
+            lock = calkit.ryaml.load(f)
+        assert expected in lock["dependencies"]
+        assert lock["channels"] == spec["channels"]
+    extra_links.clear()
     # Solving on the same OS assumes nothing about its virtual packages
     write_spec(["iniconfig"])
     monkeypatch.setattr(
@@ -722,6 +793,31 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
             "import requests",
         ]
     )
+    # The prefix can be set in calkit.yaml alone, and a global environment
+    # with the same name doesn't stand in for it
+    with open("environment.yml") as f:
+        env = calkit.ryaml.load(f)
+    del env["prefix"]
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump(env, f)
+    global_name = env["name"]
+    subprocess.check_call(
+        [CONDA, "create", "-y", "-q", "-n", global_name, "python=3.12"]
+    )
+    try:
+        subprocess.check_call(
+            [CONDA, "env", "remove", "-y", "--prefix", conda_env_prefix]
+        )
+        out = subprocess.check_output(
+            ["calkit", "xenv", "-n", "my-conda-env", "python", "-c"]
+            + ["import requests, sys; print(sys.prefix)"],
+            text=True,
+        )
+        assert os.path.realpath(
+            out.strip().splitlines()[-1]
+        ) == os.path.realpath(conda_env_prefix)
+    finally:
+        delete_env(global_name)
 
 
 @pytest.mark.xdist_group("conda")
@@ -902,3 +998,84 @@ def test_find_mamba_exe():
     # valid path
     if mamba_exe is not None:
         assert os.path.isfile(mamba_exe)
+
+
+def test_find_named_env_prefix(tmp_path, monkeypatch):
+    from calkit.conda import find_named_env_prefix
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("CONDA_ENVS_PATH", raising=False)
+    monkeypatch.delenv("CONDA_ENVS_DIRS", raising=False)
+    root = tmp_path / "miniforge"
+    conda_exe = root / "bin" / "conda"
+    conda_exe.parent.mkdir(parents=True)
+    conda_exe.write_text("")
+
+    def make_env(prefix):
+        (prefix / "conda-meta").mkdir(parents=True)
+        return str(prefix)
+
+    assert find_named_env_prefix("a", str(conda_exe)) is None
+    # In the envs folder of Conda's root
+    expected = make_env(root / "envs" / "a")
+    assert find_named_env_prefix("a", str(conda_exe)) == expected
+    # In the user's, e.g., on a shared install
+    expected = make_env(home / ".conda" / "envs" / "b")
+    assert find_named_env_prefix("b", str(conda_exe)) == expected
+    # In one set by the environment, which comes first, as it does for Conda
+    other = tmp_path / "other"
+    monkeypatch.setenv("CONDA_ENVS_PATH", str(other))
+    expected = make_env(other / "a")
+    assert find_named_env_prefix("a", str(conda_exe)) == expected
+    # Or by a config file, before the defaults
+    listed = tmp_path / "listed"
+    (home / ".condarc").write_text(f"envs_dirs:\n  - {listed}\n")
+    expected = make_env(listed / "b")
+    assert find_named_env_prefix("b", str(conda_exe)) == expected
+    # One Conda only recorded making, e.g., at a project's prefix, isn't
+    # found by name, since 'conda run -n' wouldn't find it either
+    elsewhere = make_env(tmp_path / "elsewhere" / "d")
+    (home / ".conda" / "environments.txt").write_text(elsewhere + "\n")
+    assert find_named_env_prefix("d", str(conda_exe)) is None
+
+
+def test_create_env_reports_steps(capsys):
+    # What Conda prints as it goes, with one step split across writes and
+    # one skipped
+    script = (
+        "import sys, time\n"
+        "for text in [\n"
+        "    'Channels:\\n',\n"
+        "    'Solving envir', 'onment: done\\n',\n"
+        "    'Downloading and Extracting Packages: done\\n',\n"
+        "    'Preparing transaction: done\\n',\n"
+        "    'Installing pip dependencies: done\\n',\n"
+        "]:\n"
+        "    sys.stdout.write(text)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.05)\n"
+        "sys.exit(int(sys.argv[1]))\n"
+    )
+    reported: list[str] = []
+    doing = "Creating environment 'main' from its lock file"
+    with calkit.progress.reporting(reported.append, label="main"):
+        _create_env([sys.executable, "-c", script, "0"], doing=doing)
+    assert reported == [
+        doing,
+        f"{doing}: solving",
+        f"{doing}: downloading packages",
+        f"{doing}: installing packages",
+        f"{doing}: installing pip dependencies",
+    ]
+    # Shown only if it fails
+    assert "Channels" not in capsys.readouterr().err
+    with calkit.progress.reporting(reported.append):
+        with pytest.raises(subprocess.CalledProcessError):
+            _create_env([sys.executable, "-c", script, "1"], doing=doing)
+    assert "Channels:" in capsys.readouterr().err
+    # With nobody watching, nothing's reported
+    reported.clear()
+    _create_env([sys.executable, "-c", script, "0"], doing=doing)
+    assert reported == []

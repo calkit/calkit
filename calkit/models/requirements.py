@@ -141,7 +141,20 @@ SystemValueProperty = Literal[
     "machine-id",
     "calkit-python-version",
     "python-implementation",
+    "gpu-name",
+    "gpu-vendor",
+    "gpu-arch",
 ]
+
+# The GPU properties, each mapped onto its field of a GPU as
+# ``calkit.get_gpus`` reports it. A machine can have several GPUs, e.g., an
+# integrated one beside a discrete one, so a constraint on one of these is
+# met when any GPU meets it.
+GPU_PROPERTY_FIELDS = {
+    "gpu-name": "name",
+    "gpu-vendor": "vendor",
+    "gpu-arch": "arch",
+}
 
 
 class SystemNumberRequirement(Model):
@@ -192,6 +205,10 @@ class SystemValueRequirement(Model):
     ``version_spec`` compares as a version, for properties like
     ``os-version`` and ``calkit-python-version`` where '>=' means
     something.
+
+    ``gpu-name``, ``gpu-vendor`` ('amd', 'nvidia' or 'apple') and
+    ``gpu-arch`` (e.g., 'gfx1201' or 'sm_89') describe the machine's GPUs,
+    and are met when any one of them meets the constraint.
 
     At least one of ``equals``, ``matches`` and ``version_spec`` must be
     given. To record a property that results depend on rather than

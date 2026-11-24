@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from dvc_objects.fs import known_implementations
 
 import calkit
 import calkit.latex
+import calkit.overleaf
 import calkit.pipeline
 from calkit.dvc import register_ck_scheme
 from calkit.dvc.core import _tolerate_lock_release_failures
@@ -66,6 +68,103 @@ def test_ensure_dvc_lock_not_ignored(tmp_dir):
     assert repo.ignored("dvc.lock")
     assert calkit.dvc.ensure_dvc_lock_not_ignored()
     assert not repo.ignored("dvc.lock")
+
+
+def test_record_stage_output_dvc_file(tmp_dir):
+    def write(path: str, text: str) -> None:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+
+    def add(path: str) -> dict:
+        subprocess.check_call(["dvc", "add", "-q", path])
+        with open(f"{path}.dvc") as f:
+            return calkit.ryaml.load(f)["outs"][0]
+
+    def write_lock(outs: list[dict]) -> None:
+        lock = {
+            "schema": "2.0",
+            "stages": {"make": {"cmd": "x", "outs": outs}},
+        }
+        with open("dvc.lock", "w") as f:
+            calkit.ryaml.dump(lock, f)
+
+    def record(stage: dict) -> bool:
+        (overlap,) = calkit.dvc.get_stage_output_dvc_files({"make": stage})
+        return calkit.dvc.record_stage_output_dvc_file(overlap, stage)
+
+    def get_lock_outs() -> list[dict]:
+        return calkit.dvc.read_lock_stages()["make"]["outs"]
+
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "config", "core.autocrlf", "false"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    # Joins what dvc.lock has for the stage
+    other = {"path": "a.txt", "hash": "md5", "md5": "0" * 32, "size": 1}
+    write_lock([other])
+    write("b.txt", "b")
+    b_out = add("b.txt")
+    stage = {"cmd": "x", "outs": ["a.txt", "b.txt"]}
+    assert record(stage)
+    outs = get_lock_outs()
+    assert [o["path"] for o in outs] == ["a.txt", "b.txt"]
+    assert outs[0]["md5"] == "0" * 32
+    assert outs[1]["md5"] == b_out["md5"]
+    # An output dvc.lock already records is left as is
+    write_lock([other, {"path": "b.txt", "hash": "md5", "md5": "f" * 32}])
+    assert record(stage)
+    assert get_lock_outs()[1]["md5"] == "f" * 32
+    os.remove("b.txt.dvc")
+    os.remove("dvc.lock")
+    # A directory from a stage with a wdir, declared with a trailing slash,
+    # which DVC reads back and can push and pull
+    write("sub/data/x.txt", "x")
+    write("sub/data/y.txt", "y")
+    data_out = add("sub/data")
+    stage = {"cmd": "x", "wdir": "sub", "frozen": True, "outs": ["data/"]}
+    assert record(stage)
+    (locked,) = get_lock_outs()
+    assert (locked["path"], locked["nfiles"]) == ("data/", 2)
+    os.remove("sub/data.dvc")
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump({"stages": {"make": stage}}, f)
+    with dvc.repo.Repo() as dvc_repo:
+        (out,) = dvc_repo.index.outs
+        assert out.hash_info.value == data_out["md5"]
+    subprocess.check_call(["dvc", "remote", "add", "-d", "store", "../store"])
+    subprocess.check_call(["dvc", "push", "-q"])
+    shutil.rmtree("sub/data")
+    calkit.overleaf.rmtree(".dvc/cache")
+    subprocess.check_call(["dvc", "pull", "-q"])
+    with open("sub/data/y.txt") as f:
+        assert f.read() == "y"
+    os.remove("dvc.yaml")
+    os.remove("dvc.lock")
+    # A .dvc file with its own wdir
+    md5 = "c" * 32
+    write(
+        "sub/c.txt.dvc", f"wdir: ..\nouts:\n- md5: {md5}\n  path: sub/c.txt\n"
+    )
+    assert record({"cmd": "x", "outs": ["sub/c.txt"]})
+    assert get_lock_outs()[0]["md5"] == md5
+    os.remove("dvc.lock")
+    # One that doesn't list the output can't be removed, and one with no
+    # hash has nothing to keep
+    write("d.txt.dvc", f"outs:\n- md5: {md5}\n  path: other.txt\n")
+    assert not record({"cmd": "x", "outs": ["d.txt"]})
+    write("e.txt.dvc", "outs:\n- path: e.txt\n")
+    assert record({"cmd": "x", "outs": ["e.txt"]})
+    assert not os.path.isfile("dvc.lock")
+    # Line endings are the ones Git checks dvc.lock out with
+    write("f.txt.dvc", f"outs:\n- md5: {md5}\n  path: f.txt\n")
+    for eol in ["crlf", "lf"]:
+        write(".gitattributes", f"dvc.lock text eol={eol}\n")
+        assert record({"cmd": "x", "outs": ["f.txt"]})
+        with open("dvc.lock", "rb") as f:
+            raw = f.read()
+        n_crlf = raw.count(b"\n") if eol == "crlf" else 0
+        assert raw.count(b"\r\n") == n_crlf, eol
+        os.remove("dvc.lock")
 
 
 def test_hash_directory():
@@ -310,6 +409,26 @@ def test_list_files_paths(tmp_dir):
     repo = dvc.repo.Repo()
     repo.add("file1.txt")  # type: ignore
     assert "file1.txt" in calkit.dvc.list_paths()
+
+
+def test_get_missing_outs(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    assert calkit.dvc.get_missing_outs() == []
+    os.makedirs("data")
+    Path("data/a.txt").write_text("a")
+    Path("b.txt").write_text("b")
+    subprocess.check_call(["dvc", "add", "-q", "data", "b.txt"])
+    Path("dvc.yaml").write_text(
+        "stages:\n  never-run:\n    cmd: echo hi\n    outs:\n      - c.txt\n"
+    )
+    assert calkit.dvc.get_missing_outs() == []
+    os.remove("b.txt")
+    assert calkit.dvc.get_missing_outs() == ["b.txt"]
+    # A directory that's lost part of its contents is missing too
+    Path("data/a.txt").unlink()
+    Path("data/other.txt").write_text("other")
+    assert calkit.dvc.get_missing_outs() == ["b.txt", "data"]
 
 
 def test_detect_calkit_remote_type():

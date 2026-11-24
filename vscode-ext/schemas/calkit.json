@@ -210,7 +210,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -859,7 +859,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -1839,7 +1839,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2040,6 +2040,91 @@
       "title": "GimpExportStage",
       "type": "object"
     },
+    "GpuArchIsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_arch_is": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Architecture of one of the machine's GPUs, ignoring case, e.g., 'gfx1201' for an AMD Radeon RX 9070 or 'sm_89' for an NVIDIA RTX 4090.",
+          "title": "Gpu Arch Is"
+        }
+      },
+      "required": [
+        "gpu_arch_is"
+      ],
+      "title": "GpuArchIsCondition",
+      "type": "object"
+    },
+    "GpuNameMatchesCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_name_matches": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Glob the name of one of the machine's GPUs must match, case-insensitively, e.g., '*RTX 40*'.",
+          "title": "Gpu Name Matches"
+        }
+      },
+      "required": [
+        "gpu_name_matches"
+      ],
+      "title": "GpuNameMatchesCondition",
+      "type": "object"
+    },
+    "GpuVendorIsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_vendor_is": {
+          "anyOf": [
+            {
+              "enum": [
+                "amd",
+                "nvidia",
+                "apple"
+              ],
+              "type": "string"
+            },
+            {
+              "items": {
+                "enum": [
+                  "amd",
+                  "nvidia",
+                  "apple"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Vendor of one of the machine's GPUs: 'amd', 'nvidia' or 'apple'.",
+          "title": "Gpu Vendor Is"
+        }
+      },
+      "required": [
+        "gpu_vendor_is"
+      ],
+      "title": "GpuVendorIsCondition",
+      "type": "object"
+    },
     "HostnameMatchesCondition": {
       "additionalProperties": false,
       "properties": {
@@ -2119,7 +2204,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2468,7 +2553,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2715,7 +2800,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -3032,7 +3117,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -3244,6 +3329,15 @@
           "title": "Always Run",
           "type": "boolean"
         },
+        "cell_outputs": {
+          "default": [],
+          "description": "Values, figures, and tables the notebook's cells make, saved by Calkit when the notebook runs, so it doesn't have to write them. Only for Python notebooks.",
+          "items": {
+            "$ref": "#/$defs/NotebookCellOutput"
+          },
+          "title": "Cell Outputs",
+          "type": "array"
+        },
         "cleaned_ipynb_storage": {
           "anyOf": [
             {
@@ -3309,7 +3403,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -3660,7 +3754,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4237,7 +4331,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4490,7 +4584,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4757,7 +4851,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -5138,7 +5232,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -5362,7 +5456,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -5676,7 +5770,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -6161,6 +6255,96 @@
         "path"
       ],
       "title": "Notebook",
+      "type": "object"
+    },
+    "NotebookCellOutput": {
+      "additionalProperties": false,
+      "description": "A value, figure, or table one of a notebook's cells makes, which\nCalkit saves when the pipeline runs the notebook, so the notebook\ndoesn't have to write it itself.",
+      "properties": {
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID of the cell it's saved after, which Jupyter and VS Code keep on the cell as it moves. A value with none is saved after the last cell.",
+          "title": "Cell Id"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Python format spec for a table's numbers, e.g., '.3f'.",
+          "title": "Format"
+        },
+        "kind": {
+          "description": "What it is: a value, cited by the notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}, or a figure or table, saved to 'output_path'.",
+          "enum": [
+            "value",
+            "figure",
+            "table"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "output_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where a figure or table is saved, in the format its extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as LaTeX (.tex), CSV, Markdown, or JSON.",
+          "title": "Output Path"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where to store a figure or table. New figures are set to Git when added.",
+          "title": "Storage"
+        },
+        "variable_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the variable it's saved from: a value's name, e.g., a number or a dict of them, a figure, e.g., a Matplotlib figure, or a table, e.g., a DataFrame. A figure without one is the image the cell shows, and a table the result it shows, e.g., df.head() on its last line.",
+          "title": "Variable Name"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "NotebookCellOutput",
       "type": "object"
     },
     "OsIsCondition": {
@@ -6781,7 +6965,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -7220,7 +7404,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -7804,7 +7988,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -8008,7 +8192,7 @@
     },
     "QuartoStage": {
       "additionalProperties": false,
-      "description": "A stage that renders a Quarto document.\n\nCalkit controls only what belongs on the CLI: which environment to\nrender in, the target document, and (optionally) the output format and\nextra ``quarto render`` arguments. The output format(s) and any other\nrendering behavior are left to the document/``_quarto.yml`` metadata, so\nthere is no redundancy between the pipeline definition and the doc.\n\nOutputs are declared explicitly via ``outputs`` rather than parsed out\nof the Quarto document, since a document can emit multiple formats to\narbitrary paths. As with other stages, plain string outputs are\nDVC-cached by default; use a ``PathOutput`` to store an output with Git\ninstead.",
+      "description": "A stage that renders a Quarto document.\n\nCalkit controls only what belongs on the CLI: which environment to\nrender in, the target document, and (optionally) the output format and\nextra ``quarto render`` arguments. The output format(s) and any other\nrendering behavior are left to the document/``_quarto.yml`` metadata, so\nthere is no redundancy between the pipeline definition and the doc.\n\nOutputs are declared explicitly via ``outputs`` rather than parsed out\nof the Quarto document, since a document can emit multiple formats to\narbitrary paths. As with other stages, plain string outputs are\nDVC-cached by default; use a ``PathOutput`` to store an output with Git\ninstead.\n\nIt renders with ``calkit quarto render``, which checks Quarto comes from\nthe stage's environment, or is a declared requirement, and resolves the\nvalues the document shows with the ``ckvalue`` shortcode first. A notebook\nrendered with ``--execute`` is depended on with its outputs stripped,\nlike a notebook stage's, since rendering writes them back into it.\nOtherwise Quarto shows the outputs saved in it, so they're depended on\ntoo.",
       "properties": {
         "always_run": {
           "default": false,
@@ -8056,7 +8240,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -8471,7 +8655,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -8784,7 +8968,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -9121,7 +9305,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -9959,7 +10143,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -10414,7 +10598,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -10671,7 +10855,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -11530,7 +11714,7 @@
       "type": "object"
     },
     "SwitchEnvironment": {
-      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_set``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.\n\nAn option's ``lock`` is part of the switch's too, so relocking the\noption, with ``relock: auto`` or ``calkit update env --lock``, reruns\nthe switch's stages. The first time a switch is checked, its options\nwith a ``host`` are locked from there. An option without one is locked\nthe first time it's checked on its own machine, which reruns nothing,\nsince only a machine taking up its option has changed.",
+      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_set``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n- ``gpu_vendor_is``: ``amd``, ``nvidia`` or ``apple``, for one of the\n  machine's GPUs.\n- ``gpu_arch_is``: one of the machine's GPUs' architecture, e.g.,\n  ``gfx1201`` or ``sm_89``.\n- ``gpu_name_matches``: a glob one of the machine's GPUs' names\n  matches, ignoring case.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.\n\nAn option's ``lock`` is part of the switch's too, so relocking the\noption, with ``relock: auto`` or ``calkit update env --lock``, reruns\nthe switch's stages. The first time a switch is checked, its options\nwith a ``host`` are locked from there. An option without one is locked\nthe first time it's checked on its own machine, which reruns nothing,\nsince only a machine taking up its option has changed.",
       "properties": {
         "description": {
           "anyOf": [
@@ -11744,6 +11928,15 @@
                   },
                   {
                     "$ref": "#/$defs/MachineIdEqualsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuVendorIsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuArchIsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuNameMatchesCondition"
                   }
                 ]
               },
@@ -12049,7 +12242,7 @@
       "type": "object"
     },
     "SystemValueRequirement": {
-      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
+      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\n``gpu-name``, ``gpu-vendor`` ('amd', 'nvidia' or 'apple') and\n``gpu-arch`` (e.g., 'gfx1201' or 'sm_89') describe the machine's GPUs,\nand are met when any one of them meets the constraint.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
       "properties": {
         "description": {
           "anyOf": [
@@ -12093,7 +12286,10 @@
             "hostname",
             "machine-id",
             "calkit-python-version",
-            "python-implementation"
+            "python-implementation",
+            "gpu-name",
+            "gpu-vendor",
+            "gpu-arch"
           ],
           "title": "Kind",
           "type": "string"
@@ -12350,6 +12546,22 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "extras": {
+          "default": [],
+          "description": "Extras of the project to install, each named or given with the machines it's for. They're passed to both 'uv sync' and 'uv run', so they're installed even when the environment isn't checked first.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/UvExtra"
+              }
+            ]
+          },
+          "title": "Extras",
+          "type": "array"
+        },
         "inputs": {
           "anyOf": [
             {
@@ -12398,6 +12610,63 @@
         "path"
       ],
       "title": "UvEnvironment",
+      "type": "object"
+    },
+    "UvExtra": {
+      "additionalProperties": false,
+      "description": "An extra of a uv project, installed only on the machines it's for.\n\nFor a dependency built for particular hardware, e.g., a PyTorch for one\nGPU architecture. ``when`` takes the conditions a switch environment's\noptions do, and the extra is installed where all of them hold. One that\ndoesn't hold here is left out rather than reported, since it describes a\ndifferent machine, not a problem with this one.",
+      "properties": {
+        "name": {
+          "description": "Name of the extra in pyproject.toml.",
+          "title": "Name",
+          "type": "string"
+        },
+        "when": {
+          "description": "Conditions this machine must all meet for the extra to be installed, e.g., 'gpu_arch_is: gfx1201'. To always install it, list it by name instead.",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AppExistsCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarSetCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarExistsCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarEqualsCondition"
+              },
+              {
+                "$ref": "#/$defs/HostnameMatchesCondition"
+              },
+              {
+                "$ref": "#/$defs/OsIsCondition"
+              },
+              {
+                "$ref": "#/$defs/MachineIdEqualsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuVendorIsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuArchIsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuNameMatchesCondition"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "when"
+      ],
+      "title": "UvExtra",
       "type": "object"
     },
     "UvVenvEnvironment": {
@@ -12686,7 +12955,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },

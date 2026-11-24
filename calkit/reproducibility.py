@@ -8,6 +8,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, computed_field
 
 import calkit
+import calkit.eol
 from calkit.provenance import (
     PROVENANCE_ARTIFACT_TYPES,
     find_project_provenance_gaps,
@@ -105,6 +106,7 @@ DETAIL_CATEGORIES = {
     "provenance": "misc_needing_provenance",
     "gaps": "provenance_gaps",
     "imports": "unchecked_imports",
+    "line-endings": "eol_unpinned",
 }
 
 
@@ -152,6 +154,10 @@ class ReproCheck(BaseModel):
     # write, e.g., an absolute path to a synced drive, which only exist on
     # the machine they were written on
     paths_outside_project: list[str] = []
+    # Git-tracked text files the pipeline hashes whose line endings Git
+    # doesn't pin, so a Windows checkout hashes them differently from
+    # everyone else's and its stages read as out of date there
+    eol_unpinned: list[str] = []
     n_dvc_remotes: int
     # Values the project computes that a manuscript typed out instead,
     # which go stale the next time the stage behind them runs
@@ -257,6 +263,14 @@ class ReproCheck(BaseModel):
                     "created them. Define where they came from or create "
                     "stage(s) to produce them."
                 )
+        if self.eol_unpinned:
+            return (
+                f"There are {len(self.eol_unpinned)} files the pipeline "
+                "hashes whose line endings Git doesn't pin, e.g., "
+                f"{self.eol_unpinned[0]}. Git for Windows checks them out "
+                "with CRLF, so they hash differently there and stages read "
+                f"as out of date. To pin them, {calkit.eol.FIX}."
+            )
         if not self.has_dev_container:
             return (
                 "No dev container spec is defined. "
@@ -356,6 +370,12 @@ class ReproCheck(BaseModel):
             f"{calkit.check_or_x(not self.paths_outside_project)}"
             f"{self._tag('outside')}\n"
         )
+        txt += (
+            "Pipeline files with line endings that differ on Windows: "
+            f"{len(self.eol_unpinned)} "
+            f"{calkit.check_or_x(not self.eol_unpinned)}"
+            f"{self._tag('line-endings')}\n"
+        )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n = getattr(self, f"n_{artifact_type}")
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
@@ -437,6 +457,31 @@ def find_scripts_not_in_pipeline(
     """
     from git.exc import InvalidGitRepositoryError
 
+    def get_stage_io_paths(pipeline: dict, ck_info: dict) -> list[str]:
+        """The paths the pipeline's stages read and write, relative to the
+        project."""
+        paths = []
+        for stage in (pipeline.get("stages") or {}).values():
+            if not isinstance(stage, dict):
+                continue
+            wdir = stage.get("wdir") or ""
+            for item in (stage.get("deps") or []) + (stage.get("outs") or []):
+                for path in item if isinstance(item, dict) else [item]:
+                    if isinstance(path, str):
+                        paths.append(posixpath.join(wdir, path))
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        for stage in stages.values():
+            if not isinstance(stage, dict):
+                continue
+            wdir = stage.get("wdir") or ""
+            for item in (stage.get("inputs") or []) + (
+                stage.get("outputs") or []
+            ):
+                path = item.get("path") if isinstance(item, dict) else item
+                if isinstance(path, str):
+                    paths.append(posixpath.join(wdir, path))
+        return [p for p in paths if p.strip()]
+
     try:
         repo = calkit.git.get_repo(wdir)
     except InvalidGitRepositoryError:
@@ -458,9 +503,16 @@ def find_scripts_not_in_pipeline(
     # One string to search rather than a set of paths, since a command
     # names its script somewhere inside it and a dependency may be written
     # with a leading ./
-    referenced = "\n".join(
-        _strings_in(pipeline.get("stages", {}))
-        + _strings_in(ck_info.get("pipeline", {}))
+    strings = _strings_in(pipeline.get("stages", {})) + _strings_in(
+        ck_info.get("pipeline", {})
+    )
+    referenced = "\n".join(strings)
+    # A folder a stage reads or writes covers what's in it, e.g., a package's
+    # modules under an input 'src', or generated data under an output, but
+    # not one that's only named, e.g., by an environment
+    referenced_dirs = tuple(
+        posixpath.normpath(p) + "/"
+        for p in get_stage_io_paths(pipeline, ck_info)
     )
     # Tracked paths are relative to the repo root, which may be above wdir
     # when checking a subproject, so make them relative to wdir
@@ -482,7 +534,7 @@ def find_scripts_not_in_pipeline(
             path == p or path.startswith(p + "/") for p in env_prefixes
         ):
             continue
-        if path not in referenced:
+        if path not in referenced and not path.startswith(referenced_dirs):
             scripts.append(path)
     return scripts
 
@@ -753,6 +805,7 @@ def _project_values(
     import json
 
     from calkit.latex import component_path, read_ck_usage
+    from calkit.notebooks import get_notebook_of_values_path
     from calkit.questions import read_evidence_file, resolve_key
 
     def add_numbers(node: Any, path: str, key: str = "") -> None:
@@ -789,7 +842,8 @@ def _project_values(
                 data = read_evidence_file(os.path.join(wdir, rel))
             except Exception:
                 continue
-            add_numbers(data, rel)
+            # A value saved from a notebook's cells is cited by the notebook
+            add_numbers(data, get_notebook_of_values_path(rel) or rel)
     for stage in stages.values():
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
         if "calkit latex from-json" not in cmd:
@@ -1077,6 +1131,11 @@ def check_reproducibility(
             f"{script} writes {p}" for p in io.get("external_outputs", [])
         ]
     res["paths_outside_project"] = list(dict.fromkeys(outside))
+    res["eol_unpinned"] = (
+        [f.path for f in calkit.eol.check_pipeline(wdir=wdir) if f.at_risk]
+        if res["is_git_repo"]
+        else []
+    )
     res["n_environments"] = len(ck_info.get("environments", {}))
     # Check for stages not run with environments
     stages = pipeline.get("stages", {})

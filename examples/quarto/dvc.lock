@@ -1,0 +1,86 @@
+schema: '2.0'
+stages:
+  simulate:
+    cmd: calkit xenv -n jl --no-check -- "scripts/simulate.jl"
+    deps:
+    - path: Manifest.toml
+      hash: md5
+      md5: 78d98c5daab43dbb867f09b2d1842b51
+      size: 3071
+    - path: scripts/simulate.jl
+      hash: md5
+      md5: d238630c1cf6b84851842a4b11666a35
+      size: 965
+    outs:
+    - path: data/sim.csv
+      hash: md5
+      md5: 05a12e0f23928d3253961d6ed3a6c3af
+      size: 93347
+    - path: results/sim.json
+      hash: md5
+      md5: df42206b92f58bee9822430cf38f0769
+      size: 81
+  analysis:
+    cmd: calkit quarto render -e quarto --no-check analysis.ipynb -- --execute
+    deps:
+    - path: .calkit/notebooks/cleaned/analysis.ipynb
+      hash: md5
+      md5: fd9584210ae23925cc0843ce2999ba6b
+      size: 2058
+    - path: data/sim.csv
+      hash: md5
+      md5: 05a12e0f23928d3253961d6ed3a6c3af
+      size: 93347
+    - path: pixi.lock
+      hash: md5
+      md5: b2b3871188338fb16716c7950472ff6a
+      size: 357380
+    - path: results/sim.json
+      hash: md5
+      md5: df42206b92f58bee9822430cf38f0769
+      size: 81
+    outs:
+    - path: analysis.html
+      hash: md5
+      md5: 82abf199a8a5a6c29db0a24b8955ad4e
+      size: 1283168
+    - path: results/fit.json
+      hash: md5
+      md5: 7af7f73ca345a9d998b30cfd4f6bf32a
+      size: 50
+  report:
+    cmd: calkit quarto render -e quarto --no-check report.qmd
+    deps:
+    - path: analysis.html
+      hash: md5
+      md5: 82abf199a8a5a6c29db0a24b8955ad4e
+      size: 1283168
+    - path: analysis.ipynb
+      hash: md5
+      md5: cea69c63ed708f59296ab3fe4a6d60ed
+      size: 77748
+    - path: data/sim.csv
+      hash: md5
+      md5: 05a12e0f23928d3253961d6ed3a6c3af
+      size: 93347
+    - path: pixi.lock
+      hash: md5
+      md5: b2b3871188338fb16716c7950472ff6a
+      size: 357380
+    - path: report.qmd
+      hash: md5
+      md5: 4d8df41702e9eebf0e925d526c9df95d
+      size: 604
+    - path: results/fit.json
+      hash: md5
+      md5: 7af7f73ca345a9d998b30cfd4f6bf32a
+      size: 50
+    - path: results/sim.json
+      hash: md5
+      md5: df42206b92f58bee9822430cf38f0769
+      size: 81
+    outs:
+    - path: report.html
+      hash: md5
+      md5: 6f54a89c6f3e63c7e635d47897610964
+      size: 1459883

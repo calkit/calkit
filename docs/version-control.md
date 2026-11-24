@@ -213,6 +213,13 @@ which sets it up to be committed.
 Calkit will determine based on its type and size if it should be tracked
 with Git or DVC and act accordingly.
 
+<!-- TODO: needs human review -->
+
+Figures, i.e., PNG, JPEG, PDF, and SVG files, go in Git unless they're over
+1 MB, so a clone has them.
+If a figure stored in Git grows past that,
+`calkit save` asks to move it to DVC.
+
 Options:
 
 - `--to`, `-t`: Manually specify `git`, `dvc`, or `dvc-zip` as the tracking
@@ -308,9 +315,41 @@ whatever `core.autocrlf` is set to. Nothing to do.
 
 Files your project commits itself are a different matter, and worth
 thinking about if you collaborate across platforms---a text file that is
-also a stage dependency has the same problem. DVC's
+also a stage dependency, or an output stored in Git, has the same problem.
+`calkit init` and `calkit new project` pin them, adding rules to the start
+of `.gitattributes` that check text files out with LF on every platform
+(and batch files with CRLF, which `cmd.exe` needs). For a project created
+before that, or another way, `calkit check repro` lists the files whose
+line endings Git doesn't pin, and `calkit run` warns when the checkout it's
+running in has CRLF where Git has LF in any of them, which is what makes
+stages rerun. To pin them:
+
+```sh
+calkit fix line-endings
+git commit -m "Pin line endings" .gitattributes
+```
+
+This adds the same rules, unless `.gitattributes` already sets `eol` for
+every file, and rewrites any file in this checkout whose line endings
+don't match, keeping uncommitted changes. Otherwise a checkout made before
+the rules keeps its CRLF files, and Git shows each as modified, with an
+empty diff, until it's checked out again. No committed file changes:
+`text=auto` leaves binary files alone, and also files committed with CRLF,
+which are checked out the same on every platform already, so there's
+nothing to renormalize.
+
+A [submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) is its
+own repo, so the project's `.gitattributes` doesn't reach it, and a stage
+that uses its files has the same problem. `calkit fix line-endings` and
+`calkit clone` turn off `core.autocrlf` in this clone of each submodule
+that doesn't pin its own line endings, so its files have the bytes it
+committed, on every platform, and its own attributes still apply. That's
+for this clone only, so other clones need the same, which `calkit run`
+warns about. To pin it for every clone, and for projects that use it
+without Calkit, commit `* text=auto eol=lf` to the submodule's own
+`.gitattributes`. DVC's
 [guide to running on Windows](https://doc.dvc.org/user-guide/how-to/run-dvc-on-windows)
-covers the options.
+covers the options in more depth.
 
 <!-- prettier-ignore -->
 !!! note

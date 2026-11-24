@@ -557,6 +557,46 @@ def test_run_in_env_by_path(tmp_dir):
     assert len(envs) == 3
 
 
+def test_run_in_env_uv_extras(tmp_dir):
+    def write_extras(extras: list) -> None:
+        env = {"kind": "uv", "path": "pyproject.toml", "extras": extras}
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"environments": {"main": env}}, f)
+
+    subprocess.check_call(["uv", "init", "--bare"])
+    subprocess.check_call(["uv", "add", "--optional", "accel", "six"])
+    # Adding it installs it, so start from an environment without it
+    subprocess.check_call(["uv", "sync"])
+    cmd = ["calkit", "xenv", "-n", "main", "--", "python", "-c", "import six"]
+    # An extra meant for another machine, e.g., one with a GPU this one
+    # lacks, is neither installed nor an error
+    write_extras(
+        [{"name": "accel", "when": [{"gpu_arch_is": "calkit-test-no-such"}]}]
+    )
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "No module named 'six'" in res.stderr
+    # A mistake in one is a clean error, not a traceback
+    write_extras([{"name": "accel", "when": [{"gpu_arch": "gfx1201"}]}])
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "is invalid" in res.stderr and "Traceback" not in res.stderr
+    # One meant for this machine is installed by 'uv run', even when the
+    # environment isn't checked first
+    any_os = ["linux", "macos", "windows"]
+    write_extras([{"name": "accel", "when": [{"os_is": any_os}]}])
+    subprocess.check_call(cmd[:4] + ["--no-check"] + cmd[4:])
+    # And by checking the environment, as is one given by name alone
+    subprocess.check_call(["uv", "sync"])
+    write_extras(["accel"])
+    subprocess.check_call(
+        ["calkit", "check", "environment", "-n", "main", "--force"]
+    )
+    subprocess.check_call(
+        ["uv", "run", "--no-sync", "python", "-c", "import six"]
+    )
+
+
 def test_run_in_env_detect_default(tmp_dir):
     # Check that if we don't specify an environment, we'll find a default one
     # and add it to the project
@@ -790,6 +830,69 @@ def test_run_in_env_system(tmp_dir):
     combined = res.stdout + res.stderr
     assert "'wdir'" in combined
     assert "'user'" not in combined
+
+
+def test_open_env_shell(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from calkit.environments import shell as env_shell
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CALKIT_SHELL", raising=False)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "py": {"kind": "uv", "path": "pyproject.toml"},
+                    "jl": {"kind": "julia", "path": "Project.toml"},
+                }
+            },
+            f,
+        )
+    opened = {}
+
+    def start(shell, activation, base_env=None):
+        opened["shell"] = shell
+        opened["activation"] = activation
+        return 4
+
+    monkeypatch.setattr(env_shell, "start", start)
+
+    def shell(*args: str):
+        return CliRunner().invoke(calkit_app, ["shell", *args])
+
+    # The environment has to be named
+    res = shell()
+    assert res.exit_code == 1
+    assert "Name the environment to open with '-e', one of: py, jl" in (
+        res.output
+    )
+    # Ones with nothing to activate in a shell are refused
+    res = shell("-e", "_system")
+    assert res.exit_code == 1
+    assert "nothing to activate" in res.output
+    res = shell("-e", "nope")
+    assert "Environment 'nope' does not exist" in res.output
+    res = shell("-e", "jl")
+    assert res.exit_code == 1
+    assert "calkit xenv -n jl -- <command>" in res.output
+    assert not opened
+    # The shell opens with the environment activated, and its exit status
+    # is this one's
+    res = shell("-e", "py", "--no-check", "--shell", "/bin/zsh")
+    assert res.exit_code == 4, res.output
+    assert "Opening zsh in environment 'py'; run 'exit' to leave" in (
+        res.output
+    )
+    assert opened["shell"] == "/bin/zsh"
+    assert opened["activation"].env_vars["VIRTUAL_ENV"] == os.path.join(
+        str(tmp_path), ".venv"
+    )
+    # Not inside another
+    monkeypatch.setenv("CALKIT_SHELL", "py")
+    res = shell("-e", "py", "--no-check")
+    assert res.exit_code == 1
+    assert "Already in a shell for environment 'py'" in res.output
 
 
 def test_to_shell_cmd():
@@ -1028,6 +1131,177 @@ def test_add_pipeline_output_storage(tmp_dir):
     assert "dvc.lock" in out
     assert not os.path.exists("figure.png.dvc")
     assert "dvc.lock" in calkit.git.get_staged_files()
+
+
+def test_figure_storage(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import _offer_dvc_for_large_figures
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    subprocess.check_call(["calkit", "init"])
+    # A small figure goes in Git and a big one in DVC, saying the real limit
+    with open("small.png", "wb") as f:
+        f.write(os.urandom(1000))
+    with open("big.pdf", "wb") as f:
+        f.write(os.urandom(1_100_000))
+    out = subprocess.check_output(
+        ["calkit", "add", "small.png", "big.pdf"], text=True
+    )
+    assert "greater than 1 MB" in out
+    assert git("ls-files", "small.png").strip() == "small.png"
+    assert not git("ls-files", "big.pdf").strip()
+    assert os.path.isfile("big.pdf.dvc")
+    # An output DVC will cache isn't Git's, even before its first run
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": (
+                    'python -c "import os; '
+                    "[open(p, 'wb').write(os.urandom(1_100_000)) "
+                    "for p in ('kept.png', 'moved.png')]; "
+                    "open('declared.png', 'wb').write(b'png')\""
+                ),
+                "outputs": [
+                    {"path": "kept.png", "storage": "git"},
+                    {"path": "moved.png", "storage": "git"},
+                    "declared.png",
+                ],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "status"], stdout=subprocess.DEVNULL)
+    with open("declared.png", "wb") as f:
+        f.write(b"png")
+    subprocess.check_call(
+        ["calkit", "add", "declared.png"], stdout=subprocess.DEVNULL
+    )
+    assert not git("ls-files", "declared.png").strip()
+    assert not os.path.isfile("declared.png.dvc")
+    subprocess.check_call(["calkit", "run"], stdout=subprocess.DEVNULL)
+    git("add", "-A")
+    git("reset", "-q", "--", "kept.png", "moved.png")
+    git("commit", "-qm", "Set up")
+    # Without a terminal it says how
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+    assert _offer_dvc_for_large_figures() == []
+    assert "path-storage kept.png --to dvc" in capsys.readouterr().out
+    # With one, each is up to the person
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr(
+        "typer.confirm", lambda text, default=None: "moved.png" in text
+    )
+    assert _offer_dvc_for_large_figures() == ["moved.png"]
+    assert not git("ls-files", "moved.png").strip()
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["make"]
+    assert "moved.png" in stage["outputs"]
+    # One left in Git at that size isn't asked about again
+    git("add", "-A")
+    git("commit", "-qm", "Keep it")
+
+    def fail(*args, **kwargs):
+        raise AssertionError("Asked again")
+
+    monkeypatch.setattr("typer.confirm", fail)
+    assert _offer_dvc_for_large_figures() == []
+    # A pipeline's Python keeps the time out of what it writes
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"sys": {"kind": "system"}}
+    calkit.save_calkit_info(ck_info)
+    env = os.environ | {"CALKIT_PIPELINE_RUNNING": "1"}
+    env.pop("SOURCE_DATE_EPOCH", None)
+    code = "import os; print(os.environ.get('SOURCE_DATE_EPOCH'))"
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "sys", "--", "python", "-c", code],
+        env=env,
+        text=True,
+    )
+    assert out.strip().splitlines()[-1] == calkit.core.OUTPUT_SOURCE_DATE_EPOCH
+
+
+def test_save_moves_large_figure(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import _offer_dvc_for_large_figures, save
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def run() -> None:
+        p = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+        assert p.returncode == 0, p.stdout + p.stderr
+
+    # A project in a subdirectory of its repo, where Git runs from above it
+    git("init", "-q")
+    git("commit", "-q", "--allow-empty", "-m", "Start")
+    os.makedirs("proj")
+    monkeypatch.chdir("proj")
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    with open("make.py", "w") as f:
+        f.write(
+            "import os\n"
+            "n = int(open('size.txt').read())\n"
+            "open('fig.png', 'wb').write(os.urandom(n))\n"
+        )
+    with open("size.txt", "w") as f:
+        f.write("1000")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "python make.py",
+                "inputs": ["make.py", "size.txt"],
+                "outputs": [{"path": "fig.png", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    run()
+    git("add", "-A", ".")
+    git("commit", "-qm", "Set up")
+    with open("size.txt", "w") as f:
+        f.write("2000000")
+    run()
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr("typer.confirm", lambda text, default=None: True)
+    # One that can't move, here since its stage is out of date, says why,
+    # and the rest is still saved
+    with open("make.py", "a") as f:
+        f.write("# Edited\n")
+    with open("notes.md", "w") as f:
+        f.write("Notes\n")
+    git("add", "notes.md")
+    save(paths=["notes.md"], message="Notes", no_push=True)
+    assert "is out of date" in capsys.readouterr().err
+    assert git("log", "-1", "--format=%s").strip() == "Notes"
+    assert git("ls-files", "fig.png").strip() == "fig.png"
+    # Moving it commits taking it out of Git too, not only what says to
+    run()
+    with open("notes.md", "a") as f:
+        f.write("More\n")
+    save(paths=["notes.md", "make.py"], message="Move", no_push=True)
+    committed = git("ls-tree", "-r", "--name-only", "HEAD").split()
+    assert "proj/fig.png" not in committed
+    assert "/fig.png" in git("show", "HEAD:proj/.gitignore")
+    assert "proj/calkit.yaml" not in git("diff", "--name-only", "HEAD")
+    assert not git("ls-files", "fig.png").strip()
+    # One left in Git at that size isn't asked about again
+    subprocess.check_call(
+        ["calkit", "update", "path-storage", "fig.png", "--to", "git"],
+        stdout=subprocess.DEVNULL,
+    )
+    git("add", "-A", ".")
+    git("commit", "-qm", "Keep it in Git")
+
+    def fail(*args, **kwargs):
+        raise AssertionError("Asked again")
+
+    monkeypatch.setattr("typer.confirm", fail)
+    assert _offer_dvc_for_large_figures() == []
 
 
 def test_git_outputs_with_ignored_files(
@@ -1446,10 +1720,72 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
 
 
 def test_status(tmp_dir):
-    subprocess.check_call(["calkit", "status"])
+    # Without a calkit.yaml this isn't a project, which status says
+    res = subprocess.run(["calkit", "status"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "not a Calkit project" in res.stdout
+    # Unless only non-project categories are asked for
+    res = subprocess.run(
+        ["calkit", "status", "-c", "git"], capture_output=True, text=True
+    )
+    assert res.returncode == 0
+    assert "calkit.yaml" not in res.stdout + res.stderr
     subprocess.check_call(["calkit", "init"])
+    # From a subdirectory of the project, it points to the root instead
+    os.makedirs("figures")
+    res = subprocess.run(
+        ["calkit", "status"], capture_output=True, text=True, cwd="figures"
+    )
+    assert res.returncode == 0
+    assert "not a Calkit project" not in res.stdout
+    assert "project is at" in res.stdout
+    # Every category read from calkit.yaml warns, keeping JSON parseable
+    for category in ["questions", "pipeline", "imports"]:
+        res = subprocess.run(
+            ["calkit", "status", "--json", "-c", category],
+            capture_output=True,
+            text=True,
+            cwd="figures",
+        )
+        assert res.returncode == 0
+        json.loads(res.stdout)
+        assert "project is at" in res.stderr
+    # A separate Git repo inside the project isn't part of it
+    nested_repo_path = os.path.join("vendor", "otherlib")
+    os.makedirs(nested_repo_path)
+    subprocess.check_call(["git", "init", "-q"], cwd=nested_repo_path)
+    res = subprocess.run(
+        ["calkit", "status", "-c", "project"],
+        capture_output=True,
+        text=True,
+        cwd=nested_repo_path,
+    )
+    assert res.returncode == 0
+    assert "not a Calkit project" in res.stdout
+    assert "project is at" not in res.stdout
+    # The search doesn't reach or pass the home directory
+    home_path = os.path.join(os.getcwd(), "home")
+    home_subdir_path = os.path.join(home_path, "folder")
+    os.makedirs(home_subdir_path)
+    home_env = {**os.environ, "HOME": home_path, "USERPROFILE": home_path}
+    for wdir, stray_yaml in [(home_path, False), (home_subdir_path, True)]:
+        if stray_yaml:
+            with open(os.path.join(home_path, "calkit.yaml"), "w") as f:
+                f.write("")
+        res = subprocess.run(
+            ["calkit", "status", "-c", "project"],
+            capture_output=True,
+            text=True,
+            cwd=wdir,
+            env=home_env,
+        )
+        assert res.returncode == 0
+        assert "not a Calkit project" in res.stdout
+        assert "project is at" not in res.stdout
     subprocess.check_call(["calkit", "new", "status", "in-progress"])
-    subprocess.check_call(["calkit", "status"])
+    res = subprocess.run(["calkit", "status"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "No calkit.yaml" not in res.stdout
     status = calkit.get_latest_project_status()
     assert status is not None
     assert status.status == "in-progress"
@@ -1515,6 +1851,61 @@ def test_status(tmp_dir):
         subprocess.check_output(["calkit", "status", "-c", "dvc", "--json"])
     )
     assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
+
+
+def test_status_offers_requirements_for_failed_env_check(
+    tmp_dir, monkeypatch: pytest.MonkeyPatch
+):
+    from typer.testing import CliRunner
+
+    from calkit.pipeline import PipelineStatus
+
+    with open("calkit.yaml", "w") as f:
+        yaml.safe_dump({"requirements": ["fake-node"]}, f)
+    failed = PipelineStatus(
+        has_pipeline=True, environment_checks={"dev": {"success": False}}
+    )
+    ok = PipelineStatus(has_pipeline=True)
+    statuses: list[PipelineStatus] = []
+    asked: list[bool] = []
+    installs: list[bool] = []
+
+    def check_requirements(ck_info=None, interactive=None, **kwargs):
+        asked.append(bool(interactive))
+        if not (interactive and installs.pop(0)):
+            raise ValueError("app 'fake-node' not found on this machine")
+
+    monkeypatch.setattr(
+        calkit.pipeline, "get_status", lambda **kwargs: statuses.pop(0)
+    )
+    monkeypatch.setattr(calkit, "check_requirements", check_requirements)
+    runner = CliRunner()
+    # Without a terminal, what's missing is named, but nothing is offered
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    statuses[:] = [failed]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False]
+    assert "app 'fake-node' not found" in res.output
+    assert "'calkit check reqs'" in res.output
+    # With one, it's offered, and once installed the status is checked again
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    asked.clear()
+    statuses[:] = [failed, ok]
+    installs[:] = [True]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False, True] and not statuses
+    assert "Failed pipeline environment checks" not in res.output
+    # Declined, it's reported as without a terminal
+    asked.clear()
+    statuses[:] = [failed]
+    installs[:] = [False]
+    res = runner.invoke(calkit_app, ["status", "-c", "pipeline"])
+    assert res.exit_code == 0, res.output
+    assert asked == [False, True]
+    assert "Failed pipeline environment checks for: dev" in res.output
+    assert "app 'fake-node' not found" in res.output
 
 
 def test_no_dvc_repo(tmp_dir, tmp_path):
@@ -1712,6 +2103,33 @@ def test_save_data_not_in_cache(tmp_dir):
 def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "--help"])
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])
+
+
+def test_run_with_output_outside_code_page(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    # Writes a quote to the run log as UTF-8, which cp1252, Windows' default,
+    # can't decode
+    script = (
+        "import glob; [open(p, 'ab').write(b'\\xe2\\x80\\x9d\\n') "
+        "for p in glob.glob('.calkit/local/logs/*.log')]"
+    )
+    with open("quote.py", "w") as f:
+        f.write(script)
+    ck_info["pipeline"] = {
+        "stages": {
+            "quote": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": f'"{Path(sys.executable).as_posix()}" quote.py',
+                "outputs": [],
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
 
 
 @pytest.mark.needs("juliaup")
@@ -2754,6 +3172,61 @@ def test_only_invoked() -> None:
     assert built(["new", "projetc"]) == built(["new", "--help"])
     assert built(["statsu"]) == everything
     assert built([]) == everything
+
+
+def test_run_offers_git_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    from calkit.cli import run as cli_run
+
+    error = ImportError("Failed to initialize: Bad git executable.")
+
+    def fail() -> None:
+        raise error
+
+    monkeypatch.setattr("calkit.cli._only_invoked", lambda app, args: fail)
+    monkeypatch.setattr(sys, "argv", ["calkit", "config", "github-ssh"])
+    # Where it can be installed, it's offered, then the command runs again,
+    # unless Git still doesn't run, which would only offer it again
+    for installed, runs in [(True, True), (True, False), (False, False)]:
+        with (
+            patch("calkit.install.can_run_git", side_effect=[False, runs]),
+            patch("calkit.install.get_unsupported_message", return_value=None),
+            patch(
+                "calkit.install.prompt_and_install", return_value=installed
+            ) as m_prompt,
+            patch("subprocess.call", return_value=0) as m_call,
+            pytest.raises(SystemExit) as exc,
+        ):
+            cli_run()
+        assert m_prompt.call_args.args[0] == "git"
+        assert exc.value.code == (0 if runs else 1)
+        assert m_call.called is runs
+        if runs:
+            assert m_call.call_args.args[0] == [
+                *calkit.get_calkit_cmd(),
+                "config",
+                "github-ssh",
+            ]
+    # Where it can't, it says what to run
+    monkeypatch.setattr("calkit.install.can_run_git", lambda: False)
+    with (
+        patch("calkit.install.get_unsupported_message", return_value="apt"),
+        patch("calkit.install.prompt_and_install") as m_prompt,
+        pytest.raises(SystemExit),
+    ):
+        cli_run()
+    m_prompt.assert_not_called()
+    # Where Git runs, installing it won't help, so the error is raised
+    monkeypatch.setattr("calkit.install.can_run_git", lambda: True)
+    with (
+        patch("calkit.install.prompt_and_install") as m_prompt,
+        pytest.raises(ImportError),
+    ):
+        cli_run()
+    m_prompt.assert_not_called()
+    # Other import errors aren't caught
+    error = ImportError("No module named 'x'")
+    with pytest.raises(ImportError):
+        cli_run()
 
 
 def test_use_version_without_uvx(monkeypatch):
@@ -5232,6 +5705,110 @@ def test_run_records_app_version(tmp_dir):
     assert system["os"] == platform.system()
 
 
+def test_clone_data_not_available(tmp_dir, monkeypatch):
+    from typer.testing import CliRunner
+
+    real_check_call = subprocess.check_call
+
+    def run(*cmd):
+        real_check_call(cmd, stdout=subprocess.DEVNULL)
+
+    def clone(name, remote_url=None):
+        # Clone from a copy that has the remote, if any, in its DVC config
+        source = os.path.join(top, f"source-{name}")
+        run("git", "clone", "-q", origin, source)
+        if remote_url is not None:
+            run("dvc", "--cd", source, "remote", "add", "-d", "r", remote_url)
+            run("git", "-C", source, "add", ".dvc/config")
+            run(
+                "git",
+                "-C",
+                source,
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "commit",
+                "-qm",
+                "Add remote",
+            )
+
+        def check_call(cmd, *args, **kwargs):
+            # Clone only takes URLs, so have Git clone the local copy
+            if cmd[:2] == ["git", "clone"]:
+                cmd = ["git", "clone", "-q", source, cmd[-1]]
+            return real_check_call(cmd, *args, **kwargs)
+
+        with patch("subprocess.check_call", check_call):
+            result = CliRunner().invoke(
+                calkit.cli.main.app,
+                ["clone", "https://example.com/me/proj.git", f"clone-{name}"],
+            )
+        os.chdir(top)
+        return result, Path(top, f"clone-{name}")
+
+    monkeypatch.setattr(calkit.github, "can_use_ssh", lambda **kwargs: False)
+    monkeypatch.setattr(calkit, "record_project_path", lambda: None)
+    top = os.getcwd()
+    origin = os.path.join(top, "origin")
+    os.makedirs(origin)
+    os.chdir(origin)
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "test@example.com")
+    run("git", "config", "user.name", "Test")
+    run("dvc", "init", "-q")
+    Path("kept.txt").write_text("kept")
+    Path("lost.txt").write_text("lost")
+    run("dvc", "add", "-q", "kept.txt", "lost.txt")
+    with open("dvc.yaml", "w") as f:
+        yaml.safe_dump(
+            {
+                "stages": {
+                    "never-run": {
+                        "cmd": "echo hi > never-run.txt",
+                        "outs": ["never-run.txt"],
+                    }
+                }
+            },
+            f,
+        )
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "Add data")
+    all_there = os.path.join(top, "all-there")
+    partial = os.path.join(top, "partial")
+    run("dvc", "remote", "add", "--local", "all-there", all_there)
+    run("dvc", "remote", "add", "--local", "partial", partial)
+    run("dvc", "push", "-q", "-r", "all-there", "kept.txt", "lost.txt")
+    run("dvc", "push", "-q", "-r", "partial", "kept.txt")
+    os.chdir(top)
+    # With no remote, the data is named and the clone still finishes
+    result, path = clone("no-remote")
+    assert result.exit_code == 0, result.output
+    assert "the project has no DVC remote" in result.output
+    warning = result.output.split("weren't pulled")[1]
+    assert "kept.txt" in warning and "lost.txt" in warning
+    assert "never-run.txt" not in warning
+    assert (path / "kept.txt.dvc").is_file()
+    # With everything in the remote, a stage that hasn't run isn't missing
+    result, path = clone("all-there", all_there)
+    assert result.exit_code == 0, result.output
+    assert "weren't pulled" not in result.output
+    assert (path / "kept.txt").read_text() == "kept"
+    assert (path / "lost.txt").read_text() == "lost"
+    # What the remote does have is pulled, and only the rest is named
+    result, path = clone("partial", partial)
+    assert result.exit_code == 0, result.output
+    assert "they aren't in the project's DVC remote" in result.output
+    warning = result.output.split("weren't pulled")[1]
+    assert "lost.txt" in warning and "kept.txt" not in warning
+    assert (path / "kept.txt").read_text() == "kept"
+    assert not (path / "lost.txt").exists()
+    # A remote that can't be reached is still an error
+    result, _ = clone("unreachable", "ssh://nobody@127.0.0.1:1/nothing")
+    assert result.exit_code != 0
+    assert "Failed to pull" in result.output
+
+
 def test_clone(monkeypatch):
     from typer.testing import CliRunner
 
@@ -5253,7 +5830,9 @@ def test_clone(monkeypatch):
         cloned.clear()
         hubs.clear()
         monkeypatch.delenv("CALKIT_HUB", raising=False)
-        monkeypatch.setattr(calkit.github, "can_use_ssh", lambda: ssh_set_up)
+        monkeypatch.setattr(
+            calkit.github, "can_use_ssh", lambda interactive=False: ssh_set_up
+        )
         result = CliRunner().invoke(calkit.cli.main.app, ["clone", *args])
         assert result.exit_code != 0
         return result
@@ -5273,6 +5852,19 @@ def test_clone(monkeypatch):
         == "git@github.com:me/proj.git"
     )
     assert clone_url("github.com/me/proj") == "git@github.com:me/proj"
+    # GitHub's ssh:// form is the same URL, and another host's is kept
+    assert (
+        clone_url("ssh://git@github.com/me/proj.git")
+        == "git@github.com:me/proj.git"
+    )
+    assert (
+        clone_url("ssh://git@github.com/me/proj.git", "--https")
+        == "https://github.com/me/proj.git"
+    )
+    assert (
+        clone_url("ssh://git@gitlab.com/me/proj.git")
+        == "ssh://git@gitlab.com/me/proj.git"
+    )
     # Otherwise HTTPS, which is also what's asked for wins
     assert (
         clone_url("me/proj", ssh_set_up=False)
@@ -5292,6 +5884,44 @@ def test_clone(monkeypatch):
         clone_url("me/proj", "--ssh", ssh_set_up=False)
         == "git@github.com:me/proj.git"
     )
+    # Interactively, SSH where it isn't set up offers to set it up, which
+    # can end early, e.g., once GitHub's host key is trusted, then checks
+    # again, or falls back to HTTPS, unless SSH was asked for
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    for args, answer, setup_works, url in [
+        ([], "y", True, "git@github.com:me/proj.git"),
+        ([], "y", False, "https://github.com/me/proj.git"),
+        ([], "n", False, "https://github.com/me/proj.git"),
+        (["--ssh"], "n", False, "git@github.com:me/proj.git"),
+    ]:
+        monkeypatch.setattr(
+            calkit.github,
+            "can_use_ssh",
+            lambda interactive=False: interactive and setup_works,
+        )
+        with patch(
+            "calkit.cli.config.config_github_ssh", side_effect=typer.Exit()
+        ) as m_setup:
+            result = CliRunner().invoke(
+                calkit.cli.main.app,
+                ["clone", "git@github.com:me/proj.git", *args],
+                input=answer + "\n",
+            )
+        assert "SSH not set up" in result.output
+        assert cloned[-1] == url, (args, answer, setup_works)
+        assert m_setup.called is (answer == "y")
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    # Without Git, it's offered first
+    for installed in [True, False]:
+        with (
+            patch("calkit.install.can_run_git", return_value=False),
+            patch(
+                "calkit.install.prompt_and_install", return_value=installed
+            ) as m_prompt,
+        ):
+            clone("me/proj")
+        assert m_prompt.call_args.args[0] == "git"
+        assert bool(cloned) is installed
     # Another host's URL is left as given
     assert (
         clone_url("https://gitlab.com/me/proj.git")
@@ -5389,3 +6019,116 @@ def test_run_untracks_git_tracked_outputs(tmp_dir):
     ).strip()
     with open("fig.txt") as f:
         assert f.read() == "made\n"
+
+
+@pytest.mark.xdist_group("conda")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Conda environments need Windows debugging"
+)
+def test_xenv_conda_env_first_on_path(tmp_dir, monkeypatch):
+    conda_name = "calkit-test-" + calkit.to_kebab_case(
+        os.path.basename(os.getcwd())
+    )
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "conda-env", "-n", "py", "--conda-name", conda_name]
+        + ["python=3.12"]
+    )
+    try:
+        # A program installed elsewhere and earlier on PATH, e.g., by Homebrew
+        # or Pixi, doesn't win over the environment's own, even though
+        # activating it puts it where Conda's base is on PATH, if there
+        decoy = Path("decoy")
+        decoy.mkdir()
+        (decoy / "python").write_text("#!/bin/sh\necho decoy\n")
+        (decoy / "python").chmod(0o755)
+        monkeypatch.setenv(
+            "PATH", str(decoy.absolute()) + os.pathsep + os.environ["PATH"]
+        )
+        out = subprocess.check_output(
+            ["calkit", "xenv", "-n", "py", "--", "python", "-c"]
+            + ["import sys; print(sys.prefix)"],
+            text=True,
+        )
+        assert out.strip().splitlines()[-1].endswith(conda_name)
+    finally:
+        subprocess.call(
+            [calkit.conda.find_conda_exe() or "conda", "env", "remove"]
+            + ["-y", "-n", conda_name]
+        )
+
+
+def test_run_jupyter(tmp_dir):
+    # Another Jupyter first on PATH, without Calkit's extensions, isn't run
+    os.makedirs("other")
+    fake = os.path.join("other", "jupyter-lab")
+    with open(fake, "w") as f:
+        f.write("#!/bin/sh\necho other\n")
+    os.chmod(fake, 0o755)
+    env = os.environ | {
+        "PATH": os.path.abspath("other") + os.pathsep + os.environ["PATH"]
+    }
+    out = subprocess.run(
+        ["calkit", "jupyter", "lab", "path"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "other" not in out.stdout
+    assert "Application directory" in out.stdout
+
+
+def test_run_skips_for_failed_env(tmp_dir):
+    # A stage whose environment couldn't be built is skipped rather than
+    # failing with its own error, e.g., that a tool isn't in it, which
+    # would hide the real one. The stages that need its outputs are skipped
+    # too, the rest run, and then the run fails.
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("./does-not-exist\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        }
+    }
+    ck_info["pipeline"] = {
+        "stages": {
+            "thing": {
+                "kind": "shell-command",
+                "environment": "py",
+                "command": "echo hi > out.txt",
+                "outputs": ["out.txt"],
+            },
+            "after": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "cat out.txt > after.txt",
+                "inputs": ["out.txt"],
+                "outputs": ["after.txt"],
+            },
+            "other": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo other > other.txt",
+                "outputs": ["other.txt"],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, out
+    assert "Stage 'thing' is out of date and couldn't run" in out
+    assert (
+        "Failed to check environment 'py', so skipping out-of-date stage "
+        "'thing'" in out
+    )
+    assert "calkit check env -n py" in out
+    assert not os.path.exists("out.txt")
+    assert not os.path.exists("after.txt")
+    assert os.path.exists("other.txt")

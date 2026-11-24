@@ -1037,6 +1037,7 @@ def get_gated_stages(
     manual: bool = True,
     requirements_by_stage: dict[str, list] | None = None,
     blocked_by: dict[str, set[str]] | None = None,
+    failed_environments: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -1060,6 +1061,9 @@ def get_gated_stages(
     later, e.g., by ``calkit run`` for a stage it would run. Each of those,
     and each stage skipped for an output a skipped stage hasn't made, that
     needs such an output is added to ``blocked_by`` with those stages.
+
+    ``failed_environments`` maps environments that failed their check to a
+    reason, which a stage using one is skipped for, as for a requirement.
     """
     import contextlib
     import json
@@ -1300,6 +1304,10 @@ def get_gated_stages(
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )
+        failed = [e for e in env_names if e in (failed_environments or {})]
+        if failed:
+            gated[name] = (failed_environments or {})[failed[0]]
+            continue
         resolved: list[tuple[str, dict]] = []
         reason = None
         is_error = False
@@ -2088,6 +2096,35 @@ def get_map_paths_outputs(stage: dict) -> list[str]:
     ]
 
 
+def get_cell_output_paths(
+    stage: dict, ck_info: dict | None = None
+) -> list[str]:
+    """Where a notebook stage saves what its cells are marked to make,
+    relative to the project, which it declares under ``cell_outputs``
+    rather than ``outputs``: its values file, and each figure and table.
+    The project's parameters, in ``ck_info``, name the values file of a
+    stage whose parameters use them.
+    """
+    from calkit.notebooks import get_stage_values_path
+
+    if stage.get("kind") != "jupyter-notebook":
+        return []
+    marks = [o for o in stage.get("cell_outputs") or [] if isinstance(o, dict)]
+    paths = []
+    if any(o.get("kind") == "value" for o in marks) and isinstance(
+        stage.get("notebook_path"), str
+    ):
+        paths.append(get_stage_values_path(stage, ck_info))
+    paths += [
+        posixpath.normpath(
+            posixpath.join(stage.get("wdir") or "", str(o["output_path"]))
+        )
+        for o in marks
+        if o.get("kind") in ("figure", "table") and o.get("output_path")
+    ]
+    return paths
+
+
 def get_figure_paths_with_origins(ck_info: dict) -> list[str]:
     """Images calkit.yaml says the origin of, wherever they are: those a
     stage makes, and those recorded under ``misc`` as imported or created
@@ -2119,6 +2156,7 @@ def get_figure_paths_with_origins(ck_info: dict) -> list[str]:
             candidates.append(
                 out.get("path") if isinstance(out, dict) else out
             )
+        candidates += get_cell_output_paths(stage, ck_info)
     candidates += [
         entry.get("path")
         for entry in ck_info.get("misc") or []
@@ -2325,7 +2363,10 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
             posixpath.normpath(posixpath.join(wdir, Path(p).as_posix()))
             for p in declared
             if p and isinstance(p, str)
-        ] + get_map_paths_outputs(stage)
+        ]
+        outs += get_map_paths_outputs(stage) + get_cell_output_paths(
+            stage, ck_info
+        )
         for out in outs:
             if target == out:
                 return str(name)
@@ -2505,6 +2546,12 @@ def get_output_storage_map(
             if isinstance(out, dict) and "path" in out and "storage" in out:
                 path = Path(os.path.normpath(os.path.join(wdir, out["path"])))
                 result[path.as_posix()] = out["storage"]
+        for out in stage.get("cell_outputs") or []:
+            if out.get("output_path") and out.get("storage"):
+                path = Path(
+                    os.path.normpath(os.path.join(wdir, out["output_path"]))
+                )
+                result[path.as_posix()] = out["storage"]
     return result
 
 
@@ -2532,7 +2579,7 @@ def _dump_yaml_if_changed(data, fpath: str, verbose: bool = False) -> bool:
             pass
     if verbose:
         typer.echo(f"Writing to {os.path.basename(fpath)}")
-    with open(fpath, "w") as f:
+    with open(fpath, "w", newline=calkit.git.get_checkout_newline(fpath)) as f:
         calkit.ryaml.dump(data, f)
     return True
 
@@ -2950,6 +2997,49 @@ def _stage_revision_key(
     """A revision key over what this stage reads."""
     paths = [p for p in stage.dvc_deps if not p.startswith(".calkit/")]
     return _revision_key(wdir, paths)
+
+
+# Stage kinds whose code imports packages, so on _system gets whatever this
+# machine has installed, with the command to make an environment for it.
+# MATLAB is an app, so _system is how it's usually run.
+SYSTEM_ENV_RISKY_KINDS = {
+    "python-script": ("a Python script", "calkit new uv-env"),
+    "r-script": ("an R script", "calkit new renv"),
+    "julia-script": ("a Julia script", "calkit new julia-env"),
+    "julia-command": ("Julia", "calkit new julia-env"),
+}
+
+
+def _warn_on_system_env(stage_name: str, stage) -> None:
+    """Warn that a stage runs code that imports packages with ``_system``,
+    which uses whatever this machine has installed.
+    """
+    from calkit.cli import warn
+
+    if stage.environment != "_system":
+        return
+    if stage.kind == "jupyter-notebook":
+        language = getattr(stage, "language", None) or "python"
+        if language == "matlab":
+            return
+        what = "a notebook"
+        new_cmd = (
+            "calkit new julia-env"
+            if language == "julia"
+            else "calkit new uv-env"
+        )
+    elif stage.kind in SYSTEM_ENV_RISKY_KINDS:
+        what, new_cmd = SYSTEM_ENV_RISKY_KINDS[stage.kind]
+    else:
+        return
+    warn(
+        f"Stage '{stage_name}' runs {what} with the '_system' environment, "
+        "so it uses whatever version and packages each machine has "
+        "installed, and may fail or give different results elsewhere. "
+        f"Create an environment for it, e.g., with '{new_cmd}', and set the "
+        "stage's environment to it.",
+        err=True,
+    )
 
 
 def to_dvc(
@@ -3445,6 +3535,7 @@ def to_dvc(
     output_dvcignores: list[str] = []
     output_gitignores: list[str] = []
     for stage_name, stage in pipeline.stages.items():
+        _warn_on_system_env(stage_name, stage)
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
         if stage.kind == "jupyter-notebook":
@@ -3590,6 +3681,8 @@ def to_dvc(
                 outputs += stage.app_outputs
             elif stage.kind == "references-check":
                 outputs += stage.check_outputs
+            elif stage.kind == "quarto":
+                outputs += stage.notebook_outputs
             sched_log = stage.scheduler_log_output
             if sched_log is not None:
                 outputs.append(sched_log)
@@ -3740,6 +3833,14 @@ def to_dvc(
         # A path a stage makes now isn't also added on its own, e.g., a
         # figure saved with DVC before its stage was, which DVC would refuse
         for overlap in calkit.dvc.get_stage_output_dvc_files(dvc_stages, wdir):
+            if not calkit.dvc.record_stage_output_dvc_file(
+                overlap, dvc_stages[overlap["stage"]], wdir
+            ):
+                warn(
+                    f"Keeping {overlap['dvc_file']}: can't record its hash "
+                    "in dvc.lock"
+                )
+                continue
             os.remove(os.path.join(wdir or ".", overlap["dvc_file"]))
             warn(
                 f"Removed {overlap['dvc_file']}, since stage "
@@ -4107,10 +4208,19 @@ def stages_by_output(
             prefix = posixpath.join(
                 "" if project == "." else project, stage.get("wdir") or ""
             )
-            for path in paths:
+            # Cell outputs' paths already include the stage's wdir
+            cell_outputs = [
+                posixpath.join("" if project == "." else project, p)
+                for p in get_cell_output_paths(stage, info)
+            ]
+            for path in paths + cell_outputs:
                 if not isinstance(path, str) or not path:
                     continue
-                full = posixpath.normpath(posixpath.join(prefix, path))
+                full = (
+                    posixpath.normpath(path)
+                    if path in cell_outputs
+                    else posixpath.normpath(posixpath.join(prefix, path))
+                )
                 qualified = calkit.qualify_with_project(project, name)
                 out.setdefault(full, []).append(qualified)
     return out

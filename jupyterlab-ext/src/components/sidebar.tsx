@@ -894,6 +894,8 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       const kind = item.kind || "unknown";
       const packages = item.packages || [];
       const showPackages =
+        kind === "uv" ||
+        kind === "texlive" ||
         kind === "uv-venv" ||
         kind === "venv" ||
         kind === "python" ||

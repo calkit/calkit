@@ -108,6 +108,32 @@ Calkit will check that the environment matches its specification,
 and if it needs to be updated,
 that will be done before execution.
 
+<!-- TODO: needs human review -->
+
+To work in an environment interactively,
+e.g., to try things out in Python or run a few commands in a row,
+open a shell with it activated:
+
+```sh
+calkit shell -e {env-name}
+```
+
+This checks the environment, creating it if it doesn't exist yet,
+and then opens your shell with the environment's programs first on `PATH`,
+the variables its kind sets, e.g., `VIRTUAL_ENV` or `CONDA_PREFIX`,
+and its name at the start of the prompt.
+Your shell's startup files are read as usual,
+and the environment is activated after them,
+so it comes first even if they activate another, e.g., Conda's `base`.
+Run `exit` to leave.
+It works with Conda, uv, venv, and Pixi environments,
+and opens a Docker environment's shell in its container.
+For other kinds, run programs in them with `calkit xenv`.
+
+On macOS and Linux, the shell is the one in `SHELL`,
+and on Windows, it's PowerShell.
+Pick another with `--shell`, e.g., `calkit shell -e main --shell bash`.
+
 All project environments can be checked at once with:
 
 ```sh
@@ -595,6 +621,37 @@ However, if you add it in there,
 calling the above command again will succeed because Calkit
 automatically checks or syncs the environment before execution.
 
+<!-- TODO: needs human review -->
+
+#### Extras for particular machines
+
+A uv project environment can install
+[extras](https://docs.astral.sh/uv/concepts/projects/dependencies/#optional-dependencies)
+of its `pyproject.toml`,
+which Calkit passes to both `uv sync` and `uv run`,
+so they're installed even when the environment isn't checked first.
+An extra can also be meant only for certain machines,
+given under `when` with the conditions a [switch](#switch) option takes,
+e.g., a PyTorch built for one GPU architecture:
+
+```yaml
+environments:
+  main:
+    kind: uv
+    path: pyproject.toml
+    extras:
+      - plots
+      - name: rocm-gfx1201
+        when:
+          - gpu_arch_is: gfx1201
+```
+
+An extra is installed where all of its `when` conditions hold,
+and left out elsewhere rather than reported,
+since it describes a different machine, not a problem with this one.
+Since the stages' results may then depend on which machine ran them,
+pin the machine with a [`system` environment](#system) when that matters.
+
 ### venv
 
 A `venv` environment,
@@ -769,6 +826,13 @@ Run `calkit describe system` to see what these are on the machine you're on.
 
 The built-in `_system` environment is shorthand for this kind
 on `localhost` with nothing locked.
+
+<!-- TODO: needs human review -->
+
+Since nothing is locked, a Python, R, or Julia script or notebook run with
+`_system` gets whatever version and packages each machine has installed,
+so Calkit warns about such a stage.
+Give it an environment of its own instead, e.g., with `calkit new uv-env`.
 
 #### Following the machine, or staying on one
 
@@ -1612,6 +1676,12 @@ pair:
 - `os_is`: `linux`, `macos` or `windows`.
 - `machine_id_equals`: this machine's ID, as
   `calkit describe system` shows it.
+- `gpu_vendor_is`: `amd`, `nvidia` or `apple`, for one of the
+  machine's GPUs.
+- `gpu_arch_is`: one of the machine's GPUs' architecture, e.g.,
+  `gfx1201` or `sm_89`.
+- `gpu_name_matches`: a glob one of the machine's GPUs' names
+  matches, ignoring case.
 
 A list of values means any one of them. To pick an environment when
 either of two conditions holds, list it as two options. For example:
@@ -1791,13 +1861,14 @@ Model class: `TexLiveEnvironment`
 
 Model class: `UvEnvironment`
 
-| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
-| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind        | Literal['uv']            | yes      | What kind of environment this is.                                                                                                                                                       |
-| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
-| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.      |
-| path        | str                      | yes      | Path to the uv project's pyproject.toml.                                                                                                                                                |
-| description | str                      | no       | A description of the environment.                                                                                                                                                       |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                                          |
+| ----------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['uv']            | yes      | What kind of environment this is.                                                                                                                                                                    |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.              |
+| with        | list[str]                | no       | Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.                   |
+| path        | str                      | yes      | Path to the uv project's pyproject.toml.                                                                                                                                                             |
+| extras      | list[str \| UvExtra]     | no       | Extras of the project to install, each named or given with the machines it's for. They're passed to both 'uv sync' and 'uv run', so they're installed even when the environment isn't checked first. |
+| description | str                      | no       | A description of the environment.                                                                                                                                                                    |
 
 #### `uv-venv`
 

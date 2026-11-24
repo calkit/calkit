@@ -148,6 +148,36 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
 The stage depends on everything included this way, so don't add
 `json-to-latex` or `map-paths` stages, or list those files in `inputs`.
 
+<!-- TODO: needs human review -->
+
+### Values, figures, and tables from notebook cells
+
+A `jupyter-notebook` stage can save values, figures, and tables from its
+cells, so the notebook doesn't need to write files.
+Offer this to anyone who'd rather not add `json.dump` or `savefig` calls.
+Add them with `calkit nb add-output`, which stores them under the stage's
+`cell_outputs` by cell ID.
+Read IDs from the `.ipynb`, or use `--cell-index`, which adds IDs if the
+notebook has none.
+
+```sh
+calkit nb add-output analysis.ipynb value --cell-id 3f9a1c2e --variable-name k_25 --variable-name k_35
+calkit nb add-output analysis.ipynb figure --cell-id 8b77d0aa --variable-name fig --output-path figures/fit.pdf
+calkit nb add-output analysis.ipynb table --cell-id 1d2e4c0b --variable-name df --output-path tables/rates.tex
+calkit nb outputs analysis.ipynb --json
+```
+
+Cite a value with the notebook's path, e.g.,
+`\ckvalue[.3f]{analysis.ipynb}{k_25}`, or `{rates.25C}` for a key in a
+dict.
+Cite figures and tables by their paths.
+Each output is saved right after its cell runs,
+so if a later cell changes the variable, the saved one doesn't change.
+Outputs are only saved when the pipeline runs the notebook,
+so run `calkit run` after adding them.
+`calkit nb remove-output` stops saving one.
+Don't also list a saved figure or table in the stage's `outputs`.
+
 ### Outputs: Git vs. DVC storage
 
 By default, outputs are stored with DVC (large file storage). Use
@@ -225,24 +255,25 @@ DVC handles:
 
 ## Key CLI commands
 
-| Command                         | What it does                                           |
-| ------------------------------- | ------------------------------------------------------ |
-| `calkit run`                    | Run the pipeline (skips unchanged stages)              |
-| `calkit run --force`            | Force re-run all stages                                |
-| `calkit status`                 | Show which stages are stale                            |
-| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline      |
-| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                   |
-| `calkit push`                   | Push Git commits and DVC-tracked files to remotes      |
-| `calkit pull`                   | Pull latest code and data                              |
-| `calkit save`                   | Auto-add, commit, and push (Git + DVC)                 |
-| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)                 |
-| `calkit add <file>`             | Add a file to version control                          |
-| `calkit check env --name <env>` | Verify an environment matches its spec                 |
-| `calkit new`                    | Create new project objects (notebook, dataset, etc.)   |
-| `calkit new question "<text>"`  | Record a research question                             |
-| `calkit list questions`         | List questions with what each has and lacks            |
-| `calkit show question <n>`      | Show a question with its answer rendered from evidence |
-| `calkit check questions`        | Check answers against current evidence                 |
+| Command                         | What it does                                            |
+| ------------------------------- | ------------------------------------------------------- |
+| `calkit run`                    | Run the pipeline (skips unchanged stages)               |
+| `calkit run --force`            | Force re-run all stages                                 |
+| `calkit status`                 | Show which stages are stale                             |
+| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline       |
+| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                    |
+| `calkit shell -e <env>`         | Open an interactive shell with an environment activated |
+| `calkit push`                   | Push Git commits and DVC-tracked files to remotes       |
+| `calkit pull`                   | Pull latest code and data                               |
+| `calkit save`                   | Auto-add, commit, and push (Git + DVC)                  |
+| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)                  |
+| `calkit add <file>`             | Add a file to version control                           |
+| `calkit check env --name <env>` | Verify an environment matches its spec                  |
+| `calkit new`                    | Create new project objects (notebook, dataset, etc.)    |
+| `calkit new question "<text>"`  | Record a research question                              |
+| `calkit list questions`         | List questions with what each has and lacks             |
+| `calkit show question <n>`      | Show a question with its answer rendered from evidence  |
+| `calkit check questions`        | Check answers against current evidence                  |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 

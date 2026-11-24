@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
-from calkit.core import LOCAL_DIR, ensure_local_dir
+from calkit.core import LOCAL_DIR, OUTPUT_SOURCE_DATE_EPOCH, ensure_local_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -143,8 +143,10 @@ def get_source_date_epoch(tex_file: str) -> str | None:
 
     # Whoever set it knows better, e.g., for LaTeX generated from a source
     # that has the history
-    if os.environ.get("SOURCE_DATE_EPOCH"):
-        return os.environ["SOURCE_DATE_EPOCH"]
+    # except a pipeline's date for Python's outputs, which isn't the paper's
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch and epoch != OUTPUT_SOURCE_DATE_EPOCH:
+        return epoch
     tex_dir = os.path.dirname(os.path.abspath(tex_file)) or os.getcwd()
     # A commit's date describes what that commit holds, so it can only
     # speak for a document that has been saved. With edits still in the
@@ -343,7 +345,8 @@ def find_missing_tex_files(log: str) -> list[str]:
 
 
 def find_named_tex_files(tex_file: str) -> list[str]:
-    """List the classes, packages, and bibliography styles a document names.
+    """List the classes, packages, bibliography styles, and babel languages
+    a document names.
 
     Read from the document and the files it inputs, so a missing package
     can be found before compiling rather than one failed run at a time.
@@ -377,6 +380,14 @@ def find_named_tex_files(tex_file: str) -> list[str]:
                         if path not in seen and os.path.isfile(path):
                             seen.add(path)
                             queue.append(path)
+        # Each language babel loads is a file of its own, e.g., english.ldf
+        for opts in re.findall(
+            r"\\usepackage\s*\[([^\]]*)\]\s*\{\s*babel\s*\}", tex
+        ):
+            for opt in (o.strip() for o in opts.split(",")):
+                lang = opt.removeprefix("main=").strip()
+                if re.fullmatch(r"[A-Za-z]+", lang):
+                    names.append(lang + ".ldf")
     return list(dict.fromkeys(names))
 
 
@@ -877,6 +888,12 @@ def component_candidates(
         exts = _GRAPHICS_EXTS if component.kind == "figure" else [".tex"]
         if posixpath.splitext(rel)[1].lower() not in exts:
             return [rel + ext for ext in exts] + [rel], None
+    # A value cited from a notebook is one its cells make, which the
+    # pipeline saves beside it
+    elif rel.lower().endswith(".ipynb"):
+        from calkit.notebooks import get_notebook_values_path
+
+        return [get_notebook_values_path(rel)], None
     return [rel], None
 
 
@@ -892,6 +909,11 @@ def component_path(
     for candidate in candidates:
         if exists(candidate):
             return candidate, None
+    if component.kind == "value" and component.path.lower().endswith(".ipynb"):
+        return None, (
+            f"No values saved from {component.path} yet; add it as a cell "
+            "output and run the pipeline"
+        )
     return None, f"{component.path} is not in the project yet"
 
 
@@ -961,16 +983,55 @@ def include_figure(
         return changed
     # calkit.sty has to be loaded for \ckfigure
     text = changed.get(document) or _read_leniently(str(base / root)) or ""
+    loading = add_package_load(text)
+    if loading != text:
+        changed[document] = loading
+    return changed
+
+
+def add_package_load(text: str) -> str:
+    """A document's text with ``\\usepackage{calkit}`` before its
+    ``\\begin{document}``, unless it loads calkit.sty already or has none.
+    """
     loaded = [
         name.strip()
         for names in _PACKAGE_RE.findall(_strip_comments(text))
         for name in names.split(",")
     ]
     begin = re.search(r"^[ \t]*\\begin\{document\}", text, re.M)
-    if "calkit" not in loaded and begin is not None:
-        at = begin.start()
-        changed[document] = text[:at] + "\\usepackage{calkit}\n" + text[at:]
-    return changed
+    if "calkit" in loaded or begin is None:
+        return text
+    at = begin.start()
+    newline = "\r\n" if "\r\n" in text else "\n"
+    return text[:at] + "\\usepackage{calkit}" + newline + text[at:]
+
+
+def load_package(document: str) -> bool:
+    """Add ``\\usepackage{calkit}`` to a document that uses calkit.sty's
+    commands, itself or in the files it inputs, without loading it, since it
+    can't compile otherwise. Returns whether it was added.
+    """
+    lines = flatten(document, read=_read_leniently)
+    text = "\n".join(_strip_comments(line.text) for line in lines)
+    loads = any(
+        "calkit" in (name.strip() for name in m.group(1).split(","))
+        for m in _PACKAGE_RE.finditer(text)
+    )
+    if loads or _CK_COMMAND_RE.search(text) is None:
+        return False
+    # Read as written, so its line endings are kept, and left alone if it
+    # isn't UTF-8, which writing back would garble
+    try:
+        with open(document, encoding="utf-8", newline="") as f:
+            source = f.read()
+    except UnicodeDecodeError:
+        return False
+    loading = add_package_load(source)
+    if loading == source:
+        return False
+    with open(document, "w", encoding="utf-8", newline="") as f:
+        f.write(loading)
+    return True
 
 
 def root_documents(folder: str) -> list[str]:

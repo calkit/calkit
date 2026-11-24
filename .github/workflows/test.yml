@@ -107,7 +107,7 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -125,7 +125,7 @@ jobs:
         with:
           run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@8d13b44e0eb1620c4e2d2d0a4ceee7d98100b955 # v3.1.6
+        uses: julia-actions/install-juliaup@ac1bed66e8369307bff3d25a4fa3f6b85cdfcfe7 # v3.1.7
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       # Juliaup installs Julia but leaves the depot empty, and the first Pkg
@@ -234,7 +234,7 @@ jobs:
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
       - name: Setup uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run

@@ -608,6 +608,16 @@ def update_markdown(
 
 @update_app.command(name="agent-skills")
 def update_agent_skills(
+    copy: Annotated[
+        bool,
+        typer.Option(
+            "--copy",
+            help=(
+                "Copy the skills to `~/.agents/skills` instead, for agents "
+                "without Calkit's plugin."
+            ),
+        ),
+    ] = False,
     quiet: Annotated[
         bool,
         typer.Option(
@@ -616,8 +626,33 @@ def update_agent_skills(
             help="Suppress non-essential output.",
         ),
     ] = False,
-):
-    """Copy packaged Calkit agent skills to `~/.agents/skills`."""
+) -> None:
+    """Update Calkit's plugin in each coding agent on this machine.
+
+    Copies of the skills in `~/.agents/skills` are removed, since they
+    shadow or duplicate the plugin's.
+    """
+    import re
+
+    from calkit import install
+
+    def fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
+        skill_md = os.path.join(dest_dir, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            return
+        with open(skill_md) as f:
+            content = f.read()
+        content = re.sub(
+            r"^(name:\s*)(.+)$",
+            f"\\g<1>{prefixed_name}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        with open(skill_md, "w") as f:
+            f.write(content)
+
+    # Find the skills, packaged or, in a dev install, in the repo
     source = resources.files("calkit").joinpath("agent_skills")
     source_repo = os.path.abspath(
         os.path.join(
@@ -631,50 +666,72 @@ def update_agent_skills(
     use_packaged = source.is_dir()
     if not use_packaged and not os.path.isdir(source_repo):
         raise_error("Bundled agent skills are missing from this installation")
-    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
-    os.makedirs(dest_root, exist_ok=True)
-
-    def _fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
-        skill_md = os.path.join(dest_dir, "SKILL.md")
-        if not os.path.isfile(skill_md):
-            return
-        with open(skill_md) as f:
-            content = f.read()
-        import re
-
-        content = re.sub(
-            r"^(name:\s*)(.+)$",
-            f"\\g<1>{prefixed_name}",
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        with open(skill_md, "w") as f:
-            f.write(content)
-
-    copied = 0
     if use_packaged:
-        for entry in source.iterdir():
-            if not entry.is_dir():
-                continue
-            prefixed = f"calkit-{entry.name}"
-            dest = os.path.join(dest_root, prefixed)
-            with resources.as_file(entry) as source_dir:
-                shutil.copytree(source_dir, dest, dirs_exist_ok=True)
-            _fix_skill_name(dest, prefixed)
-            copied += 1
+        skill_names = [e.name for e in source.iterdir() if e.is_dir()]
     else:
-        for name in os.listdir(source_repo):
-            source_dir = os.path.join(source_repo, name)
-            if not os.path.isdir(source_dir):
-                continue
+        skill_names = [
+            name
+            for name in os.listdir(source_repo)
+            if os.path.isdir(os.path.join(source_repo, name))
+        ]
+    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
+    # Copy for agents without the plugin
+    if copy:
+        os.makedirs(dest_root, exist_ok=True)
+        for name in skill_names:
             prefixed = f"calkit-{name}"
             dest = os.path.join(dest_root, prefixed)
-            shutil.copytree(source_dir, dest, dirs_exist_ok=True)
-            _fix_skill_name(dest, prefixed)
-            copied += 1
-    if not quiet:
-        typer.echo(f"Updated {copied} skills in {dest_root}")
+            if use_packaged:
+                with resources.as_file(source.joinpath(name)) as source_dir:
+                    shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            else:
+                shutil.copytree(
+                    os.path.join(source_repo, name), dest, dirs_exist_ok=True
+                )
+            fix_skill_name(dest, prefixed)
+        if not quiet:
+            typer.echo(f"Updated {len(skill_names)} skills in {dest_root}")
+        return
+    # Update the plugin in each agent found
+    n_found = 0
+    updated = []
+    for agent in install.AGENT_PLUGIN_CMDS:
+        binary_path = install.find(agent)
+        if binary_path is None:
+            continue
+        n_found += 1
+        if not install.is_agent_logged_in(agent, binary_path):
+            warn(
+                f"'{agent}' not logged in, so its Calkit plugin can't be "
+                f"updated; run '{agent} auth login'"
+            )
+            continue
+        if not quiet:
+            typer.echo(f"Updating Calkit plugin in '{agent}'")
+        if install.update_agent_plugin(agent, binary_path):
+            updated.append(agent)
+        else:
+            warn(f"Failed to update Calkit plugin in '{agent}'")
+    if n_found and not updated:
+        raise_error("Failed to update Calkit plugin in any coding agent")
+    if not updated:
+        warn(
+            "No coding agents updated; install one with, e.g., "
+            "'calkit install claude', or use '--copy' for other agents"
+        )
+        return
+    # Remove copies, which only now have a plugin to stand in for them, in
+    # an agent that reads them
+    if not set(updated) & set(install.AGENTS_READING_SKILL_COPIES):
+        return
+    n_removed = 0
+    for name in skill_names:
+        copy_path = os.path.join(dest_root, f"calkit-{name}")
+        if os.path.isdir(copy_path):
+            shutil.rmtree(copy_path)
+            n_removed += 1
+    if n_removed and not quiet:
+        typer.echo(f"Removed {n_removed} copied skills from {dest_root}")
 
 
 def _load_env(env_name: str) -> tuple[dict, dict]:
@@ -1547,14 +1604,60 @@ def update_figure(
             help="Name of the pipeline stage that produces this figure.",
         ),
     ] = None,
+    created_by_email: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-email",
+            help="Email of whoever made this figure, for one drawn by hand rather than produced by a stage.",
+        ),
+    ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-name", help="Name of whoever made this figure."
+        ),
+    ] = None,
+    created_by_orcid: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-orcid", help="ORCID of whoever made this figure."
+        ),
+    ] = None,
+    created_with_ai: Annotated[
+        list[str],
+        typer.Option(
+            "--created-with-ai",
+            help=(
+                "Generative AI tool they used, e.g. 'Claude Opus 5'. "
+                "Repeat for several."
+            ),
+        ),
+    ] = [],
 ) -> None:
     """Update a figure entry in calkit.yaml."""
+    from pydantic import ValidationError
+
+    from calkit.cli.new import _person_from_options
+    from calkit.models.core import Figure
+
     if imported_from is not None and imported_from_url is not None:
         raise_error(
             "--imported-from says where this came from on its own, so it "
             "can't be combined with --imported-from-url."
         )
-    if imported_from is None and imported_from_url is None and stage is None:
+    created_by = _person_from_options(
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
+    )
+    if (
+        imported_from is None
+        and imported_from_url is None
+        and stage is None
+        and created_by is None
+    ):
         raise_error("No updates specified.")
     source_dict = None
     if imported_from is not None:
@@ -1565,19 +1668,24 @@ def update_figure(
     figures = ck_info.get("figures", [])
     for fig in figures:
         if fig.get("path") == path:
-            if source_dict is not None:
-                fig["imported_from"] = source_dict
-            if stage is not None:
-                fig["stage"] = stage
             break
     else:
-        entry: dict = {"path": path}
-        if source_dict is not None:
-            entry["imported_from"] = source_dict
-        if stage is not None:
-            entry["stage"] = stage
-        figures.append(entry)
+        fig = {"path": path}
+        figures.append(fig)
         ck_info["figures"] = figures
+    if source_dict is not None:
+        fig["imported_from"] = source_dict
+    if stage is not None:
+        fig["stage"] = stage
+    if created_by is not None:
+        fig["created_by"] = created_by
+    try:
+        Figure.model_validate(fig)
+    except ValidationError as e:
+        raise_error(
+            "Invalid figure: "
+            + "; ".join(str(err["msg"]) for err in e.errors())
+        )
     calkit.save_calkit_info(ck_info)
 
 
@@ -1788,6 +1896,9 @@ def update_path_storage(
             if isinstance(out, dict) and out.get("storage") == "dvc-zip":
                 raise_error(f"{path} is stored zipped, which can't move yet")
             return f"outputs.{n}"
+        for n, out in enumerate(stage.get("cell_outputs") or []):
+            if out.get("output_path") and here(out["output_path"]) == path:
+                return f"cell_outputs.{n}"
         try:
             model = Pipeline.model_validate(
                 {"stages": {stage_name: stage}}
@@ -1818,6 +1929,9 @@ def update_path_storage(
         return None
 
     def set_storage(stage_name: str, stage: dict, key: str) -> None:
+        if key.startswith("cell_outputs."):
+            stage["cell_outputs"][int(key.split(".")[1])]["storage"] = to
+            return
         # Back to the default rather than spelled out where it can be
         if key.startswith("outputs."):
             n = int(key.split(".")[1])
@@ -2061,10 +2175,40 @@ def update_dataset(
             help="Name of the pipeline stage that produces this dataset.",
         ),
     ] = None,
+    created_by_email: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-email",
+            help="Email of whoever collected this data, for one collected for the project rather than imported or computed.",
+        ),
+    ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-name", help="Name of whoever collected this data."
+        ),
+    ] = None,
+    created_by_orcid: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-orcid", help="ORCID of whoever collected this data."
+        ),
+    ] = None,
+    created_with_ai: Annotated[
+        list[str],
+        typer.Option(
+            "--created-with-ai",
+            help=(
+                "Generative AI tool they used, e.g. 'Claude Opus 5'. "
+                "Repeat for several."
+            ),
+        ),
+    ] = [],
 ) -> None:
     """Update a dataset entry in calkit.yaml."""
     from pydantic import ValidationError
 
+    from calkit.cli.new import _person_from_options
     from calkit.models.core import (
         Dataset,
         _ImportedFromDoi,
@@ -2107,7 +2251,14 @@ def update_dataset(
             "recorded in .calkit/imports.json by 'calkit sync import'. Use "
             "--imported-from-git-ref to say what to follow."
         )
-    if not sources_given and stage is None:
+    created_by = _person_from_options(
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
+    )
+    if not sources_given and stage is None and created_by is None:
         raise_error("No updates specified.")
     source_dict: dict | None = None
     if sources_given:
@@ -2154,6 +2305,8 @@ def update_dataset(
         ds["imported_from"] = source_dict
     if stage is not None:
         ds["stage"] = stage
+    if created_by is not None:
+        ds["created_by"] = created_by
     # Checked as a whole, so an import added to a dataset someone collected
     # is refused here rather than left for the next validation to find
     try:

@@ -377,6 +377,8 @@ def check_repro(
             _echo_retyped(items)
         elif category == "numbers":
             _echo_unattributed(items)
+        elif category == "line-endings":
+            _echo_line_endings(items)
         else:
             calkit.echo(f"{category} ({len(items)}):")
             for item in items:
@@ -422,6 +424,25 @@ def _echo_retyped(findings: list[dict]) -> None:
         "written; and anything in a results file the document doesn't "
         "read with \\ckvalue and no 'json-to-latex' stage reads, or a "
         "value a 'json-to-latex' stage leaves out of the 'keys' it names."
+    )
+
+
+def _echo_line_endings(paths: list[str]) -> None:
+    """Files the pipeline hashes whose line endings Git doesn't pin."""
+    import calkit.eol
+
+    calkit.echo(
+        f"Pipeline files with line endings that differ on Windows "
+        f"({len(paths)}):"
+    )
+    for path in paths:
+        calkit.echo(f"  {path}")
+    calkit.echo(
+        "\nGit for Windows checks text files out with CRLF unless "
+        ".gitattributes says otherwise, and DVC hashes them as they are on "
+        "disk, so these hash differently there than wherever dvc.lock was "
+        "written, and the stages that use or write them read as out of "
+        f"date. To pin them to LF everywhere, {calkit.eol.FIX}."
     )
 
 
@@ -471,13 +492,13 @@ def _echo_unattributed(findings: list[dict]) -> None:
     help="Check that an environment is up-to-date (alias for 'environment').",
 )
 @check_app.command(name="environment")
-def check_environment(
+def check_environment_command(
     env_name: Annotated[
         str,
         typer.Option("--name", "-n", help="Name of the environment to check."),
     ],
     verbose: Annotated[
-        bool, typer.Option("--verbose", help="Print verbose output.")
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
     force: Annotated[
         bool,
@@ -488,8 +509,27 @@ def check_environment(
             "something it was built from changed outside the project.",
         ),
     ] = False,
-) -> str | None:
+) -> None:
     """Check that an environment is up-to-date.
+
+    An environment is also rebuilt when one of its 'inputs' changes.
+    """
+    import calkit.progress
+
+    # On a terminal, what the tools print is only shown if it fails
+    with calkit.progress.spinner(
+        f"Checking environment '{env_name}'", label=env_name, show=not verbose
+    ):
+        check_environment(env_name=env_name, verbose=verbose, force=force)
+
+
+def check_environment(
+    env_name: str,
+    verbose: bool = False,
+    force: bool = False,
+) -> str | None:
+    """Check that an environment is up-to-date, rebuilding it with
+    ``force``, and return its lock file's path.
 
     An environment is also rebuilt when one of its 'inputs' changes.
     """
@@ -566,6 +606,7 @@ def check_environment(
             alt_lock_fpaths=alt_lock_fpaths,
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
+            prefix=env.get("prefix"),
         )
     elif env["kind"] == "pixi":
         cmd = ["pixi", "install"]
@@ -587,6 +628,12 @@ def check_environment(
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--directory", env_dir]
+        try:
+            extras = calkit.environments.get_uv_extras(env)
+        except ValueError as e:
+            raise_error(str(e))
+        for extra in extras:
+            cmd += ["--extra", extra]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -1327,6 +1374,13 @@ def check_conda_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
+    prefix: Annotated[
+        str | None,
+        typer.Option(
+            "--prefix",
+            help="Where the environment is kept, overriding the spec's.",
+        ),
+    ] = None,
 ) -> None:
     log_func: Callable[..., None]
     if quiet:
@@ -1342,6 +1396,7 @@ def check_conda_env(
             log_func=log_func,
             relaxed=relaxed,
             verbose=not quiet,
+            prefix=prefix,
         )
     except Exception as e:
         warn_app_control(output=str(e), maybe=True)
@@ -1553,13 +1608,21 @@ def check_venv(
             return
         # Local packages are installed from the spec, since their paths
         # differ between machines
-        with open(lock_fpath_full, encoding="utf-8") as f:
-            frozen = f.read()
+        # Read as written, since pip writes it through the shell, e.g., with
+        # CRLF on Windows, whatever Git checks it out with
+        with open(lock_fpath_full, encoding="utf-8", newline="") as f:
+            written = f.read()
+        frozen = written.replace("\r\n", "\n")
         lock = "".join(
             ln for ln in frozen.splitlines(keepends=True) if not is_local(ln)
         )
-        if lock != frozen:
-            with open(lock_fpath_full, "w", encoding="utf-8") as f:
+        newline = calkit.git.get_checkout_newline(lock_fpath_full)
+        if lock != frozen or (
+            newline is not None and lock.replace("\n", newline) != written
+        ):
+            with open(
+                lock_fpath_full, "w", encoding="utf-8", newline=newline
+            ) as f:
                 f.write(lock)
         lock_changed = lock != lock_before
         # All platforms are relocked together, so they agree; an existing
@@ -1999,10 +2062,18 @@ def check_stage_runs() -> None:
     problems = []
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
+        # DVC writes a frozen stage's entry whenever it verifies the stage's
+        # outputs rather than running it, so there's no run to match
+        try:
+            frozen = calkit.pipeline.frozen_stage_base_names(wdir=lock_dir)
+        except Exception:
+            frozen = set()
         for lock_name, locked in sorted(lock_stages.items()):
             if not isinstance(locked, dict) or lock_name in removed.get(
                 lock_dir, set()
             ):
+                continue
+            if lock_name.split("@")[0] in frozen:
                 continue
             name = (
                 lock_name
@@ -2135,8 +2206,9 @@ def check_storage(
     """Check that paths are tracked where they're declared to be stored.
 
     That is, nothing is tracked by both Git and DVC, no pipeline output has
-    a .dvc file of its own too, no pipeline output stored in Git, or file
-    in one, is ignored by it, and nothing in Git is too large for it.
+    a .dvc file of its own too or is in a directory one tracks, no
+    pipeline output stored in Git, or file in one, is ignored by it, and
+    nothing in Git is too large for it.
     Large files are only reported.
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
@@ -2157,7 +2229,10 @@ def check_storage(
             for problem in problems:
                 warn(problem["message"])
         if any(p["kind"] != "large" for p in problems):
-            if not as_json:
+            if not as_json and any(
+                p["kind"] not in ("large", "stage-output-in-dvc-dir")
+                for p in problems
+            ):
                 typer.echo("Run 'calkit check storage --fix' to fix these")
             raise typer.Exit(1)
         if not problems and not as_json:
@@ -2170,11 +2245,22 @@ def check_storage(
     # Pipeline outputs are recorded in DVC, which records their stages'
     # inputs too, so only for stages that are up to date
     to_record = []
+    dvc_stages: dict = {}
+    if any(p["kind"] == "stage-output-dvc-file" for p in problems):
+        with open("dvc.yaml") as f:
+            dvc_stages = calkit.ryaml.load(f)["stages"]
     for problem in problems:
         path = os.path.abspath(problem["path"])
         if problem["kind"] == "stage-output-dvc-file":
-            # The stage says how it's made, so its own .dvc file goes
+            # The stage says how it's made, so its own .dvc file goes, with
+            # its hash kept in dvc.lock
             dvc_file = problem["dvc_file"]
+            if not calkit.dvc.record_stage_output_dvc_file(
+                problem, dvc_stages[problem["stage"]]
+            ):
+                warn(f"Keeping {dvc_file}: can't record its hash in dvc.lock")
+                unfixed.append(problem)
+                continue
             if repo.git.ls_files("--", dvc_file):
                 repo.git.rm("-q", "--", dvc_file)
             elif os.path.isfile(dvc_file):
@@ -2241,6 +2327,11 @@ def check_storage(
         target = problem["dvc_file"] or stage
         if calkit.dvc.run_dvc_command(["commit", "-f", "-q", target]) != 0:
             warn(f"Couldn't record {problem['path']} in DVC")
+    if os.path.isfile("dvc.lock") and any(
+        p["kind"] == "stage-output-dvc-file" for p in fixed
+    ):
+        calkit.dvc.ensure_dvc_lock_not_ignored()
+        repo.git.add("--", "dvc.lock")
     for message in calkit.git.stage_gitignores(repo, gitignores):
         warn(message)
     for problem in unfixed:

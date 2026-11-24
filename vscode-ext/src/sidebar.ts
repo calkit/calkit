@@ -14,7 +14,7 @@ import type {
   SignOffEntry,
   StaleStageDetail,
 } from "./types";
-import { getExecutedNotebookHtmlPath } from "./notebooks";
+import { getNotebookHtmlPath, getStageNotebookPath } from "./notebooks";
 import { pipelineLatexDiffs } from "./latex/core";
 import {
   classifyStaleStage,
@@ -403,8 +403,9 @@ export class CalkitSidebarProvider
     const listed = this.calkitConfig?.notebooks ?? [];
     const knownNbPaths = new Set(listed.map((n) => n.path));
     for (const stage of Object.values(stages)) {
-      if (typeof stage.notebook_path === "string") {
-        knownNbPaths.add(stage.notebook_path);
+      const stageNbPath = getStageNotebookPath(stage);
+      if (stageNbPath) {
+        knownNbPaths.add(stageNbPath);
       }
     }
     const allNbPaths = [...knownNbPaths];
@@ -934,9 +935,9 @@ export class CalkitSidebarProvider
     const listed = this.calkitConfig?.notebooks ?? [];
     const stages = this.calkitConfig?.pipeline?.stages ?? {};
     const explicit = listed.find((n) => n.path === nbPath);
-    // Find stage where notebook_path matches
+    // The stage that runs it, or renders it with Quarto
     const stageEntry = Object.entries(stages).find(
-      ([, s]) => s.notebook_path === nbPath,
+      ([, s]) => getStageNotebookPath(s) === nbPath,
     );
     const stageName = explicit?.stage ?? stageEntry?.[0];
     const stage = stageName ? stages[stageName] : undefined;
@@ -957,11 +958,10 @@ export class CalkitSidebarProvider
     const stages = this.calkitConfig?.pipeline?.stages ?? {};
     const knownPaths = new Set(listed.map((n) => n.path));
     // Add notebooks from pipeline stages
-    for (const [, stage] of Object.entries(stages)) {
-      if (typeof stage.notebook_path === "string") {
-        if (!knownPaths.has(stage.notebook_path)) {
-          knownPaths.add(stage.notebook_path);
-        }
+    for (const stage of Object.values(stages)) {
+      const stageNbPath = getStageNotebookPath(stage);
+      if (stageNbPath) {
+        knownPaths.add(stageNbPath);
       }
     }
     // Add auto-detected notebooks not already known
@@ -1109,8 +1109,9 @@ export class CalkitSidebarProvider
       // The notebook itself opens when clicked in the tree, so no separate
       // "Open" child is needed. Offer the executed HTML when it has been
       // generated.
-      const htmlRel = getExecutedNotebookHtmlPath(
+      const htmlRel = getNotebookHtmlPath(
         nbPath,
+        stage,
         stage?.subproject_wdir,
       );
       if (fs.existsSync(path.join(this.workspaceRoot, htmlRel))) {

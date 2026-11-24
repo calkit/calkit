@@ -505,7 +505,7 @@ Common stage parameters:
 | `always_run`        | bool                                                                                                                                                                  | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
 | `iterate_over`      | list[StageIteration] \| None                                                                                                                                          | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
 | `description`       | str \| None                                                                                                                                                           | no       | null      | A description of what this stage does.                                                                                                                                                                                                                                                                                |
-| `frozen`            | bool                                                                                                                                                                  | no       | False     | Never rerun this stage, treating its outputs as up-to-date.                                                                                                                                                                                                                                                           |
+| `frozen`            | bool                                                                                                                                                                  | no       | False     | Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.                                                                                                                                                                                                     |
 | `scheduler`         | StageSchedulerOptions \| None                                                                                                                                         | no       | null      | Options for running this stage on a job scheduler (SLURM or PBS).                                                                                                                                                                                                                                                     |
 | `setup`             | list[str] \| None                                                                                                                                                     | no       | null      | Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'. |
 | `env_default_setup` | Literal['ignore', 'replace', 'merge']                                                                                                                                 | no       | 'replace' | How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.                                                                   |
@@ -568,14 +568,15 @@ Notebooks need to be cleaned of outputs so they can be used as DVC
 dependencies. The `status` and `run` commands handle this
 automatically.
 
-| Kind-specific parameter  | Type                                         | Required | Default | Description                                                                                                  |
-| ------------------------ | -------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `notebook_path`          | str                                          | yes      |         | Path to the notebook to execute.                                                                             |
-| `cleaned_ipynb_storage`  | Literal['git', 'dvc'] \| None                | no       | null    | Where to store the output-stripped notebook.                                                                 |
-| `executed_ipynb_storage` | Literal['git', 'dvc'] \| None                | no       | 'dvc'   | Where to store the executed notebook.                                                                        |
-| `html_storage`           | Literal['git', 'dvc'] \| None                | no       | 'dvc'   | Where to store the executed notebook as HTML.                                                                |
-| `parameters`             | dict[str, Any]                               | no       |         | Parameters injected into the notebook. A value like '{name}' is filled in from the project-level parameters. |
-| `language`               | Literal['python', 'matlab', 'julia'] \| None | no       | null    | The notebook's language. Detected automatically if unset.                                                    |
+| Kind-specific parameter  | Type                                         | Required | Default | Description                                                                                                                                                 |
+| ------------------------ | -------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notebook_path`          | str                                          | yes      |         | Path to the notebook to execute.                                                                                                                            |
+| `cleaned_ipynb_storage`  | Literal['git', 'dvc'] \| None                | no       | null    | Where to store the output-stripped notebook.                                                                                                                |
+| `executed_ipynb_storage` | Literal['git', 'dvc'] \| None                | no       | 'dvc'   | Where to store the executed notebook.                                                                                                                       |
+| `html_storage`           | Literal['git', 'dvc'] \| None                | no       | 'dvc'   | Where to store the executed notebook as HTML.                                                                                                               |
+| `parameters`             | dict[str, Any]                               | no       |         | Parameters injected into the notebook. A value like '{name}' is filled in from the project-level parameters.                                                |
+| `language`               | Literal['python', 'matlab', 'julia'] \| None | no       | null    | The notebook's language. Detected automatically if unset.                                                                                                   |
+| `cell_outputs`           | list[NotebookCellOutput]                     | no       |         | Values, figures, and tables the notebook's cells make, saved by Calkit when the notebook runs, so it doesn't have to write them. Only for Python notebooks. |
 
 ### `latex`
 
@@ -756,6 +757,14 @@ of the Quarto document, since a document can emit multiple formats to
 arbitrary paths. As with other stages, plain string outputs are
 DVC-cached by default; use a `PathOutput` to store an output with Git
 instead.
+
+It renders with `calkit quarto render`, which checks Quarto comes from
+the stage's environment, or is a declared requirement, and resolves the
+values the document shows with the `ckvalue` shortcode first. A notebook
+rendered with `--execute` is depended on with its outputs stripped,
+like a notebook stage's, since rendering writes them back into it.
+Otherwise Quarto shows the outputs saved in it, so they're depended on
+too.
 
 | Kind-specific parameter | Type        | Required | Default | Description                                                                                        |
 | ----------------------- | ----------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
@@ -993,17 +1002,21 @@ case-insensitively, and a list of values means any of them will do.
 `os-version` and `calkit-python-version` where '>=' means
 something.
 
+`gpu-name`, `gpu-vendor` ('amd', 'nvidia' or 'apple') and
+`gpu-arch` (e.g., 'gfx1201' or 'sm_89') describe the machine's GPUs,
+and are met when any one of them meets the constraint.
+
 At least one of `equals`, `matches` and `version_spec` must be
 given. To record a property that results depend on rather than
 constrain it, add it to a `system` environment's `lock`.
 
-| Parameter      | Type                                                                                                                                        | Required | Default | Description                                                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `kind`         | Literal['os', 'os-version', 'platform', 'machine', 'processor', 'hostname', 'machine-id', 'calkit-python-version', 'python-implementation'] | yes      |         | Which property of the machine to constrain.                                                                           |
-| `equals`       | str \| list[str] \| None                                                                                                                    | no       | null    | Value the property must have, matched case-insensitively. A list means any one of them is acceptable.                 |
-| `version_spec` | str \| None                                                                                                                                 | no       | null    | PEP 440 version specifier the property must satisfy, e.g., '>=3.11'. For properties that are versions.                |
-| `matches`      | str \| list[str] \| None                                                                                                                    | no       | null    | Glob the property must match, case-insensitively, e.g., `*.cluster.edu` for a hostname. A list means any one of them. |
-| `description`  | str \| None                                                                                                                                 | no       | null    |                                                                                                                       |
+| Parameter      | Type                                                                                                                                                                              | Required | Default | Description                                                                                                           |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `kind`         | Literal['os', 'os-version', 'platform', 'machine', 'processor', 'hostname', 'machine-id', 'calkit-python-version', 'python-implementation', 'gpu-name', 'gpu-vendor', 'gpu-arch'] | yes      |         | Which property of the machine to constrain.                                                                           |
+| `equals`       | str \| list[str] \| None                                                                                                                                                          | no       | null    | Value the property must have, matched case-insensitively. A list means any one of them is acceptable.                 |
+| `version_spec` | str \| None                                                                                                                                                                       | no       | null    | PEP 440 version specifier the property must satisfy, e.g., '>=3.11'. For properties that are versions.                |
+| `matches`      | str \| list[str] \| None                                                                                                                                                          | no       | null    | Glob the property must match, case-insensitively, e.g., `*.cluster.edu` for a hostname. A list means any one of them. |
+| `description`  | str \| None                                                                                                                                                                       | no       | null    |                                                                                                                       |
 
 #### `SetupRequirement`
 
@@ -1108,6 +1121,21 @@ name as its key instead.
 | `account_id`    | str \| None                                                            | no       | null    |             |
 | `profile`       | str \| None                                                            | no       | null    |             |
 | `notes`         | str \| None                                                            | no       | null    |             |
+
+#### `NotebookCellOutput`
+
+A value, figure, or table one of a notebook's cells makes, which
+Calkit saves when the pipeline runs the notebook, so the notebook
+doesn't have to write it itself.
+
+| Parameter       | Type                                | Required | Default | Description                                                                                                                                                                                                                                                                      |
+| --------------- | ----------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['value', 'figure', 'table'] | yes      |         | What it is: a value, cited by the notebook's path, e.g., \ckvalue{analysis.ipynb}{name}, or a figure or table, saved to 'output_path'.                                                                                                                                           |
+| `cell_id`       | str \| None                         | no       | null    | ID of the cell it's saved after, which Jupyter and VS Code keep on the cell as it moves. A value with none is saved after the last cell.                                                                                                                                         |
+| `variable_name` | str \| None                         | no       | null    | Name of the variable it's saved from: a value's name, e.g., a number or a dict of them, a figure, e.g., a Matplotlib figure, or a table, e.g., a DataFrame. A figure without one is the image the cell shows, and a table the result it shows, e.g., df.head() on its last line. |
+| `output_path`   | str \| None                         | no       | null    | Where a figure or table is saved, in the format its extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as LaTeX (.tex), CSV, Markdown, or JSON.                                                                                                                     |
+| `format`        | str \| None                         | no       | null    | Python format spec for a table's numbers, e.g., '.3f'.                                                                                                                                                                                                                           |
+| `storage`       | Literal['git', 'dvc'] \| None       | no       | null    | Where to store a figure or table. New figures are set to Git when added.                                                                                                                                                                                                         |
 
 #### `PythonScriptDiffFilter`
 

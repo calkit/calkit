@@ -1,5 +1,6 @@
 """Tests for ``calkit.cli.check``."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -124,6 +125,21 @@ def test_check_venv(tmp_dir):
     assert result.returncode != 0
     assert "out of sync with its lock" in result.stderr + result.stdout
     assert not [f for f in os.listdir() if f.startswith(("osx-", "linux-"))]
+    # A new lock gets the line ending Git checks it out with, whichever one
+    # the installer froze it with
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "config", "core.autocrlf", "false"])
+    for eol, reqs in [("crlf", "requests\nsix\n"), ("lf", "requests\n")]:
+        with open(".gitattributes", "w") as f:
+            f.write(f"lock.txt text eol={eol}\n")
+        with open("reqs.txt", "w") as f:
+            f.write(reqs)
+        subprocess.check_call(check_311)
+        with open("lock.txt", "rb") as f:
+            raw = f.read()
+        assert b"requests==" in raw
+        n_crlf = raw.count(b"\n") if eol == "crlf" else 0
+        assert raw.count(b"\r\n") == n_crlf, eol
 
 
 def test_check_venv_moved(tmp_dir):
@@ -1878,6 +1894,42 @@ def test_check_stage_runs(tmp_dir):
     # Rerunning them records them again
     subprocess.check_call(["calkit", "run", "--force"])
     subprocess.check_call(check)
+    # A frozen stage's committed output, e.g., model weights trained
+    # elsewhere, gets an entry DVC writes on verifying it, not a run, so
+    # it isn't checked against one
+    with open("f.txt", "w") as f:
+        f.write("trained elsewhere\n")
+    ck_info["pipeline"]["stages"]["f"] = {
+        "kind": "shell-command",
+        "command": "echo f > f.txt",
+        "environment": "_system",
+        "inputs": [{"from_stage_outputs": "a"}],
+        "outputs": [{"path": "f.txt", "storage": "git"}],
+        "frozen": True,
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    assert "f" in calkit.dvc.read_lock_stages()
+    assert "f" not in calkit.read_stage_runs()
+    with open("f.txt") as f:
+        assert f.read() == "trained elsewhere\n"
+    subprocess.check_call(check)
+    # Forcing all stages leaves it alone, but naming it runs it,
+    subprocess.check_call(["calkit", "run", "--force"])
+    with open("f.txt") as f:
+        assert f.read() == "trained elsewhere\n"
+    # without rerunning what it depends on, which is up to date
+    a_run = calkit.read_stage_runs()["a"]
+    subprocess.check_call(["calkit", "run", "--force", "f"])
+    with open("f.txt") as f:
+        assert f.read() == "f\n"
+    assert "f" in calkit.read_stage_runs()
+    assert calkit.read_stage_runs()["a"] == a_run
+    subprocess.check_call(check)
+    del ck_info["pipeline"]["stages"]["f"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
     # A subproject's runs are kept beside its dvc.lock under their names
     # there, so it is the same record whichever directory ran them
     os.makedirs("sub")
@@ -2339,3 +2391,52 @@ def test_check_storage_stage_output_dvc_file(tmp_dir):
         ["git", "diff", "--cached", "--name-only"], text=True
     ).split()
     assert "fig.png.dvc" in staged
+    # Its hash moves to dvc.lock, staged, so the data can still be pulled
+    assert "dvc.lock" in staged
+    with open("dvc.lock") as f:
+        (locked,) = calkit.ryaml.load(f)["stages"]["plot"]["outs"]
+    assert locked["path"] == "fig.png"
+    assert locked["md5"] == hashlib.md5(b"old").hexdigest()
+    subprocess.check_call(["git", "commit", "-qm", "Fix figure"])
+    # A .dvc file whose hash can't be found to keep isn't removed
+    with open("fig.png.dvc", "w") as f:
+        f.write("outs:\n- path: other.png\n  md5: abc\n")
+    result = subprocess.run(
+        ["calkit", "check", "storage", "--fix"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "Keeping fig.png.dvc" in result.stdout
+    assert os.path.isfile("fig.png.dvc")
+    os.remove("fig.png.dvc")
+    # A stage output in a directory a .dvc file tracks, which the check
+    # reports for the user, keeping the .dvc file since it covers other data
+    os.makedirs("data")
+    for fname in ["made.pkl", "other.pkl"]:
+        with open(f"data/{fname}", "w") as f:
+            f.write(fname)
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data"])
+    subprocess.check_call(["git", "commit", "-qm", "Add data"])
+    with open("dvc.yaml", "a") as f:
+        f.write("  make:\n    cmd: x\n    outs:\n    - data/made.pkl\n")
+    for args in [[], ["--fix"]]:
+        result = subprocess.run(
+            ["calkit", "check", "storage", *args],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "data/made.pkl is made by stage 'make'" in result.stdout
+        assert "add its other files separately" in result.stdout
+        assert "--fix" not in result.stdout
+        assert os.path.isfile("data.dvc")
+    (problem,) = json.loads(
+        subprocess.run(
+            ["calkit", "check", "storage", "--json"],
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    assert problem["kind"] == "stage-output-in-dvc-dir"
+    assert problem["dvc_file"] == "data.dvc"

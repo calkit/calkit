@@ -1233,6 +1233,10 @@ def test_get_path_provenance():
         "paper/drawn.svg": "",
         "paper/figures/plot.png": "",
         "figures/plot.png": "",
+        "nbs/fit.ipynb": "{}",
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json": json.dumps(
+            {"k": 0.25}
+        ),
     }
     ck_info = {
         "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
@@ -1252,6 +1256,14 @@ def test_get_path_provenance():
                     "script_path": "scripts/analyze.py",
                     "environment": "py",
                     "outputs": ["results/metrics.json", "figures/plot.png"],
+                },
+                "fit": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "nbs/fit.ipynb",
+                    "environment": "py",
+                    "cell_outputs": [
+                        {"kind": "value", "cell_id": "a", "variable_name": "k"}
+                    ],
                 },
                 "copy-figs": {
                     "kind": "map-paths",
@@ -1283,6 +1295,13 @@ def test_get_path_provenance():
                 "deps": ["figures/plot.png"],
                 "outs": ["paper/figures/plot.png"],
             },
+            "fit": {
+                "cmd": "calkit nb execute nbs/fit.ipynb",
+                "deps": [".calkit/notebooks/cleaned/nbs/fit.ipynb"],
+                "outs": [
+                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+                ],
+            },
         }
     }
     dvc_lock = {
@@ -1306,6 +1325,7 @@ def test_get_path_provenance():
             or {
                 "analyze": {"status": "up-to-date"},
                 "copy-figs": {"status": "up-to-date"},
+                "fit": {"status": "up-to-date"},
             },
             is_file=lambda p: p in files,
             is_dir=lambda p: p == "data/downloaded",
@@ -1327,6 +1347,10 @@ def test_get_path_provenance():
     assert get("results/metrics.json", key="nope")["value_error"] == (
         "nope isn't in results/metrics.json"
     )
+    # A value cited from a notebook is the one its cells saved
+    fit = get("nbs/fit.ipynb", key="k")
+    assert fit["value"] == 0.25
+    assert fit["stage"] == "fit"
     # A copy is described by what made the original, and is stale if the
     # copy is
     copy = get(
@@ -1389,7 +1413,15 @@ def test_add_origin_and_add_creator():
         ck_info, "drawings/c.svg", created_by=[person], title="C"
     )
     assert ck_info["misc"] == [
-        {"path": "drawings/c.svg", "title": "C", "created_by": [person]}
+        {"path": "drawings/c.svg", "title": "C", "created_by": person}
+    ]
+    # Several people stay a list
+    ck_info, _ = add_origin(
+        ck_info, "drawings/g.svg", created_by=[person, {"email": "me@x.org"}]
+    )
+    assert ck_info["misc"].pop()["created_by"] == [
+        person,
+        {"email": "me@x.org"},
     ]
     for path, kwargs, error in [
         ("figures/b.png", {"imported_from": url}, "already declared"),
@@ -1409,14 +1441,14 @@ def test_add_origin_and_add_creator():
         {"email": "me@x.org"},
     )
     assert before["misc"][1] == {"path": "./drawings/f.psd"}
-    assert ck_info["misc"][0]["created_by"] == [person]
+    assert ck_info["misc"][0]["created_by"] == person
     assert ck_info["misc"][1] == {
         "path": "./drawings/f.psd",
-        "created_by": [{"email": "me@x.org"}],
+        "created_by": {"email": "me@x.org"},
     }
     assert ck_info["misc"][2] == {
         "path": "drawings/e.psd",
-        "created_by": [{"email": "me@x.org"}],
+        "created_by": {"email": "me@x.org"},
     }
     assert len(ck_info["misc"]) == 3
 

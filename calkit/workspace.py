@@ -872,6 +872,7 @@ def check_requirements(
     from here is say precisely what was missing and where.
     """
     from calkit.core import _normalize_requirement
+    from calkit.install import NAME_ALIASES
 
     reqs = [_normalize_requirement(raw) for raw in requirements]
     if not reqs:
@@ -886,7 +887,7 @@ def check_requirements(
             system_info = remote_system_info(
                 workspace,
                 apps=[
-                    r["name"]
+                    NAME_ALIASES.get(r["name"], r["name"])
                     for r in reqs
                     if r["kind"] == "app" and r.get("version_spec")
                 ],
@@ -915,7 +916,9 @@ def check_requirements(
                     msg += f" Get a value with '{req['setup_command']}'."
                 raise ValueError(msg)
         elif kind == "app":
-            cmd = f"command -v {shlex.quote(name)}"
+            # Looked for as the binary it provides, e.g., code for vscode
+            binary = NAME_ALIASES.get(name, name)
+            cmd = f"command -v {shlex.quote(binary)}"
             if _remote_rc(workspace, cmd, verbose=verbose) != 0:
                 msg = f"app '{name}' was not found on {described_as}"
                 if req.get("setup_command"):
@@ -926,7 +929,7 @@ def check_requirements(
             spec = req.get("version_spec")
             if spec:
                 calkit.check_app_version(
-                    name,
+                    binary,
                     spec,
                     system_info=system_info or {},
                     described_as=described_as,

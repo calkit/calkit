@@ -16,6 +16,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
+import calkit.eol
 from calkit.cli import AliasGroup, OptionalValueCommand, raise_error, warn
 from calkit.core import ryaml
 
@@ -34,7 +35,11 @@ def _check_path_dir(path: str):
 
 
 def _person_from_options(
-    option: str, email: str | None, orcid: str | None, with_ai: list[str]
+    option: str,
+    email: str | None,
+    orcid: str | None,
+    with_ai: list[str],
+    name: str | None = None,
 ) -> dict | None:
     """Build a ``created_by`` entry from CLI options.
 
@@ -46,7 +51,7 @@ def _person_from_options(
 
     from calkit.models.core import _Person
 
-    if email is None and orcid is None and not with_ai:
+    if email is None and orcid is None and name is None and not with_ai:
         return None
     # ``with_ai`` is a list, one entry per --with-ai given. A single tool is
     # written as a scalar, which is what the docs show and what reads best
@@ -57,7 +62,9 @@ def _person_from_options(
     elif with_ai:
         with_ai_value = with_ai
     try:
-        person = _Person(email=email, orcid=orcid, with_ai=with_ai_value)
+        person = _Person(
+            email=email, name=name, orcid=orcid, with_ai=with_ai_value
+        )
     except ValidationError as e:
         raise_error(
             f"Invalid --{option}: "
@@ -560,8 +567,11 @@ def new_project(
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:
             warn("Could not set authentication for Calkit DVC remote")
+        # Before adding, so what's committed is normalized by the rules
+        calkit.eol.write_rules(abs_path)
         # Commit this stuff to Git
         repo.git.add(".")
+        calkit.eol.convert_worktree(abs_path)
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Create new project from {template_name}"])
         calkit.record_project_path(abs_path)
@@ -574,6 +584,9 @@ def new_project(
         typer.echo("Initializing Git repository")
         subprocess.run(["git", "init", "-q"], cwd=abs_path)
     repo = calkit.git.get_repo(abs_path)
+    # Before anything is added, so what's committed is normalized by them
+    if calkit.eol.write_rules(abs_path):
+        repo.git.add(".gitattributes")
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
         result = run_dvc_command(
@@ -619,6 +632,8 @@ def new_project(
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception as e:
             warn(f"Failed to set up Calkit DVC remote: {e}")
+    # Files written here have this platform's line endings
+    calkit.eol.convert_worktree(abs_path)
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     calkit.record_project_path(abs_path)
@@ -673,6 +688,10 @@ def new_figure(
             ),
         ),
     ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option("--created-by-name", help="Their name."),
+    ] = None,
     created_by_orcid: Annotated[
         str | None,
         typer.Option(
@@ -716,7 +735,11 @@ def new_figure(
     if (deps or outs or outs_from_stage) and not stage_name:
         raise_error("Stage name must be provided")
     created_by = _person_from_options(
-        "created-by", created_by_email, created_by_orcid, created_with_ai
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
     )
     obj: dict = dict(path=path, title=title)
     if description is not None:
@@ -1461,6 +1484,10 @@ def new_dataset(
             ),
         ),
     ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option("--created-by-name", help="Their name."),
+    ] = None,
     created_by_orcid: Annotated[
         str | None,
         typer.Option(
@@ -1505,7 +1532,11 @@ def new_dataset(
     if (deps or outs or outs_from_stage) and not stage_name:
         raise_error("Stage name must be provided")
     created_by = _person_from_options(
-        "created-by", created_by_email, created_by_orcid, created_with_ai
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
     )
     obj: dict = dict(path=path, title=title)
     if description is not None:

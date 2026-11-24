@@ -157,6 +157,8 @@ def _xr_markdown(
             "dvc.yaml",
             "dvc.lock",
             ".gitignore",
+            # Initializing pins line endings in it
+            ".gitattributes",
             ".dvcignore",
             STAGE_RUNS_FPATH,
         ]

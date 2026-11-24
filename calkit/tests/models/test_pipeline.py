@@ -2,6 +2,8 @@
 
 import base64
 import json
+import os
+import re
 import subprocess
 import sys
 
@@ -23,6 +25,7 @@ from calkit.models.pipeline import (
     MarkdownStage,
     MatlabCommandStage,
     MatlabScriptStage,
+    NotebookCellOutput,
     Pipeline,
     PptxExportStage,
     PythonScriptStage,
@@ -398,7 +401,7 @@ def test_latexstage(tmp_path):
     assert all_deps == [expected] * 3
 
 
-def test_quartostage():
+def test_quartostage(tmp_path):
     s = QuartoStage(
         name="render-report",
         environment="analysis",
@@ -407,8 +410,10 @@ def test_quartostage():
         outputs=["report/report.html"],
     )
     sd = s.to_dvc()
+    # Calkit renders it, checking Quarto comes from the environment and
+    # resolving the document's values first
     assert sd["cmd"] == (
-        "calkit xenv -n analysis --no-check -- quarto render report/report.qmd"
+        "calkit quarto render -e analysis --no-check report/report.qmd"
     )
     assert "report/report.qmd" in sd["deps"]
     assert "report/results.json" in sd["deps"]
@@ -425,20 +430,153 @@ def test_quartostage():
         # A PathOutput can be used to store with Git instead
         outputs=[PathOutput(path="report/report.pdf", storage="git")],
     )
-    assert s.dvc_cmd.endswith(
-        "quarto render report/report.qmd --to pdf --no-clean"
-    )
+    assert s.dvc_cmd.endswith("report/report.qmd --to pdf -- --no-clean")
     assert s.dvc_outs == [
         {"report/report.pdf": {"cache": False, "persist": False}}
     ]
-    # System environment renders without an xenv wrapper
+    # Outside any environment, it renders with what's on this machine
     s = QuartoStage(
         name="render-report",
         environment="_system",
         target_path="report/report.qmd",
         outputs=["report/report.html"],
     )
-    assert s.dvc_cmd == "quarto render report/report.qmd"
+    assert s.dvc_cmd == (
+        "calkit quarto render -e _system --no-check report/report.qmd"
+    )
+    # A stage listing Quarto as a requirement says one installed on the
+    # machine is expected
+    s = QuartoStage(
+        name="render-report",
+        environment="_system",
+        target_path="report/report.qmd",
+        requirements=["quarto>=1.8"],
+    )
+    assert s.dvc_cmd == (
+        "calkit quarto render -e _system --no-check --allow-machine-quarto "
+        "report/report.qmd"
+    )
+    # A notebook rendered with --execute gets its outputs written back, so
+    # it's depended on stripped of them, from wherever the stage runs
+    s = QuartoStage(
+        name="nb",
+        environment="analysis",
+        target_path="index.ipynb",
+        args=["--execute"],
+        wdir="pub",
+    )
+    assert (
+        s.cleaned_notebook_path == ".calkit/notebooks/cleaned/pub/index.ipynb"
+    )
+    assert s.dvc_deps[0] == "../.calkit/notebooks/cleaned/pub/index.ipynb"
+    assert s.notebook_outputs == [
+        PathOutput(path=s.cleaned_notebook_path, storage=None)
+    ]
+    assert s.dvc_cmd.endswith("index.ipynb -- --execute")
+    # Rendered without executing, it shows the outputs saved in it, so
+    # those are depended on
+    s = QuartoStage(
+        name="nb", environment="analysis", target_path="index.ipynb"
+    )
+    assert s.dvc_deps[0] == "index.ipynb"
+    assert s.notebook_outputs == []
+    # Args are quoted so sh and cmd.exe on Windows both read them the same
+    s = QuartoStage(
+        name="nb",
+        environment="analysis",
+        target_path="my report.qmd",
+        args=["-M", "title:My Paper", "-P", "n:{n}"],
+    )
+    assert s.dvc_cmd.endswith(
+        '"my report.qmd" -- -M "title:My Paper" -P n:{n}'
+    )
+    # The files its ckvalue shortcodes read are inputs, if they exist or a
+    # stage makes them, with the extension that reads them written beside it
+    (tmp_path / "calkit.yaml").write_text(
+        "results:\n  - name: metrics\n    path: results/metrics.json\n"
+    )
+    (tmp_path / "report").mkdir()
+    (tmp_path / "report" / "report.qmd").write_text(
+        "RMS {{< ckvalue metrics rms .2f >}}, n "
+        "{{< ckvalue path=data/n.json key=n >}}, and an escaped "
+        "{{</* ckvalue other.json x */>}}, and a typo "
+        "{{< ckvalue missing.json x >}}.\n"
+    )
+    s = QuartoStage(
+        name="report",
+        environment="analysis",
+        target_path="report/report.qmd",
+    )
+    s.preprocess(
+        str(tmp_path),
+        lambda p: p in ("results/metrics.json", "data/n.json"),
+        write_files=True,
+    )
+    assert s.dvc_deps[0] == "report/report.qmd"
+    assert s.dvc_deps[-2:] == ["results/metrics.json", "data/n.json"]
+    assert "missing.json" not in s.dvc_deps
+    assert s.dvc_outs == []
+    assert (tmp_path / "report/_extensions/calkit/calkit.lua").is_file()
+    # In a Quarto project, it goes at its root, with inputs seen from the
+    # stage's wdir
+    (tmp_path / "_quarto.yml").write_text("project:\n  type: website\n")
+    s = QuartoStage(
+        name="report",
+        environment="analysis",
+        target_path="report.qmd",
+        wdir="report",
+    )
+    s.preprocess(
+        str(tmp_path),
+        lambda p: p in ("results/metrics.json", "data/n.json"),
+        write_files=True,
+    )
+    assert s.dvc_deps[-2:] == ["../results/metrics.json", "../data/n.json"]
+    assert (tmp_path / "_extensions/calkit/calkit.lua").is_file()
+    # One that shows nothing has nothing extra
+    (tmp_path / "report" / "report.qmd").write_text("No values.\n")
+    s.preprocess(str(tmp_path), lambda p: False, write_files=True)
+    assert s.dvc_deps == ["report.qmd"]
+    # The notebooks it embeds cells' outputs from are inputs too, and one
+    # another stage executes makes it wait for that stage through one of
+    # its outputs, since the notebook itself isn't one
+    (tmp_path / "_quarto.yml").unlink()
+    (tmp_path / "analysis.ipynb").write_text("{}")
+    (tmp_path / "report" / "report.qmd").write_text(
+        "{{< embed ../analysis.ipynb#fig-decay >}}\n\n"
+        "{{< embed '/analysis.ipynb#tbl-fit' >}}\n\n"
+        "{{< embed missing.ipynb#fig-x >}}\n"
+    )
+    pipeline = Pipeline(
+        stages={
+            "analysis": QuartoStage(
+                name="analysis",
+                environment="analysis",
+                target_path="analysis.ipynb",
+                args=["--execute"],
+                outputs=["analysis.html"],
+            ),
+            "report": QuartoStage(
+                name="report",
+                environment="analysis",
+                target_path="report.qmd",
+                wdir="report",
+            ),
+        }
+    )
+    pipeline.preprocess_stages(str(tmp_path))
+    assert pipeline.stages["report"].dvc_deps == [
+        "report.qmd",
+        "../analysis.ipynb",
+        "../analysis.html",
+    ]
+    # One rendered without executing has nothing to wait for
+    pipeline.stages["analysis"].args = []
+    pipeline.preprocess_stages(str(tmp_path))
+    assert pipeline.stages["report"].dvc_deps == [
+        "report.qmd",
+        "../analysis.ipynb",
+    ]
 
 
 def test_jupyternotebookstage():
@@ -494,6 +632,174 @@ def test_jupyternotebookstage():
         " --params-base64 "
         '"eyJwYXJhbTEiOiAidmFsdWUxIiwgInBhcmFtMiI6ICJ2YWx1ZTIifQ==" '
     ) in dvc_stage["cmd"]
+    # Cell outputs are passed to the command and are outputs of the stage,
+    # with values saved together in Git
+    s = JupyterNotebookStage(
+        name="fit",
+        environment="main",
+        notebook_path="nbs/fit.ipynb",
+        html_storage=None,
+        cell_outputs=[
+            {"kind": "value", "cell_id": "3f9a1c2e", "variable_name": "k_25"},
+            {"kind": "value", "variable_name": "rates"},
+            {
+                "kind": "figure",
+                "cell_id": "8b77d0aa",
+                "variable_name": "fig",
+                "output_path": "figures/fit.pdf",
+            },
+            {
+                "kind": "figure",
+                "cell_id": "8b77d0aa",
+                "output_path": "f/shown.svg",
+            },
+            {
+                "kind": "table",
+                "cell_id": "1d2e4c0b",
+                "variable_name": "df",
+                "output_path": "tables/rates.tex",
+                "format": ".3f",
+            },
+        ],
+    )
+    dvc_stage = s.to_dvc()
+    assert (
+        s.values_path == ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+    )
+    assert dvc_stage["cmd"] == (
+        "calkit nb execute --environment main --no-check "
+        '--output "kind=value,cell_id=3f9a1c2e,variable_name=k_25" '
+        '--output "kind=value,variable_name=rates" '
+        '--output "kind=figure,cell_id=8b77d0aa,variable_name=fig,'
+        'output_path=figures/fit.pdf" '
+        '--output "kind=figure,cell_id=8b77d0aa,output_path=f/shown.svg" '
+        '--output "kind=table,cell_id=1d2e4c0b,variable_name=df,'
+        'output_path=tables/rates.tex,format=.3f" "nbs/fit.ipynb"'
+    )
+    assert {s.values_path: {"cache": False}} in dvc_stage["outs"]
+    assert {"figures/fit.pdf": {"cache": True}} in dvc_stage["outs"]
+    assert {"f/shown.svg": {"cache": False}} in dvc_stage["outs"]
+    assert {"tables/rates.tex": {"cache": False}} in dvc_stage["outs"]
+    assert s.values_path in [o.path for o in s.notebook_outputs]
+    for out in s.cell_outputs:
+        assert NotebookCellOutput.from_arg(out.to_arg()) == out
+    # Without values, there's no values file
+    s = JupyterNotebookStage(
+        environment="main",
+        notebook_path="fit.ipynb",
+        cell_outputs=[
+            {
+                "kind": "figure",
+                "cell_id": "a",
+                "output_path": "f.png",
+                "storage": "git",
+            },
+        ],
+    )
+    assert [o.path for o in s.cell_output_paths] == ["f.png"]
+    assert {"f.png": {"cache": False}} in s.to_dvc()["outs"]
+    # Paths are kept as a document cites them
+    typed = NotebookCellOutput(
+        kind="figure", cell_id="a", output_path=r".\figs\fit.pdf"
+    )
+    assert typed.output_path == "figs/fit.pdf"
+    # A percent format has one %, which no shell expands
+    pct = NotebookCellOutput(
+        kind="table",
+        cell_id="a",
+        variable_name="d",
+        output_path="t.tex",
+        format=".1%",
+    )
+    assert NotebookCellOutput.from_arg(pct.to_arg()) == pct
+    # A table without a variable is the result its cell shows
+    shown = NotebookCellOutput(kind="table", cell_id="a", output_path="t.tex")
+    assert NotebookCellOutput.from_arg(shown.to_arg()) == shown
+    # What can't be saved
+    figure = {"kind": "figure", "cell_id": "a"}
+    table = {"kind": "table", "cell_id": "a", "variable_name": "d"}
+    bad_outputs = [
+        ({}, "Field required"),
+        ({"kind": "plot", "variable_name": "a"}, "Input should be"),
+        ({"kind": "value"}, "Name the variable"),
+        ({"kind": "value", "variable_name": "not a name"}, "isn't a variable"),
+        (
+            {"kind": "value", "variable_name": "a", "output_path": "a.json"},
+            "don't apply",
+        ),
+        ({"kind": "value", "cell_id": "a b", "variable_name": "a"}, "cell ID"),
+        ({"kind": "value", "variable_name": "a", "figure": "f.png"}, "Extra"),
+        (figure, "A figure needs an 'output_path'"),
+        (figure | {"output_path": "f.gif"}, "not '.gif'"),
+        ({"kind": "figure", "output_path": "f.png"}, "Name the cell"),
+        (figure | {"output_path": os.path.abspath("f.png")}, "relative"),
+        (figure | {"output_path": "f,g.png"}, "comma"),
+        (figure | {"output_path": "$HOME/f.png"}, "can't include $"),
+        (figure | {"output_path": "100%.png"}, "can't include %"),
+        (
+            table | {"output_path": "t.tex", "format": '">8'},
+            "can't include \"",
+        ),
+        (figure | {"output_path": "f.png", "format": ".2f"}, "only applies"),
+        (
+            {"kind": "table", "output_path": "t.tex"},
+            "Name the cell that shows t.tex",
+        ),
+        (table | {"output_path": "t.xlsx"}, "not '.xlsx'"),
+        (table | {"output_path": "t.tex", "format": "q"}, "format"),
+        (table | {"output_path": "t.tex", "format": ",.2f"}, "'_'"),
+    ]
+    for fields, message in bad_outputs:
+        with pytest.raises(ValidationError, match=re.escape(message)):
+            NotebookCellOutput.model_validate(
+                {k: v for k, v in fields.items() if v is not None}
+            )
+    for fields, message in [
+        ({"variable_name": "b c"}, "isn't a variable"),
+        ({}, "Name the variable"),
+        ({"variable_names": ["a", "b"]}, "Extra inputs"),
+    ]:
+        with pytest.raises(ValidationError, match=message):
+            NotebookCellOutput.model_validate({"kind": "value"} | fields)
+    # Figures added before they defaulted to Git stay in DVC
+    for path, storage, stored_with in [
+        ("f.png", None, "dvc"),
+        ("f.pdf", None, "dvc"),
+        ("f.svg", None, "git"),
+        ("f.png", "git", "git"),
+    ]:
+        assert (
+            NotebookCellOutput(
+                kind="figure", cell_id="a", output_path=path, storage=storage
+            ).stored_with
+            == stored_with
+        )
+    with pytest.raises(ValueError, match="give it as"):
+        NotebookCellOutput.from_arg("value")
+    with pytest.raises(ValueError, match="given twice"):
+        NotebookCellOutput.from_arg("kind=value,kind=value")
+    value = {"kind": "value", "variable_name": "a"}
+    bad_stages = [
+        ([value, value | {"cell_id": "x"}], {}, "more than once"),
+        (
+            [
+                figure | {"output_path": "f.png"},
+                figure | {"cell_id": "y", "output_path": "f.png"},
+            ],
+            {},
+            "more than one cell",
+        ),
+        ([figure | {"output_path": "f.png"}], {"outputs": ["f.png"]}, "too"),
+        ([value], {"language": "julia"}, "only saved from Python"),
+    ]
+    for cell_outputs, extra, message in bad_stages:
+        with pytest.raises(ValidationError, match=message):
+            JupyterNotebookStage(
+                environment="main",
+                notebook_path="fit.ipynb",
+                cell_outputs=cell_outputs,
+                **extra,
+            )
 
 
 def test_stageiteration(monkeypatch, tmp_path):

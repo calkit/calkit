@@ -1356,7 +1356,6 @@ def test_log(tmp_path, monkeypatch):
     fpath = str(tmp_path / "hub_link.log")
     monkeypatch.setattr(hub_link, "LOG_MAX_BYTES", 100)
     monkeypatch.setattr(hub_link, "LOG_KEEP_BYTES", 50)
-    monkeypatch.setattr(hub_link.sys, "platform", "linux")
     with open(fpath, "a") as service:
         service.write("".join(f"line {i:03d}\n" for i in range(20)))
         service.flush()
@@ -1443,10 +1442,11 @@ def test_service_files(tmp_path, monkeypatch):
     # On Windows, a script in the Startup folder runs it hidden at login
     script = hub_link._windows_startup_script()
     assert "--mode" in script and "service" in script
-    assert hub_link.get_log_path() in script
-    # The whole command has its own quotes, since cmd strips the outer pair
-    # of one with more than two (doubled here, for VBScript)
-    assert 'cmd /c ""' in script and '2>&1"""' in script
+    # It writes its own log, since one cmd redirects to can't be opened again
+    assert "cmd /c" not in script and '""--log-file""' in script
+    assert hub_link.get_log_path() not in script
+    # In a hidden console, so what it runs doesn't each open a window
+    assert "pythonw" not in script and script.rstrip().endswith(", 0, False")
     unit = hub_link._systemd_unit()
     expected = shlex.join(command).replace("\\", "\\\\")
     assert f"ExecStart={expected}" in unit

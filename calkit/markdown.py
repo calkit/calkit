@@ -2006,6 +2006,14 @@ def local_package_source_paths(
         full = os.path.join(wdir, candidate) if wdir else candidate
         if os.path.isdir(full):
             found.append(Path(candidate).as_posix())
+    # A src layout's packages needn't be named for the distribution, e.g.,
+    # 'analysis' in a project called 'my-paper', so they're found by their
+    # __init__.py, which leaves out build residue beside them, e.g., egg-info
+    src_dir = os.path.join(wdir, "src") if wdir else "src"
+    if language == "python" and not found and os.path.isdir(src_dir):
+        for entry in sorted(os.listdir(src_dir)):
+            if os.path.isfile(os.path.join(src_dir, entry, "__init__.py")):
+                found.append(f"src/{entry}")
     return found
 
 
@@ -2752,10 +2760,19 @@ def _resolve_source(
     A declared result's name wins over a path that happens to look like it,
     since a name is the thing a project controls; anything else is taken as
     a path. A bare word that is neither is the likely typo, so it is named
-    as one rather than reported as a missing file later.
+    as one rather than reported as a missing file later. A notebook stands
+    for the values the pipeline saves from its cells.
     """
+    from calkit.notebooks import get_notebook_values_path
+
+    def get_results_path(source_path: str) -> str:
+        source_path = Path(source_path).as_posix()
+        if source_path.lower().endswith(".ipynb"):
+            return get_notebook_values_path(source_path)
+        return source_path
+
     if kind == "path":
-        return Path(source).as_posix()
+        return get_results_path(source)
     if kind == "name":
         if not (results and source in results):
             known = ", ".join(sorted(results)) if results else "none declared"
@@ -2764,9 +2781,9 @@ def _resolve_source(
                 path=path,
                 line=line,
             )
-        return Path(results[source]).as_posix()
+        return get_results_path(results[source])
     if results and source in results:
-        return Path(results[source]).as_posix()
+        return get_results_path(results[source])
     looks_like_path = "/" in source or "." in Path(source).name
     if not looks_like_path:
         known = ", ".join(sorted(results)) if results else "none declared"
@@ -2776,7 +2793,7 @@ def _resolve_source(
             path=path,
             line=line,
         )
-    return Path(source).as_posix()
+    return get_results_path(source)
 
 
 def _ck_format(option: str | None) -> str | None:
@@ -2921,19 +2938,6 @@ def extract_values(
     return values
 
 
-def lookup_value(data: Any, key: str) -> Any:
-    """Return the value at a dotted key, e.g. ``fit.coeffs.0``."""
-    value = data
-    for part in key.split("."):
-        if isinstance(value, dict) and part in value:
-            value = value[part]
-        elif isinstance(value, list) and part.lstrip("-").isdigit():
-            value = value[int(part)]
-        else:
-            raise KeyError(key)
-    return value
-
-
 def format_value(value: Any, fmt: str | None = None) -> str:
     """Render a value the way it should read in prose.
 
@@ -3047,7 +3051,7 @@ def set_values(
     """
     import json
 
-    from calkit.questions import read_evidence_file
+    from calkit.questions import read_evidence_file, resolve_key
 
     original = text
     text, _ = heal_markers(text)
@@ -3086,7 +3090,7 @@ def set_values(
     rendered = []
     for value in values:
         try:
-            raw = lookup_value(data_by_path[value.path], value.key)
+            raw = resolve_key(data_by_path[value.path], value.key)
         except KeyError:
             raise MarkdownParseError(
                 f"Results file '{value.path}' has no key '{value.key}'",

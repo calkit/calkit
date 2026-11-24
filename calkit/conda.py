@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel
 
 import calkit
+import calkit.progress
 from calkit import ryaml
 
 # Typical conda/mamba installation directories to search
@@ -107,6 +109,57 @@ def find_conda_exe() -> str | None:
     return _find_exe("conda")
 
 
+def find_named_env_prefix(name: str, conda_exe: str) -> str | None:
+    """Where ``conda run -n`` finds a named environment, without running
+    Conda, which is slow to start.
+
+    Conda looks in its envs folders in order: those set by
+    ``CONDA_ENVS_DIRS`` or ``CONDA_ENVS_PATH``, then those its config files
+    list, most specific first, then its root's and the user's, the user's
+    first if the root can't be written to, e.g., a shared install.
+    """
+    import calkit
+
+    home = os.path.expanduser("~")
+    root = os.path.dirname(os.path.dirname(os.path.realpath(conda_exe)))
+    envs_dirs = []
+    for var in ("CONDA_ENVS_DIRS", "CONDA_ENVS_PATH"):
+        envs_dirs += [
+            d for d in os.environ.get(var, "").split(os.pathsep) if d
+        ]
+    condarc_paths = [os.environ.get("CONDARC", "")] + [
+        os.path.join(home, ".condarc"),
+        os.path.join(home, ".conda", ".condarc"),
+        os.path.join(home, ".config", "conda", ".condarc"),
+        os.path.join(home, ".config", "conda", "condarc"),
+        os.path.join(root, ".condarc"),
+        os.path.join(root, "condarc"),
+    ]
+    for condarc_path in condarc_paths:
+        if not condarc_path or not os.path.isfile(condarc_path):
+            continue
+        try:
+            with open(condarc_path, encoding="utf-8") as f:
+                config = calkit.ryaml.load(f)
+        except Exception:
+            continue
+        dirs = config.get("envs_dirs") if isinstance(config, dict) else None
+        envs_dirs += [
+            os.path.expandvars(os.path.expanduser(str(d))) for d in dirs or []
+        ]
+    defaults = [
+        os.path.join(root, "envs"),
+        os.path.join(home, ".conda", "envs"),
+    ]
+    if not os.access(root, os.W_OK):
+        defaults.reverse()
+    for envs_dir in envs_dirs + defaults:
+        candidate = os.path.join(envs_dir, name)
+        if os.path.isdir(os.path.join(candidate, "conda-meta")):
+            return candidate
+    return None
+
+
 def find_mamba_exe() -> str | None:
     """Find the absolute path to the Mamba executable."""
     return _find_exe("mamba")
@@ -169,6 +222,60 @@ _VIRTUAL_PACKAGE_OVERRIDES = {
 # How long locking every other platform may take in all, since it happens
 # during an env check and a solve can take minutes
 CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS = 600
+# What Conda prints as it starts each step of creating an environment, and
+# what that step is called on a spinner, in order
+_CREATE_PHASES = [
+    ("Collecting package metadata", "collecting package metadata"),
+    ("Solving environment", "solving"),
+    ("Downloading and Extracting Packages", "downloading packages"),
+    ("Preparing transaction", "installing packages"),
+    ("Installing pip dependencies", "installing pip dependencies"),
+]
+
+
+def _create_env(cmd: list[str], doing: str) -> None:
+    """Run a Conda command that creates an environment.
+
+    Anyone watching is told ``doing``, followed by each step Conda starts,
+    read from what it prints, which is only printed if creation fails.
+    Without anyone watching, Conda prints to the terminal as usual.
+
+    Raises ``subprocess.CalledProcessError`` if creation fails.
+    """
+    calkit.progress.report(doing)
+    if not calkit.progress.active():
+        subprocess.check_call(cmd)
+        return
+    # Conda flushes as it goes only when it's told to
+    env = os.environ | {"PYTHONUNBUFFERED": "1"}
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+    )
+    assert proc.stdout is not None
+    output = b""
+    phase = -1
+    # A marker can be split across reads, so the end of the last is kept
+    overlap = max(len(marker) for marker, _ in _CREATE_PHASES)
+    # Whatever has arrived, rather than waiting for a full buffer
+    while chunk := os.read(proc.stdout.fileno(), 65536):
+        recent = (output[-overlap:] + chunk).decode(errors="replace")
+        output += chunk
+        # The furthest step started, since a read can span several
+        for i in range(len(_CREATE_PHASES) - 1, phase, -1):
+            marker, name = _CREATE_PHASES[i]
+            if marker in recent:
+                phase = i
+                calkit.progress.report(f"{doing}: {name}")
+                break
+    returncode = proc.wait()
+    if returncode != 0:
+        sys.stderr.write(output.decode(errors="replace"))
+        sys.stderr.flush()
+        raise subprocess.CalledProcessError(returncode, cmd, output=output)
 
 
 def _pkg_name_from_dep(dep: str) -> str:
@@ -213,9 +320,12 @@ def _local_pip_path(dep: str) -> str | None:
     target = dep[editable.end() :].strip() if editable else dep
     url = re.match(r"^(?:\S+\s*@\s*)?(file:\S+)$", target)
     if url:
-        from urllib.parse import unquote, urlparse
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
 
-        return unquote(urlparse(url[1]).path) or None
+        # e.g., 'file:///D:/pkg' is D:\pkg on Windows, without extras
+        path = url2pathname(urlparse(url[1]).path)
+        return re.sub(r"\[[^\]]*\]$", "", path) or None
     is_path = target.startswith((".", "/", "~")) or re.match(
         r"^[A-Za-z]:[\\/]", target
     )
@@ -454,10 +564,14 @@ def check_env(
     alt_lock_fpaths_delete: list[str] = [],
     relaxed: bool = False,
     verbose: bool = True,
+    prefix: str | None = None,
 ) -> EnvCheckResult:
     """Check that a conda environment matches its spec.
 
     If it doesn't match, recreate it.
+
+    ``prefix`` is where the environment is kept, e.g., from calkit.yaml,
+    overriding the spec's own.
 
     Note that this only works with exact or no version specification.
     Using greater than and less than operators is not supported.
@@ -573,12 +687,11 @@ def check_env(
     existing_env_names = [
         os.path.basename(env) for env in envs if env.startswith(envs_dir)
     ]
-    # Get a list of environments defined by prefix instead of name
-    env_prefixes = [e for e in envs if not e.startswith(root_prefix)]
     with open(env_fpath, encoding="utf-8") as f:
         env_spec = ryaml.load(f)
     env_name = env_spec["name"]
-    prefix = env_spec.get("prefix")
+    # Set in calkit.yaml, it wins over the spec, as it does when running in it
+    prefix = prefix or env_spec.get("prefix")
     prefix_orig = prefix
     if prefix is not None:
         prefix = os.path.abspath(prefix)
@@ -604,7 +717,12 @@ def check_env(
         "export",
         "--no-builds",
         "--json",
+        # Else it warns it can't reliably lock pip packages, which Calkit
+        # pins itself
+        "--quiet",
     ]
+    # Who's watching knows the environment by its name in calkit.yaml
+    label = calkit.progress.label(env_name)
     # Create with conda since newer mamba versions create a strange
     # "Library" subdirectory, at least on Windows
     # Use lock file for creation if available, otherwise use env spec
@@ -619,12 +737,22 @@ def check_env(
         export_cmd += ["-n", env_name]
     # Check if env even exists
     # If env has a prefix defined, it will be identified by that
-    if env_name not in existing_env_names and prefix not in env_prefixes:
+    # One kept at a prefix is that folder, whatever else shares its name,
+    # e.g., the same project's environment created globally elsewhere
+    if prefix is not None:
+        env_exists = os.path.isdir(os.path.join(prefix, "conda-meta"))
+    else:
+        env_exists = env_name in existing_env_names
+    if not env_exists:
         log_func(f"Environment {env_name} doesn't exist; creating")
         res.env_exists = False
         # Environment doesn't exist, so create it
+        source = "its lock file" if create_file != env_fpath else "its spec"
         try:
-            subprocess.check_call(create_cmd)
+            _create_env(
+                create_cmd,
+                doing=f"Creating environment '{label}' from {source}",
+            )
             # Delete legacy lock file after successful creation
             if used_legacy_lock:
                 try:
@@ -662,7 +790,10 @@ def check_env(
                 ]
                 if prefix is not None:
                     create_cmd += ["--prefix", prefix]
-                subprocess.check_call(create_cmd)
+                _create_env(
+                    create_cmd,
+                    doing=f"Creating environment '{label}' from its spec",
+                )
             else:
                 raise
         env_needs_rebuild = False
@@ -793,7 +924,11 @@ def check_env(
         if prefix is not None:
             rebuild_cmd += ["--prefix", prefix]
         try:
-            subprocess.check_call(rebuild_cmd)
+            source = "its lock file" if lock_is_current else "its spec"
+            _create_env(
+                rebuild_cmd,
+                doing=f"Rebuilding environment '{label}' from {source}",
+            )
         except subprocess.CalledProcessError:
             if lock_is_current:
                 raise RuntimeError(
@@ -859,6 +994,7 @@ def check_env(
                 )
     if env_needs_export:
         log_func(f"Exporting existing env to {env_check_fpath}")
+        calkit.progress.report(f"Recording environment '{label}'")
         env_check = json.loads(subprocess.check_output(export_cmd).decode())
         env_check["mtime"] = os.path.getmtime(
             os.path.normpath(env_check["prefix"])
@@ -887,6 +1023,7 @@ def check_env(
         or lock_is_stale(lock_fpath)
     ):
         log_func(f"Exporting lock file to {lock_fpath}")
+        calkit.progress.report(f"Locking environment '{label}'")
         env_export = json.loads(
             subprocess.check_output(
                 [a for a in export_cmd if a != "--no-builds"]
@@ -1076,25 +1213,59 @@ def write_cross_platform_locks(
             log(f"Could not solve {env_fpath} for {arch}: {e}")
             return None
 
+    def get_locked_dep(link: dict) -> str:
+        """Pin a solved package, with its channel if the lock won't list it."""
+        dep = f"{link['name']}={link['version']}={link['build_string']}"
+        for channel in dep_channels:
+            if channel in (link.get("channel"), link.get("base_url")):
+                return f"{channel}::{dep}"
+        return dep
+
     lock_dir, lock_name = os.path.split(lock_fpath)
     stem, ext = os.path.splitext(lock_name)
     here = _conda_venv_platform()
     written: list[str] = []
+    label = calkit.progress.label(env_fpath)
     # Only a per-platform lock, e.g., from 'calkit check env', has siblings
     if stem != here or not os.path.isfile(lock_fpath):
         return written
     with open(env_fpath, encoding="utf-8") as f:
         env_spec = ryaml.load(f)
     conda_deps, pip_deps = _split_env_dependencies(env_spec["dependencies"])
-    # Git URLs resolve the same anywhere, but local paths and included
-    # files may not
+    # Git URLs resolve the same anywhere, and so does a path in the project,
+    # e.g., '-e .' for its own package, but other local paths and included
+    # files may not. The project is where the pipeline runs from.
+    spec_dir = os.path.dirname(os.path.abspath(env_fpath))
+    project_dir = os.path.realpath(".")
+    lock_dir_abs = os.path.abspath(os.path.dirname(lock_fpath))
+    # Each in-project local dependency's absolute path, and its extras,
+    # e.g., '[dev]', which installing it elsewhere needs too
+    in_project: dict[str, str] = {}
+    in_project_extras: dict[str, str] = {}
+    for d in pip_deps:
+        local = _local_pip_path(d)
+        if local is None:
+            continue
+        full = os.path.realpath(
+            os.path.join(spec_dir, os.path.expanduser(local))
+        )
+        if full == project_dir or full.startswith(project_dir + os.sep):
+            in_project[d] = full
+            extras = re.search(r"\[[^\]]*\]$", d.split("#", 1)[0].strip())
+            in_project_extras[full] = extras[0] if extras else ""
     unpinnable = [
         d
         for d in pip_deps
-        if _local_pip_path(d) is not None
+        if (_local_pip_path(d) is not None and d not in in_project)
         or re.match(r"^(-r|-c|--requirement|--constraint)\b", d.strip())
     ]
     channels = list(env_spec.get("channels") or [])
+    # Named only on a dependency, e.g., 'sea-lab::pkg'
+    dep_channels = {
+        str(d).rpartition("::")[0].rstrip("/")
+        for d in conda_deps
+        if "::" in str(d)
+    } - {c.rstrip("/") for c in channels}
     # Pin direct dependencies to what's installed here
     with open(lock_fpath, encoding="utf-8") as f:
         local_lock = ryaml.load(f) or {}
@@ -1132,6 +1303,14 @@ def write_cross_platform_locks(
         name = _norm_pkg_name(pkg.split("[")[0])
         if dep in unpinnable:
             pinned_pip_deps.append(dep)
+        elif dep in in_project:
+            # Compiled from elsewhere, so named by its absolute path
+            editable = re.match(r"^(-e|--editable)[\s=]+", dep.strip())
+            pinned_pip_deps.append(
+                ("-e " if editable else "")
+                + in_project[dep]
+                + in_project_extras[in_project[dep]]
+            )
         elif name in local_pip_urls:
             pinned_pip_deps.append(local_pip_urls[name])
         elif name not in local_pip_vers:
@@ -1149,6 +1328,7 @@ def write_cross_platform_locks(
         out_fpath = os.path.join(lock_dir, arch + ext)
         if arch == here or (not relock and os.path.isfile(out_fpath)):
             continue
+        calkit.progress.report(f"Locking environment '{label}' for {arch}")
         links = None
         if not pip_deps or not (
             unpinnable
@@ -1192,10 +1372,33 @@ def write_cross_platform_locks(
                 os.remove(out_fpath)
             continue
         dependencies: list = [
-            f"{p['name']}={p['version']}={p['build_string']}"
-            for p in sorted(links, key=lambda p: p["name"])
+            get_locked_dep(p) for p in sorted(links, key=lambda p: p["name"])
         ]
         if pinned_pip is not None:
+            # A project path is written as this platform's lock writes it,
+            # relative to the lock, rather than where it is on this machine
+            for i, line in enumerate(pinned_pip):
+                local = _local_pip_path(line)
+                full = os.path.realpath(local) if local else None
+                if full not in in_project.values():
+                    continue
+                pinned_pip[i] = next(
+                    (
+                        # The same on every platform
+                        dep.replace("\\", "/")
+                        for dep in local_pip
+                        if _local_pip_path(dep) is not None
+                        and os.path.realpath(
+                            os.path.join(lock_dir_abs, _local_pip_path(dep))
+                        )
+                        == full
+                    ),
+                    ("-e " if line.startswith(("-e", "--editable")) else "")
+                    + pathlib.PurePath(
+                        os.path.relpath(full, lock_dir_abs)
+                    ).as_posix()
+                    + in_project_extras[full],
+                )
             # Pip leaves alone what conda already installed
             from_conda = {_norm_pkg_name(p["name"]) for p in links}
             dependencies.append(

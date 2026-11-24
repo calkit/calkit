@@ -73,6 +73,24 @@ For Claude Code, create a `CLAUDE.md` at the repo root with the same content
 Calkit ships agent skills covering `calkit.yaml` structure, stage
 kinds, environment types, and CLI commands.
 
+<!-- TODO: needs human review -->
+
+To install Claude Code, Codex, or OpenCode along with Calkit's plugin, run
+one of:
+
+```bash
+calkit install claude
+calkit install codex
+calkit install opencode
+```
+
+If the agent is already installed, this only adds the plugin.
+To update the plugin in every agent on this machine, run:
+
+```bash
+calkit update agent-skills
+```
+
 ### Claude Code
 
 Claude Code supports a plugin system that loads skills on demand.
@@ -166,7 +184,7 @@ opencode plugin update
 For other agents that read skills from `~/.agents/skills`, run:
 
 ```bash
-calkit update agent-skills
+calkit update agent-skills --copy
 ```
 
 This copies skills into `~/.agents/skills`.
@@ -179,7 +197,7 @@ For command details, see the
 ## What the Calkit conventions cover
 
 The skills loaded by the plugins (or installed by
-`calkit update agent-skills`) include:
+`calkit update agent-skills --copy`) include:
 
 - The `calkit.yaml` schema: All top-level sections and their purpose
 - All pipeline stage kinds and their required/optional fields

@@ -1123,6 +1123,14 @@ def test_installing_the_projects_own_package_is_a_dev_install(
     # The source is a dependency in its own right, because an editable
     # install is a pointer to the working tree
     assert local_package_source_paths("python") == ["src/wave_tools"]
+    # A src layout whose package isn't named for the distribution, as a
+    # template's often isn't, still has its source depended on, but not
+    # build residue beside it
+    (tmp_path / "src" / "wave_tools").rename(tmp_path / "src" / "analysis")
+    (tmp_path / "src" / "wave_tools.egg-info").mkdir()
+    (tmp_path / "src" / "wave_tools.egg-info" / "PKG-INFO").write_text("")
+    assert local_package_source_paths("python") == ["src/analysis"]
+    (tmp_path / "src" / "analysis").rename(tmp_path / "src" / "wave_tools")
     text = (
         "```sh calkit environment name=py\nuv add wave-tools\n```\n\n"
         "```python calkit stage name=py environment=py\nprint(1)\n```\n"
@@ -1520,17 +1528,20 @@ def test_values(tmp_path, monkeypatch):
     # YAML and TOML results files are read by extension, as calkit.sty does
     (tmp_path / "r.yaml").write_text("fit:\n  rms: 0.5\n")
     (tmp_path / "r.toml").write_text("[fit]\nn = 12\n")
-    (tmp_path / "r.out").write_text('{"n": 3}')
+    (tmp_path / "r.out").write_text('{"n": 3, "rates": {"25.0": 0.03}}')
     new, _ = set_values(
         "<!-- ckvalue r.yaml fit.rms .2f -->?<!-- /ckvalue -->, "
         "<!-- ckvalue r.toml fit.n -->?<!-- /ckvalue -->, "
-        "<!-- ckvalue r.out n -->?<!-- /ckvalue -->\n",
+        "<!-- ckvalue r.out n -->?<!-- /ckvalue -->, "
+        "<!-- ckvalue r.out rates.25.0 -->?<!-- /ckvalue -->\n",
         "README.md",
     )
+    # A key can have dots in it, e.g., a dict keyed by floats
     assert new == (
         "<!-- ckvalue r.yaml fit.rms .2f -->0.50<!-- /ckvalue -->, "
         "<!-- ckvalue r.toml fit.n -->12<!-- /ckvalue -->, "
-        "<!-- ckvalue r.out n -->3<!-- /ckvalue -->\n"
+        "<!-- ckvalue r.out n -->3<!-- /ckvalue -->, "
+        "<!-- ckvalue r.out rates.25.0 -->0.03<!-- /ckvalue -->\n"
     )
     (tmp_path / "bad.toml").write_text("not = [toml\n")
     with pytest.raises(MarkdownParseError, match="not valid TOML"):
@@ -1673,6 +1684,15 @@ def test_compact_value_markers(tmp_path, monkeypatch):
     assert "Nested: <!-- ckvalue metrics fit.coeffs.0 -->1.974" in new
     assert "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->" in new
     assert set_values(new, "README.md", results=declared) == (new, False)
+    # A notebook stands for the values its cells save
+    values_path = tmp_path / ".calkit/notebooks/outputs/fit.ipynb/values.json"
+    values_path.parent.mkdir(parents=True)
+    values_path.write_text('{"k_25": 0.030912}')
+    nb_text = "k is <!-- ckvalue fit.ipynb k_25 .3f -->?<!-- /ckvalue -->\n"
+    assert extract_values(nb_text, "README.md")[0].path == (
+        ".calkit/notebooks/outputs/fit.ipynb/values.json"
+    )
+    assert "-->0.031<!--" in set_values(nb_text, "README.md")[0]
 
     # Source, key and format read like a Python call: positional in that
     # order, or by name, or positional then keyword

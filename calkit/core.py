@@ -699,6 +699,7 @@ def write_json(path: str, data: Any, **kwargs: Any) -> None:
     through a temporary file of its own, so writers don't share one.
     """
     import tempfile
+    import time
 
     folder = os.path.dirname(path) or "."
     os.makedirs(folder, exist_ok=True)
@@ -708,7 +709,16 @@ def write_json(path: str, data: Any, **kwargs: Any) -> None:
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, **kwargs)
-        os.replace(tmp_path, path)
+        # Windows refuses to replace a file while another process reads it
+        n_retries = 40 if sys.platform == "win32" else 0
+        for n_retries_left in range(n_retries, -1, -1):
+            try:
+                os.replace(tmp_path, path)
+                break
+            except PermissionError:
+                if n_retries_left == 0:
+                    raise
+                time.sleep(0.05)
     except BaseException:
         with contextlib.suppress(OSError):
             os.remove(tmp_path)

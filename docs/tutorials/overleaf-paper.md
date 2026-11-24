@@ -1,4 +1,4 @@
-# Making a paper on Overleaf single-button reproducible and coding agent-friendly
+# Making and Overleaf project single-button reproducible, locally-editable, and coding agent-friendly
 
 <!--
 First pass, written ahead of the features it describes; see the PR for

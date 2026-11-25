@@ -1,6 +1,6 @@
 """Routes for machines: users' computers linked to the hub.
 
-See docs/dev/hub-link-protocol.md for how these fit with the relay.
+See docs/dev/hub/linked-machines.md for how these fit with the relay.
 """
 
 import re

@@ -1176,9 +1176,7 @@ def new_comment(
             pathlib.Path(review).read_text(encoding="utf-8").split("\n")
         )
         review_lines = calkit.reviews.add(review_lines, comment, section)
-        pathlib.Path(review).write_text(
-            "\n".join(review_lines), encoding="utf-8"
-        )
+        calkit.eol.write_text(review, "\n".join(review_lines))
         ordinal = next(
             i
             for i, c in enumerate(calkit.reviews.parse(review_lines), 1)
@@ -1207,7 +1205,7 @@ def new_comment(
         calkit.latex.add_comment(lines, line, tc)
     except ValueError as e:
         raise_error(str(e))
-    pathlib.Path(path).write_text("\n".join(lines), encoding="utf-8")
+    calkit.eol.write_text(path, "\n".join(lines))
     if as_json:
         blks = calkit.latex.file_blocks(path, lines)
         typer.echo(

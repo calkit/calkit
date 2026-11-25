@@ -447,3 +447,25 @@ def pin_submodules(wdir: str = ".") -> PinResult:
         res.converted += [f"{sm}/{p}" for p in nested.converted]
         res.submodules += [f"{sm}/{p}" for p in nested.submodules]
     return res
+
+
+def write_text(path: str | os.PathLike, text: str) -> None:
+    """Write ``text``, with ``\\n`` line endings, to ``path`` as UTF-8 with
+    the line endings the file has already, or else those Git checks it out
+    with, so editing a file doesn't change the rest of its bytes.
+    """
+    import calkit.git
+
+    try:
+        with open(path, "rb") as f:
+            existing = f.read()
+    except FileNotFoundError:
+        existing = b""
+    first_break = existing.find(b"\n")
+    if first_break == -1:
+        newline = calkit.git.get_checkout_newline(path)
+    else:
+        is_crlf = existing[first_break - 1 : first_break] == b"\r"
+        newline = "\r\n" if is_crlf else "\n"
+    with open(path, "w", encoding="utf-8", newline=newline) as f:
+        f.write(text)

@@ -316,3 +316,33 @@ def test_submodule(tmp_dir, monkeypatch):
     _git("checkout", "--", "plot.py", cwd="utils")
     with open("utils/plot.py", "rb") as f:
         assert f.read() == b"x = 1\n"
+
+
+def test_write_text(tmp_dir):
+    # Outside a repo, a new file gets the platform's line endings
+    calkit.eol.write_text("new.tex", "a\nb\n")
+    with open("new.tex", "rb") as f:
+        assert f.read() == f"a{os.linesep}b{os.linesep}".encode()
+    _git("init")
+    _git("config", "core.autocrlf", "true")
+    with open(".gitattributes", "w", newline="\n") as f:
+        f.write("*.tex text eol=lf\n")
+    # A file keeps the line endings it has, whatever Git would check out
+    for name, existing in [("lf.md", b"x\ny\n"), ("crlf.tex", b"x\r\ny\r\n")]:
+        with open(name, "wb") as f:
+            f.write(existing)
+        calkit.eol.write_text(name, "x\ny\nz\n")
+        newline = b"\r\n" if b"\r" in existing else b"\n"
+        with open(name, "rb") as f:
+            assert f.read() == newline.join([b"x", b"y", b"z", b""])
+    # Without a line break to go by, it gets Git's
+    for name, newline in [("one.tex", b"\n"), ("one.md", b"\r\n")]:
+        with open(name, "wb") as f:
+            f.write(b"x")
+        calkit.eol.write_text(name, "x\ny")
+        with open(name, "rb") as f:
+            assert f.read() == b"x" + newline + b"y"
+    # Non-ASCII text is written as UTF-8
+    calkit.eol.write_text("lf.md", "é\n")
+    with open("lf.md", "rb") as f:
+        assert f.read() == "é\n".encode("utf-8")

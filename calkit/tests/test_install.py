@@ -465,8 +465,10 @@ def test_platform_entries_prerequisites_and_record(
         brew = install.get_installer("brew")
         assert brew is not None and "Homebrew" in brew["script"]
         assert install.get_installer("pixi") is not None
+        # Except Git, which comes with Apple's Command Line Tools
         git = install.get_installer("git")
-        assert git is not None and git.get("requires") == ["brew"]
+        assert git is not None and "xcode-select --install" in git["script"]
+        assert "requires" not in git
         assert install.get_installer("choco") is None
         assert "Windows-only" in str(install.get_unsupported_message("choco"))
         # Colima comes with the Docker CLI it's no use without, unless

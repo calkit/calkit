@@ -215,10 +215,14 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
         },
     },
     "git": {
+        # Apple's, which needs no Homebrew, waiting for the dialog it opens,
+        # which installs it after this returns
         "mac": {
-            "script": "brew install git",
-            "path_add": _BREW_BINS,
-            "requires": ["brew"],
+            "script": (
+                "xcode-select --install && "
+                "until git --version >/dev/null 2>&1; do sleep 5; done"
+            ),
+            "path_add": "/usr/bin",
         },
         "windows": {
             "script": _WINGET + "Git.Git --source winget",

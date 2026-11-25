@@ -64,7 +64,7 @@ dev = [
   "pytest>=7.4.3",
   "mypy<2.0.0,>=1.8.0",
   "ruff<1.0.0,>=0.2.2",
-  "pre-commit<4.0.0,>=3.6.2",
+  "pre-commit>=3.6.2,<5.0.0",
   "pytest-test-utils", # For tmp_dir fixture
   "types-passlib<2.0.0.0,>=1.7.7.20240106",
   # So mypy sees cachetools the way Pylance already does

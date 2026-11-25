@@ -48,7 +48,7 @@ When it's connected, the Overleaf panel works with the project on your
 machine rather than through calkit.io, and says **On this machine**.
 It finds the project from its `calkit.yaml`, and **Sync now** runs
 `calkit overleaf sync` there, instead of on GitHub Actions.
-If any stages are out of date, **Run the pipeline first** next to it runs
+If any stages are out of date, checking **Run pipeline** next to it runs
 `calkit run --save --overleaf` instead,
 and with nothing to sync, **Run and sync** does the same.
 The pipeline stages in the Calkit sidebar are the ones on your machine,
@@ -116,17 +116,21 @@ Linked Overleaf projects are indexed on the hub the first time a sync or a
 status check runs for them, which is what lets the extension go from an
 Overleaf URL back to your project.
 
+To make a new Calkit project for the paper,
+open the Calkit extension panel on Overleaf and click
+**Make this paper reproducible**.
+**Select analysis folder** makes the project from a folder of your code and
+data on this machine, with the paper in it.
 If you already have a GitHub repo for your code, data, figures, etc.,
-you can integrate the Overleaf and GitHub projects into a Calkit project.
-From Overleaf, open the Calkit extension panel and click
-"attach to new project".
-From there, select the switch for "exists on GitHub",
+check **This project already has a GitHub repo**,
 then start typing your GitHub repo name.
 You'll see an option for what folder you want the Overleaf project to live
 in inside the larger project.
 
 Note: If you haven't installed the Calkit GitHub app for the repo in question,
 you'll need to do that.
+If Calkit doesn't have access to Overleaf yet,
+the panel asks you to connect it first.
 
 Once everything is connected, syncing between them is a single action.
 The Overleaf document becomes a Calkit pipeline stage with explicit

@@ -241,8 +241,17 @@ pip install calkit-python
 
 To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
 is installed and properly configured.
+
+<!-- TODO: needs human review -->
+
+On macOS, the install script starts installing Git with Apple's
+Command Line Tools if it's missing, in a dialog where you click **Install**.
+With projects on the hub, Git pushes to and pulls from GitHub with your
+Calkit account, so you don't need to sign in to GitHub on this machine.
+
 You may also want to install [Docker](https://docker.com),
-since that is the default method by which LaTeX environments are created.
+for environments that run in containers;
+LaTeX doesn't need it, since Calkit installs TeX Live itself.
 If you want to use a [Calkit hub](https://docs.calkit.org/hub)
 for collaboration and backup as a DVC remote,
 you can [connect to the hub](https://docs.calkit.org/hub) with:

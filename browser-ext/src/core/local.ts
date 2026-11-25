@@ -132,6 +132,10 @@ export interface LocalJob {
   output: string | null;
   /** What it's doing, while it runs. */
   progress?: RunProgress;
+  /** What each of its commands does, for one with several, e.g., a create. */
+  steps?: string[] | null;
+  /** Which of them is running, or the last that ran. */
+  step?: number;
   error: string | null;
   /** The hub's status for the same failure, e.g., 401 for credentials. */
   error_status?: number;

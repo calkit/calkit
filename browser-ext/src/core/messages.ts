@@ -323,6 +323,12 @@ export type Request =
       hubUrl: string;
     }
   | {
+      /** What creating a project on this machine is doing. */
+      type: "local.createProgress";
+      owner: string;
+      name: string;
+    }
+  | {
       /** Everything in a project's checkout here saved, as 'calkit save -a'. */
       type: "local.save";
       /** As "owner/name". */
@@ -453,6 +459,7 @@ export interface ResponseMap {
     warning: string | null;
   };
   "local.createProject": { path: string; project: string };
+  "local.createProgress": string | null;
   "local.openOptions": null;
   "local.installEditor": null;
   /**

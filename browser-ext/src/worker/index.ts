@@ -927,6 +927,15 @@ async function handle(
       localCheckouts.delete(made.project);
       return made;
     }
+    case "local.createProgress": {
+      const [job] = await askLocal<LocalJob[]>({
+        type: "jobs.list",
+        project: `${message.owner}/${message.name}`,
+        kind: "create",
+      });
+      if (!job || !["queued", "running"].includes(job.status)) return null;
+      return job.steps?.[job.step ?? 0] ?? null;
+    }
     case "local.clone": {
       const job = await waitForJob(
         await askLocal<LocalJob>({

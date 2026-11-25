@@ -725,6 +725,13 @@ def test_start_job(tmp_path, monkeypatch):
         + ["paper", "--kind", "journal-article"],
         calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
     ]
+    # With what each is doing, for the extension to show
+    assert creating["steps"] == [
+        "Signing in",
+        "Creating project",
+        "Importing paper",
+        "Saving",
+    ]
     os.remove(calkit.browser_link.get_job_path(creating["id"]))
     # Trying again where an earlier try made the project picks up where it
     # stopped, e.g., before the paper could be imported
@@ -732,6 +739,7 @@ def test_start_job(tmp_path, monkeypatch):
     (analysis / "calkit.yaml").write_text("owner: me\nname: dye\n")
     resumed = start_job(create)
     assert resumed["then"] == creating["then"][1:]
+    assert resumed["steps"] == ["Signing in", "Importing paper", "Saving"]
     os.remove(calkit.browser_link.get_job_path(resumed["id"]))
     (analysis / "calkit.yaml").write_text(
         "owner: me\nname: dye\noverleaf_sync:\n  paper: {}\n"
@@ -819,6 +827,8 @@ def test_start_job(tmp_path, monkeypatch):
     )
     assert chained["status"] == "failed" and chained["returncode"] == 3
     assert chained["output"] == "One\nTwo"
+    # Which it stopped at
+    assert chained["step"] == 2
     done = run("print('Ran it')")
     assert done["status"] == "succeeded" and done["output"] == "Ran it"
     assert "progress" not in done and not done["log_path"]
@@ -863,6 +873,19 @@ def test_start_job(tmp_path, monkeypatch):
         "raise SystemExit(1)"
     )
     assert failed["error_status"] == 401
+    # One with several steps says which failed
+    with open(job_path) as f:
+        record = json.load(f)
+    with open(job_path, "w") as f:
+        json.dump(record | {"steps": ["Signing in", "Saving"]}, f)
+    failed = run(
+        "print('In')", then=["print('Error: No'); raise SystemExit(1)"]
+    )
+    assert failed["error"] == "Saving failed: No"
+    with open(job_path) as f:
+        record = json.load(f)
+    with open(job_path, "w") as f:
+        json.dump(record | {"steps": None}, f)
     # One whose process died without saying so has failed
     with open(job_path) as f:
         record = json.load(f)

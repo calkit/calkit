@@ -1453,6 +1453,8 @@ def start_job(msg: dict) -> dict:
         wdir = location
         cmd = calkit_cmd + ["hub", "login", "--hub", hub]
         then = []
+        # What each command is doing, for the extension to show
+        steps = ["Signing in"]
         if not made:
             then.append(
                 calkit_cmd
@@ -1460,15 +1462,18 @@ def start_job(msg: dict) -> dict:
                 + ["--title", title.strip()]
                 + (["--public"] if msg.get("isPublic") else [])
             )
+            steps.append("Creating project")
         if path not in (made.get("overleaf_sync") or {}):
             then.append(
                 calkit_cmd
                 + ["overleaf", "import", overleaf_url, path]
                 + ["--kind", doc_kind]
             )
+            steps.append("Importing paper")
         then.append(
             calkit_cmd + ["save", "-a", "-m", "Add files from this machine"]
         )
+        steps.append("Saving")
     elif kind == "clone":
         location = msg.get("location") or os.path.join(
             calkit.get_user_home(), "calkit", name
@@ -1545,6 +1550,7 @@ def start_job(msg: dict) -> dict:
         ),
         "cmd": cmd,
         "then": then if kind == "create" else [],
+        "steps": steps if kind == "create" else None,
         "status": "queued",
         "created": datetime.now(timezone.utc).isoformat(),
         "started": None,
@@ -1668,7 +1674,9 @@ def run_job(job_id: str) -> None:
 
     try:
         started = time.monotonic()
-        for cmd in [job["cmd"], *job.get("then", [])]:
+        for i, cmd in enumerate([job["cmd"], *job.get("then", [])]):
+            job["step"] = i
+            save(job)
             proc = subprocess.Popen(
                 cmd,
                 cwd=job["wdir"],
@@ -1715,6 +1723,9 @@ def run_job(job_id: str) -> None:
             (x for x in reversed(lines) if x.startswith("Error: ")),
             lines[-1] if lines else "It failed",
         ).removeprefix("Error: ")
+        # Which step, for a job with several, e.g., a create
+        if job.get("steps") and job["step"] < len(job["steps"]):
+            error = f"{job['steps'][job['step']]} failed: {error}"
         job |= {"status": "failed", "error": error}
         if re.search(r"overleaf_token|overleaf login", error):
             job |= {

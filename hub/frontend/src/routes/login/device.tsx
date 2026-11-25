@@ -49,6 +49,8 @@ function CliAuth() {
         (response) => response.data,
       ),
     refetchOnWindowFocus: false,
+    // A failure doesn't block authorizing, so it isn't worth waiting on
+    retry: false,
     enabled: Boolean(deviceCode) && isGithubUser,
   })
   const ghAppNotInstalled =

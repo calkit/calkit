@@ -1508,6 +1508,15 @@ def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
             ],
         )
     failing.clear()
+    # A path is looked for there, not here
+    ran.clear()
+    path_req = {"kind": "env-var-path", "name": "SOLVER", "search_paths": "*"}
+    ws.check_requirements(w, [path_req])
+    assert 'test -e "${SOLVER:-}"' in ran[0]
+    failing.add("SOLVER")
+    with pytest.raises(ValueError, match="'SOLVER' isn't a path that exists"):
+        ws.check_requirements(w, [path_req])
+    failing.clear()
     # AWS credentials are checked there, for the account asked for
     ran.clear()
     aws = {"kind": "aws-credentials", "account_id": "012", "profile": "p"}

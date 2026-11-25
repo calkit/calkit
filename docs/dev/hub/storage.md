@@ -1,17 +1,23 @@
-# ADR 0002: External storage
+# Hub storage
 
 <!-- prettier-ignore -->
 !!! note
     This document was written by Anthropic's Claude Code.
 
-- Status: accepted
-- Date: 2026-11-22
-- Issues: #1739 (Hugging Face buckets), #2170 (Box), S3
+Where the Calkit Hub keeps projects' files,
+why it works this way,
+and where it's probably headed.
+Today that's a project's large files, stored with DVC;
+its Git repo is always on GitHub.
+
 - User docs: [storage.md](../../storage.md)
+- Issues: #1739 (Hugging Face buckets), #2170 (Box), #1253 (own cloud
+  storage), #1254 (own Git host), #1390 (no GitHub account), #682
+  (Forgejo), #654 and #736 (issues in the project)
 - Notes on later work, e.g., storage per path, Git LFS, and HF Datasets:
   [original design notes](https://github.com/calkit/calkit/blob/55e3628d1665fb5e72ca1f4cc74acea94810af0a/docs/storage.md#design-notes)
 
-## Context
+## Why
 
 A project's large files are stored with DVC.
 By default they go to the Calkit Hub's own object storage,
@@ -30,11 +36,27 @@ e.g., with a key in local config, would hide those files from the hub.
 At the same time, traffic through the hub should scale with batches of
 files, not with files or bytes.
 
-HF is the first provider, in #1739.
-S3 and S3-compatible storage, Box, Dropbox, OneDrive, and Google Drive
-follow, so the model has to fit all of them.
+The model has to fit every provider,
+from object storage like S3 and HF buckets
+to file services like Box, Dropbox, OneDrive, and Google Drive.
 
-## Decision
+So:
+
+- One brokered pattern serves every provider:
+  the hub holds credentials and hands out narrow, short-lived access,
+  and clients transfer directly with the service.
+- Each provider needs code for creating resources,
+  changing their visibility where it applies,
+  and handing out scoped access.
+- A public project's objects in a dedicated public bucket can be fetched
+  straight from the service, without the hub.
+- Renaming or moving projects gets harder,
+  since storage carries their names.
+
+## Where we are
+
+The hub's own storage, HF buckets, Box, and S3 and S3-compatible storage,
+e.g., the Open Storage Network (OSN), hold DVC objects.
 
 ### Terms
 
@@ -69,12 +91,12 @@ follow, so the model has to fit all of them.
 | ------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------- |
 | HF, connected with OAuth              | dedicated bucket                  | HF doesn't limit bucket count, and a bucket's visibility can match its project's        |
 | HF, with a token scoped to one bucket | dedicated bucket                  | The token can't create buckets, and a Xet read token covers a whole bucket              |
-| S3 and compatible                     | namespace bucket                  | Creating buckets takes broader permissions, and institutions usually provide one bucket |
+| S3 and compatible, with pasted keys   | namespace bucket or prefix        | Creating buckets takes broader permissions, and institutions usually provide one bucket |
 | Box                                   | namespace folder, e.g., `Calkit/` | Tokens can be downscoped to one project's folder, so projects can share it              |
 | Dropbox, OneDrive, Google Drive       | namespace folder, e.g., `Calkit/` | Their narrower OAuth scopes are limited to a folder like this                           |
 
 A service may offer the other kind as an option,
-e.g., a dedicated S3 bucket when the credential can create one.
+e.g., a dedicated S3 bucket or prefix, such as an existing DVC remote.
 HF is the exception,
 and its buckets are always dedicated.
 A Xet read token covers a whole bucket,
@@ -237,18 +259,60 @@ is a separate feature from storage.
 A storage resource holds DVC objects by hash,
 which only make sense to DVC.
 
-## Consequences
+<!-- TODO: needs human review -->
 
-- One brokered pattern serves every provider:
-  the hub holds credentials and hands out narrow, short-lived access,
-  and clients transfer directly with the service.
-- Each provider needs code for creating resources,
-  changing their visibility where it applies,
-  and handing out scoped access.
-- A public project's objects in a dedicated public bucket can be fetched
-  straight from the service, without the hub.
-- Renaming or moving projects gets harder,
-  since storage carries their names.
+## Where we want to end up
+
+### More storage
+
+- Dropbox, OneDrive, and Google Drive, as namespace folders.
+- Connecting AWS without access keys, e.g., with a role the hub assumes.
+- Connecting an existing HF bucket with a token limited to it.
+- Choosing storage per path in `calkit.yaml`,
+  e.g., one dataset on HF and the rest on the hub.
+- Moving files to new storage when a project's storage changes.
+- Pasting what an OSN allocation's page in ColdFront shows,
+  i.e., endpoint, bucket, and keys, in one go.
+
+### Git storage
+
+A project's Git repo should be pluggable the same way,
+so GitHub becomes one option rather than a requirement:
+
+- The hub hosts Git itself as the default,
+  the way its own storage is the default for DVC,
+  which also lets people use Calkit without a GitHub account.
+- GitHub, GitLab, hosted or self-hosted, and Forgejo,
+  which covers Codeberg and Gitea,
+  plug in as external Git storage.
+  Hosted services connect with OAuth,
+  and self-hosted ones with pasted tokens,
+  since registering an OAuth app there takes the instance's admin.
+- Collaborators push and pull through the hub,
+  e.g., `calkit.io/git/{owner}/{project}.git`,
+  authenticated as themselves with their Calkit login.
+  The hub checks their access to the project,
+  then forwards to the host with the connection's credential,
+  scoped to one repo where the host allows it,
+  e.g., a GitLab project access token or a Forgejo deploy key.
+  This is the same brokered pattern as DVC storage:
+  collaborators don't need accounts on the host,
+  and the credential never leaves the hub.
+
+The costs are that Git traffic goes through the hub,
+which is small next to data but not free,
+and that pushes, issues, and pull requests made through the hub show up
+on the host as the credential's identity,
+though commits keep their authors.
+
+### Issues
+
+Issues should live in the project,
+e.g., as files under `.calkit/`,
+so they move with it and work offline,
+and sync with each Git host's issue tracker through its connection.
+git-bug, which keeps issues in Git and has bridges to GitHub and GitLab,
+is worth evaluating before building this.
 
 ## Alternatives considered
 
@@ -266,5 +330,21 @@ which only make sense to DVC.
   but the hub could never show files stored this way,
   and every collaborator would need their own credential.
 - **Storage IDs instead of names** in paths and buckets,
-  which would make renames free,
-  but leave storage unreadable outside Calkit.
+which would make renames free,
+but leave storage unreadable outside Calkit.
+<!-- TODO: needs human review -->
+
+- **Keys for each project rather than each user**,
+  for S3.
+  Keys usually reach a whole bucket or account,
+  so tying them to one project would mean pasting the same keys again for
+  each project sharing a bucket.
+- **Checking an S3 endpoint's address only when its keys are saved**.
+  A redirect, or the host resolving differently later,
+  could still point the hub at its own network,
+  so each connection is checked as it's made.
+- **Sharing a Git host credential with collaborators**,
+  or giving each a token of their own on the host.
+  It needs no proxy,
+  but either spreads a credential that can do more than the project needs,
+  or makes every collaborator get an account on the host.

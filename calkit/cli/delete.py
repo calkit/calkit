@@ -72,6 +72,6 @@ def delete_comment(
             lines = calkit.reviews.delete(lines, int(id))
         except ValueError as e:
             raise_error(str(e))
-        pathlib.Path(review).write_text("\n".join(lines), encoding="utf-8")
+        calkit.write_text(review, "\n".join(lines))
         return
     edit_comment(path, id, line, None)

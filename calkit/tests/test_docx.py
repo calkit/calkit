@@ -527,8 +527,10 @@ def test_docx_round_trip(
     # As bytes, so restoring it doesn't change its line endings
     before = Path("paper/main.tex").read_bytes()
     calkit.cli.latex.merge_docx("paper/pandoc-edited.docx")
-    after = Path("paper/main.tex").read_text(encoding="utf-8")
-    assert "wind farm turbine layout" in after
+    after_bytes = Path("paper/main.tex").read_bytes()
+    assert b"wind farm turbine layout" in after_bytes
+    # Merging keeps the file's line endings, e.g., LF on Windows
+    assert (b"\r\n" in after_bytes) == (b"\r\n" in before)
     Path("paper/main.tex").write_bytes(before)
     for name in ("main.aux", "main.bbl", "pandoc.docx", "pandoc-edited.docx"):
         Path("paper", name).unlink()

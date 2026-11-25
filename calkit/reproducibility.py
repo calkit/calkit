@@ -9,7 +9,6 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, computed_field
 
 import calkit
-import calkit.eol
 from calkit.provenance import (
     PROVENANCE_ARTIFACT_TYPES,
     find_project_provenance_gaps,
@@ -280,7 +279,7 @@ class ReproCheck(BaseModel):
                 "hashes whose line endings Git doesn't pin, e.g., "
                 f"{self.eol_unpinned[0]}. Git for Windows checks them out "
                 "with CRLF, so they hash differently there and stages read "
-                f"as out of date. To pin them, {calkit.eol.FIX}."
+                f"as out of date. To pin them, {calkit.EOL_FIX}."
             )
         if not self.has_dev_container:
             return (
@@ -1429,7 +1428,7 @@ def check_reproducibility(
         ]
     res["paths_outside_project"] = list(dict.fromkeys(outside))
     res["eol_unpinned"] = (
-        [f.path for f in calkit.eol.check_pipeline(wdir=wdir) if f.at_risk]
+        [f.path for f in calkit.check_pipeline_eol(wdir=wdir) if f.at_risk]
         if res["is_git_repo"]
         else []
     )

@@ -469,6 +469,10 @@ def test_platform_entries_prerequisites_and_record(
         git = install.get_installer("git")
         assert git is not None and "xcode-select --install" in git["script"]
         assert "requires" not in git
+        # VS Code goes in the user's own Applications without access to
+        # /Applications, e.g., on a managed Mac
+        code = install.get_installer("code")
+        assert code is not None and '"$HOME/Applications"' in code["script"]
         assert install.get_installer("choco") is None
         assert "Windows-only" in str(install.get_unsupported_message("choco"))
         # Colima comes with the Docker CLI it's no use without, unless

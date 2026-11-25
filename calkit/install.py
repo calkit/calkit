@@ -308,12 +308,15 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "code": {
         # VS Code's own download, unzipped where its installer would put it,
-        # so it doesn't take Homebrew
+        # so it doesn't take Homebrew, or into the user's own Applications
+        # where they can't write to that, e.g., on a managed Mac
         "mac": {
             "script": (
+                "apps=/Applications; [ -w $apps ] || "
+                'apps="$HOME/Applications"; mkdir -p "$apps" && '
                 'zip="$(mktemp)" && curl -fsSL -o "$zip" '
                 "https://update.code.visualstudio.com/latest/darwin-universal/"
-                'stable && ditto -xk "$zip" /Applications && rm "$zip"'
+                'stable && ditto -xk "$zip" "$apps" && rm "$zip"'
             ),
             # Also where one dragged into the user's own Applications runs
             "path_add": [

@@ -5873,12 +5873,15 @@ def test_clone(monkeypatch):
             raise subprocess.CalledProcessError(1, cmd)
         raise AssertionError(cmd)
 
-    def get_token():
-        raise ValueError("No token found")
-
-    def get(path):
+    def get(path, **kwargs):
+        if path == "/user/github-token":
+            if not github_token:
+                raise ValueError("No token found")
+            return {"access_token": "ghu_token"}
         hubs.append(os.environ.get("CALKIT_HUB"))
         return {"git_repo_url": "https://github.com/me/proj"}
+
+    github_token = False
 
     def clone(*args, ssh_set_up=True):
         cloned.clear()
@@ -5900,7 +5903,6 @@ def test_clone(monkeypatch):
     monkeypatch.setenv("CALKIT_HUB", "")
     monkeypatch.setattr("subprocess.check_call", check_call)
     monkeypatch.setattr(calkit.hub, "get", get)
-    monkeypatch.setattr(calkit.hub, "get_token", get_token)
     # SSH where it's set up for GitHub, by a project's name or its URL
     assert clone_url("me/proj") == "git@github.com:me/proj.git"
     assert (
@@ -5940,14 +5942,17 @@ def test_clone(monkeypatch):
         clone_url("me/proj", "--ssh", ssh_set_up=False)
         == "git@github.com:me/proj.git"
     )
-    # Over HTTPS, Git gets GitHub credentials from the hub, if signed in
+    # Over HTTPS, Git gets GitHub credentials for a hub's project from the
+    # hub, if it has them, but not for any other repo
     assert configs == [[]]
-    monkeypatch.setattr(calkit.hub, "get_token", lambda: "token")
+    github_token = True
     clone("me/proj", "--https")
     assert configs == [calkit.git.get_github_credential_args()]
     clone("me/proj")
     assert configs == [[]]
-    monkeypatch.setattr(calkit.hub, "get_token", get_token)
+    clone("https://github.com/me/proj.git", "--https")
+    assert configs == [[]]
+    github_token = False
     # Interactively, SSH where it isn't set up offers to set it up, which
     # can end early, e.g., once GitHub's host key is trusted, then checks
     # again, or falls back to HTTPS, unless SSH was asked for

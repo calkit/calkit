@@ -116,6 +116,8 @@ Linked Overleaf projects are indexed on the hub the first time a sync or a
 status check runs for them, which is what lets the extension go from an
 Overleaf URL back to your project.
 
+<!-- TODO: needs human review -->
+
 To make a new Calkit project for the paper,
 open the Calkit extension panel on Overleaf and click
 **Make this paper reproducible**.

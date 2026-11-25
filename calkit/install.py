@@ -215,12 +215,14 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
         },
     },
     "git": {
-        # Apple's, which needs no Homebrew, waiting for the dialog it opens,
-        # which installs it after this returns
+        # Apple's, which needs no Homebrew, waiting up to half an hour for
+        # the dialog it opens, which installs it after this returns, or one
+        # already open, checking without git, which would open another
         "mac": {
             "script": (
-                "xcode-select --install && "
-                "until git --version >/dev/null 2>&1; do sleep 5; done"
+                "xcode-select --install; n=0; "
+                "until xcode-select -p >/dev/null 2>&1; do "
+                "n=$((n + 1)); [ $n -gt 360 ] && exit 1; sleep 5; done"
             ),
             "path_add": "/usr/bin",
         },

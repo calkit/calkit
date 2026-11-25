@@ -21,6 +21,10 @@ for arg in "$@"; do
     esac
 done
 
+# The user's own, to tell whether they'll need a new terminal for calkit,
+# before installing uv puts its tool directory on this one
+USER_PATH="$PATH"
+
 # Check if uv is installed
 if ! command -v uv >/dev/null 2>&1; then
     echo "Installing uv"
@@ -46,7 +50,7 @@ fi
 # it's a Windows path, whose drive letter's colon would split PATH
 bin_dir="$(uv tool dir --bin)"
 if command -v cygpath >/dev/null 2>&1; then bin_dir="$(cygpath -u "$bin_dir")"; fi
-case ":$PATH:" in
+case ":$USER_PATH:" in
     *":$bin_dir:"*) NEW_TERMINAL=0 ;;
     *) NEW_TERMINAL=1 ;;
 esac
@@ -54,8 +58,9 @@ PATH="$bin_dir:$PATH"
 export PATH
 
 # macOS has a git command that only works once the Command Line Tools are
-# installed, so start that now rather than at the first project
-if [ "$(uname)" = "Darwin" ] && ! git --version >/dev/null 2>&1; then
+# installed, so start that now rather than at the first project, checking
+# without running git, which would open the same dialog
+if [ "$(uname)" = "Darwin" ] && ! xcode-select -p >/dev/null 2>&1; then
     echo "Installing Git with Apple's Command Line Tools"
     if xcode-select --install 2>/dev/null; then
         echo "⚠️ Select Install in the dialog that opened to finish installing Git"

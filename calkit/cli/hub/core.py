@@ -91,8 +91,12 @@ def git_credential(
     ):
         return
     try:
+        # Not long, since Git waits on it
         resp = calkit.hub.get(
-            "/user/github-token", allow_login=False, max_retries=2
+            "/user/github-token",
+            allow_login=False,
+            max_retries=2,
+            timeout=(5, 30),
         )
     except Exception as e:
         # Git carries on without, e.g., asking for a password

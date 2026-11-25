@@ -1521,15 +1521,21 @@ def start_job(msg: dict) -> dict:
         check_clone_location(location)
         if not os.path.isdir(location):
             raise ValueError(f"{location} isn't a folder")
-        # One an earlier try made the project in picks up where it
-        # stopped, e.g., before Overleaf could be connected
-        made = {}
+        # A folder where an earlier try already made this project, e.g.,
+        # one that stopped before Overleaf was connected, picks up where it
+        # stopped
+        prior_info = {}
         if os.path.exists(os.path.join(location, ".git")):
             try:
-                made = calkit.load_calkit_info(wdir=location, read_only=True)
+                prior_info = calkit.load_calkit_info(
+                    wdir=location, read_only=True
+                )
             except Exception:
-                made = {}
-            if made.get("name") != name or made.get("owner") != owner:
+                prior_info = {}
+            if (
+                prior_info.get("name") != name
+                or prior_info.get("owner") != owner
+            ):
                 raise ValueError(f"{location} is already a Git repo")
         hub = msg.get("hub")
         title = msg.get("title")
@@ -1559,7 +1565,7 @@ def start_job(msg: dict) -> dict:
         then = []
         # What each command is doing, for the extension to show
         steps = ["Signing in"]
-        if not made:
+        if not prior_info:
             then.append(
                 calkit_cmd
                 + ["new", "project", ".", "--hub", hub, "--name", name]
@@ -1567,7 +1573,7 @@ def start_job(msg: dict) -> dict:
                 + (["--public"] if msg.get("isPublic") else [])
             )
             steps.append("Creating project")
-        if path not in (made.get("overleaf_sync") or {}):
+        if path not in (prior_info.get("overleaf_sync") or {}):
             then.append(
                 calkit_cmd
                 + ["overleaf", "import", overleaf_url, path]

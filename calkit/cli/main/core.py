@@ -457,6 +457,7 @@ def clone(
         url = "git@github.com:" + url.removeprefix("ssh://git@github.com/")
     # A project named by its owner and name, and maybe its hub, has its repo
     # URL fetched from that hub
+    from_hub = False
     parts = url.split("/")
     if url.startswith(("github.com/", "gitlab.com/")):
         url = "https://" + url
@@ -483,6 +484,7 @@ def clone(
         url = project["git_repo_url"]
         if not url.endswith(".git"):
             url += ".git"
+        from_hub = True
     # Set up the project for its hub, e.g., its DVC remote, even when it's
     # given by its repo URL
     if hub is not None:
@@ -529,13 +531,16 @@ def clone(
         if not ssh_ok and not ssh_given:
             typer.echo("Cloning over HTTPS")
             url = "https://github.com/" + url.removeprefix("git@github.com:")
-    # Over HTTPS, Git gets GitHub credentials from the hub when signed in,
-    # so this machine needs no sign-in to GitHub, which the browser
-    # extension can't ask for
+    # Over HTTPS, Git gets GitHub credentials for a hub's project from the
+    # hub, if it has them, so this machine needs no sign-in to GitHub, which
+    # the browser extension can't ask for; only for a hub's project, which
+    # its GitHub App can reach, since the user's own credentials are dropped
     hub_credentials = False
-    if url.startswith("https://github.com/"):
+    if from_hub and url.startswith("https://github.com/"):
         try:
-            calkit.hub.get_token()
+            calkit.hub.get(
+                "/user/github-token", allow_login=False, max_retries=2
+            )
             hub_credentials = True
         except Exception:
             pass

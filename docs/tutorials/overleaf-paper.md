@@ -52,12 +52,16 @@ You don't need to have used Calkit before, or Git, or Docker.
 ## What you need
 
 - An [Overleaf](https://overleaf.com) account.
+  A free one works, without Overleaf's Git integration.
 - A [GitHub](https://github.com) account, where the project's files are
   kept.
 - An account on [calkit.io](https://calkit.io), which you can make with
   your GitHub account. It shows the project, its figures, and where they
   came from, so you can share it, and it's where you connect your GitHub
   and Overleaf accounts. Your analysis runs on your laptop.
+  <!-- TODO: needs human review -->
+  Signing up asks you to install the Calkit app on GitHub, which lets
+  Calkit create and update the project's repo.
 - [VS Code](https://code.visualstudio.com) with the
   [Calkit extension](https://marketplace.visualstudio.com/items?itemName=calkit.calkit-vscode).
 - The [Calkit browser extension](../browser-ext/index.md), signed in.
@@ -83,6 +87,14 @@ powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 This also lets the browser extension ask Calkit on your laptop to do
 things, e.g., run a notebook, while you're on Overleaf. It talks to your
 laptop directly, not through calkit.io.
+
+<!-- TODO: needs human review -->
+
+On macOS, if Git isn't installed yet, a dialog opens to install Apple's
+Command Line Tools, which include it: click **Install**.
+Open a new terminal afterwards, so it finds `calkit`.
+Then, in the browser extension's options, click **Connect** under
+**This machine**, and allow it in the browser's prompt.
 
 ## Get the starter files
 
@@ -125,25 +137,20 @@ constant at 25 °C typed into the text.
 The starter paper on Overleaf, with the diagram, the plots, and typed
 numbers. -->
 
-## Make the folder a project
+## Connect the paper to the analysis
 
-In VS Code, open a terminal in the `dye-fading` folder and run:
+<!-- TODO: needs human review -->
 
-```sh
-calkit new project . --hub
-```
+On Overleaf, open the starter paper and click the Calkit button in the
+corner, then **Make this paper reproducible**.
+Click **Select analysis folder** and select the `dye-fading` folder,
+check the title, and click **Create project**.
+If Calkit doesn't have access to Overleaf yet, it asks you to connect it
+first: without Overleaf Premium, click **Connect with Overleaf login**.
 
-This makes the folder a Calkit project, with a copy of it on GitHub and a
-page on calkit.io, without moving or changing your files.
-
-Then bring the paper in, using its URL from your browser's address bar on
-Overleaf:
-
-```sh
-calkit overleaf import https://www.overleaf.com/project/... paper
-```
-
-The paper is copied into a `paper` folder in the project and stays
+Calkit on your laptop makes the folder a Calkit project, with a copy of it
+on GitHub and a page on calkit.io, without moving or changing your files.
+It brings the paper into a `paper` folder in the project, which stays
 connected to Overleaf: you keep writing there, and syncing brings changes
 both ways.
 
@@ -151,6 +158,14 @@ Calkit sees that the paper's `figures/decay.png` and `figures/spectra.png`
 are the same as the ones in your `figures` folder, and offers to keep them
 in sync from there, so the paper always shows what the analysis last made.
 Say yes.
+
+You can do the same from a terminal in the `dye-fading` folder, with the
+paper's URL from your browser's address bar on Overleaf:
+
+```sh
+calkit new project . --hub
+calkit overleaf import https://www.overleaf.com/project/... paper
+```
 
 If you already use Overleaf's Git integration, your clone of the Overleaf
 project holds only the paper. Bring it in the same way, and work in the
@@ -184,12 +199,11 @@ out of date, save the project, and sync the paper, all at once:
 calkit run --save --overleaf
 ```
 
-or click **Run and Save** at the top of the Calkit sidebar in VS Code,
-which syncs the paper too once it's connected to Overleaf. The label now
-shows what was saved.
+or click **Run, Save, and Sync with Overleaf** at the top of the Calkit
+sidebar in VS Code. The label now shows what was saved.
 
-On Overleaf, hover over the typed rate constant. Calkit finds the rate in
-`rates` that matches it, and offers to use it instead:
+On Overleaf, the typed rate constant is now marked, since it matches a
+rate in `rates`. Hover over it and click **Link** to use it instead:
 
 ```latex
 % Before
@@ -243,11 +257,12 @@ on the PDF, anything with no recorded origin is marked in red.
 The Calkit sidebar listing the figures and numbers, with the spectra plot
 and the diagram marked red. -->
 
-The spectra plot is still red. Hover over its `\includegraphics` line and
-click **Define origin**, then pick `plot_spectra.py` from the list of your
-project's scripts and notebooks. Calkit on your laptop does the rest: it
-records the script the same way `xr` did, runs it, saves the project, and
-syncs the paper, while the card on Overleaf shows how it's going.
+The spectra plot is still red. Hover over its `\includegraphics` line and,
+under **Define origin**, click **Script**, then select `plot_spectra.py`
+from your project's scripts and notebooks, and click **Add to pipeline**.
+Calkit on your laptop does the rest: it records the script the same way
+`xr` did, runs it, saves the project, and syncs the paper, while the card
+on Overleaf shows how it's going.
 
 <!-- Screenshot: img/overleaf-paper/define-origin-script.png
 Defining the spectra plot's origin by picking plot_spectra.py. -->
@@ -260,9 +275,10 @@ The setup diagram is drawn in `figures/setup-diagram.pptx`, and the PDF in
 the paper was exported from it by hand. Instead of exporting and uploading
 it again every time you change it, have the pipeline do it.
 
-On Overleaf, hover over the diagram's `\includegraphics` line and click
-**Define origin**. Calkit suggests `figures/setup-diagram.pptx`, since it
-has the same name, so click **Confirm**, then **Save**. Calkit on your
+On Overleaf, hover over the diagram's `\includegraphics` line. Under
+**Define origin**, Calkit suggests it's exported from
+`figures/setup-diagram.pptx`, since it has the same name, so click
+**Confirm**, then **Add export step**. Calkit on your
 laptop adds a step to the pipeline that exports the slide to PDF, with
 PowerPoint, or with LibreOffice if you don't have PowerPoint, and syncs it
 to the paper.
@@ -274,6 +290,33 @@ You keep drawing in PowerPoint. From now on, whenever the pipeline runs and
 the PowerPoint file has changed, the diagram in the paper is exported
 again, and the PowerPoint file is saved with the rest of the project, so
 it's backed up and every version of it is kept.
+
+## Change something and watch the paper follow
+
+Now the figures and the number are accounted for, try changing them.
+
+Say the decay plot's axis labels need units. On Overleaf, hover over the
+plot's line in the editor, or select it in the Calkit sidebar, then click
+**Open in VS Code** on its card. VS Code opens `fit_rates.ipynb`, the
+notebook that makes it. Change the labels, then:
+
+```sh
+calkit run --save --overleaf
+```
+
+Calkit reruns only what's out of date, here the notebook and everything
+downstream of it, and the new plot is on Overleaf a few seconds later. You
+didn't export, upload, or retype anything, and you didn't have to remember
+which notebook made which figure, or what had to run after it.
+
+<!-- Screenshot: img/overleaf-paper/open-in-vscode.png
+The decay plot's card on Overleaf, with the "Open in VS Code" button. -->
+
+The same goes for the diagram. Open `figures/setup-diagram.pptx` in
+PowerPoint, change the slide, and save it. Then, on Overleaf, click
+**Run and sync** in the Calkit sidebar. Calkit on your laptop exports the
+slide, saves the project, and syncs the paper, and the new diagram is in
+the PDF the next time Overleaf compiles it.
 
 ## When xr isn't enough: hand it to an agent
 
@@ -295,51 +338,29 @@ Calkit's skills. In VS Code, start your agent and ask it, e.g.:
 
 The agent copies the temperature log into the project, changes the notebook
 to read the rate constants `fit_rates.ipynb` saves, records it in the
-pipeline after `fit_rates.ipynb`, and runs it. Read what it changed before
-you keep it: it's your analysis. Then, on Overleaf, right-click where the
-activation energy goes, choose **Insert from Calkit**, and pick it.
-
-## Change something and watch the paper follow
-
-Now everything in the paper is accounted for, try changing it.
-
-Say the decay plot's axis labels need units. On Overleaf, click the plot,
-then **Open in VS Code** on its card. VS Code opens `fit_rates.ipynb`, the
-notebook that makes it. Change the labels, then:
-
-```sh
-calkit run --save --overleaf
-```
-
-Calkit reruns only what's out of date, here the notebook and everything
-downstream of it, and the new plot is on Overleaf a few seconds later. You
-didn't export, upload, or retype anything, and you didn't have to remember
-which notebook made which figure, or what had to run after it.
-
-<!-- Screenshot: img/overleaf-paper/open-in-vscode.png
-The decay plot's card on Overleaf, with the "Open in VS Code" button. -->
+pipeline after `fit_rates.ipynb`, and runs it, asking before it saves the
+project and syncs the paper. Read what it changed before you keep it: it's
+your analysis. Then, on Overleaf, right-click where the activation energy
+goes, choose **Insert from Calkit**, and select it.
 
 <!-- TODO: needs human review -->
 
-Now a bigger change. Say the fits should only use the first 30 minutes of
-each run. In `fit_rates.ipynb`, keep only those rows before fitting, e.g.,
+Now a bigger change, which you can do yourself or ask the agent for. Say
+the fits should only use the first 30 minutes of each run. In
+`fit_rates.ipynb`, keep only those rows before fitting, e.g.,
 `df = df[df.time_min <= 30]`, and run, save, and sync again. The decay
-plot, the rate constants in `rates`, the Arrhenius fit that reads them, and the activation energy all change, and so does every
-`\ckvalue` in the paper that shows one of them. By hand, that's rerunning
+plot, the rate constants in `rates`, the Arrhenius fit that reads them,
+and the activation energy all change, and so does every `\ckvalue` in the
+paper that shows one of them. By hand, that's rerunning
 two notebooks in the right order, uploading two figures, and finding and
 retyping every number that moved.
-
-The same goes for the diagram. Open `figures/setup-diagram.pptx` in
-PowerPoint, change the slide, and save it. Then, on Overleaf, click
-**Run and sync** in the Calkit sidebar. Calkit on your laptop exports the
-slide, saves the project, and syncs the paper, and the new diagram is in
-the PDF the next time Overleaf compiles it.
 
 ## Write the paper in VS Code too
 
 You can keep writing on Overleaf, or write in VS Code, next to the
-analysis. Open `paper/main.tex`, and the Calkit extension shows the PDF
-beside it, with figures and numbers that lead back to what made them.
+analysis. Open `paper/main.tex` and click **Show PDF** in the editor's
+title bar to see the PDF beside it, with figures and numbers that lead back
+to what made them.
 **Sync with Overleaf** in the Calkit sidebar brings your coauthors' changes
 in and sends yours out.
 

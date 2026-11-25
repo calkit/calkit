@@ -210,14 +210,13 @@ def fix_line_endings() -> None:
     Submodules that don't pin their own line endings are set to check
     their files out as committed, in this clone only.
     """
-    import calkit.eol
     import calkit.git
 
     try:
         calkit.git.get_repo()
     except Exception:
         raise_error("Not in a Git repo")
-    res = calkit.eol.pin()
+    res = calkit.pin_eol()
     if res.wrote_gitattributes:
         typer.echo(
             "Added rules to .gitattributes that check text files out with "
@@ -229,7 +228,7 @@ def fix_line_endings() -> None:
         n = len(res.converted)
         typer.echo(
             f"Rewrote {n} {'file' if n == 1 else 'files'} in this checkout "
-            f"to match: {calkit.eol.summarize(res.converted)}"
+            f"to match: {calkit.summarize_paths(res.converted)}"
         )
     for sm in res.submodules:
         typer.echo(

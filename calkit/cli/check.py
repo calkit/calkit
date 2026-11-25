@@ -449,7 +449,6 @@ def _echo_retyped(findings: list[dict]) -> None:
 
 def _echo_line_endings(paths: list[str]) -> None:
     """Files the pipeline hashes whose line endings Git doesn't pin."""
-    import calkit.eol
 
     calkit.echo(
         f"Pipeline files with line endings that differ on Windows "
@@ -462,7 +461,7 @@ def _echo_line_endings(paths: list[str]) -> None:
         ".gitattributes says otherwise, and DVC hashes them as they are on "
         "disk, so these hash differently there than wherever dvc.lock was "
         "written, and the stages that use or write them read as out of "
-        f"date. To pin them to LF everywhere, {calkit.eol.FIX}."
+        f"date. To pin them to LF everywhere, {calkit.EOL_FIX}."
     )
 
 

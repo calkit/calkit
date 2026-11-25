@@ -366,10 +366,8 @@ def init(
     # Pinned before there's a pipeline, so dvc.lock never records hashes
     # of files with this machine's line endings. Committed files keep
     # their content, so none reads as changed.
-    from calkit.eol import pin as pin_line_endings
-
     attrs = os.path.abspath(".gitattributes")
-    pinned = pin_line_endings().wrote_gitattributes
+    pinned = calkit.pin_eol().wrote_gitattributes
     if pinned:
         repo.git.add(attrs)
     # Create an empty calkit.yaml if one doesn't already exist
@@ -549,9 +547,7 @@ def clone(
     # Submodules the project's .gitattributes can't reach would otherwise
     # be checked out with this platform's line endings, so stages that use
     # them read as out of date wherever dvc.lock wasn't written
-    from calkit.eol import pin_submodules
-
-    if converted := pin_submodules().converted:
+    if converted := calkit.pin_submodules_eol().converted:
         typer.echo(
             f"Rewrote {len(converted)} files in submodules with the line "
             "endings they were committed with"
@@ -3637,10 +3633,9 @@ def _warn_rewritten_line_endings() -> None:
     whose line endings could be rewritten elsewhere are for
     `calkit check repro`, rather than a warning on every run.
     """
-    import calkit.eol
 
     try:
-        rewritten = [f for f in calkit.eol.check_pipeline() if f.rewritten]
+        rewritten = [f for f in calkit.check_pipeline_eol() if f.rewritten]
     except Exception:
         return
     if not rewritten:
@@ -3650,7 +3645,7 @@ def _warn_rewritten_line_endings() -> None:
     message = (
         f"{n} {'file' if n == 1 else 'files'} the pipeline hashes "
         f"{'has' if n == 1 else 'have'} CRLF line endings here but LF in "
-        f"Git ({calkit.eol.summarize(paths)}), so stages that use them look "
+        f"Git ({calkit.summarize_paths(paths)}), so stages that use them look "
         "out of date compared with other machines, and rerunning them "
         "changes dvc.lock for everyone. "
     )
@@ -3663,7 +3658,7 @@ def _warn_rewritten_line_endings() -> None:
             "rewrites them."
         )
     else:
-        message += f"To fix it, {calkit.eol.FIX}."
+        message += f"To fix it, {calkit.EOL_FIX}."
     warn(message)
 
 

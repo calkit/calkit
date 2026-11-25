@@ -4,6 +4,8 @@
 !!! note
     This document was written by Anthropic's Claude Code.
 
+<!-- TODO: needs human review -->
+
 How users link their own machines to the Calkit Hub to reach their
 workspaces there,
 why it works this way,
@@ -65,26 +67,6 @@ Two pieces already exist:
   DVC objects in and bringing changed outputs back, under a lock.
 - `calkit local-server` is a localhost FastAPI app the hub's "local
   machine" tab calls for status, saving, pipeline runs, and Jupyter.
-
-So:
-
-- One hub-connected process now does what `calkit local-server` did, and
-  more, so the local server and its hub tab are removed rather than
-  maintained in parallel.
-- The link requires the hub.
-  The hub is still optional for the project itself, which lives in Git,
-  and SSH environments still work without it.
-- All interactive traffic passes through the relay, which costs latency
-  and hub bandwidth.
-  Keeping bulk data off the relay and metering it keeps that bounded, and
-  a direct path can be added later without changing the link's
-  command set.
-- The hub gains a new service to deploy and monitor.
-- The hub becomes a way to get a shell on users' machines, so the security
-  of the hub, of user sessions, and of machine tokens matters more than
-  before.
-- Personal and managed workspaces follow different rules, which the hub
-  must make visible.
 
 ## Where we are
 
@@ -389,8 +371,8 @@ taken.
 The hub presents itself as a workspace too: the default one, and the
 project's source of truth, which can be viewed and edited but runs
 nothing.
-A "view from" select in the project's menu switches between the hub, its
-change batches (#445), which extends the existing `ref` picker, and the
+A "view from" select (phase 2) in the project's menu switches between
+the hub, its change batches (#445), which extends the existing `ref` picker, and the
 user's machines' workspaces, read live through their links, so only
 while they're online and with the second factor sessions take.
 What's in the view is always relative to the hub, and the key design
@@ -459,7 +441,7 @@ lists every workspace of the project with its commit, whether it has
 uncommitted changes, and how far ahead of or behind the hub it is, plus the
 sessions running in it.
 
-To avoid paying twice for expensive stages, the link points all of a
+To avoid paying twice for expensive stages (phase 3), the link points all of a
 project's workspaces on one machine at a shared DVC cache, so the run cache
 lets one workspace restore outputs another has already computed instead of
 recomputing them.
@@ -494,7 +476,8 @@ Agent-specific features are deferred:
   Terminals remain the baseline, since they work with every agent.
 
 The hub's workspace view is built natively: xterm.js terminals over the
-relay, the pipeline stage list, and a file tree with a simple editor.
+relay, the pipeline stage list, and a file tree with a simple editor
+(phase 2).
 We don't embed a full editor such as openvscode-server.
 
 The editor works on the workspace's files directly through the link,
@@ -513,7 +496,7 @@ Editing the hub's copy of a project, i.e., what has been pushed, commits
 directly, which workspaces then need to pull.
 When the user has a live workspace for the project, the hub opens files
 there by default, and each user can choose a default workspace per
-project, which the hub opens into when working hub first.
+project, which the hub opens into when working hub first (phase 2).
 
 ### Running as a service
 
@@ -551,8 +534,8 @@ supported:
 
 - `calkit hub link start` in the foreground, e.g., inside tmux.
 - `calkit hub link install --cron`, which checks in with the hub on a
-  schedule, reporting scheduler job states, and opens the websocket only
-  when there is work to do, e.g., the user has opened a shell.
+  schedule, reporting scheduler job states (phase 2), and opens the
+  websocket only when there is work to do, e.g., the user has opened a shell.
   Its crontab includes an `@reboot` entry so it checks in at boot.
 
 `scrontab` and similar are deferred.
@@ -613,6 +596,26 @@ The hub calls these pages Workspaces.
 "Compute" is saved for brokered compute,
 and pipeline runs from elsewhere, e.g., GitHub Actions,
 go on the pipeline page, since they aren't interactive like workspaces.
+
+### Consequences
+
+- One hub-connected process now does what `calkit local-server` did, and
+  more, so the local server and its hub tab are removed rather than
+  maintained in parallel.
+- The link requires the hub.
+  The hub is still optional for the project itself, which lives in Git,
+  and SSH environments still work without it.
+- All interactive traffic passes through the relay, which costs latency
+  and hub bandwidth.
+  Keeping bulk data off the relay and metering it keeps that bounded, and
+  a direct path can be added later without changing the link's
+  command set.
+- The hub gains a new service to deploy and monitor.
+- The hub becomes a way to get a shell on users' machines, so the security
+  of the hub, of user sessions, and of machine tokens matters more than
+  before.
+- Personal and managed workspaces follow different rules, which the hub
+  must make visible.
 
 ### Protocol
 
@@ -1267,7 +1270,7 @@ project on that machine if there is one, and otherwise the machine's own
 Git credentials, which it has because it runs as the user.
 Machines with no access to the repository are out of scope for now.
 
-#### Protocol
+#### Editor build messages
 
 The figure and LaTeX editors send `build.start` with `id`, `project`
 (`owner/name`), `stages`, `commit`, and `files`, a list of

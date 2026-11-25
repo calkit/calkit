@@ -3955,7 +3955,7 @@ class HubLink:
             await asyncio.sleep(min(30, self.idle_exit_seconds))
             # Anything running or watching keeps it up, e.g., a pipeline
             # run with no browser left, or loops once links run them (see
-            # docs/dev/hub/linked-machines.md)
+            # docs/dev/hub/linked-machines.md#loops)
             if self.sessions or self.channels or self.workspace_actions:
                 last_used = loop.time()
             elif loop.time() - last_used >= self.idle_exit_seconds:

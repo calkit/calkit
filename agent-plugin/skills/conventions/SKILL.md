@@ -335,7 +335,9 @@ See the Calkit docs on questions for the full evidence schema.
 A folder listed under `overleaf_sync` in `calkit.yaml` is linked to an
 Overleaf project, where coauthors write.
 After changing anything a paper shows, e.g., a figure, table, or value,
-finish with:
+coauthors only see it once it's run, saved, and synced.
+Unless the user has already said how they want this done,
+ask whether to finish with:
 
 ```bash
 calkit run --save --overleaf
@@ -343,6 +345,10 @@ calkit run --save --overleaf
 
 This syncs with Overleaf, runs the pipeline, saves the project,
 and syncs again, so coauthors see the update.
+It's a good default for anyone who doesn't want fine-grained control over
+their commit history.
+If the user would rather make their own commits,
+run `calkit run` and leave saving and syncing to them.
 Don't copy outputs to Overleaf or edit them there by hand.
 Don't edit a linked paper's source unless the user asks,
 since coauthors may be writing in it,

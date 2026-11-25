@@ -431,7 +431,7 @@ def check_s3_endpoint_url(endpoint_url: str, resolve: bool = True) -> None:
     except (socket.gaierror, UnicodeError):
         raise S3EndpointError(f"Can't resolve {hostname}")
     for info in infos:
-        if not address_is_public(info[4][0]):
+        if not address_is_public(str(info[4][0])):
             raise S3EndpointError(f"{hostname} isn't public")
 
 

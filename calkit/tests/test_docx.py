@@ -524,11 +524,12 @@ def test_docx_round_trip(
         "turbine ",
     )
     converted.save("paper/pandoc-edited.docx")
-    before = Path("paper/main.tex").read_text(encoding="utf-8")
+    # As bytes, so restoring it doesn't change its line endings
+    before = Path("paper/main.tex").read_bytes()
     calkit.cli.latex.merge_docx("paper/pandoc-edited.docx")
     after = Path("paper/main.tex").read_text(encoding="utf-8")
     assert "wind farm turbine layout" in after
-    Path("paper/main.tex").write_text(before, encoding="utf-8")
+    Path("paper/main.tex").write_bytes(before)
     for name in ("main.aux", "main.bbl", "pandoc.docx", "pandoc-edited.docx"):
         Path("paper", name).unlink()
     for folder in (

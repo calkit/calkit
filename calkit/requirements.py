@@ -2,7 +2,7 @@
 
 The ``app``, ``env-var``, and ``calkit-config`` kinds are handled directly
 by :func:`calkit.core.check_dep_exists`. This module adds support for the
-``path-env-var`` kind, an env var holding a path that must exist, and the
+``env-var-path`` kind, an env var holding a path that must exist, and the
 ``setup`` kind, which represents a per-machine precondition that isn't a
 file -- the canonical example is ``gh auth login``, which must be done
 once per clone and can be probed with ``gh auth status`` -- and the
@@ -434,8 +434,8 @@ def prompt_for_env_var_req(req: dict[str, Any]) -> str | None:
     """
     from calkit.core import is_tty
 
-    if req["kind"] == "path-env-var":
-        return prompt_for_path_env_var_req(req)
+    if req["kind"] == "env-var-path":
+        return prompt_for_env_var_path_req(req)
     name = req["name"]
     print(f"Missing env var '{name}'")
     for key in ("description", "notes"):
@@ -463,7 +463,7 @@ def _offer_setup_command(setup_command: str, purpose: str) -> None:
             print(f"  {setup_command!r} exited {result.returncode}.")
 
 
-def resolve_path_env_var(name: str, dotenv_path: str = ".env") -> str | None:
+def resolve_env_var_path(name: str, dotenv_path: str = ".env") -> str | None:
     """Get the path an env var resolves to on this machine, if it exists.
 
     ``.env`` doesn't override a variable that's already set, so when the
@@ -505,7 +505,7 @@ def resolve_path_env_var(name: str, dotenv_path: str = ".env") -> str | None:
 
 
 def _describe_missing_path(value: str) -> str:
-    """Say what's wrong with a ``path-env-var`` value that isn't a path."""
+    """Say what's wrong with an ``env-var-path`` value that isn't a path."""
     if not os.path.isabs(value) and os.path.exists(value):
         return f"is a relative path, which needs to be absolute: {value}"
     msg = f"is a path that doesn't exist: {value}"
@@ -514,8 +514,8 @@ def _describe_missing_path(value: str) -> str:
     return msg
 
 
-def get_path_env_var_candidates(req: dict[str, Any]) -> list[str]:
-    """Get the existing paths a ``path-env-var`` requirement could be.
+def get_env_var_path_candidates(req: dict[str, Any]) -> list[str]:
+    """Get the existing paths an ``env-var-path`` requirement could be.
 
     They're in the order of its ``default``, which is a path rather than a
     pattern, then its ``search_paths`` patterns, with the highest version
@@ -561,10 +561,10 @@ def get_path_env_var_candidates(req: dict[str, Any]) -> list[str]:
     return list(found.values())
 
 
-def prompt_for_path_env_var_req(
+def prompt_for_env_var_path_req(
     req: dict[str, Any], dotenv_path: str = ".env"
 ) -> str | None:
-    """Ask where a ``path-env-var`` requirement's path is and store it.
+    """Ask where an ``env-var-path`` requirement's path is and store it.
 
     What the search finds is offered, so the usual answer is a single key
     press. Finding nothing is a chance to install it and search again,
@@ -587,13 +587,13 @@ def prompt_for_path_env_var_req(
             print(f"  {str(req[key]).strip()}")
     searchable = bool(req.get("search_paths") or req.get("default"))
     setup_command = req.get("setup_command")
-    candidates = get_path_env_var_candidates(req)
+    candidates = get_env_var_path_candidates(req)
     if not candidates and setup_command and not is_tty():
         # Piped input is the answer to the question below, not this one
         print(f"  To install it, run:  {setup_command}")
     elif not candidates and setup_command:
         _offer_setup_command(setup_command, "to install it")
-        candidates = get_path_env_var_candidates(req)
+        candidates = get_env_var_path_candidates(req)
     while True:
         if candidates:
             print("Found:")
@@ -618,7 +618,7 @@ def prompt_for_path_env_var_req(
         if not answer and candidates:
             value = candidates[0]
         elif not answer and searchable:
-            candidates = get_path_env_var_candidates(req)
+            candidates = get_env_var_path_candidates(req)
             continue
         elif not answer:
             return None
@@ -648,8 +648,8 @@ def prompt_for_path_env_var_req(
     return value
 
 
-def check_path_env_var_req(req: dict[str, Any], interactive: bool) -> None:
-    """Check a ``path-env-var`` requirement, asking for it on a terminal.
+def check_env_var_path_req(req: dict[str, Any], interactive: bool) -> None:
+    """Check an ``env-var-path`` requirement, asking for it on a terminal.
 
     Raises
     ------
@@ -658,17 +658,17 @@ def check_path_env_var_req(req: dict[str, Any], interactive: bool) -> None:
         so the fix can be copied.
     """
     name = req["name"]
-    if resolve_path_env_var(name) is not None:
+    if resolve_env_var_path(name) is not None:
         return
-    if interactive and prompt_for_path_env_var_req(req) is not None:
+    if interactive and prompt_for_env_var_path_req(req) is not None:
         return
     current = os.environ.get(name)
     msg = (
-        f"path-env-var '{name}' {_describe_missing_path(current)}"
+        f"env-var-path '{name}' {_describe_missing_path(current)}"
         if current
-        else f"path-env-var '{name}' not found"
+        else f"env-var-path '{name}' not found"
     )
-    candidates = get_path_env_var_candidates(req)
+    candidates = get_env_var_path_candidates(req)
     value = candidates[0] if candidates else "<path>"
     if candidates:
         msg += f"; found {value}"
@@ -703,8 +703,8 @@ def resolve_env_var_deps(
     missing = []
     for raw in get_requirements(ck_info):
         req = _normalize_requirement(raw)
-        if req["kind"] == "path-env-var":
-            if resolve_path_env_var(req["name"]) is not None:
+        if req["kind"] == "env-var-path":
+            if resolve_env_var_path(req["name"]) is not None:
                 continue
         elif req["kind"] != "env-var" or os.environ.get(req["name"]):
             continue

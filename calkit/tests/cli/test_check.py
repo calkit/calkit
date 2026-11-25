@@ -220,7 +220,7 @@ def test_check_env_vars(tmp_dir):
             env=os.environ.copy() | {"MY_ENV_VAR": "value1"},
         )
     # A path one must be an absolute path that exists
-    ck_info["dependencies"].append({"kind": "path-env-var", "name": "MY_APP"})
+    ck_info["dependencies"].append({"kind": "env-var-path", "name": "MY_APP"})
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     env = os.environ.copy() | {"MY_ENV_VAR": "v1", "MY_OTHER_ENV_VAR": "v2"}

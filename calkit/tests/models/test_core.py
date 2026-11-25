@@ -227,19 +227,19 @@ def test_requirement_forms_match_what_the_runtime_accepts():
     for bad in [{"kind": "app"}, {"kind": "env-var"}]:
         with pytest.raises(ValidationError):
             ProjectInfo.model_validate({"requirements": [bad]})
-    # Only a path-env-var has somewhere to search, in either form
+    # Only an env-var-path has somewhere to search, in either form
     for search_paths in ("~/apps/*/app.exe", ["~/apps/*/app.exe", "/opt/app"]):
         ProjectInfo.model_validate(
             {
                 "requirements": [
                     {
-                        "kind": "path-env-var",
+                        "kind": "env-var-path",
                         "name": "APP",
                         "search_paths": search_paths,
                     },
                     {
                         "APP2": {
-                            "kind": "path-env-var",
+                            "kind": "env-var-path",
                             "search_paths": search_paths,
                         }
                     },
@@ -249,7 +249,7 @@ def test_requirement_forms_match_what_the_runtime_accepts():
     for bad in [
         {"kind": "env-var", "name": "APP", "search_paths": "*"},
         {"kind": "app", "name": "APP", "search_paths": "*"},
-        {"kind": "path-env-var", "search_paths": "*"},
+        {"kind": "env-var-path", "search_paths": "*"},
     ]:
         with pytest.raises(ValidationError):
             ProjectInfo.model_validate({"requirements": [bad]})

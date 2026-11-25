@@ -129,14 +129,14 @@ raises a clear error so failures aren't silent.
 Some apps can't be installed for someone,
 e.g., because they need a license or a download behind a login,
 and each collaborator may put them somewhere different.
-A `path-env-var` requirement is an environmental variable holding a path
+An `env-var-path` requirement is an environmental variable holding a path
 that must exist,
 and its `search_paths` patterns say where that path usually is,
 so a project doesn't need its own setup script to find it:
 
 ```yaml
 requirements:
-  - kind: path-env-var
+  - kind: env-var-path
     name: MYAPP_EXE
     description: Path to the MyApp 2.1 executable.
     notes: MyApp needs a license. Download it from https://example.com.
@@ -590,7 +590,7 @@ requirements in four phases regardless of the order they appear in
 
 1. **machine properties**: First, because a machine too small to run
    the project at all should say so before anything is installed on it.
-2. **`env-var` and `path-env-var`**: Prompted next so installers and
+2. **`env-var` and `env-var-path`**: Prompted next so installers and
    setup steps can read newly-set variables.
 3. **`app`**: Environment managers like `pixi` and `uv` must exist before
    any setup step that runs inside one of those environments. Missing

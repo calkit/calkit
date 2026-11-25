@@ -1510,7 +1510,7 @@ def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
     failing.clear()
     # A path is looked for there, not here
     ran.clear()
-    path_req = {"kind": "path-env-var", "name": "SOLVER", "search_paths": "*"}
+    path_req = {"kind": "env-var-path", "name": "SOLVER", "search_paths": "*"}
     ws.check_requirements(w, [path_req])
     assert 'test -e "${SOLVER:-}"' in ran[0]
     failing.add("SOLVER")

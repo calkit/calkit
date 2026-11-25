@@ -19,7 +19,7 @@ class RequirementAttrs(Model):
     kind: Literal[
         "app",
         "env-var",
-        "path-env-var",
+        "env-var-path",
         "setup",
         "aws-credentials",
         "calkit-config",
@@ -47,7 +47,7 @@ class Requirement(Model):
     - ``env-var``: an environmental variable that must be defined.
       ``setup_command`` says how to get a value, e.g., a login flow that
       prints a token, and is offered before the value is asked for.
-    - ``path-env-var``: an environmental variable holding a path that must
+    - ``env-var-path``: an environmental variable holding a path that must
       exist, e.g., to a licensed app that can't be installed for the user.
       ``search_paths`` lists where it's usually found, to suggest.
       ``setup_command`` is offered when the search finds nothing.
@@ -74,7 +74,7 @@ class Requirement(Model):
     kind: Literal[
         "app",
         "env-var",
-        "path-env-var",
+        "env-var-path",
         "setup",
         "aws-credentials",
         "calkit-config",
@@ -88,7 +88,7 @@ class Requirement(Model):
         "terminal and printed as the fix otherwise. For an 'app', it "
         "installs it, e.g., 'brew install colima', in place of any installer "
         "Calkit has for it. For an 'env-var', it's run before the value is "
-        "asked for, e.g., 'claude setup-token'. For a 'path-env-var', it's "
+        "asked for, e.g., 'claude setup-token'. For an 'env-var-path', it's "
         "offered when the search finds nothing.",
     )
     # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
@@ -116,7 +116,7 @@ class Requirement(Model):
     )
     search_paths: str | list[str] | None = Field(
         default=None,
-        description="Glob patterns for where a 'path-env-var' is usually "
+        description="Glob patterns for where an 'env-var-path' is usually "
         "found, which may use `~` and environmental variables, e.g., "
         "`~/apps/MyApp_*/MyApp.exe`. Matches are suggested, and the version "
         "that sorts highest in a pattern comes first.",
@@ -125,10 +125,10 @@ class Requirement(Model):
 
     @model_validator(mode="after")
     def _check_search_paths(self) -> Requirement:
-        if self.search_paths is not None and self.kind != "path-env-var":
+        if self.search_paths is not None and self.kind != "env-var-path":
             raise ValueError(
                 f"A '{self.kind}' requirement can't have 'search_paths', "
-                "since only a 'path-env-var' names a path to look for"
+                "since only an 'env-var-path' names a path to look for"
             )
         return self
 

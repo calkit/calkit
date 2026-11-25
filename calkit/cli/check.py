@@ -2242,14 +2242,14 @@ def check_env_vars(
         with calkit.in_project(wdir):
             for raw in calkit.get_requirements(info):
                 req = _normalize_requirement(raw)
-                if req["kind"] not in ("env-var", "path-env-var"):
+                if req["kind"] not in ("env-var", "env-var-path"):
                     continue
                 name = req["name"]
                 if verbose:
                     typer.echo(f"Checking for environmental variable '{name}'")
                 is_set = (
-                    calkit.requirements.resolve_path_env_var(name) is not None
-                    if req["kind"] == "path-env-var"
+                    calkit.requirements.resolve_env_var_path(name) is not None
+                    if req["kind"] == "env-var-path"
                     else name in os.environ
                 )
                 if not is_set:

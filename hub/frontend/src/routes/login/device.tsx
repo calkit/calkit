@@ -11,16 +11,18 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { z } from "zod"
 
 import type { AxiosError } from "axios"
-import { LoginService } from "../../client"
+import { LoginService, UsersService } from "../../client"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
+import { appName } from "../../lib/core"
 import { handleError } from "../../lib/errors"
+import { setGitHubReturnTo } from "../../lib/github"
 
 const cliAuthParamsSchema = z.object({
   device_code: z.string().optional(),
@@ -37,6 +39,26 @@ function CliAuth() {
   const navigate = useNavigate()
   const showToast = useCustomToast()
   const [authorized, setAuthorized] = useState(false)
+  // As the rest of the site does, GitHub users install the GitHub App first,
+  // since this page is outside it, and the CLI's projects need it
+  const isGithubUser = Boolean(user?.github_username)
+  const ghAppInstalledQuery = useQuery({
+    queryKey: ["user", "github-app-installations"],
+    queryFn: () =>
+      UsersService.getUserGithubAppInstallations().then(
+        (response) => response.data,
+      ),
+    refetchOnWindowFocus: false,
+    enabled: Boolean(deviceCode) && isGithubUser,
+  })
+  const ghAppNotInstalled =
+    isGithubUser &&
+    ghAppInstalledQuery.data &&
+    !ghAppInstalledQuery.data.total_count
+  if (ghAppNotInstalled) {
+    setGitHubReturnTo(`${location.pathname}${location.search}${location.hash}`)
+    location.href = `https://github.com/apps/${appName}/installations/new`
+  }
 
   const authorizeMutation = useMutation({
     mutationFn: () =>
@@ -98,7 +120,10 @@ function CliAuth() {
     )
   }
 
-  if (isLoggedIn() && isLoading) {
+  if (
+    (isLoggedIn() && isLoading) ||
+    (isGithubUser && (ghAppInstalledQuery.isPending || ghAppNotInstalled))
+  ) {
     return (
       <Container minH="100vh" maxW="sm" justifyContent="center" centerContent>
         <VStack spacing={3}>

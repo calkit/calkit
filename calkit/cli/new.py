@@ -338,6 +338,12 @@ def new_project(
                         "make sure the organization exists on the hub "
                         "and that you have write access to it."
                     )
+            elif "GitHub App not enabled" in str(e):
+                msg += (
+                    "\n\nInstall the Calkit GitHub App, or give it access to "
+                    "this repo, from "
+                    f"{calkit.hub.get_hub_url()}/settings?tab=connected-accounts"
+                )
             raise_error(msg)
         # Now clone here
         # Git gets GitHub credentials from the hub, so this machine needs no

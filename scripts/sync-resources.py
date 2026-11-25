@@ -43,7 +43,9 @@ def main() -> int:
     resources_dir = Path(get_dir())
     out_path = resources_dir / "devcontainer" / DEVCONTAINER_FNAME
     spec = render_devcontainer_spec()
-    out_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    out_path.write_text(
+        json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
     print(f"Wrote {out_path}")
     workflow_path = repo_dir / "actions" / "run" / GITHUB_ACTIONS_FNAME
     workflow_out = resources_dir / "github-actions" / GITHUB_ACTIONS_FNAME
@@ -58,7 +60,7 @@ def main() -> int:
     workflow = workflow_path.read_text(encoding="utf-8").rstrip()
     snippet = f"{SNIPPET_START}\n\n```yaml\n{workflow}\n```\n\n"
     readme = readme[:start] + snippet + readme[end:]
-    readme_path.write_text(readme, encoding="utf-8")
+    readme_path.write_text(readme, encoding="utf-8", newline="\n")
     print(f"Wrote {readme_path}")
     extensions_out = (
         repo_dir / "assistant" / "resources" / ("vscode-extensions.json")

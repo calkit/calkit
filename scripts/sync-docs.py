@@ -299,7 +299,7 @@ def main() -> None:
     readme_path = repo_root / "README.md"
     docs_dir = repo_root / "docs"
     processed = process_readme(readme_path, docs_dir)
-    readme_path.write_text(processed, encoding="utf-8")
+    readme_path.write_text(processed, encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":

@@ -209,6 +209,34 @@ def test_pin(tmp_dir):
     assert _git("status", "--porcelain") == " M .gitattributes\n"
 
 
+def test_pin_many_files(tmp_dir, monkeypatch):
+    os.makedirs("origin/d")
+    os.chdir("origin")
+    _git("init", "-q")
+    # More characters of paths than a command line on Windows can hold
+    names = [f"d/{'x' * 80}-{i:04}.txt" for i in range(400)]
+    for name in names:
+        with open(name, "w", newline="\n") as f:
+            f.write("a\nb\n")
+    _git("add", "-A")
+    _git("commit", "-qm", "Set up")
+    os.chdir("..")
+    _git("-c", "core.autocrlf=true", "clone", "-q", "origin", "clone")
+    os.chdir("clone")
+    _git("config", "core.autocrlf", "true")
+    res = calkit.eol.pin()
+    assert sorted(res.converted) == names
+    with open(names[-1], "rb") as f:
+        assert f.read() == b"a\nb\n"
+    # The rewritten files match what's committed, so only the rules are new
+    assert _git("status", "--porcelain") == "?? .gitattributes\n"
+    # A file under paths given to different calls is listed once
+    monkeypatch.setattr(calkit.eol, "MAX_PATH_CHARS", 100)
+    tracked = calkit.eol.list_tracked_eol([names[0], "d", names[1]])
+    assert sorted(f.path for f in tracked) == names
+    assert calkit.eol.list_tracked_eol([names[0]])[0].worktree == "lf"
+
+
 def test_write_rules_respects_existing(tmp_dir):
     with open(".gitattributes", "w", newline="\n") as f:
         f.write("* text=auto eol=lf\n")

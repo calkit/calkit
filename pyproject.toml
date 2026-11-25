@@ -32,7 +32,10 @@ dependencies = [
   "bibtexparser",
   "checksumdir",
   "docx2pdf",
-  "dulwich>=1.2.5",
+  # 1.2.15 reports a folder ignored when only its contents are, e.g., by
+  # 'data/*', so DVC skips the pointers in it that are unignored, e.g., by
+  # '!data/*.dvc'; https://github.com/treeverse/scmrepo/issues/481
+  "dulwich>=1.2.5,<1.2.15",
   "dvc[all]==3.67.1",
   "filelock",
   "gitpython",

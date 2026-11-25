@@ -1577,6 +1577,16 @@ def _normalize_requirement(req) -> dict:
             "'kind', e.g., '- kind: env-var' with 'name: TOKEN'"
         )
 
+    def check_search_paths(out: dict) -> None:
+        if (
+            out.get("search_paths") is not None
+            and out["kind"] != "env-var-path"
+        ):
+            raise ValueError(
+                f"Malformed requirement {req!r}; only an 'env-var-path' can "
+                "have 'search_paths', since it's what names a path to look for"
+            )
+
     if isinstance(req, str):
         # Split on the first version operator so a string like
         # ``calkit>=0.38`` produces both a clean name and a version spec
@@ -1625,6 +1635,7 @@ def _normalize_requirement(req) -> dict:
                 f"Malformed requirement {req!r}; its 'name' must be text, "
                 'so quote it if it\'s in braces, e.g., name: "{var}"'
             )
+        check_search_paths(out)
         return out
     if len(keys) != 1:
         raise malformed()
@@ -1636,6 +1647,7 @@ def _normalize_requirement(req) -> dict:
     out = dict(attrs)
     out["name"] = name
     out.setdefault("kind", "app")
+    check_search_paths(out)
     return out
 
 
@@ -1928,10 +1940,11 @@ def get_requirement_key(req: Any, wdir: str | None = None) -> str:
     """Identify a requirement however it's written, e.g., to cache its check.
 
     One checked by running something in the project, e.g., a setup step's
-    ``check_command``, is identified by that project's directory too.
+    ``check_command``, or by reading its ``.env``, is identified by that
+    project's directory too.
     """
     normalized = _normalize_requirement(req)
-    if normalized["kind"] in ("setup", "aws-credentials"):
+    if normalized["kind"] in ("setup", "aws-credentials", "env-var-path"):
         normalized = normalized | {"_wdir": os.path.abspath(wdir or ".")}
     return json.dumps(normalized, sort_keys=True, default=str)
 
@@ -2000,6 +2013,7 @@ def check_requirements(
     buckets: dict[str, list[dict]] = {
         "_property": [],
         "env-var": [],
+        "env-var-path": [],
         "app": [],
         "setup": [],
         "aws-credentials": [],
@@ -2023,6 +2037,7 @@ def check_requirements(
         for bucket in (
             "_property",
             "env-var",
+            "env-var-path",
             "app",
             "_other",
             "setup",
@@ -2087,6 +2102,10 @@ def check_requirements(
                 f"with 'calkit set-env-var {req_name} <value>'"
             )
         raise ValueError(msg)
+    for req in buckets["env-var-path"]:
+        from calkit.requirements import check_env_var_path_req
+
+        check_env_var_path_req(req, interactive=interactive)
     for req in buckets["app"]:
         declared_name = req["name"]
         # Checked and installed as the binary it provides, e.g., code for
@@ -2198,7 +2217,12 @@ _normalize_dep = _normalize_requirement
 
 
 def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
-    """Get a list of all environment variable names used in the project."""
+    """Get the names of the project's ``env-var`` requirements.
+
+    ``env-var-path`` requirements are left out, since what these are for,
+    passing them into Docker containers, would hand a container a path on
+    the host.
+    """
     if ck_info is None:
         ck_info = load_calkit_info()
     env_vars = []

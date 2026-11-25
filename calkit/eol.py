@@ -16,16 +16,16 @@ import subprocess
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 
-#: What to do about files whose line endings aren't pinned
+# What to do about files whose line endings aren't pinned
 FIX = "run `calkit fix line-endings` and commit .gitattributes"
 
-#: Marks the block of rules :func:`pin` writes
+# Marks the block of rules ``pin()`` writes
 MARKER = "calkit line endings"
 
-#: The rules :func:`pin` writes, first in ``.gitattributes`` so a project's
-#: own rules after them win. ``text=auto`` leaves binary files alone, and
-#: files committed with CRLF, which are checked out the same everywhere
-#: already, so pinning makes no committed file read as changed.
+# The rules ``pin()`` writes, first in ``.gitattributes`` so a project's
+# own rules after them win. ``text=auto`` leaves binary files alone, and
+# files committed with CRLF, which are checked out the same everywhere
+# already, so pinning makes no committed file read as changed.
 RULES = [
     "# Check out text files with LF everywhere, including Windows, so the",
     "# files the pipeline hashes are the same on every machine",
@@ -35,6 +35,10 @@ RULES = [
     "*.cmd text=auto eol=crlf",
 ]
 
+# Most characters of paths to give one Git command, well within the 32,767
+# of a whole command line on Windows
+MAX_PATH_CHARS = 16_000
+
 
 @dataclass
 class TrackedEol:
@@ -42,12 +46,12 @@ class TrackedEol:
     out, as ``git ls-files --eol`` reports them."""
 
     path: str
-    #: In the index: ``lf``, ``crlf``, ``mixed``, ``none`` (no line
-    #: breaks), or ``-text`` (binary)
+    # In the index: ``lf``, ``crlf``, ``mixed``, ``none`` (no line
+    # breaks), or ``-text`` (binary)
     index: str
-    #: In the working tree, likewise, or empty if the file isn't there
+    # In the working tree, likewise, or empty if the file isn't there
     worktree: str
-    #: The ``text`` and ``eol`` attributes that apply, e.g., ``text eol=lf``
+    # The ``text`` and ``eol`` attributes that apply, e.g., ``text eol=lf``
     attr: str
 
     @property
@@ -69,6 +73,44 @@ class TrackedEol:
         return self.index == "lf" and self.worktree == "crlf"
 
 
+def _run_git_on_paths(
+    args: list[str], paths: list[str], wdir: str = "."
+) -> bytes:
+    """Run ``git`` with ``args``, then ``--`` and ``paths``, and return its
+    output.
+
+    Paths are split across as many calls as it takes to keep each command
+    line short enough for Windows, which refuses one over 32,767 characters,
+    e.g., for every file in a large repo.
+
+    Raises
+    ------
+    OSError
+        If Git can't be run.
+    subprocess.CalledProcessError
+        If Git fails.
+    """
+    chunks: list[list[str]] = [[]]
+    size = 0
+    for path in paths:
+        # Each path may also be quoted and spaced from the next
+        if chunks[-1] and size + len(path) + 3 > MAX_PATH_CHARS:
+            chunks.append([])
+            size = 0
+        chunks[-1].append(path)
+        size += len(path) + 3
+    return b"".join(
+        subprocess.run(
+            ["git", *args, "--", *chunk],
+            cwd=wdir,
+            capture_output=True,
+            check=True,
+        ).stdout
+        for chunk in chunks
+        if chunk
+    )
+
+
 def list_tracked_eol(paths: list[str], wdir: str = ".") -> list[TrackedEol]:
     """Report the line endings of the Git-tracked files at or under
     ``paths``, relative to ``wdir``, in one call to Git.
@@ -87,20 +129,20 @@ def list_tracked_eol(paths: list[str], wdir: str = ".") -> list[TrackedEol]:
     out = ""
     try:
         if top_paths:
-            out = subprocess.run(
-                ["git", "ls-files", "--eol", "-z", "--", *top_paths],
-                cwd=wdir,
-                capture_output=True,
-                check=True,
-            ).stdout.decode("utf-8", errors="replace")
+            out = _run_git_on_paths(
+                ["ls-files", "--eol", "-z"], top_paths, wdir=wdir
+            ).decode("utf-8", errors="replace")
     except (OSError, subprocess.CalledProcessError):
         return []
     res = []
+    # A file under paths in different calls to Git is listed by each
+    seen = set()
     for entry in out.split("\0"):
         # <index> <worktree> attr/<attrs>, padded with spaces, then a tab
         info, sep, path = entry.partition("\t")
-        if not sep:
+        if not sep or path in seen:
             continue
+        seen.add(path)
         fields = info.split()
         if len(fields) < 3:
             continue
@@ -193,13 +235,13 @@ def summarize(paths: list[str], n: int = 3) -> str:
 
 @dataclass
 class PinResult:
-    """What :func:`pin` changed."""
+    """What ``pin()`` changed."""
 
-    #: Whether ``.gitattributes`` was written
+    # Whether ``.gitattributes`` was written
     wrote_gitattributes: bool = False
-    #: Working-tree files rewritten to the line endings Git checks out
+    # Working-tree files rewritten to the line endings Git checks out
     converted: list[str] = dataclass_field(default_factory=list)
-    #: Submodules set to check files out as committed, in this clone only
+    # Submodules set to check files out as committed, in this clone only
     submodules: list[str] = dataclass_field(default_factory=list)
 
 
@@ -222,7 +264,7 @@ def pins_all(wdir: str = ".") -> bool:
 
 
 def write_rules(wdir: str = ".") -> bool:
-    """Put :data:`RULES` first in ``wdir``'s ``.gitattributes``, unless it
+    """Put ``RULES`` first in ``wdir``'s ``.gitattributes``, unless it
     pins every file already. Returns whether the file was written."""
     path = os.path.join(wdir, ".gitattributes")
     begin = f"# >>> {MARKER} (managed by calkit) >>>"
@@ -327,34 +369,21 @@ def _refresh_index(paths: list[str], wdir: str = ".") -> None:
         return
     try:
         staged = {}
-        out = subprocess.run(
-            ["git", "ls-files", "-s", "-z", "--", *paths],
-            cwd=wdir,
-            capture_output=True,
-            check=True,
-        ).stdout.decode("utf-8", errors="replace")
+        out = _run_git_on_paths(
+            ["ls-files", "-s", "-z"], paths, wdir=wdir
+        ).decode("utf-8", errors="replace")
         for entry in out.split("\0"):
             info, sep, path = entry.partition("\t")
             if sep:
                 staged[path] = info.split()[1]
         hashes = (
-            subprocess.run(
-                ["git", "hash-object", "--", *paths],
-                cwd=wdir,
-                capture_output=True,
-                check=True,
-            )
-            .stdout.decode()
+            _run_git_on_paths(["hash-object"], paths, wdir=wdir)
+            .decode()
             .split()
         )
         same = [p for p, h in zip(paths, hashes) if staged.get(p) == h]
         if same:
-            subprocess.run(
-                ["git", "update-index", "-q", "--", *same],
-                cwd=wdir,
-                capture_output=True,
-                check=True,
-            )
+            _run_git_on_paths(["update-index", "-q"], same, wdir=wdir)
     except (OSError, subprocess.CalledProcessError, IndexError):
         pass
 

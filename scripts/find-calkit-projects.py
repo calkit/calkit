@@ -5,18 +5,17 @@ and DataCite records of Calkit archives (Zenodo, CaltechDATA, figshare).
 Each candidate owner's other recent repos are checked too, since code search
 only indexes some of them, and other branches of the candidates themselves,
 to catch Calkit being tried out on one. GitHub API requests use the GitHub
-CLI's token. calkit.yaml files are read from raw.githubusercontent.com,
-which doesn't count against the API's rate limit.
+CLI's token, and GraphQL to read many repos' calkit.yaml files in each one.
 
 Writes data/calkit-projects/projects.csv.
 """
 
 import csv
+import json
 import os
 import re
 import subprocess
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import requests
@@ -37,28 +36,90 @@ gh_session.headers.update(
         "User-Agent": "calkit",
     }
 )
+# Named like the REST API's, which the rows below were first written for
+REPO_FIELDS = (
+    "full_name: nameWithOwner name html_url: url description"
+    " fork: isFork created_at: createdAt pushed_at: pushedAt"
+    " owner { login } parent { full_name: nameWithOwner } isPrivate"
+)
 repo_url_re = re.compile(r"github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?(?:/|$)")
 
 
-def gh(path: str, **params: Any) -> Any:
-    """GET from the GitHub API, returning None for a 404 or 409 (empty)."""
+def send(method: str, path: str, **kwargs: Any) -> requests.Response:
+    """Send a GitHub API request, waiting out rate limits."""
     while True:
-        resp = gh_session.get(
-            f"https://api.github.com/{path}", params=params, timeout=60
+        resp = gh_session.request(
+            method, f"https://api.github.com/{path}", timeout=60, **kwargs
         )
-        if resp.status_code in (404, 409, 451):
-            return None
         rate_limited = resp.status_code in (403, 429) and (
             resp.headers.get("x-ratelimit-remaining") == "0"
             or "retry-after" in resp.headers
         )
-        if rate_limited:
-            reset = int(resp.headers.get("x-ratelimit-reset", time.time()))
-            retry_after = int(resp.headers.get("retry-after", 0))
-            time.sleep(max(reset - time.time(), retry_after, 1) + 1)
+        if not rate_limited:
+            return resp
+        wait_for_reset(resp)
+
+
+def wait_for_reset(resp: requests.Response) -> None:
+    reset = int(resp.headers.get("x-ratelimit-reset", time.time()))
+    retry_after = int(resp.headers.get("retry-after", 0))
+    time.sleep(max(reset - time.time(), retry_after, 1) + 1)
+
+
+def gh(path: str, **params: Any) -> Any:
+    """GET from the GitHub API, returning None for a 404 or 409 (empty)."""
+    resp = send("GET", path, params=params)
+    if resp.status_code in (404, 409, 451):
+        return None
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_graphql_results(
+    fields: dict[str, str], batch_size: int
+) -> dict[str, Any]:
+    """Query GraphQL for aliased fields, many per request.
+
+    Returns each alias's result, which is None for a missing repo or owner.
+    A batch that times out is split in half and retried.
+    """
+    results: dict[str, Any] = {}
+    aliases = list(fields)
+    batches = [
+        aliases[i : i + batch_size] for i in range(0, len(aliases), batch_size)
+    ]
+    while batches:
+        batch = batches.pop()
+        body = " ".join(f"{alias}: {fields[alias]}" for alias in batch)
+        resp = send("POST", "graphql", json={"query": f"query {{ {body} }}"})
+        if resp.status_code in (502, 504) and len(batch) > 1:
+            batches += [batch[: len(batch) // 2], batch[len(batch) // 2 :]]
             continue
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        error_types = {e.get("type") for e in data.get("errors") or []}
+        if "RATE_LIMITED" in error_types:
+            wait_for_reset(resp)
+            batches.append(batch)
+            continue
+        # Missing repos, owners, and files come back as null
+        if error_types - {"NOT_FOUND"}:
+            raise RuntimeError(data["errors"])
+        results.update(data["data"])
+    return results
+
+
+def get_repo_field(name: str, fields: str) -> str:
+    owner, repo_name = (json.dumps(part) for part in name.split("/"))
+    return f"repository(owner: {owner}, name: {repo_name}) {{ {fields} }}"
+
+
+def load_calkit_yaml(text: str | None) -> dict:
+    try:
+        content = yaml.safe_load(text or "")
+    except yaml.YAMLError:
+        content = None
+    return content if isinstance(content, dict) else {}
 
 
 def gh_pages(path: str, max_pages: int = 10, **params: Any) -> list:
@@ -90,6 +151,10 @@ for query in [
 ]:
     # Code search allows 10 requests a minute
     for hit in gh_pages("search/code", q=query):
+        # Searches the token can see include private repos, which aren't ours
+        # to list
+        if hit["repository"]["private"]:
+            continue
         name = hit["repository"]["full_name"].lower()
         found_via.setdefault(name, set()).add("github-search")
     time.sleep(7)
@@ -130,74 +195,131 @@ for query in ["calkit", '"Calkit project"']:
         if page >= data["meta"].get("totalPages", 1):
             break
         page += 1
-# Every candidate owner's recent repos
-owners = {name.split("/")[0] for name in found_via}
-with ThreadPoolExecutor(8) as pool:
-    owner_repos = dict(
-        zip(
-            owners,
-            pool.map(
-                lambda o: gh_pages(f"users/{o}/repos", type="owner"), owners
-            ),
-        )
-    )
+# Every candidate owner's recent repos, newest first, so paging stops at the
+# first one pushed before PUSHED_SINCE
+owners = sorted({name.split("/")[0] for name in found_via})
+print(f"Listing repos of {len(owners)} owners")
 repos: dict[str, dict] = {}
-for owner_list in owner_repos.values():
-    for repo in owner_list:
-        if repo["pushed_at"] >= PUSHED_SINCE:
+cursors: dict[str, str | None] = dict.fromkeys(owners)
+n_pages = 0
+while cursors and n_pages < 10:
+    n_pages += 1
+    owner_aliases = {f"o{i}": owner for i, owner in enumerate(cursors)}
+    results = get_graphql_results(
+        {
+            alias: f"repositoryOwner(login: {json.dumps(owner)})"
+            " { repositories(first: 100,"
+            f" after: {json.dumps(cursors[owner])},"
+            " privacy: PUBLIC, ownerAffiliations: [OWNER],"
+            " orderBy: {field: PUSHED_AT, direction: DESC})"
+            " { pageInfo { hasNextPage endCursor }"
+            f" nodes {{ {REPO_FIELDS} }} }} }}"
+            for alias, owner in owner_aliases.items()
+        },
+        batch_size=5,
+    )
+    cursors = {}
+    for alias, owner in owner_aliases.items():
+        repos_page = (results.get(alias) or {}).get("repositories")
+        if not repos_page:
+            continue
+        recent = [
+            r
+            for r in repos_page["nodes"]
+            if (r["pushed_at"] or "") >= PUSHED_SINCE
+        ]
+        for repo in recent:
             repos[repo["full_name"].lower()] = repo
-for name in found_via:
-    if name not in repos and name not in hub_projects:
-        repo = gh(f"repos/{name}")
-        if repo:
-            repos[name] = repo
-
-
-def find_calkit_yaml(repo: dict) -> tuple[str | None, dict | None]:
-    """Return the ref holding a root calkit.yaml, and its contents."""
-
-    def read(ref: str) -> dict | None:
-        resp = requests.get(
-            f"https://raw.githubusercontent.com/{repo['full_name']}/{ref}"
-            "/calkit.yaml",
-            timeout=60,
+        if repos_page["pageInfo"]["hasNextPage"] and len(recent) == len(
+            repos_page["nodes"]
+        ):
+            cursors[owner] = repos_page["pageInfo"]["endCursor"]
+missing = [
+    name
+    for name in found_via
+    if name not in repos and name not in hub_projects
+]
+results = get_graphql_results(
+    {
+        f"r{i}": get_repo_field(name, REPO_FIELDS)
+        for i, name in enumerate(missing)
+    },
+    batch_size=50,
+)
+# A repo on DataCite or the hub may have been made private since
+for repo in results.values():
+    if repo and not repo["isPrivate"]:
+        repos[repo["full_name"].lower()] = repo
+# Each repo's root calkit.yaml on its default branch
+print(f"Reading calkit.yaml from {len(repos)} repos")
+names = list(repos)
+results = get_graphql_results(
+    {
+        f"r{i}": get_repo_field(
+            name,
+            'object(expression: "HEAD:calkit.yaml") { ... on Blob { text } }',
         )
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        try:
-            content = yaml.safe_load(resp.text)
-        except yaml.YAMLError:
-            content = None
-        return content if isinstance(content, dict) else {}
-
-    ref = repo["default_branch"]
-    content = read(ref)
-    if content is not None:
-        return ref, content
-    # Listing branches costs API requests, so only for repos found to be
-    # Calkit projects some other way, e.g., on the hub
-    if repo["full_name"].lower() not in found_via:
-        return None, None
-    for branch in gh_pages(f"repos/{repo['full_name']}/branches", max_pages=1):
-        if branch["name"] != ref:
-            content = read(branch["name"])
-            if content is not None:
-                return branch["name"], content
-    return None, None
-
-
-with ThreadPoolExecutor(16) as pool:
-    calkit_yamls = dict(zip(repos, pool.map(find_calkit_yaml, repos.values())))
-projects = {
-    name: repos[name] for name, (ref, _) in calkit_yamls.items() if ref
+        for i, name in enumerate(names)
+    },
+    batch_size=50,
+)
+texts = {
+    name: results[f"r{i}"]["object"].get("text")
+    for i, name in enumerate(names)
+    if (results.get(f"r{i}") or {}).get("object") is not None
 }
+# Default branch names only for those, since each is a slow Git lookup
+names = list(texts)
+results = get_graphql_results(
+    {
+        f"r{i}": get_repo_field(name, "defaultBranchRef { name }")
+        for i, name in enumerate(names)
+    },
+    batch_size=50,
+)
+calkit_yamls: dict[str, tuple[str | None, dict | None]] = {
+    name: (
+        results[f"r{i}"]["defaultBranchRef"]["name"],
+        load_calkit_yaml(texts[name]),
+    )
+    for i, name in enumerate(names)
+}
+# Other branches, only of repos found to be Calkit projects some other way,
+# e.g., on the hub, since a branch is another Git lookup
+names = [
+    name for name in repos if name in found_via and name not in calkit_yamls
+]
+print(f"Reading calkit.yaml from other branches of {len(names)} repos")
+results = get_graphql_results(
+    {
+        f"r{i}": get_repo_field(
+            name,
+            'refs(refPrefix: "refs/heads/", first: 100) { nodes { name target'
+            ' { ... on Commit { file(path: "calkit.yaml") { object'
+            " { ... on Blob { text } } } } } } }",
+        )
+        for i, name in enumerate(names)
+    },
+    batch_size=10,
+)
+for i, name in enumerate(names):
+    branches = ((results.get(f"r{i}") or {}).get("refs") or {}).get(
+        "nodes", []
+    )
+    for branch in branches:
+        file = (branch["target"] or {}).get("file")
+        if file:
+            calkit_yamls[name] = (
+                branch["name"],
+                load_calkit_yaml((file["object"] or {}).get("text")),
+            )
+            break
+projects = {name: repos[name] for name in calkit_yamls}
 # A fork is the same project as its parent, if that's here too
 for name, repo in list(projects.items()):
-    if repo["fork"]:
-        parent = (gh(f"repos/{name}") or {}).get("parent") or {}
-        if parent.get("full_name", "").lower() in projects:
-            del projects[name]
+    parent = (repo["parent"] or {}).get("full_name", "").lower()
+    if repo["fork"] and parent in projects:
+        del projects[name]
 
 
 def is_pete(name: str) -> bool:

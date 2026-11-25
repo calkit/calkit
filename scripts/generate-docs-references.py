@@ -1042,7 +1042,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
 
     cli_doc = repo_root / "docs" / "cli-reference.md"
-    cli_doc.write_text(generate_cli_markdown(), encoding="utf-8")
+    cli_doc.write_text(generate_cli_markdown(), encoding="utf-8", newline="\n")
 
     env_doc = repo_root / "docs" / "environments.md"
     env_content = _remove_legacy_combined_block(
@@ -1060,7 +1060,7 @@ def main() -> None:
         SYSTEM_LOCK_END,
         generate_system_lock_properties_markdown(),
     )
-    env_doc.write_text(env_content, encoding="utf-8")
+    env_doc.write_text(env_content, encoding="utf-8", newline="\n")
 
     pipeline_doc = repo_root / "docs" / "pipeline" / "index.md"
     pipeline_content = _replace_marked_block(
@@ -1069,7 +1069,7 @@ def main() -> None:
         STAGE_END,
         generate_stage_kinds_markdown(),
     )
-    pipeline_doc.write_text(pipeline_content, encoding="utf-8")
+    pipeline_doc.write_text(pipeline_content, encoding="utf-8", newline="\n")
 
     keys_doc = repo_root / "docs" / "calkit-yaml.md"
     keys_content = _replace_marked_block(
@@ -1078,7 +1078,7 @@ def main() -> None:
         KEYS_END,
         generate_top_level_keys_markdown(),
     )
-    keys_doc.write_text(keys_content, encoding="utf-8")
+    keys_doc.write_text(keys_content, encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":

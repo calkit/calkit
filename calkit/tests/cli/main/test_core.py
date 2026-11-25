@@ -4598,6 +4598,33 @@ def test_push_carries_annotated_tags(tmp_dir):
     assert "scratch" not in tags
 
 
+def test_push_and_pull_data_in_folder_with_ignored_contents(
+    tmp_dir: Path, tmp_path: Path
+) -> None:
+    subprocess.check_call(["calkit", "init"])
+    dvc_remote = tmp_path / "dvc_remote"
+    dvc_remote.mkdir()
+    subprocess.check_call(
+        ["dvc", "remote", "add", "-d", "origin", str(dvc_remote)]
+    )
+    # Everything in data/ is ignored but the pointers, so the folder itself
+    # isn't, and DVC has to look inside it to find them
+    with open(".gitignore", "a") as f:
+        f.write("data/*\n!data/*.dvc\n")
+    os.makedirs("data")
+    with open("data/raw.bin", "w") as f:
+        f.write("raw data")
+    subprocess.check_call(["dvc", "add", "data/raw.bin"])
+    subprocess.check_call(["calkit", "push", "--no-git", "--no-check-auth"])
+    assert any(p.is_file() for p in dvc_remote.rglob("*"))
+    # It comes back on a pull
+    os.remove("data/raw.bin")
+    calkit.overleaf.rmtree(".dvc/cache")
+    subprocess.check_call(["calkit", "pull", "--no-git", "--no-check-auth"])
+    with open("data/raw.bin") as f:
+        assert f.read() == "raw data"
+
+
 @skipif_windows_mock_scheduler
 def test_run_switch_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])

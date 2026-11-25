@@ -1763,3 +1763,49 @@ def test_get_printed_numbers(tmp_path):
         {"notebook": "fit.ipynb", "stage": "fit"} | found,
         {"notebook": "clean.ipynb", "stage": "clean"} | found,
     ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Policies in registry")
+def test_get_policy_blocks(tmp_path, monkeypatch):
+    import getpass
+    import plistlib
+
+    from calkit.browser_link import get_policy_blocks
+
+    monkeypatch.setattr(
+        calkit.browser_link,
+        "POLICY_PATHS",
+        {
+            platform.system(): {
+                "chrome": [str(tmp_path / "chrome" / "*.json")],
+                "edge": [str(tmp_path / "{user}" / "edge.plist")],
+            }
+        },
+    )
+    (tmp_path / "chrome").mkdir()
+    # Nothing set, or hosts allowed, blocks nothing
+    assert get_policy_blocks() == {}
+    policy = tmp_path / "chrome" / "policy.json"
+    policy.write_text(json.dumps({"NativeMessagingBlocklist": ["other"]}))
+    assert get_policy_blocks() == {}
+    # Blocking every host, unless Calkit's is allowed
+    policy.write_text(json.dumps({"NativeMessagingBlocklist": ["*"]}))
+    assert "NativeMessagingAllowlist" in get_policy_blocks()["chrome"]
+    policy.write_text(
+        json.dumps(
+            {
+                "NativeMessagingBlocklist": ["*"],
+                "NativeMessagingAllowlist": ["io.calkit.native"],
+            }
+        )
+    )
+    assert get_policy_blocks() == {}
+    # Only allowing hosts installed for every user, from a Mac's managed
+    # preferences for this user
+    user_dir = tmp_path / getpass.getuser()
+    user_dir.mkdir()
+    with open(user_dir / "edge.plist", "wb") as f:
+        plistlib.dump({"NativeMessagingUserLevelHosts": False}, f)
+    assert get_policy_blocks() == {
+        "edge": "only hosts installed for all users allowed"
+    }

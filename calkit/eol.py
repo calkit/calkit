@@ -16,16 +16,16 @@ import subprocess
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 
-#: What to do about files whose line endings aren't pinned
+# What to do about files whose line endings aren't pinned
 FIX = "run `calkit fix line-endings` and commit .gitattributes"
 
-#: Marks the block of rules :func:`pin` writes
+# Marks the block of rules ``pin()`` writes
 MARKER = "calkit line endings"
 
-#: The rules :func:`pin` writes, first in ``.gitattributes`` so a project's
-#: own rules after them win. ``text=auto`` leaves binary files alone, and
-#: files committed with CRLF, which are checked out the same everywhere
-#: already, so pinning makes no committed file read as changed.
+# The rules ``pin()`` writes, first in ``.gitattributes`` so a project's
+# own rules after them win. ``text=auto`` leaves binary files alone, and
+# files committed with CRLF, which are checked out the same everywhere
+# already, so pinning makes no committed file read as changed.
 RULES = [
     "# Check out text files with LF everywhere, including Windows, so the",
     "# files the pipeline hashes are the same on every machine",
@@ -35,8 +35,8 @@ RULES = [
     "*.cmd text=auto eol=crlf",
 ]
 
-#: Most characters of paths to give one Git command, well within the 32,767
-#: of a whole command line on Windows
+# Most characters of paths to give one Git command, well within the 32,767
+# of a whole command line on Windows
 MAX_PATH_CHARS = 16_000
 
 
@@ -46,12 +46,12 @@ class TrackedEol:
     out, as ``git ls-files --eol`` reports them."""
 
     path: str
-    #: In the index: ``lf``, ``crlf``, ``mixed``, ``none`` (no line
-    #: breaks), or ``-text`` (binary)
+    # In the index: ``lf``, ``crlf``, ``mixed``, ``none`` (no line
+    # breaks), or ``-text`` (binary)
     index: str
-    #: In the working tree, likewise, or empty if the file isn't there
+    # In the working tree, likewise, or empty if the file isn't there
     worktree: str
-    #: The ``text`` and ``eol`` attributes that apply, e.g., ``text eol=lf``
+    # The ``text`` and ``eol`` attributes that apply, e.g., ``text eol=lf``
     attr: str
 
     @property
@@ -235,13 +235,13 @@ def summarize(paths: list[str], n: int = 3) -> str:
 
 @dataclass
 class PinResult:
-    """What :func:`pin` changed."""
+    """What ``pin()`` changed."""
 
-    #: Whether ``.gitattributes`` was written
+    # Whether ``.gitattributes`` was written
     wrote_gitattributes: bool = False
-    #: Working-tree files rewritten to the line endings Git checks out
+    # Working-tree files rewritten to the line endings Git checks out
     converted: list[str] = dataclass_field(default_factory=list)
-    #: Submodules set to check files out as committed, in this clone only
+    # Submodules set to check files out as committed, in this clone only
     submodules: list[str] = dataclass_field(default_factory=list)
 
 
@@ -264,7 +264,7 @@ def pins_all(wdir: str = ".") -> bool:
 
 
 def write_rules(wdir: str = ".") -> bool:
-    """Put :data:`RULES` first in ``wdir``'s ``.gitattributes``, unless it
+    """Put ``RULES`` first in ``wdir``'s ``.gitattributes``, unless it
     pins every file already. Returns whether the file was written."""
     path = os.path.join(wdir, ".gitattributes")
     begin = f"# >>> {MARKER} (managed by calkit) >>>"

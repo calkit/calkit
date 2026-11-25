@@ -6845,6 +6845,10 @@ export type S3ConnectionPut = {
    * Secret Access Key
    */
   secret_access_key: string
+  /**
+   * Replace
+   */
+  replace?: boolean
 }
 
 /**

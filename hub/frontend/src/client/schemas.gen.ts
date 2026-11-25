@@ -11972,6 +11972,11 @@ export const S3ConnectionPutSchema = {
       minLength: 1,
       title: "Secret Access Key",
     },
+    replace: {
+      type: "boolean",
+      title: "Replace",
+      default: false,
+    },
   },
   type: "object",
   required: ["access_key_id", "secret_access_key"],

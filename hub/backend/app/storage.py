@@ -1,9 +1,11 @@
 """Functionality for managing object storage."""
 
+import ipaddress
 import json
 import logging
 import os
 import shutil
+import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -222,16 +224,6 @@ def _generate_multipart_urls(
         **S3_CHECKSUM_CONFIG,
     )
     region = fs.client_kwargs.get("region_name")
-    # Use an internal client for control-plane calls (create multipart upload)
-    control_client: Any = boto3.client(
-        "s3",
-        endpoint_url=fs.endpoint_url,
-        region_name=region,
-        aws_access_key_id=fs.key,
-        aws_secret_access_key=fs.secret,
-        aws_session_token=fs.token,
-        config=s3_config,
-    )
     # Sign URLs for the externally reachable host to avoid host/signature
     # mismatch, which only the hub's own storage needs locally
     presign_endpoint = fs.endpoint_url
@@ -249,8 +241,9 @@ def _generate_multipart_urls(
         aws_session_token=fs.token,
         config=s3_config,
     )
-    # Initiate multipart upload
-    mpu = control_client.create_multipart_upload(
+    # Through the filesystem, so it connects the same way as the rest
+    mpu = fs.call_s3(
+        "create_multipart_upload",
         Bucket=bucket,
         Key=key,
         **({"ContentType": content_type} if content_type else {}),
@@ -406,33 +399,53 @@ class S3EndpointError(ValueError):
     """
 
 
-def check_s3_endpoint_url(endpoint_url: str) -> None:
-    """Refuse an S3 endpoint URL that isn't HTTPS or resolves to an address
-    that isn't public. Locally, HTTP and any address are allowed, e.g., the
-    dev MinIO.
+def check_s3_endpoint_url(endpoint_url: str, resolve: bool = True) -> None:
+    """Refuse an S3 endpoint URL that isn't HTTPS or, with ``resolve``,
+    resolves to an address that isn't public. Locally, HTTP and any address
+    are allowed, e.g., the dev MinIO.
+
+    Resolving here is only for a clear error when keys are saved, since a
+    host can resolve differently later; ``connect_public_socket`` is what
+    keeps connections off private networks.
     """
-    import ipaddress
-    import socket
     from urllib.parse import urlparse
 
-    parsed = urlparse(endpoint_url)
+    try:
+        parsed = urlparse(endpoint_url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        raise S3EndpointError("Invalid endpoint URL")
     local = settings.ENVIRONMENT == "local"
     schemes = ("http", "https") if local else ("https",)
-    if parsed.scheme not in schemes or not parsed.hostname:
+    if parsed.scheme not in schemes or not hostname:
         raise S3EndpointError("Endpoint URL must start with https://")
     if parsed.path not in ("", "/") or parsed.query or parsed.username:
         raise S3EndpointError("Endpoint URL must only have a host")
-    if local:
+    if local or not resolve:
         return
     try:
         infos = socket.getaddrinfo(
-            parsed.hostname, parsed.port or 443, proto=socket.IPPROTO_TCP
+            hostname, port or 443, proto=socket.IPPROTO_TCP
         )
-    except socket.gaierror:
-        raise S3EndpointError(f"Can't resolve {parsed.hostname}")
+    except (socket.gaierror, UnicodeError):
+        raise S3EndpointError(f"Can't resolve {hostname}")
     for info in infos:
         if not ipaddress.ip_address(info[4][0]).is_global:
-            raise S3EndpointError(f"{parsed.hostname} isn't public")
+            raise S3EndpointError(f"{hostname} isn't public")
+
+
+def connect_public_socket(addr_info: Any) -> socket.socket:
+    """Make a socket for connecting to S3 storage, refusing addresses that
+    aren't public.
+
+    It's checked as each connection is made, so neither a redirect nor a
+    host that resolves differently later can reach the hub's own network.
+    """
+    family, type_, proto, _, sockaddr = addr_info
+    if not ipaddress.ip_address(sockaddr[0]).is_global:
+        raise OSError(f"Refusing to connect to {sockaddr[0]}")
+    return socket.socket(family=family, type=type_, proto=proto)
 
 
 def get_s3_fs(
@@ -446,18 +459,24 @@ def get_s3_fs(
     No endpoint means AWS itself.
     """
     if endpoint_url:
-        check_s3_endpoint_url(endpoint_url)
+        check_s3_endpoint_url(endpoint_url, resolve=False)
     client_kwargs: dict[str, Any] = {}
     if region:
         client_kwargs["region_name"] = region
+    config_kwargs: dict[str, Any] = dict(S3_CHECKSUM_CONFIG)
+    # S3-compatible storage, e.g., OSN, may not support virtual hosts
+    if endpoint_url:
+        config_kwargs["s3"] = {"addressing_style": "path"}
+    if settings.ENVIRONMENT != "local":
+        config_kwargs["connector_args"] = {
+            "socket_factory": connect_public_socket
+        }
     return s3fs.S3FileSystem(
         key=access_key_id,
         secret=secret_access_key,
         endpoint_url=endpoint_url or None,
         client_kwargs=client_kwargs,
-        # S3-compatible storage, e.g., OSN, may not support virtual hosts
-        config_kwargs=S3_CHECKSUM_CONFIG
-        | ({"s3": {"addressing_style": "path"}} if endpoint_url else {}),
+        config_kwargs=config_kwargs,
         use_listings_cache=False,
         skip_instance_cache=True,
     )

@@ -47,7 +47,11 @@ const S3ConnectionModal = ({
     mode: "onBlur",
     defaultValues: emptyS3Connection,
   })
+  // Starts fresh each time it opens, so keys typed before aren't kept
   useEffect(() => {
+    if (!isOpen) {
+      return
+    }
     reset(
       connection
         ? {
@@ -59,7 +63,7 @@ const S3ConnectionModal = ({
           }
         : emptyS3Connection,
     )
-  }, [connection, reset])
+  }, [isOpen, connection, reset])
   const mutation = useMutation({
     mutationFn: (data: S3ConnectionForm) =>
       UsersService.putUserS3Connection({
@@ -69,6 +73,7 @@ const S3ConnectionModal = ({
           region: data.region || null,
           access_key_id: data.access_key_id,
           secret_access_key: data.secret_access_key,
+          replace: !!connection,
         },
       }).then((response) => response.data),
     onSuccess: () => {

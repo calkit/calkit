@@ -237,6 +237,13 @@ interface UseS3BucketForm extends S3ConnectionForm {
   dedicated: boolean
 }
 
+const emptyS3Bucket: UseS3BucketForm = {
+  ...emptyS3Connection,
+  connection: "",
+  url: "",
+  dedicated: false,
+}
+
 // New keys can be added here too, so a bucket takes one step
 const UseS3Bucket = ({
   accountName,
@@ -252,26 +259,23 @@ const UseS3Bucket = ({
       UsersService.getUserS3Connections().then((response) => response.data),
     enabled: isOpen,
   })
-  const defaults: UseS3BucketForm = {
-    ...emptyS3Connection,
-    connection: "",
-    url: "",
-    dedicated: false,
-  }
   const {
     register,
     handleSubmit,
     reset,
-    setValue,
     watch,
     formState: { errors },
-  } = useForm<UseS3BucketForm>({ mode: "onBlur", defaultValues: defaults })
+  } = useForm<UseS3BucketForm>({
+    mode: "onBlur",
+    defaultValues: emptyS3Bucket,
+  })
+  // Starts fresh each time it opens, with saved keys selected if any
   const firstConnection = connectionsQuery.data?.[0]?.name
   useEffect(() => {
-    if (firstConnection) {
-      setValue("connection", firstConnection)
+    if (isOpen) {
+      reset({ ...emptyS3Bucket, connection: firstConnection ?? "" })
     }
-  }, [firstConnection, setValue])
+  }, [isOpen, firstConnection, reset])
   const isNew = !watch("connection")
   const mutation = useMutation({
     mutationFn: async (data: UseS3BucketForm) => {
@@ -309,7 +313,6 @@ const UseS3Bucket = ({
           : "Read-only bucket added.",
         "success",
       )
-      reset(defaults)
       onClose()
     },
     onError: (err: AxiosError) => {

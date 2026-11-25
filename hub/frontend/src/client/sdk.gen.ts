@@ -2548,7 +2548,7 @@ export class UsersService {
    * Put User S3 Connection
    *
    * Save keys for S3 or S3-compatible storage, e.g., OSN, as a named
-   * connection, or replace a connection's keys.
+   * connection, or, with ``replace``, replace a connection's keys.
    *
    * Storage using a connection is found at its endpoint, so that can't
    * change while there is any.

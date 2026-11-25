@@ -649,6 +649,10 @@ def post_project_s3_bucket(
     bucket_name = match["bucket"]
     prefix = (match["prefix"] or "").strip("/")
     bucket = f"{bucket_name}/{prefix}" if prefix else bucket_name
+    if len(bucket) > 255:
+        raise HTTPException(
+            422, "Bucket and prefix must be under 256 characters"
+        )
     credential = users.get_external_credential(
         session=session, user=current_user, provider="s3", label=req.connection
     )
@@ -673,6 +677,25 @@ def post_project_s3_bucket(
         )
     ).first()
     created = resource is None
+    if resource is not None and resource.read_only:
+        # The keys may have been replaced with ones that can write
+        try:
+            storage.claim_project_folder(
+                storage.get_resource_storage(session, resource),
+                project,
+                adopt=req.dedicated,
+            )
+            resource.read_only = False
+            session.add(resource)
+        except PermissionError:
+            pass
+        except storage.FolderTakenError as e:
+            raise HTTPException(409, f"{e}; move it in S3, then try again")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.info(f"Failed to write to S3 bucket {bucket}: {e}")
+            raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
     if resource is None:
         metadata = credential.metadata_json or {}
         endpoint_url = metadata.get("endpoint_url")
@@ -737,8 +760,13 @@ def post_project_s3_bucket(
                     )
                 ).all()
             )
-            base = re.sub(r"[^a-z0-9-]+", "-", bucket_name.lower())[:56]
-            name = base.strip("-") or "s3"
+            base = (
+                re.sub(r"[^a-z0-9-]+", "-", bucket_name.lower())[:56].strip(
+                    "-"
+                )
+                or "s3"
+            )
+            name = base
             n = 2
             while name in taken:
                 name = f"{base}-{n}"

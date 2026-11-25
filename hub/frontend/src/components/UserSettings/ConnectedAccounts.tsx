@@ -66,12 +66,22 @@ function ConnectedAccounts() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const { disconnect, s3_connection } = useSearch({ from: "/_layout/settings" })
+  const { disconnect, add_s3_keys, s3_connection } = useSearch({
+    from: "/_layout/settings",
+  })
   const navigate = useNavigate({ from: "/settings" })
   const setDisconnect = (provider: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, disconnect: provider }) })
   const setS3Connection = (name: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, s3_connection: name }) })
+  const closeS3Keys = () =>
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        add_s3_keys: undefined,
+        s3_connection: undefined,
+      }),
+    })
   // An S3 connection is disconnected by name, e.g., "s3:osn"
   const [disconnectProvider, s3Label] = disconnect?.startsWith("s3:")
     ? ["s3", disconnect.slice(3)]
@@ -623,15 +633,19 @@ function ConnectedAccounts() {
                 variant="primary"
                 size="xs"
                 alignSelf="start"
-                onClick={() => setS3Connection("new")}
+                onClick={() =>
+                  navigate({
+                    search: (prev) => ({ ...prev, add_s3_keys: true }),
+                  })
+                }
               >
                 Add keys
               </Button>
             </Stack>
           </HStack>
           <S3ConnectionModal
-            isOpen={s3_connection !== undefined}
-            onClose={() => setS3Connection(undefined)}
+            isOpen={!!add_s3_keys || s3_connection !== undefined}
+            onClose={closeS3Keys}
             connection={s3ConnectionsQuery.data?.find(
               (c) => c.name === s3_connection,
             )}

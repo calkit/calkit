@@ -1548,6 +1548,9 @@ class S3ConnectionPut(BaseModel):
     region: str | None = Field(default=None, max_length=64)
     access_key_id: str = Field(min_length=1, max_length=255)
     secret_access_key: str = Field(min_length=1, max_length=1024)
+    # Whether to replace the keys of a connection with this name, rather
+    # than refuse
+    replace: bool = False
 
 
 def to_s3_connection_public(
@@ -1590,7 +1593,7 @@ def put_user_s3_connection(
     current_user: CurrentUser,
 ) -> S3ConnectionPublic:
     """Save keys for S3 or S3-compatible storage, e.g., OSN, as a named
-    connection, or replace a connection's keys.
+    connection, or, with ``replace``, replace a connection's keys.
 
     Storage using a connection is found at its endpoint, so that can't
     change while there is any.
@@ -1609,6 +1612,8 @@ def put_user_s3_connection(
     existing = users.get_external_credential(
         session=session, user=current_user, provider="s3", label=name
     )
+    if existing is not None and not req.replace:
+        raise HTTPException(409, f"Keys named '{name}' already saved")
     if (
         existing is not None
         and (existing.metadata_json or {}).get("endpoint_url") != endpoint_url

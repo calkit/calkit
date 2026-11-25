@@ -683,8 +683,9 @@ def test_s3_storage(db: Session) -> None:
     db.expire_all()
     assert db.get(StorageResource, resource_id) is None
     # Endpoints off the internet are refused outside local development
-    with pytest.raises(storage.S3EndpointError):
-        storage.check_s3_endpoint_url("minio")
+    for bad in ("minio", "https://host:abc", "https://[::1"):
+        with pytest.raises(storage.S3EndpointError):
+            storage.check_s3_endpoint_url(bad)
     with patch("app.config.settings.ENVIRONMENT", "production"):
         for bad in ("http://example.com", "https://example.com/path"):
             with pytest.raises(storage.S3EndpointError):
@@ -708,6 +709,22 @@ def test_s3_storage(db: Session) -> None:
             pytest.raises(storage.S3EndpointError),
         ):
             storage.check_s3_endpoint_url("https://nope.invalid")
+        # And each connection is checked as it's made, e.g., after a
+        # redirect or the host resolving differently
+        guarded = storage.get_s3_fs("key", "secret", "https://s3.example.org")
+        assert guarded.config_kwargs["connector_args"] == {
+            "socket_factory": storage.connect_public_socket
+        }
+    for address in ("127.0.0.1", "10.1.2.3", "169.254.169.254", "::1"):
+        family = socket.AF_INET6 if ":" in address else socket.AF_INET
+        with pytest.raises(OSError):
+            storage.connect_public_socket(
+                (family, socket.SOCK_STREAM, 6, "", (address, 443))
+            )
+    sock = storage.connect_public_socket(
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+    )
+    sock.close()
     # Compatible storage is addressed by path, and AWS by its default
     assert fs.config_kwargs["s3"] == {"addressing_style": "path"}
     aws = storage.get_s3_fs("key", "secret", region="eu-west-1")

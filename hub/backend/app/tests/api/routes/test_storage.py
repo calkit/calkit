@@ -357,6 +357,9 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
     assert response.status_code == 422
     response = client.put(f"{connections}/osn", headers=headers, json=keys)
     assert response.status_code == 200
+    # Keys under a name already saved are only replaced when asked to
+    response = client.put(f"{connections}/osn", headers=headers, json=keys)
+    assert response.status_code == 409
     listed = client.get(connections, headers=headers).json()
     assert [(c["name"], c["endpoint_url"]) for c in listed] == [
         ("osn", endpoint_url)
@@ -369,6 +372,7 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
         ({"connection": "osn", "url": "s3://a"}, 422),
         ({"connection": "osn", "url": f"s3://{bucket_name}/../x"}, 422),
         ({"connection": "osn", "url": "s3://no-such-bucket-here/x"}, 404),
+        ({"connection": "osn", "url": f"s3://{bucket_name}/{'x' * 300}"}, 422),
     ):
         response = client.post(url, headers=headers, json=body)
         assert response.status_code == status_code, response.text
@@ -420,14 +424,29 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
         json={"dvc_storage_id": read_only["id"]},
     )
     assert response.status_code == 409
+    # Once the keys can write, adding the bucket again makes it writable
+    response = client.post(
+        third,
+        headers=headers,
+        json={
+            "connection": "osn",
+            "url": f"s3://{bucket_name}/shared",
+            "dedicated": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["dvc"]["id"] == read_only["id"]
+    assert not response.json()["dvc"]["read_only"]
     # The endpoint can't change under storage using it, but the keys can
     response = client.put(
         f"{connections}/osn",
         headers=headers,
-        json=keys | {"endpoint_url": "http://elsewhere:9000"},
+        json=keys | {"endpoint_url": "http://elsewhere:9000", "replace": True},
     )
     assert response.status_code == 409
-    response = client.put(f"{connections}/osn", headers=headers, json=keys)
+    response = client.put(
+        f"{connections}/osn", headers=headers, json=keys | {"replace": True}
+    )
     assert response.status_code == 200
     # Removing the connection needs a choice for its storage
     disconnect = "/user/external-credentials/s3"

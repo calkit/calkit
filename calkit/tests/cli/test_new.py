@@ -814,6 +814,11 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     repo = git.Repo()
     assert repo.remotes.origin.url == "https://github.com/test-user/my-project"
     assert not repo.is_dirty(untracked_files=True)
+    # Git gets GitHub credentials from the hub
+    helpers = repo.git.config(
+        "--local", "--get-all", calkit.git.GITHUB_CREDENTIAL_KEY
+    ).split("\n")
+    assert helpers[-1].endswith(" hub git-credential")
     # Test 403: remote owner is an org not in Calkit hub; error should
     # surface the detected org name and a helpful hint
     httpserver.expect_ordered_request(

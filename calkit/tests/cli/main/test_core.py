@@ -5861,14 +5861,20 @@ def test_clone(monkeypatch):
     from typer.testing import CliRunner
 
     cloned = []
+    configs = []
     hubs = []
 
     def check_call(cmd, *args, **kwargs):
         # Stop at the clone, which is all that depends on the protocol
-        if cmd[:2] == ["git", "clone"]:
-            cloned.append(cmd[2])
+        if cmd[0] == "git" and "clone" in cmd:
+            i = cmd.index("clone")
+            cloned.append(cmd[i + 1])
+            configs.append(cmd[1:i])
             raise subprocess.CalledProcessError(1, cmd)
         raise AssertionError(cmd)
+
+    def get_token():
+        raise ValueError("No token found")
 
     def get(path):
         hubs.append(os.environ.get("CALKIT_HUB"))
@@ -5876,6 +5882,7 @@ def test_clone(monkeypatch):
 
     def clone(*args, ssh_set_up=True):
         cloned.clear()
+        configs.clear()
         hubs.clear()
         monkeypatch.delenv("CALKIT_HUB", raising=False)
         monkeypatch.setattr(
@@ -5893,6 +5900,7 @@ def test_clone(monkeypatch):
     monkeypatch.setenv("CALKIT_HUB", "")
     monkeypatch.setattr("subprocess.check_call", check_call)
     monkeypatch.setattr(calkit.hub, "get", get)
+    monkeypatch.setattr(calkit.hub, "get_token", get_token)
     # SSH where it's set up for GitHub, by a project's name or its URL
     assert clone_url("me/proj") == "git@github.com:me/proj.git"
     assert (
@@ -5932,6 +5940,14 @@ def test_clone(monkeypatch):
         clone_url("me/proj", "--ssh", ssh_set_up=False)
         == "git@github.com:me/proj.git"
     )
+    # Over HTTPS, Git gets GitHub credentials from the hub, if signed in
+    assert configs == [[]]
+    monkeypatch.setattr(calkit.hub, "get_token", lambda: "token")
+    clone("me/proj", "--https")
+    assert configs == [calkit.git.get_github_credential_args()]
+    clone("me/proj")
+    assert configs == [[]]
+    monkeypatch.setattr(calkit.hub, "get_token", get_token)
     # Interactively, SSH where it isn't set up offers to set it up, which
     # can end early, e.g., once GitHub's host key is trusted, then checks
     # again, or falls back to HTTPS, unless SSH was asked for

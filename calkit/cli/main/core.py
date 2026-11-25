@@ -529,8 +529,21 @@ def clone(
         if not ssh_ok and not ssh_given:
             typer.echo("Cloning over HTTPS")
             url = "https://github.com/" + url.removeprefix("git@github.com:")
+    # Over HTTPS, Git gets GitHub credentials from the hub when signed in,
+    # so this machine needs no sign-in to GitHub, which the browser
+    # extension can't ask for
+    hub_credentials = False
+    if url.startswith("https://github.com/"):
+        try:
+            calkit.hub.get_token()
+            hub_credentials = True
+        except Exception:
+            pass
     # Git clone
-    cmd = ["git", "clone", url]
+    cmd = ["git"]
+    if hub_credentials:
+        cmd += calkit.git.get_github_credential_args()
+    cmd += ["clone", url]
     if not non_recursive:
         cmd.append("--recursive")
     if location is not None:
@@ -543,6 +556,8 @@ def clone(
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")
     os.chdir(location)
+    if hub_credentials:
+        calkit.git.configure_github_credentials(calkit.git.get_repo())
     calkit.record_project_path()
     # So Git merges dvc.lock and stage run records stage by stage
     calkit.merge.configure_driver()

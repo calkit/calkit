@@ -64,6 +64,43 @@ def get(
         raise_error(str(e))
 
 
+@hub_app.command(name="git-credential", hidden=True)
+def git_credential(
+    operation: Annotated[
+        str, typer.Argument(help="What Git asks: get, store, or erase.")
+    ],
+) -> None:
+    """Give Git a GitHub token from the hub, for repos set up with
+    ``calkit.git.configure_github_credentials``.
+    """
+    import sys
+
+    from calkit.cli import warn
+
+    attrs = {}
+    for line in sys.stdin:
+        if not line.strip():
+            break
+        key, _, value = line.rstrip("\n").partition("=")
+        attrs[key] = value
+    # Storing and erasing are for helpers that keep what they're given
+    if (
+        operation != "get"
+        or attrs.get("protocol") != "https"
+        or attrs.get("host") != "github.com"
+    ):
+        return
+    try:
+        resp = calkit.hub.get(
+            "/user/github-token", allow_login=False, max_retries=2
+        )
+    except Exception as e:
+        # Git carries on without, e.g., asking for a password
+        warn(f"Couldn't get GitHub token from hub: {e}", err=True)
+        return
+    typer.echo(f"username=x-access-token\npassword={resp['access_token']}")
+
+
 @hub_app.command(name="login")
 def login(
     hub: Annotated[

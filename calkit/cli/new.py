@@ -340,12 +340,27 @@ def new_project(
                     )
             raise_error(msg)
         # Now clone here
+        # Git gets GitHub credentials from the hub, so this machine needs no
+        # sign-in to GitHub, which the browser extension can't ask for
         if not os.path.isdir(abs_path):
-            subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+            subprocess.run(
+                [
+                    "git",
+                    *calkit.git.get_github_credential_args(),
+                    "clone",
+                    resp["git_repo_url"],
+                    abs_path,
+                ]
+            )
+            if os.path.isdir(os.path.join(abs_path, ".git")):
+                calkit.git.configure_github_credentials(
+                    calkit.git.get_repo(abs_path)
+                )
         elif repo is None:
             typer.echo("Fetching from newly created Git repo")
             repo = git.Repo.init(abs_path, initial_branch="main")
             repo.git.remote(["add", "origin", resp["git_repo_url"]])
+            calkit.git.configure_github_credentials(repo)
             repo.git.fetch()
             checkout_cmd = ["-t", "origin/main"]
             if overwrite:
@@ -418,6 +433,7 @@ def new_project(
             else:
                 typer.echo("Adding Git remote URL for hub repo")
                 repo.git.remote(["add", "origin", resp["git_repo_url"]])
+            calkit.git.configure_github_credentials(repo)
         try:
             remote_name = calkit.dvc.configure_remote(wdir=abs_path)
             calkit.dvc.set_remote_auth(remote_name=remote_name, wdir=abs_path)

@@ -960,3 +960,54 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
         warnings.warn(f"Failed to fetch history: {e}")
         return None
     return parse()
+
+
+# Where Git looks up helpers for GitHub over HTTPS
+GITHUB_CREDENTIAL_KEY = "credential.https://github.com.helper"
+
+
+def get_github_credential_config() -> list[tuple[str, str]]:
+    """The Git config that gets GitHub credentials from the hub, for
+    ``git -c`` or a repo's own config.
+
+    An empty helper comes first, which drops the user's own for GitHub,
+    since one that stored the hub's token, e.g., osxkeychain, would hand it
+    back after it expired.
+    """
+    import shlex
+    import shutil
+    import sys
+
+    from calkit.core import get_calkit_cmd
+
+    exe = shutil.which("calkit")
+    cmd = [exe] if exe else get_calkit_cmd()
+    if sys.platform == "win32":
+        # Git runs helpers with its own sh, which reads backslashes as escapes
+        cmd = [c.replace("\\", "/") for c in cmd]
+    helper = "!" + shlex.join([*cmd, "hub", "git-credential"])
+    return [(GITHUB_CREDENTIAL_KEY, ""), (GITHUB_CREDENTIAL_KEY, helper)]
+
+
+def get_github_credential_args() -> list[str]:
+    """``git -c`` options for ``get_github_credential_config``, e.g., for a
+    clone, which has no repo config yet.
+    """
+    args = []
+    for key, value in get_github_credential_config():
+        args += ["-c", f"{key}={value}"]
+    return args
+
+
+def configure_github_credentials(repo: git.Repo) -> None:
+    """Have Git get GitHub credentials for a repo from the hub, so pushing
+    and pulling over HTTPS work without signing in to GitHub on this
+    machine, e.g., from the browser extension, which has no terminal to ask
+    in.
+    """
+    with repo.config_writer("repository") as writer:
+        # Dropping any there first, so running it again doesn't add more
+        if writer.has_option('credential "https://github.com"', "helper"):
+            writer.remove_option('credential "https://github.com"', "helper")
+    for key, value in get_github_credential_config():
+        repo.git.config("--local", "--add", key, value)

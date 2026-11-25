@@ -1,4 +1,19 @@
-# Making and Overleaf project single-button reproducible, locally-editable, and coding agent-friendly
+# Making an Overleaf project single-button reproducible and ready for coding agents
+
+Are you tired of manually copying your figures, tables, and results
+into Overleaf and worrying if they might be out-of-date or incorrect?
+Have you received reviews back from a journal only to realize you
+forgot how a figure was created, or the script no longer runs?
+In this tutorial you'll learn how to solve and prevent
+these problems by directly connecting all of your paper's components
+back to the code and data that produced them, so they can be
+reproduced with a single button.
+You'll also be able to clearly see if any are out of date,
+regenerating if so.
+Lastly, you'll learn how to work on the entire project--literature review,
+data collection, analysis
+and writing--locally with AI coding agents,
+without losing the ability to write and collaborate on Overleaf.
 
 <!--
 First pass, written ahead of the features it describes; see the PR for

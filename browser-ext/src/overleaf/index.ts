@@ -2235,6 +2235,12 @@ async function renderAttachForm(
       );
       return;
     }
+    // Before the project's made, rather than when its paper is imported,
+    // which leaves it half done
+    if (!(await send({ type: "overleaf.connected" }))) {
+      renderTokenForm(clear(container), "", retry);
+      return;
+    }
   } catch (e) {
     // The hub's GitHub token can be expired or revoked even with a GitHub
     // username on the account, which reconnecting fixes

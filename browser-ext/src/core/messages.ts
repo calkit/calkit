@@ -225,6 +225,7 @@ export type Request =
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }
   | { type: "overleaf.connectSession" }
+  | { type: "overleaf.connected" }
   | { type: "overleaf.openTokenSettings" }
   | { type: "overleaf.tokenTab" }
   | { type: "overleaf.returnFromTokenTab" }
@@ -420,6 +421,7 @@ export interface ResponseMap {
   "overleaf.sync": OverleafSyncResponse;
   "overleaf.setToken": { message: string };
   "overleaf.connectSession": { message: string };
+  "overleaf.connected": boolean;
   "overleaf.openTokenSettings": null;
   "overleaf.tokenTab": { requested: boolean };
   "overleaf.returnFromTokenTab": { returned: boolean };

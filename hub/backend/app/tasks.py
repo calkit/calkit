@@ -116,10 +116,14 @@ def get_storage_transfer_status(
     return None, None, None
 
 
-def enqueue_storage_transfer(user_id: str, provider: str) -> bool:
+def enqueue_storage_transfer(
+    user_id: str, provider: str, label: str = "default"
+) -> bool:
     """Queue moving the storage reached with a user's account on a service,
     e.g., HF, into the hub's own storage, then disconnecting it. True if it
     was queued.
+
+    For S3, ``label`` is the name of the connection.
     """
     queue = get_queue()
     if queue is None:
@@ -137,6 +141,7 @@ def enqueue_storage_transfer(user_id: str, provider: str) -> bool:
             "app.storage.transfer_storage_and_disconnect",
             user_id,
             provider,
+            label,
             job_id=job_id,
             # Copying a project's data can take much longer than a warm
             job_timeout=6 * 3600,

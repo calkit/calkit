@@ -6,7 +6,7 @@
 
 - Status: accepted
 - Date: 2026-11-22
-- Issues: #1739 (Hugging Face buckets), #2170 (Box)
+- Issues: #1739 (Hugging Face buckets), #2170 (Box), S3
 - User docs: [storage.md](../../storage.md)
 - Notes on later work, e.g., storage per path, Git LFS, and HF Datasets:
   [original design notes](https://github.com/calkit/calkit/blob/55e3628d1665fb5e72ca1f4cc74acea94810af0a/docs/storage.md#design-notes)
@@ -151,6 +151,23 @@ needs there, i.e., make folders, upload, list, and download,
 so Box needs nothing from the hub after the token.
 Clients look up where many objects are in one request to the hub,
 and download each by its Box ID.
+
+<!-- TODO: needs human review -->
+
+S3 has no OAuth, so users paste access keys.
+Keys reach one endpoint, e.g., an OSN pod or AWS,
+and a user can save several sets, each under a name.
+A project selects a set of keys and a bucket with an optional prefix,
+which is a namespace unless it's marked as dedicated,
+e.g., an existing DVC remote holding objects at its root.
+The hub signs URLs with the keys,
+so clients transfer directly with the bucket.
+Writing a project's `.calkit-project` file shows whether the keys can
+write;
+storage they can only read is added to the project's previous storage,
+so it's read from but never written to.
+The hub only reaches endpoints on the public internet,
+since it would otherwise make requests into its own network for users.
 
 ### Keeping connections alive
 

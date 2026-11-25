@@ -268,8 +268,8 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
     with (
         patch("calkit.box.BoxFileSystem.get_folder_id", return_value="123"),
         patch(
-            "app.api.routes.storage.storage.claim_box_project_folder",
-            side_effect=storage.BoxFolderTakenError("Calkit/a/b"),
+            "app.api.routes.storage.storage.claim_project_folder",
+            side_effect=storage.FolderTakenError("Calkit/a/b"),
         ),
     ):
         response = client.post(url, headers=headers)
@@ -281,10 +281,7 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
         patch(
             "calkit.box.BoxFileSystem.get_folder_id", return_value="123"
         ) as get_folder_id,
-        patch(
-            "app.api.routes.storage.storage.claim_box_project_folder",
-            return_value="456",
-        ) as claim,
+        patch("app.api.routes.storage.storage.claim_project_folder") as claim,
     ):
         response = client.post(url, headers=headers)
         assert response.status_code == 200
@@ -315,3 +312,137 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
     assert (
         client.get("/user/zenodo/storage", headers=headers).status_code == 422
     )
+
+
+def test_project_s3_bucket(client: TestClient, db: Session) -> None:
+    from app.config import settings
+
+    email = random_email()
+    headers = authentication_token_from_email(
+        client=client, email=email, db=db
+    )
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    projects = []
+    for _ in range(3):
+        project = Project(
+            name=f"s3-{uuid.uuid4().hex[:8]}",
+            title="S3 project",
+            git_repo_url="https://github.com/someone/s3",
+            owner_account_id=user.account.id,
+            owner_account=user.account,
+        )
+        db.add(project)
+        projects.append(project)
+    db.commit()
+    owner = user.account.name
+    # The dev MinIO stands in for someone's S3-compatible storage, e.g., OSN
+    endpoint_url = settings.OBJECT_STORAGE_ENDPOINT_URL
+    bucket_name = f"s3-route-{uuid.uuid4().hex[:8]}"
+    storage.get_s3_fs(
+        str(settings.OBJECT_STORAGE_KEY),
+        str(settings.OBJECT_STORAGE_SECRET),
+        endpoint_url=endpoint_url,
+    ).mkdir(bucket_name)
+    keys = {
+        "endpoint_url": f"{endpoint_url}/",
+        "access_key_id": settings.OBJECT_STORAGE_KEY,
+        "secret_access_key": settings.OBJECT_STORAGE_SECRET,
+    }
+    connections = "/user/s3-connections"
+    assert client.get(connections, headers=headers).json() == []
+    response = client.put(
+        f"{connections}/Bad_Name", headers=headers, json=keys
+    )
+    assert response.status_code == 422
+    response = client.put(f"{connections}/osn", headers=headers, json=keys)
+    assert response.status_code == 200
+    listed = client.get(connections, headers=headers).json()
+    assert [(c["name"], c["endpoint_url"]) for c in listed] == [
+        ("osn", endpoint_url)
+    ]
+    # Secrets never go back out
+    assert "secret_access_key" not in listed[0]
+    url = f"/projects/{owner}/{projects[0].name}/storage/s3-bucket"
+    for body, status_code in (
+        ({"connection": "nope", "url": f"s3://{bucket_name}"}, 404),
+        ({"connection": "osn", "url": "s3://a"}, 422),
+        ({"connection": "osn", "url": f"s3://{bucket_name}/../x"}, 422),
+        ({"connection": "osn", "url": "s3://no-such-bucket-here/x"}, 404),
+    ):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == status_code, response.text
+    # Projects share a bucket, each in its own folder
+    body = {"connection": "osn", "url": f"s3://{bucket_name}/calkit/"}
+    response = client.post(url, headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    dvc = response.json()["dvc"]
+    assert dvc["kind"] == "s3-bucket"
+    assert dvc["bucket"] == f"{bucket_name}/calkit"
+    assert dvc["name"] == bucket_name
+    assert dvc["connection"] == "osn"
+    assert not dvc["dedicated"] and not dvc["read_only"]
+    second = f"/projects/{owner}/{projects[1].name}/storage/s3-bucket"
+    response = client.post(second, headers=headers, json=body)
+    assert response.json()["dvc"]["id"] == dvc["id"]
+    resource = db.get(StorageResource, uuid.UUID(dvc["id"]))
+    assert resource is not None
+    target = storage.get_resource_storage(db, resource)
+    for project in projects[:2]:
+        marker = target.make_project_path(
+            owner, project.name, storage.PROJECT_FILE
+        )
+        assert target.fs.cat_file(marker) == str(project.id).encode()
+    # Keys that can only read make a source to read from, with new objects
+    # going where they did
+    third = f"/projects/{owner}/{projects[2].name}/storage/s3-bucket"
+    with patch(
+        "app.api.routes.storage.storage.claim_project_folder",
+        side_effect=PermissionError,
+    ):
+        response = client.post(
+            third,
+            headers=headers,
+            json={
+                "connection": "osn",
+                "url": f"s3://{bucket_name}/shared",
+                "dedicated": True,
+            },
+        )
+    assert response.status_code == 200, response.text
+    settings_resp = response.json()
+    assert settings_resp["dvc"] is None
+    read_only = settings_resp["previous"][0]
+    assert read_only["read_only"] and read_only["dedicated"]
+    response = client.put(
+        f"/projects/{owner}/{projects[2].name}/storage",
+        headers=headers,
+        json={"dvc_storage_id": read_only["id"]},
+    )
+    assert response.status_code == 409
+    # The endpoint can't change under storage using it, but the keys can
+    response = client.put(
+        f"{connections}/osn",
+        headers=headers,
+        json=keys | {"endpoint_url": "http://elsewhere:9000"},
+    )
+    assert response.status_code == 409
+    response = client.put(f"{connections}/osn", headers=headers, json=keys)
+    assert response.status_code == 200
+    # Removing the connection needs a choice for its storage
+    disconnect = "/user/external-credentials/s3"
+    response = client.delete(
+        disconnect, headers=headers, params={"label": "osn"}
+    )
+    assert response.status_code == 409
+    response = client.delete(
+        disconnect,
+        headers=headers,
+        params={"label": "osn", "storage_action": "orphan"},
+    )
+    assert response.status_code == 200
+    assert client.get(connections, headers=headers).json() == []
+    db.expire_all()
+    assert db.get(StorageResource, uuid.UUID(dvc["id"])) is None
+    reloaded = db.get(Project, projects[0].id)
+    assert reloaded is not None and reloaded.dvc_storage_id is None

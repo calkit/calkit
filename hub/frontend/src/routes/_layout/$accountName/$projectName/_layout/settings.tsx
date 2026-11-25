@@ -1,8 +1,10 @@
 import {
   Box,
   Button,
+  Checkbox,
   FormControl,
   FormErrorMessage,
+  FormHelperText,
   FormLabel,
   HStack,
   Heading,
@@ -20,8 +22,8 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import mixpanel from "mixpanel-browser"
 import type { AxiosError } from "axios"
+import mixpanel from "mixpanel-browser"
 import { useEffect, useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { z } from "zod"
@@ -31,15 +33,20 @@ import {
   StorageService,
   UsersService,
 } from "../../../../../client"
+import S3ConnectionFields, {
+  type S3ConnectionForm,
+  emptyS3Connection,
+} from "../../../../../components/Common/S3ConnectionFields"
 import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
-import { handleError } from "../../../../../lib/errors"
 import { startBoxAuth } from "../../../../../lib/box"
+import { handleError } from "../../../../../lib/errors"
 import { startHuggingFaceAuth } from "../../../../../lib/huggingface"
 import { getStorageServiceName } from "../../../../../lib/storage"
 
 const settingsSearchSchema = z.object({
   add_storage: z.boolean().optional(),
+  add_s3: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -216,9 +223,204 @@ const NewHfBucket = ({
   )
 }
 
+interface UseS3BucketProps {
+  accountName: string
+  projectName: string
+  isOpen: boolean
+  onClose: () => void
+}
+
+interface UseS3BucketForm extends S3ConnectionForm {
+  // An existing connection's name, or empty for new keys
+  connection: string
+  url: string
+  dedicated: boolean
+}
+
+// New keys can be added here too, so a bucket takes one step
+const UseS3Bucket = ({
+  accountName,
+  projectName,
+  isOpen,
+  onClose,
+}: UseS3BucketProps) => {
+  const queryClient = useQueryClient()
+  const showToast = useCustomToast()
+  const connectionsQuery = useQuery({
+    queryKey: ["user", "s3-connections"],
+    queryFn: () =>
+      UsersService.getUserS3Connections().then((response) => response.data),
+    enabled: isOpen,
+  })
+  const defaults: UseS3BucketForm = {
+    ...emptyS3Connection,
+    connection: "",
+    url: "",
+    dedicated: false,
+  }
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<UseS3BucketForm>({ mode: "onBlur", defaultValues: defaults })
+  const firstConnection = connectionsQuery.data?.[0]?.name
+  useEffect(() => {
+    if (firstConnection) {
+      setValue("connection", firstConnection)
+    }
+  }, [firstConnection, setValue])
+  const isNew = !watch("connection")
+  const mutation = useMutation({
+    mutationFn: async (data: UseS3BucketForm) => {
+      if (!data.connection) {
+        await UsersService.putUserS3Connection({
+          name: data.name,
+          s3ConnectionPut: {
+            endpoint_url: data.endpoint_url || null,
+            region: data.region || null,
+            access_key_id: data.access_key_id,
+            secret_access_key: data.secret_access_key,
+          },
+        })
+      }
+      return StorageService.postProjectS3Bucket({
+        owner_name: accountName,
+        project_name: projectName,
+        projectS3BucketPost: {
+          connection: data.connection || data.name,
+          url: data.url,
+          dedicated: data.dedicated,
+        },
+      }).then((response) => response.data)
+    },
+    onSuccess: (data, variables) => {
+      mixpanel.track("Used S3 bucket", {
+        new_connection: !variables.connection,
+        dedicated: variables.dedicated,
+        read_only: !data.dvc || data.dvc.kind !== "s3-bucket",
+      })
+      showToast(
+        "Success!",
+        data.dvc?.kind === "s3-bucket"
+          ? "Storage updated."
+          : "Read-only bucket added.",
+        "success",
+      )
+      reset(defaults)
+      onClose()
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "s3-connections"] })
+      queryClient.invalidateQueries({
+        queryKey: ["projects", accountName, projectName, "storage"],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["accounts", accountName, "storage"],
+      })
+    },
+  })
+  const onSubmit: SubmitHandler<UseS3BucketForm> = (data) => {
+    mutation.mutate(data)
+  }
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size={{ base: "sm", md: "md" }}
+      isCentered
+      motionPreset="none"
+      scrollBehavior="inside"
+    >
+      <ModalOverlay />
+      <ModalContent
+        as="form"
+        onSubmit={handleSubmit(onSubmit)}
+        autoComplete="off"
+        // Per-field opt-outs alone don't stop Dashlane
+        data-form-type="other"
+        data-1p-ignore
+        data-lpignore="true"
+      >
+        <ModalHeader>Use S3 bucket</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody pb={6}>
+          {connectionsQuery.isPending ? (
+            <SkeletonText noOfLines={3} />
+          ) : (
+            <>
+              <FormControl mb={4}>
+                <FormLabel htmlFor="s3-connection">Keys</FormLabel>
+                <Select id="s3-connection" {...register("connection")}>
+                  {connectionsQuery.data?.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                  <option value="">New keys</option>
+                </Select>
+              </FormControl>
+              {isNew && (
+                <Box mb={4}>
+                  <S3ConnectionFields register={register} errors={errors} />
+                </Box>
+              )}
+              <FormControl isInvalid={!!errors.url}>
+                <FormLabel htmlFor="s3-url">Bucket</FormLabel>
+                <Input
+                  id="s3-url"
+                  placeholder="s3://bucket/prefix"
+                  autoComplete="off"
+                  data-form-type="other"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  {...register("url", {
+                    required: "Bucket required",
+                    pattern: {
+                      value:
+                        /^(s3:\/\/)?[A-Za-z0-9][A-Za-z0-9._-]+[A-Za-z0-9](\/\S*)?$/,
+                      message: "Use s3://bucket or s3://bucket/prefix",
+                    },
+                  })}
+                />
+                {errors.url && (
+                  <FormErrorMessage>{errors.url.message}</FormErrorMessage>
+                )}
+              </FormControl>
+              <FormControl mt={4}>
+                <Checkbox {...register("dedicated")}>
+                  Only this project's files
+                </Checkbox>
+                <FormHelperText>E.g., an existing DVC remote</FormHelperText>
+              </FormControl>
+            </>
+          )}
+        </ModalBody>
+        <ModalFooter gap={3}>
+          <Button
+            variant="primary"
+            type="submit"
+            isLoading={mutation.isPending}
+            isDisabled={connectionsQuery.isPending}
+          >
+            Use bucket
+          </Button>
+          <Button onClick={onClose}>Cancel</Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  )
+}
+
 function ProjectSettings() {
   const { accountName, projectName } = Route.useParams()
-  const { add_storage } = Route.useSearch()
+  const { add_storage, add_s3 } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
@@ -304,8 +506,8 @@ function ProjectSettings() {
   const describe = (r: StorageResourcePublic) =>
     r.kind === "box-folder"
       ? `Box (${r.connected_by})`
-      : r.kind === "hf-bucket"
-        ? `${getStorageServiceName(r.kind)} bucket ${r.bucket}`
+      : r.kind === "hf-bucket" || r.kind === "s3-bucket"
+        ? `${getStorageServiceName(r.kind)} bucket ${r.bucket}${r.read_only ? " (read-only)" : ""}`
         : r.bucket
   const boxConnected = connectedAccountsQuery.data
     ? Boolean(connectedAccountsQuery.data.box)
@@ -346,7 +548,10 @@ function ProjectSettings() {
     ...(storageQuery.data?.dvc ? [storageQuery.data.dvc] : []),
     ...(storageQuery.data?.previous ?? []),
     ...(accountStorageQuery.data ?? []),
-  ].filter((r, i, all) => all.findIndex((o) => o.id === r.id) === i)
+  ]
+    .filter((r, i, all) => all.findIndex((o) => o.id === r.id) === i)
+    // Read-only storage can't hold new files
+    .filter((r) => !r.read_only)
 
   return (
     <Box>
@@ -442,6 +647,15 @@ function ProjectSettings() {
               >
                 Use Box
               </Button>
+              <Button
+                flexShrink={0}
+                onClick={() => {
+                  mixpanel.track("Clicked use S3 bucket")
+                  navigate({ search: (prev) => ({ ...prev, add_s3: true }) })
+                }}
+              >
+                Use S3 bucket
+              </Button>
             </HStack>
           )}
         </>
@@ -459,6 +673,16 @@ function ProjectSettings() {
           hfConnected={hfConnected}
           onConnect={() => connectMutation.mutate()}
           isConnecting={connectMutation.isPending}
+        />
+      )}
+      {isOwner && (
+        <UseS3Bucket
+          accountName={accountName}
+          projectName={projectName}
+          isOpen={!!add_s3}
+          onClose={() =>
+            navigate({ search: (prev) => ({ ...prev, add_s3: undefined }) })
+          }
         />
       )}
     </Box>

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from sqlmodel import Session
 
-    from app.models import Project, StorageResource
+    from app.models import Project, StorageResource, UserExternalCredential
 
 # Multipart/chunked upload configuration
 MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024  # 64 MB
@@ -124,6 +124,14 @@ def remove_gcs_content_type(fpath: str) -> None:
     blob.patch()
 
 
+# Newer boto adds checksums S3-compatible storage often rejects, e.g., OSN's
+# Ceph, so they're only sent when an operation requires one
+S3_CHECKSUM_CONFIG = {
+    "request_checksum_calculation": "when_required",
+    "response_checksum_validation": "when_required",
+}
+
+
 def get_object_fs() -> s3fs.S3FileSystem | gcsfs.GCSFileSystem:
     # Without caching listings: the instance outlives a request, so a cached
     # listing would hide objects other workers have written since, and an
@@ -136,6 +144,7 @@ def get_object_fs() -> s3fs.S3FileSystem | gcsfs.GCSFileSystem:
             key=settings.OBJECT_STORAGE_KEY,
             secret=settings.OBJECT_STORAGE_SECRET,
             use_listings_cache=False,
+            config_kwargs=S3_CHECKSUM_CONFIG,
         )
     return gcsfs.GCSFileSystem(
         token=get_gcs_credentials(), use_listings_cache=False
@@ -208,25 +217,33 @@ def _generate_multipart_urls(
     else:
         raise ValueError(f"Invalid S3 path: {fpath}")
     s3_config = Config(
-        signature_version="s3v4", s3={"addressing_style": "path"}
+        signature_version="s3v4",
+        s3={"addressing_style": "path"},
+        **S3_CHECKSUM_CONFIG,
     )
+    region = fs.client_kwargs.get("region_name")
     # Use an internal client for control-plane calls (create multipart upload)
     control_client: Any = boto3.client(
         "s3",
         endpoint_url=fs.endpoint_url,
+        region_name=region,
         aws_access_key_id=fs.key,
         aws_secret_access_key=fs.secret,
         aws_session_token=fs.token,
         config=s3_config,
     )
     # Sign URLs for the externally reachable host to avoid host/signature
-    # mismatch
+    # mismatch, which only the hub's own storage needs locally
     presign_endpoint = fs.endpoint_url
-    if settings.ENVIRONMENT == "local":
+    if (
+        settings.ENVIRONMENT == "local"
+        and fs.endpoint_url == settings.OBJECT_STORAGE_ENDPOINT_URL
+    ):
         presign_endpoint = f"http://objects.{settings.DOMAIN}"
     presign_client: Any = boto3.client(
         "s3",
         endpoint_url=presign_endpoint,
+        region_name=region,
         aws_access_key_id=fs.key,
         aws_secret_access_key=fs.secret,
         aws_session_token=fs.token,
@@ -383,6 +400,101 @@ _box_folder_ids: cachetools.TTLCache[str, dict[str, str]] = (
 )
 
 
+class S3EndpointError(ValueError):
+    """An S3 endpoint the hub won't connect to, e.g., one on a private
+    network, which would let users reach the hub's own services.
+    """
+
+
+def check_s3_endpoint_url(endpoint_url: str) -> None:
+    """Refuse an S3 endpoint URL that isn't HTTPS or resolves to an address
+    that isn't public. Locally, HTTP and any address are allowed, e.g., the
+    dev MinIO.
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(endpoint_url)
+    local = settings.ENVIRONMENT == "local"
+    schemes = ("http", "https") if local else ("https",)
+    if parsed.scheme not in schemes or not parsed.hostname:
+        raise S3EndpointError("Endpoint URL must start with https://")
+    if parsed.path not in ("", "/") or parsed.query or parsed.username:
+        raise S3EndpointError("Endpoint URL must only have a host")
+    if local:
+        return
+    try:
+        infos = socket.getaddrinfo(
+            parsed.hostname, parsed.port or 443, proto=socket.IPPROTO_TCP
+        )
+    except socket.gaierror:
+        raise S3EndpointError(f"Can't resolve {parsed.hostname}")
+    for info in infos:
+        if not ipaddress.ip_address(info[4][0]).is_global:
+            raise S3EndpointError(f"{parsed.hostname} isn't public")
+
+
+def get_s3_fs(
+    access_key_id: str,
+    secret_access_key: str,
+    endpoint_url: str | None = None,
+    region: str | None = None,
+) -> s3fs.S3FileSystem:
+    """Get a filesystem for S3 or S3-compatible storage with a user's keys.
+
+    No endpoint means AWS itself.
+    """
+    if endpoint_url:
+        check_s3_endpoint_url(endpoint_url)
+    client_kwargs: dict[str, Any] = {}
+    if region:
+        client_kwargs["region_name"] = region
+    return s3fs.S3FileSystem(
+        key=access_key_id,
+        secret=secret_access_key,
+        endpoint_url=endpoint_url or None,
+        client_kwargs=client_kwargs,
+        # S3-compatible storage, e.g., OSN, may not support virtual hosts
+        config_kwargs=S3_CHECKSUM_CONFIG
+        | ({"s3": {"addressing_style": "path"}} if endpoint_url else {}),
+        use_listings_cache=False,
+        skip_instance_cache=True,
+    )
+
+
+def get_s3_bucket_region(fs: s3fs.S3FileSystem, bucket: str) -> str | None:
+    """Get the region of an AWS bucket, which presigned URLs must be signed
+    for, or ``None`` if it doesn't say.
+
+    AWS gives it in a header even when access is denied.
+    """
+    client: Any = boto3.client(
+        "s3",
+        endpoint_url=fs.endpoint_url,
+        aws_access_key_id=fs.key,
+        aws_secret_access_key=fs.secret,
+        config=Config(**S3_CHECKSUM_CONFIG),
+    )
+    try:
+        resp = client.head_bucket(Bucket=bucket)
+    except client.exceptions.ClientError as e:
+        resp = e.response
+    headers = resp.get("ResponseMetadata", {}).get("HTTPHeaders", {})
+    region = headers.get("x-amz-bucket-region")
+    return str(region) if region else None
+
+
+def get_s3_credential_keys(
+    credential: "UserExternalCredential",
+) -> tuple[str, str]:
+    """Get the access key ID and secret of an S3 credential."""
+    from app.security import decrypt_secret
+
+    keys = json.loads(decrypt_secret(credential.secret_payload))
+    return str(keys["access_key_id"]), str(keys["secret_access_key"])
+
+
 def get_internal_storage() -> ProjectStorage:
     """Get the hub's own object storage."""
     return ProjectStorage(
@@ -417,6 +529,29 @@ def get_resource_storage(
             data_prefix="",
             resource=resource,
             token=token,
+        )
+    if resource.kind == "s3-bucket":
+        from fastapi import HTTPException
+
+        credential = resource.credential
+        if credential is None:
+            raise HTTPException(401, "S3 connection removed")
+        metadata = credential.metadata_json or {}
+        access_key_id, secret_access_key = get_s3_credential_keys(credential)
+        try:
+            fs = get_s3_fs(
+                access_key_id,
+                secret_access_key,
+                endpoint_url=metadata.get("endpoint_url"),
+                region=resource.region or metadata.get("region"),
+            )
+        except S3EndpointError as e:
+            raise HTTPException(400, str(e))
+        return ProjectStorage(
+            backend="s3",
+            fs=fs,
+            data_prefix=f"s3://{resource.bucket}",
+            resource=resource,
         )
     if resource.kind != "hf-bucket":
         raise ValueError(f"Unsupported storage kind: {resource.kind}")
@@ -530,8 +665,12 @@ def set_project_bucket_visibility(
 
     from app.models import StorageResource
 
+    # Only HF buckets have a visibility to follow the project's
     resources = session.exec(
-        select(StorageResource).where(StorageResource.project_id == project.id)
+        select(StorageResource).where(
+            StorageResource.project_id == project.id,
+            StorageResource.kind == "hf-bucket",
+        )
     ).all()
     targets = []
     for resource in resources:
@@ -562,36 +701,49 @@ def delete_project_objects(project: "Project") -> None:
 
 
 # The kinds of storage resource reached with each provider's credential
-PROVIDER_STORAGE_KINDS = {"huggingface": ["hf-bucket"], "box": ["box-folder"]}
+PROVIDER_STORAGE_KINDS = {
+    "huggingface": ["hf-bucket"],
+    "box": ["box-folder"],
+    "s3": ["s3-bucket"],
+}
 # And the reverse, e.g., "huggingface" for "hf-bucket"
 STORAGE_KIND_PROVIDERS = {
     kind: provider
     for provider, kinds in PROVIDER_STORAGE_KINDS.items()
     for kind in kinds
 }
-STORAGE_PROVIDER_NAMES = {"huggingface": "Hugging Face", "box": "Box"}
+STORAGE_PROVIDER_NAMES = {
+    "huggingface": "Hugging Face",
+    "box": "Box",
+    "s3": "S3",
+}
 
 
 def get_credential_resources(
-    session: "Session", user_id: Any, provider: str
+    session: "Session", user_id: Any, provider: str, label: str = "default"
 ) -> list["StorageResource"]:
     """Get the storage reached with a user's credential for a provider,
     e.g., their HF account, whichever account owns it.
+
+    For S3, which a user can connect more than once, the credential is the
+    one with the label, i.e., the connection's name.
     """
     from sqlmodel import col, select
 
-    from app.models import StorageResource
+    from app.models import StorageResource, UserExternalCredential
 
-    return list(
-        session.exec(
-            select(StorageResource).where(
-                StorageResource.credential_user_id == user_id,
-                col(StorageResource.kind).in_(
-                    PROVIDER_STORAGE_KINDS.get(provider, [])
-                ),
-            )
-        ).all()
+    query = select(StorageResource).where(
+        StorageResource.credential_user_id == user_id,
+        col(StorageResource.kind).in_(
+            PROVIDER_STORAGE_KINDS.get(provider, [])
+        ),
     )
+    if provider == "s3":
+        query = query.join(
+            UserExternalCredential,
+            col(StorageResource.credential_id) == UserExternalCredential.id,
+        ).where(UserExternalCredential.label == label)
+    return list(session.exec(query).all())
 
 
 def get_resource_projects(
@@ -696,7 +848,7 @@ def copy_resource_to_internal(
 
 
 def transfer_storage_and_disconnect(
-    user_id: str, provider: str = "huggingface"
+    user_id: str, provider: str = "huggingface", label: str = "default"
 ) -> None:
     """Move the storage reached with a user's account on a service, e.g.,
     HF, into the hub's own storage, then disconnect the account. Run on the
@@ -724,7 +876,7 @@ def transfer_storage_and_disconnect(
             # Checked again after each pass, in case any was added meanwhile
             for _ in range(10):
                 resources = get_credential_resources(
-                    session, user.id, provider=provider
+                    session, user.id, provider=provider, label=label
                 )
                 if not resources:
                     break
@@ -758,7 +910,7 @@ def transfer_storage_and_disconnect(
             )
             raise
         credential = app.users.get_external_credential(
-            session=session, user=user, provider=provider
+            session=session, user=user, provider=provider, label=label
         )
         if credential is not None:
             if provider == "box":
@@ -785,33 +937,36 @@ _box_access: cachetools.TTLCache[tuple[str, str], dict[str, Any]] = (
 )
 
 
-# In each project's folder in Box, holding the project's ID, so a folder left
-# by a deleted or renamed project isn't given to another with its name
-BOX_PROJECT_FILE = ".calkit-project"
+# In each project's folder in connected storage, e.g., Box or S3, holding the
+# project's ID, so a folder left by a deleted or renamed project isn't given
+# to another with its name
+PROJECT_FILE = ".calkit-project"
 
 
-class BoxFolderTakenError(RuntimeError):
-    """A project's folder in Box holds another project's files."""
+class FolderTakenError(RuntimeError):
+    """A project's folder in storage holds another project's files."""
 
     def __init__(self, path: str):
         self.path = path
-        super().__init__(f"Box folder {path} holds another project's files")
+        super().__init__(f"Folder {path} holds another project's files")
 
 
-def claim_box_project_folder(
+def claim_project_folder(
     storage: ProjectStorage, project: "Project", adopt: bool = False
-) -> str:
-    """Get the ID of a project's folder in Box, making it if needed.
+) -> None:
+    """Mark a project's folder in connected storage as the project's,
+    making it if needed.
 
-    Raises ``BoxFolderTakenError`` if it holds files from another project,
+    Raises ``FolderTakenError`` if it holds files from another project,
     e.g., a deleted one with the same name, since Calkit never deletes them.
-    With ``adopt``, for a project already using the storage, which it was
-    checked for when it started, a folder with files but no record of its
-    project is taken as the project's.
+    With ``adopt``, e.g., for a project already using the storage, which it
+    was checked for when it started, a folder with files but no record of
+    its project is taken as the project's. Raises ``PermissionError`` if the
+    storage can't be written to.
     """
     fs = storage.fs
     path = storage.make_project_path(project.owner_account_name, project.name)
-    marker = f"{path}/{BOX_PROJECT_FILE}"
+    marker = f"{path}/{PROJECT_FILE}"
     project_id = str(project.id)
     names = None
     # Twice, since a folder moved to the trash since its ID was cached is
@@ -822,14 +977,13 @@ def claim_box_project_folder(
             break
         except FileNotFoundError:
             continue
-    if names is not None and BOX_PROJECT_FILE in names:
+    if names is not None and PROJECT_FILE in names:
         if fs.cat_file(marker).decode().strip() != project_id:
-            raise BoxFolderTakenError(path)
+            raise FolderTakenError(path)
     elif names and not adopt:
-        raise BoxFolderTakenError(path)
+        raise FolderTakenError(path)
     else:
         fs.pipe_file(marker, project_id.encode())
-    return str(fs.get_folder_id(path))
 
 
 def get_box_access(
@@ -845,12 +999,10 @@ def get_box_access(
     """
     import requests
 
+    path = storage.make_project_path(project.owner_account_name, project.name)
     if operation == "upload":
-        folder_id = claim_box_project_folder(storage, project, adopt=True)
-    else:
-        folder_id = storage.fs.get_folder_id(
-            storage.make_project_path(project.owner_account_name, project.name)
-        )
+        claim_project_folder(storage, project, adopt=True)
+    folder_id = storage.fs.get_folder_id(path)
     key = (folder_id, operation)
     access = _box_access.get(key)
     # Only while it has a while left, since how long Box's last is up to Box
@@ -990,7 +1142,7 @@ def put_project_objects(
             else:
                 with open(src, "rb") as f_in:
                     shutil.copyfileobj(f_in, f_out)
-        if settings.ENVIRONMENT != "local":
+        if target.backend == "gcs" and settings.ENVIRONMENT != "local":
             remove_gcs_content_type(fpath)
 
 

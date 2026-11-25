@@ -1,6 +1,8 @@
 """Routes for users."""
 
+import json
 import logging
+import re
 import secrets
 import urllib.parse
 import uuid
@@ -59,6 +61,7 @@ from app.models import (
     User,
     UserAdminPublic,
     UserCreate,
+    UserExternalCredential,
     UserOnboardingFlag,
     UserPublic,
     UserRegister,
@@ -1531,12 +1534,123 @@ def get_user_overleaf_token(
     return ExternalTokenResponse(access_token=token)
 
 
+class S3ConnectionPublic(BaseModel):
+    name: str
+    # Unset for AWS itself
+    endpoint_url: str | None
+    region: str | None
+    access_key_id: str
+    updated: datetime
+
+
+class S3ConnectionPut(BaseModel):
+    endpoint_url: str | None = None
+    region: str | None = Field(default=None, max_length=64)
+    access_key_id: str = Field(min_length=1, max_length=255)
+    secret_access_key: str = Field(min_length=1, max_length=1024)
+
+
+def to_s3_connection_public(
+    credential: UserExternalCredential,
+) -> S3ConnectionPublic:
+    metadata = credential.metadata_json or {}
+    return S3ConnectionPublic(
+        name=credential.label,
+        endpoint_url=metadata.get("endpoint_url"),
+        region=metadata.get("region"),
+        access_key_id=credential.provider_account_id or "",
+        updated=credential.updated,
+    )
+
+
+@router.get("/user/s3-connections")
+def get_user_s3_connections(
+    session: SessionDep, current_user: CurrentUser
+) -> list[S3ConnectionPublic]:
+    """Get the current user's S3 connections, without their secrets."""
+    credentials = session.exec(
+        select(UserExternalCredential)
+        .where(
+            UserExternalCredential.user_id == current_user.id,
+            UserExternalCredential.provider == "s3",
+        )
+        .order_by(col(UserExternalCredential.label))
+    ).all()
+    return [to_s3_connection_public(c) for c in credentials]
+
+
+S3_CONNECTION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
+
+
+@router.put("/user/s3-connections/{name}")
+def put_user_s3_connection(
+    name: str,
+    req: S3ConnectionPut,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> S3ConnectionPublic:
+    """Save keys for S3 or S3-compatible storage, e.g., OSN, as a named
+    connection, or replace a connection's keys.
+
+    Storage using a connection is found at its endpoint, so that can't
+    change while there is any.
+    """
+    if not S3_CONNECTION_NAME_RE.match(name):
+        raise HTTPException(
+            422, "Name must be lowercase letters, numbers, and dashes"
+        )
+    endpoint_url = (req.endpoint_url or "").strip().rstrip("/") or None
+    region = (req.region or "").strip() or None
+    if endpoint_url is not None:
+        try:
+            app.storage.check_s3_endpoint_url(endpoint_url)
+        except app.storage.S3EndpointError as e:
+            raise HTTPException(422, str(e))
+    existing = users.get_external_credential(
+        session=session, user=current_user, provider="s3", label=name
+    )
+    if (
+        existing is not None
+        and (existing.metadata_json or {}).get("endpoint_url") != endpoint_url
+        and app.storage.get_credential_resources(
+            session, current_user.id, provider="s3", label=name
+        )
+    ):
+        raise HTTPException(409, "Storage uses this connection's endpoint")
+    credential = users.save_external_credential(
+        session=session,
+        user=current_user,
+        provider="s3",
+        secret_payload=json.dumps(
+            {
+                "access_key_id": req.access_key_id.strip(),
+                "secret_access_key": req.secret_access_key.strip(),
+            }
+        ),
+        credential_type="access-key",
+        label=name,
+        provider_account_id=req.access_key_id.strip(),
+        metadata_json={"endpoint_url": endpoint_url, "region": region},
+    )
+    mixpanel.user_connected_s3(
+        current_user,
+        endpoint_host=(
+            str(urllib.parse.urlparse(endpoint_url).hostname)
+            if endpoint_url
+            else "aws"
+        ),
+        replaced=existing is not None,
+    )
+    return to_s3_connection_public(credential)
+
+
 @router.delete("/user/external-credentials/{provider}")
 def delete_user_external_credential(
     session: SessionDep,
     current_user: CurrentUser,
     provider: str,
     storage_action: Literal["transfer", "orphan"] | None = None,
+    label: str = "default",
 ) -> Message:
     """Disconnect an external account by deleting its credential.
 
@@ -1546,13 +1660,15 @@ def delete_user_external_credential(
     happens on the worker, with the account disconnected once it's done,
     or ``orphan`` them, i.e., leave them where they are, out of reach of
     their projects. Nothing is deleted from the service either way.
+
+    For S3, ``label`` is the name of the connection.
     """
     if provider == "github":
         raise HTTPException(
             403, "Cannot disconnect GitHub as it is your login method"
         )
     resources = app.storage.get_credential_resources(
-        session, current_user.id, provider=provider
+        session, current_user.id, provider=provider, label=label
     )
     service_name = app.storage.STORAGE_PROVIDER_NAMES.get(provider)
     if (
@@ -1607,7 +1723,7 @@ def delete_user_external_credential(
         # copying its objects, with reads falling back to the service until
         # then
         if not app.tasks.enqueue_storage_transfer(
-            str(current_user.id), provider
+            str(current_user.id), provider, label=label
         ):
             raise HTTPException(503, "Transfers unavailable")
         return Message(
@@ -1620,7 +1736,7 @@ def delete_user_external_credential(
         session=session,
         user=current_user,
         provider=provider,
-        label="default",
+        label=label,
     )
     if credential:
         if provider == "box":
@@ -1638,6 +1754,8 @@ def delete_user_external_credential(
         if overleaf_session:
             session.delete(overleaf_session)
     session.commit()
+    if provider == "s3":
+        return Message(message=f"S3 connection {label} removed")
     return Message(message=f"{provider.capitalize()} account disconnected")
 
 

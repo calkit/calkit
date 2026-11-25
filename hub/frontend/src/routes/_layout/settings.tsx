@@ -53,6 +53,8 @@ const tabSearchSchema = z.object({
   verify_2fa: z.boolean().optional().catch(undefined),
   // A connected account being disconnected, e.g., "huggingface"
   disconnect: z.string().optional().catch(undefined),
+  // S3 keys being added, i.e., "new", or replaced, by connection name
+  s3_connection: z.string().optional().catch(undefined),
 })
 
 export const Route = createFileRoute("/_layout/settings")({

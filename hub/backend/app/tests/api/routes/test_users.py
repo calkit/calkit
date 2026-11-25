@@ -2403,7 +2403,7 @@ def test_disconnect_huggingface_with_storage(
                 url, headers=headers, params={"storage_action": "transfer"}
             )
         assert response.status_code == 200
-        q.assert_called_once_with(str(user.id), "huggingface")
+        q.assert_called_once_with(str(user.id), "huggingface", label="default")
     assert is_connected()
     assert db.get(StorageResource, resource_id) is not None
     # One at a time

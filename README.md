@@ -247,7 +247,9 @@ is installed and properly configured.
 On macOS, the install script starts installing Git with Apple's
 Command Line Tools if it's missing, in a dialog where you click **Install**.
 With projects on the hub, Git pushes to and pulls from GitHub with your
-Calkit account, so you don't need to sign in to GitHub on this machine.
+Calkit account, so you don't need to sign in to GitHub on this machine,
+unless you've set up Git's GitHub credentials yourself, which it keeps
+using.
 
 You may also want to install [Docker](https://docker.com),
 for environments that run in containers;

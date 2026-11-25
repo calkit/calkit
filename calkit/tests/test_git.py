@@ -798,23 +798,30 @@ def test_configure_github_credentials(tmp_dir, monkeypatch, httpserver):
         "CALKIT_HUB_API_BASE_URL", httpserver.url_for("").rstrip("/")
     )
     monkeypatch.setenv("CALKIT_TEST_TOKEN", "calkit-token")
-    # A helper of the user's, which would otherwise answer first
+    # A helper the system came with, e.g., macOS's osxkeychain, which would
+    # otherwise answer first, and no Git config of the user's own
+    helper = '\thelper = "!f() { echo username=me; echo password=%s; }; f"\n'
+    # macOS's Git also reads a config of Apple's that GIT_CONFIG_SYSTEM
+    # doesn't replace, with osxkeychain in it, and Git for Windows one with
+    # its Credential Manager, neither of which may be asked here
+    fake_system = sys.platform not in ("darwin", "win32")
+    if not fake_system:
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    else:
+        system_config = os.path.join(tmp_dir, "system.gitconfig")
+        with open(system_config, "w") as f:
+            f.write("[credential]\n" + helper % "system")
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", system_config)
     global_config = os.path.join(tmp_dir, "global.gitconfig")
-    with open(global_config, "w") as f:
-        f.write(
-            "[credential]\n"
-            '\thelper = "!f() { echo username=me; echo password=users; }; f"\n'
-        )
+    open(global_config, "w").close()
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", global_config)
-    # Nor the system's, e.g., macOS's osxkeychain
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
     for name in ("GIT_ASKPASS", "SSH_ASKPASS"):
         monkeypatch.delenv(name, raising=False)
     repo = git.Repo.init("repo")
     # Running it again doesn't add more helpers
-    calkit.git.configure_github_credentials(repo)
-    calkit.git.configure_github_credentials(repo)
+    assert calkit.git.configure_github_credentials(repo)
+    assert calkit.git.configure_github_credentials(repo)
     helpers = repo.git.config(
         "--local", "--get-all", calkit.git.GITHUB_CREDENTIAL_KEY
     ).split("\n")
@@ -822,18 +829,28 @@ def test_configure_github_credentials(tmp_dir, monkeypatch, httpserver):
     assert helpers[1].endswith(" hub git-credential")
     assert len(helpers) == 2
 
-    def fill(host: str) -> str:
+    def fill(host: str, cwd: str = "repo") -> str:
         return subprocess.run(
             ["git", "credential", "fill"],
-            cwd="repo",
+            cwd=cwd,
             input=f"protocol=https\nhost={host}\n\n",
             capture_output=True,
             text=True,
         ).stdout
 
-    # GitHub's come from the hub, and other hosts' from the user's helper
+    # GitHub's come from the hub, and other hosts' from the system's helper
     assert "password=ghu_from_hub" in fill("github.com")
-    assert "password=users" in fill("gitlab.com")
+    if fake_system:
+        assert "password=system" in fill("gitlab.com")
+    # Credentials the user set up themselves are kept, e.g., with
+    # 'gh auth setup-git'
+    with open(global_config, "w") as f:
+        f.write('[credential "https://github.com"]\n' + helper % "users")
+    own = git.Repo.init("own")
+    assert calkit.git.get_github_credential_args() == []
+    assert not calkit.git.configure_github_credentials(own)
+    assert "password=users" in fill("github.com", cwd="own")
+    open(global_config, "w").close()
     # Without a token from the hub, Git is told why and gets nothing
     httpserver.clear()
     httpserver.no_handler_status_code = 401

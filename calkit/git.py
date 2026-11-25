@@ -989,28 +989,62 @@ def get_github_credential_config() -> list[tuple[str, str]]:
     return [(GITHUB_CREDENTIAL_KEY, ""), (GITHUB_CREDENTIAL_KEY, helper)]
 
 
+def has_own_github_helper() -> bool:
+    """Whether the user set up Git credentials for GitHub themselves, in
+    their own Git config, e.g., with ``gh auth setup-git``, rather than with
+    a helper their system came with, e.g., macOS's osxkeychain.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "config",
+                "--global",
+                "--get-urlmatch",
+                "credential.helper",
+                "https://github.com",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(out.strip())
+
+
 def get_github_credential_args() -> list[str]:
     """``git -c`` options for ``get_github_credential_config``, e.g., for a
-    clone, which has no repo config yet.
+    clone, which has no repo config yet, or none if the user has their own,
+    as for ``configure_github_credentials``.
     """
+    if has_own_github_helper():
+        return []
     args = []
     for key, value in get_github_credential_config():
         args += ["-c", f"{key}={value}"]
     return args
 
 
-def configure_github_credentials(repo: git.Repo) -> None:
+def configure_github_credentials(repo: git.Repo) -> bool:
     """Have Git get GitHub credentials for a repo from the hub, so pushing
     and pulling over HTTPS work without signing in to GitHub on this
     machine, e.g., from the browser extension, which has no terminal to ask
-    in.
+    in, unless the user set up their own, which are kept.
+
+    Returns whether it did.
     """
+    if has_own_github_helper():
+        return False
     with repo.config_writer("repository") as writer:
         # Dropping any there first, so running it again doesn't add more
         if writer.has_option('credential "https://github.com"', "helper"):
             writer.remove_option('credential "https://github.com"', "helper")
     for key, value in get_github_credential_config():
         repo.git.config("--local", "--add", key, value)
+    return True
 
 
 def configure_identity(repo: git.Repo) -> dict[str, str]:

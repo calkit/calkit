@@ -233,8 +233,8 @@ stages:
       size: 14225
     - path: uv.lock
       hash: md5
-      md5: e7545441a041b113874e20e4b7798ce4
-      size: 1711897
+      md5: bf2332e0ece5a7771d8abf2b3e92eecf
+      size: 1711901
     outs:
     - path: results/research-flow.json
       hash: md5
@@ -258,8 +258,8 @@ stages:
       size: 2015
     - path: uv.lock
       hash: md5
-      md5: e7545441a041b113874e20e4b7798ce4
-      size: 1711897
+      md5: bf2332e0ece5a7771d8abf2b3e92eecf
+      size: 1711901
     outs:
     - path: results/2027-budget.json
       hash: md5
@@ -282,8 +282,8 @@ stages:
       size: 12155
     - path: uv.lock
       hash: md5
-      md5: e7545441a041b113874e20e4b7798ce4
-      size: 1711897
+      md5: bf2332e0ece5a7771d8abf2b3e92eecf
+      size: 1711901
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
@@ -318,8 +318,8 @@ stages:
       size: 1616
     - path: uv.lock
       hash: md5
-      md5: e7545441a041b113874e20e4b7798ce4
-      size: 1711897
+      md5: bf2332e0ece5a7771d8abf2b3e92eecf
+      size: 1711901
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
@@ -355,8 +355,8 @@ stages:
       size: 2652
     - path: uv.lock
       hash: md5
-      md5: e7545441a041b113874e20e4b7798ce4
-      size: 1711897
+      md5: bf2332e0ece5a7771d8abf2b3e92eecf
+      size: 1711901
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
@@ -408,8 +408,8 @@ stages:
       size: 4976
     - path: uv.lock
       hash: md5
-      md5: e7545441a041b113874e20e4b7798ce4
-      size: 1711897
+      md5: bf2332e0ece5a7771d8abf2b3e92eecf
+      size: 1711901
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5
@@ -445,8 +445,8 @@ stages:
       size: 139495
     - path: uv.lock
       hash: md5
-      md5: e7545441a041b113874e20e4b7798ce4
-      size: 1711897
+      md5: bf2332e0ece5a7771d8abf2b3e92eecf
+      size: 1711901
     outs:
     - path: images/latex/sizes.json
       hash: md5

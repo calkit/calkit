@@ -915,6 +915,15 @@ def check_requirements(
                 if req.get("setup_command"):
                     msg += f" Get a value with '{req['setup_command']}'."
                 raise ValueError(msg)
+        elif kind == "env-var-path":
+            cmd = f'test -e "${{{name}:-}}"'
+            if _remote_rc(workspace, cmd, verbose=verbose) != 0:
+                raise ValueError(
+                    f"env-var-path '{name}' isn't a path that exists on "
+                    f"{described_as}. Set it in that machine's shell "
+                    "profile, since a stage running there reads its "
+                    "environment, not this one's."
+                )
         elif kind == "app":
             # Looked for as the binary it provides, e.g., code for vscode
             binary = NAME_ALIASES.get(name, name)

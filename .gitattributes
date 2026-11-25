@@ -1,3 +1,12 @@
+# >>> calkit line endings (managed by calkit) >>>
+# Check out text files with LF everywhere, including Windows, so the
+# files the pipeline hashes are the same on every machine
+* text=auto eol=lf
+# cmd.exe can misread batch files with LF
+*.bat text=auto eol=crlf
+*.cmd text=auto eol=crlf
+# <<< calkit line endings <<<
+
 test/dvc-md5-dir/** text eol=lf
 
 # >>> calkit generated files (managed by calkit) >>>

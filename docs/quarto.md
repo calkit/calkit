@@ -78,10 +78,26 @@ so a change to a value renders the document again.
 
 <!-- TODO: needs human review -->
 
+<!-- TODO: needs human review -->
+
+A value quoted from a reference is shown with
+`{{< ckrefval citation-key name format >}}`, from what `calkit.yaml`
+records for the reference.
+See [quoting values from references](references.md#quoting-values-from-references).
+
 To show a value saved from a notebook cell, use the notebook's path
 instead of a results file, e.g., `{{< ckvalue fit.ipynb k_25 .3f >}}`.
 See [saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells)
 for more info.
+
+<!-- TODO: needs human review -->
+
+`calkit check repro -c numbers` lists numbers typed into a Quarto document
+that has a stage, including a notebook's Markdown cells,
+that look like results but have nothing recorded behind them,
+so they can be read from the pipeline instead.
+Numbers in shortcodes, inline expressions, and code are left out,
+as is a line with a `<!-- calkit: ignore -->` comment.
 
 <!-- TODO: needs human review -->
 

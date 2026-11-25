@@ -1667,6 +1667,11 @@ class ProvenanceGap:
         return f"{what} ({' <- '.join(chain)})"
 
 
+#: Where Calkit writes the values documents quote from references, as
+#: ``calkit.references.values.VALUES_DIR`` names it
+REF_VALUES_DIR = ".calkit/reference-values"
+
+
 def find_provenance_gaps(
     paths: list[str],
     ck_info: dict,
@@ -1709,6 +1714,10 @@ def find_provenance_gaps(
         return None
 
     def walk(path: str, trail: list[ProvenanceStep]) -> None:
+        # Values quoted from references, which Calkit writes from
+        # calkit.yaml, where each names the reference it's from
+        if path.startswith(REF_VALUES_DIR + "/"):
+            return
         # Every entry covering the path counts, e.g., a file's and its
         # folder's, whatever order calkit.yaml lists them in
         covering = [e for e in entries if under(path, norm(e["path"]))]

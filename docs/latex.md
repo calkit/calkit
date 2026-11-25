@@ -207,6 +207,13 @@ These commands are optional.
 `\includegraphics` and `\input` work as usual for files in the document's
 folder.
 
+<!-- TODO: needs human review -->
+
+A value quoted from a reference rather than computed by the pipeline is
+written `\ckrefval[format]{citation key}{name}`, from what `calkit.yaml`
+records for the reference.
+See [quoting values from references](references.md#quoting-values-from-references).
+
 ### Formatting values
 
 The document formats numbers when it compiles, with the

@@ -329,8 +329,21 @@ def check_repro(
     as_json: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="Don't download open-access copies of references to check "
+            "values quoted from them, or the Calkit Cloud's Zotero PDFs.",
+        ),
+    ] = False,
 ) -> None:
     """Check the reproducibility of a project.
+
+    Values quoted from references with \\ckrefval are checked against the
+    references' PDFs, from a file the collection names, Zotero, or an
+    open-access copy downloaded into .calkit/local, which isn't stored in
+    the project. So are numbers typed into a sentence citing a reference.
 
     Reports one line per check. Where a line counts something, ask for
     that category to see what it counted, e.g., 'calkit check repro -c
@@ -348,7 +361,9 @@ def check_repro(
             raise_error(
                 f"Invalid category: {category}. Valid categories are: {valid}"
             )
-    res = check_reproducibility(wdir=wdir, log_func=typer.echo)
+    res = check_reproducibility(
+        wdir=wdir, log_func=typer.echo, offline=offline
+    )
     if as_json:
         calkit.echo(res.model_dump_json(indent=2))
         if res.retyped_values:
@@ -379,6 +394,10 @@ def check_repro(
             _echo_unattributed(items)
         elif category == "line-endings":
             _echo_line_endings(items)
+        elif category == "refvals":
+            _echo_refval_problems(items)
+        elif category == "unchecked-refvals":
+            _echo_unchecked_refvals(items)
         else:
             calkit.echo(f"{category} ({len(items)}):")
             for item in items:
@@ -390,6 +409,7 @@ def check_repro(
 def _echo_retyped(findings: list[dict]) -> None:
     """Values the pipeline produces that a document typed out instead."""
     from rich.console import Console
+    from rich.markup import escape
     from rich.table import Table
 
     table = Table(
@@ -408,7 +428,7 @@ def _echo_retyped(findings: list[dict]) -> None:
             f"{finding['file']}:{finding['line']}:{finding['column']}",
             finding["value"],
             finding["source"],
-            finding["context"],
+            escape(finding["context"]),
         )
     Console().print(table)
     calkit.echo(
@@ -449,6 +469,7 @@ def _echo_line_endings(paths: list[str]) -> None:
 def _echo_unattributed(findings: list[dict]) -> None:
     """Result-like numbers with nothing recorded behind them."""
     from rich.console import Console
+    from rich.markup import escape
     from rich.table import Table
 
     table = Table(
@@ -463,11 +484,24 @@ def _echo_unattributed(findings: list[dict]) -> None:
     table.add_column("Note", style="dim", no_wrap=True)
     table.add_column("Context")
     for finding in findings:
+        where = f"{finding['file']}:{finding['line']}:{finding['column']}"
+        if finding.get("cell") is not None:
+            # Lines count from the top of a notebook's cell
+            where = (
+                f"{finding['file']} cell {finding['cell'] + 1}, "
+                f"{finding['line']}:{finding['column']}"
+            )
+        note = "quoted?" if finding.get("cited") else ""
+        if finding.get("found"):
+            match = finding["found"][0]
+            note = f"p. {match['page']} of {match['key']}"
+        elif finding.get("searched"):
+            note = f"not in {', '.join(finding['searched'])}"
         table.add_row(
-            f"{finding['file']}:{finding['line']}:{finding['column']}",
+            where,
             finding["value"],
-            "quoted?" if finding.get("cited") else "",
-            finding["context"],
+            note,
+            escape(finding["context"]),
         )
     Console().print(table)
     calkit.echo(
@@ -484,6 +518,90 @@ def _echo_unattributed(findings: list[dict]) -> None:
         "which are masked; and anything in a file the document does not "
         "read. It is tuned to under-report: a false alarm on a number "
         "that belongs in the text costs more than a missed one."
+    )
+    found = [f for f in findings if f.get("found")]
+    if any(f.get("cited") for f in findings):
+        calkit.echo(
+            "\nA number in a sentence citing a reference is looked for in "
+            "the reference's PDF. Where it's found, the page is shown; "
+            "record it, and quote it with ckrefval, so it's checked against "
+            "the reference from then on. 'not in' names a cited reference "
+            "whose PDF doesn't have it, which may be a misquote."
+        )
+    import shlex
+
+    for finding in found:
+        match = finding["found"][0]
+        # Quoted, since a context can hold anything, e.g., $ or a backtick
+        command = shlex.join(
+            [
+                "calkit",
+                "new",
+                "ref-value",
+                match["key"],
+                "NAME",
+                "--value",
+                finding["value"].strip(),
+                "--page",
+                str(match["page"]),
+                "--context",
+                match["context"],
+            ]
+        )
+        calkit.echo(
+            f"\n{finding['file']}:{finding['line']}, {finding['value']}:\n"
+            f"  {command}"
+        )
+
+
+def _echo_refval_problems(problems: list[dict]) -> None:
+    """What's wrong with values quoted from references."""
+    from rich.console import Console
+    from rich.markup import escape
+    from rich.table import Table
+
+    table = Table(
+        title=f"Problems with values quoted from references ({len(problems)})",
+        title_justify="left",
+        show_header=True,
+        header_style="bold",
+    )
+    table.add_column("Where", style="cyan", no_wrap=True)
+    table.add_column("Value", style="red", no_wrap=True)
+    table.add_column("Problem")
+    for problem in problems:
+        where = problem["file"]
+        if problem.get("line"):
+            where += f":{problem['line']}"
+        value = problem["key"]
+        if problem.get("name"):
+            value += f" {problem['name']}"
+        table.add_row(escape(where), escape(value), escape(problem["problem"]))
+    Console().print(table)
+    calkit.echo(
+        "\nA value quoted from a reference is recorded in calkit.yaml, under "
+        "the reference collection it's from, with 'calkit new ref-value', "
+        "and checked against the reference's PDF: its context has to be on "
+        "the page given, with the value in it. A document quoting it with "
+        "ckrefval should also cite the reference."
+    )
+
+
+def _echo_unchecked_refvals(unchecked: list[dict]) -> None:
+    """Values quoted from references with no PDF to check them against."""
+    calkit.echo(
+        "Values quoted from references with no PDF to check them against "
+        f"({len(unchecked)}):"
+    )
+    for item in unchecked:
+        tried = "; tried " + ", ".join(item["tried"]) if item["tried"] else ""
+        calkit.echo(f"  {item['key']} {item['name']}{tried}")
+    calkit.echo(
+        "\nA reference's PDF is found from the collection's 'files' in "
+        "calkit.yaml, Zotero desktop or the Calkit Cloud for a collection "
+        "linked to Zotero, or an open-access copy, which is downloaded into "
+        ".calkit/local without --offline. None of these store it in the "
+        "project."
     )
 
 
@@ -2124,12 +2242,17 @@ def check_env_vars(
         with calkit.in_project(wdir):
             for raw in calkit.get_requirements(info):
                 req = _normalize_requirement(raw)
-                if req["kind"] != "env-var":
+                if req["kind"] not in ("env-var", "env-var-path"):
                     continue
                 name = req["name"]
                 if verbose:
                     typer.echo(f"Checking for environmental variable '{name}'")
-                if name not in os.environ:
+                is_set = (
+                    calkit.requirements.resolve_env_var_path(name) is not None
+                    if req["kind"] == "env-var-path"
+                    else name in os.environ
+                )
+                if not is_set:
                     value = calkit.requirements.prompt_for_env_var_req(req)
                     if value is None:
                         raise_error(

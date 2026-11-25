@@ -586,15 +586,40 @@ AUTO_IGNORE_SUFFIXES = [
     ".pyc",
     ".synctex.gz",
     ".auxlock",
-    ".ipynb_checkpoints",
 ]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
 AUTO_IGNORE_PREFIXES = [
     ".venv",
-    "__pycache__",
-    ".ipynb_checkpoints",
     ".calkit/overleaf/",
 ]
+# Directories ignored wherever they are in the project, e.g., the
+# checkpoints Jupyter writes next to each notebook
+AUTO_IGNORE_DIR_NAMES = [".ipynb_checkpoints", "__pycache__"]
+
+
+def get_auto_ignore_path(path: str) -> str | None:
+    """The path to ignore so ``path`` isn't committed, if it's one Calkit
+    ignores automatically.
+
+    A file in a directory that's always ignored gives that directory, so it
+    takes one line of ``.gitignore`` however many files it holds.
+    """
+    from pathlib import Path
+
+    path = Path(path).as_posix()
+    parts = path.split("/")
+    for n, part in enumerate(parts[:-1]):
+        if part in AUTO_IGNORE_DIR_NAMES:
+            return "/".join(parts[: n + 1]) + "/"
+    if (
+        any(path.endswith(s) for s in AUTO_IGNORE_SUFFIXES)
+        or any(path.startswith(p) for p in AUTO_IGNORE_PREFIXES)
+        or path in {Path(p).as_posix() for p in AUTO_IGNORE_PATHS}
+    ):
+        return path
+    return None
+
+
 # Constants for version control auto-add to DVC
 DVC_EXTENSIONS = [
     ".gif",
@@ -1276,6 +1301,41 @@ def update_readme_content(
     return heading + intro + ("\n" + body if body else "")
 
 
+def is_terminal(stream: Any) -> bool:
+    """True when a stream is a terminal.
+
+    On Windows, ``isatty`` is also true of the NUL device, e.g., for
+    ``2>NUL`` or ``subprocess.DEVNULL``, so only a stream with a console
+    mode counts there. Python writes to NUL with the ANSI code page, so
+    taking it for a terminal, e.g., to draw a spinner, fails on the first
+    character it can't encode. mintty isn't a console either; see
+    :func:`is_mintty`.
+    """
+    try:
+        if not stream.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetConsoleMode.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    mode = wintypes.DWORD()
+    return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
 def is_tty() -> bool:
     """True only when both stdin and stdout are TTYs.
 
@@ -1283,36 +1343,9 @@ def is_tty() -> bool:
     we need to read the user's answer. CI environments fail at least one
     and fall through to the abort-with-fix-command path.
 
-    On Windows, ``isatty`` is also true of the NUL device, which is what a
-    child given ``subprocess.DEVNULL`` reads, so only a stream with a console
-    mode counts there.
+    Neither counts on Windows when it's the NUL device; see
+    :func:`is_terminal`.
     """
-
-    def is_terminal(stream: Any) -> bool:
-        try:
-            if not stream.isatty():
-                return False
-        except (AttributeError, ValueError):
-            return False
-        if sys.platform != "win32":
-            return True
-        import ctypes
-        import msvcrt
-        from ctypes import wintypes
-
-        try:
-            handle = msvcrt.get_osfhandle(stream.fileno())
-        except (AttributeError, OSError, ValueError):
-            return False
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.GetConsoleMode.argtypes = [
-            wintypes.HANDLE,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        kernel32.GetConsoleMode.restype = wintypes.BOOL
-        mode = wintypes.DWORD()
-        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
-
     return is_terminal(sys.stdin) and is_terminal(sys.stdout)
 
 
@@ -1544,6 +1577,16 @@ def _normalize_requirement(req) -> dict:
             "'kind', e.g., '- kind: env-var' with 'name: TOKEN'"
         )
 
+    def check_search_paths(out: dict) -> None:
+        if (
+            out.get("search_paths") is not None
+            and out["kind"] != "env-var-path"
+        ):
+            raise ValueError(
+                f"Malformed requirement {req!r}; only an 'env-var-path' can "
+                "have 'search_paths', since it's what names a path to look for"
+            )
+
     if isinstance(req, str):
         # Split on the first version operator so a string like
         # ``calkit>=0.38`` produces both a clean name and a version spec
@@ -1592,6 +1635,7 @@ def _normalize_requirement(req) -> dict:
                 f"Malformed requirement {req!r}; its 'name' must be text, "
                 'so quote it if it\'s in braces, e.g., name: "{var}"'
             )
+        check_search_paths(out)
         return out
     if len(keys) != 1:
         raise malformed()
@@ -1603,6 +1647,7 @@ def _normalize_requirement(req) -> dict:
     out = dict(attrs)
     out["name"] = name
     out.setdefault("kind", "app")
+    check_search_paths(out)
     return out
 
 
@@ -1895,10 +1940,11 @@ def get_requirement_key(req: Any, wdir: str | None = None) -> str:
     """Identify a requirement however it's written, e.g., to cache its check.
 
     One checked by running something in the project, e.g., a setup step's
-    ``check_command``, is identified by that project's directory too.
+    ``check_command``, or by reading its ``.env``, is identified by that
+    project's directory too.
     """
     normalized = _normalize_requirement(req)
-    if normalized["kind"] in ("setup", "aws-credentials"):
+    if normalized["kind"] in ("setup", "aws-credentials", "env-var-path"):
         normalized = normalized | {"_wdir": os.path.abspath(wdir or ".")}
     return json.dumps(normalized, sort_keys=True, default=str)
 
@@ -1967,6 +2013,7 @@ def check_requirements(
     buckets: dict[str, list[dict]] = {
         "_property": [],
         "env-var": [],
+        "env-var-path": [],
         "app": [],
         "setup": [],
         "aws-credentials": [],
@@ -1990,6 +2037,7 @@ def check_requirements(
         for bucket in (
             "_property",
             "env-var",
+            "env-var-path",
             "app",
             "_other",
             "setup",
@@ -2054,6 +2102,10 @@ def check_requirements(
                 f"with 'calkit set-env-var {req_name} <value>'"
             )
         raise ValueError(msg)
+    for req in buckets["env-var-path"]:
+        from calkit.requirements import check_env_var_path_req
+
+        check_env_var_path_req(req, interactive=interactive)
     for req in buckets["app"]:
         declared_name = req["name"]
         # Checked and installed as the binary it provides, e.g., code for
@@ -2165,7 +2217,12 @@ _normalize_dep = _normalize_requirement
 
 
 def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
-    """Get a list of all environment variable names used in the project."""
+    """Get the names of the project's ``env-var`` requirements.
+
+    ``env-var-path`` requirements are left out, since what these are for,
+    passing them into Docker containers, would hand a container a path on
+    the host.
+    """
     if ck_info is None:
         ck_info = load_calkit_info()
     env_vars = []

@@ -2055,6 +2055,27 @@ def test_save(tmp_dir):
         os.rename(".git-moved", ".git")
 
 
+def test_save_ignores_nested_notebook_checkpoints(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("notebooks/.ipynb_checkpoints")
+    with open("notebooks/fade.ipynb", "w") as f:
+        f.write("{}")
+    for name in ["fade-checkpoint.ipynb", "other-checkpoint.ipynb"]:
+        with open(
+            os.path.join("notebooks/.ipynb_checkpoints", name), "w"
+        ) as f:
+            f.write("{}")
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Add notebook", "--no-push"]
+    )
+    repo = git.Repo()
+    assert repo.git.ls_files("notebooks/fade.ipynb")
+    assert not repo.git.ls_files("notebooks/.ipynb_checkpoints")
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert lines.count("notebooks/.ipynb_checkpoints/") == 1
+
+
 def test_save_data_not_in_cache(tmp_dir):
     # We should skip DVC-tracked paths that are missing from both the
     # workspace and the cache, e.g., because they were never pulled
@@ -4577,6 +4598,33 @@ def test_push_carries_annotated_tags(tmp_dir):
     assert "scratch" not in tags
 
 
+def test_push_and_pull_data_in_folder_with_ignored_contents(
+    tmp_dir: Path, tmp_path: Path
+) -> None:
+    subprocess.check_call(["calkit", "init"])
+    dvc_remote = tmp_path / "dvc_remote"
+    dvc_remote.mkdir()
+    subprocess.check_call(
+        ["dvc", "remote", "add", "-d", "origin", str(dvc_remote)]
+    )
+    # Everything in data/ is ignored but the pointers, so the folder itself
+    # isn't, and DVC has to look inside it to find them
+    with open(".gitignore", "a") as f:
+        f.write("data/*\n!data/*.dvc\n")
+    os.makedirs("data")
+    with open("data/raw.bin", "w") as f:
+        f.write("raw data")
+    subprocess.check_call(["dvc", "add", "data/raw.bin"])
+    subprocess.check_call(["calkit", "push", "--no-git", "--no-check-auth"])
+    assert any(p.is_file() for p in dvc_remote.rglob("*"))
+    # It comes back on a pull
+    os.remove("data/raw.bin")
+    calkit.overleaf.rmtree(".dvc/cache")
+    subprocess.check_call(["calkit", "pull", "--no-git", "--no-check-auth"])
+    with open("data/raw.bin") as f:
+        assert f.read() == "raw data"
+
+
 @skipif_windows_mock_scheduler
 def test_run_switch_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])
@@ -6132,3 +6180,30 @@ def test_run_skips_for_failed_env(tmp_dir):
     assert not os.path.exists("out.txt")
     assert not os.path.exists("after.txt")
     assert os.path.exists("other.txt")
+
+
+def test_run_with_stderr_discarded(tmp_dir):
+    # On Windows, NUL looks like a terminal to isatty, but Python writes to
+    # it with the ANSI code page, so a spinner drawn there failed the run
+    subprocess.check_call(["calkit", "init"], stdout=subprocess.DEVNULL)
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo made > out.txt",
+                "outputs": ["out.txt"],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    for cmd in [["calkit", "run"], ["calkit", "status"]]:
+        p = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+        )
+        if p.returncode != 0:
+            # Run again with stderr kept, to show why
+            shown = subprocess.run(cmd, capture_output=True, text=True)
+            raise AssertionError(p.stdout + shown.stdout + shown.stderr)
+    assert os.path.isfile("out.txt")

@@ -34,6 +34,8 @@ _FORMAT_FIELD_RE = re.compile(r"\{([^{}]*)\}")
 # A shortcode written {{</* ckvalue */>}} is Quarto's escaped form, shown
 # literally, so it doesn't match
 _SHORTCODE_RE = re.compile(r"\{\{<\s*ckvalue\s+(?P<args>.*?)\s*>\}\}")
+# {{< ckrefval key name format >}}, a value quoted from a reference
+_REFVAL_SHORTCODE_RE = re.compile(r"\{\{<\s*ckrefval\s+(?P<args>.*?)\s*>\}\}")
 # Quarto's own shortcode for a cell's output from another document, e.g.,
 # {{< embed analysis.ipynb#fig-decay >}}
 _EMBED_RE = re.compile(r"\{\{<\s*embed\s+[\"']?(?P<path>[^\s#\"'>]+)")
@@ -623,6 +625,49 @@ return {
     end
     return pandoc.Str(text)
   end,
+  -- A value quoted from a reference: its citation key, its name, and
+  -- optionally a format, from the file Calkit writes them all to
+  ["ckrefval"] = function(args, kwargs)
+    if project_dir == nil then
+      project_dir = find_project_dir()
+    end
+    local slots = {"", "", ""}
+    for i = 1, math.min(#args, 3) do
+      slots[i] = pandoc.utils.stringify(args[i])
+    end
+    -- The name and format can be given by name, as for ckvalue
+    for name, slot in pairs({key = 2, format = 3}) do
+      local value = pandoc.utils.stringify(kwargs[name] or "")
+      if value ~= "" then
+        slots[slot] = value
+      end
+    end
+    local key, name, fmt = slots[1], slots[2], slots[3]
+    -- One file per reference, named for its key percent-encoded, as
+    -- Python's urllib.parse.quote(key, safe="") writes it
+    local file = key:gsub("[^A-Za-z0-9_%.~%-]", function(c)
+      return string.format("%%%02X", string.byte(c))
+    end)
+    local data = load_data(".calkit/reference-values/" .. file .. ".json")
+    local value = nil
+    if type(data) == "table" then
+      value = data[name]
+    end
+    if value == nil then
+      quarto.log.warning(
+        "calkit.yaml records no value " .. name .. " quoted from " .. key
+      )
+      return pandoc.Str("??")
+    end
+    local text = format_value(value, fmt)
+    if text == nil then
+      quarto.log.warning(
+        "Can't show ckrefval " .. key .. " " .. name .. " " .. fmt
+      )
+      return pandoc.Str("??")
+    end
+    return pandoc.Str(text)
+  end,
 }
 """
 
@@ -639,6 +684,8 @@ class QuartoValue:
     path: str
     # 1-indexed line of the document, or of the cell in a notebook
     line: int = 0
+    # For a value quoted from a reference, its citation key and name
+    ref: tuple[str, str] | None = None
 
 
 def read_document_text(path: str) -> str | None:
@@ -677,24 +724,61 @@ def extract_values(
     positionally or by name. A malformed one raises
     ``calkit.markdown.MarkdownParseError`` naming its line.
     """
-    from calkit.markdown import _ckvalue_args, _resolve_source
+    from calkit.markdown import (
+        MarkdownParseError,
+        _ckvalue_args,
+        _resolve_source,
+    )
+    from calkit.references.values import get_values_path
 
     path = Path(document_path).as_posix()
     values = []
     for i, line in enumerate(text.splitlines()):
+        found = []
         for m in _SHORTCODE_RE.finditer(line):
             got = _ckvalue_args(m.group("args"), path, i + 1)
-            values.append(
-                QuartoValue(
-                    source=got["source"],
-                    key=got["key"],
-                    format=got.get("format"),
-                    path=_resolve_source(
-                        got["source"], results, path, i + 1, kind=got["kind"]
+            found.append(
+                (
+                    m.start(),
+                    QuartoValue(
+                        source=got["source"],
+                        key=got["key"],
+                        format=got.get("format"),
+                        path=_resolve_source(
+                            got["source"],
+                            results,
+                            path,
+                            i + 1,
+                            kind=got["kind"],
+                        ),
+                        line=i + 1,
                     ),
-                    line=i + 1,
                 )
             )
+        # A citation key, a name, and a format, read the same way
+        for m in _REFVAL_SHORTCODE_RE.finditer(line):
+            got = _ckvalue_args(m.group("args"), path, i + 1)
+            if got["kind"]:
+                raise MarkdownParseError(
+                    f"'ckrefval' takes a citation key and a name, not "
+                    f"{got['kind']}=",
+                    path=path,
+                    line=i + 1,
+                )
+            found.append(
+                (
+                    m.start(),
+                    QuartoValue(
+                        source=got["source"],
+                        key=got["key"],
+                        format=got.get("format"),
+                        path=get_values_path(got["source"]),
+                        line=i + 1,
+                        ref=(got["source"], got["key"]),
+                    ),
+                )
+            )
+        values += [value for _, value in sorted(found, key=lambda f: f[0])]
     return values
 
 
@@ -767,6 +851,13 @@ def check_values(
     for value in values:
         check_format(value)
         fpath = os.path.join(wdir, value.path) if wdir else value.path
+        if value.ref is not None and not os.path.isfile(fpath):
+            raise MarkdownParseError(
+                f"calkit.yaml records no value '{value.ref[1]}' quoted "
+                f"from '{value.ref[0]}'",
+                path=document_path,
+                line=value.line,
+            )
         if value.path not in data_by_path:
             if not os.path.isfile(fpath):
                 notebook_path = get_notebook_of_values_path(value.path)
@@ -790,7 +881,10 @@ def check_values(
             raw = resolve_key(data_by_path[value.path], value.key)
         except KeyError:
             raise MarkdownParseError(
-                f"'{value.path}' has no key '{value.key}'",
+                f"calkit.yaml records no value '{value.ref[1]}' quoted "
+                f"from '{value.ref[0]}'"
+                if value.ref is not None
+                else f"'{value.path}' has no key '{value.key}'",
                 path=document_path,
                 line=value.line,
             )

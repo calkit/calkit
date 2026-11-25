@@ -150,10 +150,10 @@ def spinner(
     """
     import tempfile
 
-    from calkit.core import is_mintty
+    from calkit.core import is_mintty, is_terminal
 
     mintty = is_mintty(sys.stderr)
-    if not show or active() or not (sys.stderr.isatty() or mintty):
+    if not show or active() or not (is_terminal(sys.stderr) or mintty):
         yield
         return
     from rich.console import Console

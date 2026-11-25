@@ -214,6 +214,7 @@ def test_get_project_provenance(client: TestClient) -> None:
             ),
             patch(f"{MODULE}.get_repo_tree_for_ref", return_value=tree),
             patch(f"{MODULE}.pipeline_at_ref", return_value=pipeline),
+            patch(f"{MODULE}.app.projects.get_storage_locations_for_project"),
             patch(
                 f"{MODULE}.app.projects.read_project_file", side_effect=read
             ),

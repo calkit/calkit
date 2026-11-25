@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.dvc import (
-    get_data_fpath_for_md5,
+    find_md5_object,
     make_mermaid_diagram,
     output_from_pipeline,
     run_dvc_command,
@@ -245,7 +245,9 @@ def test_expand_dvc_lock_outs():
     pass  # TODO
 
 
-def test_get_data_fpath_for_md5_takes_only_hashes():
+def test_find_md5_object_takes_only_hashes():
+    from app.storage import ProjectStorage
+
     class FakeFs:
         def __init__(self):
             self.looked_up: list[str] = []
@@ -257,10 +259,15 @@ def test_get_data_fpath_for_md5_takes_only_hashes():
         exists = isfile
 
     fs = FakeFs()
+    storage_locations = [
+        ProjectStorage(backend="s3", fs=fs, data_prefix="s3://b")
+    ]
     md5 = "0123456789abcdef0123456789abcdef"
     for valid in (md5, md5 + ".dir"):
-        path = get_data_fpath_for_md5("me", "proj", valid, fs=fs)
-        assert path is not None and path.endswith(valid[2:])
+        found = find_md5_object(
+            "me", "proj", valid, storage_locations=storage_locations
+        )
+        assert found is not None and found[1].endswith(valid[2:])
     # The hash comes from the project's own files, so anything that isn't
     # one never makes it into a storage path
     fs.looked_up.clear()
@@ -273,5 +280,10 @@ def test_get_data_fpath_for_md5_takes_only_hashes():
         "",
     ]
     for bad in crafted:
-        assert get_data_fpath_for_md5("me", "proj", bad, fs=fs) is None
+        assert (
+            find_md5_object(
+                "me", "proj", bad, storage_locations=storage_locations
+            )
+            is None
+        )
     assert fs.looked_up == []

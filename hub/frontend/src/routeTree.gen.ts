@@ -23,7 +23,10 @@ import { Route as LoginDeviceRouteImport } from './routes/login/device'
 import { Route as JoinTokenRouteImport } from './routes/join/$token'
 import { Route as AuthZoteroRouteImport } from './routes/auth/zotero'
 import { Route as AuthZenodoRouteImport } from './routes/auth/zenodo'
+import { Route as AuthHuggingfaceRouteImport } from './routes/auth/huggingface'
 import { Route as AuthGoogleRouteImport } from './routes/auth/google'
+import { Route as AuthBoxRouteImport } from './routes/auth/box'
+import { Route as LayoutWorkspacesRouteImport } from './routes/_layout/workspaces'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutOrgsRouteImport } from './routes/_layout/orgs'
@@ -34,8 +37,10 @@ import { Route as LayoutAccountNameIndexRouteImport } from './routes/_layout/$ac
 import { Route as LayoutAccountNameProjectNameLayoutRouteImport } from './routes/_layout/$accountName/$projectName/_layout'
 import { Route as LayoutAccountNameProjectNameLayoutIndexRouteImport } from './routes/_layout/$accountName/$projectName/_layout/index'
 import { Route as LayoutAccountNameProjectNameReleasesReleaseNameRouteImport } from './routes/_layout/$accountName/$projectName/releases/$releaseName'
+import { Route as LayoutAccountNameProjectNameLayoutWorkspacesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/workspaces'
 import { Route as LayoutAccountNameProjectNameLayoutTablesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/tables'
 import { Route as LayoutAccountNameProjectNameLayoutSoftwareRouteImport } from './routes/_layout/$accountName/$projectName/_layout/software'
+import { Route as LayoutAccountNameProjectNameLayoutSettingsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/settings'
 import { Route as LayoutAccountNameProjectNameLayoutResultsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/results'
 import { Route as LayoutAccountNameProjectNameLayoutReleasesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/releases'
 import { Route as LayoutAccountNameProjectNameLayoutReferencesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/references'
@@ -43,7 +48,6 @@ import { Route as LayoutAccountNameProjectNameLayoutPublicationsRouteImport } fr
 import { Route as LayoutAccountNameProjectNameLayoutPresentationsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/presentations'
 import { Route as LayoutAccountNameProjectNameLayoutPipelineRouteImport } from './routes/_layout/$accountName/$projectName/_layout/pipeline'
 import { Route as LayoutAccountNameProjectNameLayoutNotebooksRouteImport } from './routes/_layout/$accountName/$projectName/_layout/notebooks'
-import { Route as LayoutAccountNameProjectNameLayoutLocalRouteImport } from './routes/_layout/$accountName/$projectName/_layout/local'
 import { Route as LayoutAccountNameProjectNameLayoutHistoryRouteImport } from './routes/_layout/$accountName/$projectName/_layout/history'
 import { Route as LayoutAccountNameProjectNameLayoutFilesRouteImport } from './routes/_layout/$accountName/$projectName/_layout/files'
 import { Route as LayoutAccountNameProjectNameLayoutFiguresRouteImport } from './routes/_layout/$accountName/$projectName/_layout/figures'
@@ -120,10 +124,25 @@ const AuthZenodoRoute = AuthZenodoRouteImport.update({
   path: '/auth/zenodo',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthHuggingfaceRoute = AuthHuggingfaceRouteImport.update({
+  id: '/auth/huggingface',
+  path: '/auth/huggingface',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthGoogleRoute = AuthGoogleRouteImport.update({
   id: '/auth/google',
   path: '/auth/google',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthBoxRoute = AuthBoxRouteImport.update({
+  id: '/auth/box',
+  path: '/auth/box',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LayoutWorkspacesRoute = LayoutWorkspacesRouteImport.update({
+  id: '/workspaces',
+  path: '/workspaces',
+  getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutSettingsRoute = LayoutSettingsRouteImport.update({
   id: '/settings',
@@ -183,6 +202,12 @@ const LayoutAccountNameProjectNameReleasesReleaseNameRoute =
     path: '/releases/$releaseName',
     getParentRoute: () => LayoutAccountNameProjectNameRoute,
   } as any)
+const LayoutAccountNameProjectNameLayoutWorkspacesRoute =
+  LayoutAccountNameProjectNameLayoutWorkspacesRouteImport.update({
+    id: '/workspaces',
+    path: '/workspaces',
+    getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
+  } as any)
 const LayoutAccountNameProjectNameLayoutTablesRoute =
   LayoutAccountNameProjectNameLayoutTablesRouteImport.update({
     id: '/tables',
@@ -193,6 +218,12 @@ const LayoutAccountNameProjectNameLayoutSoftwareRoute =
   LayoutAccountNameProjectNameLayoutSoftwareRouteImport.update({
     id: '/software',
     path: '/software',
+    getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
+  } as any)
+const LayoutAccountNameProjectNameLayoutSettingsRoute =
+  LayoutAccountNameProjectNameLayoutSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
     getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
   } as any)
 const LayoutAccountNameProjectNameLayoutResultsRoute =
@@ -235,12 +266,6 @@ const LayoutAccountNameProjectNameLayoutNotebooksRoute =
   LayoutAccountNameProjectNameLayoutNotebooksRouteImport.update({
     id: '/notebooks',
     path: '/notebooks',
-    getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
-  } as any)
-const LayoutAccountNameProjectNameLayoutLocalRoute =
-  LayoutAccountNameProjectNameLayoutLocalRouteImport.update({
-    id: '/local',
-    path: '/local',
     getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
   } as any)
 const LayoutAccountNameProjectNameLayoutHistoryRoute =
@@ -328,7 +353,10 @@ export interface FileRoutesByFullPath {
   '/orgs': typeof LayoutOrgsRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/workspaces': typeof LayoutWorkspacesRoute
+  '/auth/box': typeof AuthBoxRoute
   '/auth/google': typeof AuthGoogleRoute
+  '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
@@ -345,7 +373,6 @@ export interface FileRoutesByFullPath {
   '/$accountName/$projectName/figures': typeof LayoutAccountNameProjectNameLayoutFiguresRoute
   '/$accountName/$projectName/files': typeof LayoutAccountNameProjectNameLayoutFilesRoute
   '/$accountName/$projectName/history': typeof LayoutAccountNameProjectNameLayoutHistoryRoute
-  '/$accountName/$projectName/local': typeof LayoutAccountNameProjectNameLayoutLocalRoute
   '/$accountName/$projectName/notebooks': typeof LayoutAccountNameProjectNameLayoutNotebooksRoute
   '/$accountName/$projectName/pipeline': typeof LayoutAccountNameProjectNameLayoutPipelineRoute
   '/$accountName/$projectName/presentations': typeof LayoutAccountNameProjectNameLayoutPresentationsRoute
@@ -353,8 +380,10 @@ export interface FileRoutesByFullPath {
   '/$accountName/$projectName/references': typeof LayoutAccountNameProjectNameLayoutReferencesRoute
   '/$accountName/$projectName/releases': typeof LayoutAccountNameProjectNameLayoutReleasesRoute
   '/$accountName/$projectName/results': typeof LayoutAccountNameProjectNameLayoutResultsRoute
+  '/$accountName/$projectName/settings': typeof LayoutAccountNameProjectNameLayoutSettingsRoute
   '/$accountName/$projectName/software': typeof LayoutAccountNameProjectNameLayoutSoftwareRoute
   '/$accountName/$projectName/tables': typeof LayoutAccountNameProjectNameLayoutTablesRoute
+  '/$accountName/$projectName/workspaces': typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
   '/$accountName/$projectName/releases/$releaseName': typeof LayoutAccountNameProjectNameReleasesReleaseNameRoute
   '/$accountName/$projectName/': typeof LayoutAccountNameProjectNameLayoutIndexRoute
   '/$accountName/$projectName/apps/$appName': typeof LayoutAccountNameProjectNameLayoutAppsAppNameRoute
@@ -374,7 +403,10 @@ export interface FileRoutesByTo {
   '/orgs': typeof LayoutOrgsRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/workspaces': typeof LayoutWorkspacesRoute
+  '/auth/box': typeof AuthBoxRoute
   '/auth/google': typeof AuthGoogleRoute
+  '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
@@ -390,7 +422,6 @@ export interface FileRoutesByTo {
   '/$accountName/$projectName/figures': typeof LayoutAccountNameProjectNameLayoutFiguresRoute
   '/$accountName/$projectName/files': typeof LayoutAccountNameProjectNameLayoutFilesRoute
   '/$accountName/$projectName/history': typeof LayoutAccountNameProjectNameLayoutHistoryRoute
-  '/$accountName/$projectName/local': typeof LayoutAccountNameProjectNameLayoutLocalRoute
   '/$accountName/$projectName/notebooks': typeof LayoutAccountNameProjectNameLayoutNotebooksRoute
   '/$accountName/$projectName/pipeline': typeof LayoutAccountNameProjectNameLayoutPipelineRoute
   '/$accountName/$projectName/presentations': typeof LayoutAccountNameProjectNameLayoutPresentationsRoute
@@ -398,8 +429,10 @@ export interface FileRoutesByTo {
   '/$accountName/$projectName/references': typeof LayoutAccountNameProjectNameLayoutReferencesRoute
   '/$accountName/$projectName/releases': typeof LayoutAccountNameProjectNameLayoutReleasesRoute
   '/$accountName/$projectName/results': typeof LayoutAccountNameProjectNameLayoutResultsRoute
+  '/$accountName/$projectName/settings': typeof LayoutAccountNameProjectNameLayoutSettingsRoute
   '/$accountName/$projectName/software': typeof LayoutAccountNameProjectNameLayoutSoftwareRoute
   '/$accountName/$projectName/tables': typeof LayoutAccountNameProjectNameLayoutTablesRoute
+  '/$accountName/$projectName/workspaces': typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
   '/$accountName/$projectName/releases/$releaseName': typeof LayoutAccountNameProjectNameReleasesReleaseNameRoute
   '/$accountName/$projectName/apps/$appName': typeof LayoutAccountNameProjectNameLayoutAppsAppNameRoute
   '/$accountName/$projectName/questions/$questionNumber': typeof LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute
@@ -420,7 +453,10 @@ export interface FileRoutesById {
   '/_layout/orgs': typeof LayoutOrgsRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
+  '/_layout/workspaces': typeof LayoutWorkspacesRoute
+  '/auth/box': typeof AuthBoxRoute
   '/auth/google': typeof AuthGoogleRoute
+  '/auth/huggingface': typeof AuthHuggingfaceRoute
   '/auth/zenodo': typeof AuthZenodoRoute
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
@@ -438,7 +474,6 @@ export interface FileRoutesById {
   '/_layout/$accountName/$projectName/_layout/figures': typeof LayoutAccountNameProjectNameLayoutFiguresRoute
   '/_layout/$accountName/$projectName/_layout/files': typeof LayoutAccountNameProjectNameLayoutFilesRoute
   '/_layout/$accountName/$projectName/_layout/history': typeof LayoutAccountNameProjectNameLayoutHistoryRoute
-  '/_layout/$accountName/$projectName/_layout/local': typeof LayoutAccountNameProjectNameLayoutLocalRoute
   '/_layout/$accountName/$projectName/_layout/notebooks': typeof LayoutAccountNameProjectNameLayoutNotebooksRoute
   '/_layout/$accountName/$projectName/_layout/pipeline': typeof LayoutAccountNameProjectNameLayoutPipelineRoute
   '/_layout/$accountName/$projectName/_layout/presentations': typeof LayoutAccountNameProjectNameLayoutPresentationsRoute
@@ -446,8 +481,10 @@ export interface FileRoutesById {
   '/_layout/$accountName/$projectName/_layout/references': typeof LayoutAccountNameProjectNameLayoutReferencesRoute
   '/_layout/$accountName/$projectName/_layout/releases': typeof LayoutAccountNameProjectNameLayoutReleasesRoute
   '/_layout/$accountName/$projectName/_layout/results': typeof LayoutAccountNameProjectNameLayoutResultsRoute
+  '/_layout/$accountName/$projectName/_layout/settings': typeof LayoutAccountNameProjectNameLayoutSettingsRoute
   '/_layout/$accountName/$projectName/_layout/software': typeof LayoutAccountNameProjectNameLayoutSoftwareRoute
   '/_layout/$accountName/$projectName/_layout/tables': typeof LayoutAccountNameProjectNameLayoutTablesRoute
+  '/_layout/$accountName/$projectName/_layout/workspaces': typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
   '/_layout/$accountName/$projectName/releases/$releaseName': typeof LayoutAccountNameProjectNameReleasesReleaseNameRoute
   '/_layout/$accountName/$projectName/_layout/': typeof LayoutAccountNameProjectNameLayoutIndexRoute
   '/_layout/$accountName/$projectName/_layout/apps/$appName': typeof LayoutAccountNameProjectNameLayoutAppsAppNameRoute
@@ -469,7 +506,10 @@ export interface FileRouteTypes {
     | '/orgs'
     | '/projects'
     | '/settings'
+    | '/workspaces'
+    | '/auth/box'
     | '/auth/google'
+    | '/auth/huggingface'
     | '/auth/zenodo'
     | '/auth/zotero'
     | '/join/$token'
@@ -486,7 +526,6 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/figures'
     | '/$accountName/$projectName/files'
     | '/$accountName/$projectName/history'
-    | '/$accountName/$projectName/local'
     | '/$accountName/$projectName/notebooks'
     | '/$accountName/$projectName/pipeline'
     | '/$accountName/$projectName/presentations'
@@ -494,8 +533,10 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/references'
     | '/$accountName/$projectName/releases'
     | '/$accountName/$projectName/results'
+    | '/$accountName/$projectName/settings'
     | '/$accountName/$projectName/software'
     | '/$accountName/$projectName/tables'
+    | '/$accountName/$projectName/workspaces'
     | '/$accountName/$projectName/releases/$releaseName'
     | '/$accountName/$projectName/'
     | '/$accountName/$projectName/apps/$appName'
@@ -515,7 +556,10 @@ export interface FileRouteTypes {
     | '/orgs'
     | '/projects'
     | '/settings'
+    | '/workspaces'
+    | '/auth/box'
     | '/auth/google'
+    | '/auth/huggingface'
     | '/auth/zenodo'
     | '/auth/zotero'
     | '/join/$token'
@@ -531,7 +575,6 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/figures'
     | '/$accountName/$projectName/files'
     | '/$accountName/$projectName/history'
-    | '/$accountName/$projectName/local'
     | '/$accountName/$projectName/notebooks'
     | '/$accountName/$projectName/pipeline'
     | '/$accountName/$projectName/presentations'
@@ -539,8 +582,10 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/references'
     | '/$accountName/$projectName/releases'
     | '/$accountName/$projectName/results'
+    | '/$accountName/$projectName/settings'
     | '/$accountName/$projectName/software'
     | '/$accountName/$projectName/tables'
+    | '/$accountName/$projectName/workspaces'
     | '/$accountName/$projectName/releases/$releaseName'
     | '/$accountName/$projectName/apps/$appName'
     | '/$accountName/$projectName/questions/$questionNumber'
@@ -560,7 +605,10 @@ export interface FileRouteTypes {
     | '/_layout/orgs'
     | '/_layout/projects'
     | '/_layout/settings'
+    | '/_layout/workspaces'
+    | '/auth/box'
     | '/auth/google'
+    | '/auth/huggingface'
     | '/auth/zenodo'
     | '/auth/zotero'
     | '/join/$token'
@@ -578,7 +626,6 @@ export interface FileRouteTypes {
     | '/_layout/$accountName/$projectName/_layout/figures'
     | '/_layout/$accountName/$projectName/_layout/files'
     | '/_layout/$accountName/$projectName/_layout/history'
-    | '/_layout/$accountName/$projectName/_layout/local'
     | '/_layout/$accountName/$projectName/_layout/notebooks'
     | '/_layout/$accountName/$projectName/_layout/pipeline'
     | '/_layout/$accountName/$projectName/_layout/presentations'
@@ -586,8 +633,10 @@ export interface FileRouteTypes {
     | '/_layout/$accountName/$projectName/_layout/references'
     | '/_layout/$accountName/$projectName/_layout/releases'
     | '/_layout/$accountName/$projectName/_layout/results'
+    | '/_layout/$accountName/$projectName/_layout/settings'
     | '/_layout/$accountName/$projectName/_layout/software'
     | '/_layout/$accountName/$projectName/_layout/tables'
+    | '/_layout/$accountName/$projectName/_layout/workspaces'
     | '/_layout/$accountName/$projectName/releases/$releaseName'
     | '/_layout/$accountName/$projectName/_layout/'
     | '/_layout/$accountName/$projectName/_layout/apps/$appName'
@@ -603,7 +652,9 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
+  AuthBoxRoute: typeof AuthBoxRoute
   AuthGoogleRoute: typeof AuthGoogleRoute
+  AuthHuggingfaceRoute: typeof AuthHuggingfaceRoute
   AuthZenodoRoute: typeof AuthZenodoRoute
   AuthZoteroRoute: typeof AuthZoteroRoute
   JoinTokenRoute: typeof JoinTokenRoute
@@ -697,12 +748,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthZenodoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/huggingface': {
+      id: '/auth/huggingface'
+      path: '/auth/huggingface'
+      fullPath: '/auth/huggingface'
+      preLoaderRoute: typeof AuthHuggingfaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth/google': {
       id: '/auth/google'
       path: '/auth/google'
       fullPath: '/auth/google'
       preLoaderRoute: typeof AuthGoogleRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/auth/box': {
+      id: '/auth/box'
+      path: '/auth/box'
+      fullPath: '/auth/box'
+      preLoaderRoute: typeof AuthBoxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_layout/workspaces': {
+      id: '/_layout/workspaces'
+      path: '/workspaces'
+      fullPath: '/workspaces'
+      preLoaderRoute: typeof LayoutWorkspacesRouteImport
+      parentRoute: typeof LayoutRoute
     }
     '/_layout/settings': {
       id: '/_layout/settings'
@@ -781,6 +853,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAccountNameProjectNameReleasesReleaseNameRouteImport
       parentRoute: typeof LayoutAccountNameProjectNameRoute
     }
+    '/_layout/$accountName/$projectName/_layout/workspaces': {
+      id: '/_layout/$accountName/$projectName/_layout/workspaces'
+      path: '/workspaces'
+      fullPath: '/$accountName/$projectName/workspaces'
+      preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutWorkspacesRouteImport
+      parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
+    }
     '/_layout/$accountName/$projectName/_layout/tables': {
       id: '/_layout/$accountName/$projectName/_layout/tables'
       path: '/tables'
@@ -793,6 +872,13 @@ declare module '@tanstack/react-router' {
       path: '/software'
       fullPath: '/$accountName/$projectName/software'
       preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutSoftwareRouteImport
+      parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
+    }
+    '/_layout/$accountName/$projectName/_layout/settings': {
+      id: '/_layout/$accountName/$projectName/_layout/settings'
+      path: '/settings'
+      fullPath: '/$accountName/$projectName/settings'
+      preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutSettingsRouteImport
       parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
     }
     '/_layout/$accountName/$projectName/_layout/results': {
@@ -842,13 +928,6 @@ declare module '@tanstack/react-router' {
       path: '/notebooks'
       fullPath: '/$accountName/$projectName/notebooks'
       preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutNotebooksRouteImport
-      parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
-    }
-    '/_layout/$accountName/$projectName/_layout/local': {
-      id: '/_layout/$accountName/$projectName/_layout/local'
-      path: '/local'
-      fullPath: '/$accountName/$projectName/local'
-      preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutLocalRouteImport
       parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
     }
     '/_layout/$accountName/$projectName/_layout/history': {
@@ -965,7 +1044,6 @@ interface LayoutAccountNameProjectNameLayoutRouteChildren {
   LayoutAccountNameProjectNameLayoutFiguresRoute: typeof LayoutAccountNameProjectNameLayoutFiguresRoute
   LayoutAccountNameProjectNameLayoutFilesRoute: typeof LayoutAccountNameProjectNameLayoutFilesRoute
   LayoutAccountNameProjectNameLayoutHistoryRoute: typeof LayoutAccountNameProjectNameLayoutHistoryRoute
-  LayoutAccountNameProjectNameLayoutLocalRoute: typeof LayoutAccountNameProjectNameLayoutLocalRoute
   LayoutAccountNameProjectNameLayoutNotebooksRoute: typeof LayoutAccountNameProjectNameLayoutNotebooksRoute
   LayoutAccountNameProjectNameLayoutPipelineRoute: typeof LayoutAccountNameProjectNameLayoutPipelineRoute
   LayoutAccountNameProjectNameLayoutPresentationsRoute: typeof LayoutAccountNameProjectNameLayoutPresentationsRoute
@@ -973,8 +1051,10 @@ interface LayoutAccountNameProjectNameLayoutRouteChildren {
   LayoutAccountNameProjectNameLayoutReferencesRoute: typeof LayoutAccountNameProjectNameLayoutReferencesRoute
   LayoutAccountNameProjectNameLayoutReleasesRoute: typeof LayoutAccountNameProjectNameLayoutReleasesRoute
   LayoutAccountNameProjectNameLayoutResultsRoute: typeof LayoutAccountNameProjectNameLayoutResultsRoute
+  LayoutAccountNameProjectNameLayoutSettingsRoute: typeof LayoutAccountNameProjectNameLayoutSettingsRoute
   LayoutAccountNameProjectNameLayoutSoftwareRoute: typeof LayoutAccountNameProjectNameLayoutSoftwareRoute
   LayoutAccountNameProjectNameLayoutTablesRoute: typeof LayoutAccountNameProjectNameLayoutTablesRoute
+  LayoutAccountNameProjectNameLayoutWorkspacesRoute: typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
   LayoutAccountNameProjectNameLayoutIndexRoute: typeof LayoutAccountNameProjectNameLayoutIndexRoute
   LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute: typeof LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute
   LayoutAccountNameProjectNameLayoutQuestionsIndexRoute: typeof LayoutAccountNameProjectNameLayoutQuestionsIndexRoute
@@ -998,8 +1078,6 @@ const LayoutAccountNameProjectNameLayoutRouteChildren: LayoutAccountNameProjectN
       LayoutAccountNameProjectNameLayoutFilesRoute,
     LayoutAccountNameProjectNameLayoutHistoryRoute:
       LayoutAccountNameProjectNameLayoutHistoryRoute,
-    LayoutAccountNameProjectNameLayoutLocalRoute:
-      LayoutAccountNameProjectNameLayoutLocalRoute,
     LayoutAccountNameProjectNameLayoutNotebooksRoute:
       LayoutAccountNameProjectNameLayoutNotebooksRoute,
     LayoutAccountNameProjectNameLayoutPipelineRoute:
@@ -1014,10 +1092,14 @@ const LayoutAccountNameProjectNameLayoutRouteChildren: LayoutAccountNameProjectN
       LayoutAccountNameProjectNameLayoutReleasesRoute,
     LayoutAccountNameProjectNameLayoutResultsRoute:
       LayoutAccountNameProjectNameLayoutResultsRoute,
+    LayoutAccountNameProjectNameLayoutSettingsRoute:
+      LayoutAccountNameProjectNameLayoutSettingsRoute,
     LayoutAccountNameProjectNameLayoutSoftwareRoute:
       LayoutAccountNameProjectNameLayoutSoftwareRoute,
     LayoutAccountNameProjectNameLayoutTablesRoute:
       LayoutAccountNameProjectNameLayoutTablesRoute,
+    LayoutAccountNameProjectNameLayoutWorkspacesRoute:
+      LayoutAccountNameProjectNameLayoutWorkspacesRoute,
     LayoutAccountNameProjectNameLayoutIndexRoute:
       LayoutAccountNameProjectNameLayoutIndexRoute,
     LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute:
@@ -1056,6 +1138,7 @@ interface LayoutRouteChildren {
   LayoutOrgsRoute: typeof LayoutOrgsRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
+  LayoutWorkspacesRoute: typeof LayoutWorkspacesRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutAccountNameIndexRoute: typeof LayoutAccountNameIndexRoute
   LayoutAccountNameProjectNameRoute: typeof LayoutAccountNameProjectNameRouteWithChildren
@@ -1068,6 +1151,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutOrgsRoute: LayoutOrgsRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
+  LayoutWorkspacesRoute: LayoutWorkspacesRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutAccountNameIndexRoute: LayoutAccountNameIndexRoute,
   LayoutAccountNameProjectNameRoute:
@@ -1084,7 +1168,9 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
   VerifyEmailRoute: VerifyEmailRoute,
+  AuthBoxRoute: AuthBoxRoute,
   AuthGoogleRoute: AuthGoogleRoute,
+  AuthHuggingfaceRoute: AuthHuggingfaceRoute,
   AuthZenodoRoute: AuthZenodoRoute,
   AuthZoteroRoute: AuthZoteroRoute,
   JoinTokenRoute: JoinTokenRoute,

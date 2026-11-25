@@ -1,5 +1,11 @@
+/**
+ * The requests content scripts and pages send the service worker, what each
+ * returns, and how they're sent.
+ */
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
+import type { PrintedNumbers } from "./latex";
+import type { CheckoutStatus, LocalStatus } from "./local";
 import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
   CalkitYamlInfo,
@@ -9,6 +15,10 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  ImportUpdate,
+  PipelineRun,
+  ProjectPipeline,
+  PipelineRuns,
   StageFile,
   OverleafLookup,
   OverleafSyncResponse,
@@ -131,6 +141,15 @@ export type Request =
       shows?: string;
       /** Which of the script's outputs that is. */
       produces?: string;
+      /**
+       * Data it reads from outside the project, to read from the project
+       * instead, with any files uploaded, base64-encoded.
+       */
+      data?: {
+        external: string;
+        path: string;
+        files: { path: string; content: string }[];
+      }[];
       save?: boolean;
     }
   | {
@@ -141,6 +160,28 @@ export type Request =
       /** One of calkit's `imported_from` forms, e.g., `{ url }`. */
       importedFrom?: Record<string, unknown>;
       createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
+    }
+  | { type: "project.pipeline"; owner: string; project: string }
+  | { type: "project.pipelineRuns"; owner: string; project: string }
+  | {
+      /** The whole log of a run on this machine, as far as it's got. */
+      type: "project.pipelineRunLog";
+      owner: string;
+      project: string;
+      runId: string;
+    }
+  | {
+      type: "project.startPipelineRun";
+      owner: string;
+      project: string;
+      /** Whether to save and sync with Overleaf after, when run here. */
+      sync?: boolean;
+    }
+  | {
+      type: "project.updateImport";
+      owner: string;
+      project: string;
+      path: string;
     }
   | {
       type: "project.addExportStage";
@@ -168,10 +209,25 @@ export type Request =
       project: string;
       overleafProjectId?: string;
       path?: string;
+      /**
+       * False for what's known from the last pull from Overleaf, without
+       * pulling, when answered on this machine, to show while it pulls.
+       */
+      pull?: boolean;
+      /**
+       * What Overleaf's editor has: every file's Git hash and the
+       * documents' text, by path, so this machine's copy can be checked or
+       * updated without downloading the project.
+       */
+      overleafFiles?: Record<string, string>;
+      overleafTexts?: Record<string, string>;
     }
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }
   | { type: "overleaf.connectSession" }
+  | { type: "overleaf.openTokenSettings" }
+  | { type: "overleaf.tokenTab" }
+  | { type: "overleaf.returnFromTokenTab" }
   | {
       type: "overleaf.import";
       owner: string;
@@ -212,6 +268,119 @@ export type Request =
       path: string;
       bibKey: string;
       notes: ReferenceNote[];
+    }
+  | { type: "local.status" }
+  | {
+      type: "local.openProject";
+      /** As "owner/name". */
+      project: string;
+      /** A file in it to open too, e.g., the script that makes a figure. */
+      path?: string;
+    }
+  | {
+      type: "local.projectStatus";
+      /** As "owner/name". */
+      project: string;
+    }
+  | {
+      /** A LaTeX file in a synced folder, as it is on this machine. */
+      type: "local.publicationSource";
+      /** As "owner/name". */
+      project: string;
+      folder: string;
+      /** As Overleaf names it. */
+      path: string;
+    }
+  | {
+      /** The SyncTeX of the PDF a synced folder builds to on this machine. */
+      type: "local.publicationSynctex";
+      /** As "owner/name". */
+      project: string;
+      folder: string;
+    }
+  | {
+      /** A folder chosen in this machine's own dialog. */
+      type: "local.chooseFolder";
+      prompt: string;
+    }
+  | {
+      /**
+       * A folder on this machine made a project on a hub, with an Overleaf
+       * project imported into it.
+       */
+      type: "local.createProject";
+      /** Who'll own it, for the job until the hub names it. */
+      owner: string;
+      name: string;
+      title: string;
+      isPublic: boolean;
+      folder: string;
+      overleafProjectUrl: string;
+      /** The document's folder in the project. */
+      path: string;
+      kind: string;
+      hubUrl: string;
+    }
+  | {
+      /** Everything in a project's checkout here saved, as 'calkit save -a'. */
+      type: "local.save";
+      /** As "owner/name". */
+      project: string;
+    }
+  | {
+      /**
+       * Copy data a script reads from outside the project into it, on this
+       * machine, pointing the script at the copy.
+       */
+      type: "project.moveExternalData";
+      owner: string;
+      project: string;
+      scriptPath: string;
+      /** As the script names it. */
+      external: string;
+      dest: string;
+    }
+  | {
+      /** What likely makes a file with no origin, for someone to confirm. */
+      type: "project.originSuggestions";
+      owner: string;
+      project: string;
+      path: string;
+    }
+  | {
+      /** Numbers the pipeline's notebooks printed, read on this machine. */
+      type: "project.printedNumbers";
+      owner: string;
+      project: string;
+    }
+  | {
+      /** Add a variable a notebook's cell makes as a value to save. */
+      type: "project.addCellOutput";
+      owner: string;
+      project: string;
+      notebook: string;
+      stage: string;
+      cell_id: string;
+      variable_name: string;
+    }
+  | { type: "local.openOptions" }
+  /** Install the editor projects open in, i.e., VS Code. */
+  | { type: "local.installEditor"; project: string }
+  | {
+      type: "local.checkout";
+      /** As "owner/name". */
+      project: string;
+    }
+  | {
+      type: "local.chooseCheckout";
+      project: string;
+      path: string;
+    }
+  | {
+      type: "local.clone";
+      project: string;
+      /** Where to, by default ~/calkit/NAME. */
+      location?: string;
     };
 
 export interface ResponseMap {
@@ -238,7 +407,12 @@ export interface ResponseMap {
   "project.provenance": Provenance;
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
+  "project.updateImport": ImportUpdate;
   "project.addExportStage": ExportStage;
+  "project.pipeline": ProjectPipeline;
+  "project.pipelineRuns": PipelineRuns;
+  "project.startPipelineRun": PipelineRun;
+  "project.pipelineRunLog": { log: string };
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;
@@ -246,12 +420,51 @@ export interface ResponseMap {
   "overleaf.sync": OverleafSyncResponse;
   "overleaf.setToken": { message: string };
   "overleaf.connectSession": { message: string };
+  "overleaf.openTokenSettings": null;
+  "overleaf.tokenTab": { requested: boolean };
+  "overleaf.returnFromTokenTab": { returned: boolean };
   "overleaf.import": { path: string; title: string };
   "references.list": References[];
   "references.search": ReferenceSearchMatch[];
   "references.add": { message: string };
   "references.notes.get": { notes: ReferenceNote[] };
   "references.notes.put": { notes: ReferenceNote[] };
+  "local.status": LocalStatus;
+  "local.openProject": Record<string, never>;
+  "local.projectStatus": { checkouts: CheckoutStatus[] };
+  "local.publicationSource": { path: string; text: string };
+  "local.publicationSynctex": string | null;
+  "local.chooseFolder": { path: string | null; empty: boolean };
+  "local.save": null;
+  "project.moveExternalData": { path: string; script_path: string };
+  "project.originSuggestions": {
+    kind: "script" | "notebook" | "exported";
+    source: string;
+    /** What a script or notebook writes that matched. */
+    writes?: string;
+  }[];
+  "project.printedNumbers": PrintedNumbers[];
+  "project.addCellOutput": {
+    stage: string;
+    outputs: Record<string, string>[];
+    citations: string[];
+    warning: string | null;
+  };
+  "local.createProject": { path: string; project: string };
+  "local.openOptions": null;
+  "local.installEditor": null;
+  /**
+   * The checkout used for a project here, and the others, or none when the
+   * extension isn't connected or the project isn't here; ``connected``
+   * says which.
+   */
+  "local.checkout": {
+    connected: boolean;
+    path: string | null;
+    paths: string[];
+  };
+  "local.chooseCheckout": { path: string; paths: string[] };
+  "local.clone": { path: string };
 }
 
 /**

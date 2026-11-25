@@ -37,7 +37,7 @@ import app.projects
 from app import arxiv, messaging, mixpanel, users
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.config import settings
-from app.core import ryaml, utcnow
+from app.core import ryaml, utcnow, web_url_or_none
 from app.git import (
     get_repo,
     get_repo_tree_for_ref,
@@ -70,6 +70,7 @@ from app.models import (
     User,
 )
 from app.pipeline import compute_stage_statuses, find_stage_for_path
+from app.storage import ProjectStorage
 from calkit.models import Release as CkRelease  # type: ignore[import-untyped]
 
 logger = logging.getLogger("uvicorn")
@@ -120,6 +121,7 @@ def _get_pipeline_output_staleness(
     path: str | None,
     owner_name: str,
     project_name: str,
+    storage_locations: list[ProjectStorage] | None = None,
 ) -> ReleaseStaleness:
     """Report whether the pipeline stage that produces *path* is up-to-date.
 
@@ -147,6 +149,7 @@ def _get_pipeline_output_staleness(
             tree=tree,
             owner_name=owner_name,
             project_name=project_name,
+            storage_locations=storage_locations,
             cache_token=git_rev,
         )
         ss = statuses.get(stage)
@@ -629,6 +632,9 @@ def post_project_release(
             release_in.path,
             project.owner_account_name,
             project.name,
+            storage_locations=app.projects.get_storage_locations_for_project(
+                project
+            ),
         )
         if not staleness.up_to_date:
             raise HTTPException(
@@ -1276,7 +1282,7 @@ def get_project_releases(
                 # A missing ``public`` key means public. Visibility is separate
                 # from where it was released (internal vs an external venue).
                 public=rel.get("public", True),
-                url=rel.get("url"),
+                url=web_url_or_none(rel.get("url")),
                 doi=rel.get("doi"),
                 publisher=rel.get("publisher"),
                 date=release_date,
@@ -1316,7 +1322,14 @@ def get_release_staleness(
     if git_rev is None:
         raise HTTPException(400, f"Could not resolve Git ref '{git_ref}'")
     return _get_pipeline_output_staleness(
-        repo, git_rev, path, project.owner_account_name, project.name
+        repo,
+        git_rev,
+        path,
+        project.owner_account_name,
+        project.name,
+        storage_locations=app.projects.get_storage_locations_for_project(
+            project
+        ),
     )
 
 

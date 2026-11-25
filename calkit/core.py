@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import copy
 import csv
 import functools
 import glob
@@ -41,84 +42,281 @@ import ruamel.yaml
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
+# Folders in the home folder that macOS asks before a process reads, which
+# projects aren't kept in, e.g., Pictures, which has the Photos library
+MACOS_MEDIA_FOLDERS = (
+    "Applications",
+    "Library",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Public",
+)
+# Those macOS asks about where projects may be kept
+MACOS_PROTECTED_FOLDERS = ("Desktop", "Documents", "Downloads")
 
 
 class _FoldedPlainStr(str):
-    """A plain scalar read from several lines, remembering where they broke.
+    """A scalar read from a file, remembering where its lines broke.
 
-    ``fold_pos`` holds the index of each space that was a line break, so
-    the value can be written back the way it was wrapped rather than
-    re-folded at whatever width ruamel is set to, which rewrote every
-    paragraph of a file wrapped any other way.
+    ``fold_pos`` holds the index of each space that was a line break, none
+    if it was on one line, so the value can be written back the way it was
+    wrapped rather than re-folded at whatever width ruamel is set to, which
+    rewrote every paragraph of a file wrapped any other way, and broke
+    every line longer than the width.
+
+    Plain scalars are loaded as one, and double-quoted ones are written out
+    as one.
     """
 
     fold_pos: list[int]
+    #: Whether it started a line, e.g., below its key, which is kept too
+    own_line: bool
+    #: Where it started, so an item of a wrapped flow list starts there again
+    column: int
+
+
+class _SourceDoubleQuotedStr(
+    ruamel.yaml.scalarstring.DoubleQuotedScalarString
+):
+    """A double-quoted scalar read from a file, remembering where its lines
+    broke, as ``_FoldedPlainStr`` does."""
+
+    __slots__ = ("fold_pos", "own_line", "column")
+
+
+class _SourceFoldedStr(str):
+    """A folded block scalar's text, as read from a file, on its way out.
+
+    Its line breaks are the ones it was read with, which ruamel marks, so
+    the emitter adds none of its own at the width.
+    """
 
 
 class _FoldPreservingConstructor(ruamel.yaml.constructor.RoundTripConstructor):
     def construct_scalar(self, node: Any) -> Any:
+        from ruamel.yaml.scalarstring import (
+            DoubleQuotedScalarString,
+            FoldedScalarString,
+        )
+
         value = super().construct_scalar(node)
-        if (
-            type(value) is not str
-            or node.style is not None
-            or node.start_mark.line == node.end_mark.line
-        ):
+        # ruamel records a folded block's breaks only if it has some, and
+        # one without is otherwise taken for one made in code
+        if isinstance(value, FoldedScalarString):
+            if not hasattr(value, "fold_pos"):
+                value.fold_pos = []  # type: ignore[attr-defined]
+            return value
+        quoted = type(value) is DoubleQuotedScalarString
+        if not quoted and (type(value) is not str or node.style is not None):
             return value
         # Only text loaded from a string has its source in the marks
         buffer = getattr(node.start_mark, "buffer", None)
         if buffer is None:
             return value
         source = buffer[node.start_mark.index : node.end_mark.index]
-        lines = [line.strip() for line in source.split("\n")]
-        # Blank lines are newlines in the value, which the emitter handles
-        if "" in lines or " ".join(lines) != value:
+        lines = source.split("\n")
+        if quoted:
+            # A break in quotes can be escaped, or follow spaces that are
+            # kept, and these are left to ruamel
+            if len(lines) > 1 and "\\" in source:
+                return value
+            lines[0] = lines[0].removeprefix('"')
+            lines[-1] = lines[-1].removesuffix('"')
+            lines = (
+                [lines[0]]
+                if len(lines) == 1
+                else [
+                    lines[0].rstrip(),
+                    *(line.strip() for line in lines[1:-1]),
+                    lines[-1].lstrip(),
+                ]
+            )
+        else:
+            lines = [line.strip() for line in lines]
+        # Blank lines are newlines in the value, which the emitter handles.
+        # Quotes on one line can hold escapes, but have no breaks to find.
+        if len(lines) > 1 and ("" in lines or " ".join(lines) != value):
             return value
-        out = _FoldedPlainStr(value)
+        if len(lines) == 1 and not quoted and lines[0] != value:
+            return value
+        out: Any = (
+            _SourceDoubleQuotedStr(value, anchor=node.anchor)
+            if quoted
+            else _FoldedPlainStr(value)
+        )
         out.fold_pos = []
         pos = -1
         for line in lines[:-1]:
             pos += len(line) + 1
             out.fold_pos.append(pos)
+        i = node.start_mark.index - 1
+        while i >= 0 and buffer[i] in " \t":
+            i -= 1
+        out.own_line = i < 0 or buffer[i] == "\n"
+        out.column = node.start_mark.column
         return out
 
 
 class _FoldPreservingRepresenter(ruamel.yaml.representer.RoundTripRepresenter):
-    pass
+    def represent_folded_scalarstring(self, data: Any) -> Any:
+        node = super().represent_folded_scalarstring(data)
+        if hasattr(data, "fold_pos"):
+            node.value = _SourceFoldedStr(node.value)
+        return node
+
+    def represent_source_double_quoted(self, data: Any) -> Any:
+        node = self.represent_double_quoted_scalarstring(data)
+        # One given a new value in code has nothing to keep, since ruamel
+        # keeps the type of the value it replaced
+        if not hasattr(data, "fold_pos"):
+            return node
+        node.value = _FoldedPlainStr(node.value)
+        node.value.fold_pos = data.fold_pos
+        node.value.own_line = data.own_line
+        node.value.column = data.column
+        return node
 
 
+# Values read from calkit.yaml end up in files other dumpers write, e.g.,
+# DVC writing dvc.yaml, which would otherwise refuse them
+for _representer in (
+    ruamel.yaml.representer.SafeRepresenter,
+    ruamel.yaml.representer.RoundTripRepresenter,
+    _FoldPreservingRepresenter,
+):
+    _representer.add_representer(
+        _FoldedPlainStr, ruamel.yaml.representer.SafeRepresenter.represent_str
+    )
+ruamel.yaml.representer.RoundTripRepresenter.add_representer(
+    _SourceDoubleQuotedStr,
+    ruamel.yaml.representer.RoundTripRepresenter.represent_double_quoted_scalarstring,
+)
 _FoldPreservingRepresenter.add_representer(
-    _FoldedPlainStr, ruamel.yaml.representer.RoundTripRepresenter.represent_str
+    _SourceDoubleQuotedStr,
+    _FoldPreservingRepresenter.represent_source_double_quoted,
+)
+_FoldPreservingRepresenter.add_representer(
+    ruamel.yaml.scalarstring.FoldedScalarString,
+    _FoldPreservingRepresenter.represent_folded_scalarstring,
 )
 
 
 class _FoldPreservingEmitter(ruamel.yaml.emitter.Emitter):
+    def _write(self, data: str) -> None:
+        self.column += len(data)
+        self.stream.write(
+            data.encode(self.encoding) if self.encoding else data
+        )
+
+    def _flow_item_from_source(self) -> bool:
+        """Whether the next item of a flow sequence was read from a file,
+        and if so, start it on a new line if it was on one."""
+        if not hasattr(getattr(self.event, "value", None), "fold_pos"):
+            return False
+        if self.event.value.own_line:
+            self.write_indent()
+            self._write(" " * (self.event.value.column - self.column))
+        self.states.append(self.expect_flow_sequence_item)
+        self.expect_node(sequence=True)
+        return True
+
+    def expect_first_flow_sequence_item(self) -> None:
+        if not self._flow_item_from_source():
+            super().expect_first_flow_sequence_item()
+
+    def expect_flow_sequence_item(self) -> None:
+        from ruamel.yaml.events import SequenceEndEvent
+
+        if isinstance(self.event, SequenceEndEvent) or not hasattr(
+            getattr(self.event, "value", None), "fold_pos"
+        ):
+            return super().expect_flow_sequence_item()
+        self.write_indicator(self.flow_seq_separator, False)
+        self._flow_item_from_source()
+
+    def write_folded(self, text: Any, comment: Any) -> None:
+        if not isinstance(text, _SourceFoldedStr):
+            return super().write_folded(text, comment)
+        best_width = self.best_width
+        self.best_width = sys.maxsize
+        try:
+            super().write_folded(text, comment)
+        finally:
+            self.best_width = best_width
+
+    def write_double_quoted(self, text: Any, split: Any = True) -> None:
+        fold_pos = getattr(text, "fold_pos", None)
+        if self.root_context or fold_pos is None:
+            return super().write_double_quoted(text, split)
+
+        def escaped(s: str) -> str:
+            # The same escapes as the parent's
+            out = []
+            for ch in s:
+                if ch in '"\\\x85  ﻿' or not (
+                    "\x20" <= ch <= "\x7e"
+                    or (
+                        self.allow_unicode
+                        and (
+                            "\xa0" <= ch <= "퟿"
+                            or "" <= ch <= "�"
+                            or "\U00010000" <= ch <= "\U0010ffff"
+                        )
+                    )
+                ):
+                    if ch in self.ESCAPE_REPLACEMENTS:
+                        ch = "\\" + self.ESCAPE_REPLACEMENTS[ch]
+                    elif ch <= "\xff":
+                        ch = "\\x%02X" % ord(ch)
+                    elif ch <= "￿":
+                        ch = "\\u%04X" % ord(ch)
+                    else:
+                        ch = "\\U%08X" % ord(ch)
+                out.append(ch)
+            return "".join(out)
+
+        # Breaking where the source did, each break reading as the space
+        # it replaced
+        self.write_indicator('"', True)
+        start = 0
+        for pos in fold_pos if split else []:
+            self._write(escaped(text[start:pos]))
+            self.write_indent()
+            start = pos + 1
+        self._write(escaped(text[start:]))
+        self.write_indicator('"', False)
+
     def write_plain(self, text: Any, split: Any = True) -> None:
         fold_pos = getattr(text, "fold_pos", None)
-        if self.root_context or not text or (split and not fold_pos):
+        if self.root_context or not text or (split and fold_pos is None):
             return super().write_plain(text, split)
-
-        def write(data: str) -> None:
-            self.column += len(data)
-            self.stream.write(
-                data.encode(self.encoding) if self.encoding else data
-            )
-
         # The same bookkeeping as the parent's, breaking where the source
-        # did instead of where the width says to
+        # did instead of where the width says to. A value on one line stays
+        # on one line, however long.
         if not self.whitespace:
-            write(" ")
+            if (
+                split
+                and not self.flow_level
+                and getattr(text, "own_line", False)
+                and self.indent is not None
+                and self.column > self.indent
+            ):
+                self.write_indent()
+            else:
+                self._write(" ")
         self.whitespace = False
         self.indention = False
         # A simple key gets no breaks: ruamel still wraps one past the width,
         # but a key can't span lines
         start = 0
-        for pos in fold_pos if split and fold_pos else []:
-            write(text[start:pos])
+        for pos in fold_pos if split and fold_pos is not None else []:
+            self._write(text[start:pos])
             self.write_indent()
             self.whitespace = False
             self.indention = False
             start = pos + 1
-        write(text[start:])
+        self._write(text[start:])
 
 
 class _ThreadLocalYAML(threading.local):
@@ -237,6 +435,77 @@ class _ThreadLocalYAMLProxy:
 
 ryaml = _ThreadLocalYAMLProxy()
 
+
+def set_yaml_item(mapping: dict, key: Any, value: Any) -> None:
+    """Set an item in a mapping loaded with ``ryaml``, keeping its layout.
+
+    ruamel.yaml attaches the blank lines and comments that follow a mapping
+    to its last item, however deeply nested, so a key appended after it
+    would land below them, e.g., below the blank line separating the mapping
+    from the next top-level key. The new last item takes them over instead.
+    """
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    def get_last_items(node: Any) -> list[tuple[Any, Any]]:
+        # The collection and key of each last item, outermost first
+        if isinstance(node, CommentedMap) and node:
+            last = next(reversed(node))
+        elif isinstance(node, CommentedSeq) and node:
+            last = len(node) - 1
+        else:
+            return []
+        return [(node, last)] + get_last_items(node[last])
+
+    def to_commented(node: Any) -> Any:
+        if isinstance(node, dict):
+            return CommentedMap((k, to_commented(v)) for k, v in node.items())
+        if isinstance(node, list):
+            return CommentedSeq(to_commented(v) for v in node)
+        return node
+
+    is_last = bool(mapping) and key == next(reversed(mapping))
+    # A scalar replacing a scalar keeps the item's comments as they are
+    if not isinstance(mapping, CommentedMap) or (
+        key in mapping
+        and (
+            not is_last
+            or (
+                not isinstance(mapping[key], (dict, list))
+                and not isinstance(value, (dict, list))
+            )
+        )
+    ):
+        mapping[key] = value
+        return
+    # Maps keep a trailing comment in slot 2 of an item, and sequences in 0
+    token = None
+    for node, k in reversed(get_last_items(mapping)):
+        slots = node.ca.items.get(k)
+        slot = 2 if isinstance(node, CommentedMap) else 0
+        if slots and slots[slot] is not None:
+            token = slots[slot]
+            slots[slot] = None
+            # A comment at the end of the item's own line stays with it
+            if token.value.startswith("#"):
+                eol, _, rest = token.value.partition("\n")
+                slots[slot] = copy.copy(token)
+                slots[slot].value = eol + "\n"
+                token = copy.copy(token)
+                token.value = "\n" + rest
+                if not rest:
+                    token = None
+            break
+    if token is None:
+        mapping[key] = value
+        return
+    mapping[key] = to_commented(value)
+    node, k = get_last_items(mapping)[-1]
+    if isinstance(node, CommentedMap):
+        node.ca.items[k] = [None, None, token, None]
+    else:
+        node.ca.items[k] = [token, None]
+
+
 try:
     # libyaml-backed loader, many times faster than the pure-Python one.
     # PyYAML ships prebuilt wheels with libyaml on every platform we target,
@@ -317,20 +586,42 @@ AUTO_IGNORE_SUFFIXES = [
     ".pyc",
     ".synctex.gz",
     ".auxlock",
-    ".ipynb_checkpoints",
 ]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
 AUTO_IGNORE_PREFIXES = [
     ".venv",
-    "__pycache__",
-    ".ipynb_checkpoints",
     ".calkit/overleaf/",
 ]
+# Directories ignored wherever they are in the project, e.g., the
+# checkpoints Jupyter writes next to each notebook
+AUTO_IGNORE_DIR_NAMES = [".ipynb_checkpoints", "__pycache__"]
+
+
+def get_auto_ignore_path(path: str) -> str | None:
+    """The path to ignore so ``path`` isn't committed, if it's one Calkit
+    ignores automatically.
+
+    A file in a directory that's always ignored gives that directory, so it
+    takes one line of ``.gitignore`` however many files it holds.
+    """
+    from pathlib import Path
+
+    path = Path(path).as_posix()
+    parts = path.split("/")
+    for n, part in enumerate(parts[:-1]):
+        if part in AUTO_IGNORE_DIR_NAMES:
+            return "/".join(parts[: n + 1]) + "/"
+    if (
+        any(path.endswith(s) for s in AUTO_IGNORE_SUFFIXES)
+        or any(path.startswith(p) for p in AUTO_IGNORE_PREFIXES)
+        or path in {Path(p).as_posix() for p in AUTO_IGNORE_PATHS}
+    ):
+        return path
+    return None
+
+
 # Constants for version control auto-add to DVC
 DVC_EXTENSIONS = [
-    ".png",
-    ".jpeg",
-    ".jpg",
     ".gif",
     ".h5",
     ".parquet",
@@ -338,7 +629,6 @@ DVC_EXTENSIONS = [
     ".mp4",
     ".avi",
     ".webm",
-    ".pdf",
     ".xlsx",
     ".docx",
     ".pptx",
@@ -350,6 +640,13 @@ DVC_EXTENSIONS = [
     ".zarr",
 ]
 DVC_SIZE_THRESH_BYTES = 5_000_000
+# Figures go in Git so a clone has them, unless they're big, since each
+# version stays in its history at about full size
+FIGURE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf", ".svg"]
+FIGURE_DVC_SIZE_THRESH_BYTES = 1_000_000
+# What pipeline runs of Python tell tools to date their files, so the same
+# data gives the same bytes. Tools that write ZIPs can't go before 1980.
+OUTPUT_SOURCE_DATE_EPOCH = "315532800"
 # How each stage's current outputs were made, kept with the project
 STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
 
@@ -401,24 +698,134 @@ def echo(message: str) -> None:
     typer.echo(encode_safe(message))
 
 
-def find_project_dirs(relative=False, max_depth=3) -> list[str]:
-    """Find all Calkit project directories."""
+def get_project_paths_path() -> str:
+    """Where the folders projects were created or cloned into on this
+    machine are recorded.
+    """
+    return os.path.join(
+        get_user_home(), ".calkit", f"project-paths{get_env_suffix()}.json"
+    )
+
+
+def get_recorded_project_paths() -> list[str]:
+    """The folders projects were created or cloned into on this machine."""
+    try:
+        with open(get_project_paths_path()) as f:
+            paths = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(paths, list):
+        return []
+    return [p for p in paths if isinstance(p, str)]
+
+
+def write_json(path: str, data: Any, **kwargs: Any) -> None:
+    """Write JSON to a file all at once, so it's never read half written,
+    through a temporary file of its own, so writers don't share one.
+    """
+    import tempfile
+    import time
+
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=folder, prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, **kwargs)
+        # Windows refuses to replace a file while another process reads it
+        n_retries = 40 if sys.platform == "win32" else 0
+        for n_retries_left in range(n_retries, -1, -1):
+            try:
+                os.replace(tmp_path, path)
+                break
+            except PermissionError:
+                if n_retries_left == 0:
+                    raise
+                time.sleep(0.05)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+        raise
+
+
+def record_project_path(wdir: str = ".") -> None:
+    """Remember where a project is on this machine, so it's found wherever
+    it is, e.g., by 'calkit open project' or the browser extension.
+    """
+    from filelock import FileLock
+
+    path = os.path.realpath(wdir)
+    if path in get_recorded_project_paths():
+        return
+    fpath = get_project_paths_path()
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    # Read again once it's ours, so another process's addition isn't lost
+    with FileLock(fpath + ".lock", timeout=60):
+        paths = get_recorded_project_paths()
+        if path in paths:
+            return
+        # Ones since moved or deleted are dropped while it's being written
+        paths = [
+            p for p in paths if os.path.isfile(os.path.join(p, "calkit.yaml"))
+        ]
+        write_json(fpath, paths + [path], indent=2)
+
+
+def find_project_dirs(
+    relative: bool = False, max_depth: int = 3, search_protected: bool = True
+) -> list[str]:
+    """Find all Calkit project directories, i.e., those up to
+    ``max_depth`` folders into the home folder, and, unless ``relative``,
+    those recorded when created, cloned, or found before.
+
+    On macOS, the home folder's media and system folders are never
+    searched, and, without ``search_protected``, nor are its Desktop,
+    Documents, and Downloads folders, since macOS asks before a process
+    reads any of them, e.g., one the browser starts; recorded projects in
+    them are still found.
+    """
     if relative:
         start = ""
     else:
         start = os.path.expanduser("~")
+    skipped = set()
+    if platform.system() == "Darwin" and not relative:
+        skipped |= set(MACOS_MEDIA_FOLDERS)
+        if not search_protected:
+            skipped |= set(MACOS_PROTECTED_FOLDERS)
+    try:
+        top_names = sorted(
+            entry.name
+            for entry in os.scandir(start or ".")
+            if not entry.name.startswith(".")
+            and entry.name not in skipped
+            and entry.is_dir()
+        )
+    except OSError:
+        top_names = []
     res = []
     for i in range(max_depth):
-        pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
-        res += glob.glob(pattern)
-        # Check GitHub documents for users who use GitHub Desktop
-        pattern = os.path.join(
-            start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
-        )
-        res += glob.glob(pattern)
+        for top_name in top_names:
+            top = os.path.join(glob.escape(start), glob.escape(top_name))
+            pattern = os.path.join(top, *["*"] * i, "calkit.yaml")
+            res += glob.glob(pattern)
+            # Check GitHub documents for users who use GitHub Desktop
+            pattern = os.path.join(
+                top, "GitHub", *["*"] * (i + 1), "calkit.yaml"
+            )
+            res += glob.glob(pattern)
+    if not relative:
+        res += [
+            os.path.join(p, "calkit.yaml")
+            for p in get_recorded_project_paths()
+        ]
     final_res = []
     for ck_fpath in res:
         path = os.path.dirname(ck_fpath)
+        if path in final_res or not os.path.isfile(ck_fpath):
+            continue
         # Make sure this path is a Git repo
         try:
             calkit.git.get_repo(path)
@@ -426,6 +833,77 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
             continue
         final_res.append(path)
     return final_res
+
+
+def get_project_checkouts(
+    name: str,
+    owner: str = "",
+    warn: Any = None,
+    search_protected: bool = True,
+) -> dict[str, str]:
+    """Find the checkouts of a project on this machine, by the owner and
+    name each says it has, returning each one's owner by its real path.
+
+    ``warn`` is called with why a project that can't be read was skipped.
+    ``search_protected`` is as for :func:`find_project_dirs`. Each found is
+    recorded, so it's found again without searching where it is.
+    """
+    found: dict[str, str] = {}
+    for path in find_project_dirs(search_protected=search_protected):
+        path = os.path.realpath(path)
+        if path in found:
+            continue
+        try:
+            # Most projects say their name, which rules them out without
+            # asking Git for a remote, or, for one written plainly on its
+            # own line, even parsing the file
+            with open(os.path.join(path, "calkit.yaml"), "rb") as f:
+                text = f.read()
+            match = re.search(
+                rb"^name:[ \t]*([\"']?)([\w.-]+)\1[ \t]*(?:#[^\r\n]*)?\r?$",
+                text,
+                flags=re.MULTILINE,
+            )
+            if match and match.group(2).decode() not in (
+                name,
+                "null",
+                "Null",
+                "NULL",
+                "~",
+            ):
+                continue
+            # One that says none takes it from its Git remote, so it's in
+            # the repo's config, unless that's elsewhere, as a worktree's is
+            git_config_path = os.path.join(path, ".git", "config")
+            if not re.search(
+                rb"^name[ \t]*:", text, flags=re.MULTILINE
+            ) and os.path.isfile(git_config_path):
+                with open(git_config_path, "rb") as f:
+                    if name.encode() not in f.read():
+                        continue
+            info = load_calkit_info(wdir=path, read_only=True)
+            declared = info.get("name") if isinstance(info, dict) else None
+            if declared is not None and declared != name:
+                continue
+            # A subproject without its own repo would look like its parent
+            repo = calkit.git.get_repo(path)
+            if os.path.realpath(str(repo.working_tree_dir)) != path:
+                continue
+            p_owner, p_name = detect_project_name(wdir=path).split("/", 1)
+        except ValueError:
+            # It names no owner, so it can't be the one asked for
+            continue
+        except Exception as e:
+            # E.g., a calkit.yaml left with merge conflict markers
+            if warn is not None:
+                warn(f"Skipping {path}, which can't be read: {e}")
+            continue
+        if p_name == name and owner in ("", p_owner):
+            found[path] = p_owner
+    for path in found:
+        with contextlib.suppress(Exception):
+            record_project_path(path)
+    return found
 
 
 def load_calkit_info(
@@ -578,13 +1056,16 @@ def save_calkit_info(
     wdir: str | PathLike | None = None,
 ) -> None:
     """Save Calkit project information to ``calkit.yaml``."""
+    from pathlib import Path
+
     fpath = "calkit.yaml"
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
-    # Always write as UTF-8; on Windows the default open() encoding is cp1252,
-    # which mangles non-ASCII content (e.g., Greek letters) into mojibake.
-    with open(fpath, "w", encoding="utf-8") as f:
-        ryaml.dump(info, f)
+    # Written as UTF-8, since on Windows the default open() encoding is
+    # cp1252, which mangles non-ASCII content (e.g., Greek letters) into
+    # mojibake, and only once the dump has succeeded, so a failure can't
+    # leave the file empty
+    ryaml.dump(info, Path(fpath))
 
 
 def load_calkit_info_object(wdir: str | None = None) -> ProjectInfo:
@@ -611,6 +1092,21 @@ USER_HOME_ENV_VAR = "CALKIT_USER_HOME"
 # These are here rather than in calkit.config, which every command's update
 # check would otherwise import, with keyring and pydantic-settings, only to
 # find where its state is kept
+def get_calkit_cmd(module: str = "calkit") -> list[str]:
+    """The command that runs one of Calkit's modules with this Python,
+    without importing anything from the folder it runs in first, e.g., a
+    project's own ``queue.py``.
+    """
+    if sys.version_info >= (3, 11):
+        return [sys.executable, "-P", "-m", module]
+    return [
+        sys.executable,
+        "-c",
+        "import runpy, sys; sys.path.pop(0); "
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)",
+    ]
+
+
 def get_user_home() -> str:
     """The home directory Calkit keeps its own files in."""
     return os.environ.get(USER_HOME_ENV_VAR) or os.path.expanduser("~")
@@ -646,6 +1142,27 @@ def ensure_local_dir(wdir: str | None = None) -> str:
         with open(gitignore, "w") as f:
             f.write("*\n")
     return base
+
+
+def write_if_changed(path: str, content: str | bytes) -> bool:
+    """Write a file only if its content differs, returning whether it did,
+    so whatever goes by its content or timestamp, e.g., DVC or latexmk,
+    doesn't rerun for nothing.
+
+    Text is written as UTF-8 bytes, so it's byte-identical on every
+    platform, where text mode would write CRLF on Windows.
+    """
+    data = content.encode("utf-8") if isinstance(content, str) else content
+    try:
+        with open(path, "rb") as f:
+            if f.read() == data:
+                return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return True
 
 
 NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
@@ -784,16 +1301,65 @@ def update_readme_content(
     return heading + intro + ("\n" + body if body else "")
 
 
+def is_terminal(stream: Any) -> bool:
+    """True when a stream is a terminal.
+
+    On Windows, ``isatty`` is also true of the NUL device, e.g., for
+    ``2>NUL`` or ``subprocess.DEVNULL``, so only a stream with a console
+    mode counts there. Python writes to NUL with the ANSI code page, so
+    taking it for a terminal, e.g., to draw a spinner, fails on the first
+    character it can't encode. mintty isn't a console either; see
+    :func:`is_mintty`.
+    """
+    try:
+        if not stream.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetConsoleMode.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    mode = wintypes.DWORD()
+    return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
 def is_tty() -> bool:
     """True only when both stdin and stdout are TTYs.
 
     Stdout matters because the prompt needs to render; stdin matters because
     we need to read the user's answer. CI environments fail at least one
     and fall through to the abort-with-fix-command path.
+
+    Neither counts on Windows when it's the NUL device; see
+    :func:`is_terminal`.
     """
+    return is_terminal(sys.stdin) and is_terminal(sys.stdout)
+
+
+def is_wsl() -> bool:
+    """Whether this is Linux running under the Windows Subsystem for Linux."""
+    if not sys.platform.startswith("linux"):
+        return False
+    # A container on a Windows host shares the WSL kernel, but it isn't WSL
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return False
     try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError):
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
         return False
 
 
@@ -874,6 +1440,22 @@ def check_dep_exists(
 
         exe = find_conda_exe() if name == "conda" else find_mamba_exe()
         return exe is not None
+    # Apps that aren't run by their name, or not on every OS
+    if name in ("word", "excel", "powerpoint"):
+        from calkit.office import app_installed
+
+        return app_installed(name)
+    if name == "libreoffice":
+        from calkit.docx import find_soffice
+
+        return find_soffice() is not None
+    # Apps Calkit exports with can be installed off the PATH, e.g., as a
+    # macOS app bundle
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if name.lower() in known:
+        return known[name.lower()].find_executable() is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -896,17 +1478,24 @@ def system_property_requirement_kinds() -> dict[str, str]:
     These constrain something about the machine rather than requiring a
     thing to be present, so they carry no name: ``cpu-count`` is the whole
     identity of the entry. The values are the keys
-    :func:`get_system_info` reports them under.
+    :func:`get_system_info` reports them under, which for the GPU
+    properties is the list of GPUs they're read from.
     """
     from typing import get_args
 
     from calkit.environments import SYSTEM_LOCK_PROPERTIES
     from calkit.models.core import SystemNumberProperty, SystemValueProperty
+    from calkit.models.requirements import GPU_PROPERTY_FIELDS
 
     props = list(get_args(SystemNumberProperty)) + list(
         get_args(SystemValueProperty)
     )
-    return {prop: SYSTEM_LOCK_PROPERTIES[prop] for prop in props}
+    return {
+        prop: "gpus"
+        if prop in GPU_PROPERTY_FIELDS
+        else SYSTEM_LOCK_PROPERTIES[prop]
+        for prop in props
+    }
 
 
 def _numeric_property_kinds() -> tuple[str, ...]:
@@ -1003,11 +1592,12 @@ def _normalize_requirement(req) -> dict:
     if not isinstance(req, dict):
         raise malformed()
     keys = list(req.keys())
-    # Flat form with explicit kind: only requires ``name`` for kinds where
-    # name is the identity (app, env-var). Setup requirements may omit it,
-    # and property requirements have none to give.
-    if "kind" in keys:
+    # Flat form, an app unless it gives a kind: only requires ``name`` for
+    # kinds where name is the identity (app, env-var). Setup requirements
+    # may omit it, and property requirements have none to give.
+    if "kind" in keys or "name" in keys:
         out = dict(req)
+        out.setdefault("kind", "app")
         if "name" not in out:
             kind = out["kind"]
             if kind in system_property_requirement_kinds():
@@ -1029,10 +1619,12 @@ def _normalize_requirement(req) -> dict:
                 )
             else:
                 raise ValueError(f"Requirement missing required 'name': {req}")
-        return out
-    if "name" in keys:
-        out = dict(req)
-        out.setdefault("kind", "app")
+        # YAML reads an unquoted name in braces, e.g., {var}, as a mapping
+        if not isinstance(out["name"], str):
+            raise ValueError(
+                f"Malformed requirement {req!r}; its 'name' must be text, "
+                'so quote it if it\'s in braces, e.g., name: "{var}"'
+            )
         return out
     if len(keys) != 1:
         raise malformed()
@@ -1062,8 +1654,89 @@ def check_property_requirement(
     A property the machine can't report is an error too, rather than a
     silent pass: an unanswerable question isn't a satisfied one.
     """
-    from packaging.specifiers import SpecifierSet
-    from packaging.version import InvalidVersion, Version
+    from calkit.models.requirements import GPU_PROPERTY_FIELDS
+
+    def check_value(value: Any) -> None:
+        """Check one value of the property against the requirement."""
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import InvalidVersion, Version
+
+        # Numeric properties are bounded; everything else is matched or
+        # compared as a version.
+        if prop in _numeric_property_kinds():
+            minimum = req.get("min")
+            maximum = req.get("max")
+            if minimum is None and maximum is None:
+                raise ValueError(
+                    f"Requirement on '{prop}' needs a 'min' or a 'max'; to "
+                    "depend on its value rather than constrain it, add it to "
+                    "the environment's 'lock'"
+                )
+            if minimum is not None and value < minimum:
+                raise ValueError(
+                    f"{described_as} has {prop} {_fmt_prop(value)}, but at "
+                    f"least {_fmt_prop(minimum)} is required"
+                )
+            if maximum is not None and value > maximum:
+                raise ValueError(
+                    f"{described_as} has {prop} {_fmt_prop(value)}, but at "
+                    f"most {_fmt_prop(maximum)} is required"
+                )
+            return
+        equals = req.get("equals")
+        spec = req.get("version_spec")
+        patterns = req.get("matches")
+        if equals is None and spec is None and patterns is None:
+            raise ValueError(
+                f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
+                "'version_spec'; to depend on its value rather than constrain "
+                "it, add it to the environment's 'lock'"
+            )
+        if patterns is not None:
+            import fnmatch
+
+            globs = [patterns] if isinstance(patterns, str) else list(patterns)
+            if not any(
+                fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
+                for g in globs
+            ):
+                wanted = " or ".join(f"'{g}'" for g in globs)
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', which doesn't "
+                    f"match {wanted}"
+                )
+        if equals is not None:
+            allowed = [equals] if isinstance(equals, str) else list(equals)
+            # Matched case-insensitively because the same machine is 'Darwin'
+            # or 'darwin' depending on who is writing it down, and nobody means
+            # those to be different answers.
+            if str(value).lower() not in [str(a).lower() for a in allowed]:
+                wanted = " or ".join(f"'{a}'" for a in allowed)
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', but {wanted} is "
+                    "required"
+                )
+        if spec is not None:
+            try:
+                spec_set = SpecifierSet(
+                    spec if spec[0] in "<>=!~" else f"=={spec}"
+                )
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid version_spec '{spec}' for {prop}: {e}"
+                )
+            try:
+                parsed = Version(str(value))
+            except InvalidVersion:
+                raise ValueError(
+                    f"{described_as} reports {prop} '{value}', which can't be "
+                    f"read as a version to compare against '{spec}'"
+                )
+            if parsed not in spec_set:
+                raise ValueError(
+                    f"{described_as} has {prop} '{value}', but '{spec}' is "
+                    "required"
+                )
 
     prop = req["kind"]
     key = system_property_requirement_kinds()[prop]
@@ -1073,80 +1746,28 @@ def check_property_requirement(
             f"Requirement on '{prop}' can't be checked because "
             f"{described_as} doesn't report it"
         )
-    # Numeric properties are bounded; everything else is matched or
-    # compared as a version.
-    if prop in _numeric_property_kinds():
-        minimum = req.get("min")
-        maximum = req.get("max")
-        if minimum is None and maximum is None:
+    if prop in GPU_PROPERTY_FIELDS:
+        field = GPU_PROPERTY_FIELDS[prop]
+        values = [gpu[field] for gpu in value if gpu.get(field)]
+        if not values:
             raise ValueError(
-                f"Requirement on '{prop}' needs a 'min' or a 'max'; to "
-                "depend on its value rather than constrain it, add it to "
-                "the environment's 'lock'"
+                f"Requirement on '{prop}' isn't met because {described_as} "
+                "has no GPU that reports it"
             )
-        if minimum is not None and value < minimum:
-            raise ValueError(
-                f"{described_as} has {prop} {_fmt_prop(value)}, but at least "
-                f"{_fmt_prop(minimum)} is required"
-            )
-        if maximum is not None and value > maximum:
-            raise ValueError(
-                f"{described_as} has {prop} {_fmt_prop(value)}, but at most "
-                f"{_fmt_prop(maximum)} is required"
-            )
-        return
-    equals = req.get("equals")
-    spec = req.get("version_spec")
-    patterns = req.get("matches")
-    if equals is None and spec is None and patterns is None:
+        problems = []
+        for gpu_value in values:
+            try:
+                check_value(gpu_value)
+                return
+            except ValueError as e:
+                problems.append(str(e))
+        if len(problems) == 1:
+            raise ValueError(problems[0])
         raise ValueError(
-            f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
-            "'version_spec'; to depend on its value rather than constrain "
-            "it, add it to the environment's 'lock'"
+            f"No GPU on {described_as} meets the requirement on '{prop}': "
+            + "; ".join(problems)
         )
-    if patterns is not None:
-        import fnmatch
-
-        globs = [patterns] if isinstance(patterns, str) else list(patterns)
-        if not any(
-            fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
-            for g in globs
-        ):
-            wanted = " or ".join(f"'{g}'" for g in globs)
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', which doesn't match "
-                f"{wanted}"
-            )
-    if equals is not None:
-        allowed = [equals] if isinstance(equals, str) else list(equals)
-        # Matched case-insensitively because the same machine is 'Darwin'
-        # or 'darwin' depending on who is writing it down, and nobody means
-        # those to be different answers.
-        if str(value).lower() not in [str(a).lower() for a in allowed]:
-            wanted = " or ".join(f"'{a}'" for a in allowed)
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', but {wanted} is "
-                "required"
-            )
-    if spec is not None:
-        try:
-            spec_set = SpecifierSet(
-                spec if spec[0] in "<>=!~" else f"=={spec}"
-            )
-        except Exception as e:
-            raise ValueError(f"Invalid version_spec '{spec}' for {prop}: {e}")
-        try:
-            parsed = Version(str(value))
-        except InvalidVersion:
-            raise ValueError(
-                f"{described_as} reports {prop} '{value}', which can't be "
-                f"read as a version to compare against '{spec}'"
-            )
-        if parsed not in spec_set:
-            raise ValueError(
-                f"{described_as} has {prop} '{value}', but '{spec}' is "
-                "required"
-            )
+    check_value(value)
 
 
 def _fmt_prop(value: float) -> str:
@@ -1254,13 +1875,20 @@ def get_version_checked_app_names(
         SWITCH_KIND,
         runs_elsewhere,
     )
+    from calkit.install import NAME_ALIASES
+    from calkit.pipeline import get_stage_items
 
     envs = ck_info.get("environments") or {}
     reqs = list(get_requirements(ck_info))
     stages = (ck_info.get("pipeline") or {}).get("stages", {})
+    # With each item's values, when its environment or requirements use them
+    items: dict[str, dict] = {}
     for name, stage in stages.items():
-        if stage_names is not None and name not in stage_names:
-            continue
+        if stage_names is None or name in stage_names:
+            items |= get_stage_items(
+                name, stage, params=ck_info.get("parameters")
+            )
+    for stage in items.values():
         env_names = str(stage.get("environment") or "_system").split(
             COMPOSITE_ENV_SEP
         )
@@ -1291,8 +1919,21 @@ def get_version_checked_app_names(
             and req["name"] != "calkit"
             and req.get("version_spec")
         ):
-            names.append(req["name"])
+            # As checked, e.g., code for vscode
+            names.append(NAME_ALIASES.get(req["name"], req["name"]))
     return list(dict.fromkeys(names))
+
+
+def get_requirement_key(req: Any, wdir: str | None = None) -> str:
+    """Identify a requirement however it's written, e.g., to cache its check.
+
+    One checked by running something in the project, e.g., a setup step's
+    ``check_command``, is identified by that project's directory too.
+    """
+    normalized = _normalize_requirement(req)
+    if normalized["kind"] in ("setup", "aws-credentials"):
+        normalized = normalized | {"_wdir": os.path.abspath(wdir or ".")}
+    return json.dumps(normalized, sort_keys=True, default=str)
 
 
 def check_requirements(
@@ -1303,6 +1944,7 @@ def check_requirements(
     use_cache: bool = True,
     requirements: list | None = None,
     described_as: str = "this machine",
+    checked: dict[str, str | None] | None = None,
 ) -> None:
     """Check that a project's declared requirements are satisfied.
 
@@ -1310,6 +1952,13 @@ def check_requirements(
     which describes the host -- the built-in ``_system`` environment. A
     ``system`` environment passes its own list here instead, for the
     machine it names.
+
+    With ``checked``, each requirement is checked once across calls: its
+    outcome, None or what's wrong, is kept there under
+    :func:`get_requirement_key` and reused, so one many stages share is only
+    asked about once. Every requirement of a kind is then checked, and what
+    isn't met reported together, but not those of later kinds, which may
+    depend on them.
 
     ``setup`` requirements are verified via
     :func:`calkit.requirements.check_setup_dep`, which runs the
@@ -1319,6 +1968,8 @@ def check_requirements(
     ``aws-credentials`` requirements are checked the same way, by
     :func:`calkit.requirements.check_aws_credentials_req`.
     """
+    from calkit import install as _install
+
     if requirements is not None:
         # An environment's own list is checked exactly as declared: it
         # describes a machine that runs stages, which is a smaller claim
@@ -1365,6 +2016,40 @@ def check_requirements(
             buckets.setdefault("_other", []).append(req)
         else:
             buckets[kind].append(req)
+    if checked is not None:
+        # One at a time, in the order below, so each outcome is known
+        if buckets["_property"] and system_info is None:
+            system_info = get_machine_properties()
+        for bucket in (
+            "_property",
+            "env-var",
+            "app",
+            "_other",
+            "setup",
+            "aws-credentials",
+        ):
+            problems = []
+            for req in buckets.get(bucket, []):
+                key = get_requirement_key(req, wdir=wdir)
+                if key not in checked:
+                    try:
+                        check_requirements(
+                            wdir=wdir,
+                            system_info=system_info,
+                            interactive=interactive,
+                            use_cache=use_cache,
+                            requirements=[req],
+                            described_as=described_as,
+                        )
+                        checked[key] = None
+                    except ValueError as e:
+                        checked[key] = str(e)
+                problem = checked[key]
+                if problem is not None:
+                    problems.append(problem)
+            if problems:
+                raise ValueError("; ".join(problems))
+        return
     if buckets["_property"]:
         # Read the machine only when something asks about it; describing a
         # system shells out for a version from every package manager it can
@@ -1375,6 +2060,12 @@ def check_requirements(
             if system_info is not None
             else get_machine_properties()
         )
+        # GPUs likewise, since finding them can start a GPU runtime
+        gpu_kinds = [k for k, v in property_kinds.items() if v == "gpus"]
+        if "gpus" not in info and any(
+            req["kind"] in gpu_kinds for req in buckets["_property"]
+        ):
+            info = {**info, "gpus": [dict(g) for g in get_gpus()]}
         for req in buckets["_property"]:
             check_property_requirement(req, info, described_as=described_as)
     for req in buckets["env-var"]:
@@ -1397,7 +2088,10 @@ def check_requirements(
             )
         raise ValueError(msg)
     for req in buckets["app"]:
-        req_name = req["name"]
+        declared_name = req["name"]
+        # Checked and installed as the binary it provides, e.g., code for
+        # vscode
+        req_name = _install.NAME_ALIASES.get(declared_name, declared_name)
         # The ``calkit`` app is always satisfied by the running process,
         # but a declared ``version_spec`` (e.g. ``calkit>=0.38``) is
         # checked against the installed version so projects can pin a
@@ -1419,13 +2113,31 @@ def check_requirements(
                     described_as=described_as,
                 )
             continue
-        # Offer the registered native installer when we have one.
-        from calkit import install as _install
-
-        if _install.get_installer(req_name) is not None:
-            print(f"App '{req_name}' is not installed.")
+        # Offer the project's own way to install it, or else the registered
+        # native installer when we have one
+        setup_command = req.get("setup_command")
+        description = (req.get("description") or "").strip()
+        registered = _install.get_installer(req_name)
+        # Only the project's own command is an override; the registered
+        # installer goes through by name, so declining it points at
+        # 'calkit install' rather than its raw script
+        override: _install.Installer | None = None
+        if setup_command:
+            override = {"script": setup_command, "path_add": []}
+            if registered is not None:
+                # The app tends to land in the same place however it's
+                # installed, e.g., ~/.local/bin, so keep where to look for
+                # it, but not the registry's prerequisites, which the
+                # project's command may not need
+                override["path_add"] = registered["path_add"]
+                if "binary" in registered:
+                    override["binary"] = registered["binary"]
+        if override is not None or registered is not None:
+            print(f"App '{declared_name}' is not installed.")
+            if description and interactive:
+                print(f"  {description}")
             if _install.prompt_and_install(
-                req_name, interactive=interactive
+                req_name, interactive=interactive, entry=override
             ) and check_dep_exists(req_name, "app", system_info=system_info):
                 if spec:
                     check_app_version(
@@ -1437,10 +2149,15 @@ def check_requirements(
                 continue
         # Some apps have no installer here but a known way in, e.g., a
         # system package manager on Linux
-        hint = _install.get_unsupported_message(req_name)
+        hint = (
+            None
+            if setup_command
+            else _install.get_unsupported_message(req_name)
+        )
         raise ValueError(
-            f"app '{req_name}' not found on {described_as}"
+            f"app '{declared_name}' not found on {described_as}"
             + (f"; {hint}" if hint else "")
+            + (f"\n  {description}" if description else "")
         )
     for req in buckets.get("_other", []):
         req_name = req["name"]
@@ -1566,6 +2283,24 @@ def read_file(path: str, as_bytes: bool | None = None) -> str | bytes:
     # Project is None, so let's just read a local file
     with open(path, mode="rb" if as_bytes else "r") as f:
         return f.read()
+
+
+def get_dvc_size_thresh_bytes(path: str) -> int:
+    """The size above which a new file at ``path`` goes to DVC."""
+    if os.path.splitext(path)[-1].lower() in FIGURE_EXTENSIONS:
+        return FIGURE_DVC_SIZE_THRESH_BYTES
+    return DVC_SIZE_THRESH_BYTES
+
+
+def get_output_date_env_vars() -> dict[str, str]:
+    """Environmental variables that keep the time out of files a pipeline
+    run of Python writes, e.g., Matplotlib's PDFs, unless already set.
+    """
+    if not os.environ.get("CALKIT_PIPELINE_RUNNING") or os.environ.get(
+        "SOURCE_DATE_EPOCH"
+    ):
+        return {}
+    return {"SOURCE_DATE_EPOCH": OUTPUT_SOURCE_DATE_EPOCH}
 
 
 def get_size(path: str):
@@ -1724,6 +2459,11 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
 
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if dep_name.lower() in known:
+        return known[dep_name.lower()].version()
     # MATLAB has no '--version', and starts in full if passed one
     if dep_name == "matlab":
         cmd = [dep_name, "-batch", "disp(version)"]
@@ -1900,6 +2640,160 @@ def get_machine_properties() -> dict:
     }
 
 
+@functools.cache
+def get_gpus() -> tuple[dict, ...]:
+    """Get this machine's GPUs, each with a ``name``, ``vendor`` and ``arch``.
+
+    They're read from what the drivers install rather than from a framework
+    like PyTorch, so this works before any environment is built: the HIP
+    runtime for AMD, ``nvidia-smi`` for NVIDIA, and the chip itself on Apple
+    silicon. ``arch`` is what a build targets, e.g., 'gfx1201' or 'sm_89',
+    or None where there's no such thing. Cached, since this can start a GPU
+    runtime, and a machine's GPUs don't change while a command runs.
+    """
+
+    def get_apple_gpus() -> list[dict]:
+        if platform.system() != "Darwin" or platform.machine() != "arm64":
+            return []
+        res = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if res.returncode != 0 or not res.stdout.strip():
+            return []
+        return [{"name": res.stdout.strip(), "vendor": "apple", "arch": None}]
+
+    gpus = []
+    for get in (_get_amd_gpus, _get_nvidia_gpus, get_apple_gpus):
+        # A broken driver is a machine with no usable GPU, not a crash
+        try:
+            gpus += get()
+        except (
+            OSError,
+            AttributeError,
+            ValueError,
+            subprocess.SubprocessError,
+        ):
+            pass
+    return tuple(gpus)
+
+
+def _get_amd_gpus() -> list[dict]:
+    """Get AMD GPUs from the HIP runtime, falling back to Linux's KFD.
+
+    Windows drivers install the runtime, while on Linux it comes with a
+    ROCm install that a machine using ROCm wheels needn't have, so there
+    the kernel's description of each GPU is read instead.
+    """
+    import ctypes
+
+    if sys.platform == "win32":
+        candidates = ["amdhip64_7.dll", "amdhip64_6.dll"]
+    else:
+        candidates = ["libamdhip64.so", "/opt/rocm/lib/libamdhip64.so"]
+    for candidate in candidates:
+        try:
+            if sys.platform == "win32":
+                hip = ctypes.WinDLL(candidate)
+            else:
+                hip = ctypes.CDLL(candidate)
+        except OSError:
+            continue
+        count = ctypes.c_int()
+        if hip.hipGetDeviceCount(ctypes.byref(count)) != 0:
+            return []
+        get_props = getattr(hip, "hipGetDevicePropertiesR0600", None)
+        if get_props is None:
+            get_props = hip.hipGetDeviceProperties
+        gpus = []
+        for i in range(count.value):
+            # The properties struct starts with the name, but where the
+            # architecture sits has moved between releases, so it's found
+            # by its shape in a buffer bigger than any release's struct
+            props = ctypes.create_string_buffer(8192)
+            if get_props(props, i) != 0:
+                continue
+            raw = props.raw
+            name = raw[:256].split(b"\0")[0].decode(errors="replace")
+            arch = re.search(rb"gfx[0-9a-f]{3,5}(?=[\0:])", raw[256:])
+            gpus.append(
+                {
+                    "name": name or None,
+                    "vendor": "amd",
+                    "arch": arch.group().decode() if arch else None,
+                }
+            )
+        return gpus
+    gpus = []
+    nodes = glob.glob("/sys/class/kfd/kfd/topology/nodes/*/properties")
+    for path in sorted(nodes):
+        with open(path) as f:
+            node_props = dict(
+                line.split(maxsplit=1) for line in f if len(line.split()) == 2
+            )
+        # Zero for a CPU node, else major, minor and stepping as decimal
+        # pairs, e.g., 120001 for gfx1201 or 90010 for gfx90a
+        version = int(node_props.get("gfx_target_version", "0"))
+        if version:
+            major, minor, step = (
+                version // 10000,
+                version // 100 % 100,
+                version % 100,
+            )
+            gpus.append(
+                {
+                    "name": None,
+                    "vendor": "amd",
+                    "arch": f"gfx{major}{minor:x}{step:x}",
+                }
+            )
+    return gpus
+
+
+def _get_nvidia_gpus() -> list[dict]:
+    """Get NVIDIA GPUs from ``nvidia-smi``, which the driver installs."""
+    import shutil
+
+    if shutil.which("nvidia-smi") is None:
+        return []
+    # Drivers older than 510 can't report compute_cap, so they're asked for
+    # names alone
+    for fields in ("name,compute_cap", "name"):
+        res = subprocess.run(
+            [
+                "nvidia-smi",
+                f"--query-gpu={fields}",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            break
+    else:
+        return []
+    gpus = []
+    for line in res.stdout.splitlines():
+        if fields == "name":
+            name, cap = line, ""
+        else:
+            name, _, cap = line.rpartition(",")
+        if name.strip():
+            gpus.append(
+                {
+                    "name": name.strip(),
+                    "vendor": "nvidia",
+                    "arch": f"sm_{cap.strip().replace('.', '')}"
+                    if cap.strip()
+                    else None,
+                }
+            )
+    return gpus
+
+
 # Apps whose versions 'calkit describe system' reports on every OS
 ALWAYS_REPORTED_APPS = (
     "python",
@@ -1916,15 +2810,23 @@ ALWAYS_REPORTED_APPS = (
 
 
 def get_system_info(
-    apps: list[str] | None = None, all_apps: bool = True
+    apps: list[str] | None = None,
+    all_apps: bool = True,
+    gpus: bool | None = None,
 ) -> dict:
     """Get information about the system on which we're currently running.
 
     ``apps`` are reported with a version each, beyond the ones always
     reported, e.g., the apps a project's requirements name. Without
     ``all_apps``, only ``apps`` are, since each costs a subprocess.
+    ``gpus`` reports the machine's GPUs too, which can mean starting a GPU
+    runtime, so it defaults to ``all_apps``.
     """
     system_info = get_machine_properties()
+    if gpus is None:
+        gpus = all_apps
+    if gpus:
+        system_info["gpus"] = [dict(g) for g in get_gpus()]
     os_name = system_info["os"]
     node_id = uuid.getnode()
     # The multicast bit is the 40th bit from the right (0-indexed)
@@ -2000,3 +2902,35 @@ def set_env_vars(ck_info: dict, cli: bool = True) -> None:
         os.environ[str(k)] = str(v)
     if os.path.expanduser("~") != home:
         os.environ.setdefault(USER_HOME_ENV_VAR, home)
+
+
+def normalize_orcid(orcid: str) -> str:
+    """Check an ORCID, bare or as a URL, and return it as its URL.
+
+    Raises ``ValueError`` if it isn't shaped like one or its check digit
+    doesn't match the rest.
+    """
+    match = re.fullmatch(
+        r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
+        r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
+        orcid.strip(),
+    )
+    if match is None:
+        raise ValueError(
+            f"orcid must look like 0000-0002-1825-0097 (got {orcid!r})"
+        )
+    bare = match.group(1).upper()
+    # The last character is an ISO 7064 MOD 11-2 check digit over the
+    # other 15, so a typo is caught here rather than by whoever later
+    # finds the identifier resolves to a stranger, or to nobody.
+    total = 0
+    for digit in bare[:-1].replace("-", ""):
+        total = (total + int(digit)) * 2
+    result = (12 - total % 11) % 11
+    expected = "X" if result == 10 else str(result)
+    if bare[-1] != expected:
+        raise ValueError(
+            f"orcid {orcid!r} has check digit {bare[-1]} but its other "
+            f"digits call for {expected}, so one of them is mistyped"
+        )
+    return f"https://orcid.org/{bare}"

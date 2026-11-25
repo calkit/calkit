@@ -93,7 +93,6 @@ _SUBMODULES = {
     "requirements",
     "resources",
     "schema",
-    "server",
     "templates",
     "upgrade",
     "workspace",

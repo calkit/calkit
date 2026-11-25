@@ -1,13 +1,19 @@
 """Tests for the ``core`` module."""
 
+import json
 import os
 import subprocess
+import sys
+import threading
+from pathlib import Path
 from unittest import mock
 
 import git
 import pytest
 
 import calkit
+import calkit.docx
+import calkit.install
 
 
 def test_set_env_vars_keeps_user_home(monkeypatch, tmp_path):
@@ -41,6 +47,79 @@ def test_find_project_dirs():
     calkit.find_project_dirs()
     if os.path.isdir(os.path.join(os.path.expanduser("~"), "calkit")):
         assert calkit.find_project_dirs(relative=False)
+
+
+def test_get_project_checkouts(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    # Windows finds the home folder from USERPROFILE
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("CALKIT_USER_HOME", str(home))
+    # Named in calkit.yaml in any of the ways YAML allows, or by the remote
+    projects = {
+        "plain": ("owner: me\nname: proj\n", None),
+        "quoted": ("owner: me\nname: 'proj'  # It's this\n", None),
+        "folded": ("owner: me\nname: >-\n  proj\n", None),
+        "other": ("owner: me\nname: other\n", None),
+        "windows": ("owner: me\r\nname: proj\r\n", None),
+        "remote": ("owner: me\n", "https://github.com/me/proj.git"),
+        "other-remote": ("owner: me\n", "https://github.com/me/else.git"),
+        "not-mine": ("owner: you\nname: proj\n", None),
+    }
+    for dirname, (text, remote_url) in projects.items():
+        path = home / "calkit" / dirname
+        os.makedirs(path)
+        (path / "calkit.yaml").write_bytes(text.encode())
+        repo = git.Repo.init(path)
+        if remote_url:
+            repo.create_remote("origin", remote_url)
+    found = calkit.get_project_checkouts("proj", owner="me")
+    assert sorted(os.path.basename(p) for p in found) == [
+        "folded",
+        "plain",
+        "quoted",
+        "remote",
+        "windows",
+    ]
+    assert set(found.values()) == {"me"}
+    # macOS asks before its media folders are read, so they're never
+    # searched, nor, for the browser's host, Desktop, Documents, or
+    # Downloads, but one found there before still is
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    for folder in ["Documents", "Pictures"]:
+        path = home / folder / "proj"
+        os.makedirs(path)
+        (path / "calkit.yaml").write_text("owner: me\nname: proj\n")
+        git.Repo.init(path)
+    quiet = calkit.find_project_dirs(search_protected=False)
+    assert not any(os.sep + "Documents" + os.sep in p for p in quiet)
+    assert not any(os.sep + "Pictures" + os.sep in p for p in quiet)
+    found = calkit.get_project_checkouts("proj", owner="me")
+    in_documents = os.path.realpath(home / "Documents" / "proj")
+    assert in_documents in found
+    assert not any(os.sep + "Pictures" + os.sep in p for p in found)
+    found = calkit.get_project_checkouts(
+        "proj", owner="me", search_protected=False
+    )
+    assert in_documents in found
+
+
+def test_output_storage_and_dates(monkeypatch):
+    assert calkit.core.get_dvc_size_thresh_bytes("f/a.PNG") == 1_000_000
+    assert calkit.core.get_dvc_size_thresh_bytes("f/a.pdf") == 1_000_000
+    assert calkit.core.get_dvc_size_thresh_bytes("data.csv") == 5_000_000
+    for ext in calkit.core.FIGURE_EXTENSIONS:
+        assert ext not in calkit.core.DVC_EXTENSIONS
+    monkeypatch.delenv("CALKIT_PIPELINE_RUNNING", raising=False)
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+    assert calkit.core.get_output_date_env_vars() == {}
+    monkeypatch.setenv("CALKIT_PIPELINE_RUNNING", "1")
+    assert calkit.core.get_output_date_env_vars() == {
+        "SOURCE_DATE_EPOCH": calkit.core.OUTPUT_SOURCE_DATE_EPOCH
+    }
+    # Whoever set it knows better
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1000")
+    assert calkit.core.get_output_date_env_vars() == {}
 
 
 def test_to_kebab_case():
@@ -126,6 +205,47 @@ def test_encode_safe() -> None:
     )
 
 
+def test_is_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
+    wsl = "Linux version 6.6.87.2-microsoft-standard-WSL2"
+    for platform, version, container, expected in [
+        ("linux", wsl, False, True),
+        (
+            "linux",
+            "Linux version 6.8.0-45-generic (buildd@lcy02)",
+            False,
+            False,
+        ),
+        # A container on a Windows host has the WSL kernel too
+        ("linux", wsl, True, False),
+        # Only Linux reads /proc at all
+        ("darwin", "microsoft", False, False),
+    ]:
+        monkeypatch.setattr("sys.platform", platform)
+        with (
+            mock.patch("builtins.open", mock.mock_open(read_data=version)),
+            mock.patch("os.path.exists", return_value=container),
+        ):
+            assert calkit.core.is_wsl() is expected, (version, container)
+
+
+def test_is_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Not a console on Windows, where its descriptor is checked too
+    tty = mock.Mock(isatty=lambda: True, fileno=lambda: -1)
+    # Windows says the NUL device is a TTY, which isn't a terminal
+    with open(os.devnull) as f:
+        for stdin, stdout in [(f, tty), (tty, f)]:
+            monkeypatch.setattr(sys, "stdin", stdin)
+            monkeypatch.setattr(sys, "stdout", stdout)
+            assert not calkit.core.is_tty()
+    for stdin in [None, object(), mock.Mock(isatty=lambda: False)]:
+        monkeypatch.setattr(sys, "stdin", stdin)
+        monkeypatch.setattr(sys, "stdout", tty)
+        assert not calkit.core.is_tty()
+    if sys.platform != "win32":
+        monkeypatch.setattr(sys, "stdin", tty)
+        assert calkit.core.is_tty()
+
+
 def test_is_mintty() -> None:
     import sys
 
@@ -173,6 +293,57 @@ def test_save_calkit_info_preserves_unicode(tmp_dir):
     raw = open("calkit.yaml", "rb").read()
     assert "ν".encode("utf-8") in raw
     assert "Î½".encode("utf-8") not in raw
+
+
+def test_set_yaml_item() -> None:
+    import io
+
+    def set_item(txt: str, key: str, value: object) -> str:
+        info = calkit.ryaml.load(txt)
+        calkit.set_yaml_item(info["envs"], key, value)
+        buf = io.StringIO()
+        calkit.ryaml.dump(info, buf)
+        return buf.getvalue()
+
+    # A new item goes above the blank line and comment ending the mapping,
+    # whether they trail a mapping or a sequence
+    txt = "envs:\n  a:\n    kind: uv\n\n# Stages\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda", "deps": ["x"]}) == (
+        "envs:\n  a:\n    kind: uv\n  b:\n    kind: conda\n    deps:\n"
+        "      - x\n\n# Stages\npipeline: {}\n"
+    )
+    txt = "envs:\n  a:\n    deps:\n      - x\n\npipeline: {}\n"
+    assert set_item(txt, "b", {}) == (
+        "envs:\n  a:\n    deps:\n      - x\n  b: {}\n\npipeline: {}\n"
+    )
+    # A comment at the end of the last item's line stays on it
+    txt = "envs:\n  a:\n    kind: uv  # Fast\n\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda"}) == (
+        "envs:\n  a:\n    kind: uv  # Fast\n  b:\n    kind: conda\n"
+        "\npipeline: {}\n"
+    )
+    txt = "envs:\n  a:\n    kind: uv  # Fast\npipeline: {}\n"
+    assert set_item(txt, "b", {"kind": "conda"}) == (
+        "envs:\n  a:\n    kind: uv  # Fast\n  b:\n    kind: conda\n"
+        "pipeline: {}\n"
+    )
+    # Replacing the last item keeps the blank line, and replacing another
+    # leaves it where it was
+    txt = "envs:\n  a:\n    kind: uv\n  b:\n    kind: uv\n\npipeline: {}\n"
+    for key in ["a", "b"]:
+        assert set_item(txt, key, {"kind": "conda"}) == txt.replace(
+            f"{key}:\n    kind: uv", f"{key}:\n    kind: conda"
+        )
+    # A scalar replacing the last item keeps the comment at the end of its
+    # line too
+    txt = "envs:\n  a: 1  # eol\n\nnext: 2\n"
+    assert set_item(txt, "a", 5) == "envs:\n  a: 5  # eol\n\nnext: 2\n"
+    txt = "envs:\n  a:\n    b: 1  # eol\n\nnext: 2\n"
+    assert set_item(txt, "a", 5) == "envs:\n  a: 5\n\nnext: 2\n"
+    # Plain dicts, e.g., environments converted from a list, still get set
+    envs: dict = {"a": {"kind": "uv"}}
+    calkit.set_yaml_item(envs, "b", {"kind": "conda"})
+    assert envs == {"a": {"kind": "uv"}, "b": {"kind": "conda"}}
 
 
 def test_load_calkit_info(tmp_dir, monkeypatch):
@@ -392,6 +563,120 @@ def test_check_property_requirement():
         check(
             {"kind": "cpu-count", "min": 16}, info, described_as="host 'box'"
         )
+    # A GPU property is met when any GPU meets it, e.g., the discrete one
+    # beside an integrated one
+    info["gpus"] = [
+        {
+            "name": "AMD Radeon(TM) Graphics",
+            "vendor": "amd",
+            "arch": "gfx1036",
+        },
+        {"name": "AMD Radeon RX 9070 XT", "vendor": "amd", "arch": "gfx1201"},
+    ]
+    check({"kind": "gpu-arch", "equals": "gfx1201"}, info)
+    check({"kind": "gpu-name", "matches": "*rx 90?0*"}, info)
+    check({"kind": "gpu-vendor", "equals": ["nvidia", "AMD"]}, info)
+    with pytest.raises(ValueError, match="No GPU on this machine meets") as e:
+        check({"kind": "gpu-arch", "equals": "sm_89"}, info)
+    assert "'gfx1036'" in str(e.value) and "'gfx1201'" in str(e.value)
+    # With one GPU, its own mismatch is the whole story
+    info["gpus"] = info["gpus"][1:]
+    with pytest.raises(ValueError, match="'gfx1201', which doesn't match"):
+        check({"kind": "gpu-arch", "matches": "sm_*"}, info)
+    # A GPU that doesn't report a property can't meet it, and neither can
+    # a machine with no GPU, but a machine that reports no GPU list at all
+    # is unanswered
+    info["gpus"] = [{"name": "Apple M4 Pro", "vendor": "apple", "arch": None}]
+    with pytest.raises(ValueError, match="has no GPU that reports it"):
+        check({"kind": "gpu-arch", "equals": "gfx1201"}, info)
+    info["gpus"] = []
+    with pytest.raises(ValueError, match="has no GPU that reports it"):
+        check({"kind": "gpu-vendor", "equals": "amd"}, info)
+    with pytest.raises(ValueError, match="doesn't report it"):
+        check({"kind": "gpu-vendor", "equals": "amd"}, {})
+
+
+def test_get_gpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import calkit.core
+
+    # A Linux machine using ROCm wheels has no HIP runtime installed, so
+    # its AMD GPUs are read from the kernel, skipping the CPU's node
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        "ctypes.CDLL", mock.Mock(side_effect=OSError("not found"))
+    )
+    nodes = {"0": 0, "1": 120001, "2": 90010}
+    for node, version in nodes.items():
+        (tmp_path / node).mkdir()
+        (tmp_path / node / "properties").write_text(
+            f"cpu_cores_count 8\ngfx_target_version {version}\n"
+        )
+    real_glob = calkit.core.glob.glob
+    monkeypatch.setattr(
+        calkit.core.glob,
+        "glob",
+        lambda pattern: (
+            real_glob(str(tmp_path / "*" / "properties"))
+            if pattern.startswith("/sys/class/kfd")
+            else real_glob(pattern)
+        ),
+    )
+    assert calkit.core._get_amd_gpus() == [
+        {"name": None, "vendor": "amd", "arch": "gfx1201"},
+        {"name": None, "vendor": "amd", "arch": "gfx90a"},
+    ]
+    # NVIDIA GPUs come from nvidia-smi, whose names can hold commas
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        calkit.core.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 0, stdout="NVIDIA GeForce RTX 4090, 8.9\nA, B, 9.0\n"
+        ),
+    )
+    assert calkit.core._get_nvidia_gpus() == [
+        {
+            "name": "NVIDIA GeForce RTX 4090",
+            "vendor": "nvidia",
+            "arch": "sm_89",
+        },
+        {"name": "A, B", "vendor": "nvidia", "arch": "sm_90"},
+    ]
+    # A driver too old to report compute_cap still reports names
+    monkeypatch.setattr(
+        calkit.core.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args,
+            *(
+                (2, "")
+                if "compute_cap" in args[1]
+                else (0, "Tesla K80\nTesla K80\n")
+            ),
+        ),
+    )
+    assert (
+        calkit.core._get_nvidia_gpus()
+        == [{"name": "Tesla K80", "vendor": "nvidia", "arch": None}] * 2
+    )
+    # A driver that fails to answer is a machine without that GPU
+    monkeypatch.setattr(
+        calkit.core.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 9, ""),
+    )
+    assert calkit.core._get_nvidia_gpus() == []
+    monkeypatch.setattr(
+        calkit.core,
+        "_get_amd_gpus",
+        mock.Mock(side_effect=OSError("driver crashed")),
+    )
+    monkeypatch.setattr(calkit.core.platform, "system", lambda: "Linux")
+    calkit.core.get_gpus.cache_clear()
+    try:
+        assert calkit.core.get_gpus() == ()
+    finally:
+        calkit.core.get_gpus.cache_clear()
 
 
 def test_check_requirements_checks_machine_properties(tmp_dir):
@@ -412,6 +697,151 @@ def test_check_requirements_checks_machine_properties(tmp_dir):
     )
     # check_system_deps is the old name for the same function
     assert calkit.check_system_deps is calkit.check_requirements
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Fakes an app with a shell script"
+)
+def test_check_requirements_offers_an_apps_setup_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}/usr/bin:/bin")
+    log_path = tmp_path / "installed.json"
+    monkeypatch.setattr(
+        "calkit.install.get_install_log_path", lambda: str(log_path)
+    )
+    # The project's way in beats the registry's
+    monkeypatch.setattr(
+        "calkit.install.get_installer",
+        lambda app: {"script": "exit 1", "path_add": []},
+    )
+    exe = fake_bin / "calkit-fake-app"
+    setup_command = f"printf '#!/bin/sh\\n' > {exe} && chmod +x {exe}"
+    req = {
+        "kind": "app",
+        "name": "calkit-fake-app",
+        "setup_command": setup_command,
+        "description": "Makes the fake things.",
+    }
+    # Without a terminal, it says how to install it and what it's for
+    with pytest.raises(ValueError) as e:
+        calkit.check_requirements(requirements=[req], interactive=False)
+    assert str(e.value) == (
+        "app 'calkit-fake-app' not found on this machine\n"
+        "  Makes the fake things."
+    )
+    assert f"to install, run:  {setup_command}" in capsys.readouterr().out
+    assert not exe.exists()
+    # On one, declining says how to do it later
+    with (
+        mock.patch("builtins.input", return_value="n"),
+        pytest.raises(ValueError, match="not found on this machine"),
+    ):
+        calkit.check_requirements(requirements=[req], interactive=True)
+    out = capsys.readouterr().out
+    assert "  Makes the fake things.\n" in out
+    assert f"Skipped. Run '{setup_command}' when you want it." in out
+    assert not exe.exists()
+    # Agreeing runs it, and it's recorded like any install
+    with mock.patch("builtins.input", return_value="y"):
+        calkit.check_requirements(requirements=[req], interactive=True)
+    assert exe.exists()
+    log = calkit.install.read_install_log()
+    assert [(r["app"], r["script"]) for r in log] == [
+        ("calkit-fake-app", setup_command)
+    ]
+    # Without a way in, a platform hint and the description still show
+    monkeypatch.setattr("calkit.install.get_installer", lambda app: None)
+    with (
+        mock.patch("calkit.install.sys.platform", "linux"),
+        pytest.raises(ValueError) as e,
+    ):
+        calkit.check_requirements(
+            requirements=[
+                {"kind": "app", "name": "colima", "description": "VMs"}
+            ],
+            interactive=True,
+        )
+    assert str(e.value).startswith(
+        "app 'colima' not found on this machine; Colima isn't needed on Linux"
+    )
+    assert str(e.value).endswith("\n  VMs")
+    # Names apps go by are checked and installed as the binary they provide
+    checked = []
+    monkeypatch.setattr(
+        "calkit.core.check_dep_exists",
+        lambda name, *args, **kwargs: checked.append(name) or False,
+    )
+    monkeypatch.setattr(
+        "calkit.install.get_installer",
+        lambda app: (
+            {"script": "true", "path_add": []} if app == "code" else None
+        ),
+    )
+    with (
+        mock.patch(
+            "calkit.install.prompt_and_install", return_value=False
+        ) as m_prompt,
+        # Named as the project declares it
+        pytest.raises(ValueError, match="app 'vscode' not found"),
+    ):
+        calkit.check_requirements(
+            requirements=[{"kind": "app", "name": "vscode"}],
+            interactive=True,
+        )
+    assert checked == ["code"]
+    assert m_prompt.call_args.args == ("code",)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Fakes an app with a shell script"
+)
+def test_check_requirements_setup_command_with_registered_installer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    # Where the registered installer puts the app, which isn't on PATH yet,
+    # as ~/.local/bin isn't on a fresh machine
+    hidden = tmp_path / "hidden"
+    hidden.mkdir()
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}/usr/bin:/bin")
+    monkeypatch.setattr(
+        "calkit.install.get_install_log_path",
+        lambda: str(tmp_path / "installed.json"),
+    )
+    registered: dict = {"script": "exit 1", "path_add": str(hidden)}
+    monkeypatch.setattr(
+        "calkit.install.get_installer",
+        lambda app: registered if app == "calkit-fake-app" else None,
+    )
+    # Declining the registered installer points at it by name, which is
+    # what handles its prerequisites and records the install
+    req = {"kind": "app", "name": "calkit-fake-app"}
+    with (
+        mock.patch("builtins.input", return_value="n"),
+        pytest.raises(ValueError, match="not found on this machine"),
+    ):
+        calkit.check_requirements(requirements=[req], interactive=True)
+    out = capsys.readouterr().out
+    assert "Skipped. Run 'calkit install calkit-fake-app'" in out
+    # The project's own command keeps where the registry says the app
+    # lands, so installing it there is found, but not the registry's
+    # prerequisites, which its command may not need
+    registered["requires"] = ["calkit-missing-prereq"]
+    exe = hidden / "calkit-fake-app"
+    req["setup_command"] = f"printf '#!/bin/sh\\n' > {exe} && chmod +x {exe}"
+    with mock.patch("builtins.input", return_value="y") as answer:
+        calkit.check_requirements(requirements=[req], interactive=True)
+    assert answer.call_count == 1
+    assert exe.exists()
+    assert "calkit-missing-prereq" not in capsys.readouterr().out
 
 
 def test_check_app_version():
@@ -501,6 +931,18 @@ def test_check_dep_exists_conda_off_path(monkeypatch):
     # When neither is findable, it should report missing.
     monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
     assert not calkit.check_dep_exists("conda", "app")
+    # Office apps and LibreOffice aren't run by their names
+    import calkit.office
+
+    for found in [True, False]:
+        monkeypatch.setattr(calkit.office, "app_installed", lambda app: found)
+        monkeypatch.setattr(
+            calkit.docx,
+            "find_soffice",
+            lambda: "/bin/soffice" if found else None,
+        )
+        for app in ["word", "excel", "powerpoint", "libreoffice"]:
+            assert calkit.check_dep_exists(app, "app") is found
 
 
 def test_get_md5(tmp_dir):
@@ -643,6 +1085,11 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     calkit.save_calkit_info(info)
     with open("calkit.yaml") as f:
         assert f.read() == text + "owner: someone\n"
+    # A save that fails leaves the file as it was
+    with pytest.raises(Exception):
+        calkit.save_calkit_info({**info, "bad": object()})
+    with open("calkit.yaml") as f:
+        assert f.read() == text + "owner: someone\n"
     # A value that's changed is wrapped at the width like any other
     data = calkit.ryaml.load(text)
     data["questions"][0]["notes"] += " And one more sentence to fold."
@@ -650,6 +1097,60 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     assert "agree to within two\n" not in out
     assert calkit.ryaml.load(out) == data
     assert "      more than the measurement uncertainty?\n" in out
+    # Nor are lines longer than the width, in plain values or folded
+    # blocks, or long words, whether beside their key or below it
+    long = "word " * 20 + "end"
+    text = (
+        f"notes: {long}\n"
+        f"path: {'a/' * 45}b.json\n"
+        f"below:\n  {'c/' * 45}d.json\n"
+        f"answer: >-\n  {long}\n  and a second line.\n"
+        f"single: >-\n  {long}\n"
+    )
+    assert dumped(calkit.ryaml.load(text)) == text
+    # Unless they're new
+    data = calkit.ryaml.load(text)
+    data["notes"] = str(data["notes"])
+    data["path"] = str(data["path"])
+    out = dumped(data)
+    assert f"notes: {long}\n" not in out
+    assert "path:\n" in out
+    assert calkit.ryaml.load(out) == data
+    # Likewise double-quoted strings, including escapes, and flow lists,
+    # however they were wrapped
+    quoted = (
+        f'quoted: "{long}"\n'
+        f'escaped: "{long}\\t{{x:.0f}}"\n'
+        f'wrapped: "{long}\n  ms"\n'
+        f"items: [{', '.join(['item'] * 20)}]\n"
+        "names: [one, two,\n    three]\n"
+    )
+    for data in [
+        calkit.ryaml.load(quoted),
+        copy.deepcopy(calkit.ryaml.load(quoted)),
+    ]:
+        assert dumped(data) == quoted
+    # A break in quotes after an escape is left to ruamel
+    continued = f'continued: "{long}\\\n  ms"\n'
+    assert calkit.ryaml.load(dumped(calkit.ryaml.load(continued))) == (
+        calkit.ryaml.load(continued)
+    )
+    # A quoted value replaced in code keeps its quotes, as ruamel keeps the
+    # type of what it replaced, but is wrapped like any other new value
+    data = calkit.ryaml.load(quoted)
+    data["wrapped"] = f"{long} and more"
+    out = dumped(data)
+    assert 'wrapped: "word' in out
+    assert f'wrapped: "{long} and more"\n' not in out
+    assert calkit.ryaml.load(out) == data
+    # Other dumpers can still write what was read, e.g., DVC writing
+    # dvc.yaml
+    import ruamel.yaml
+
+    for source in [text, quoted]:
+        buf = io.StringIO()
+        ruamel.yaml.YAML().dump(calkit.ryaml.load(source), buf)
+        assert calkit.ryaml.load(buf.getvalue()) == calkit.ryaml.load(source)
 
 
 def test_update_readme_content():
@@ -738,7 +1239,92 @@ def test_get_version_checked_app_names():
     assert calkit.get_version_checked_app_names(
         ck_info, stage_names={"s"}
     ) == ["jq", "ffmpeg"]
+    # Apps are asked as the binary they provide, e.g., code for vscode
+    ck_info["requirements"].append("vscode>=1.80")
+    assert calkit.get_version_checked_app_names(
+        ck_info, stage_names=set()
+    ) == ["jq", "code"]
     # A malformed requirement says how to write one
     ck_info["environments"]["ml"]["requirements"] = [{"app": "sbatch"}]
     with pytest.raises(ValueError, match="list an app by name"):
         calkit.get_version_checked_app_names(ck_info)
+    # So does one whose name isn't text, e.g., an unquoted {var} in YAML
+    for req in [
+        {"kind": "app", "name": {"var": None}, "version_spec": ">=1"},
+        {"name": {"var": None}},
+    ]:
+        ck_info["environments"]["ml"]["requirements"] = [req]
+        with pytest.raises(ValueError, match="'name' must be text"):
+            calkit.get_version_checked_app_names(ck_info)
+
+
+def test_write_json_waits_for_reader_on_windows(tmp_path: Path) -> None:
+    path = tmp_path / "data.json"
+    denied = PermissionError("Access is denied")
+    # A brief denial on Windows is retried until the write lands
+    with (
+        mock.patch("calkit.core.sys.platform", "win32"),
+        mock.patch("time.sleep") as m_sleep,
+        mock.patch(
+            "calkit.core.os.replace",
+            side_effect=[denied, denied, mock.DEFAULT],
+            wraps=os.replace,
+        ) as m_replace,
+    ):
+        calkit.write_json(str(path), [1])
+    assert m_replace.call_count == 3
+    assert m_sleep.call_count == 2
+    # One that never clears is raised, leaving no temporary file
+    path.unlink(missing_ok=True)
+    with (
+        mock.patch("calkit.core.sys.platform", "win32"),
+        mock.patch("time.sleep"),
+        mock.patch("calkit.core.os.replace", side_effect=denied),
+        pytest.raises(PermissionError),
+    ):
+        calkit.write_json(str(path), [2])
+    assert list(tmp_path.iterdir()) == []
+    # Elsewhere a denial is real, so it isn't retried
+    with (
+        mock.patch("calkit.core.sys.platform", "linux"),
+        mock.patch("time.sleep") as m_sleep,
+        mock.patch("calkit.core.os.replace", side_effect=denied) as m_replace,
+        pytest.raises(PermissionError),
+    ):
+        calkit.write_json(str(path), [3])
+    assert m_replace.call_count == 1
+    m_sleep.assert_not_called()
+    # A real reader holding the file open doesn't fail the write
+    calkit.write_json(str(path), [4])
+    reader = open(path)
+    timer = threading.Timer(0.2, reader.close)
+    timer.start()
+    try:
+        calkit.write_json(str(path), [5])
+    finally:
+        timer.join()
+        reader.close()
+    assert json.loads(path.read_text()) == [5]
+
+
+def test_get_auto_ignore_path():
+    assert (
+        calkit.get_auto_ignore_path(
+            "notebooks/.ipynb_checkpoints/fade-checkpoint.ipynb"
+        )
+        == "notebooks/.ipynb_checkpoints/"
+    )
+    assert (
+        calkit.get_auto_ignore_path(".ipynb_checkpoints/a-checkpoint.ipynb")
+        == ".ipynb_checkpoints/"
+    )
+    assert (
+        calkit.get_auto_ignore_path("src/pkg/__pycache__/mod.cpython-312.pyc")
+        == "src/pkg/__pycache__/"
+    )
+    assert calkit.get_auto_ignore_path("sub/.DS_Store") == "sub/.DS_Store"
+    assert (
+        calkit.get_auto_ignore_path(".venv/bin/python") == ".venv/bin/python"
+    )
+    assert calkit.get_auto_ignore_path("notebooks/fade.ipynb") is None
+    assert calkit.get_auto_ignore_path("notes/.ipynb_checkpoints.md") is None

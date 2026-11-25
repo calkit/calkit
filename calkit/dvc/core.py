@@ -11,10 +11,10 @@ import posixpath
 import re
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Container, Iterator
 from itertools import groupby
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import dvc.repo
 from configobj import ConfigObj
@@ -27,6 +27,9 @@ import calkit
 from calkit.cli import warn
 from calkit.config import get_app_name
 
+if TYPE_CHECKING:
+    import git
+
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
@@ -34,6 +37,8 @@ USE_CK_REMOTE_BY_DEFAULT = True
 # Whether projects have what Calkit and DVC write staged in Git as it's
 # written, e.g., dvc.lock and env locks, so they're committed together
 AUTOSTAGE = True
+# Size in MB of a file too large for Git
+LARGE_MB = 50
 
 
 class _FrozenStageWarningFilter(logging.Filter):
@@ -176,6 +181,61 @@ def _hash_dirs_inside_nested_repos() -> None:
 _hash_dirs_inside_nested_repos()
 
 
+def _tolerate_purged_rwlock_entries() -> None:
+    """Stop a process's purged rwlock entries from failing its stage.
+
+    DVC records each running stage's paths in ``.dvc/tmp/rwlock`` with the
+    holder's PID, and any DVC process that can't see that PID, e.g., one on
+    another login node or in a container sharing the project directory,
+    removes the entries as left by a killed process. When the stage finishes,
+    DVC's release then fails a bare ``assert`` on its missing entries, so a
+    stage whose command succeeded is reported as "failed to reproduce" with
+    an empty message and its lock entry is never written. Releasing is all
+    that's left to do at that point, so entries already gone are skipped.
+    """
+    import dvc.rwlock
+    from dvc.utils import relpath
+
+    def warn_purged(urls: list[str]) -> None:
+        if urls:
+            logger.warning(
+                "Another process, e.g., on another machine, removed DVC's "
+                f"lock on {', '.join(repr(relpath(u)) for u in urls)} while "
+                "it was in use"
+            )
+
+    def release_write(lock: dict, info: dict, changes: list[str]) -> None:
+        purged = []
+        for url in changes:
+            if lock.get("write", {}).get(url) != info:
+                purged.append(url)
+                continue
+            del lock["write"][url]
+            if not lock["write"]:
+                del lock["write"]
+        warn_purged(purged)
+
+    def release_read(lock: dict, info: dict, changes: list[str]) -> None:
+        purged = []
+        for url in changes:
+            readers = lock.get("read", {}).get(url, [])
+            if info not in readers:
+                purged.append(url)
+                continue
+            readers.remove(info)
+            if not readers:
+                del lock["read"][url]
+            if not lock["read"]:
+                del lock["read"]
+        warn_purged(purged)
+
+    dvc.rwlock._release_write = release_write
+    dvc.rwlock._release_read = release_read
+
+
+_tolerate_purged_rwlock_entries()
+
+
 # Default seconds to wait for DVC's repo-level lock during a pipeline run.
 #
 # DVC's own default is only 3 seconds (``dvc.lock.DEFAULT_TIMEOUT``), after
@@ -192,6 +252,9 @@ _hash_dirs_inside_nested_repos()
 # left behind by a crashed process on an NFS share, common on HPC clusters---is
 # still surfaced as an error the user can act on.
 DEFAULT_RUN_LOCK_TIMEOUT = 120.0
+# The reason ``skip_stages`` gets for a stage skipped by name, e.g., with
+# ``calkit run --skip``, rather than because it can't run here
+SKIP_REQUESTED = "skipped as requested"
 
 
 @contextlib.contextmanager
@@ -295,11 +358,17 @@ def skip_stages(
             )
             unchanged.append((self, kwargs.get("allow_missing", False)))
             return None
-        logging.getLogger("dvc").info(
-            "Stage '%s' can't run on this machine, skipping: %s",
-            self.addressing,
-            reason,
-        )
+        if reason == SKIP_REQUESTED:
+            logging.getLogger("dvc").info(
+                "Stage '%s' is out of date, skipping as requested",
+                self.addressing,
+            )
+        else:
+            logging.getLogger("dvc").info(
+                "Stage '%s' can't run on this machine, skipping: %s",
+                self.addressing,
+                reason,
+            )
         if skipped is not None:
             skipped[self.addressing] = reason
         return None
@@ -314,6 +383,67 @@ def skip_stages(
     finally:
         setattr(StageLoader, "load_stage", original_load)
         setattr(Stage, "reproduce", original_reproduce)
+
+
+@contextlib.contextmanager
+def thaw_stages(names: set[str], force_only: bool = False) -> Iterator[None]:
+    """Run these frozen stages in ``dvc repro`` while active.
+
+    Keyed by Calkit stage name, which also covers the ``<name>@<item>``
+    stages DVC makes from an iterated one. Only stages in the root
+    ``dvc.yaml`` match. DVC never runs a frozen stage, even forced, so this
+    is how one named outright with ``--force`` runs, e.g., to retrain a
+    model whose committed weights are otherwise left alone.
+
+    With ``force_only``, a forced run forces only these stages, and the
+    stages upstream of them run only if they're out of date, as they would
+    for an unfrozen stage that is. DVC otherwise forces every stage in the
+    plan, which thawing one brings its upstream stages into, e.g.,
+    regenerating the data a model is trained on.
+    """
+    import dvc.repo.reproduce
+    from dvc.stage.loader import StageLoader
+
+    original_load = StageLoader.__dict__["load_stage"]
+
+    def load_stage(cls: Any, *args: Any, **kwargs: Any) -> Any:
+        stage = original_load.__func__(cls, *args, **kwargs)
+        name = getattr(stage, "name", None) or ""
+        dvcfile = getattr(stage, "dvcfile", None)
+        if (
+            name.split("@")[0] in names
+            and dvcfile is not None
+            and os.path.normpath(os.path.relpath(dvcfile.path)) == "dvc.yaml"
+        ):
+            stage.frozen = False
+        return stage
+
+    original_reproduce = dvc.repo.reproduce._reproduce
+
+    def reproduce(stages: Any, *args: Any, **kwargs: Any) -> Any:
+        repro_fn = kwargs.pop("repro_fn", dvc.repo.reproduce._reproduce_stage)
+
+        def repro_thawed_only(stage: Any, **stage_kwargs: Any) -> Any:
+            name = getattr(stage, "name", None) or ""
+            if name.split("@")[0] not in names:
+                stage_kwargs["force"] = False
+            return repro_fn(stage, **stage_kwargs)
+
+        return original_reproduce(
+            stages, *args, repro_fn=repro_thawed_only, **kwargs
+        )
+
+    if not names:
+        yield
+        return
+    setattr(StageLoader, "load_stage", classmethod(load_stage))
+    if force_only:
+        setattr(dvc.repo.reproduce, "_reproduce", reproduce)
+    try:
+        yield
+    finally:
+        setattr(StageLoader, "load_stage", original_load)
+        setattr(dvc.repo.reproduce, "_reproduce", original_reproduce)
 
 
 _memoized_hashes_lock = threading.RLock()
@@ -668,6 +798,7 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
             return True
 
     register_ck_scheme()
+    ensure_writable_site_cache()
     dvc.cli._log_unknown_exceptions = log_unknown_exceptions
     links = DropLinks()
     dvc.cli.logger.addFilter(links)
@@ -677,9 +808,34 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
         dvc.cli.logger.removeFilter(links)
 
 
+def ensure_writable_site_cache() -> None:
+    """Point DVC at a per-user site cache if the shared one isn't writable.
+
+    On Linux, DVC keeps per-repo state in ``/var/tmp/dvc``, which every user
+    on a machine shares, so on, e.g., an HPC login node, another user can
+    own it and DVC fails to open any repo. The fallback goes in the
+    environment, so DVC subprocesses use it too.
+    """
+    import dvc.dirs
+
+    if os.environ.get("DVC_SITE_CACHE_DIR"):
+        return
+    # DVC creates whatever is missing, so check the deepest part that exists
+    path = os.path.join(dvc.dirs.site_cache_dir(), "repo")
+    while not os.path.exists(path) and os.path.dirname(path) != path:
+        path = os.path.dirname(path)
+    if os.access(path, os.W_OK | os.X_OK):
+        return
+    cache_home = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache"
+    )
+    os.environ["DVC_SITE_CACHE_DIR"] = os.path.join(cache_home, "dvc", "site")
+
+
 def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     """Return a DVC repo with ``ck://`` scheme support registered."""
     register_ck_scheme()
+    ensure_writable_site_cache()
     return dvc.repo.Repo(wdir)
 
 
@@ -750,7 +906,25 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     :func:`_rwlock_holder_is_live`), so neither dead PIDs nor reused ones are
     reported. An empty list means no pipeline run is currently in progress.
     """
-    rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
+
+    def is_in_project(path: str) -> bool:
+        # Only this project's run, not another one sharing the repo's lock
+        path = os.path.normcase(os.path.abspath(os.path.join(root, path)))
+        try:
+            return os.path.commonpath([project_dir, path]) == project_dir
+        except ValueError:
+            # On another drive
+            return False
+
+    project_dir = os.path.normcase(os.path.abspath(wdir or "."))
+    # A project in a subdirectory of a DVC repo shares the repo's lock
+    root = project_dir
+    while not os.path.isdir(os.path.join(root, ".dvc")):
+        parent = os.path.dirname(root)
+        if parent == root:
+            return []
+        root = parent
+    rwlock_path = os.path.join(root, ".dvc", "tmp", "rwlock")
     if not os.path.isfile(rwlock_path):
         return []
     try:
@@ -761,10 +935,12 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     # The rwlock format is
     # {"write": {path: {pid, cmd}}, "read": {path: [{pid, cmd}]}}
     by_pid: dict[int, str] = {}
-    for info in lock.get("write", {}).values():
-        if isinstance(info, dict) and "pid" in info:
+    for path, info in lock.get("write", {}).items():
+        if isinstance(info, dict) and "pid" in info and is_in_project(path):
             by_pid[info["pid"]] = info.get("cmd", "")
-    for infos in lock.get("read", {}).values():
+    for path, infos in lock.get("read", {}).items():
+        if not is_in_project(path):
+            continue
         for info in infos or []:
             if isinstance(info, dict) and "pid" in info:
                 by_pid[info["pid"]] = info.get("cmd", "")
@@ -1029,7 +1205,9 @@ def autostage_enabled(wdir: str | None = None) -> bool:
     dvc_dir = os.path.join(wdir or "", ".dvc")
     if not os.path.isdir(dvc_dir):
         return False
-    # Unvalidated, since the 'ck' remote scheme may not be registered
+    # Registered first, since DVC keeps the schema it builds for the first
+    # config it reads, and every repo opened after would reject 'ck' remotes
+    register_ck_scheme()
     value = Config(dvc_dir=dvc_dir, validate=False)["core"].get("autostage")
     return str(value).lower() in ("true", "yes", "1")
 
@@ -1050,6 +1228,18 @@ def run_dvc_command(
     #942, where ``calkit pull`` failed and succeeded on a second try. See
     :func:`dvc_lock_timeout`.
     """
+    # DVC would send the hub's token wherever the repo points a remote,
+    # e.g., after a Git pull changed it, in the repo DVC's own --cd names,
+    # if given, as with 'calkit dvc --cd path pull'
+    wdir = cwd
+    for i, arg in enumerate(argv):
+        if arg == "--":
+            break
+        if arg == "--cd" and i + 1 < len(argv):
+            wdir = os.path.join(cwd or "", argv[i + 1])
+        elif arg.startswith("--cd="):
+            wdir = os.path.join(cwd or "", arg.removeprefix("--cd="))
+    clear_off_hub_auth(wdir=wdir)
     if cwd:
         argv = ["--cd", cwd] + argv
     if lock_timeout is not None:
@@ -1081,11 +1271,141 @@ def detect_calkit_remote_type(
     )
     if not name_matches:
         return None
-    if url.startswith("ck://"):
+    # Schemes are case-insensitive, and DVC treats them so
+    scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+    if scheme == "ck":
         return "ck"
-    if url.startswith("http"):
+    if scheme in ("http", "https"):
         return "http"
     return None
+
+
+def is_on_hub(url: str, base_url: str) -> bool:
+    """Whether a URL is on the hub's API, by its scheme, host, port, and
+    path, so the hub's token is sent nowhere else.
+    """
+    from urllib.parse import urlsplit
+
+    def port(parts: Any) -> int | None:
+        return parts.port or {"http": 80, "https": 443}.get(parts.scheme)
+
+    try:
+        target, base = urlsplit(url.strip()), urlsplit(base_url)
+        same_port = port(target) == port(base)
+    except ValueError:
+        return False
+    base_path = base.path.rstrip("/")
+    return (
+        target.scheme.lower() in ("http", "https")
+        and target.scheme.lower() == base.scheme.lower()
+        and target.hostname is not None
+        and target.hostname == base.hostname
+        and same_port
+        and target.username is None
+        and target.password is None
+        and (
+            target.path == base_path or target.path.startswith(base_path + "/")
+        )
+    )
+
+
+# What the hub's token is kept in for a remote, in its local config
+REMOTE_AUTH_OPTIONS = (
+    "custom_auth_header",
+    "password",
+    "auth",
+    "token",
+    "user",
+)
+
+
+def clear_off_hub_auth(wdir: str | None = None) -> list[str]:
+    """Remove the hub's token from the local config of DVC remotes it wasn't
+    stored for, returning their names.
+
+    The repo says where its remotes are, so a pull can point one that has
+    the token anywhere, which DVC would send it to. So the token is stored
+    along with the remote's URL, in the local config, which a pull can't
+    change, and it's removed if the repo's URL for that remote differs, or
+    if it was stored without one for a URL off the hub. ``run_dvc_command``
+    runs this first.
+    """
+
+    def is_hub_token(secret: object) -> bool:
+        import jwt
+
+        token = str(secret).removeprefix("Bearer ").strip()
+        if token.startswith("ckp_"):
+            return True
+        # Older hub tokens are JWTs naming the token they are, and a hub
+        # link's sessions' name their machine
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+        except jwt.PyJWTError:
+            return False
+        return isinstance(payload, dict) and bool(
+            {"token_id", "machine_id"} & payload.keys()
+        )
+
+    root = os.path.abspath(wdir or ".")
+    while not os.path.isdir(os.path.join(root, ".dvc")):
+        if os.path.dirname(root) == root:
+            return []
+        root = os.path.dirname(root)
+    config_local = os.path.join(root, ".dvc", "config.local")
+    if not os.path.isfile(config_local):
+        return []
+    try:
+        local = ConfigObj(config_local, encoding="utf-8")
+        shared_path = os.path.join(root, ".dvc", "config")
+        shared = (
+            ConfigObj(shared_path, encoding="utf-8")
+            if os.path.isfile(shared_path)
+            else {}
+        )
+    except Exception:
+        return []
+    cleared = []
+    changed = False
+    for section, options in list(local.items()):
+        match = re.fullmatch(r'remote "(.+)"', section)
+        if match is None or not isinstance(options, dict):
+            continue
+        # Only the hub's token, not credentials of the user's own for
+        # remotes elsewhere, e.g., with a custom header of their own
+        if not any(
+            is_hub_token(options.get(k, "")) for k in ("password", "token")
+        ):
+            continue
+        pinned = options.get("url")
+        repo_url = (shared.get(section) or {}).get("url")
+        if pinned and (repo_url is None or repo_url == pinned):
+            continue
+        # Stored before URLs were, for one still on the hub, so it's pinned
+        # there rather than set up again
+        if (
+            not pinned
+            and repo_url
+            and is_on_hub(repo_url, calkit.hub.get_base_url())
+        ):
+            options["url"] = repo_url
+            changed = True
+            continue
+        # The repo's URL wins again, without the token
+        for option in (*REMOTE_AUTH_OPTIONS, "url"):
+            options.pop(option, None)
+        if not options:
+            local.pop(section)
+        cleared.append(match.group(1))
+    if cleared or changed:
+        local.write()
+        for name in cleared:
+            logger.warning(
+                f"Removed the hub's token from DVC remote {name}, since its "
+                "URL changed or wasn't stored with it; run 'calkit config "
+                "remote-auth' to set it up again"
+            )
+    return cleared
 
 
 def configure_remote(
@@ -1154,12 +1474,14 @@ def clear_remote_local_http_auth(
     if not isinstance(remote, dict):
         return
     changed = False
-    for option in ("custom_auth_header", "password", "auth"):
+    for option in REMOTE_AUTH_OPTIONS:
         if option in remote:
             remote.pop(option)
             changed = True
     if not changed:
         return
+    # Along with the URL it was stored for, so the repo's is used again
+    remote.pop("url", None)
     if not remote:
         cfg.pop(section_name, None)
     cfg.write()
@@ -1178,14 +1500,46 @@ def set_remote_auth(
     """
     if remote_name is None:
         remote_name = make_remote_name()
+    # So a token stored for a URL the repo has since changed isn't kept
+    # with it
+    clear_off_hub_auth(wdir=wdir)
     # Check if this is a ck:// remote (doesn't need HTTP auth)
     remotes = get_remotes(wdir=wdir)
     remote_url = remotes.get(remote_name, "")
-    if remote_url.startswith("ck://"):
+    if remote_url.lower().startswith("ck://"):
         clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         logger.info(
             f"Remote {remote_name} uses ck:// scheme; skipping HTTP auth setup"
         )
+        return
+    # The token is the user's own, and a repo can point a remote named like
+    # the hub's anywhere, so it only goes to the hub it came from
+    base_url = calkit.hub.get_base_url().rstrip("/")
+    if not is_on_hub(remote_url, base_url):
+        # Including any set while it pointed at the hub
+        clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
+        logger.warning(
+            f"Not setting up authentication for DVC remote {remote_name}, "
+            f"since its URL ({remote_url}) isn't on the hub ({base_url})"
+        )
+        return
+    # A hub link's session can't make a lasting token, and its own are
+    # short-lived, so neither goes in the config; a remote set up before
+    # keeps working, and 'ck://' ones get the session's token as they go
+    if calkit.hub.uses_link(base_url):
+        config_local = os.path.join(wdir or ".", ".dvc", "config.local")
+        local = (
+            ConfigObj(config_local, encoding="utf-8")
+            if os.path.isfile(config_local)
+            else {}
+        )
+        section = local.get(f'remote "{remote_name}"')
+        if not isinstance(section, dict) or not section.get("password"):
+            logger.warning(
+                f"DVC remote {remote_name} can't be authenticated in a hub "
+                "session; 'calkit update hub' switches it to Calkit's ck:// "
+                "scheme, which can"
+            )
         return
     settings = calkit.config.read()
     if settings.dvc_token is None or always_auth:
@@ -1195,6 +1549,13 @@ def set_remote_auth(
         )["access_token"]
         settings.dvc_token = token
         settings.write()
+    # The URL it's for goes first, in the local config, which the repo can't
+    # change, so the token only goes where it was meant to, and isn't
+    # cleared by the next command as a token without one
+    r3 = run_dvc_command(
+        ["remote", "modify", "--local", remote_name, "url", remote_url],
+        cwd=wdir,
+    )
     r1 = run_dvc_command(
         [
             "remote",
@@ -1217,7 +1578,7 @@ def set_remote_auth(
         ],
         cwd=wdir,
     )
-    if r1 != 0 or r2 != 0:
+    if r1 != 0 or r2 != 0 or r3 != 0:
         raise RuntimeError(
             f"Failed to set DVC remote authentication for {remote_name}"
         )
@@ -1272,6 +1633,24 @@ def get_remotes(wdir: str | None = None) -> dict[str, str]:
                 if isinstance(url, str):
                     remotes[name] = url
         return remotes
+    finally:
+        repo.close()
+
+
+def get_missing_outs(wdir: str | None = None) -> list[str]:
+    """Get the paths of DVC outputs whose recorded data isn't in the
+    workspace.
+
+    An output of a stage that has never run has no recorded data, so it
+    isn't missing.
+    """
+    repo = get_dvc_repo(wdir)
+    try:
+        return sorted(
+            str(out).replace(os.sep, "/")
+            for out in repo.index.outs
+            if out.use_cache and out.hash_info and out.workspace_status()
+        )
     finally:
         repo.close()
 
@@ -1335,11 +1714,14 @@ def get_cached_out_paths(wdir: str | None = None) -> set[str]:
     paths relative to the project root.
     """
     repo = get_dvc_repo(wdir)
-    return {
-        Path(os.path.relpath(out.fs_path, repo.root_dir)).as_posix()
-        for out in repo.index.outs
-        if out.use_scm_ignore
-    }
+    try:
+        return {
+            Path(os.path.relpath(out.fs_path, repo.root_dir)).as_posix()
+            for out in repo.index.outs
+            if out.use_scm_ignore
+        }
+    finally:
+        repo.close()
 
 
 def restore_output_ignores(wdir: str | None = None) -> list[str]:
@@ -1362,9 +1744,606 @@ def restore_output_ignores(wdir: str | None = None) -> list[str]:
     return written
 
 
+def get_git_output_paths(  # type: ignore[no-any-unimported]
+    dvc_repo: dvc.repo.Repo | None = None,
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+) -> dict[str, str]:
+    """Get the pipeline outputs declared to be stored in Git, each mapped to
+    the name of the stage that makes it, as DVC names it from ``wdir``,
+    e.g., ``name@item`` for an iterated stage, or ``sub/dvc.yaml:name`` for
+    an inline subproject's.
+
+    Paths are absolute and posix.
+    An iterated stage's paths are templates, so its outputs are found in
+    DVC's index, which ``dvc_repo`` can have built; without a ``dvc_repo``,
+    they're left out.
+    """
+    import calkit.latex
+    import calkit.markdown
+    from calkit.models.pipeline import (
+        JsonToLatexStage,
+        JupyterNotebookStage,
+        LatexStage,
+        MarimoHtmlWasmStage,
+        PathOutput,
+        Pipeline,
+        QuestionsToLatexStage,
+        ReferencesCheckStage,
+    )
+
+    base = Path(wdir or ".").resolve()
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    # Markdown stages stand for the stages their blocks declare
+    try:
+        expanded = calkit.markdown.expand_ck_info(ck_info, wdir=wdir).ck_info
+        stages = Pipeline.model_validate(expanded["pipeline"]).stages
+    except Exception:
+        stages = {}
+    git_out_paths: dict[str, str] = {}
+    # Iterated stages' outputs stored in Git, by their positions among its
+    # DVC outs, by stage name, since their paths are templates
+    iterated: dict[str, list[int]] = {}
+    for name, stage in stages.items():
+        outs = [o for o in stage.outputs or [] if isinstance(o, PathOutput)]
+        if isinstance(stage, JupyterNotebookStage):
+            outs += stage.notebook_outputs
+        elif isinstance(stage, MarimoHtmlWasmStage):
+            outs += stage.app_outputs
+        elif isinstance(stage, ReferencesCheckStage):
+            outs += stage.check_outputs
+        if stage.scheduler_log_output is not None:
+            outs.append(stage.scheduler_log_output)
+        # By the name of the stage that makes each
+        paths = [(out.path, name) for out in outs if out.storage == "git"]
+        # Generated LaTeX and reference reports are stored in Git unless
+        # they say otherwise
+        if isinstance(
+            stage,
+            (JsonToLatexStage, QuestionsToLatexStage, ReferencesCheckStage),
+        ):
+            paths += [
+                (out, name)
+                for out in stage.outputs or []
+                if isinstance(out, str)
+            ]
+        if isinstance(stage, LatexStage):
+            if stage.pdf_storage == "git":
+                paths.append((stage.pdf_path, name))
+            # Each diff is a stage of its own
+            if stage.diff_pdf_storage == "git":
+                paths += [
+                    (path, calkit.latex.get_diff_stage_name(name, *pair))
+                    for pair, path in zip(stage.diff_pairs, stage.diff_paths)
+                ]
+        if stage.iterate_over:
+            # Matching paths to templates could match another output's
+            try:
+                dvc_out_paths = [
+                    out if isinstance(out, str) else next(iter(out))
+                    for out in stage.to_dvc().get("outs", [])
+                ]
+            except Exception:
+                dvc_out_paths = []
+            template_paths = {posixpath.normpath(p) for p, _ in paths}
+            iterated[name] = [
+                i
+                for i, out_path in enumerate(dvc_out_paths)
+                if posixpath.normpath(out_path) in template_paths
+            ]
+            continue
+        for p, stage_name in paths:
+            path = Path(os.path.normpath(base / (stage.wdir or "") / p))
+            git_out_paths[path.as_posix()] = stage_name
+    if any(iterated.values()) and dvc_repo is not None:
+        dvc_yaml_path = base / "dvc.yaml"
+        for dvc_stage in dvc_repo.index.stages:
+            positions = iterated.get(dvc_stage.name.split("@")[0])
+            if not positions:
+                continue
+            if Path(dvc_stage.path).resolve() != dvc_yaml_path:
+                continue
+            for i in positions:
+                if i < len(dvc_stage.outs):
+                    out_path = Path(dvc_stage.outs[i].fs_path).resolve()
+                    git_out_paths[out_path.as_posix()] = dvc_stage.name
+    # An inline subproject's stages are run from here, but an isolated one,
+    # with its own DVC repo, runs on its own
+    for subproject in ck_info.get("subprojects") or []:
+        if not isinstance(subproject, dict) or not subproject.get("path"):
+            continue
+        sp = Path(subproject["path"]).as_posix().strip("/")
+        sp_dir = base / sp
+        if not sp_dir.is_dir() or (sp_dir / ".dvc").is_dir():
+            continue
+        for sp_out_path, name in get_git_output_paths(
+            dvc_repo=dvc_repo, wdir=str(sp_dir)
+        ).items():
+            lock_dir, lock_name = split_lock_stage_name(name)
+            sp_lock_dir = posixpath.join(sp, lock_dir) if lock_dir else sp
+            git_out_paths[sp_out_path] = f"{sp_lock_dir}/dvc.yaml:{lock_name}"
+    return git_out_paths
+
+
+def get_unstored_output_files(  # type: ignore[no-any-unimported]
+    dvc_repo: dvc.repo.Repo | None = None,
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    stages: Container[str] | None = None,
+    tracked: bool = False,
+) -> list[dict]:
+    """Find files in pipeline outputs stored in Git that neither Git nor DVC
+    stores.
+
+    These are files Git ignores, unless .dvcignore excludes them too, e.g.,
+    by the output's ``ignore``, so DVC doesn't hash them either.
+    The output is then complete here but not in a clone, where it doesn't
+    match dvc.lock, so its stage looks stale.
+    With ``tracked``, they're instead files Git tracks that both ignore, so
+    DVC doesn't hash them, but Git stores them anyway.
+
+    Each has the output's ``path``, the ``stage`` that makes it, as DVC
+    names it, the ``files``, and the ``rules`` that ignore them, e.g.,
+    ``'*.log' in .gitignore``.
+    Paths are relative to ``wdir``.
+    ``stages`` limits it to the outputs of those.
+    Without a ``dvc_repo``, iterated stages' outputs and what DVC tracks or
+    ignores can't be told, so they're left out.
+    """
+    import subprocess
+
+    import calkit.git
+
+    base = Path(wdir or ".").resolve()
+    repo = calkit.git.get_repo(wdir)
+    root = Path(repo.working_dir).resolve()
+
+    def rel(path: str | Path) -> str:
+        return Path(os.path.relpath(path, base)).as_posix()
+
+    unstored: list[dict] = []
+    if tracked and dvc_repo is None:
+        return unstored
+    git_out_paths = {
+        path: stage
+        for path, stage in get_git_output_paths(
+            dvc_repo=dvc_repo, ck_info=ck_info, wdir=wdir
+        ).items()
+        if (stages is None or stage in stages) and os.path.exists(path)
+    }
+    # What DVC caches is ignored by Git on purpose
+    cached_out_paths = (
+        set()
+        if dvc_repo is None or not git_out_paths
+        else {
+            Path(out.fs_path).resolve().as_posix()
+            for out in dvc_repo.index.outs
+            if out.use_cache
+        }
+    )
+    # Whether each path is in an output DVC caches, and the output stored in
+    # Git it's in, if any, worked out with strings and saved per directory,
+    # since an output can have many files
+    containing: dict[str, tuple[bool, str | None]] = {}
+
+    def get_containing(path: str) -> tuple[bool, str | None]:
+        if path not in containing:
+            parent = posixpath.dirname(path)
+            in_cached, out_path = (
+                (False, None) if parent == path else get_containing(parent)
+            )
+            if path in cached_out_paths:
+                in_cached = True
+            if path in git_out_paths:
+                out_path = path
+            containing[path] = (in_cached, out_path)
+        return containing[path]
+
+    # Files Git ignores in outputs stored in Git, with the output of each
+    out_path_by_file: dict[str, str] = {}
+    root_posix = root.as_posix()
+    out_paths = list(git_out_paths)
+    # Chunked to stay under command line length limits
+    for i in range(0, len(out_paths), 100):
+        listing = repo.git.ls_files(
+            "-z",
+            "--cached" if tracked else "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--",
+            *[f":(literal){p}" for p in out_paths[i : i + 100]],
+        )
+        for git_path in listing.split("\0"):
+            if not git_path:
+                continue
+            path = posixpath.join(root_posix, git_path)
+            # Within its output, or the output itself, if it's a file
+            in_cached, out_path = get_containing(path)
+            if out_path is not None and not in_cached:
+                out_path_by_file[path] = out_path
+    dvcignored = _get_dvcignored_paths(dvc_repo, list(out_path_by_file))
+    files_by_out: dict[str, list[str]] = {}
+    for path, out_path in out_path_by_file.items():
+        if (path in dvcignored) == tracked:
+            files_by_out.setdefault(out_path, []).append(path)
+    if files_by_out:
+        # What ignores each, in one call
+        all_files = [
+            Path(p).relative_to(root).as_posix()
+            for files in files_by_out.values()
+            for p in files
+        ]
+        result = subprocess.run(
+            ["git", "check-ignore", "-v", "-z", "--stdin"],
+            input="\0".join(all_files) + "\0",
+            capture_output=True,
+            text=True,
+            cwd=root,
+        )
+        fields = result.stdout.split("\0")
+        rule_by_path = {}
+        for n in range(0, len(fields) - 3, 4):
+            source, _, pattern, git_path = fields[n : n + 4]
+            if not os.path.isabs(source):
+                source = rel(root / source)
+            rule_by_path[(root / git_path).as_posix()] = (
+                f"'{pattern}' in {source}"
+            )
+        for out_path, files in files_by_out.items():
+            unstored.append(
+                dict(
+                    path=rel(out_path),
+                    stage=git_out_paths[out_path],
+                    files=[rel(p) for p in files],
+                    rules=list(
+                        dict.fromkeys(
+                            rule_by_path[p] for p in files if p in rule_by_path
+                        )
+                    ),
+                )
+            )
+    return unstored
+
+
+def _get_dvcignored_paths(  # type: ignore[no-any-unimported]
+    dvc_repo: dvc.repo.Repo | None, paths: list[str]
+) -> set[str]:
+    """Get which of ``paths``, absolute and posix, .dvcignore excludes.
+
+    Checked a directory at a time, since an output can have many.
+    """
+    if dvc_repo is None or not paths:
+        return set()
+    dvcignore = dvc_repo.dvcignore
+    # DVC's root may not be resolved, e.g., a temporary directory on macOS,
+    # and it only knows paths under it as it is
+    dvc_root = Path(dvc_repo.root_dir)
+    dvc_root_resolved = dvc_root.resolve()
+
+    def to_dvc_path(path: str) -> str:
+        return str(dvc_root / os.path.relpath(path, dvc_root_resolved))
+
+    dir_is_ignored: dict[str, bool] = {}
+
+    def is_dir_ignored(dir_path: str) -> bool:
+        # DVC doesn't look inside an excluded directory
+        if dir_path not in dir_is_ignored:
+            path = Path(dir_path)
+            if path == dvc_root_resolved or not path.is_relative_to(
+                dvc_root_resolved
+            ):
+                dir_is_ignored[dir_path] = False
+            else:
+                dir_is_ignored[dir_path] = is_dir_ignored(
+                    path.parent.as_posix()
+                ) or dvcignore.is_ignored_dir(to_dvc_path(dir_path))
+        return dir_is_ignored[dir_path]
+
+    names_by_dir: dict[str, list[str]] = {}
+    for path in paths:
+        names_by_dir.setdefault(posixpath.dirname(path), []).append(
+            posixpath.basename(path)
+        )
+    ignored: set[str] = set()
+    for dir_path, names in names_by_dir.items():
+        if is_dir_ignored(dir_path):
+            excluded = set(names)
+        else:
+            _, kept = dvcignore(to_dvc_path(dir_path), [], list(names))
+            excluded = set(names) - set(kept)
+        ignored.update(posixpath.join(dir_path, name) for name in excluded)
+    return ignored
+
+
+def get_unstored_files_text(files: list[str], rules: list[str]) -> str:
+    """Get a short description of files stored nowhere, naming the first few
+    and what excludes them.
+    """
+    n_shown = 3
+    text = ", ".join(files[:n_shown])
+    if len(files) > n_shown:
+        text += f", and {len(files) - n_shown} more"
+    if rules:
+        text += f" ({', '.join(rules)})"
+    return text
+
+
+def force_add_ignored_files(
+    repo: git.Repo, paths: list[str], dry_run: bool = False
+) -> list[str]:
+    """Add files to Git in spite of the rules that ignore them, unless
+    they're larger than ``LARGE_MB``, since Git history keeps them for good.
+
+    Returns those too large, which aren't added.
+    """
+    too_large = [
+        p
+        for p in paths
+        if os.path.isfile(p) and os.path.getsize(p) > LARGE_MB * 1024**2
+    ]
+    if dry_run:
+        return too_large
+    to_add = [os.path.abspath(p) for p in paths if p not in too_large]
+    root = os.path.realpath(repo.working_dir)
+    _ensure_notebooks_are_not_filtered(
+        repo,
+        [
+            Path(os.path.relpath(os.path.realpath(p), root)).as_posix()
+            for p in to_add
+        ],
+    )
+    # Chunked to stay under command line length limits
+    for i in range(0, len(to_add), 100):
+        repo.git.add(
+            "-f", "--", *[f":(literal){p}" for p in to_add[i : i + 100]]
+        )
+    return too_large
+
+
+def stage_git_outputs(
+    repo: git.Repo, paths: list[str], dry_run: bool = False
+) -> list[str]:
+    """Stage pipeline outputs stored in Git, deletions included, except files
+    Git doesn't track yet that are larger than ``LARGE_MB``, since Git
+    history keeps them for good.
+
+    Returns those too large, relative to the repo's root, which aren't
+    staged.
+    """
+    root = Path(repo.working_dir)
+    literal_paths = [f":(literal){p}" for p in paths]
+
+    def list_files(*args: str) -> list[str]:
+        # Chunked to stay under command line length limits
+        return [
+            p
+            for i in range(0, len(paths), 100)
+            for p in repo.git.ls_files(
+                "-z", *args, "--", *literal_paths[i : i + 100]
+            ).split("\0")
+            if p
+        ]
+
+    new_paths = list_files("--others", "--exclude-standard")
+    too_large = [
+        p
+        for p in new_paths
+        if os.path.isfile(root / p)
+        and os.path.getsize(root / p) > LARGE_MB * 1024**2
+    ]
+    if dry_run:
+        return too_large
+    _ensure_notebooks_are_not_filtered(
+        repo, new_paths + list_files("--modified")
+    )
+    excludes = [f":(top,literal,exclude){p}" for p in too_large]
+    for i in range(0, len(paths), 100):
+        repo.git.add("-A", "--", *literal_paths[i : i + 100], *excludes)
+    return too_large
+
+
+def _ensure_notebooks_are_not_filtered(
+    repo: git.Repo, paths: list[str]
+) -> None:
+    """Exempt notebooks among ``paths``, relative to the repo's root, from a
+    clean filter like nbstripout, which would store different bytes in Git
+    than DVC hashes.
+    """
+    import calkit.git
+
+    for path in paths:
+        if path.endswith(".ipynb"):
+            calkit.git.ensure_path_is_not_filtered(repo, path)
+
+
+def untrack_files(repo: git.Repo, paths: list[str]) -> None:
+    """Remove files from Git, keeping them in the working tree."""
+    abs_paths = [os.path.abspath(p) for p in paths]
+    # Chunked to stay under command line length limits
+    for i in range(0, len(abs_paths), 100):
+        repo.git.rm(
+            "-q",
+            "--cached",
+            "--",
+            *[f":(literal){p}" for p in abs_paths[i : i + 100]],
+        )
+
+
+def get_too_large_text(paths: list[str]) -> str:
+    """Get what to say about files in outputs stored in Git that are too
+    large to add to it.
+    """
+    n_files_txt = f"{len(paths)} file{'s' if len(paths) > 1 else ''}"
+    return (
+        f"Not adding {n_files_txt} in outputs stored in Git to it, since "
+        f"they're larger than {LARGE_MB} MB: "
+        f"{get_unstored_files_text(paths, [])}; add them to the output's "
+        "'ignore' list, or store it with DVC"
+    )
+
+
+def get_stage_output_dvc_files(
+    dvc_stages: dict, wdir: str | None = None
+) -> list[dict]:
+    """The .dvc files, e.g., from adding a figure with DVC by hand, for paths
+    a pipeline stage makes now, each with the output's ``path``, its
+    ``dvc_file``, both relative to ``wdir``, and the ``stage``.
+
+    DVC refuses a pipeline with both, as overlapping outputs, and the stage
+    is what says how the path is made, so the .dvc file is the one to go.
+    Only checks whether files exist, so it's fast enough to run whenever the
+    pipeline is compiled.
+    """
+    base = wdir or "."
+    found = []
+    for name, stage in dvc_stages.items():
+        stage_wdir = stage.get("wdir") or ""
+        for out in stage.get("outs") or []:
+            path = next(iter(out)) if isinstance(out, dict) else out
+            if not isinstance(path, str) or "${" in path:
+                continue
+            path = posixpath.normpath(posixpath.join(stage_wdir, path))
+            dvc_file = path.rstrip("/") + ".dvc"
+            if os.path.isfile(os.path.join(base, dvc_file)):
+                found.append(
+                    {"path": path, "dvc_file": dvc_file, "stage": name}
+                )
+    return found
+
+
+def record_stage_output_dvc_file(
+    overlap: dict, dvc_stage: dict, wdir: str | None = None
+) -> bool:
+    """Copy the hash from a stage output's own .dvc file to ``dvc.lock``, so
+    the data can still be pulled once that file is removed.
+
+    ``overlap`` is an item from ``get_stage_output_dvc_files``. Only the
+    output is recorded, so a stage that hasn't run stays stale, and an
+    output ``dvc.lock`` already records is left as is.
+
+    Returns whether the .dvc file can be removed, which it can't if it
+    doesn't list the output, since its hash wasn't found to keep.
+    """
+    import calkit.git
+
+    base = wdir or "."
+    with open(os.path.join(base, overlap["dvc_file"])) as f:
+        dvc_file = calkit.ryaml.load(f) or {}
+    dvc_file_wdir = posixpath.join(
+        posixpath.dirname(overlap["dvc_file"]), dvc_file.get("wdir") or ""
+    )
+    dvc_out = next(
+        (
+            out
+            for out in dvc_file.get("outs") or []
+            if posixpath.normpath(
+                posixpath.join(dvc_file_wdir, out.get("path", ""))
+            )
+            == overlap["path"]
+        ),
+        None,
+    )
+    if dvc_out is None:
+        return False
+    hash_keys = ("md5", "etag", "checksum", "files")
+    if not any(k in dvc_out for k in hash_keys):
+        return True
+    hashes = {
+        k: dvc_out[k]
+        for k in (*hash_keys, "size", "nfiles", "hash")
+        if k in dvc_out
+    }
+    lock_path = os.path.join(base, "dvc.lock")
+    lock: dict = {}
+    if os.path.isfile(lock_path):
+        with open(lock_path) as f:
+            lock = calkit.ryaml.load(f) or {}
+    lock.setdefault("schema", "2.0")
+    stages = lock.setdefault("stages", {})
+    entry = stages.setdefault(overlap["stage"], {"cmd": dvc_stage.get("cmd")})
+    outs = entry.setdefault("outs", [])
+    # As the stage declares it, e.g., with a trailing slash, for DVC to match
+    stage_wdir = dvc_stage.get("wdir") or ""
+    declared = [
+        next(iter(out)) if isinstance(out, dict) else out
+        for out in dvc_stage.get("outs") or []
+    ]
+    out_path = next(
+        (
+            p
+            for p in declared
+            if posixpath.normpath(posixpath.join(stage_wdir, p))
+            == overlap["path"]
+        ),
+        posixpath.relpath(overlap["path"], stage_wdir or "."),
+    )
+    if any(out.get("path") == out_path for out in outs):
+        return True
+    outs.append({"path": out_path, **hashes})
+    newline = calkit.git.get_checkout_newline(lock_path)
+    with open(lock_path, "w", newline=newline) as f:
+        calkit.ryaml.dump(lock, f)
+    return True
+
+
+def untrack_cached_stage_outputs(
+    dvc_stages: dict, wdir: str | None = None
+) -> list[dict]:
+    """Stop Git tracking what a stage stores with DVC, e.g., a figure
+    imported from Overleaf before its stage was, which DVC refuses to save
+    as an output, returning each one's ``path`` and ``stage``.
+
+    The stage says where it's stored, as ``calkit check storage --fix``
+    takes it to. The files stay as they are, and DVC ignores them in Git
+    when it saves them. One ``git ls-files``, so fast enough to run before
+    every run.
+    """
+    import calkit.git
+
+    outs: dict[str, str] = {}
+    for name, stage in dvc_stages.items():
+        stage_wdir = stage.get("wdir") or ""
+        for out in stage.get("outs") or []:
+            if isinstance(out, dict):
+                path, opts = next(iter(out.items()))
+                if (opts or {}).get("cache") is False:
+                    continue
+            else:
+                path = out
+            if not isinstance(path, str) or "${" in path:
+                continue
+            path = posixpath.normpath(posixpath.join(stage_wdir, path))
+            outs[path.rstrip("/")] = name
+    if not outs:
+        return []
+    repo = calkit.git.get_repo(wdir)
+    root = Path(repo.working_dir).resolve()
+    base = Path(wdir or ".").resolve()
+    tracked = set()
+    paths = list(outs)
+    for i in range(0, len(paths), 100):
+        listed = repo.git.ls_files(
+            "-z", "--", *[str(base / p) for p in paths[i : i + 100]]
+        )
+        tracked |= {
+            Path(os.path.relpath(root / p, base)).as_posix()
+            for p in listed.split("\0")
+            if p
+        }
+    untracked = [
+        {"path": path, "stage": name}
+        for path, name in outs.items()
+        if path in tracked or any(t.startswith(path + "/") for t in tracked)
+    ]
+    for found in untracked:
+        repo.git.rm("-r", "-q", "--cached", "--", str(base / found["path"]))
+    return untracked
+
+
 def get_storage_problems(  # type: ignore[no-any-unimported]
     wdir: str | None = None,
-    large_mb: float | None = 50,
+    large_mb: float | None = LARGE_MB,
     dvc_repo: dvc.repo.Repo | None = None,
     ck_info: dict | None = None,
 ) -> list[dict]:
@@ -1377,29 +2356,36 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     The kinds are:
 
     - ``both``: tracked by Git and cached by DVC, so it belongs in DVC,
-      unless it was added on its own and differs from its ``.dvc`` file.
-    - ``ignored``: a pipeline output stored in Git that Git ignores.
+      unless it was added on its own and differs from its ``.dvc`` file,
+      with the ``files`` in both if a directory has others only in Git.
+    - ``ignored``: a pipeline output stored in Git that Git ignores, with
+      the ``files`` in it Git ignores.
+    - ``ignored-files``: a pipeline output stored in Git with ``files`` in
+      it that Git ignores, from ``get_unstored_output_files``, so leaving out
+      those .dvcignore excludes too.
+    - ``excluded-tracked``: a pipeline output stored in Git with ``files``
+      in it Git still tracks that both it and .dvcignore leave out, e.g., by
+      the output's ``ignore``, so DVC doesn't hash them.
     - ``zipped``: stored zipped with DVC, but tracked by Git too.
     - ``large``: tracked by Git, and larger than ``large_mb``, which is only
       advice; None skips this check.
+    - ``stage-output-dvc-file``: made by a pipeline ``stage`` and tracked by
+      its own ``dvc_file`` too, e.g., added with DVC by hand before the
+      stage was, which belongs to the stage. DVC can't index a project like
+      that, so if there are any, they're all that's reported.
+    - ``stage-output-in-dvc-dir``: made by a pipeline ``stage``, and inside
+      a directory ``dvc_file`` tracks, which DVC refuses to run. Left to the
+      user, since the .dvc file can cover data the stage doesn't make.
 
     Building DVC's index is most of the cost, and loading calkit.yaml much
     of the rest, so a ``dvc_repo`` that has built it, and ``ck_info``, can
     be passed in.
     """
     import bisect
+    import itertools
 
     import calkit.dvc.zip
     import calkit.git
-    from calkit.models.pipeline import (
-        JsonToLatexStage,
-        JupyterNotebookStage,
-        LatexStage,
-        MarimoHtmlWasmStage,
-        PathOutput,
-        Pipeline,
-        QuestionsToLatexStage,
-    )
 
     base = Path(wdir or ".").resolve()
     repo = calkit.git.get_repo(wdir)
@@ -1421,11 +2407,63 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
         return Path(os.path.relpath(path, base)).as_posix()
 
     problems: list[dict] = []
+    # Before DVC's index is built, which these stop
+    dvc_yaml_path = base / "dvc.yaml"
+    if dvc_yaml_path.is_file():
+        with open(dvc_yaml_path) as f:
+            dvc_stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+        for found in get_stage_output_dvc_files(dvc_stages, str(base)):
+            problems.append(
+                dict(
+                    path=found["path"],
+                    kind="stage-output-dvc-file",
+                    stage=found["stage"],
+                    dvc_file=found["dvc_file"],
+                    store_in=None,
+                    message=(
+                        f"{found['path']} is made by stage "
+                        f"'{found['stage']}', but {found['dvc_file']} tracks "
+                        "it too"
+                    ),
+                )
+            )
+        if problems:
+            return problems
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
     # Cached by DVC, so not to be tracked by Git
     repo_given = dvc_repo is not None
     if dvc_repo is None:
         dvc_repo = get_dvc_repo(wdir)
     try:
+        # An output in a tracked directory doesn't stop the index from
+        # building, only DVC's runs
+        outs_by_path = {
+            Path(out.fs_path).resolve(): out for out in dvc_repo.index.outs
+        }
+        for path, out in sorted(outs_by_path.items()):
+            if out.stage.is_data_source or not path.is_relative_to(base):
+                continue
+            for parent in path.parents:
+                parent_out = outs_by_path.get(parent)
+                if parent_out is None or not parent_out.stage.is_data_source:
+                    continue
+                dvc_file = rel(Path(parent_out.stage.path).resolve())
+                problems.append(
+                    dict(
+                        path=rel(path),
+                        kind="stage-output-in-dvc-dir",
+                        stage=out.stage.addressing,
+                        dvc_file=dvc_file,
+                        store_in=None,
+                        message=(
+                            f"{rel(path)} is made by stage "
+                            f"'{out.stage.addressing}', but {dvc_file} tracks "
+                            f"{rel(parent)}, which contains it; add its other "
+                            f"files separately and delete {dvc_file}"
+                        ),
+                    )
+                )
         for out in dvc_repo.index.outs:
             path = Path(out.fs_path).resolve()
             # A project in a subdirectory can share its DVC repo with others
@@ -1433,8 +2471,29 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
                 continue
             if not out.use_cache or not in_git(path):
                 continue
+            # Files Git tracks in a directory that DVC excludes, e.g., added
+            # with 'git add -f', are only in Git, so only the rest are in both
+            both_files = None
+            if path.is_dir():
+                prefix = path.as_posix() + "/"
+                n = bisect.bisect_left(tracked, prefix)
+                in_dir = list(
+                    itertools.takewhile(
+                        lambda p: p.startswith(prefix),
+                        itertools.islice(tracked, n, None),
+                    )
+                )
+                both_files = [
+                    p
+                    for p in in_dir
+                    if not dvc_repo.dvcignore.is_ignored_file(
+                        os.path.join(out.fs_path, os.path.relpath(p, path))
+                    )
+                ]
+                if not both_files:
+                    continue
             message = f"{rel(path)} is tracked by both Git and DVC"
-            problem = dict(
+            problem: dict[str, Any] = dict(
                 path=rel(path),
                 kind="both",
                 stage=None,
@@ -1442,6 +2501,8 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
                 store_in="dvc",
                 message=message,
             )
+            if both_files is not None and len(both_files) < len(in_dir):
+                problem["files"] = [rel(Path(p)) for p in both_files]
             if out.stage.is_data_source:
                 problem["dvc_file"] = rel(Path(out.stage.path).resolve())
                 # Without a stage to say which is right, differing content
@@ -1456,50 +2517,27 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
             else:
                 problem["stage"] = out.stage.addressing
             problems.append(problem)
-    finally:
-        if not repo_given:
-            dvc_repo.close()
-    # Declared to be stored in Git, so not to be ignored by it
-    if ck_info is None:
-        ck_info = calkit.load_calkit_info(wdir=wdir)
-    try:
-        stages = Pipeline.model_validate(ck_info["pipeline"]).stages
-    except Exception:
-        stages = {}
-    in_git_declared: list[tuple[Path, str]] = []
-    for name, stage in stages.items():
-        # An iterated stage's paths are templates
-        if stage.iterate_over:
-            continue
-        outs = [o for o in stage.outputs or [] if isinstance(o, PathOutput)]
-        if isinstance(stage, JupyterNotebookStage):
-            outs += stage.notebook_outputs
-        elif isinstance(stage, MarimoHtmlWasmStage):
-            outs += stage.app_outputs
-        if stage.scheduler_log_output is not None:
-            outs.append(stage.scheduler_log_output)
-        paths = [out.path for out in outs if out.storage == "git"]
-        # Generated LaTeX is stored in Git unless it says otherwise
-        if isinstance(stage, (JsonToLatexStage, QuestionsToLatexStage)):
-            paths += [
-                out for out in stage.outputs or [] if isinstance(out, str)
-            ]
-        if isinstance(stage, LatexStage) and stage.pdf_storage == "git":
-            paths.append(stage.pdf_path)
-        for p in paths:
-            path = Path(os.path.normpath(base / (stage.wdir or "") / p))
-            if path.exists() and not in_git(path):
-                in_git_declared.append((path, name))
-    if in_git_declared:
-        ignored = set(
-            repo.ignored(
-                *[p.relative_to(root).as_posix() for p, _ in in_git_declared]
+        # Declared to be stored in Git, so not to be ignored by it
+        in_git_declared = [
+            (Path(posix), name)
+            for posix, name in get_git_output_paths(
+                dvc_repo=dvc_repo, ck_info=ck_info, wdir=wdir
+            ).items()
+            if Path(posix).exists() and not in_git(Path(posix))
+        ]
+        ignored_problems: dict[str, dict] = {}
+        if in_git_declared:
+            ignored = set(
+                repo.ignored(
+                    *[
+                        p.relative_to(root).as_posix()
+                        for p, _ in in_git_declared
+                    ]
+                )
             )
-        )
-        for path, name in in_git_declared:
-            if path.relative_to(root).as_posix() in ignored:
-                problems.append(
-                    dict(
+            for path, name in in_git_declared:
+                if path.relative_to(root).as_posix() in ignored:
+                    ignored_problems[rel(path)] = dict(
                         path=rel(path),
                         kind="ignored",
                         stage=name,
@@ -1508,7 +2546,63 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
                         message=f"{rel(path)} is stored in Git, but Git "
                         "ignores it",
                     )
+                    problems.append(ignored_problems[rel(path)])
+        # Files in outputs stored in Git that neither Git nor DVC stores
+        for unstored in get_unstored_output_files(
+            dvc_repo=dvc_repo, ck_info=ck_info, wdir=wdir
+        ):
+            # An output ignored as a whole is reported as such, with its
+            # files, since un-ignoring it can leave some ignored by other
+            # rules, e.g., '*.log' in a directory
+            if unstored["path"] in ignored_problems:
+                ignored_problems[unstored["path"]].update(
+                    files=unstored["files"], rules=unstored["rules"]
                 )
+                continue
+            files = unstored["files"]
+            files_txt = get_unstored_files_text(files, unstored["rules"])
+            n_files_txt = f"{len(files)} file{'s' if len(files) > 1 else ''}"
+            problems.append(
+                dict(
+                    path=unstored["path"],
+                    kind="ignored-files",
+                    stage=unstored["stage"],
+                    dvc_file=None,
+                    store_in="git",
+                    message=(
+                        f"{unstored['path']} is stored in Git, but Git "
+                        f"ignores {n_files_txt} in it: {files_txt}"
+                    ),
+                    files=files,
+                    rules=unstored["rules"],
+                )
+            )
+        # Files Git stores in outputs stored in Git that DVC doesn't hash
+        for excluded in get_unstored_output_files(
+            dvc_repo=dvc_repo, ck_info=ck_info, wdir=wdir, tracked=True
+        ):
+            files = excluded["files"]
+            files_txt = get_unstored_files_text(files, [])
+            n_files_txt = f"{len(files)} file{'s' if len(files) > 1 else ''}"
+            problems.append(
+                dict(
+                    path=excluded["path"],
+                    kind="excluded-tracked",
+                    stage=excluded["stage"],
+                    dvc_file=None,
+                    store_in=None,
+                    message=(
+                        f"{excluded['path']} is stored in Git, but Git still "
+                        f"tracks {n_files_txt} in it that it and .dvcignore "
+                        f"leave out: {files_txt}"
+                    ),
+                    files=files,
+                    rules=excluded["rules"],
+                )
+            )
+    finally:
+        if not repo_given:
+            dvc_repo.close()
     # Zipped, so tracked by DVC as an archive and not by Git
     for workspace_path in calkit.dvc.zip.get_zip_path_map(wdir):
         path = base / workspace_path

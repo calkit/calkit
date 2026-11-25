@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.dvc import (
-    get_data_fpath_for_md5,
+    find_md5_object,
     make_mermaid_diagram,
     output_from_pipeline,
     run_dvc_command,
@@ -77,10 +77,62 @@ def test_make_mermaid_diagram(
         '\n\tnode2["do-something-else"]'
         '\n\tnode3["loop@1"]'
         '\n\tnode4["loop@2"]'
-        "\n\tnode1-->node2"
-        "\n\tnode2-->node3"
-        "\n\tnode2-->node4"
+        '\n\tnode1-->|"something.png"|node2'
+        '\n\tnode2-->|"else.pdf"|node3'
+        '\n\tnode2-->|"else.pdf"|node4'
     )
+    # An arrow carries every output read downstream, including through a
+    # directory either side names, and a few at most
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                "make": {
+                    "cmd": "x",
+                    "outs": ["a.csv", "b.csv", "c.csv", "d.csv", "figs"],
+                },
+                "use": {
+                    "cmd": "y",
+                    "deps": ["a.csv", "b.csv", "c.csv", "d.csv"],
+                },
+                "plot": {"cmd": "z", "deps": ["figs/one.png"]},
+                "nothing": {"cmd": "w", "deps": ["other.txt"]},
+            }
+        }
+    )
+    assert '\n\tnode1-->|"a.csv<br>b.csv<br>+2 more"|' in mm
+    assert '-->|"figs"|' in mm
+    # By file name, since the full paths are in calkit.yaml
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                "a": {"cmd": "x", "outs": ["results/deep/x.json"]},
+                "b": {"cmd": "y", "deps": ["results/deep/x.json"]},
+            }
+        }
+    )
+    assert mm.endswith('node1-->|"x.json"|node2')
+    # Too many arrows to label
+    mm = make_mermaid_diagram(
+        {
+            "stages": {"src": {"cmd": "x", "outs": ["o"]}}
+            | {f"s{i}": {"cmd": "y", "deps": ["o"]} for i in range(31)}
+        }
+    )
+    assert "|" not in mm
+    # A name can't end its label and add statements, e.g., a click handler
+    evil = 'a"]\n\tclick node1 call alert(1)\n\tnodeX["b'
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                evil: {"cmd": "x", "outs": ['o"\nclick']},
+                "b": {"cmd": "y", "deps": ['o"\nclick']},
+            }
+        }
+    )
+    lines = mm.split("\n")
+    assert len(lines) == 4
+    assert lines[1].startswith('\tnode1["a#34;#93;#10;')
+    assert not any(line.strip().startswith("click") for line in lines)
     # Neither the working directory nor its contents change
     assert os.getcwd() == str(wdir)
     assert os.listdir(wdir) == []
@@ -99,6 +151,25 @@ def test_make_mermaid_diagram(
     # A missing param still fails
     with pytest.raises(ResolveError, match="Could not find 'lr'"):
         make_mermaid_diagram(pipeline)
+    # Stage names come from the repo, so they can't add Mermaid of their own,
+    # e.g., a click with a javascript: link
+    name = 'x"]\n\tclick node1 href "javascript:alert(1)"\n\tnode9["`<b>`'
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                name: {"cmd": "echo", "outs": ["o"]},
+                "b": {"cmd": "echo", "deps": ["o"]},
+            }
+        }
+    )
+    lines = mm.splitlines()
+    assert lines[0] == "flowchart TD"
+    assert lines[1] == '\tnode1["b"]'
+    assert lines[2].startswith('\tnode2["x#34;#93;#10;#9;click node1 href')
+    assert lines[2].endswith('#96;#60;b#62;#96;"]')
+    assert lines[3:] == ['\tnode2-->|"o"|node1']
+    for c in '"[]`<>\n':
+        assert c not in lines[2][len('\tnode2["') : -len('"]')]
 
 
 def test_output_from_pipeline():
@@ -174,7 +245,9 @@ def test_expand_dvc_lock_outs():
     pass  # TODO
 
 
-def test_get_data_fpath_for_md5_takes_only_hashes():
+def test_find_md5_object_takes_only_hashes():
+    from app.storage import ProjectStorage
+
     class FakeFs:
         def __init__(self):
             self.looked_up: list[str] = []
@@ -186,10 +259,15 @@ def test_get_data_fpath_for_md5_takes_only_hashes():
         exists = isfile
 
     fs = FakeFs()
+    storage_locations = [
+        ProjectStorage(backend="s3", fs=fs, data_prefix="s3://b")
+    ]
     md5 = "0123456789abcdef0123456789abcdef"
     for valid in (md5, md5 + ".dir"):
-        path = get_data_fpath_for_md5("me", "proj", valid, fs=fs)
-        assert path is not None and path.endswith(valid[2:])
+        found = find_md5_object(
+            "me", "proj", valid, storage_locations=storage_locations
+        )
+        assert found is not None and found[1].endswith(valid[2:])
     # The hash comes from the project's own files, so anything that isn't
     # one never makes it into a storage path
     fs.looked_up.clear()
@@ -202,5 +280,10 @@ def test_get_data_fpath_for_md5_takes_only_hashes():
         "",
     ]
     for bad in crafted:
-        assert get_data_fpath_for_md5("me", "proj", bad, fs=fs) is None
+        assert (
+            find_md5_object(
+                "me", "proj", bad, storage_locations=storage_locations
+            )
+            is None
+        )
     assert fs.looked_up == []

@@ -7,7 +7,7 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import (
     AliasChoices,
@@ -16,6 +16,7 @@ from pydantic import (
     Discriminator,
     Field,
     Tag,
+    WithJsonSchema,
     computed_field,
     field_validator,
     model_validator,
@@ -23,6 +24,7 @@ from pydantic import (
 from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
+from calkit.core import normalize_orcid
 from calkit.models.base import Model
 from calkit.models.io import EnvVarInput
 from calkit.models.iteration import ParametersType
@@ -54,6 +56,15 @@ class _ImportedFromProject(Model):
 
     project: str
     path: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Branch, tag, or commit to follow when refreshing this. "
+            "Optional: an entry that names none follows the project's "
+            "default branch. The commit it resolves to is recorded in "
+            ".calkit/imports.json."
+        ),
+    )
     date: date_type | None = Field(
         default=None, description="When the data was downloaded."
     )
@@ -293,30 +304,7 @@ class _Person(Model):
         # RO-Crate both want, so neither has to guess at a bare identifier.
         if v is None:
             return v
-        match = re.fullmatch(
-            r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
-            r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
-            v.strip(),
-        )
-        if match is None:
-            raise ValueError(
-                f"orcid must look like 0000-0002-1825-0097 (got {v!r})"
-            )
-        bare = match.group(1).upper()
-        # The last character is an ISO 7064 MOD 11-2 check digit over the
-        # other 15, so a typo is caught here rather than by whoever later
-        # finds the identifier resolves to a stranger, or to nobody.
-        total = 0
-        for digit in bare[:-1].replace("-", ""):
-            total = (total + int(digit)) * 2
-        result = (12 - total % 11) % 11
-        expected = "X" if result == 10 else str(result)
-        if bare[-1] != expected:
-            raise ValueError(
-                f"orcid {v!r} has check digit {bare[-1]} but its other "
-                f"digits call for {expected}, so one of them is mistyped"
-            )
-        return f"https://orcid.org/{bare}"
+        return normalize_orcid(v)
 
     @model_validator(mode="after")
     def _check_identifiable(self) -> _Person:
@@ -606,6 +594,15 @@ PublicationKind = Literal[
 ]
 
 
+class PublicationReview(Model):
+    """A review of a publication, e.g., by a peer reviewer."""
+
+    path: str = Field(
+        description="Path to the review, a Markdown file whose comments are "
+        'numbered items under a heading containing "comments".'
+    )
+
+
 class Publication(_CalkitObject):
     """A publication the project produced, or one it builds upon.
 
@@ -631,6 +628,11 @@ class Publication(_CalkitObject):
     # was got from here, the same way a dataset does.
     imported_from: ImportedFromType | None = Field(
         default=None, description=_IMPORTED_FROM_DESCRIPTION
+    )
+    reviews: list[PublicationReview] = Field(
+        default_factory=list,
+        description="Reviews of this publication, whether written in this "
+        "project or received.",
     )
 
     @model_validator(mode="before")
@@ -660,14 +662,83 @@ class Publication(_CalkitObject):
         return self.doi is not None
 
 
-class ReferenceFile(Model):
-    path: str
-    key: str
+class ReferenceValue(Model):
+    """A value a document quotes from a reference, and where and in what
+    context the reference uses it.
+
+    A document cites it with ``\\ckrefval{<citation key>}{<name>}``, which
+    is checked against the reference's PDF.
+    """
+
+    value: float | int | str = Field(
+        description="The value, as the reference gives it, e.g., 0.1 or "
+        "'12.5%'."
+    )
+    page: int | None = Field(
+        default=None,
+        ge=1,
+        description="The page of the reference's PDF it's on, counting "
+        "from 1, which may differ from the number printed on the page.",
+    )
+    context: str | None = Field(
+        default=None,
+        description="The passage the value is used in, copied from the "
+        "reference, which is how it's found and checked; spacing and case "
+        "don't have to match.",
+    )
+    description: str | None = Field(
+        default=None, description="What the value is."
+    )
+
+
+def _reference_files_by_key(v: object) -> object:
+    """A collection's files by citation key, reading the list of key and
+    path Calkit wrote before.
+    """
+    from calkit.references.values import get_reference_files
+
+    if isinstance(v, list):
+        return get_reference_files({"files": v})
+    return v
 
 
 class ReferenceCollection(Model):
     path: str
-    files: list[ReferenceFile] = []
+    files: Annotated[
+        dict[str, str],
+        BeforeValidator(_reference_files_by_key),
+        # Editors validating calkit.yaml accept the list Calkit wrote before
+        WithJsonSchema(
+            {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                            },
+                            "required": ["key", "path"],
+                        },
+                    },
+                ]
+            }
+        ),
+    ] = Field(
+        default={},
+        description="PDFs of the collection's entries, by citation key, "
+        "relative to the project.",
+    )
+    values: dict[str, dict[str, ReferenceValue]] = Field(
+        default={},
+        description="Values documents quote from the collection's entries, "
+        "by citation key, and then by a name unique within the entry.",
+    )
 
 
 # The kinds that describe a machine, so can have 'requirements'
@@ -715,6 +786,7 @@ class Environment(Model):
         "uv-venv",
         "renv",
         "switch",
+        "texlive",
     ] = Field(description="What kind of environment this is.")
     # Note: ``path`` is declared on the specific subclasses that need it (most
     # of them, required; optional for Docker) rather than here, so subclasses
@@ -743,7 +815,21 @@ class Environment(Model):
         return data
 
 
-class CondaEnvironment(Environment):
+class ComposableEnvironment(Environment):
+    """Base class for the kinds other environments can be composed into."""
+
+    with_: list[str] = Field(
+        default=[],
+        alias="with",
+        description=(
+            "Names of TeX Live environments whose programs this one's "
+            "commands also get, e.g., for Matplotlib's usetex. They come "
+            "after this environment's own on PATH and before the system's."
+        ),
+    )
+
+
+class CondaEnvironment(ComposableEnvironment):
     kind: Literal["conda"] = "conda"
     path: str = Field(description="Path to the Conda environment YAML file.")
     prefix: str | None = Field(
@@ -751,7 +837,7 @@ class CondaEnvironment(Environment):
     )
 
 
-class VenvEnvironment(Environment):
+class VenvEnvironment(ComposableEnvironment):
     kind: Literal["venv"] = "venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -770,12 +856,167 @@ class VenvEnvironment(Environment):
     )
 
 
-class UvEnvironment(Environment):
+_OsName = Literal["linux", "macos", "windows"]
+_EnvVarSetting = Annotated[str, Field(pattern=r"^[^=]+=")]
+_GpuVendor = Literal["amd", "nvidia", "apple"]
+
+
+class AppExistsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    app_exists: str | list[str] = Field(
+        description="App that must be on PATH, e.g., 'sbatch'."
+    )
+
+
+class EnvVarSetCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    env_var_set: str | list[str] = Field(
+        description="Environmental variable that must be set."
+    )
+
+
+class EnvVarExistsCondition(Model):
+    """The old name for ``env_var_set``, still honored."""
+
+    model_config = ConfigDict(extra="forbid")
+    env_var_exists: str | list[str] = Field(
+        description="Deprecated alias for 'env_var_set'.",
+        json_schema_extra={"deprecated": True},
+    )
+
+
+class EnvVarEqualsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    env_var_equals: _EnvVarSetting | list[_EnvVarSetting] = Field(
+        description="'NAME=value' an environmental variable must be set to, "
+        "e.g., 'NERSC_HOST=perlmutter'."
+    )
+
+
+class HostnameMatchesCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    hostname_matches: str | list[str] = Field(
+        description="Glob the hostname must match, case-insensitively, "
+        "e.g., '*.cluster.edu'."
+    )
+
+
+class OsIsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    os_is: _OsName | list[_OsName] = Field(
+        description="Operating system: 'linux', 'macos' or 'windows'."
+    )
+
+
+class MachineIdEqualsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    machine_id_equals: str | list[str] = Field(
+        description="ID of the machine, as 'calkit describe system' shows "
+        "it, ignoring case and dashes."
+    )
+
+
+class GpuVendorIsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    gpu_vendor_is: _GpuVendor | list[_GpuVendor] = Field(
+        description="Vendor of one of the machine's GPUs: 'amd', 'nvidia' "
+        "or 'apple'."
+    )
+
+
+class GpuArchIsCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    gpu_arch_is: str | list[str] = Field(
+        description="Architecture of one of the machine's GPUs, ignoring "
+        "case, e.g., 'gfx1201' for an AMD Radeon RX 9070 or 'sm_89' for an "
+        "NVIDIA RTX 4090."
+    )
+
+
+class GpuNameMatchesCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    gpu_name_matches: str | list[str] = Field(
+        description="Glob the name of one of the machine's GPUs must match, "
+        "case-insensitively, e.g., '*RTX 40*'."
+    )
+
+
+_SWITCH_CONDITIONS: list[type[Model]] = [
+    AppExistsCondition,
+    EnvVarSetCondition,
+    EnvVarEqualsCondition,
+    HostnameMatchesCondition,
+    OsIsCondition,
+    MachineIdEqualsCondition,
+    GpuVendorIsCondition,
+    GpuArchIsCondition,
+    GpuNameMatchesCondition,
+]
+
+
+def _switch_condition_name(value: object) -> str | None:
+    # A condition is a one-key map, and the key says which it is
+    if isinstance(value, Model):
+        return next(iter(type(value).model_fields))
+    if isinstance(value, dict) and len(value) == 1:
+        return str(next(iter(value)))
+    return None
+
+
+SwitchCondition = Annotated[
+    Annotated[AppExistsCondition, Tag("app_exists")]
+    | Annotated[EnvVarSetCondition, Tag("env_var_set")]
+    | Annotated[EnvVarExistsCondition, Tag("env_var_exists")]
+    | Annotated[EnvVarEqualsCondition, Tag("env_var_equals")]
+    | Annotated[HostnameMatchesCondition, Tag("hostname_matches")]
+    | Annotated[OsIsCondition, Tag("os_is")]
+    | Annotated[MachineIdEqualsCondition, Tag("machine_id_equals")]
+    | Annotated[GpuVendorIsCondition, Tag("gpu_vendor_is")]
+    | Annotated[GpuArchIsCondition, Tag("gpu_arch_is")]
+    | Annotated[GpuNameMatchesCondition, Tag("gpu_name_matches")],
+    Discriminator(
+        _switch_condition_name,
+        custom_error_type="switch_condition",
+        custom_error_message="A condition is one 'name: value' pair, "
+        "e.g., 'os_is: linux', named one of: "
+        + ", ".join(next(iter(c.model_fields)) for c in _SWITCH_CONDITIONS)
+        + "; list several to require all of them",
+    ),
+]
+
+
+class UvExtra(Model):
+    """An extra of a uv project, installed only on the machines it's for.
+
+    For a dependency built for particular hardware, e.g., a PyTorch for one
+    GPU architecture. ``when`` takes the conditions a switch environment's
+    options do, and the extra is installed where all of them hold. One that
+    doesn't hold here is left out rather than reported, since it describes a
+    different machine, not a problem with this one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(description="Name of the extra in pyproject.toml.")
+    when: Annotated[list[SwitchCondition], Field(min_length=1)] = Field(
+        description="Conditions this machine must all meet for the extra to "
+        "be installed, e.g., 'gpu_arch_is: gfx1201'. To always install it, "
+        "list it by name instead."
+    )
+
+
+class UvEnvironment(ComposableEnvironment):
     kind: Literal["uv"] = "uv"
     path: str = Field(description="Path to the uv project's pyproject.toml.")
+    extras: list[str | UvExtra] = Field(
+        default=[],
+        description="Extras of the project to install, each named or given "
+        "with the machines it's for. They're passed to both 'uv sync' and "
+        "'uv run', so they're installed even when the environment isn't "
+        "checked first.",
+    )
 
 
-class UvVenvEnvironment(Environment):
+class UvVenvEnvironment(ComposableEnvironment):
     kind: Literal["uv-venv"] = "uv-venv"
     path: str = Field(
         description="Path to the requirements file, e.g., requirements.txt."
@@ -794,7 +1035,7 @@ class UvVenvEnvironment(Environment):
     )
 
 
-class PixiEnvironment(Environment):
+class PixiEnvironment(ComposableEnvironment):
     kind: Literal["pixi"] = "pixi"
     path: str = Field(description="Path to the Pixi manifest file.")
     name: str | None = Field(
@@ -817,6 +1058,41 @@ class NixEnvironment(Environment):
         description=(
             "Name of the dev shell to enter, passed as #<shell> to "
             "'nix develop'. Defaults to the flake's default dev shell."
+        ),
+    )
+
+
+class TexLiveEnvironment(Environment):
+    kind: Literal["texlive"] = "texlive"
+    release: int | None = Field(
+        default=None,
+        description=(
+            "TeX Live release, e.g., 2025, to install packages from. A "
+            "past release's repository is frozen, so its lock pins every "
+            "package for good. Defaults to the latest frozen release."
+        ),
+    )
+    packages: list[str] = Field(
+        default=[],
+        description=(
+            "TeX Live packages to install, beyond the base set every "
+            "TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). "
+            "What they depend on comes with them, and packages a build "
+            "finds missing are added to the lock, not here."
+        ),
+    )
+    platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "TeX Live platforms to lock for. Defaults to macOS, Windows, "
+            "and Linux on x86_64 and ARM."
+        ),
+    )
+    repository_url: str | None = Field(
+        default=None,
+        description=(
+            "TeX Live repository URL to install from instead of the one "
+            "for 'release', e.g., a local mirror."
         ),
     )
 
@@ -946,7 +1222,7 @@ class DockerEnvironment(Environment):
         return self
 
 
-class REnvironment(Environment):
+class REnvironment(ComposableEnvironment):
     kind: Literal["renv"] = "renv"
     path: str = Field(
         description="Path to the project's DESCRIPTION file. The renv lock "
@@ -957,7 +1233,7 @@ class REnvironment(Environment):
     )
 
 
-class JuliaEnvironment(Environment):
+class JuliaEnvironment(ComposableEnvironment):
     kind: Literal["julia"] = "julia"
     path: str = Field(description="Path to the Julia project's Project.toml.")
     julia: str = Field(description="Julia version to use.")
@@ -1279,103 +1555,6 @@ class SystemEnvironment(Environment):
     )
 
 
-_OsName = Literal["linux", "macos", "windows"]
-_EnvVarSetting = Annotated[str, Field(pattern=r"^[^=]+=")]
-
-
-class AppExistsCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    app_exists: str | list[str] = Field(
-        description="App that must be on PATH, e.g., 'sbatch'."
-    )
-
-
-class EnvVarSetCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    env_var_set: str | list[str] = Field(
-        description="Environmental variable that must be set."
-    )
-
-
-class EnvVarExistsCondition(Model):
-    """The old name for ``env_var_set``, still honored."""
-
-    model_config = ConfigDict(extra="forbid")
-    env_var_exists: str | list[str] = Field(
-        description="Deprecated alias for 'env_var_set'.",
-        json_schema_extra={"deprecated": True},
-    )
-
-
-class EnvVarEqualsCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    env_var_equals: _EnvVarSetting | list[_EnvVarSetting] = Field(
-        description="'NAME=value' an environmental variable must be set to, "
-        "e.g., 'NERSC_HOST=perlmutter'."
-    )
-
-
-class HostnameMatchesCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    hostname_matches: str | list[str] = Field(
-        description="Glob the hostname must match, case-insensitively, "
-        "e.g., '*.cluster.edu'."
-    )
-
-
-class OsIsCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    os_is: _OsName | list[_OsName] = Field(
-        description="Operating system: 'linux', 'macos' or 'windows'."
-    )
-
-
-class MachineIdEqualsCondition(Model):
-    model_config = ConfigDict(extra="forbid")
-    machine_id_equals: str | list[str] = Field(
-        description="ID of the machine, as 'calkit describe system' shows "
-        "it, ignoring case and dashes."
-    )
-
-
-_SWITCH_CONDITIONS: list[type[Model]] = [
-    AppExistsCondition,
-    EnvVarSetCondition,
-    EnvVarEqualsCondition,
-    HostnameMatchesCondition,
-    OsIsCondition,
-    MachineIdEqualsCondition,
-]
-
-
-def _switch_condition_name(value: object) -> str | None:
-    # A condition is a one-key map, and the key says which it is
-    if isinstance(value, Model):
-        return next(iter(type(value).model_fields))
-    if isinstance(value, dict) and len(value) == 1:
-        return str(next(iter(value)))
-    return None
-
-
-SwitchCondition = Annotated[
-    Annotated[AppExistsCondition, Tag("app_exists")]
-    | Annotated[EnvVarSetCondition, Tag("env_var_set")]
-    | Annotated[EnvVarExistsCondition, Tag("env_var_exists")]
-    | Annotated[EnvVarEqualsCondition, Tag("env_var_equals")]
-    | Annotated[HostnameMatchesCondition, Tag("hostname_matches")]
-    | Annotated[OsIsCondition, Tag("os_is")]
-    | Annotated[MachineIdEqualsCondition, Tag("machine_id_equals")],
-    Discriminator(
-        _switch_condition_name,
-        custom_error_type="switch_condition",
-        custom_error_message="A condition is one 'name: value' pair, "
-        "e.g., 'os_is: linux', named one of: "
-        + ", ".join(next(iter(c.model_fields)) for c in _SWITCH_CONDITIONS)
-        + "; list several to require all of them",
-    ),
-]
-
-
 # Any environment but a switch, for one a switch defines in place
 InlineEnvironment = Annotated[
     CondaEnvironment
@@ -1390,6 +1569,7 @@ InlineEnvironment = Annotated[
     | UvEnvironment
     | UvVenvEnvironment
     | NixEnvironment
+    | TexLiveEnvironment
     | SystemEnvironment,
     Discriminator("kind"),
 ]
@@ -1426,6 +1606,12 @@ class SwitchEnvironment(Environment):
     - ``os_is``: ``linux``, ``macos`` or ``windows``.
     - ``machine_id_equals``: this machine's ID, as
       ``calkit describe system`` shows it.
+    - ``gpu_vendor_is``: ``amd``, ``nvidia`` or ``apple``, for one of the
+      machine's GPUs.
+    - ``gpu_arch_is``: one of the machine's GPUs' architecture, e.g.,
+      ``gfx1201`` or ``sm_89``.
+    - ``gpu_name_matches``: a glob one of the machine's GPUs' names
+      matches, ignoring case.
 
     A list of values means any one of them. To pick an environment when
     either of two conditions holds, list it as two options. For example:
@@ -1848,7 +2034,8 @@ class ResultsEvidence(Model):
     without an entry per value.
     """
 
-    kind: Literal["result"] = "result"
+    # Null too, since an entry with no kind and a key or values is a result
+    kind: Literal["result"] | None = "result"
     path: str
     key: str | None = Field(
         default=None,
@@ -1873,6 +2060,11 @@ class ResultsEvidence(Model):
             "version of the repository where the result can be found."
         ),
     )
+
+    @field_validator("kind", mode="after")
+    @classmethod
+    def _result_kind(cls, kind: str | None) -> str:
+        return "result"
 
     @model_validator(mode="after")
     def _key_or_values(self) -> ResultsEvidence:
@@ -2000,6 +2192,87 @@ class DocumentEvidence(Model):
     )
 
 
+class FileEvidence(Model):
+    """Evidence in the form of a file cited as-is by its path, e.g., a log,
+    a transcript excerpt, a script, or a raw output, optionally at specific
+    lines.
+
+    It has no ``kind``. An entry without one that has a ``key`` or
+    ``values`` is a ``result``, which is how those used to be written.
+    """
+
+    kind: None = Field(
+        default=None,
+        description="Left out, or null, for a file cited by its path.",
+    )
+    path: str
+    lines: (
+        Annotated[int, Field(ge=1)]
+        | Annotated[str, Field(pattern=r"^\s*\d+\s*([-–]\s*\d+\s*)?$")]
+        | None
+    ) = Field(
+        default=None,
+        description=(
+            "Line or inclusive range of lines in the file where the evidence "
+            "is, e.g., 8 or '8-12'. Checked against the file, so a citation "
+            "of lines that are no longer there is an error."
+        ),
+    )
+    explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the file can be found."
+        ),
+    )
+
+    @field_validator("lines", mode="before")
+    @classmethod
+    def _lines_format(cls, lines: object) -> object:
+        from calkit.questions import parse_lines
+
+        if lines is not None:
+            parse_lines(lines)
+        return lines
+
+
+def _evidence_tag(value: object) -> str | None:
+    # Resolved as the check resolves it, so the two can't disagree
+    from calkit.questions import get_evidence_kind
+
+    if isinstance(value, Model):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+    return get_evidence_kind(value) or "file"
+
+
+def _evidence_any_of(schema: dict[str, Any]) -> None:
+    """Publish the evidence union as ``anyOf`` rather than ``oneOf``.
+
+    Every kind but a value's has a default or optional ``kind``, so an
+    entry with just a path, a file, matches several of them, which ``oneOf``
+    would reject.
+    """
+    for option in schema.get("anyOf") or []:
+        items = option.get("items") or {}
+        if "oneOf" in items:
+            items["anyOf"] = items.pop("oneOf")
+
+
+Evidence = Annotated[
+    Annotated[FigureEvidence, Tag("figure")]
+    | Annotated[ResultsEvidence, Tag("result")]
+    | Annotated[ValueEvidence, Tag("value")]
+    | Annotated[TableEvidence, Tag("table")]
+    | Annotated[PublicationEvidence, Tag("publication")]
+    | Annotated[DocumentEvidence, Tag("document")]
+    | Annotated[FileEvidence, Tag("file")],
+    Discriminator(_evidence_tag),
+]
+
+
 class SignOff(Model):
     """A person's sign-off on a question, as a verification or validation.
 
@@ -2089,17 +2362,9 @@ class Question(Model):
             "rather than as an answer lacking evidence."
         ),
     )
-    evidence: (
-        list[
-            FigureEvidence
-            | ResultsEvidence
-            | ValueEvidence
-            | TableEvidence
-            | PublicationEvidence
-            | DocumentEvidence
-        ]
-        | None
-    ) = None
+    evidence: list[Evidence] | None = Field(
+        default=None, json_schema_extra=_evidence_any_of
+    )
     verifications: list[SignOff] | None = Field(
         default=None,
         description=(
@@ -2263,6 +2528,7 @@ class ProjectInfo(Model):
             | UvEnvironment
             | UvVenvEnvironment
             | NixEnvironment
+            | TexLiveEnvironment
             | SystemEnvironment
             | SwitchEnvironment,
             Discriminator("kind"),

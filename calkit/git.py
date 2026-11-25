@@ -31,6 +31,32 @@ def get_repo(path: str | None = None) -> git.Repo:
     return git.Repo(path, search_parent_directories=True)
 
 
+def get_main_worktree_dir(repo: git.Repo) -> str | None:
+    """Return the directory of the main checkout among ``repo``'s worktrees,
+    or None if there isn't one, e.g., the repo is bare.
+
+    Not from ``git worktree list``, which gives a submodule's Git dir, nor
+    the common Git dir's parent, which is the superproject's ``.git`` there.
+    """
+    common = os.path.abspath(repo.common_dir)
+    if os.path.realpath(repo.git_dir) == os.path.realpath(common):
+        tree = repo.working_tree_dir
+        return None if tree is None else str(tree)
+    main = git.Repo(common)
+    if main.bare:
+        return None
+    # A submodule's Git dir records its checkout
+    worktree = main.config_reader("repository").get_value(
+        "core", "worktree", ""
+    )
+    if worktree:
+        return os.path.normpath(os.path.join(common, str(worktree)))
+    if os.path.basename(common) == ".git":
+        return os.path.dirname(common)
+    # E.g., from 'git init --separate-git-dir', which records none
+    return None
+
+
 def get_default_branch(repo: git.Repo) -> str | None:
     """The name of the project's default branch, e.g., ``main``.
 
@@ -63,6 +89,91 @@ def get_default_branch(repo: git.Repo) -> str | None:
         if candidate in local_branches or candidate in remote_branches:
             return candidate
     return None
+
+
+def get_set_upstream_args(
+    repo: git.Repo, push_args: list[str] | None = None
+) -> list[str]:
+    """Arguments that let a plain ``git push`` publish a new branch.
+
+    Git refuses to push a branch with no upstream unless
+    ``push.autoSetupRemote`` is on, so the first push of a project, e.g.,
+    right after connecting it to a hub, would fail. Returns nothing when
+    the branch already tracks one, ``push_args`` say what or where to
+    push, Git pushes to a remote other than the one it pulls from, the
+    remote's push refspecs say what to push, or there's no obvious remote
+    to choose.
+    """
+
+    def get_config(key: str) -> str:
+        # Through Git, since its keys are case-insensitive and config files
+        # can include others
+        return str(repo.git.config("--get", key, with_exceptions=False))
+
+    # These pick their own refs, so naming the branch would change them
+    ref_flags = {
+        "--all",
+        "--branches",
+        "--mirror",
+        "--tags",
+        "--delete",
+        "-d",
+        "--prune",
+    }
+    for arg in push_args or []:
+        if not arg.startswith("-") or arg in ref_flags:
+            return []
+        # A remote named this way loses to one given as an argument
+        if arg == "--repo" or arg.startswith("--repo="):
+            return []
+    # Neither pushes just the current branch, which naming it would do
+    if get_config("push.default") in ("nothing", "matching"):
+        return []
+    try:
+        branch = repo.active_branch
+    except TypeError:
+        # Detached HEAD
+        return []
+    if branch.tracking_branch() is not None:
+        return []
+    push_remote = get_config(f"branch.{branch.name}.pushRemote") or get_config(
+        "remote.pushDefault"
+    )
+    pull_remote = get_config(f"branch.{branch.name}.remote")
+    # Git already pushes a new branch to a push remote that isn't the one
+    # it pulls from, and setting an upstream would change where it pulls
+    if push_remote and push_remote != (pull_remote or "origin"):
+        return []
+    remote_names = [r.name for r in repo.remotes]
+    if push_remote:
+        remote = push_remote
+    elif pull_remote in remote_names:
+        remote = pull_remote
+    elif "origin" in remote_names:
+        remote = "origin"
+    elif len(remote_names) == 1:
+        remote = remote_names[0]
+    else:
+        return []
+    # Git pushes what the remote's push refspecs say, which naming the
+    # branch would override
+    if get_config(f"remote.{remote}.push"):
+        return []
+    return ["--set-upstream", remote, branch.name]
+
+
+def get_n_unpushed_commits(repo: git.Repo | None = None) -> int:
+    """How many commits the current branch has that its upstream doesn't,
+    as of the last fetch, or zero with no upstream.
+    """
+    if repo is None:
+        repo = get_repo()
+    if repo.head.is_detached:
+        return 0
+    upstream = repo.active_branch.tracking_branch()
+    if upstream is None or not upstream.is_valid():
+        return 0
+    return int(repo.git.rev_list("--count", f"{upstream.name}..HEAD"))
 
 
 def check_branch_is_current(
@@ -473,7 +584,8 @@ def ensure_path_is_not_ignored(
                 lines.remove(no_ignore_line)
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
-        f.write("\n".join(lines))
+        # Ending in a newline, so a rule appended later stays its own
+        f.write("".join(line + "\n" for line in lines))
     # If the path is still ignored after updating this gitignore file (e.g.,
     # because a subdirectory .gitignore also contains a matching rule), fix
     # that file as well. Depth-limit guards against pathological gitignore
@@ -483,15 +595,22 @@ def ensure_path_is_not_ignored(
     return True
 
 
-def get_dirty_gitignores(repo: git.Repo) -> dict[str, str]:
-    """Each .gitignore with changes not yet committed, relative to the repo
-    root, and what it holds.
+def get_dirty_gitignores(
+    repo: git.Repo, fnames: tuple[str, ...] = (".gitignore",)
+) -> dict[str, str]:
+    """Each .gitignore, or file named one of ``fnames``, with changes not yet
+    committed, relative to the repo root, and what it holds.
     """
-    status = repo.git.status("--porcelain", "--untracked-files=all")
+    status = repo.git.status(
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        *[f":(top,glob)**/{fname}" for fname in fnames],
+    )
     dirty = {}
     for line in status.splitlines():
         path = line[3:].strip('"')
-        if path.endswith(".gitignore"):
+        if path.rsplit("/", 1)[-1] in fnames:
             fpath = os.path.join(repo.working_dir, path)
             exists = os.path.isfile(fpath)
             dirty[path] = open(fpath).read() if exists else ""
@@ -499,17 +618,19 @@ def get_dirty_gitignores(repo: git.Repo) -> dict[str, str]:
 
 
 def stage_gitignores(
-    repo: git.Repo, dirty_before: dict[str, str]
+    repo: git.Repo,
+    dirty_before: dict[str, str],
+    fnames: tuple[str, ...] = (".gitignore",),
 ) -> list[str]:
-    """Stage each .gitignore changed since ``dirty_before`` was taken with
-    ``get_dirty_gitignores``.
+    """Stage each .gitignore, or file named one of ``fnames``, changed since
+    ``dirty_before`` was taken with ``get_dirty_gitignores``.
 
     One that already had changes isn't staged, since that would commit
     them too, though DVC may have staged it already if it autostages.
     Returns a warning for each that couldn't be staged cleanly.
     """
     messages = []
-    for gitignore, text in sorted(get_dirty_gitignores(repo).items()):
+    for gitignore, text in sorted(get_dirty_gitignores(repo, fnames).items()):
         if gitignore in dirty_before:
             if text == dirty_before[gitignore]:
                 continue
@@ -586,6 +707,72 @@ def get_filter_driver(repo: git.Repo, path: str | PathLike) -> str | None:
     if value in ("unspecified", "unset"):
         return None
     return value
+
+
+def get_checkout_newline(path: str | PathLike) -> str | None:
+    """Return the line ending Git checks ``path`` out with, if it sets one.
+
+    Follows Git's precedence: the ``eol`` attribute, then ``core.autocrlf``,
+    then ``core.eol`` for files marked as text. Writing a tracked file with
+    this ending keeps its bytes, and so its hash as a DVC dependency, the same
+    as a fresh checkout's.
+
+    Parameters
+    ----------
+    path : str or PathLike
+        The file, which needn't exist yet.
+
+    Returns
+    -------
+    str or None
+        ``"\\n"`` or ``"\\r\\n"``, or ``None`` when ``path`` isn't in a Git
+        repo or Git leaves its line endings alone, so passing this as
+        ``open``'s ``newline`` keeps the platform default.
+    """
+    abs_path = os.path.abspath(path)
+    try:
+        repo = get_repo(os.path.dirname(abs_path))
+        rel_path = os.path.relpath(abs_path, str(repo.working_tree_dir))
+        out = repo.git.check_attr(
+            "-z", "text", "eol", "--", Path(rel_path).as_posix()
+        )
+    except (git.GitError, ValueError):
+        # Not in a repo, Git isn't installed, or on another drive
+        return None
+    # -z gives NUL-separated <path> <attr> <value> triples
+    fields = out.split("\0")
+    attrs = {
+        fields[i + 1]: fields[i + 2] for i in range(0, len(fields) - 2, 3)
+    }
+    text = attrs.get("text", "unspecified")
+    eol = attrs.get("eol", "unspecified")
+    if text == "unset":
+        return None
+    if eol in ("lf", "crlf"):
+        return "\n" if eol == "lf" else "\r\n"
+    try:
+        config_out = repo.git.config("--get-regexp", r"^core\.(autocrlf|eol)$")
+    except git.GitCommandError:
+        # Neither is set
+        config_out = ""
+    # Later lines come from more specific config files, so they win
+    config = dict(
+        line.lower().split(maxsplit=1)
+        for line in config_out.splitlines()
+        if " " in line
+    )
+    autocrlf = config.get("core.autocrlf", "false")
+    if autocrlf in ("true", "yes", "on", "1"):
+        return "\r\n"
+    if autocrlf == "input":
+        return "\n"
+    # Without core.autocrlf, Git only converts files marked as text
+    if text == "unspecified":
+        return None
+    core_eol = config.get("core.eol", "native")
+    if core_eol in ("lf", "crlf"):
+        return "\n" if core_eol == "lf" else "\r\n"
+    return os.linesep
 
 
 def ensure_path_is_not_filtered(

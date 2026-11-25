@@ -1,5 +1,6 @@
 """Checking how reproducible a project is."""
 
+import json
 import os
 import posixpath
 import re
@@ -8,6 +9,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, computed_field
 
 import calkit
+import calkit.eol
 from calkit.provenance import (
     PROVENANCE_ARTIFACT_TYPES,
     find_project_provenance_gaps,
@@ -100,10 +102,14 @@ DETAIL_CATEGORIES = {
     "retyped": "retyped_values",
     "numbers": "unattributed_numbers",
     "scripts": "scripts_not_in_pipeline",
+    "outside": "paths_outside_project",
     "environments": "stages_without_env",
     "provenance": "misc_needing_provenance",
     "gaps": "provenance_gaps",
     "imports": "unchecked_imports",
+    "line-endings": "eol_unpinned",
+    "refvals": "refval_problems",
+    "unchecked-refvals": "refvals_unchecked",
 }
 
 
@@ -147,6 +153,14 @@ class ReproCheck(BaseModel):
     # Paths of Git-tracked scripts no pipeline stage refers to, which the
     # pipeline therefore can't be reproducing
     scripts_not_in_pipeline: list[str] = []
+    # Files outside the project that pipeline scripts and notebooks read or
+    # write, e.g., an absolute path to a synced drive, which only exist on
+    # the machine they were written on
+    paths_outside_project: list[str] = []
+    # Git-tracked text files the pipeline hashes whose line endings Git
+    # doesn't pin, so a Windows checkout hashes them differently from
+    # everyone else's and its stages read as out of date there
+    eol_unpinned: list[str] = []
     n_dvc_remotes: int
     # Values the project computes that a manuscript typed out instead,
     # which go stale the next time the stage behind them runs
@@ -156,6 +170,14 @@ class ReproCheck(BaseModel):
     # rather than a list of defects, and it is not counted against the
     # project.
     unattributed_numbers: list[dict] = Field(default_factory=list)
+    #: How many values the project records as quoted from references
+    n_refvals: int = 0
+    #: What's wrong with values quoted from references: one that doesn't
+    #: match its reference's PDF, one a document quotes that isn't
+    #: recorded, or a reference quoted but never cited
+    refval_problems: list[dict] = Field(default_factory=list)
+    #: Values quoted from references with no PDF to check them against
+    refvals_unchecked: list[dict] = Field(default_factory=list)
     # TODO: Check calkit remotes are authenticated
 
     @computed_field  # type: ignore[prop-decorator]
@@ -206,6 +228,14 @@ class ReproCheck(BaseModel):
                 "executed outside a defined environment. "
                 "Define the environment for those next."
             )
+        if self.paths_outside_project:
+            return (
+                f"There are {len(self.paths_outside_project)} files outside "
+                "the project that pipeline scripts use, e.g., "
+                f"{self.paths_outside_project[0]}. They only exist on one "
+                "machine, so the pipeline can't run anywhere else. Move them "
+                "into the project and use paths relative to it."
+            )
         if self.n_scripts_not_in_pipeline > 0:
             return (
                 f"There are {self.n_scripts_not_in_pipeline} scripts "
@@ -244,6 +274,14 @@ class ReproCheck(BaseModel):
                     "created them. Define where they came from or create "
                     "stage(s) to produce them."
                 )
+        if self.eol_unpinned:
+            return (
+                f"There are {len(self.eol_unpinned)} files the pipeline "
+                "hashes whose line endings Git doesn't pin, e.g., "
+                f"{self.eol_unpinned[0]}. Git for Windows checks them out "
+                "with CRLF, so they hash differently there and stages read "
+                f"as out of date. To pin them, {calkit.eol.FIX}."
+            )
         if not self.has_dev_container:
             return (
                 "No dev container spec is defined. "
@@ -337,6 +375,18 @@ class ReproCheck(BaseModel):
             f"{calkit.check_or_x(self.n_scripts_not_in_pipeline == 0)}"
             f"{self._tag('scripts')}\n"
         )
+        txt += (
+            "Files outside the project used by pipeline scripts: "
+            f"{len(self.paths_outside_project)} "
+            f"{calkit.check_or_x(not self.paths_outside_project)}"
+            f"{self._tag('outside')}\n"
+        )
+        txt += (
+            "Pipeline files with line endings that differ on Windows: "
+            f"{len(self.eol_unpinned)} "
+            f"{calkit.check_or_x(not self.eol_unpinned)}"
+            f"{self._tag('line-endings')}\n"
+        )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n = getattr(self, f"n_{artifact_type}")
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
@@ -376,6 +426,19 @@ class ReproCheck(BaseModel):
                 "Numbers with nothing recorded behind them: "
                 f"{len(self.unattributed_numbers)} (worth a look)"
                 f"{self._tag('numbers')}\n"
+            )
+        if self.n_refvals or self.refval_problems:
+            txt += (
+                "Problems with values quoted from references: "
+                f"{len(self.refval_problems)} "
+                f"{calkit.check_or_x(not self.refval_problems)}"
+                f"{self._tag('refvals')}\n"
+            )
+        if self.refvals_unchecked:
+            txt += (
+                "Values quoted from references with no PDF to check: "
+                f"{len(self.refvals_unchecked)} (worth a look)"
+                f"{self._tag('unchecked-refvals')}\n"
             )
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"
@@ -418,6 +481,31 @@ def find_scripts_not_in_pipeline(
     """
     from git.exc import InvalidGitRepositoryError
 
+    def get_stage_io_paths(pipeline: dict, ck_info: dict) -> list[str]:
+        """The paths the pipeline's stages read and write, relative to the
+        project."""
+        paths = []
+        for stage in (pipeline.get("stages") or {}).values():
+            if not isinstance(stage, dict):
+                continue
+            wdir = stage.get("wdir") or ""
+            for item in (stage.get("deps") or []) + (stage.get("outs") or []):
+                for path in item if isinstance(item, dict) else [item]:
+                    if isinstance(path, str):
+                        paths.append(posixpath.join(wdir, path))
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        for stage in stages.values():
+            if not isinstance(stage, dict):
+                continue
+            wdir = stage.get("wdir") or ""
+            for item in (stage.get("inputs") or []) + (
+                stage.get("outputs") or []
+            ):
+                path = item.get("path") if isinstance(item, dict) else item
+                if isinstance(path, str):
+                    paths.append(posixpath.join(wdir, path))
+        return [p for p in paths if p.strip()]
+
     try:
         repo = calkit.git.get_repo(wdir)
     except InvalidGitRepositoryError:
@@ -439,9 +527,16 @@ def find_scripts_not_in_pipeline(
     # One string to search rather than a set of paths, since a command
     # names its script somewhere inside it and a dependency may be written
     # with a leading ./
-    referenced = "\n".join(
-        _strings_in(pipeline.get("stages", {}))
-        + _strings_in(ck_info.get("pipeline", {}))
+    strings = _strings_in(pipeline.get("stages", {})) + _strings_in(
+        ck_info.get("pipeline", {})
+    )
+    referenced = "\n".join(strings)
+    # A folder a stage reads or writes covers what's in it, e.g., a package's
+    # modules under an input 'src', or generated data under an output, but
+    # not one that's only named, e.g., by an environment
+    referenced_dirs = tuple(
+        posixpath.normpath(p) + "/"
+        for p in get_stage_io_paths(pipeline, ck_info)
     )
     # Tracked paths are relative to the repo root, which may be above wdir
     # when checking a subproject, so make them relative to wdir
@@ -463,7 +558,7 @@ def find_scripts_not_in_pipeline(
             path == p or path.startswith(p + "/") for p in env_prefixes
         ):
             continue
-        if path not in referenced:
+        if path not in referenced and not path.startswith(referenced_dirs):
             scripts.append(path)
     return scripts
 
@@ -482,6 +577,13 @@ def _mask_exclusion_zones(tex_source: str) -> str:
     masked = tex_source
     # Comments: % to end of line, but not an escaped \%
     masked = re.sub(r"(?<!\\)%.*$", _mask_match, masked, flags=re.MULTILINE)
+    return _mask_latex_macros(masked)
+
+
+def _mask_latex_macros(masked: str) -> str:
+    """Blank LaTeX environments and macros whose contents aren't results,
+    which Markdown's math can have too.
+    """
     # Environments whose contents are never results
     for env in ["thebibliography"]:
         pattern = (
@@ -493,8 +595,8 @@ def _mask_exclusion_zones(tex_source: str) -> str:
         )
         masked = re.sub(pattern, _mask_match, masked, flags=re.DOTALL)
     # Macros whose arguments are references, layout, or links rather than
-    # anything the project computed. \ckfigure and \ckinput are Calkit's
-    # own, and their options carry widths and scales.
+    # anything the project computed. Those starting with \ck are Calkit's
+    # own, whose options carry widths, scales, and formats.
     macros_to_mask = [
         r"\\cite[a-zA-Z]*\*?\{[^}]*\}",
         r"\\bibitem\{[^}]*\}",
@@ -509,8 +611,11 @@ def _mask_exclusion_zones(tex_source: str) -> str:
         r"\\include\{[^}]*\}",
         r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\includesvg(?:\[[^\]]*\])?\{[^}]*\}",
-        r"\\ckfigure(?:\[[^\]]*\])?\{[^}]*\}",
-        r"\\ckinput\{[^}]*\}",
+        r"\\ckfigure\s*(?:\[[^\]]*\])?\s*\{[^}]*\}",
+        r"\\ckvalue\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
+        r"\\ckrefval\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
+        r"\\cktable\s*\{[^}]*\}",
+        r"\\ckinclude\s*\{[^}]*\}",
         r"\\usepackage(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\documentclass(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\setlength\{[^}]*\}\{[^}]*\}",
@@ -522,6 +627,50 @@ def _mask_exclusion_zones(tex_source: str) -> str:
     for macro_pattern in macros_to_mask:
         masked = re.sub(macro_pattern, _mask_match, masked, flags=re.DOTALL)
     return masked
+
+
+def _mask_markdown_zones(source: str) -> str:
+    """Blank the places in Markdown, including Quarto's, where a number can
+    appear without being a result.
+    """
+    masked = source
+    # YAML front matter
+    masked = re.sub(
+        r"\A---\n.*?\n---[ \t]*$",
+        _mask_match,
+        masked,
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    # Code blocks, and inline code, which includes Quarto's inline
+    # expressions, e.g., `{python} f"{r2:.2f}"`, whose numbers are computed
+    masked = re.sub(
+        r"^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[^\n]*$",
+        _mask_match,
+        masked,
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    masked = re.sub(r"``[^\n]+?``|`[^`\n]+`", _mask_match, masked)
+    # A Markdown stage writes each value between markers, so it's computed
+    masked = re.sub(
+        r"<!--\s*(ckvalue|ckrefval)\b.*?-->.*?<!--\s*/\1\s*-->",
+        _mask_match,
+        masked,
+        flags=re.DOTALL,
+    )
+    masked = re.sub(r"<!--.*?-->", _mask_match, masked, flags=re.DOTALL)
+    # Where links and images point, and bare URLs
+    masked = re.sub(r"\]\([^)]*\)", _mask_match, masked)
+    masked = re.sub(r"<[a-z]+://[^>]*>|https?://\S+", _mask_match, masked)
+    # Citations and cross-references, e.g., [@liu2025, p. 3] and @fig-a1
+    masked = re.sub(r"\[[^\]\n]*@[^\]\n]*\]", _mask_match, masked)
+    masked = re.sub(r"(?<![\w.])@[\w:.-]*\w", _mask_match, masked)
+    # Shortcodes, attributes, e.g., {#fig-a width=50%}, and HTML tags
+    masked = re.sub(r"\{\{<.*?>\}\}", _mask_match, masked, flags=re.DOTALL)
+    masked = re.sub(
+        r"\{[#.][^}\n]*\}|\{[^}\n=]*=[^}\n]*\}", _mask_match, masked
+    )
+    masked = re.sub(r"</?[a-zA-Z][^>\n]*>", _mask_match, masked)
+    return _mask_latex_macros(masked)
 
 
 #: A value the project computes has to be this distinctive before its
@@ -551,6 +700,7 @@ def find_retyped_values(
     tex_source: str,
     filepath: str,
     project_values: dict[str, str] | None = None,
+    json_to_latex_sources: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Values the project computes that a document typed out instead.
 
@@ -570,6 +720,10 @@ def find_retyped_values(
     project_values : dict[str, str] | None
         Value as it is written in a results file, mapped to where it came
         from, e.g., ``{"0.42": "results/drag.json:DragCoefficient"}``.
+    json_to_latex_sources : set[str] | None
+        Those sources a document already reads through the commands a
+        ``json-to-latex`` stage generates, which the fix references
+        instead of ``\\ckvalue``.
 
     Returns
     -------
@@ -590,8 +744,22 @@ def find_retyped_values(
     lines = tex_source.splitlines()
     findings: list[dict[str, Any]] = []
     for text, source in project_values.items():
-        if not _is_distinctive(text):
+        # Checked for first, since a project can have many values
+        if not _is_distinctive(text) or text not in masked_source:
             continue
+        if source in (json_to_latex_sources or set()):
+            suggestion = (
+                "Reference the generated command from the 'json-to-latex' "
+                "stage over that file instead of typing the number, so the "
+                "paper follows the analysis when it changes."
+            )
+        else:
+            path, _, key = source.partition(":")
+            suggestion = (
+                f"Read it with \\ckvalue{{{path}}}{{{key}}}, from "
+                "\\usepackage{calkit}, instead of typing the number, so the "
+                "paper follows the analysis when it changes."
+            )
         # Bounded so 0.42 doesn't match inside 10.425 or 0.4251, while a
         # value ending a sentence still does
         pattern = r"(?<![\d.])" + re.escape(text) + r"(?!\d)(?!\.\d)"
@@ -600,6 +768,8 @@ def find_retyped_values(
             preceding = tex_source[:start]
             line_idx = preceding.count("\n")
             col_idx = len(preceding) - preceding.rfind("\n") - 1
+            if line_idx < len(lines) and _IGNORE_RE.search(lines[line_idx]):
+                continue
             findings.append(
                 {
                     "value": text,
@@ -613,12 +783,7 @@ def find_retyped_values(
                         else ""
                     ),
                     "reason": (f"the project computes this value in {source}"),
-                    "suggestion": (
-                        "Reference the generated command from the "
-                        "'json-to-latex' stage over that file instead of "
-                        "typing the number, so the paper follows the "
-                        "analysis when it changes."
-                    ),
+                    "suggestion": suggestion,
                 }
             )
     findings.sort(key=lambda f: (f["line"], f["column"]))
@@ -628,25 +793,54 @@ def find_retyped_values(
 #: What a result looks like when it is written out, most specific first,
 #: so a value with uncertainty is read whole rather than as a bare decimal
 _RESULT_LIKE_PATTERNS = [
-    # Values with uncertainty, e.g., 0.42 \pm 0.03
-    r"(\b\d+(?:\.\d+)?\s*\\pm\s*\d+(?:\.\d+)?\b)",
+    # Values with uncertainty, e.g., 0.42 \pm 0.03, or 0.42 ± 0.03
+    r"(\b\d+(?:\.\d+)?\s*(?:\\pm|±)\s*\d+(?:\.\d+)?\b)",
     # Scientific notation, e.g., 1.2e-3 and 1.2\times10^{-3}
     r"(\b\d+(?:\.\d+)?"
     r"(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
-    # Percentages, e.g., 12.7\%
-    r"(\b\d+(?:\.\d+)?\s*\\%)",
+    # Percentages, e.g., 12.7\%, or 12.7% in Markdown
+    r"(\b\d+(?:\.\d+)?\s*\\?%)",
     # Plain decimals, e.g., 0.42
     r"(\b\d+\.\d+\b)",
 ]
 #: A number in a sentence that cites somebody is usually theirs, not this
 #: project's, and there is nothing to trace it to
 _CITE_RE = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\])*\{")
+# A line saying its numbers aren't results, e.g., ones from a datasheet
+_IGNORE_RE = re.compile(r"(?<!\\)%.*calkit:\s*ignore\b")
+# The same in Markdown, where a citation is a key after @, as opposed to a
+# cross-reference, e.g., @fig-orbit
+_MD_IGNORE_RE = re.compile(r"<!--.*calkit:\s*ignore\b")
+_MD_CITE_RE = re.compile(
+    r"(?<![\w.])@(?!(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|"
+    r"sol|rem|alg)-)[A-Za-z_][\w:.-]*"
+)
+# A name and a number after it, e.g., Python 3.13, which is its version
+_VERSION_RE = re.compile(r"(?:\b[A-Z][\w-]*|\bversion|\bv)\s*$")
+#: Documents read as Markdown, a notebook's Markdown cells included
+MARKDOWN_EXTENSIONS = (".md", ".qmd", ".rmd", ".ipynb")
+
+
+#: How much of a line to show on either side of a number. A paragraph is
+#: often one line, especially in Markdown.
+CONTEXT_CHARS = 60
+
+
+def _get_context(line: str, start: int, length: int) -> str:
+    """The part of a line around a number, with ellipses where cut."""
+    if len(line.strip()) <= 2 * CONTEXT_CHARS + length:
+        return line.strip()
+    begin = max(0, start - CONTEXT_CHARS)
+    end = start + length + CONTEXT_CHARS
+    text = line[begin:end].strip()
+    return ("…" if begin > 0 else "") + text + ("…" if end < len(line) else "")
 
 
 def find_unattributed_numbers(
     tex_source: str,
     filepath: str,
     project_values: dict[str, str] | None = None,
+    markdown: bool = False,
 ) -> list[dict[str, Any]]:
     """Result-like numbers in a document with nothing recorded behind them.
 
@@ -660,10 +854,16 @@ def find_unattributed_numbers(
 
     ``project_values`` are values the project computes; anything matching
     one is left to :func:`find_retyped_values`, which has more to say
-    about it.
+    about it. With ``markdown``, the source is Markdown, e.g., Quarto's,
+    rather than LaTeX.
     """
     known = set(project_values or {})
-    masked_source = _mask_exclusion_zones(tex_source)
+    if markdown:
+        masked_source = _mask_markdown_zones(tex_source)
+        ignore_re, cite_re = _MD_IGNORE_RE, _MD_CITE_RE
+    else:
+        masked_source = _mask_exclusion_zones(tex_source)
+        ignore_re, cite_re = _IGNORE_RE, _CITE_RE
     lines = tex_source.splitlines()
     findings: list[dict[str, Any]] = []
     matched: list[tuple[int, int]] = []
@@ -679,44 +879,99 @@ def find_unattributed_numbers(
             if text.replace(" ", "") in {v.replace(" ", "") for v in known}:
                 continue
             preceding = tex_source[:start]
+            if _VERSION_RE.search(preceding):
+                continue
             line_idx = preceding.count("\n")
             line = lines[line_idx] if line_idx < len(lines) else ""
+            if ignore_re.search(line):
+                continue
+            column = len(preceding) - preceding.rfind("\n")
             findings.append(
                 {
                     "value": text,
                     "file": filepath,
                     "line": line_idx + 1,
-                    "column": len(preceding) - preceding.rfind("\n"),
-                    "context": line.strip(),
-                    "cited": bool(_CITE_RE.search(line)),
+                    "column": column,
+                    "context": _get_context(line, column - 1, end - start),
+                    "cited": bool(cite_re.search(line)),
                 }
             )
     findings.sort(key=lambda f: (f["line"], f["column"]))
     return findings
 
 
-def _project_values(wdir: str, stages: dict) -> dict[str, str]:
-    """Every value a ``json-to-latex`` stage puts within a document's reach.
+def _project_values(
+    wdir: str, stages: dict, tex_paths: set[str]
+) -> tuple[dict[str, str], set[str]]:
+    """Every value the pipeline puts within a document's reach, and which
+    of them a document reads through a ``json-to-latex`` stage's commands.
 
-    Read from the results files those stages consume rather than from the
-    LaTeX they generate: the results file is what the value actually is,
-    and the generated commands are one rendering of it. Mapped back to
-    where it came from, so a finding can name the key to reference.
+    A document reaches a results file two ways: with calkit.sty's
+    ``\\ckvalue``, which can read any key in a file it reads from, found
+    the way its LaTeX stage finds them, or through the commands a
+    ``json-to-latex`` stage generates. Values are read from the results
+    files rather than from any LaTeX written from them, since the results
+    file is what the value actually is. Mapped back to where it came from,
+    so a finding can name the key to reference.
     """
     import json
 
-    from calkit.questions import resolve_key
+    from calkit.latex import component_path, read_ck_usage
+    from calkit.notebooks import get_notebook_of_values_path
+    from calkit.questions import read_evidence_file, resolve_key
+
+    def add_numbers(node: Any, path: str, key: str = "") -> None:
+        """Every number in a results file a key names, by that key, but
+        not those in lists, e.g., a residual history or a table of runs,
+        whose entries turn up in prose by chance.
+        """
+        if isinstance(node, bool):
+            return
+        if isinstance(node, (int, float)) and key:
+            values.setdefault(str(node), f"{path}:{key}")
+        elif isinstance(node, dict):
+            for name, child in node.items():
+                if isinstance(name, str):
+                    add_numbers(child, path, f"{key}.{name}" if key else name)
 
     values: dict[str, str] = {}
+    via_json_to_latex: set[str] = set()
+    # What documents read with \ckvalue, which comes first, since that's
+    # the way to read a value both reach
+    read: set[str] = set()
+    for tex_path in sorted(tex_paths):
+        _, components = read_ck_usage(tex_path)
+        for c in components:
+            # A value quoted from a reference isn't one the pipeline computes
+            if c.kind != "value" or c.ref is not None:
+                continue
+            rel, _ = component_path(
+                c, lambda p: os.path.isfile(os.path.join(wdir, p))
+            )
+            if rel is None or rel in read:
+                continue
+            read.add(rel)
+            try:
+                data = read_evidence_file(os.path.join(wdir, rel))
+            except Exception:
+                continue
+            # A value saved from a notebook's cells is cited by the notebook
+            add_numbers(data, get_notebook_of_values_path(rel) or rel)
     for stage in stages.values():
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
         if "calkit latex from-json" not in cmd:
             continue
-        for dep in stage.get("deps", []) or []:
-            if not str(dep).endswith(".json"):
+        # Whether a document inputs what the stage writes, so it already
+        # uses the commands
+        used = any(
+            os.path.abspath(os.path.join(wdir, out)) in tex_paths
+            for out in _get_stage_paths(stage, "outs")
+        )
+        for dep in _get_stage_paths(stage, "deps"):
+            if not dep.endswith(".json"):
                 continue
             try:
-                with open(os.path.join(wdir, str(dep))) as f:
+                with open(os.path.join(wdir, dep)) as f:
                     data = json.load(f)
             except (OSError, ValueError):
                 continue
@@ -729,23 +984,37 @@ def _project_values(wdir: str, stages: dict) -> dict[str, str]:
             # to name it, not to reference a command that was never
             # generated. Without any names every top-level key is exposed.
             named = _named_keys(cmd)
+            exposed: dict[str, Any] = {}
             if named:
                 for key in named:
                     try:
-                        value = resolve_key(data, key)
+                        exposed[key] = resolve_key(data, key)
                     except (KeyError, ValueError, IndexError, TypeError):
                         continue
-                    if isinstance(value, (int, float)) and not isinstance(
-                        value, bool
-                    ):
-                        values.setdefault(str(value), f"{dep}:{key}")
-                continue
-            for key, value in data.items():
-                if isinstance(value, (int, float)) and not isinstance(
+            else:
+                exposed = data
+            for key, value in exposed.items():
+                if not isinstance(value, (int, float)) or isinstance(
                     value, bool
                 ):
-                    values.setdefault(str(value), f"{dep}:{key}")
-    return values
+                    continue
+                if str(value) not in values and used:
+                    via_json_to_latex.add(f"{dep}:{key}")
+                values.setdefault(str(value), f"{dep}:{key}")
+    return values, via_json_to_latex
+
+
+def _get_stage_paths(stage: dict, field: str) -> list[str]:
+    """A compiled stage's deps or outs, relative to the project."""
+    base = stage.get("wdir") or ""
+    return [
+        posixpath.normpath(
+            posixpath.join(
+                base, str(item if isinstance(item, str) else next(iter(item)))
+            )
+        )
+        for item in stage.get(field, []) or []
+    ]
 
 
 def _named_keys(cmd: str) -> list[str]:
@@ -763,17 +1032,22 @@ def _named_keys(cmd: str) -> list[str]:
     ]
 
 
-def _generated_tex_paths(wdir: str, stages: dict) -> set[str]:
-    """LaTeX files the pipeline writes, which are not manuscripts."""
+def _generated_paths(wdir: str, stages: dict) -> set[str]:
+    """What the pipeline writes, which holds no manuscripts, e.g., a table
+    or a folder of them, and the LaTeX Calkit writes for calkit.sty, which a
+    LaTeX stage depends on.
+    """
+    from calkit.latex import COMPONENTS_DIR
+
     paths: set[str] = set()
     for stage in stages.values():
-        cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
-        if "calkit latex from-" not in cmd:
-            continue
-        for out in stage.get("outs", []) or []:
-            out_path = out if isinstance(out, str) else next(iter(out))
-            if str(out_path).endswith(".tex"):
-                paths.add(os.path.abspath(os.path.join(wdir, str(out_path))))
+        ours = [
+            dep
+            for dep in _get_stage_paths(stage, "deps")
+            if COMPONENTS_DIR in dep.split("/") and dep.endswith(".tex")
+        ]
+        for path in _get_stage_paths(stage, "outs") + ours:
+            paths.add(os.path.abspath(os.path.join(wdir, path)))
     return paths
 
 
@@ -788,9 +1062,9 @@ def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
         if "calkit latex build" not in cmd:
             continue
-        for dep in stage.get("deps", []) or []:
-            if str(dep).endswith(".tex"):
-                targets.add(str(dep))
+        for dep in _get_stage_paths(stage, "deps"):
+            if dep.endswith(".tex"):
+                targets.add(dep)
     found: set[str] = set()
 
     def walk(rel: str) -> None:
@@ -818,6 +1092,58 @@ def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
     return found
 
 
+def _markdown_sources(wdir: str, ck_info: dict) -> set[str]:
+    """Documents written in Markdown, including Quarto's, and notebooks,
+    that are publications or that a Quarto or Markdown stage renders.
+
+    Notebooks a stage only executes are left out, since their prose is
+    more like comments on the analysis than a document's.
+    """
+    targets: set[str] = set()
+    for pub in ck_info.get("publications", []) or []:
+        path = pub.get("path", "") if isinstance(pub, dict) else ""
+        targets.add(str(path))
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        if stage.get("kind") in ("quarto", "markdown") and stage.get(
+            "target_path"
+        ):
+            targets.add(
+                os.path.join(stage.get("wdir") or "", stage["target_path"])
+            )
+    return {
+        os.path.abspath(os.path.join(wdir, target))
+        for target in targets
+        if target.lower().endswith(MARKDOWN_EXTENSIONS)
+        and os.path.isfile(os.path.join(wdir, target))
+    }
+
+
+def _markdown_parts(path: str) -> list[tuple[str, int | None]]:
+    """A document's Markdown, as one part, or a notebook's, as one part per
+    Markdown cell with its index.
+    """
+    with open(path, encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    if not path.lower().endswith(".ipynb"):
+        return [(content, None)]
+    try:
+        cells = json.loads(content).get("cells", [])
+    except (ValueError, AttributeError):
+        return []
+    parts = []
+    for n, cell in enumerate(cells):
+        if not isinstance(cell, dict) or cell.get("cell_type") != "markdown":
+            continue
+        source = cell.get("source", "")
+        parts.append(
+            ("".join(source) if isinstance(source, list) else source, n)
+        )
+    return parts
+
+
 def find_literals_in_project(
     wdir: str, ck_info: dict, stages: dict
 ) -> dict[str, list[dict]]:
@@ -828,26 +1154,171 @@ def find_literals_in_project(
     result-like numbers with nothing recorded behind them, which is a
     weaker signal offered as something to look over.
     """
-    values = _project_values(wdir, stages)
-    generated = _generated_tex_paths(wdir, stages)
+    sources = _tex_sources(wdir, ck_info, stages)
+    generated = _generated_paths(wdir, stages)
+    values, via_json_to_latex = _project_values(wdir, stages, sources)
     out: dict[str, list[dict]] = {"retyped": [], "unattributed": []}
-    for path in sorted(_tex_sources(wdir, ck_info, stages) - generated):
+    for path in sorted(sources):
+        if any(
+            path == g or path.startswith(g.rstrip(os.sep) + os.sep)
+            for g in generated
+        ):
+            continue
         try:
             with open(path, encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except OSError:
             continue
-        rel = os.path.relpath(path, wdir)
-        out["retyped"] += find_retyped_values(content, rel, values)
-        out["unattributed"] += find_unattributed_numbers(content, rel, values)
+        rel = os.path.relpath(path, wdir).replace(os.sep, "/")
+        out["retyped"] += find_retyped_values(
+            content, rel, values, via_json_to_latex
+        )
+        out["unattributed"] += _with_cited_keys(
+            find_unattributed_numbers(content, rel, values), content, False
+        )
+    for path in sorted(_markdown_sources(wdir, ck_info)):
+        rel = os.path.relpath(path, wdir).replace(os.sep, "/")
+        try:
+            parts = _markdown_parts(path)
+        except OSError:
+            continue
+        for content, cell in parts:
+            for finding in _with_cited_keys(
+                find_unattributed_numbers(content, rel, values, markdown=True),
+                content,
+                True,
+            ):
+                if cell is not None:
+                    finding["cell"] = cell
+                out["unattributed"].append(finding)
     return out
 
 
+# Words ending in a period that don't end a sentence, lowercased
+_ABBREVIATIONS = {
+    "al",
+    "approx",
+    "cf",
+    "ch",
+    "e.g",
+    "ed",
+    "eds",
+    "eq",
+    "eqs",
+    "etc",
+    "fig",
+    "figs",
+    "i.e",
+    "no",
+    "nos",
+    "p",
+    "pp",
+    "ref",
+    "refs",
+    "resp",
+    "sec",
+    "secs",
+    "tab",
+    "vol",
+    "vs",
+}
+# Where a sentence may end: a full stop, question, or exclamation mark,
+# then space and something that starts a sentence
+_SENTENCE_END_RE = re.compile(r"[.!?]['\")\]]*(?=\s+[^\sa-z])")
+
+
+def get_sentence(text: str, offset: int) -> str:
+    """The sentence of some text that an offset is in, across lines.
+
+    An abbreviation, e.g., "et al." or "Fig.", or an initial, e.g., "A."
+    in "A. Liu", doesn't end one.
+    """
+    ends = []
+    for m in _SENTENCE_END_RE.finditer(text):
+        word = re.search(r"([\w.]+)\.?['\")\]]*$", text[: m.end()])
+        token = word.group(1).rstrip(".").lower() if word else ""
+        if token in _ABBREVIATIONS or re.fullmatch(r"[a-z]", token):
+            continue
+        ends.append(m.end())
+    start = max([e for e in ends if e <= offset], default=0)
+    end = min([e for e in ends if e > offset], default=len(text))
+    return text[start:end]
+
+
+def _with_cited_keys(
+    findings: list[dict], content: str, markdown: bool
+) -> list[dict]:
+    """Findings, each marked as cited when its sentence cites a reference,
+    with the keys it cites, so the number can be looked for in them.
+
+    A sentence is read across the lines of its paragraph, since one in a
+    hard-wrapped document often cites on another line than its number.
+    """
+    from calkit.references.values import get_line_cited_keys
+
+    lines = content.splitlines()
+    for finding in findings:
+        index = finding["line"] - 1
+        if not 0 <= index < len(lines):
+            continue
+        first = index
+        while first > 0 and lines[first - 1].strip():
+            first -= 1
+        last = index
+        while last + 1 < len(lines) and lines[last + 1].strip():
+            last += 1
+        paragraph = "\n".join(lines[first : last + 1])
+        offset = sum(len(line) + 1 for line in lines[first:index])
+        offset += max(finding.get("column", 1) - 1, 0)
+        keys = get_line_cited_keys(get_sentence(paragraph, offset), markdown)
+        finding["cited"] = bool(keys)
+        if keys:
+            finding["cited_keys"] = keys
+        else:
+            finding.pop("cited_keys", None)
+    return findings
+
+
+def get_document_paths(wdir: str, ck_info: dict, stages: dict) -> list[str]:
+    """The project-relative documents the checks read: LaTeX documents,
+    not the files they input, and Markdown, Quarto, and notebook ones.
+    """
+    documents = []
+    for path in sorted(_tex_sources(wdir, ck_info, stages)):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                if "\\documentclass" not in f.read():
+                    continue
+        except OSError:
+            continue
+        documents.append(path)
+    documents += sorted(_markdown_sources(wdir, ck_info))
+    return [
+        os.path.relpath(path, wdir).replace(os.sep, "/") for path in documents
+    ]
+
+
 def check_reproducibility(
-    wdir: str = ".", log_func: Callable | None = None
+    wdir: str = ".",
+    log_func: Callable | None = None,
+    offline: bool = False,
+    zotero_desktop: bool = True,
 ) -> ReproCheck:
-    """Check the reproducibility of a project."""
+    """Check the reproducibility of a project.
+
+    Values quoted from references are checked against the references' PDFs,
+    and typed numbers in sentences citing a reference are looked for in
+    them. Without ``offline``, open-access PDFs are downloaded into
+    ``.calkit/local`` for that, but never stored in the project. With
+    ``zotero_desktop``, Zotero desktop on this machine is asked for them
+    too, which a server shouldn't do.
+    """
     from git.exc import InvalidGitRepositoryError
+
+    from calkit.detect import (
+        detect_jupyter_notebook_io,
+        detect_python_script_io,
+    )
 
     res: dict = dict()
     if log_func is None:
@@ -926,6 +1397,42 @@ def check_reproducibility(
     res["scripts_not_in_pipeline"] = find_scripts_not_in_pipeline(
         wdir=wdir, ck_info=ck_info, pipeline=pipeline
     )
+    # Read or written by the pipeline's Python scripts and notebooks, which
+    # are the languages detection reports these for
+    outside = []
+    for stage in (
+        (ck_info.get("pipeline", {}) or {}).get("stages", {}).values()
+    ):
+        if not isinstance(stage, dict):
+            continue
+        # Its paths are relative to its working directory
+        stage_wdir = stage.get("wdir") or ""
+        if stage.get("kind") == "python-script" and stage.get("script_path"):
+            script = posixpath.join(stage_wdir, stage["script_path"])
+            io = detect_python_script_io(
+                script, wdir=stage_wdir or None, project_dir=wdir
+            )
+        elif stage.get("kind") == "jupyter-notebook" and stage.get(
+            "notebook_path"
+        ):
+            script = posixpath.join(stage_wdir, stage["notebook_path"])
+            io = detect_jupyter_notebook_io(
+                script, wdir=stage_wdir or None, project_dir=wdir
+            )
+        else:
+            continue
+        outside += [
+            f"{script} reads {p}" for p in io.get("external_inputs", [])
+        ]
+        outside += [
+            f"{script} writes {p}" for p in io.get("external_outputs", [])
+        ]
+    res["paths_outside_project"] = list(dict.fromkeys(outside))
+    res["eol_unpinned"] = (
+        [f.path for f in calkit.eol.check_pipeline(wdir=wdir) if f.at_risk]
+        if res["is_git_repo"]
+        else []
+    )
     res["n_environments"] = len(ck_info.get("environments", {}))
     # Check for stages not run with environments
     stages = pipeline.get("stages", {})
@@ -957,4 +1464,35 @@ def check_reproducibility(
     )
     res["retyped_values"] = literals["retyped"]
     res["unattributed_numbers"] = literals["unattributed"]
+    # Values quoted from references, and numbers in sentences citing one
+    from calkit.references import values as refvalues
+
+    res["n_refvals"] = len(refvalues.iter_declared_values(ck_info))
+    cited = [f for f in literals["unattributed"] if f.get("cited_keys")]
+    if res["n_refvals"] or cited or ck_info.get("references"):
+        from calkit.references import Lookup
+
+        lookup = Lookup(wdir=wdir, offline=offline)
+        # Shared, so each reference's PDF is found and read once
+        finder = refvalues.PdfFinder(
+            ck_info,
+            wdir=wdir,
+            download=not offline,
+            lookup=lookup,
+            zotero_desktop=zotero_desktop,
+        )
+        checked = refvalues.check_project(
+            ck_info,
+            get_document_paths(wdir, ck_info, stages),
+            wdir=wdir,
+            finder=finder,
+        )
+        res["refval_problems"] = checked["problems"]
+        res["refvals_unchecked"] = checked["unchecked"]
+        if cited:
+            refvalues.search_cited(cited, ck_info, wdir=wdir, finder=finder)
+        try:
+            lookup.save()
+        except OSError:
+            pass
     return ReproCheck.model_validate(res)

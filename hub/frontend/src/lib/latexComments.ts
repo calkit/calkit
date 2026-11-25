@@ -1,14 +1,7 @@
 // The Calkit LaTeX comment schema, as in calkit/latex.py: a thread is a
 // `% COMMENT` block above the paragraph it's about, so comments made in the
-// editor are edits to the source like any other, saved with it.
-import { RangeSetBuilder } from "@codemirror/state"
-import {
-  Decoration,
-  type DecorationSet,
-  type EditorView,
-  ViewPlugin,
-  type ViewUpdate,
-} from "@codemirror/view"
+// editor are edits to the source like any other, saved with it. It has no
+// dependencies, so the browser extension can use it too.
 
 export interface TexEntry {
   author: string
@@ -284,35 +277,3 @@ export function editComment(
   })
   return [...before, ...rendered, ...after]
 }
-
-// Tints comment blocks in the editor, so they read apart from the text
-export const commentHighlighter = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet
-    constructor(view: EditorView) {
-      this.decorations = this.build(view)
-    }
-    update(u: ViewUpdate) {
-      if (u.docChanged) this.decorations = this.build(u.view)
-    }
-    build(view: EditorView): DecorationSet {
-      const doc = view.state.doc
-      const builder = new RangeSetBuilder<Decoration>()
-      const lines = doc.toString().split("\n")
-      for (const t of parseComments(lines)) {
-        for (let n = t.lineno; n < t.lineno + t.nlines; n++) {
-          const from = doc.line(n).from
-          builder.add(
-            from,
-            from,
-            Decoration.line({
-              class: t.resolved ? "cm-texComment cm-resolved" : "cm-texComment",
-            }),
-          )
-        }
-      }
-      return builder.finish()
-    }
-  },
-  { decorations: (v) => v.decorations },
-)

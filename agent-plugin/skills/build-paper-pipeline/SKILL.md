@@ -6,7 +6,7 @@ description: Build the pipeline stages a manuscript's TODO comments ask for,
   invokes `/calkit:build-paper-pipeline`, leaves TODO comments in a manuscript
   for an agent to address, or asks to work backwards from the writing to the
   project behind it. Only for TODOs in a manuscript, and only in a Calkit
-  project: not TODO comments in source code, not GitHub issues, not a task
+  project; not TODO comments in source code, not GitHub issues, not a task
   list in someone's notes.
 ---
 
@@ -31,13 +31,17 @@ number into the sentence.
 
 ## The rule that makes this safe
 
+<!-- TODO: needs human review -->
+
 **Never type a computed value into the manuscript.** A number you typed is
 a number nobody can check, and it goes stale the moment a stage reruns. The
 number reaches the page through the pipeline: a stage computes it and
-writes it to a results file, a `json-to-latex` stage turns that file into
-LaTeX commands, and the manuscript says `\result[Speedup]`. The same
-applies to figures (`\ckfigure{...}` over a pipeline output) and to the
-answers in `calkit.yaml` (`{name}` placeholders over `value` evidence).
+writes it to a results file, and the manuscript, which loads the `calkit`
+LaTeX package, reads it from that file with
+`\ckvalue[.2f]{results/speedup.json}{mean_speedup}`. The same applies to
+figures (`\ckfigure{...}`) and tables (`\cktable{...}`) over pipeline
+outputs, and to the answers in `calkit.yaml` (`{name}` placeholders over
+`value` evidence).
 
 If you find yourself about to write `2.4x` into a `.tex` file, stop: that
 is the hole, not the fix. The `check-reproducibility` skill covers finding
@@ -74,10 +78,37 @@ building a pipeline from scratch.
    headlessly. Write the results to a JSON file under `results/` with keys
    named the way the paper will refer to them.
 
-4. **Inject, don't copy.** Add a `json-to-latex` stage over the results
-   file and reference the values from the manuscript with the generated
-   command. Replace the TODO with the sentence the user wrote, now with
-   `\result[...]` where the hole was.
+<!-- TODO: needs human review -->
+
+4. **Inject, don't copy.** Load the package with `\usepackage{calkit}` if
+   the document doesn't already, and replace the TODO with the sentence the
+   user wrote, now with `\ckvalue[format]{results/<file>.json}{<key>}` where
+   the hole was:
+
+   ```latex
+   \usepackage{calkit}
+   ...
+   Our method is faster than the baseline by
+   \ckvalue[.2f]{results/speedup.json}{mean_speedup}$\times$.
+   \ckfigure[width=0.7\linewidth]{figures/speedup-distribution.png}
+   \cktable{tables/speedup-by-case.tex}
+   ```
+
+   Paths are relative to the project, not the document. The document's
+   LaTeX stage depends on everything it includes this way, so there's no
+   `json-to-latex` or `map-paths` stage to add, and nothing to list in its
+   `inputs`. Pick the format for how the paper should read, e.g., `.2f`
+   for two decimal places or `.3g` for three significant figures; keys
+   reach into nested values with dots, e.g., `fit.slope`. `\ckvalue` can't
+   go inside siunitx commands, so write a unit after it, e.g.,
+   `\ckvalue[.1f]{results/flow.json}{speed}~\unit{\metre\per\second}`.
+   If the document already uses commands a `json-to-latex` stage
+   generates, they keep working; use `\ckvalue` for new values, and ask
+   before converting the old ones.
+
+   If no LaTeX stage builds the document yet, add one in a `texlive`
+   environment, which needs no Docker: `calkit new texlive-env`, if the
+   project has none, then `calkit xr paper/main.tex`.
 
 5. **Make the question match the paper.** A claim in the paper is an answer
    to a question. Add or update the entry under `questions` in

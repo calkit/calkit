@@ -214,14 +214,18 @@ def test_imported_dataset_reads_from_source_project(
     )
     looked_up: list[tuple[str, str]] = []
 
-    def fake_fpath(owner_name, project_name, md5, fs):
-        looked_up.append((owner_name, project_name))
-        return "src/proj/ab/c123" if owner_name == "src" else None
-
     class FakeFS:
         def open(self, path, mode="rb"):
             assert path == "src/proj/ab/c123"
             return io.BytesIO(b"a,b\n1,2\n")
+
+    def fake_find(
+        owner_name: str, project_name: str, md5: str, storage_locations: object
+    ) -> tuple[SimpleNamespace, str] | None:
+        looked_up.append((owner_name, project_name))
+        if owner_name != "src":
+            return None
+        return SimpleNamespace(fs=FakeFS()), "src/proj/ab/c123"
 
     seen_projects: list[str] = []
 
@@ -237,15 +241,15 @@ def test_imported_dataset_reads_from_source_project(
             side_effect=fake_get_project,
         ),
         patch("app.api.routes.projects.datasets.get_repo", return_value=repo),
-        patch("app.dvc.get_data_fpath_for_md5", side_effect=fake_fpath),
-        patch("app.projects.get_object_fs", return_value=FakeFS()),
+        patch("app.projects.find_md5_object", side_effect=fake_find),
     ):
         resp = client.get(f"{BASE}/data/imported.csv")
     assert resp.status_code == 200, resp.text
     assert _csv(resp).splitlines() == ["a,b", "1,2"]
-    # Looked up in the source project's storage, after an access check on it
+    # Looked up in the source project's storage, after an access check on it,
+    # and the source is fetched again to find its storage locations
     assert looked_up == [("src", "proj")]
-    assert seen_projects == ["o/p", "src/proj"]
+    assert seen_projects == ["o/p", "src/proj", "src/proj"]
 
 
 URL = "/projects/o/p/datasets"
@@ -276,7 +280,10 @@ def _streaming(body: bytes, headers: dict | None = None):
 
 
 def test_post_project_dataset_fetches_imports(
-    client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path,
+    monkeypatch,
 ) -> None:
     repo, origin = _repo(tmp_path)
     fake_project = SimpleNamespace(
@@ -377,13 +384,35 @@ def test_post_project_dataset_fetches_imports(
         assert (tmp_path / "repo" / "data" / "multi" / "a.csv").exists()
         assert (tmp_path / "repo" / "data" / "multi" / "b.csv").exists()
         assert not (tmp_path / "repo" / "data" / "multi.csv").exists()
+        # Only https:// repos are cloned, since a local path or file:// URL
+        # would read the server's own files
+        for local in [str(tmp_path / "src"), f"file://{tmp_path / 'src'}"]:
+            resp = client.post(
+                URL,
+                json={
+                    "path": "data/local.csv",
+                    "imported_from": {
+                        "git_repo_url": local,
+                        "path": "data/wind.csv",
+                    },
+                },
+                headers=normal_user_token_headers,
+            )
+            assert resp.status_code == 422, resp.text
+        # Git maps this https:// URL to the local source repo
+        git_url = "https://example.org/src"
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv(
+            "GIT_CONFIG_KEY_0", f"url.{tmp_path / 'src'}.insteadOf"
+        )
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", git_url)
         # A Git repo path at a commit is copied over
         resp = client.post(
             URL,
             json={
                 "path": "data/wind.csv",
                 "imported_from": {
-                    "git_repo_url": str(tmp_path / "src"),
+                    "git_repo_url": git_url,
                     "git_ref": rev,
                     "path": "data/wind.csv",
                 },
@@ -401,7 +430,7 @@ def test_post_project_dataset_fetches_imports(
             json={
                 "path": "data/wind-head.csv",
                 "imported_from": {
-                    "git_repo_url": str(tmp_path / "src"),
+                    "git_repo_url": git_url,
                     "path": "data/wind.csv",
                 },
             },

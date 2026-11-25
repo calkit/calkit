@@ -730,23 +730,60 @@ def get_repo(
                         # only writes .git, so it is safe to leave running on
                         # every refresh; skipping the rewrite when there is
                         # nothing new removes the hazard from the common case.
-                        try:
-                            local_sha = repo.head.commit.hexsha
-                            remote_sha = repo.commit(
-                                f"origin/{branch_name}"
-                            ).hexsha
-                        except Exception as e:
-                            logger.warning(f"Could not compare to origin: {e}")
-                            local_sha, remote_sha = None, None
-                        if local_sha is None or local_sha != remote_sha:
-                            # If we had any failed previous transactions, reset
-                            # and clean
-                            repo.git.reset()
-                            repo.git.clean("-fd")
-                            repo.git.stash("save", "Auto-stash before pull")
-                            repo.git.checkout([f"origin/{branch_name}"])
-                            repo.git.branch(["-D", branch_name])
-                            repo.git.checkout(["-b", branch_name])
+                        if not repo.head.is_valid():
+                            # Cloned while the remote was still empty, so
+                            # there's nothing to stash or replace, only
+                            # whatever has been pushed since to check out
+                            remote_ref: str | None = (
+                                f"refs/remotes/origin/{branch_name}"
+                            )
+                            fetched = [
+                                r.path
+                                for r in repo.refs
+                                if r.path.startswith("refs/remotes/origin/")
+                            ]
+                            if not fetched:
+                                logger.info(f"{repo_label} is still empty")
+                                remote_ref = None
+                            elif remote_ref not in fetched:
+                                # The first push may have been to another
+                                # branch, which GitHub then made the default
+                                repo.git.remote(
+                                    ["set-head", "origin", "--auto"],
+                                    kill_after_timeout=GIT_FETCH_TIMEOUT,
+                                )
+                                remote_ref = repo.git.symbolic_ref(
+                                    "refs/remotes/origin/HEAD"
+                                )
+                            if remote_ref is not None:
+                                branch_name = remote_ref.removeprefix(
+                                    "refs/remotes/origin/"
+                                )
+                                repo.git.checkout(
+                                    ["-f", "-B", branch_name, remote_ref]
+                                )
+                        else:
+                            try:
+                                local_sha = repo.head.commit.hexsha
+                                remote_sha = repo.commit(
+                                    f"origin/{branch_name}"
+                                ).hexsha
+                            except Exception as e:
+                                logger.warning(
+                                    f"Could not compare to origin: {e}"
+                                )
+                                local_sha, remote_sha = None, None
+                            if local_sha is None or local_sha != remote_sha:
+                                # If we had any failed previous transactions,
+                                # reset and clean
+                                repo.git.reset()
+                                repo.git.clean("-fd")
+                                repo.git.stash(
+                                    "save", "Auto-stash before pull"
+                                )
+                                repo.git.checkout([f"origin/{branch_name}"])
+                                repo.git.branch(["-D", branch_name])
+                                repo.git.checkout(["-b", branch_name])
                     else:
                         with _timed("fetch-all", repo=repo_label):
                             repo.git.fetch(

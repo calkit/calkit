@@ -99,6 +99,11 @@ questions:
 requirements:
   - docker
   - uv
+  # Builds the JupyterLab extension when installing the dev env
+  - node
+  # Runs the dev tasks, e.g., 'make format' and 'make pr'
+  - make
+  - gh
   - kind: setup
     name: GitHub CLI logged in
     # Not 'gh auth status', which calls the API, so fails when rate limited
@@ -133,6 +138,8 @@ pipeline:
       args:
         - --engine=libreoffice
       environment: dev
+      requirements:
+        - libreoffice
       description: >-
         Export the LaTeX/Word example to Word and merge it back, with no
         edits, and count what went out and came back.

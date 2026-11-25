@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import emails  # type: ignore
 from jinja2 import Template
@@ -61,7 +61,14 @@ def send_email(
     if settings.SMTP_PASSWORD:
         smtp_options["password"] = settings.SMTP_PASSWORD
     response = message.send(to=email_to, smtp=smtp_options)
-    logging.info(f"send email result: {response}")
+    # A failed send doesn't raise, so it's logged as an error to be seen
+    if response.status_code not in (250, 251):
+        logging.error(
+            f"Failed to send email to {email_to}: {response.status_code} "
+            f"{response.status_text} {response.error!r}"
+        )
+    else:
+        logging.info(f"send email result: {response}")
 
 
 def generate_test_email(email_to: str) -> EmailData:
@@ -108,6 +115,95 @@ def generate_verify_email_email(
             "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
             "valid_hours": EMAIL_VERIFICATION_LINK_HOURS,
             "link": link,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_confirm_two_factor_email(email_to: str, code: str) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your two-factor setup code is {code}"
+    html_content = render_email_template(
+        template_name="confirm_two_factor.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "code": code,
+            "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_confirm_email_change_email(
+    email_to: str, new_email: str, code: str
+) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your email change code is {code}"
+    html_content = render_email_template(
+        template_name="confirm_email_change.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "new_email": new_email,
+            "code": code,
+            "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_email_changed_email(email_to: str, new_email: str) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your email was changed"
+    html_content = render_email_template(
+        template_name="email_changed.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "new_email": new_email,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_two_factor_locked_email(email_to: str, minutes: int) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Two-factor authentication locked"
+    html_content = render_email_template(
+        template_name="two_factor_locked.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "minutes": minutes,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_machine_email(
+    email_to: str,
+    event: Literal["linked", "unlinked"],
+    name: str,
+    hostname: str | None,
+    platform: str | None,
+    machine_id: str | None,
+) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = {
+        "linked": f"{project_name} - New machine {name}",
+        "unlinked": f"{project_name} - Machine {name} revoked",
+    }[event]
+    html_content = render_email_template(
+        template_name=f"machine_{event}.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "name": name,
+            "hostname": hostname or "an unknown host",
+            "platform": platform or "unknown platform",
+            "machine_id": machine_id or "unknown",
+            "link": f"{settings.frontend_host}/settings?tab=machines",
         },
     )
     return EmailData(html_content=html_content, subject=subject)

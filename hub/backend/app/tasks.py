@@ -85,6 +85,68 @@ def enqueue_warm(
     return True
 
 
+def get_storage_transfer_status(
+    user_id: Any,
+) -> tuple[str | None, str | None, str | None]:
+    """Get the status of a user's storage transfer, i.e., ``"running"``,
+    ``"failed"``, or None if there isn't one, the error if it failed, and
+    the provider it's from, e.g., ``"huggingface"``.
+    """
+    client = get_client()
+    if client is None or not settings.REDIS_URL:
+        return None, None, None
+    try:
+        from rq.exceptions import NoSuchJobError
+        from rq.job import Job
+
+        job = Job.fetch(f"storage-transfer-{user_id}", connection=client)
+    except NoSuchJobError:
+        return None, None, None
+    except Exception as e:
+        logger.warning(f"Could not get storage transfer status: {e}")
+        return None, None, None
+    # Jobs queued before Box was supported only have the user ID
+    provider = job.args[1] if len(job.args) > 1 else "huggingface"
+    status = job.get_status()
+    if status in ("queued", "started", "deferred", "scheduled"):
+        return "running", None, provider
+    if status == "failed":
+        lines = (job.exc_info or "").strip().splitlines()
+        return "failed", lines[-1] if lines else None, provider
+    return None, None, None
+
+
+def enqueue_storage_transfer(user_id: str, provider: str) -> bool:
+    """Queue moving the storage reached with a user's account on a service,
+    e.g., HF, into the hub's own storage, then disconnecting it. True if it
+    was queued.
+    """
+    queue = get_queue()
+    if queue is None:
+        return False
+    job_id = f"storage-transfer-{user_id}"
+    try:
+        # A failed transfer is retried as a new job
+        from rq.job import Job
+
+        try:
+            Job.fetch(job_id, connection=queue.connection).delete()
+        except Exception:
+            pass
+        queue.enqueue(
+            "app.storage.transfer_storage_and_disconnect",
+            user_id,
+            provider,
+            job_id=job_id,
+            # Copying a project's data can take much longer than a warm
+            job_timeout=6 * 3600,
+        )
+    except Exception as e:
+        logger.warning(f"Could not queue a storage transfer: {e}")
+        return False
+    return True
+
+
 def enqueue_startup_warms(limit: int) -> int:
     """Queue warms for the projects most likely to be opened next.
 

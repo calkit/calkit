@@ -76,12 +76,30 @@ print("Processing complete")
         out["path"] if isinstance(out, dict) else out for out in outputs
     ]
     assert "output.txt" in output_paths
+    # Data read from outside the project is reported, and warned about
+    with open("box.py", "w") as f:
+        f.write('import numpy as np\nnp.loadtxt("/Users/me/Box/runs.csv")\n')
+    result = subprocess.run(
+        ["calkit", "xr", "--dry-run", "--json", "box.py"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout[result.stdout.find("{") :])
+    assert out["external_inputs"] == ["/Users/me/Box/runs.csv"]
+    assert "inputs" not in out["stage"]["stage"]
+    result = subprocess.run(
+        ["calkit", "xr", "--dry-run", "box.py"], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert "/Users/me/Box/runs.csv, which is outside" in result.stdout
 
 
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_xr_shell_command(tmp_dir):
     """Test xr command with shell command."""
     subprocess.check_call(["calkit", "init"])
@@ -173,7 +191,7 @@ def test_xr_mermaid_docker_command_dry_run(tmp_dir):
     assert payload["stage"]["stage"]["outputs"] == [
         {
             "path": "mdocean/plots/non_matlab_figs/taxonomy.pdf",
-            "storage": "dvc",
+            "storage": "git",
         }
     ]
 

@@ -11,7 +11,10 @@ import calkit.dvc
 
 def test_fix_merge_conflicts(tmp_dir):
     def write(path: str, text: str) -> None:
-        with open(path, "w") as f:
+        # With LF, as Git checks them out, since on Windows a file written
+        # with CRLF hashes differently from its own checkout, which would
+        # put more stages out of date after switching branches
+        with open(path, "w", newline="\n") as f:
             f.write(text + "\n")
 
     def commit(message: str) -> None:
@@ -140,8 +143,10 @@ def test_fix_merge_conflicts(tmp_dir):
         )
     write("s.in", "s-base")
     commit("Project")
+    # Whatever Git named the first branch, since that's not always main
+    base = git("branch", "--show-current").stdout.strip()
     for branch in ["p", "q"]:
-        subprocess.check_call(["git", "checkout", "-q", "-b", branch, "main"])
+        subprocess.check_call(["git", "checkout", "-q", "-b", branch, base])
         write("s.in", f"s-{branch}")
         commit(branch)
     tips = {b: git("rev-parse", b).stdout.strip() for b in "pq"}

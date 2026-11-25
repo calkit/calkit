@@ -144,6 +144,35 @@ def _record_job_result(name: str, exit_code: int) -> None:
         jobs[name] = info
 
 
+def record_interactive_job(prefix: str) -> None:
+    """Record the scheduler job we're running in, if any.
+
+    Interactive sessions, e.g., a Jupyter server started with ``srun`` from
+    VS Code, aren't submitted by Calkit but still hold an allocation for the
+    project, so ``scheduler queue`` and ``cancel`` should see them. The
+    record is for the allocation, which can outlive or be shared by several
+    sessions, so it stays until ``queue`` finds the job gone.
+    """
+    kind, job_id = None, None
+    if os.getenv("SLURM_JOB_ID"):
+        kind, job_id = "slurm", os.environ["SLURM_JOB_ID"]
+    elif os.getenv("PBS_JOBID"):
+        kind, job_id = "pbs", os.environ["PBS_JOBID"]
+    if job_id is None or not os.path.isfile("calkit.yaml"):
+        return
+    # The colon keeps it apart from stage records, since stage names can't
+    # contain one
+    _record_job(
+        f"{prefix}:{job_id}",
+        {
+            "kind": kind,
+            "job_id": job_id,
+            "interactive": True,
+            "submitted_at": calkit.utcnow().isoformat(),
+        },
+    )
+
+
 def _mock_enabled() -> bool:
     """Whether scheduler commands should run jobs locally.
 
@@ -504,7 +533,7 @@ def _count_queued_jobs(environment: str, exclude: str) -> int:
     """
     by_kind: dict[str, list[str]] = {}
     for job_name, info in _load_jobs().items():
-        if job_name == exclude:
+        if job_name == exclude or info.get("interactive"):
             continue
         # Records written before environments were tracked have no
         # environment key. Count them: over-counting delays a submission,
@@ -1478,7 +1507,10 @@ def _build_pbs_submit(
 
 @scheduler_app.command(name="queue|q")
 def get_queue() -> None:
-    """List scheduler jobs submitted via Calkit (across SLURM and PBS)."""
+    """List scheduler jobs submitted via Calkit (across SLURM and PBS).
+
+    Includes interactive jobs, e.g., Jupyter servers for notebooks.
+    """
     jobs = _load_jobs()
     if not jobs:
         typer.echo("No jobs found for this project")
@@ -1495,18 +1527,32 @@ def get_queue() -> None:
         by_kind.setdefault(info.get("kind", "slurm"), []).append(
             info["job_id"]
         )
-    for kind, job_ids in by_kind.items():
+    # Only ask about live jobs, since squeue errors on purged IDs
+    active = {
+        kind: _active_job_ids(kind, job_ids)
+        for kind, job_ids in by_kind.items()
+    }
+    for job_name, info in jobs.items():
+        kind = info.get("kind", "slurm")
+        if info.get("interactive") and info["job_id"] not in active[kind]:
+            _delete_job(job_name)
+    if not any(active.values()):
+        typer.echo("No queued or running jobs for this project")
+        raise typer.Exit(0)
+    for kind, job_ids in active.items():
+        if not job_ids:
+            continue
         query_bin = _BINARIES[kind]["query"]
         if kind == "slurm":
             subprocess.run(
-                [query_bin, "-j", ",".join(job_ids)],
+                [query_bin, "-j", ",".join(sorted(job_ids))],
                 capture_output=False,
                 text=True,
                 check=False,
             )
         else:
             subprocess.run(
-                [query_bin] + job_ids,
+                [query_bin] + sorted(job_ids),
                 capture_output=False,
                 text=True,
                 check=False,

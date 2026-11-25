@@ -5,6 +5,7 @@ import {
   type ZoomBehavior,
   zoom,
   zoomIdentity,
+  zoomTransform,
 } from "d3-zoom"
 import { useEffect, useRef, useState } from "react"
 import { FaExclamationTriangle, FaExpandAlt, FaHome } from "react-icons/fa"
@@ -28,12 +29,16 @@ interface MermaidProps {
   setIsOversizedShown?: (shown: boolean) => void
   /** Pan/zoom the diagram to center the node for this pipeline stage. */
   zoomToStage?: string
+  /** Only center that stage, at the current zoom, e.g., once it's clicked. */
+  isZoomSkipped?: boolean
   /**
    * Called with the stage name when a stage node is clicked. The diagram also
    * contains file nodes, so `stageNames` decides which nodes are clickable.
    */
   onStageClick?: (stageName: string) => void
   stageNames?: Set<string>
+  // Stages running on one of the user's machines, outlined in the diagram
+  runningStages?: string[]
 }
 
 // The stage a node represents, or null if it isn't a stage node. Matrix
@@ -55,8 +60,10 @@ const Mermaid = ({
   isOversizedShown,
   setIsOversizedShown,
   zoomToStage,
+  isZoomSkipped,
   onStageClick,
   stageNames,
+  runningStages,
 }: MermaidProps) => {
   const isOversized =
     stageCount !== undefined && stageCount > MAX_READABLE_STAGES
@@ -67,6 +74,9 @@ const Mermaid = ({
   // Bumped each time the diagram finishes rendering so the zoom-to-stage
   // effect can re-run against the freshly drawn SVG.
   const [renderTick, setRenderTick] = useState(0)
+  // The drawing's own width over height, so a wide, shallow pipeline gets a
+  // box its shape rather than a square that's mostly empty
+  const [drawnAspect, setDrawnAspect] = useState(1)
   // Set when mermaid refuses to draw the graph, so a pipeline too big for it
   // says so instead of leaving an empty box on the page.
   const [renderError, setRenderError] = useState<string | null>(null)
@@ -92,13 +102,15 @@ const Mermaid = ({
         mermaid.initialize({
           startOnLoad: false,
           theme: "dark",
-          securityLevel: "loose",
+          // The source comes from the repo's dvc.yaml, so labels are
+          // sanitized and `click` directives ignored; our own node click
+          // handlers are attached below, after rendering
+          securityLevel: "strict",
           fontFamily: "monospace",
           // Mermaid's own default is 500, past which it throws instead of
           // drawing anything. A real pipeline crosses that easily -- a
           // hundred-odd stages wired to their inputs and outputs is a few
-          // hundred edges -- and the graph is the project's own, not
-          // untrusted input, so the guard only costs us the diagram.
+          // hundred edges -- and the edge count only costs layout time.
           maxEdges: 5000,
         })
         setRenderError(null)
@@ -118,6 +130,13 @@ const Mermaid = ({
 
         svgSelection.call(zoomBehavior)
         zoomBehaviorRef.current = zoomBehavior
+        const viewBox = (svgSelection.node() as SVGSVGElement | null)?.viewBox
+          .baseVal
+        setDrawnAspect(
+          viewBox && viewBox.height > 0
+            ? Math.min(2, Math.max(1, viewBox.width / viewBox.height))
+            : 1,
+        )
         setRenderTick((t) => t + 1)
       } catch (error) {
         console.error("Error rendering Mermaid diagram:", error)
@@ -168,7 +187,7 @@ const Mermaid = ({
       // its textContent, which a <title> child would join.
       node.setAttribute("tabindex", "0")
       node.setAttribute("role", "button")
-      node.setAttribute("aria-label", `Edit stage ${name}`)
+      node.setAttribute("aria-label", `Select stage ${name}`)
       node.style.cursor = "pointer"
       cleanups.push(() => {
         node.removeEventListener("click", handler)
@@ -223,28 +242,46 @@ const Mermaid = ({
     const vbH = hasVb ? vb.height : svgEl.clientHeight
     const cx = (hasVb ? vb.x : 0) + vbW / 2
     const cy = (hasVb ? vb.y : 0) + vbH / 2
-    // Scale so the node fills ~45% of the view, clamped to a sane range.
-    const k = Math.max(
-      1,
-      Math.min(
-        2.5,
-        (vbW * 0.45) / (bbox.width || 1),
-        (vbH * 0.45) / (bbox.height || 1),
-      ),
-    )
+    // Scale so the node fills ~45% of the view, clamped to a sane range,
+    // unless it was clicked, where the view only moves to center it
+    const k = isZoomSkipped
+      ? zoomTransform(svgEl).k
+      : Math.max(
+          1,
+          Math.min(
+            2.5,
+            (vbW * 0.45) / (bbox.width || 1),
+            (vbH * 0.45) / (bbox.height || 1),
+          ),
+        )
     const tx = cx - k * pt.x
     const ty = cy - k * pt.y
     select<Element, unknown>(svgEl).call(
       zoomBehaviorRef.current.transform,
       zoomIdentity.translate(tx, ty).scale(k),
     )
-  }, [zoomToStage, renderTick])
+  }, [zoomToStage, isZoomSkipped, renderTick])
+
+  // Outline running stages, matching sweep items drawn as `name@item` too
+  const runningKey = (runningStages ?? []).join("\n")
+  useEffect(() => {
+    const svgEl = select<SVGSVGElement, unknown>(".mermaid svg").node()
+    if (!svgEl) return
+    const running = new Set(runningKey ? runningKey.split("\n") : [])
+    for (const n of Array.from(svgEl.querySelectorAll(".node"))) {
+      const label = (n.textContent ?? "").trim()
+      n.classList.toggle(
+        "ck-stage-running",
+        running.has(label) || running.has(label.split("@")[0]),
+      )
+    }
+  }, [runningKey, renderTick])
 
   return (
     <Box
       borderRadius="lg"
       borderWidth={1}
-      aspectRatio={isDiagramExpanded ? 2 / 1 : 1 / 1}
+      aspectRatio={isDiagramExpanded ? 2 / 1 : drawnAspect}
       boxSizing="border-box"
       overflow={"hidden"}
       px={3}
@@ -303,6 +340,13 @@ const Mermaid = ({
             {
               stroke: "#ff8c00 !important",
               strokeWidth: "3.5px !important",
+            },
+          // Running stages: a dashed blue outline, also leaving the fill
+          "& .node.ck-stage-running rect, & .node.ck-stage-running polygon, & .node.ck-stage-running circle, & .node.ck-stage-running path":
+            {
+              stroke: "#3182ce !important",
+              strokeWidth: "3px !important",
+              strokeDasharray: "6 3",
             },
         }}
       >

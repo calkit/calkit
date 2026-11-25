@@ -4,6 +4,7 @@ import base64
 import copy
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,22 @@ def test_clean_notebook_outputs(tmp_dir):
     )
     shutil.copy(nb_fpath, "notebook.ipynb")
     subprocess.check_call(["calkit", "nb", "clean", "notebook.ipynb"])
+    # A stage depends on these bytes, so they must match across platforms
+    cleaned_fpath = calkit.notebooks.get_cleaned_notebook_path(
+        "notebook.ipynb"
+    )
+    with open(cleaned_fpath, "rb") as f:
+        cleaned = f.read()
+    assert b"\r\n" not in cleaned
+    # Nor on the order an editor writes keys in
+    with open("notebook.ipynb", encoding="utf-8") as f:
+        nb = json.load(f)
+    nb["cells"] = [dict(reversed(c.items())) for c in nb["cells"]]
+    with open("notebook.ipynb", "w", encoding="utf-8") as f:
+        json.dump(dict(reversed(nb.items())), f)
+    subprocess.check_call(["calkit", "nb", "clean", "notebook.ipynb"])
+    with open(cleaned_fpath, "rb") as f:
+        assert f.read() == cleaned
 
 
 def test_clean_notebook_is_invariant_to_cell_ids():
@@ -54,6 +71,15 @@ def test_clean_notebook_is_invariant_to_cell_ids():
     assert calkit.notebooks.clean_notebook(
         executed
     ) == calkit.notebooks.clean_notebook(stripped)
+    # Nor whether a cell's source is one string or a list of lines, which
+    # tools rewrite between, e.g., Quarto rendering with --execute
+    joined = copy.deepcopy(executed)
+    joined["cells"][0]["source"] = "print('hi')\nprint('bye')"
+    split = copy.deepcopy(executed)
+    split["cells"][0]["source"] = ["print('hi')\n", "print('bye')"]
+    assert calkit.notebooks.clean_notebook(
+        joined
+    ) == calkit.notebooks.clean_notebook(split)
 
 
 def test_execute_notebook(tmp_dir):
@@ -182,6 +208,7 @@ def test_execute_notebook(tmp_dir):
 # Both install and build IJulia in the shared depot, and one precompiling it
 # while the other builds it fails with "IJulia not properly installed"
 @pytest.mark.xdist_group("ijulia")
+@pytest.mark.needs("juliaup")
 def test_execute_notebook_julia(tmp_dir):
     subprocess.check_call(
         [
@@ -224,6 +251,7 @@ def test_execute_notebook_julia(tmp_dir):
 # Both install and build IJulia in the shared depot, and one precompiling it
 # while the other builds it fails with "IJulia not properly installed"
 @pytest.mark.xdist_group("ijulia")
+@pytest.mark.needs("juliaup")
 def test_check_env_kernel_julia(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -258,6 +286,103 @@ def test_check_env_kernel_julia(tmp_dir):
         capture_output=True,
     )
     assert res.returncode == 0
+
+
+@pytest.mark.xdist_group("texlive")
+def test_check_env_kernel_composed(
+    tmp_dir: pathlib.Path,
+    texlive_user_home: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from jupyter_client.blocking.client import BlockingKernelClient
+    from jupyter_client.manager import start_new_kernel
+
+    from calkit.environments import texlive
+
+    def check_kernel() -> tuple[str, dict]:
+        out = subprocess.check_output(
+            ["calkit", "nb", "check-kernel", "-e", "main", "--json"]
+        )
+        result = json.loads(out)
+        kernel_name = result["kernel_name"]
+        spec_fpath = os.path.join(
+            "jupyter-data", "kernels", kernel_name.lower(), "kernel.json"
+        )
+        with open(spec_fpath) as f:
+            spec = json.load(f)
+        # The environment's Python, for an editor to tell it from others
+        assert result["python"] == spec["argv"][0]
+        return kernel_name, spec.get("env", {})
+
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    monkeypatch.setenv("JUPYTER_DATA_DIR", os.path.abspath("jupyter-data"))
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "uv-venv", "-n", "main", "ipykernel"]
+    )
+    # Without 'with', the kernel's spec doesn't touch PATH
+    _, env_vars = check_kernel()
+    assert "PATH" not in env_vars
+    assert "FONTCONFIG_FILE" not in env_vars
+    # With it, the spec puts TeX Live's programs ahead of the PATH of
+    # whatever starts the kernel
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"]["tex"] = {"kind": "texlive"}
+    ck_info["environments"]["main"]["with"] = ["tex"]
+    calkit.save_calkit_info(ck_info)
+    kernel_name, env_vars = check_kernel()
+    envs = ck_info["environments"]
+    view_dir = texlive.check("tex", envs["tex"])
+    bin_dir = os.path.join(view_dir, "bin", texlive.get_platform())
+    assert env_vars["PATH"] == bin_dir + os.pathsep + "${PATH}"
+    composed = calkit.environments.get_composed_env_vars(
+        "main", envs["main"], envs
+    )
+    assert composed is not None
+    for name in ["FONTCONFIG_FILE", "MPLCONFIGDIR"]:
+        assert env_vars[name] == composed[name]
+    # What the project sets is left to whatever starts the kernel, since the
+    # spec's values would override it
+    ck_info["env_vars"] = {"MPLCONFIGDIR": "mplconfig"}
+    calkit.save_calkit_info(ck_info)
+    kernel_name, env_vars = check_kernel()
+    assert "MPLCONFIGDIR" not in env_vars
+    assert env_vars["FONTCONFIG_FILE"] == composed["FONTCONFIG_FILE"]
+    # Jupyter fills in the PATH it was started with
+    path = os.environ["PATH"]
+    monkeypatch.setenv("PATH", os.defpath)
+    monkeypatch.setenv("MPLCONFIGDIR", "/project/mplconfig")
+    km, kc = start_new_kernel(kernel_name=kernel_name)
+    assert isinstance(kc, BlockingKernelClient)
+    try:
+        kc.execute_interactive(
+            "import json, os, shutil\n"
+            "with open('kernel-env.json', 'w') as f:\n"
+            "    json.dump([os.environ['PATH'], shutil.which('kpsewhich'),\n"
+            "        os.environ['MPLCONFIGDIR']], f)",
+            timeout=60,
+        )
+    finally:
+        kc.stop_channels()
+        km.shutdown_kernel(now=True)
+    monkeypatch.setenv("PATH", path)
+    monkeypatch.delenv("MPLCONFIGDIR")
+    with open("kernel-env.json") as f:
+        kernel_path, kpsewhich_fpath, mplconfig_dir = json.load(f)
+    assert kernel_path == bin_dir + os.pathsep + os.defpath
+    assert os.path.dirname(kpsewhich_fpath) == bin_dir
+    assert mplconfig_dir == "/project/mplconfig"
+    # Nor does the spec touch a PATH the project sets, e.g., in .env
+    with open(".env", "w") as f:
+        f.write(f"PATH={path}\n")
+    _, env_vars = check_kernel()
+    assert "PATH" not in env_vars
+    assert env_vars["FONTCONFIG_FILE"] == composed["FONTCONFIG_FILE"]
+    # Taking it out of 'with' takes it out of the spec
+    ck_info["environments"]["main"].pop("with")
+    calkit.save_calkit_info(ck_info)
+    _, env_vars = check_kernel()
+    assert "FONTCONFIG_FILE" not in env_vars
 
 
 def test_execute_notebook_auto_env(tmp_dir):
@@ -311,11 +436,10 @@ def test_execute_notebook_auto_env(tmp_dir):
     sys.platform == "win32",
     reason="Docker Linux images are unavailable on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_execute_notebook_docker(tmp_dir):
     # A Docker environment runs the kernel inside the container, so we execute
     # with Papermill inside the container rather than registering a host kernel
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is not available")
     image = "calkit-nb-docker-test:latest"
     # Bake ipykernel and Papermill into the image so execution is deterministic
     with open("Dockerfile", "w") as f:
@@ -389,3 +513,264 @@ def test_execute_notebook_docker(tmp_dir):
         if o.get("name") == "stdout"
     )
     assert "result = 40" in text
+
+
+def test_cell_outputs(tmp_dir):
+    import nbformat
+
+    subprocess.check_call(
+        ["calkit", "new", "project", ".", "-n", "fits", "--title", "Fits"]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "py",
+            "ipykernel",
+            "matplotlib",
+            "pandas",
+        ]
+    )
+    nb = nbformat.v4.new_notebook()
+    nb.cells = [
+        nbformat.v4.new_code_cell(
+            "import numpy as np\n"
+            "import pandas as pd\n"
+            "import matplotlib.pyplot as plt\n"
+            "rates = {'25C': 0.0309, '35C': np.float64(0.0616)}\n"
+            "k_25 = rates['25C']\n"
+            "k_35 = rates['35C']"
+        ),
+        nbformat.v4.new_markdown_cell("# Plots"),
+        nbformat.v4.new_code_cell(
+            "fig, ax = plt.subplots()\nax.plot([1, 2], [3, 4])"
+        ),
+        nbformat.v4.new_code_cell("plt.plot([1, 2], [4, 1])\nplt.show()"),
+        nbformat.v4.new_code_cell(
+            "df = pd.DataFrame({'T': [25, 35], 'k': [0.0309, 0.0616]})"
+        ),
+        nbformat.v4.new_code_cell("k_25 = 999\nlast = 'done'"),
+    ]
+    nbformat.write(nb, "fit.ipynb")
+    ids = [c.id for c in nb.cells]
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "fit": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "fit.ipynb",
+                "environment": "py",
+                "html_storage": None,
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+
+    def add(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "nb", "add-output", "fit.ipynb", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    # Adding one says how to show each in a document
+    out = add(
+        "value", "--cell-id", ids[0], "--variable-name", "k_25", "--json"
+    )
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == {
+        "stage": "fit",
+        "outputs": [
+            {
+                "kind": "value",
+                "cell_id": ids[0],
+                "variable_name": "k_25",
+            }
+        ],
+        "citations": [r"\ckvalue{fit.ipynb}{k_25}"],
+        "warning": None,
+    }
+    table = [
+        "table",
+        "--cell-id",
+        ids[4],
+        "--variable-name",
+        "df",
+        "--output-path",
+    ]
+    for args in [
+        ["value", "--cell-id", ids[0], "-v", "rates", "-v", "k_35"],
+        ["value", "--variable-name", "last"],
+        [
+            "figure",
+            "--cell-id",
+            ids[2],
+            "--variable-name",
+            "fig",
+            "--output-path",
+            "figures/fit.pdf",
+        ],
+        ["figure", "--cell-index", "3", "--output-path", "figures/shown.pdf"],
+        table + ["tables/rates.tex"],
+        table + ["rates.csv"],
+    ]:
+        out = add(*args)
+        assert out.returncode == 0, out.stderr
+    assert (
+        "\\cktable{tables/rates.tex}" in add(*table, "tables/rates.tex").stdout
+    )
+    # What can't be saved
+    first = ["--cell-id", ids[0]]
+    for args, message in [
+        (
+            ["value", "--cell-id", "nope", "--variable-name", "x"],
+            "has no cell nope",
+        ),
+        (
+            ["value", "--cell-index", "9", "--variable-name", "x"],
+            "has 6 cells",
+        ),
+        (
+            ["value", *first, "--cell-index", "0", "--variable-name", "x"],
+            "both",
+        ),
+        (
+            ["value", *first, "--variable-name", "x", "--format", ".2f"],
+            "apply",
+        ),
+        (["plot", *first, "--variable-name", "x"], "Input should be"),
+        (
+            ["figure", *first, "-v", "a", "-v", "b", "--output-path", "f.pdf"],
+            "saved from one variable",
+        ),
+        (["figure", *first, "--output-path", "fit.pdf"], "can't be in"),
+    ]:
+        if "can't be in" in message:
+            ck_info = calkit.load_calkit_info()
+            ck_info["pipeline"]["stages"]["fit"]["outputs"] = ["fit.pdf"]
+            calkit.save_calkit_info(ck_info)
+            message = "so it can't be in 'outputs' too"
+        out = add(*args)
+        assert out.returncode != 0
+        assert message in out.stderr + out.stdout
+    ck_info = calkit.load_calkit_info()
+    del ck_info["pipeline"]["stages"]["fit"]["outputs"]
+    calkit.save_calkit_info(ck_info)
+    out = subprocess.run(
+        [
+            "calkit",
+            "nb",
+            "add-output",
+            "other.ipynb",
+            "value",
+            "--variable-name",
+            "x",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert "isn't in the pipeline yet" in out.stderr + out.stdout
+    subprocess.check_call(
+        [
+            "calkit",
+            "nb",
+            "remove-output",
+            "fit.ipynb",
+            "--output-path",
+            "rates.csv",
+        ]
+    )
+    # Each value is its own output, even if added with others
+    ck_info = calkit.load_calkit_info()
+    saved = ck_info["pipeline"]["stages"]["fit"]["cell_outputs"]
+    assert len(saved) == 7
+    assert saved[2] == {
+        "kind": "value",
+        "cell_id": ids[0],
+        "variable_name": "k_35",
+    }
+    # Running saves each, the value as it was right after its cell, and
+    # leaves no sign of the cells that saved them
+    subprocess.check_call(["calkit", "run"])
+    values_path = ".calkit/notebooks/outputs/fit.ipynb/values.json"
+    with open(values_path) as f:
+        assert json.load(f) == {
+            "k_25": 0.0309,
+            "rates": {"25C": 0.0309, "35C": 0.0616},
+            "k_35": 0.0616,
+            "last": "done",
+        }
+    with open("figures/fit.pdf", "rb") as f:
+        assert f.read(4) == b"%PDF"
+    # A figure the cell shows is saved from Matplotlib, so as a real PDF
+    # rather than the PNG shown
+    with open("figures/shown.pdf", "rb") as f:
+        assert f.read(4) == b"%PDF"
+    with open("tables/rates.tex", encoding="utf-8") as f:
+        assert r"25 & 0.0309 \\" in f.read()
+    # Rerunning the same data gives the same PDFs
+    pdfs = ["figures/fit.pdf", "figures/shown.pdf"]
+    before = [calkit.get_md5(path) for path in pdfs]
+    subprocess.check_call(["calkit", "run", "--force"])
+    assert [calkit.get_md5(path) for path in pdfs] == before
+    for path in ["fit.ipynb", ".calkit/notebooks/executed/fit.ipynb"]:
+        with open(path) as f:
+            sources = [c["source"] for c in json.load(f)["cells"]]
+        assert len(sources) == 6
+        assert not any("_calkit" in "".join(s) for s in sources)
+    status = subprocess.check_output(["calkit", "status"], text=True)
+    assert "fit" not in status.split("Pipeline")[-1] or "up to date" in status
+    # Listing shows what was saved, by the cell it's after
+    listed = json.loads(
+        subprocess.check_output(
+            ["calkit", "nb", "outputs", "fit.ipynb", "--json"], text=True
+        )
+    )
+    assert [(d["kind"], d["cell_index"]) for d in listed] == [
+        ("value", 0),
+        ("value", 0),
+        ("value", 0),
+        ("value", None),
+        ("figure", 2),
+        ("figure", 3),
+        ("table", 4),
+    ]
+    assert listed[0]["saved_value"] == 0.0309
+    # A document cites the value by the notebook, wherever it's built
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "$k = \\ckvalue[.3f]{fit.ipynb}{rates.35C}$\n"
+            "\\end{document}\n"
+        )
+    assert calkit.latex.map_ck_components("paper/main.tex") == []
+    with open("paper/_calkit/values.tex") as f:
+        assert "\\cksetvalue{fit.ipynb}{rates.35C}{n}{0.0616}" in f.read()
+    # What couldn't be saved stops the run, saying why
+    for arg, message in [
+        (
+            f"kind=value,cell_id={ids[2]},variable_name=nope",
+            f"no variable 'nope' after cell {ids[2]}",
+        ),
+        (
+            f"kind=value,cell_id={ids[0]},variable_name=plt",
+            "since it's a module",
+        ),
+        (
+            f"kind=figure,cell_id={ids[0]},output_path=x.png",
+            f"Cell {ids[0]} shows no image/png",
+        ),
+        ("kind=value,cell_id=gone,variable_name=k_25", "no cell gone"),
+    ]:
+        out = subprocess.run(
+            ["calkit", "nb", "execute", "fit.ipynb", "-e", "py", "-o", arg],
+            capture_output=True,
+            text=True,
+        )
+        assert out.returncode != 0
+        assert message in out.stdout + out.stderr
+        assert not os.path.isdir(".calkit/notebooks/outputs/fit.ipynb/_saving")

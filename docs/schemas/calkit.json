@@ -145,7 +145,7 @@
             }
           ],
           "default": null,
-          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'app', it installs it, e.g., 'brew install colima', in place of any installer Calkit has for it. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -210,7 +210,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -468,6 +468,15 @@
           "default": null,
           "description": "Path at which to create the environment.",
           "title": "Prefix"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -647,6 +656,85 @@
       "title": "Dataset",
       "type": "object"
     },
+    "DateRangeIteration": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "date-range",
+          "description": "A range of dates, iterated over one period at a time.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "format": "date",
+              "type": "string"
+            }
+          ],
+          "description": "When the range starts, either a day, e.g., '2024-03-22', or a period, e.g., '2024-03', '2024Q1', or 2024; the first item is the period containing it.",
+          "title": "Start"
+        },
+        "state_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "local"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Keep a directory for each period that its item depends on, holding the period's window and last full day in 'period.json', so an item whose period is still open reruns daily and once more when it closes. Anything else written there, e.g., a fingerprint of a source's data for the period, reruns the item when it changes. 'git' keeps the directories in '.calkit/date-ranges/<stage>/<period>', 'local' in '.calkit/local/date-ranges/<stage>/<period>'.",
+          "title": "State Storage"
+        },
+        "step": {
+          "default": "1 month",
+          "description": "The length of each period, e.g., '1 day', '1 week', '1 month', '1 quarter', or '1 year', which names it as it starts, e.g., '2026-11-10', '2026-W46', '2026-11', '2026Q4', or '2026'. Multiples are counted from 1970, so '2 months' always start in an odd month.",
+          "title": "Step",
+          "type": "string"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "format": "date",
+              "type": "string"
+            }
+          ],
+          "default": "today",
+          "description": "When the range stops, which is not included, written like 'start'. The default, 'today', runs to the last full day, so an item is added once a new period has one, as are items for a later date when it comes.",
+          "title": "Stop"
+        },
+        "timezone": {
+          "default": "UTC",
+          "description": "Time zone days start in, e.g., 'America/New_York'.",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "start"
+      ],
+      "title": "DateRangeIteration",
+      "type": "object"
+    },
     "DerivedFromProject": {
       "properties": {
         "git_repo_url": {
@@ -771,7 +859,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -1562,6 +1650,69 @@
       "title": "FigureEvidence",
       "type": "object"
     },
+    "FileEvidence": {
+      "description": "Evidence in the form of a file cited as-is by its path, e.g., a log,\na transcript excerpt, a script, or a raw output, optionally at specific\nlines.\n\nIt has no ``kind``. An entry without one that has a ``key`` or\n``values`` is a ``result``, which is how those used to be written.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the file can be found.",
+          "title": "Git Ref"
+        },
+        "kind": {
+          "default": null,
+          "description": "Left out, or null, for a file cited by its path.",
+          "title": "Kind",
+          "type": "null"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*\\d+\\s*([-\u2013]\\s*\\d+\\s*)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Line or inclusive range of lines in the file where the evidence is, e.g., 8 or '8-12'. Checked against the file, so a citation of lines that are no longer there is an error.",
+          "title": "Lines"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FileEvidence",
+      "type": "object"
+    },
     "Formula": {
       "properties": {
         "description": {
@@ -1688,7 +1839,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -1889,6 +2040,91 @@
       "title": "GimpExportStage",
       "type": "object"
     },
+    "GpuArchIsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_arch_is": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Architecture of one of the machine's GPUs, ignoring case, e.g., 'gfx1201' for an AMD Radeon RX 9070 or 'sm_89' for an NVIDIA RTX 4090.",
+          "title": "Gpu Arch Is"
+        }
+      },
+      "required": [
+        "gpu_arch_is"
+      ],
+      "title": "GpuArchIsCondition",
+      "type": "object"
+    },
+    "GpuNameMatchesCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_name_matches": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Glob the name of one of the machine's GPUs must match, case-insensitively, e.g., '*RTX 40*'.",
+          "title": "Gpu Name Matches"
+        }
+      },
+      "required": [
+        "gpu_name_matches"
+      ],
+      "title": "GpuNameMatchesCondition",
+      "type": "object"
+    },
+    "GpuVendorIsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_vendor_is": {
+          "anyOf": [
+            {
+              "enum": [
+                "amd",
+                "nvidia",
+                "apple"
+              ],
+              "type": "string"
+            },
+            {
+              "items": {
+                "enum": [
+                  "amd",
+                  "nvidia",
+                  "apple"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Vendor of one of the machine's GPUs: 'amd', 'nvidia' or 'apple'.",
+          "title": "Gpu Vendor Is"
+        }
+      },
+      "required": [
+        "gpu_vendor_is"
+      ],
+      "title": "GpuVendorIsCondition",
+      "type": "object"
+    },
     "HostnameMatchesCondition": {
       "additionalProperties": false,
       "properties": {
@@ -1968,7 +2204,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2317,7 +2553,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2564,7 +2800,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -2814,6 +3050,15 @@
           "description": "Path to the Julia project's Project.toml.",
           "title": "Path",
           "type": "string"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -2872,7 +3117,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -3084,6 +3329,15 @@
           "title": "Always Run",
           "type": "boolean"
         },
+        "cell_outputs": {
+          "default": [],
+          "description": "Values, figures, and tables the notebook's cells make, saved by Calkit when the notebook runs, so it doesn't have to write them. Only for Python notebooks.",
+          "items": {
+            "$ref": "#/$defs/NotebookCellOutput"
+          },
+          "title": "Cell Outputs",
+          "type": "array"
+        },
         "cleaned_ipynb_storage": {
           "anyOf": [
             {
@@ -3149,7 +3403,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -3500,7 +3754,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4077,7 +4331,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4330,7 +4584,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4597,7 +4851,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -4978,7 +5232,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -5202,7 +5456,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -5516,7 +5770,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -6003,6 +6257,96 @@
       "title": "Notebook",
       "type": "object"
     },
+    "NotebookCellOutput": {
+      "additionalProperties": false,
+      "description": "A value, figure, or table one of a notebook's cells makes, which\nCalkit saves when the pipeline runs the notebook, so the notebook\ndoesn't have to write it itself.",
+      "properties": {
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID of the cell it's saved after, which Jupyter and VS Code keep on the cell as it moves. A value with none is saved after the last cell.",
+          "title": "Cell Id"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Python format spec for a table's numbers, e.g., '.3f'.",
+          "title": "Format"
+        },
+        "kind": {
+          "description": "What it is: a value, cited by the notebook's path, e.g., \\ckvalue{analysis.ipynb}{name}, or a figure or table, saved to 'output_path'.",
+          "enum": [
+            "value",
+            "figure",
+            "table"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "output_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where a figure or table is saved, in the format its extension says: a figure as PDF, PNG, SVG, or JPEG, and a table as LaTeX (.tex), CSV, Markdown, or JSON.",
+          "title": "Output Path"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where to store a figure or table. New figures are set to Git when added.",
+          "title": "Storage"
+        },
+        "variable_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the variable it's saved from: a value's name, e.g., a number or a dict of them, a figure, e.g., a Matplotlib figure, or a table, e.g., a DataFrame. A figure without one is the image the cell shows, and a table the result it shows, e.g., df.head() on its last line.",
+          "title": "Variable Name"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "NotebookCellOutput",
+      "type": "object"
+    },
     "OsIsCondition": {
       "additionalProperties": false,
       "properties": {
@@ -6317,6 +6661,22 @@
           "title": "Delete Before Run",
           "type": "boolean"
         },
+        "ignore": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files to leave out of this output directory (neither stored nor hashed), as .gitignore patterns relative to it.",
+          "title": "Ignore"
+        },
         "path": {
           "description": "Path to the output file or directory.",
           "title": "Path",
@@ -6370,11 +6730,13 @@
                 "markdown": "#/$defs/MarkdownStage",
                 "matlab-command": "#/$defs/MatlabCommandStage",
                 "matlab-script": "#/$defs/MatlabScriptStage",
+                "pptx-export": "#/$defs/PptxExportStage",
                 "procedure": "#/$defs/ProcedureStage",
                 "python-script": "#/$defs/PythonScriptStage",
                 "quarto": "#/$defs/QuartoStage",
                 "questions-to-latex": "#/$defs/QuestionsToLatexStage",
                 "r-script": "#/$defs/RScriptStage",
+                "references-check": "#/$defs/ReferencesCheckStage",
                 "sbatch": "#/$defs/SBatchStage",
                 "shell-command": "#/$defs/ShellCommandStage",
                 "shell-script": "#/$defs/ShellScriptStage",
@@ -6397,6 +6759,9 @@
               },
               {
                 "$ref": "#/$defs/QuestionsToLatexStage"
+              },
+              {
+                "$ref": "#/$defs/ReferencesCheckStage"
               },
               {
                 "$ref": "#/$defs/MatlabScriptStage"
@@ -6430,6 +6795,9 @@
               },
               {
                 "$ref": "#/$defs/GimpExportStage"
+              },
+              {
+                "$ref": "#/$defs/PptxExportStage"
               },
               {
                 "$ref": "#/$defs/JupyterNotebookStage"
@@ -6526,12 +6894,282 @@
           "description": "Path to the Pixi manifest file.",
           "title": "Path",
           "type": "string"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
         "path"
       ],
       "title": "PixiEnvironment",
+      "type": "object"
+    },
+    "PptxExportStage": {
+      "additionalProperties": false,
+      "description": "Figures exported from slides in a PowerPoint file, e.g., PDFs or\nPNGs, each cropped to what's drawn on it.\n\nIts environment says which app exports them: LibreOffice in a Docker\nenvironment, e.g., one with the ``ghcr.io/calkit/libreoffice`` image,\nor the app a system environment requires, PowerPoint or LibreOffice.\n``_system`` takes whichever is installed, so it can export differently\nfrom machine to machine.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "dpi": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Resolution of an exported PNG.",
+          "title": "Dpi"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "pptx-export",
+          "default": "pptx-export",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Files to export, each with the slide it shows, e.g., {path: figures/setup.png, slide: 3}. A PDF without one shows every slide.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SlideOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "source_path": {
+          "description": "The PowerPoint file to export from.",
+          "title": "Source Path",
+          "type": "string"
+        },
+        "trim": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Crop each slide to what's drawn on it, which it does unless a PDF shows several.",
+          "title": "Trim"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "source_path"
+      ],
+      "title": "PptxExportStage",
       "type": "object"
     },
     "Presentation": {
@@ -6766,7 +7404,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -7130,6 +7768,14 @@
           "title": "Path",
           "type": "string"
         },
+        "reviews": {
+          "description": "Reviews of this publication, whether written in this project or received.",
+          "items": {
+            "$ref": "#/$defs/PublicationReview"
+          },
+          "title": "Reviews",
+          "type": "array"
+        },
         "stage": {
           "anyOf": [
             {
@@ -7234,6 +7880,21 @@
       "title": "PublicationEvidence",
       "type": "object"
     },
+    "PublicationReview": {
+      "description": "A review of a publication, e.g., by a peer reviewer.",
+      "properties": {
+        "path": {
+          "description": "Path to the review, a Markdown file whose comments are numbered items under a heading containing \"comments\".",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "PublicationReview",
+      "type": "object"
+    },
     "PythonScriptDiffFilter": {
       "description": "A Python script each marked-up document is piped through.",
       "properties": {
@@ -7327,7 +7988,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -7531,7 +8192,7 @@
     },
     "QuartoStage": {
       "additionalProperties": false,
-      "description": "A stage that renders a Quarto document.\n\nCalkit controls only what belongs on the CLI: which environment to\nrender in, the target document, and (optionally) the output format and\nextra ``quarto render`` arguments. The output format(s) and any other\nrendering behavior are left to the document/``_quarto.yml`` metadata, so\nthere is no redundancy between the pipeline definition and the doc.\n\nOutputs are declared explicitly via ``outputs`` rather than parsed out\nof the Quarto document, since a document can emit multiple formats to\narbitrary paths. As with other stages, plain string outputs are\nDVC-cached by default; use a ``PathOutput`` to store an output with Git\ninstead.",
+      "description": "A stage that renders a Quarto document.\n\nCalkit controls only what belongs on the CLI: which environment to\nrender in, the target document, and (optionally) the output format and\nextra ``quarto render`` arguments. The output format(s) and any other\nrendering behavior are left to the document/``_quarto.yml`` metadata, so\nthere is no redundancy between the pipeline definition and the doc.\n\nOutputs are declared explicitly via ``outputs`` rather than parsed out\nof the Quarto document, since a document can emit multiple formats to\narbitrary paths. As with other stages, plain string outputs are\nDVC-cached by default; use a ``PathOutput`` to store an output with Git\ninstead.\n\nIt renders with ``calkit quarto render``, which checks Quarto comes from\nthe stage's environment, or is a declared requirement, and resolves the\nvalues the document shows with the ``ckvalue`` shortcode first. A notebook\nrendered with ``--execute`` is depended on with its outputs stripped,\nlike a notebook stage's, since rendering writes them back into it.\nOtherwise Quarto shows the outputs saved in it, so they're depended on\ntoo.",
       "properties": {
         "always_run": {
           "default": false,
@@ -7579,7 +8240,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -7851,6 +8512,9 @@
                   },
                   {
                     "$ref": "#/$defs/DocumentEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/FileEvidence"
                   }
                 ]
               },
@@ -7991,7 +8655,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -8238,6 +8902,15 @@
           "default": null,
           "description": "Path at which to create the environment.",
           "title": "Prefix"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -8295,7 +8968,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -8499,19 +9172,12 @@
     },
     "RangeIteration": {
       "properties": {
-        "range": {
-          "$ref": "#/$defs/RangeIterationParams",
-          "description": "Bounds of the range over which to iterate."
-        }
-      },
-      "required": [
-        "range"
-      ],
-      "title": "RangeIteration",
-      "type": "object"
-    },
-    "RangeIterationParams": {
-      "properties": {
+        "kind": {
+          "const": "range",
+          "description": "A range of numbers.",
+          "title": "Kind",
+          "type": "string"
+        },
         "start": {
           "anyOf": [
             {
@@ -8551,25 +9217,61 @@
         }
       },
       "required": [
+        "kind",
         "start",
         "stop"
       ],
-      "title": "RangeIterationParams",
+      "title": "RangeIteration",
       "type": "object"
     },
     "ReferenceCollection": {
       "properties": {
         "files": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/ReferenceFile"
-          },
-          "title": "Files",
-          "type": "array"
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "items": {
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "path"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "default": {},
+          "description": "PDFs of the collection's entries, by citation key, relative to the project.",
+          "title": "Files"
         },
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ReferenceValue"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Values documents quote from the collection's entries, by citation key, and then by a name unique within the entry.",
+          "title": "Values",
+          "type": "object"
         }
       },
       "required": [
@@ -8578,22 +9280,311 @@
       "title": "ReferenceCollection",
       "type": "object"
     },
-    "ReferenceFile": {
+    "ReferenceValue": {
+      "description": "A value a document quotes from a reference, and where and in what\ncontext the reference uses it.\n\nA document cites it with ``\\ckrefval{<citation key>}{<name>}``, which\nis checked against the reference's PDF.",
       "properties": {
-        "key": {
-          "title": "Key",
-          "type": "string"
+        "context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The passage the value is used in, copied from the reference, which is how it's found and checked; spacing and case don't have to match.",
+          "title": "Context"
         },
-        "path": {
-          "title": "Path",
-          "type": "string"
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the value is.",
+          "title": "Description"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The page of the reference's PDF it's on, counting from 1, which may differ from the number printed on the page.",
+          "title": "Page"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "The value, as the reference gives it, e.g., 0.1 or '12.5%'.",
+          "title": "Value"
         }
       },
       "required": [
-        "path",
-        "key"
+        "value"
       ],
-      "title": "ReferenceFile",
+      "title": "ReferenceValue",
+      "type": "object"
+    },
+    "ReferencesCheckStage": {
+      "additionalProperties": false,
+      "description": "Whether the references a document cites are real.\n\nIts inputs are the target document, the files it inputs, and the\nbibliographies it names, or ``calkit.yaml`` and the collections it\ndeclares if it names none, all found when the pipeline is compiled.\nIts outputs are that document's report, by default under\n``.calkit/reference-checks``, and beside it the services' responses\nthe report is based on. The responses are kept between runs and\nreused, since the services' answers change over time, so a rerun\nreproduces the report and asks only about what's new. One stage\nchecks one document, so a project with two papers has one of these\neach and each goes out of date on its own.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "description": "Where to run the check. Defaults to the system, which is where the Calkit running the pipeline already is.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "references-check",
+          "default": "references-check",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "offline": {
+          "default": false,
+          "description": "Use only the recorded responses instead of calling out to Crossref, DataCite, OpenAlex, and arXiv, e.g., where the pipeline runs without a network.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "target_path": {
+          "description": "What to check: a .tex or Markdown document, the PDF a stage builds from one, or a .bib file, whose every entry is checked.",
+          "title": "Target Path",
+          "type": "string"
+        },
+        "wdir": {
+          "default": null,
+          "description": "Not supported; the stage reads the project's calkit.yaml and documents from the project root.",
+          "title": "Wdir",
+          "type": "null"
+        }
+      },
+      "required": [
+        "target_path"
+      ],
+      "title": "ReferencesCheckStage",
       "type": "object"
     },
     "Release": {
@@ -8754,7 +9745,7 @@
       "type": "object"
     },
     "Requirement": {
-      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n  ``setup_command`` says how to get a value, e.g., a login flow that\n  prints a token, and is offered before the value is asked for.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
+      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``. ``setup_command`` says how to install\n  it, and is offered in place of any installer Calkit has for it.\n- ``env-var``: an environmental variable that must be defined.\n  ``setup_command`` says how to get a value, e.g., a login flow that\n  prints a token, and is offered before the value is asked for.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
       "properties": {
         "account_id": {
           "anyOf": [
@@ -8871,7 +9862,7 @@
             }
           ],
           "default": null,
-          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'app', it installs it, e.g., 'brew install colima', in place of any installer Calkit has for it. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -9146,10 +10137,17 @@
           "title": "Key"
         },
         "kind": {
-          "const": "result",
+          "anyOf": [
+            {
+              "const": "result",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": "result",
-          "title": "Kind",
-          "type": "string"
+          "title": "Kind"
         },
         "path": {
           "title": "Path",
@@ -9227,7 +10225,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -9479,7 +10477,7 @@
           "type": "string"
         },
         "period": {
-          "description": "How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, and years; 'm' is a minute and 'mo' a month.",
+          "description": "How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, quarters, and years; 'm' is a minute and 'mo' a month.",
           "title": "Period",
           "type": "string"
         },
@@ -9617,7 +10615,7 @@
             }
           ],
           "default": null,
-          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'app', it installs it, e.g., 'brew install colima', in place of any installer Calkit has for it. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -9682,7 +10680,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -9939,7 +10937,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -10312,6 +11310,81 @@
       "title": "SignOff",
       "type": "object"
     },
+    "SlideOutput": {
+      "additionalProperties": false,
+      "description": "A file exported from slides, and which ones it shows.",
+      "properties": {
+        "delete_before_run": {
+          "default": true,
+          "description": "Delete this output before the stage runs.",
+          "title": "Delete Before Run",
+          "type": "boolean"
+        },
+        "ignore": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files to leave out of this output directory (neither stored nor hashed), as .gitignore patterns relative to it.",
+          "title": "Ignore"
+        },
+        "path": {
+          "description": "Path to the output file or directory.",
+          "title": "Path",
+          "type": "string"
+        },
+        "slide": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The slide it shows, numbered from 1 and counting hidden ones, or a list for a PDF of several; every slide if not given, which only a PDF can show.",
+          "title": "Slide"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc",
+                "dvc-zip"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store this output. Use null to leave it untracked.",
+          "title": "Storage"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SlideOutput",
+      "type": "object"
+    },
     "SlurmEnvironment": {
       "properties": {
         "default_options": {
@@ -10509,6 +11582,9 @@
               },
               {
                 "$ref": "#/$defs/RangeIteration"
+              },
+              {
+                "$ref": "#/$defs/DateRangeIteration"
               },
               {
                 "$ref": "#/$defs/ParameterIteration"
@@ -10720,7 +11796,7 @@
       "type": "object"
     },
     "SwitchEnvironment": {
-      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_set``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.\n\nAn option's ``lock`` is part of the switch's too, so relocking the\noption, with ``relock: auto`` or ``calkit update env --lock``, reruns\nthe switch's stages. The first time a switch is checked, its options\nwith a ``host`` are locked from there. An option without one is locked\nthe first time it's checked on its own machine, which reruns nothing,\nsince only a machine taking up its option has changed.",
+      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_set``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n- ``gpu_vendor_is``: ``amd``, ``nvidia`` or ``apple``, for one of the\n  machine's GPUs.\n- ``gpu_arch_is``: one of the machine's GPUs' architecture, e.g.,\n  ``gfx1201`` or ``sm_89``.\n- ``gpu_name_matches``: a glob one of the machine's GPUs' names\n  matches, ignoring case.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.\n\nAn option's ``lock`` is part of the switch's too, so relocking the\noption, with ``relock: auto`` or ``calkit update env --lock``, reruns\nthe switch's stages. The first time a switch is checked, its options\nwith a ``host`` are locked from there. An option without one is locked\nthe first time it's checked on its own machine, which reruns nothing,\nsince only a machine taking up its option has changed.",
       "properties": {
         "description": {
           "anyOf": [
@@ -10853,6 +11929,7 @@
                   "renv": "#/$defs/REnvironment",
                   "slurm": "#/$defs/SlurmEnvironment",
                   "system": "#/$defs/SystemEnvironment",
+                  "texlive": "#/$defs/TexLiveEnvironment",
                   "uv": "#/$defs/UvEnvironment",
                   "uv-venv": "#/$defs/UvVenvEnvironment",
                   "venv": "#/$defs/VenvEnvironment"
@@ -10897,6 +11974,9 @@
                   "$ref": "#/$defs/NixEnvironment"
                 },
                 {
+                  "$ref": "#/$defs/TexLiveEnvironment"
+                },
+                {
                   "$ref": "#/$defs/SystemEnvironment"
                 }
               ]
@@ -10930,6 +12010,15 @@
                   },
                   {
                     "$ref": "#/$defs/MachineIdEqualsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuVendorIsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuArchIsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/GpuNameMatchesCondition"
                   }
                 ]
               },
@@ -11235,7 +12324,7 @@
       "type": "object"
     },
     "SystemValueRequirement": {
-      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
+      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\n``gpu-name``, ``gpu-vendor`` ('amd', 'nvidia' or 'apple') and\n``gpu-arch`` (e.g., 'gfx1201' or 'sm_89') describe the machine's GPUs,\nand are met when any one of them meets the constraint.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
       "properties": {
         "description": {
           "anyOf": [
@@ -11279,7 +12368,10 @@
             "hostname",
             "machine-id",
             "calkit-python-version",
-            "python-implementation"
+            "python-implementation",
+            "gpu-name",
+            "gpu-vendor",
+            "gpu-arch"
           ],
           "title": "Kind",
           "type": "string"
@@ -11422,7 +12514,7 @@
       "title": "TableEvidence",
       "type": "object"
     },
-    "UvEnvironment": {
+    "TexLiveEnvironment": {
       "properties": {
         "description": {
           "anyOf": [
@@ -11461,6 +12553,121 @@
           "title": "Inputs"
         },
         "kind": {
+          "const": "texlive",
+          "default": "texlive",
+          "title": "Kind",
+          "type": "string"
+        },
+        "packages": {
+          "default": [],
+          "description": "TeX Live packages to install, beyond the base set every TeX Live environment has (pdfLaTeX, LuaLaTeX, and latexmk). What they depend on comes with them, and packages a build finds missing are added to the lock, not here.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Packages",
+          "type": "array"
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TeX Live platforms to lock for. Defaults to macOS, Windows, and Linux on x86_64 and ARM.",
+          "title": "Platforms"
+        },
+        "release": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TeX Live release, e.g., 2025, to install packages from. A past release's repository is frozen, so its lock pins every package for good. Defaults to the latest frozen release.",
+          "title": "Release"
+        },
+        "repository_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TeX Live repository URL to install from instead of the one for 'release', e.g., a local mirror.",
+          "title": "Repository Url"
+        }
+      },
+      "title": "TexLiveEnvironment",
+      "type": "object"
+    },
+    "UvEnvironment": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "extras": {
+          "default": [],
+          "description": "Extras of the project to install, each named or given with the machines it's for. They're passed to both 'uv sync' and 'uv run', so they're installed even when the environment isn't checked first.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/UvExtra"
+              }
+            ]
+          },
+          "title": "Extras",
+          "type": "array"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
+        "kind": {
           "const": "uv",
           "default": "uv",
           "title": "Kind",
@@ -11470,12 +12677,78 @@
           "description": "Path to the uv project's pyproject.toml.",
           "title": "Path",
           "type": "string"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
         "path"
       ],
       "title": "UvEnvironment",
+      "type": "object"
+    },
+    "UvExtra": {
+      "additionalProperties": false,
+      "description": "An extra of a uv project, installed only on the machines it's for.\n\nFor a dependency built for particular hardware, e.g., a PyTorch for one\nGPU architecture. ``when`` takes the conditions a switch environment's\noptions do, and the extra is installed where all of them hold. One that\ndoesn't hold here is left out rather than reported, since it describes a\ndifferent machine, not a problem with this one.",
+      "properties": {
+        "name": {
+          "description": "Name of the extra in pyproject.toml.",
+          "title": "Name",
+          "type": "string"
+        },
+        "when": {
+          "description": "Conditions this machine must all meet for the extra to be installed, e.g., 'gpu_arch_is: gfx1201'. To always install it, list it by name instead.",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AppExistsCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarSetCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarExistsCondition"
+              },
+              {
+                "$ref": "#/$defs/EnvVarEqualsCondition"
+              },
+              {
+                "$ref": "#/$defs/HostnameMatchesCondition"
+              },
+              {
+                "$ref": "#/$defs/OsIsCondition"
+              },
+              {
+                "$ref": "#/$defs/MachineIdEqualsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuVendorIsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuArchIsCondition"
+              },
+              {
+                "$ref": "#/$defs/GpuNameMatchesCondition"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "when"
+      ],
+      "title": "UvExtra",
       "type": "object"
     },
     "UvVenvEnvironment": {
@@ -11552,6 +12825,15 @@
           "default": null,
           "description": "Python version to use when creating the environment.",
           "title": "Python"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -11698,6 +12980,15 @@
           "default": null,
           "description": "Python version to use when creating the environment.",
           "title": "Python"
+        },
+        "with": {
+          "default": [],
+          "description": "Names of TeX Live environments whose programs this one's commands also get, e.g., for Matplotlib's usetex. They come after this environment's own on PATH and before the system's.",
+          "items": {
+            "type": "string"
+          },
+          "title": "With",
+          "type": "array"
         }
       },
       "required": [
@@ -11746,7 +13037,7 @@
         },
         "frozen": {
           "default": false,
-          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "description": "Never rerun this stage, treating its outputs as up-to-date, unless it's named outright with 'calkit run --force'.",
           "title": "Frozen",
           "type": "boolean"
         },
@@ -12148,6 +13439,19 @@
           "default": null,
           "title": "Filter Paths"
         },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Branch, tag, or commit to follow when refreshing this. Optional: an entry that names none follows the project's default branch. The commit it resolves to is recorded in .calkit/imports.json.",
+          "title": "Git Ref"
+        },
         "git_rev": {
           "anyOf": [
             {
@@ -12445,6 +13749,7 @@
             "slurm": "#/$defs/SlurmEnvironment",
             "switch": "#/$defs/SwitchEnvironment",
             "system": "#/$defs/SystemEnvironment",
+            "texlive": "#/$defs/TexLiveEnvironment",
             "uv": "#/$defs/UvEnvironment",
             "uv-venv": "#/$defs/UvVenvEnvironment",
             "venv": "#/$defs/VenvEnvironment"
@@ -12487,6 +13792,9 @@
           },
           {
             "$ref": "#/$defs/NixEnvironment"
+          },
+          {
+            "$ref": "#/$defs/TexLiveEnvironment"
           },
           {
             "$ref": "#/$defs/SystemEnvironment"

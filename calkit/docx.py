@@ -345,6 +345,20 @@ class Document:
         )
         return el.text if el is not None else None
 
+    def strip_app_version(self) -> None:
+        """Name the application that wrote the package without its version.
+
+        LibreOffice writes its version and platform there, so the same
+        content would make a different file on each machine.
+        """
+        data = self.parts.get("docProps/app.xml")
+        if data is not None:
+            self.parts["docProps/app.xml"] = re.sub(
+                rb"<Application>([^<]*?)/[^<]*</Application>",
+                rb"<Application>\1</Application>",
+                data,
+            )
+
     def set_identifier(self, value: str) -> None:
         core = _parse(self.parts["docProps/core.xml"])
         el = core.find(_tag(DC, "identifier"))
@@ -1131,37 +1145,6 @@ class Document:
         self._save_content_types(root)
 
 
-def word_installed() -> bool:
-    """Whether Microsoft Word is installed, which only it can tell on
-    Windows, through the path it registers."""
-    if sys.platform == "darwin":
-        return any(
-            os.path.isdir(os.path.expanduser(p))
-            for p in (
-                "/Applications/Microsoft Word.app",
-                "~/Applications/Microsoft Word.app",
-            )
-        )
-    if sys.platform == "win32":
-        import winreg
-
-        # Machine-wide, else for this user, as Office installs either way
-        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-            try:
-                winreg.CloseKey(
-                    winreg.OpenKey(
-                        hive,
-                        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion"
-                        "\\App Paths\\Winword.exe",
-                    )
-                )
-            except OSError:
-                continue
-            return True
-        return False
-    return False
-
-
 def find_soffice() -> str | None:
     """LibreOffice's command, from ``PATH`` or where it installs itself."""
     import shutil
@@ -1176,6 +1159,23 @@ def find_soffice() -> str | None:
         ),
     ]
     return next((c for c in candidates if os.path.isfile(c)), None)
+
+
+def libreoffice_has_math(soffice: str) -> bool:
+    """Whether LibreOffice has its Math component, without which equations
+    come out empty.
+
+    Only Linux distributions package it separately, so only there can it be
+    missing.
+    """
+    if not sys.platform.startswith("linux"):
+        return True
+    program = os.path.dirname(os.path.realpath(soffice))
+    try:
+        names = os.listdir(program)
+    except OSError:
+        return True
+    return any(name.startswith("libsmlo.") for name in names)
 
 
 def _link_into_objects(content: str) -> str:

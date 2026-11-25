@@ -22,6 +22,9 @@ hand:
 - which stages run outside a declared environment;
 - which artifacts have no `stage`, `imported_from`, or `created_by`;
 - which scripts no stage refers to;
+- which Git-tracked files the pipeline hashes have line endings Git
+  doesn't pin (`eol_unpinned`), so a Windows checkout hashes them
+  differently and its stages read as out of date;
 - which numbers in the manuscript duplicate a value the pipeline already
   computes (`retyped_values`), and which result-like numbers have nothing
   recorded behind them at all (`unattributed_numbers`).
@@ -46,10 +49,17 @@ Judgment, done here:
    traceable until there is a pipeline to make it. See the
    `create-pipeline` and `add-pipeline-stage` skills.
 
+   <!-- TODO: needs human review -->
+
+   **`eol_unpinned`** has one fix: `calkit fix line-endings`, then commit
+   `.gitattributes`. It changes no committed file, only how text files are
+   checked out, but it's a project-wide rule, so suggest it rather than
+   doing it unasked, and say it matters for anyone on Windows.
+
 3. **Every `retyped_values` finding is worth fixing.** Each is a number
    the pipeline already computes, typed into the document: right today and
    wrong the next time that stage runs. The finding names the results file
-   and key, so the fix is mechanical.
+   and key, so the fix is mechanical: `\ckvalue{<file>}{<key>}`.
 
 4. **`unattributed_numbers` is a list to read, not a list to fix.** Most
    numbers in a paper are not results. A quantity quoted from a reference
@@ -61,8 +71,36 @@ Judgment, done here:
    rewrite a sentence to make a check pass, and never invent a stage to
    compute a number somebody else measured.
 
+   <!-- TODO: needs human review -->
+
+   A number in a sentence citing a reference is looked for in the
+   reference's PDF. Where it's found (`found`, shown as the page), it's the
+   reference's number: record it with the `calkit new ref-value` command the
+   check prints, giving it a short name, and replace the typed number with
+   `\ckrefval{<key>}{<name>}`, `{{< ckrefval <key> <name> >}}`, or
+   `<!-- ckrefval <key> <name> --><!-- /ckrefval -->`, keeping the
+   citation where it is. Where it isn't (`searched`, shown as "not in"),
+   the cited reference doesn't have it, which may be a misquote, a rounded
+   value, or a number from somewhere else: tell the user, and don't record
+   it.
+
+   `refval_problems` (`calkit check repro -c refvals`) are values quoted
+   from references that don't match the PDF, aren't recorded, or whose
+   reference the document never cites. Fix what's recorded only from what
+   the PDF says, never to make the check pass.
+
+   A line ending in a `% calkit: ignore` comment, optionally with a reason,
+   e.g., `% calkit: ignore, from the pump's datasheet`, is left out of both
+   checks, as it is by the Overleaf extension. In Markdown, including
+   Quarto documents and notebooks' Markdown cells, the comment is
+   `<!-- calkit: ignore -->`. Add one only for a number the user confirms
+   isn't this project's result.
+
+   <!-- TODO: needs human review -->
+
    For a number that is this project's result, it must reach the page
-   through the pipeline rather than through the author's fingers:
+   through the pipeline rather than through the author's fingers. A stage
+   writes it to a results file:
 
    ```yaml
    pipeline:
@@ -72,29 +110,48 @@ Judgment, done here:
          environment: py
          script_path: scripts/compute-drag.py
          outputs: [results/drag.json]
-       drag-to-latex:
-         kind: json-to-latex
-         command_name: result
-         inputs: [results/drag.json]
-         outputs:
-           - path: paper/generated-drag.tex
-             storage: git
    ```
 
-   The script writes `{"DragCoefficient": 0.42}`. The document inputs the
-   generated file and refers to the value by key:
+   The script writes `{"DragCoefficient": 0.42}`. The document loads the
+   `calkit` LaTeX package and reads the value from that file by its path
+   in the project and its key:
 
    ```latex
-   \input{generated-drag}
+   \usepackage{calkit}
    ...
-   The drag coefficient is \result[DragCoefficient].
+   The drag coefficient is \ckvalue[.2f]{results/drag.json}{DragCoefficient}.
    ```
 
-   `json-to-latex` generates one _keyed_ command per file, named by
-   `command_name` (or the output file's stem), so the reference is
-   `\result[DragCoefficient]` --- not a separate macro per key. Never write
-   a raw `stages:` block with `cmd: calkit latex from-json`; the stage kind
-   is what keeps `calkit.yaml` the single source of truth.
+   The document's LaTeX stage depends on what it includes this way, so no
+   `json-to-latex` stage or added `inputs` are needed. A `retyped_values`
+   finding's `source` names the file and key to use. If the document
+   already uses commands a `json-to-latex` stage generates, e.g.,
+   `\result[DragCoefficient]`, they keep working, so referencing the
+   existing command is fine there too. Never define a macro that holds the
+   number, or edit a generated file by hand: either one is a typed value
+   with extra steps.
+
+   <!-- TODO: needs human review -->
+
+   If a pipeline notebook computes the number, e.g., a cell prints it,
+   save the variable as a cell output instead of changing the notebook:
+   `calkit nb add-output <notebook> value --cell-id <id> --variable-name <name>`.
+   Then cite it as `\ckvalue{<notebook>}{<name>}`.
+   Use the cell that printed it, not the last one,
+   since the value is saved right after that cell runs.
+   See the conventions skill's section on notebook cells.
+
+   <!-- TODO: needs human review -->
+
+   The check also reads Markdown publications, and the documents Quarto
+   and Markdown stages render, including a notebook's Markdown cells,
+   reported by cell number. A Quarto document reads a value with
+   `{{< ckvalue results/drag.json DragCoefficient .2f >}}`, and a Markdown
+   stage's document with
+   `<!-- ckvalue results/drag.json DragCoefficient .2f --><!-- /ckvalue -->`,
+   which it fills in when it renders. A number that a Quarto notebook's own
+   code computes can be an inline expression instead, e.g.,
+   `` `{python} f"{drag:.2f}"` ``, since the code runs when it renders.
 
 5. **Run the pipeline** (`calkit run`) and check again. Do not run the
    script yourself and paste the number in: that is the failure this whole

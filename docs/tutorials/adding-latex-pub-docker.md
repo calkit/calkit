@@ -25,7 +25,7 @@ calkit new publication \
 What happens when we do this:
 
 1. A new publication is added to `calkit.yaml`.
-1. A new Docker environment called `latex` is added to `calkit.yaml`.
+1. A new TeX Live environment called `latex` is added to `calkit.yaml`.
    The pipeline stage depends on that environment's specification,
    so if our environment changes, that stage will be rerun.
 1. Files from a LaTeX template called "article" are copied into the `./paper`

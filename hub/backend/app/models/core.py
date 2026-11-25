@@ -1,8 +1,9 @@
 """Core models that should make it into the top-level ``models`` namespace."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, get_args
+from urllib.parse import urlparse
 
 import sqlalchemy
 
@@ -16,7 +17,13 @@ if TYPE_CHECKING:
     # forward reference in Project.releases for type checkers without creating
     # a runtime circular import.
     from app.models.releases import Release
-from pydantic import BaseModel, EmailStr, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.subscriptions import (
@@ -100,6 +107,9 @@ class UserUpdateMe(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     github_username: str | None = Field(default=None, max_length=255)
     analytics_consent: bool | None = None
+    # The code emailed to the current address, which changing a verified
+    # one takes
+    email_code: str | None = Field(default=None, max_length=8)
 
 
 class UpdatePassword(SQLModel):
@@ -189,6 +199,11 @@ class UserExternalCredential(SQLModel, table=True):
     user: "User" = Relationship(back_populates="external_credentials")
 
 
+# Whether everyone can link machines, for workspaces, rather than only
+# superusers
+MACHINES_FOR_EVERYONE = True
+
+
 # Database model, database table inferred from class name
 class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -213,6 +228,11 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    machines: list["Machine"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
+    totp: Union["UserTOTP", None] = Relationship(cascade_delete=True)
     external_credentials: list[UserExternalCredential] = Relationship(
         back_populates="user",
         cascade_delete=True,
@@ -276,6 +296,12 @@ class User(UserBase, table=True):
             and cred.provider_account_id.lower() == self.email.lower()
         )
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def can_link_machines(self) -> bool:
+        """Whether the user can link machines, for workspaces."""
+        return self.is_superuser or MACHINES_FOR_EVERYONE
+
     @computed_field
     @property
     def created(self) -> datetime:
@@ -311,6 +337,7 @@ class UserPublic(UserBase):
     created: datetime
     github_username: str | None
     email_verified: bool
+    can_link_machines: bool
     subscription: Union["UserSubscription", None]
     analytics_consent: bool | None = None
 
@@ -331,6 +358,19 @@ class UserEmailVerification(SQLModel, table=True):
     attempts: int = Field(default=0)
     # Relationships
     user: User = Relationship(back_populates="email_verification")
+
+
+class UserDailyCount(SQLModel, table=True):
+    """How many times today a user did something limited per day, e.g.,
+    entered a wrong emailed code.
+    """
+
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", primary_key=True, ondelete="CASCADE"
+    )
+    kind: str = Field(primary_key=True, max_length=32)
+    day: date
+    count: int = 0
 
 
 class UserAdminPublic(UserPublic):
@@ -547,6 +587,11 @@ class UserTokenPublic(SQLModel):
     is_active: bool
     description: str | None = Field(default=None, max_length=256)
     last_used: datetime | None = Field(default=None)
+    # The machine it was made for, as its CLI token, which
+    # revoking the machine deactivates
+    machine_id: uuid.UUID | None = Field(
+        default=None, foreign_key="machine.id", ondelete="CASCADE"
+    )
 
 
 class UserToken(UserTokenPublic, table=True):
@@ -563,6 +608,140 @@ class UserToken(UserTokenPublic, table=True):
         if self.expires is None:
             return False
         return self.expires < utcnow()
+
+
+class UserTOTP(SQLModel, table=True):
+    """An authenticator app generating time-based one-time passwords
+    (TOTP), used as a second factor before sensitive actions, e.g.,
+    opening sessions on a machine.
+    """
+
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", primary_key=True, ondelete="CASCADE"
+    )
+    # Encrypted with the app's Fernet keys
+    secret: str = Field(max_length=512)
+    # The sign-in that started setting it up, which only it can finish
+    setup_session_id: uuid.UUID | None = Field(default=None)
+    created: datetime = Field(default_factory=utcnow)
+    # Null until the user proves the app works by entering a code from it
+    confirmed_at: datetime | None = Field(default=None)
+    last_verified_at: datetime | None = Field(default=None)
+    # So a code can't be used twice
+    last_used_step: int | None = Field(
+        default=None, sa_type=sqlalchemy.BigInteger
+    )
+    # A code emailed when setting it up, so a leaked token alone can't add an
+    # attacker's app; stored as an HMAC like email verification codes
+    email_code_hash: str | None = Field(default=None, max_length=64)
+    email_code_expires: datetime | None = Field(default=None)
+    email_code_attempts: int = 0
+
+
+class MachinePublic(SQLModel):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", index=True, ondelete="CASCADE"
+    )
+    name: str = Field(min_length=1, max_length=64)
+    hostname: str | None = Field(default=None, max_length=255)
+    system_machine_id: str | None = Field(default=None, max_length=255)
+    platform: str | None = Field(default=None, max_length=64)
+    calkit_version: str | None = Field(default=None, max_length=64)
+    # Hosts this machine serves, so stages whose environment names one can
+    # run through it
+    hosts: list[str] = Field(
+        default_factory=list,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="[]"
+        ),
+    )
+    created: datetime = Field(default_factory=utcnow)
+    last_seen: datetime | None = Field(default=None)
+    # How it runs: "service", "foreground", or "cron", which only connects
+    # when asked
+    mode: str | None = Field(default=None, max_length=16)
+    # Whether it was connected to the relay at its latest check-in, which a
+    # machine in cron mode that's only asking whether to connect isn't
+    connected: bool = False
+    # When the owner last asked it to connect, for machines in cron mode
+    connect_requested_at: datetime | None = Field(default=None)
+    # Whether it will restart once idle, e.g., after Calkit was upgraded
+    restart_pending: bool = False
+    # Whether its owner asked it to restart and it hasn't heard yet
+    restart_requested: bool = False
+    is_active: bool = True
+
+
+class Machine(MachinePublic, table=True):
+    # Names are unique among the user's active machines, so a revoked
+    # one's name can be used again
+    __table_args__ = (
+        sqlalchemy.Index(
+            "uq_machine_user_name_active",
+            "user_id",
+            "name",
+            unique=True,
+            postgresql_where=sqlalchemy.text("is_active"),
+        ),
+    )
+    selector: str = Field(index=True, unique=True, max_length=32)
+    hashed_verifier: str = Field(max_length=64)
+    # Its own P-256 public key as a JWK, which browsers check its replies
+    # with; set once, from registration or its first check-in
+    public_key: dict[str, str] | None = Field(
+        default=None, sa_column=sqlalchemy.Column(sqlalchemy.JSON)
+    )
+    # When its owner asked for a CLI token to be issued to it
+    cli_token_requested_at: datetime | None = Field(default=None)
+    # When a browser last connected to it, for counting who uses machines
+    last_used: datetime | None = Field(default=None)
+    # Relationships
+    user: User = Relationship(back_populates="machines")
+    workspaces: list["MachineWorkspace"] = Relationship(
+        back_populates="machine", cascade_delete=True
+    )
+
+
+class MachineWorkspace(SQLModel, table=True):
+    """A project checkout on a machine, as of its latest check-in."""
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "machine_id", "path", name="uq_machineworkspace_machine_path"
+        ),
+        sqlalchemy.Index(
+            "ix_machineworkspace_project", "owner_name", "project_name"
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    machine_id: uuid.UUID = Field(
+        foreign_key="machine.id", index=True, ondelete="CASCADE"
+    )
+    path: str = Field(max_length=4096)
+    # "personal" checkouts, or "managed" ones Calkit uses to run stages
+    kind: str = Field(max_length=16)
+    # The project, lowercased for matching, if the machine could tell
+    owner_name: str | None = Field(default=None, max_length=255)
+    project_name: str | None = Field(default=None, max_length=255)
+    branch: str | None = Field(default=None, max_length=256)
+    commit: str | None = Field(default=None, max_length=64)
+    dirty: bool | None = None
+    ahead: int | None = None
+    behind: int | None = None
+    # Whether a pipeline run held DVC's lock at the check-in
+    running: bool = False
+    # Which stages were running and since when, and how the latest run
+    # ended, as the machine reported them
+    run_state: dict = Field(
+        default_factory=dict,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="{}"
+        ),
+    )
+    updated: datetime = Field(default_factory=utcnow)
+    # Relationships
+    machine: Machine = Relationship(back_populates="workspaces")
 
 
 class DeviceAuth(SQLModel, table=True):
@@ -608,6 +787,17 @@ class RefreshToken(SQLModel, table=True):
     expires: datetime
     is_active: bool = True
     description: str | None = Field(default=None, max_length=256)
+    # Shared by every token rotated from the same sign-in, so it names that
+    # sign-in for as long as it lasts
+    session_id: uuid.UUID | None = Field(default=None, index=True)
+    # Whether a person signed in through the web app, rather than a script
+    # or the CLI, which some actions, e.g., opening a shell, require
+    interactive: bool = Field(
+        default=False, sa_column_kwargs=dict(server_default=sqlalchemy.false())
+    )
+    # When it was exchanged for a new one, after which it only works for a
+    # short grace period, and using it later ends its session
+    rotated_at: datetime | None = Field(default=None)
     # Relationships
     user: "User" = Relationship(back_populates="refresh_tokens")
 
@@ -653,8 +843,19 @@ class Project(ProjectBase, table=True):
     parent_project_id: uuid.UUID | None = Field(
         foreign_key="project.id", default=None
     )
+    # Where DVC objects go; null means the hub's own object storage
+    dvc_storage_id: uuid.UUID | None = Field(
+        foreign_key="storageresource.id", default=None, ondelete="SET NULL"
+    )
     # Relationships
     owner_account: Account = Relationship(back_populates="owned_projects")
+    # Storage dedicated to a project points back at it, so the key is named
+    dvc_storage: Union["StorageResource", None] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[Project.dvc_storage_id]"}
+    )
+    storage_history: list["ProjectStorageHistory"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
     user_access_records: list["UserProjectAccess"] = Relationship(
         back_populates="project", cascade_delete=True
     )
@@ -689,6 +890,9 @@ class Project(ProjectBase, table=True):
         back_populates="project", cascade_delete=True
     )
     dvc_pushes: list["ProjectDvcPush"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
+    pipeline_runs: list["ProjectPipelineRun"] = Relationship(
         back_populates="project", cascade_delete=True
     )
 
@@ -737,11 +941,11 @@ class Project(ProjectBase, table=True):
 
     @property
     def github_repo(self) -> str | None:
-        if not self.git_repo_url.startswith("https://github.com"):
-            return
-        return self.git_repo_url.removeprefix(
-            "https://github.com/"
-        ).removesuffix(".git")
+        # Any form project creation accepts, e.g., www. or http://
+        parsed = urlparse(self.git_repo_url or "")
+        if parsed.hostname not in ("github.com", "www.github.com"):
+            return None
+        return parsed.path.strip("/").removesuffix(".git") or None
 
 
 class ProjectPublic(ProjectBase):
@@ -922,6 +1126,105 @@ class ProjectDvcPush(SQLModel, table=True):
     # Relationships
     project: "Project" = Relationship(back_populates="dvc_pushes")
     user: User = Relationship(back_populates="dvc_pushes")
+
+
+class StorageResource(SQLModel, table=True):
+    """External storage connected to an account, e.g., an HF bucket.
+
+    Storage dedicated to one project, e.g., an HF bucket of its own, has a
+    ``project_id``, and holds that project's DVC objects at its root.
+    Otherwise, it's a namespace that projects owned by the account can use,
+    each under its own ``{owner}/{project}`` folder. The credential used to reach
+    it is the external credential of the user who connected it, so it's
+    deleted with that user, since it can't be reached without them.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "owner_account_id",
+            "name",
+            name="uq_storageresource_owner_account_name",
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    owner_account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, ondelete="CASCADE"
+    )
+    project_id: uuid.UUID | None = Field(
+        default=None, foreign_key="project.id", index=True, ondelete="CASCADE"
+    )
+    # Only namespace storage has a name, which projects select it by
+    name: str | None = Field(default=None, min_length=2, max_length=64)
+    # "hf-bucket" or "box-folder"
+    kind: str = Field(max_length=32)
+    # For HF buckets, the bucket ID, i.e., ``{namespace}/{bucket_name}``,
+    # and for Box, the ID of the ``Calkit`` folder
+    bucket: str = Field(max_length=255)
+    credential_user_id: uuid.UUID = Field(
+        foreign_key="user.id", ondelete="CASCADE"
+    )
+    created: datetime = Field(default_factory=utcnow)
+    # Relationships
+    owner_account: Account = Relationship()
+    credential_user: User = Relationship()
+
+
+class ProjectStorageHistory(SQLModel, table=True):
+    """Every storage resource a project has used for DVC objects.
+
+    Objects aren't moved when a project switches storage, so reads fall
+    back through these (and the hub's own storage) to find older objects.
+    """
+
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id", primary_key=True, ondelete="CASCADE"
+    )
+    storage_resource_id: uuid.UUID = Field(
+        foreign_key="storageresource.id", primary_key=True, ondelete="CASCADE"
+    )
+    first_used: datetime = Field(default_factory=utcnow)
+    # Relationships
+    project: "Project" = Relationship(back_populates="storage_history")
+    storage_resource: StorageResource = Relationship()
+
+
+class ProjectPipelineRun(SQLModel, table=True):
+    """A run of a project's pipeline, wherever it ran.
+
+    The ID is ours, so a run is named the same way wherever it runs, e.g.,
+    on GitHub Actions now and a linked machine later, with the location's
+    own ID beside it.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint("project_id", "github_run_id"),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id", index=True, ondelete="CASCADE"
+    )
+    location: str = "github-actions"
+    status: str = "queued"
+    created: datetime = Field(default_factory=utcnow)
+    started: datetime | None = None
+    finished: datetime | None = None
+    git_rev: str | None = None
+    branch: str | None = None
+    # Who started it from Calkit, if it was
+    started_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    # Who started it, as the location names them, e.g., a GitHub username
+    started_by: str | None = None
+    url: str | None = None
+    # By file name
+    github_workflow: str | None = None
+    # Unknown for one just started, until GitHub lists it
+    github_run_id: int | None = Field(
+        default=None, sa_type=sqlalchemy.BigInteger
+    )
+    # Relationships
+    project: Project = Relationship(back_populates="pipeline_runs")
 
 
 class OnboardingFlags(SQLModel):
@@ -1190,6 +1493,8 @@ class Provenance(SQLModel):
     # What a manual step says to do
     message: str | None = None
     inputs: list[str] = Field(default_factory=list)
+    # The stages that use it as an input or DVC dep
+    input_to_stages: list[str] = Field(default_factory=list)
     stage_status: StageStatus | None = None
     stale_reason: Literal["pipeline", "frozen"] | None = None
     # Where a copy, e.g., one a map-paths stage put beside a document, came
@@ -1202,6 +1507,10 @@ class Provenance(SQLModel):
     origin: str | None = None
     origin_url: str | None = None
     origin_path: str | None = None
+    # Imported from a Git repo or another project, so it can be updated
+    # from there, and whether there's anything newer, if that's known
+    updatable: bool = False
+    update_available: bool | None = None
     # Data behind it that nothing records the origin of, however far back
     gaps: list[ProvenanceGap] = Field(default_factory=list)
 
@@ -1508,6 +1817,9 @@ class _ContentsItemBase(BaseModel):
 
 class ContentsItem(_ContentsItemBase):
     dir_items: list[_ContentsItemBase] | None = None
+    # Full hash of the commit this was read at, so an importer can record
+    # exactly what it got, even when it named a branch or nothing at all
+    commit_sha: str | None = None
 
 
 class PublicationOverleaf(BaseModel):
@@ -1654,6 +1966,12 @@ class MiscArtifact(BaseModel):
     created_by: list[dict[str, Any]] | None = None
     imported_from: dict[str, Any] | None = None
 
+    @field_validator("created_by", mode="before")
+    @classmethod
+    def get_creator_list(cls, value: Any) -> Any:
+        # calkit.yaml writes a single creator as one person, not a list
+        return [value] if isinstance(value, dict) else value
+
 
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
@@ -1672,7 +1990,8 @@ class QuestionEvidenceValue(SQLModel):
 
 
 class QuestionEvidence(SQLModel):
-    kind: EvidenceKind
+    # None for a plain file cited by path, e.g., a log or a script
+    kind: EvidenceKind | None
     path: str
     key: str | None = None
     # For result evidence citing several values in its file, each by name,
@@ -1684,6 +2003,8 @@ class QuestionEvidence(SQLModel):
     section: str | None = None
     # A publication's source anchor, e.g., a LaTeX label
     label: str | None = None
+    # The lines a plain file is cited at, e.g., "8" or "8-12"
+    lines: str | None = None
     # Why this piece of evidence answers the question. Written inline in
     # calkit.yaml, or kept in a file and cited by path -- a paragraph of
     # reasoning belongs in a file the pipeline can rebuild, not in a YAML
@@ -1722,7 +2043,8 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: EvidenceKind
+    # None for a plain file, which is written without a kind
+    kind: EvidenceKind | None
     path: str
     key: str | None = None
     # Name to key, for result evidence citing several values
@@ -1730,6 +2052,7 @@ class QuestionEvidencePost(SQLModel):
     name: str | None = None
     section: str | None = None
     label: str | None = None
+    lines: str | None = None
     explanation: str | None = None
     # Set instead of ``explanation`` to point at a file holding it. The two
     # are alternatives: a path wins, since the file is the record and the

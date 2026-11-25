@@ -3,13 +3,17 @@ import test from "node:test";
 import {
   collectSubprojects,
   envRefParts,
+  findProjectDir,
+  findUndeclaredProjectDir,
   mergeSubprojectConfigs,
   mergeSubprojectDvcYaml,
   qualifyEnvDescriptions,
+  rebaseStages,
   splitQualifiedName,
   splitSubprojectPath,
   stageNameFromDvcAddress,
 } from "../subprojects";
+import { documentStagePdf, documentStageSource } from "../latex/core";
 import type { CalkitInfo } from "../types";
 
 test("collectSubprojects walks nested subprojects and skips bad entries", async () => {
@@ -339,4 +343,93 @@ test("a malformed subproject calkit.yaml doesn't break the merge", async () => {
     { dir: "sub", config: sub, dvcYaml: { stages: { bad: null } } as never },
   ]);
   assert.deepEqual(dvc.stages, {});
+});
+
+test("a document in a project the root doesn't declare maps to its PDF", () => {
+  const projects = new Set([
+    "examples/basic",
+    "subs/declared",
+    "subs/declared/inner",
+    "outer",
+    "outer/declared",
+    // Read as relative, it would be one
+    "D:/basic",
+  ]);
+  const isProject = (dir: string) => projects.has(dir);
+  const declared = ["subs/declared", "outer/declared"];
+  // The nearest project above the file counts, unless the merged config
+  // already has it
+  assert.equal(
+    findUndeclaredProjectDir(
+      "examples/basic/paper/main.tex",
+      isProject,
+      declared,
+    ),
+    "examples/basic",
+  );
+  assert.equal(
+    findUndeclaredProjectDir("subs/declared/paper.tex", isProject, declared),
+    undefined,
+  );
+  // Nested either way round with a declared one, the nearest still decides
+  assert.equal(
+    findUndeclaredProjectDir(
+      "subs/declared/inner/doc.tex",
+      isProject,
+      declared,
+    ),
+    "subs/declared/inner",
+  );
+  assert.equal(
+    findUndeclaredProjectDir("outer/declared/doc.tex", isProject, declared),
+    undefined,
+  );
+  assert.equal(
+    findUndeclaredProjectDir("paper/main.tex", isProject, declared),
+    undefined,
+  );
+  assert.equal(
+    findUndeclaredProjectDir("main.tex", isProject, declared),
+    undefined,
+  );
+  for (const outside of ["../elsewhere/basic/main.tex", "D:/basic/main.tex"]) {
+    assert.equal(
+      findUndeclaredProjectDir(outside, isProject, declared),
+      undefined,
+    );
+  }
+  // Any project counts for where a file runs, declared or not, or the root
+  assert.equal(
+    findProjectDir("subs/declared/nb/analysis.ipynb", isProject),
+    "subs/declared",
+  );
+  assert.equal(
+    findProjectDir("examples/basic/analysis.ipynb", isProject),
+    "examples/basic",
+  );
+  assert.equal(findProjectDir("nb/analysis.ipynb", isProject), ".");
+  assert.equal(findProjectDir("D:/basic/main.tex", isProject), ".");
+  // Its stages, rebased, map its document and PDF in the root's frame
+  const stages = rebaseStages("examples/basic", {
+    "build-paper": { kind: "latex", target_path: "paper/main.tex" },
+    "build-notes": {
+      kind: "latex",
+      wdir: "notes",
+      target_path: "notes.tex",
+    },
+    broken: null as unknown as { kind: string },
+  });
+  assert.deepEqual(Object.keys(stages), [
+    "examples/basic:build-paper",
+    "examples/basic:build-notes",
+  ]);
+  assert.equal(
+    documentStagePdf(stages, "examples/basic/paper/main.tex"),
+    "examples/basic/paper/main.pdf",
+  );
+  assert.equal(
+    documentStageSource(stages, "examples/basic/notes/notes.pdf"),
+    "examples/basic/notes/notes.tex",
+  );
+  assert.equal(documentStagePdf(stages, "paper/main.tex"), undefined);
 });

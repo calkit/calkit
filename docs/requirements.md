@@ -32,6 +32,23 @@ Environmental variables are useful for configuration of a project that
 needs to be unique on each user's machine,
 which can also be used to avoid committing secrets to the repo.
 
+<!-- TODO: needs human review -->
+
+Requirements are what has to exist outside a project's environments:
+on the machine a stage runs on, e.g., an app installed system-wide or a
+number of CPUs, or in the session there, e.g., an env var or a login.
+Calkit builds and locks environments,
+but only checks requirements, at most offering to install or set them up.
+Where a requirement is declared says which stages need it:
+the project's apply to every stage,
+a machine environment's, i.e., a `system`, `slurm` or `pbs` environment's,
+to every stage that runs on that machine,
+and a stage's to that stage alone.
+A stage's and its machine environment's are checked on the machine where
+the stage runs, which is the one running `calkit run` unless the stage
+runs in a machine environment with a `host`.
+The project's are checked on the machine running `calkit run`.
+
 <!-- prettier-ignore -->
 !!! note
 
@@ -123,13 +140,19 @@ requirements:
     version_spec: ">=3.11"
 ```
 
+<!-- TODO: needs human review -->
+
 `cpu-count` and `memory-gb` take `min` and/or `max`.
 Everything else takes `equals`---matched case-insensitively, and a list
 means any one of them will do---`matches`, a glob like `*.cluster.edu`
 that is matched the same way, or a `version_spec` for properties that
 are versions.
 The properties available are the machine-describing ones from the table
-in [environments](environments.md#system);
+in [environments](environments.md#system),
+plus `gpu-name`, `gpu-vendor` (`amd`, `nvidia` or `apple`) and `gpu-arch`
+(e.g., `gfx1201` or `sm_89`), which are met when any of the machine's GPUs
+meets them, so an integrated GPU beside a discrete one doesn't get in the
+way;
 versions of installed tools are reached as an `app` requirement with a
 `version_spec` instead, which is one way to say it rather than two.
 
@@ -195,8 +218,37 @@ It stays out of date in `calkit status`, which says why it can't run
 there, and the run ends by listing the out-of-date stages it skipped.
 Requirements of an environment on another machine, e.g., a `system`
 environment with a `host`, are checked on that machine by `calkit run`.
-`calkit status` doesn't connect to other machines,
-so it doesn't check those.
+`calkit status` and `calkit check reqs` don't connect to other machines,
+so they don't check those.
+
+<!-- TODO: needs human review -->
+
+On a terminal, before skipping a stage for requirements this machine
+doesn't meet, `calkit run` offers what's missing if the stage would run,
+i.e., it's out of date, follows one that is, or is forced,
+the same way it does for the project's requirements:
+installing an app, running a setup command, or asking for a variable.
+A stage that's up to date is never asked about,
+and a requirement many stages share is asked about once per run.
+This comes after the environments of the other stages are checked,
+since checking one can put a stage out of date.
+The environments of a stage whose requirements weren't met can't be
+checked until they are, so a stage is judged out of date on what they
+last recorded, and they're checked once its requirements are met.
+If that puts another stage using them out of date, it's offered next.
+Declining, or an install that fails, skips the stage as before,
+as does running without a terminal, e.g., in CI.
+
+<!-- TODO: needs human review -->
+
+`calkit check reqs` checks everything a machine needs to run the whole
+project: the project's requirements, and those of every stage and
+environment, except a switch's options it doesn't pick here,
+reporting each one that isn't met by where it's declared.
+With `--stale`, it only checks what `calkit run` needs now:
+the project's requirements, and those of the stages `calkit status`
+lists as out of date and of their environments.
+Both cover subprojects too.
 
 Some skips still fail the run, after the stages that can run have run:
 
@@ -204,10 +256,35 @@ Some skips still fail the run, after the stages that can run have run:
   `calkit run fetch`, is out of date and can't run.
 - A stage is out of date and can't run because something is wrong
   rather than because the project says so, e.g., its machine can't be
-  reached.
+  reached, or one of its environments failed its check.
 - Any stage is out of date and can't run, with `calkit run --strict`,
   e.g., in CI for a project whose stages should all run there.
   The `calkit/run` action takes it as `run_args: --strict`.
+
+<!-- TODO: needs human review -->
+
+A stage that [iterates](pipeline/index.md#iteration) can use its values
+in its requirements, so each item only needs what it uses,
+and an item whose requirements aren't met is skipped on its own.
+Quote a value in braces, since YAML reads `{engine}` alone as a mapping:
+
+```yaml
+pipeline:
+  stages:
+    round-trip:
+      kind: python-script
+      script_path: scripts/round-trip.py
+      args:
+        - --engine={engine}
+      iterate_over:
+        - arg_name: engine
+          values: [word, libreoffice]
+      requirements:
+        - "{engine}"
+```
+
+Calkit finds Microsoft Word and LibreOffice where they install,
+so `word` and `libreoffice` work as app requirements.
 
 ## Pinning the Calkit CLI version
 
@@ -270,26 +347,52 @@ non-zero.
 Installing is always opt-in: nothing runs without a yes at the prompt
 or `--yes` on the command line.
 
+<!-- TODO: needs human review: gh, make, and Office rows -->
+
 Apps currently in the registry:
 
-| Name               | Installer                                                                                          |
-| ------------------ | -------------------------------------------------------------------------------------------------- |
-| `pixi`             | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                          |
-| `uv`               | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                 |
-| `rustup`, `cargo`  | upstream `rustup` script on Unix, `winget` on Windows                                              |
-| `juliaup`, `julia` | upstream `juliaup` script on Unix, `winget` on Windows                                             |
-| `nix`              | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows |
-| `conda`, `mamba`   | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                 |
-| `git`              | Homebrew on macOS, `winget` on Windows                                                             |
-| `docker`           | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows                             |
-| `code`             | Homebrew cask on macOS, `winget` on Windows                                                        |
-| `R`, `Rscript`     | Homebrew cask on macOS, `winget` on Windows                                                        |
-| `brew`             | the upstream Homebrew script, macOS only                                                           |
-| `choco`            | the upstream Chocolatey script in an elevated shell, Windows only                                  |
+| Name                          | Installer                                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `pixi`                        | `curl -fsSL https://pixi.sh/install.sh \| sh` on Unix, `winget` on Windows                                                |
+| `uv`                          | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                                        |
+| `rustup`, `cargo`             | upstream `rustup` script on Unix, `winget` on Windows                                                                     |
+| `juliaup`, `julia`            | upstream `juliaup` script on Unix, `winget` on Windows                                                                    |
+| `nix`                         | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows                        |
+| `conda`, `mamba`              | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                                        |
+| `git`                         | Homebrew on macOS, `winget` on Windows                                                                                    |
+| `gh`                          | Homebrew on macOS, `pixi global install gh` on Linux, `winget` on Windows                                                 |
+| `make`                        | `winget` on Windows; comes with the developer tools elsewhere                                                             |
+| `docker`                      | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows, enabling Virtual Machine Platform first if needed |
+| `colima`                      | Homebrew on macOS, with the Docker CLI unless one is already installed                                                    |
+| `code`                        | VS Code's own download on macOS, `winget` on Windows; also `calkit install vscode`                                        |
+| `R`, `Rscript`                | Homebrew cask on macOS, `winget` on Windows                                                                               |
+| `word`, `excel`, `powerpoint` | Homebrew cask on macOS; Microsoft 365 Apps, with all three, from `winget` on Windows                                      |
+| `node`, `npm`, `npx`          | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                                               |
+| `claude`                      | upstream script; then adds Calkit's plugin                                                                                |
+| `codex`                       | upstream script; then adds Calkit's plugin                                                                                |
+| `opencode`                    | upstream script on Unix; then adds Calkit's plugin                                                                        |
+| `brew`                        | the upstream Homebrew script, macOS only                                                                                  |
+| `choco`                       | the upstream Chocolatey script in an elevated shell, Windows only                                                         |
 
 Run `calkit list installers` for the live list.
 On Linux, Git, VS Code, and R come from the system package manager,
 so those entries print what to run rather than guessing which one.
+
+<!-- TODO: needs human review -->
+
+Colima isn't needed on Linux, where Docker runs natively,
+so there it points to Docker Engine instead,
+and it doesn't run on Windows, so there it points to Docker Desktop.
+After installing it, `colima start` starts its VM.
+
+<!-- TODO: needs human review -->
+
+On Windows, Docker Desktop needs Windows 10 22H2 or Windows 11 23H2 or
+later, and WSL 2.1.5 or later.
+Before installing it, Calkit says what to run for either if this machine
+doesn't have it.
+The install enables Virtual Machine Platform if it isn't already,
+from an elevated shell, after which Windows needs a restart.
 
 Some entries depend on another, e.g., Git on macOS is installed with
 Homebrew.
@@ -312,6 +415,25 @@ Every app Calkit installs is recorded in `~/.calkit/installed.json`,
 with the date and the command that was run,
 and `calkit list installers` marks those entries.
 That way there's always a record of what Calkit changed on the machine.
+
+<!-- TODO: needs human review -->
+
+A project can say how to install an app itself with a `setup_command`,
+which is offered the same way,
+in place of any installer in the registry,
+e.g., for an app the registry doesn't have:
+
+```yaml
+requirements:
+  - kind: app
+    name: gh
+    setup_command: brew install gh
+    description: Downloads the raw data from the lab's GitHub releases.
+```
+
+A missing app's `description`, if it has one,
+is shown when Calkit asks to install it and in the error if it's still
+missing.
 
 ## Setup requirements
 
@@ -399,8 +521,8 @@ requirements in four phases regardless of the order they appear in
    read newly-set variables.
 3. **`app`**: Environment managers like `pixi` and `uv` must exist before
    any setup step that runs inside one of those environments. Missing
-   apps with a registered installer trigger the auto-install prompt
-   here.
+   apps with a `setup_command` or a registered installer trigger the
+   auto-install prompt here.
 4. **`setup`**: Last, since `check_command` typically wraps
    `calkit xenv` and depends on both apps and env vars.
 

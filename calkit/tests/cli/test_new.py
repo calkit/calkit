@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
+from unittest import mock
 
 import git
 import pytest
@@ -13,7 +15,7 @@ import typer
 from typer.testing import CliRunner
 
 import calkit
-import calkit.latex
+import calkit.environments.texlive
 import calkit.schema
 from calkit.cli.main.core import app
 from calkit.environments import get_env_lock_fpath
@@ -385,10 +387,9 @@ def test_new_publication(tmp_dir):
     )
     ck_info = calkit.load_calkit_info()
     print(ck_info)
-    assert ck_info["environments"]["my-latex-env"] == dict(
-        kind="docker",
-        image=calkit.latex.DEFAULT_LATEX_IMAGE,
-        description="TeX Live via Calkit's LaTeX image.",
+    assert (
+        ck_info["environments"]["my-latex-env"]
+        == calkit.environments.texlive.DEFAULT_ENVIRONMENT
     )
     assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
     stage = ck_info["pipeline"]["stages"]["build-latex-article"]
@@ -487,13 +488,31 @@ def test_new_uv_env(tmp_dir):
             "my-uv-env",
             "--python",
             "3.13",
-            "requests",
+            "--description",
+            "For analysis.",
+            "requests==2.32.3",
         ]
     )
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["my-uv-env"]
-    assert env["path"] == "pyproject.toml"
-    # Test one in a subdirectory when another env already exists
+    assert env == {
+        "kind": "uv",
+        "path": "pyproject.toml",
+        "description": "For analysis.",
+    }
+    # The interpreter is pinned, not just floored, and an exact version
+    # given for a package is kept rather than resolved to the latest
+    with open(".python-version") as f:
+        assert f.read().strip() == "3.13"
+    with open("pyproject.toml") as f:
+        pyproject = f.read()
+    assert 'requires-python = ">=3.13"' in pyproject
+    assert '"requests==2.32.3"' in pyproject
+    assert ".python-version" in git.Repo().git.ls_files().split()
+    # Test one in a subdirectory when another env already exists, and one
+    # that comes before another top-level key, which keeps its blank line
+    with open("calkit.yaml", "a") as f:
+        f.write("\npipeline:\n  stages: {}\n")
     subprocess.check_call(
         [
             "calkit",
@@ -511,6 +530,100 @@ def test_new_uv_env(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["main"]
     assert env["path"] == ".calkit/envs/main/pyproject.toml"
+    with open(".calkit/envs/main/.python-version") as f:
+        assert f.read().strip() == "3.13"
+    with open("calkit.yaml") as f:
+        ck_txt = f.read()
+    assert (
+        "    description: For analysis.\n"
+        "  main:\n"
+        "    kind: uv\n"
+        "    path: .calkit/envs/main/pyproject.toml\n"
+        "\npipeline:\n"
+    ) in ck_txt
+    # An existing interpreter pin is kept
+    os.makedirs(".calkit/envs/other")
+    with open(".calkit/envs/other/.python-version", "w") as f:
+        f.write("3.12.0\n")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-env",
+            "--name",
+            "other",
+            "--path",
+            ".calkit/envs/other/pyproject.toml",
+            "--python",
+            "3.12",
+            "--no-check",
+        ]
+    )
+    with open(".calkit/envs/other/.python-version") as f:
+        assert f.read() == "3.12.0\n"
+    assert ".calkit/envs/other/.python-version" not in (
+        git.Repo().git.ls_files().split()
+    )
+    # One that disagrees with --python is refused before anything is written
+    os.makedirs(".calkit/envs/mismatch")
+    with open(".calkit/envs/mismatch/.python-version", "w") as f:
+        f.write("3.12\n")
+    res = subprocess.run(
+        ["calkit", "new", "uv-env", "--name", "mismatch", "--path"]
+        + [".calkit/envs/mismatch/pyproject.toml", "--python", "3.13"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "already pins Python '3.12'" in res.stdout + res.stderr
+    assert not os.path.isfile(".calkit/envs/mismatch/pyproject.toml")
+    assert "mismatch" not in calkit.load_calkit_info()["environments"]
+    # A pin the project ignores isn't committed, whether written here or
+    # already there
+    with open(".gitignore", "a") as f:
+        f.write("\n.python-version\n")
+    os.makedirs(".calkit/envs/ignored1")
+    with open(".calkit/envs/ignored1/.python-version", "w") as f:
+        f.write("3.12\n")
+    for i, python_args in enumerate([["--python", "3.12"], []]):
+        subprocess.check_call(
+            ["calkit", "new", "uv-env", "--name", f"ignored{i}", "--path"]
+            + [f".calkit/envs/ignored{i}/pyproject.toml", "--no-check"]
+            + python_args
+        )
+        repo = git.Repo()
+        assert os.path.isfile(f".calkit/envs/ignored{i}/.python-version")
+        assert f"ignored{i}" in calkit.load_calkit_info()["environments"]
+        assert f".calkit/envs/ignored{i}/pyproject.toml" in (
+            repo.git.ls_files().split()
+        )
+        assert not repo.is_dirty(path="calkit.yaml")
+
+
+@pytest.mark.xdist_group("texlive")
+def test_new_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", texlive_user_home)
+    from calkit.environments import texlive
+
+    subprocess.check_call(["calkit", "init"])
+    # Locked, installed, and committed with its lock
+    subprocess.check_call(["calkit", "new", "texlive-env", "booktabs"])
+    env = calkit.load_calkit_info()["environments"]["tex"]
+    # The release is written out, so a new default doesn't move it
+    assert env == {
+        "kind": "texlive",
+        "release": texlive.DEFAULT_RELEASE,
+        "packages": ["booktabs"],
+    }
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Add TeX Live environment tex"
+    assert ".calkit/env-locks/tex.json" in repo.git.ls_files().split()
+    # A name already taken is refused unless overwriting it
+    cmd = ["calkit", "new", "texlive-env", "--no-check", "--release", "2024"]
+    assert subprocess.run(cmd, capture_output=True).returncode != 0
+    subprocess.check_call(cmd + ["-f"])
+    env = calkit.load_calkit_info()["environments"]["tex"]
+    assert env == {"kind": "texlive", "release": 2024}
 
 
 def test_new_uv_venv(tmp_dir):
@@ -1044,6 +1157,7 @@ def test_new_matlab_script_stage(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+@pytest.mark.needs("juliaup")
 def test_new_julia_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     # Note we use Example, the registry's trivial test package, since nothing
@@ -2299,6 +2413,308 @@ def test_release_detached_head(tmp_dir):
     assert res.exit_code == 0, res.stdout
 
 
+def test_release_checks_requirements_first(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ck_info = {
+        "title": "Test",
+        "description": "Test",
+        "requirements": [
+            {"kind": "app", "name": "calkit-test-missing-app"},
+        ],
+        "publications": [
+            {"path": "out.txt", "kind": "journal-article", "title": "Out"}
+        ],
+        "pipeline": {
+            "stages": {
+                "make": {
+                    "kind": "command",
+                    "command": "echo hi > out.txt",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("out.txt", "w") as f:
+        f.write("hi\n")
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "test@test.com"])
+    subprocess.check_call(["git", "config", "user.name", "Test"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(["dvc", "config", "core.analytics", "false"])
+    subprocess.check_call(["git", "add", "."])
+    subprocess.check_call(["git", "commit", "-m", "init"])
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    zip_paths = mock.Mock()
+    get_status = mock.Mock(
+        return_value=mock.Mock(
+            errors=[],
+            failed_environment_checks=[],
+            stale_stage_names=[],
+            is_stale=False,
+        )
+    )
+    monkeypatch.setattr(calkit.releases, "zip_paths", zip_paths)
+    monkeypatch.setattr(calkit.pipeline, "get_status", get_status)
+    # Releases that get checked by running their pipeline stop on an unmet
+    # requirement before checking environments or archiving anything
+    for args in [
+        ["-n", "v1", "--to", "zenodo", "--no-push", "."],
+        ["-n", "v1", "--to", "zenodo", "--no-push", "--dry-run", "."],
+        ["-n", "v1", "--internal", "--no-push", "--pipeline", "out.txt"],
+    ]:
+        res = runner.invoke(app, ["new", "release"] + args)
+        assert res.exit_code != 0
+        output = res.stdout + str(res.stderr)
+        assert "Project requirements aren't met" in output
+        assert "app 'calkit-test-missing-app' not found" in output
+        zip_paths.assert_not_called()
+        get_status.assert_not_called()
+    # A subproject's requirements are the host's too
+    ck_info["requirements"] = []
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    os.makedirs("sub")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"requirements": ["calkit-test-missing-app"]}, f)
+    res = runner.invoke(
+        app, ["new", "release", "-n", "v1", "--to", "zenodo", "--no-push", "."]
+    )
+    assert res.exit_code != 0
+    assert "subproject 'sub': app 'calkit-test-missing-app'" in (
+        res.stdout + str(res.stderr)
+    )
+    zip_paths.assert_not_called()
+    get_status.assert_not_called()
+    # A release that isn't checked by running it doesn't need them met
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v2", "--internal", "--no-push", "out.txt"],
+    )
+    assert res.exit_code == 0, res.stdout
+    assert "Checking project requirements" not in res.stdout
+    get_status.assert_called_once()
+    zip_paths.assert_not_called()
+    # Nor does a project archive with no pipeline, which isn't run either
+    get_status.reset_mock()
+    no_pipeline = {
+        k: v
+        for k, v in ck_info.items()
+        if k not in ["pipeline", "subprojects"]
+    }
+    no_pipeline["requirements"] = [
+        {"kind": "app", "name": "calkit-test-missing-app"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(no_pipeline, f)
+    assert not os.path.isfile("dvc.yaml")
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v3", "--to", "zenodo", "--dry-run", "."],
+    )
+    assert "Checking project requirements" not in res.stdout, res.stdout
+    get_status.assert_called_once()
+    # A variable the project sets in calkit.yaml meets a requirement for
+    # it, as it does for 'calkit run'. Set and removed through monkeypatch
+    # so the value the release sets doesn't outlive this test.
+    get_status.reset_mock()
+    var = "CALKIT_TEST_RELEASE_VAR"
+    monkeypatch.setenv(var, "")
+    monkeypatch.delenv(var)
+    ck_info["subprojects"] = []
+    ck_info["requirements"] = [{"kind": "env-var", "name": var}]
+    ck_info["env_vars"] = {var: "from-yaml"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v4", "--to", "zenodo", "--dry-run", "."],
+    )
+    output = res.stdout + str(res.stderr)
+    assert "Checking project requirements" in output
+    assert "Project requirements aren't met" not in output, output
+    get_status.assert_called_once()
+
+
+def test_new_workspace(tmp_dir):
+    def git_out(*args: str, input: str | None = None) -> str:
+        return subprocess.run(
+            ["git", *args],
+            input=input,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def cache_dir(path: str) -> str:
+        # Normalized, since Git gives paths on Windows with forward slashes
+        with open(os.path.join(path, ".dvc", "config.local")) as f:
+            for line in f:
+                if line.strip().startswith("dir ="):
+                    return os.path.normpath(line.split("=", 1)[1].strip())
+        return ""
+
+    subprocess.check_call(["calkit", "init"])
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "data.csv"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-qm", "Add data"])
+    # A remote's settings, e.g., its auth, live in the local config
+    with open(".dvc/config.local", "a") as f:
+        f.write("[core]\n    autostage = true\n")
+    root = os.getcwd()
+    # It's a worktree beside this one on a new branch, using this one's DVC
+    # cache, so its data is there without pulling
+    subprocess.check_call(["calkit", "new", "workspace", "fix/axes"])
+    path = f"{root}-fix-axes"
+    repo = git.Repo(path)
+    assert repo.active_branch.name == "fix/axes"
+    assert os.path.normpath(
+        repo.git.rev_parse("--git-common-dir")
+    ) == os.path.join(root, ".git")
+    with open(os.path.join(path, "data.csv")) as f:
+        assert f.read() == "a,b\n"
+    local_config = open(os.path.join(path, ".dvc", "config.local")).read()
+    assert "autostage = true" in local_config
+    assert cache_dir(path) == os.path.join(root, ".dvc", "cache")
+    assert not os.path.exists(os.path.join(path, ".dvc", "cache"))
+    # One made from a worktree made some other way, without the main
+    # checkout's cache, is still named after it and uses its cache
+    manual = os.path.join(os.path.dirname(root), "manual")
+    git.Repo(root).git.worktree("add", "-b", "manual", manual)
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "from-manual"], cwd=manual
+    )
+    path = f"{root}-from-manual"
+    with open(os.path.join(path, "data.csv")) as f:
+        assert f.read() == "a,b\n"
+    local_config = open(os.path.join(path, ".dvc", "config.local")).read()
+    assert "autostage = true" in local_config
+    assert cache_dir(path) == os.path.join(root, ".dvc", "cache")
+    # An existing branch is checked out rather than created, and a path
+    # that's taken is refused
+    git.Repo(root).git.branch("other")
+    other = os.path.join(os.path.dirname(root), "elsewhere")
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "other", "--path", other]
+    )
+    assert git.Repo(other).active_branch.name == "other"
+    result = subprocess.run(
+        ["calkit", "new", "workspace", "third", "--path", other],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 and "already exists" in result.stderr
+    # What to start from is never taken as an option
+    flagged = os.path.join(os.path.dirname(root), "flagged")
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "flagged",
+            "--path",
+            flagged,
+            "--from=--quiet",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 and not os.path.exists(flagged)
+    # A branch from before DVC was set up gets no DVC config
+    blob = git_out("hash-object", "-w", "--stdin", input="hi\n")
+    # NUL-terminated, since text mode on Windows would make the name end in \r
+    tree = git_out("mktree", "-z", input=f"100644 blob {blob}\tREADME.md\0")
+    git_out("branch", "before-dvc", git_out("commit-tree", tree, "-m", "Old"))
+    old = os.path.join(os.path.dirname(root), "old")
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "before-dvc", "--path", old]
+    )
+    assert not os.path.exists(os.path.join(old, ".dvc"))
+    # Nor does one whose .dvc is a link, which could point anywhere
+    target = os.path.join(os.path.dirname(root), "linked-target")
+    os.mkdir(target)
+    link_blob = git_out(
+        "hash-object", "-w", "--stdin", input="../linked-target"
+    )
+    tree = git_out("mktree", "-z", input=f"120000 blob {link_blob}\t.dvc\0")
+    git_out("branch", "linked", git_out("commit-tree", tree, "-m", "Link"))
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "linked",
+            "--path",
+            os.path.join(os.path.dirname(root), "linked"),
+        ]
+    )
+    assert os.listdir(target) == []
+    # A branch only on a remote tracks it, preferring origin's, rather than
+    # starting over from here
+    parent = os.path.dirname(root)
+    head = git_out("rev-parse", "HEAD")
+    feat = git_out("commit-tree", "HEAD^{tree}", "-p", head, "-m", "Feat")
+    up_feat = git_out("commit-tree", "HEAD^{tree}", "-p", head, "-m", "Up")
+    for name, sha in [("origin", feat), ("upstream", up_feat)]:
+        url = os.path.join(parent, f"{name}.git")
+        git_out("init", "-q", "--bare", url)
+        git_out("remote", "add", name, url)
+        git_out("push", "-q", name, f"{sha}:refs/heads/feat")
+        git_out("push", "-q", name, f"{sha}:refs/heads/{name}-only")
+        git_out("fetch", "-q", name)
+    for branch, sha, upstream in [
+        ("feat", feat, "origin/feat"),
+        ("upstream-only", up_feat, "upstream/upstream-only"),
+    ]:
+        dest = os.path.join(parent, f"ws-{branch}")
+        subprocess.check_call(
+            ["calkit", "new", "workspace", branch, "--path", dest]
+        )
+        ws = git.Repo(dest)
+        assert ws.head.commit.hexsha == sha
+        tracking = ws.active_branch.tracking_branch()
+        assert tracking is not None and tracking.name == upstream
+    # Unless told where to start from
+    dest = os.path.join(parent, "ws-origin-only")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "origin-only",
+            "--path",
+            dest,
+            "--from",
+            head,
+        ]
+    )
+    ws = git.Repo(dest)
+    assert ws.head.commit.hexsha == head
+    assert ws.active_branch.tracking_branch() is None
+    # In a submodule, it goes beside the submodule's checkout, not inside
+    # the superproject's .git
+    sub_src = os.path.join(parent, "sub-src")
+    git_out("init", "-q", sub_src)
+    git_out("-C", sub_src, "commit", "-q", "--allow-empty", "-m", "Init")
+    git_out(
+        "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub_src
+    )
+    sub = os.path.join(root, "sub-src")
+    subprocess.check_call(["calkit", "new", "workspace", "s1"], cwd=sub)
+    assert git.Repo(f"{sub}-s1").active_branch.name == "s1"
+    # Also from one of its workspaces
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "s2"], cwd=f"{sub}-s1"
+    )
+    assert git.Repo(f"{sub}-s2").active_branch.name == "s2"
+    assert not os.path.exists(os.path.join(root, ".git", "modules-s1"))
+
+
 def test_new_comment(tmp_dir):
     def ck(*args: str) -> str:
         return subprocess.run(
@@ -2355,4 +2771,74 @@ def test_new_comment(tmp_dir):
         ],
     ]:
         res = subprocess.run(["calkit", *args], capture_output=True)
+        assert res.returncode != 0, args
+    # A comment on a PDF goes in its review file, made and listed if it's
+    # not, and is listed and deleted through the PDF
+    os.makedirs("paper")
+    with open("paper/manuscript.pdf", "wb") as f:
+        f.write(b"%PDF")
+    with open("calkit.yaml", "w") as f:
+        f.write("name: review\n")
+    assert (
+        ck(
+            "new",
+            "comment",
+            "paper/manuscript.pdf",
+            "--section",
+            "major",
+            "-m",
+            "The data isn't available.",
+        )
+        == "paper/review.md:3"
+    )
+    added = json.loads(
+        ck(
+            "new",
+            "comment",
+            "paper/manuscript.pdf",
+            "--page",
+            "3",
+            "-l",
+            "120",
+            "--highlight",
+            "Reynolds number",
+            "-m",
+            "Which length is it based on?",
+            "--section",
+            "minor",
+            "--json",
+        )
+    )
+    assert (added["id"], added["page"], added["pdf_line"]) == ("2", 3, 120)
+    assert (added["number"], added["section"]) == (1, "Minor comments")
+    with open("paper/review.md") as f:
+        assert f.read() == (
+            "## Major comments\n\n1. The data isn't available.\n\n"
+            "## Minor comments\n\n"
+            '1. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
+        )
+    listed = json.loads(
+        ck("list", "comments", "paper/manuscript.pdf", "--json")
+    )
+    assert [c["id"] for c in listed] == ["1", "2"]
+    ck("delete", "comment", "paper/manuscript.pdf", "--id", "1")
+    with open("paper/review.md") as f:
+        assert f.read() == (
+            "## Major comments\n\n## Minor comments\n\n"
+            '1. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
+        )
+    with open("calkit.yaml") as f:
+        assert "    reviews:\n      - path: paper/review.md" in f.read()
+    res = subprocess.run(
+        ["calkit", "delete", "comment", "paper/manuscript.pdf", "--id", "x"],
+        capture_output=True,
+    )
+    assert res.returncode != 0
+    # Where on the page needs the page, rather than being dropped
+    for args in [["-l", "5"], ["--highlight", "Reynolds"]]:
+        res = subprocess.run(
+            ["calkit", "new", "comment", "paper/manuscript.pdf", "-m", "A"]
+            + args,
+            capture_output=True,
+        )
         assert res.returncode != 0, args

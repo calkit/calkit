@@ -310,6 +310,7 @@ def user_performed_fs_op(
     owner_name: str,
     project_name: str,
     operation: str,
+    backend: str | None = None,
 ):
     track(
         user,
@@ -318,6 +319,161 @@ def user_performed_fs_op(
             owner_name=owner_name,
             project_name=project_name,
             operation=operation,
+            backend=backend,
+        ),
+    )
+
+
+def user_connected_huggingface(user: User, first: bool) -> None:
+    track(user, "Connected Hugging Face", add_event_info=dict(first=first))
+
+
+def user_connected_box(user: User, first: bool) -> None:
+    track(user, "Connected Box", add_event_info=dict(first=first))
+
+
+def user_created_project_storage(
+    user: User,
+    owner_name: str,
+    project_name: str,
+    kind: str,
+    is_public: bool,
+    in_org: bool,
+) -> None:
+    """``in_org`` says whether it's under one of the user's organizations
+    on the service, rather than their own account there.
+    """
+    track(
+        user,
+        "Created project storage",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            kind=kind,
+            is_public=is_public,
+            in_org=in_org,
+        ),
+    )
+
+
+def user_changed_project_storage(
+    user: User,
+    owner_name: str,
+    project_name: str,
+    from_kind: str,
+    to_kind: str,
+) -> None:
+    """Kinds are a storage resource's, e.g., ``hf-bucket``, or ``hub`` for
+    the hub's own storage.
+    """
+    track(
+        user,
+        "Changed project storage",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            from_kind=from_kind,
+            to_kind=to_kind,
+        ),
+    )
+
+
+def user_pushed_to_external_storage(
+    user: User, owner_name: str, project_name: str, kind: str, n_files: int
+) -> None:
+    """One per batch of files added, so summing ``n_files`` counts them."""
+    track(
+        user,
+        "Pushed to external storage",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            kind=kind,
+            n_files=n_files,
+        ),
+    )
+
+
+def user_disconnected_with_storage(
+    user: User,
+    provider: str,
+    storage_action: str,
+    n_storage: int,
+    n_projects: int,
+) -> None:
+    track(
+        user,
+        "Disconnected account with storage",
+        add_event_info=dict(
+            provider=provider,
+            storage_action=storage_action,
+            n_storage=n_storage,
+            n_projects=n_projects,
+        ),
+    )
+
+
+def user_transferred_storage(
+    user: User,
+    n_storage: int,
+    n_objects: int,
+    succeeded: bool,
+    provider: str = "huggingface",
+) -> None:
+    """A transfer of external storage to the hub's own finished."""
+    track(
+        user,
+        "Transferred storage to hub",
+        add_event_info=dict(
+            n_storage=n_storage,
+            n_objects=n_objects,
+            succeeded=succeeded,
+            provider=provider,
+        ),
+    )
+
+
+def user_connection_lapsed(user: User, provider: str) -> None:
+    """A connected account stopped working, e.g., a Box connection unused
+    for 60 days, so its user has to connect it again.
+    """
+    track(user, "Connection lapsed", add_event_info=dict(provider=provider))
+
+
+def user_deleted_project(
+    user: User,
+    owner_name: str,
+    project_name: str,
+    delete_hub_storage: bool,
+    n_external_storage: int,
+) -> None:
+    track(
+        user,
+        "Deleted project",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            delete_hub_storage=delete_hub_storage,
+            n_external_storage=n_external_storage,
+        ),
+    )
+
+
+def user_changed_project_visibility(
+    user: User,
+    owner_name: str,
+    project_name: str,
+    is_public: bool,
+    n_buckets: int,
+) -> None:
+    track(
+        user,
+        "Changed project visibility",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            is_public=is_public,
+            n_buckets=n_buckets,
         ),
     )
 
@@ -465,4 +621,49 @@ def user_saved_figure_script(
             n_inputs=n_inputs,
             n_packages=n_packages,
         ),
+    )
+
+
+def user_linked_machine(user: User, platform: str | None, n_machines: int):
+    """A machine linked, with how many the user has linked, so the first
+    stands out.
+    """
+    track(
+        user,
+        "Linked machine",
+        add_event_info=dict(platform=platform, n_machines=n_machines),
+    )
+
+
+def user_unlinked_machine(user: User, platform: str | None, days_linked: int):
+    track(
+        user,
+        "Unlinked machine",
+        add_event_info=dict(platform=platform, days_linked=days_linked),
+    )
+
+
+def machine_came_online(user: User, platform: str | None, mode: str | None):
+    """A linked machine's first check-in, which a link that failed to
+    install or start never sends.
+    """
+    track(
+        user,
+        "Machine came online",
+        add_event_info=dict(platform=platform, mode=mode),
+    )
+
+
+def user_used_machine(
+    user: User, platform: str | None, mode: str | None, usage: dict[str, int]
+):
+    """What browsers asked a machine to do since its last check-in, as
+    counts of each kind of request, e.g., ``sessions.open`` or
+    ``workspace.run``, and agents started in its sessions, e.g.,
+    ``agent.claude``, never what they ran or where.
+    """
+    track(
+        user,
+        "Used machine",
+        add_event_info=dict(platform=platform, mode=mode) | usage,
     )

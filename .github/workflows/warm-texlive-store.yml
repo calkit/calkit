@@ -1,0 +1,73 @@
+name: Warm the TeX Live store cache
+
+# The test workflow is `on: pull_request`, so what it saves no other pull
+# request can read. This saves the TeX Live packages the tests download in
+# the default branch's scope, where the tests' restore keys can reach them,
+# so TeX Live's historic archive, one server, is asked for each only once.
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "calkit/environments/texlive.py"
+      - "calkit/latex.py"
+      - "calkit/tests/**"
+      - ".github/workflows/warm-texlive-store.yml"
+  # GitHub evicts caches untouched for 7 days
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure Git Credentials
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config --global init.defaultBranch main
+      - name: Setup uv
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+      # Restore what's already there, so only new packages are downloaded
+      - name: Restore TeX Live downloads
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.calkit/texlive/pkgs
+            ~/.calkit/texlive/tlpdb
+            ${{ runner.temp }}/texlive-home/.calkit/texlive/pkgs
+            ${{ runner.temp }}/texlive-home/.calkit/texlive/tlpdb
+          key: texlive-store-${{ runner.os }}-
+          restore-keys: texlive-store-${{ runner.os }}-
+      # The tests that build TeX Live environments, for the packages they
+      # download; a test failing here is the test workflow's to report
+      - name: Download what the tests use
+        continue-on-error: true
+        env:
+          CALKIT_TEST_TEXLIVE_HOME: ${{ runner.temp }}/texlive-home
+        run: >-
+          uv run pytest -n 4
+          calkit/tests/environments/test_texlive.py
+          calkit/tests/cli/test_latex.py
+          calkit/tests/test_latex.py
+          calkit/tests/environments/test_core.py::test_composed_envs
+      - name: Save TeX Live downloads
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.calkit/texlive/pkgs
+            ~/.calkit/texlive/tlpdb
+            ${{ runner.temp }}/texlive-home/.calkit/texlive/pkgs
+            ${{ runner.temp }}/texlive-home/.calkit/texlive/tlpdb
+          key: texlive-store-${{ runner.os }}-${{ github.run_id }}

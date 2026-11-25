@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest"
 
 import type { QuestionPublic, QuestionSignOff } from "../../client"
 import QuestionStatusLetters, {
+  formatLines,
   getQuestionLetters,
   getSignOffState,
+  parseLines,
 } from "./QuestionStatus"
 
 const base: QuestionPublic = {
@@ -49,6 +51,31 @@ describe("question status letters", () => {
     expect(colors(evidence())[1]).toBe("green.400")
     expect(colors(evidence("pipeline"))[1]).toBe("orange.300")
     expect(colors(evidence("missing"))[1]).toBe("red.400")
+    // A plain file cited by path counts like any other evidence
+    const file = {
+      ...answered,
+      evidence: [
+        { kind: null, path: "logs/run.log", lines: "8", stale_reason: null },
+      ],
+    }
+    expect(colors(file)[1]).toBe("green.400")
+    file.evidence[0].stale_reason = "missing" as never
+    expect(colors(file)[1]).toBe("red.400")
+  })
+
+  it("reads the lines a file is cited at", () => {
+    expect(parseLines("8")).toEqual([8, 8])
+    expect(parseLines(" 8 - 12 ")).toEqual([8, 12])
+    expect(parseLines("8–12")).toEqual([8, 12])
+    expect(parseLines("12-8")).toBeUndefined()
+    expect(parseLines("0")).toBeUndefined()
+    expect(parseLines("eight")).toBeUndefined()
+    expect(parseLines(null)).toBeUndefined()
+    expect(formatLines("8")).toBe("line 8")
+    expect(formatLines("8-12")).toBe("lines 8–12")
+    // Shown as written when it's neither, rather than dropped
+    expect(formatLines("eight")).toBe("lines eight")
+    expect(formatLines(undefined)).toBeUndefined()
   })
 
   it("marks sign-offs stale if any one is, and unchecked as current", () => {

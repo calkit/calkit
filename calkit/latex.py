@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
-from calkit.core import LOCAL_DIR, ensure_local_dir
+from calkit.core import LOCAL_DIR, OUTPUT_SOURCE_DATE_EPOCH, ensure_local_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -61,18 +61,25 @@ WORKING_NAME = "working"
 # of a full TeX Live image. Pinned to an exact tag rather than :latest so
 # a document keeps building against the same TeX until this is moved
 # deliberately; what it carries is recorded in images/latex/README.md.
-DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.7"
-# The environment created for a document that doesn't have one, wherever
-# that happens: a new publication, an Overleaf import, or a stage whose
-# environment is worked out from what it runs. Copied where it's used,
-# since what's written into a project is the caller's to amend.
-DEFAULT_LATEX_ENVIRONMENT = {
-    "kind": "docker",
-    "image": DEFAULT_LATEX_IMAGE,
-    "description": "TeX Live via Calkit's LaTeX image.",
-}
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.8"
 
 
+def is_latex_env(env: dict) -> bool:
+    """Whether an environment builds LaTeX: a TeX Live one, or a Docker
+    one whose image carries TeX Live.
+    """
+    if env.get("kind") == "texlive":
+        return True
+    image = env.get("image") or ""
+    return env.get("kind") == "docker" and (
+        "texlive" in image or "calkit/latex" in image
+    )
+
+
+# TeX run before the document, keeping it in nonstop mode when a class
+# switches back, e.g., one that tests for fonts in batch mode, so an error
+# doesn't stop a build that nobody is there to answer
+NONSTOP_PRETEX = r"\let\errorstopmode\nonstopmode"
 # TeX run before the document, leaving the dates and trailer ID out of the
 # PDF. Even taken from a commit, the date changes when history is rewritten,
 # e.g., by a squash merge, which changes the bytes of an identical document.
@@ -136,8 +143,10 @@ def get_source_date_epoch(tex_file: str) -> str | None:
 
     # Whoever set it knows better, e.g., for LaTeX generated from a source
     # that has the history
-    if os.environ.get("SOURCE_DATE_EPOCH"):
-        return os.environ["SOURCE_DATE_EPOCH"]
+    # except a pipeline's date for Python's outputs, which isn't the paper's
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch and epoch != OUTPUT_SOURCE_DATE_EPOCH:
+        return epoch
     tex_dir = os.path.dirname(os.path.abspath(tex_file)) or os.getcwd()
     # A commit's date describes what that commit holds, so it can only
     # speak for a document that has been saved. With edits still in the
@@ -176,8 +185,17 @@ CONTAINER_TEXMF_DIR = "/work/.calkit/local/texmf"
 # couldn't, e.g., "Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable"
 _MISSING_FILE_RE = re.compile(r"File `([^']+)' not found")
 _MISSING_TFM_RE = re.compile(
-    r"Font \S+=(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
+    r"Font \S+=(?![\"\[])(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
 )
+# XeTeX's and LuaTeX's for a font fontspec loads by file name, e.g.,
+# "Font TU/...=[texgyretermes-regular.otf]/OT at 10.0pt not loadable"
+_MISSING_FONT_FILE_RE = re.compile(r"Font \S+=\"?\[([^\]\n]+\.[ot]t[fc])\]")
+# LuaTeX's require() of a module no package installed, e.g., pdftexcmds
+# under LuaLaTeX, which only says so as a Lua error
+_MISSING_LUA_RE = re.compile(r"module '([^']+)' not found")
+# pdfTeX's for a font with metrics but no outlines, e.g., T1-encoded
+# Computer Modern without cm-super, falling back to a bitmap
+_MISSING_FONT_RE = re.compile(r"Font (\S+) at \d+ not found")
 
 
 def get_texmf_cache_dir(wdir: str | None = None) -> str:
@@ -192,17 +210,185 @@ def get_texmf_cache_dir(wdir: str | None = None) -> str:
     return os.path.join(ensure_local_dir(wdir), "texmf")
 
 
+def get_latexmk_programs(latexmk_cmd: list[str], wdir: str = ".") -> list[str]:
+    """The programs a latexmk command makes its PDF with: the TeX engine,
+    e.g., 'xelatex', then any converter, e.g., 'dvipdf' from DVI.
+
+    Follows latexmk's own order: the rc file in the directory it runs in,
+    then its options, including '-r' rc files and '-e' code where they
+    appear. The user's own rc file is left out, since it isn't the
+    project's.
+    """
+    modes = {"pdf_mode": 0, "dvi_mode": 0, "xdv_mode": 0}
+    programs = {
+        "pdflatex": "pdflatex",
+        "lualatex": "lualatex",
+        "xelatex": "xelatex",
+        "latex": "latex",
+        "dvipdf": "dvipdf",
+        "dvips": "dvips",
+        "ps2pdf": "ps2pdf",
+    }
+    flags = {
+        "-pdf": {"pdf_mode": 1, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflatex": {"pdf_mode": 1, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflua": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-lualatex": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdflualatex": {"pdf_mode": 4, "dvi_mode": 0, "xdv_mode": 0},
+        "-pdfxe": {"pdf_mode": 5, "dvi_mode": 0},
+        "-xelatex": {"pdf_mode": 5, "dvi_mode": 0},
+        "-pdfxelatex": {"pdf_mode": 5, "dvi_mode": 0},
+        "-pdfdvi": {"pdf_mode": 3, "xdv_mode": 0},
+        "-pdfps": {"pdf_mode": 2, "xdv_mode": 0},
+        "-dvi": {"dvi_mode": 1},
+        "-latex": {"dvi_mode": 1, "xdv_mode": 0},
+        "-xdv": {"xdv_mode": 1, "dvi_mode": 0},
+    }
+    commands = {
+        "pdflatex": "pdflatex",
+        "pdflualatex": "lualatex",
+        "lualatex": "lualatex",
+        "pdfxelatex": "xelatex",
+        "xelatex": "xelatex",
+        "latex": "latex",
+    }
+
+    def read_perl(code: str) -> None:
+        # Assignments in the order they appear, which is enough for an rc
+        # file setting a mode or a command
+        code = re.sub(
+            r"""('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$#)|#.*""",
+            lambda m: m.group(1) or "",
+            code,
+        )
+        for m in re.finditer(
+            r"\$(pdf_mode|dvi_mode|xdv_mode)\s*=\s*(\d+)"
+            r"|\$(pdflatex|lualatex|xelatex|latex|dvipdf|dvips|ps2pdf)"
+            r"\s*=\s*(['\"])(.*?)\4",
+            code,
+        ):
+            if m.group(1):
+                modes[m.group(1)] = int(m.group(2))
+            else:
+                programs[m.group(3)] = m.group(5)
+
+    def read_rc(fpath: str) -> None:
+        try:
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                read_perl(f.read())
+        except OSError:
+            pass
+
+    for name in [".latexmkrc", "latexmkrc"]:
+        if os.path.isfile(os.path.join(wdir, name)):
+            read_rc(os.path.join(wdir, name))
+            break
+    args = iter(latexmk_cmd[1:])
+    for arg in args:
+        if arg in ("-r", "-e"):
+            value = next(args, "")
+            if arg == "-r":
+                read_rc(os.path.join(wdir, value))
+            else:
+                read_perl(value)
+        elif arg in flags:
+            pdf_mode = modes["pdf_mode"]
+            modes.update(flags[arg])
+            # As latexmk does, -latex and -xdv keep a PDF mode that
+            # converts from their output
+            if arg == "-latex" and pdf_mode in (2, 3):
+                modes["pdf_mode"] = pdf_mode
+            elif arg == "-xdv" and pdf_mode != 5:
+                modes["pdf_mode"] = 0
+            elif arg == "-latex":
+                modes["pdf_mode"] = 0
+        elif arg.startswith("-") and "=" in arg:
+            option, value = arg[1:].split("=", 1)
+            if option in commands:
+                programs[commands[option]] = value
+    if modes["pdf_mode"] == 5 or modes["xdv_mode"]:
+        command = programs["xelatex"]
+    elif modes["pdf_mode"] == 4:
+        command = programs["lualatex"]
+    elif modes["pdf_mode"] == 1:
+        command = programs["pdflatex"]
+    else:
+        command = programs["latex"]
+    commands_run = [command]
+    if modes["pdf_mode"] == 2:
+        commands_run += [programs["dvips"], programs["ps2pdf"]]
+    elif modes["pdf_mode"] == 3:
+        commands_run.append(programs["dvipdf"])
+    return [
+        os.path.splitext(os.path.basename(c.split()[0]))[0]
+        for c in commands_run
+        if c.split()
+    ]
+
+
 def find_missing_tex_files(log: str) -> list[str]:
     """The files a LaTeX log says it couldn't find, in the order it says.
 
     Style and class files are named as they are; a font whose metrics are
-    missing is named as its ``.tfm`` file, which is what finds the package
-    providing it.
+    missing is named as its ``.tfm`` file, and one whose outlines are as
+    its ``.pfb`` file, which is what finds the package providing it. One
+    fontspec loads by file name is named as that file.
     """
-    found = _MISSING_FILE_RE.findall(log) + [
-        f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)
-    ]
+    found = (
+        _MISSING_FILE_RE.findall(log)
+        + [f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)]
+        + [f"{name}.lua" for name in _MISSING_LUA_RE.findall(log)]
+        + [f"{name}.pfb" for name in _MISSING_FONT_RE.findall(log)]
+        + _MISSING_FONT_FILE_RE.findall(log)
+    )
     return list(dict.fromkeys(found))
+
+
+def find_named_tex_files(tex_file: str) -> list[str]:
+    """List the classes, packages, bibliography styles, and babel languages
+    a document names.
+
+    Read from the document and the files it inputs, so a missing package
+    can be found before compiling rather than one failed run at a time.
+    Names built from macros are skipped.
+    """
+    tex_dir = os.path.dirname(tex_file)
+    exts = {
+        "documentclass": ".cls",
+        "usepackage": ".sty",
+        "RequirePackage": ".sty",
+        "bibliographystyle": ".bst",
+    }
+    names: list[str] = []
+    queue = [tex_file]
+    seen = {os.path.normpath(tex_file)}
+    while queue:
+        try:
+            with open(queue.pop(), encoding="utf-8", errors="replace") as f:
+                tex = _strip_comments(f.read())
+        except OSError:
+            continue
+        for command, arg in _INPUT_RE.findall(tex):
+            for raw in [n.strip() for n in arg.split(",")]:
+                if not raw or "#" in raw or "\\" in raw:
+                    continue
+                if command in exts:
+                    names.append(raw + exts[command])
+                elif command in ("input", "include", "subfile"):
+                    for name in (raw, raw + ".tex"):
+                        path = os.path.normpath(os.path.join(tex_dir, name))
+                        if path not in seen and os.path.isfile(path):
+                            seen.add(path)
+                            queue.append(path)
+        # Each language babel loads is a file of its own, e.g., english.ldf
+        for opts in re.findall(
+            r"\\usepackage\s*\[([^\]]*)\]\s*\{\s*babel\s*\}", tex
+        ):
+            for opt in (o.strip() for o in opts.split(",")):
+                lang = opt.removeprefix("main=").strip()
+                if re.fullmatch(r"[A-Za-z]+", lang):
+                    names.append(lang + ".ldf")
+    return list(dict.fromkeys(names))
 
 
 def _ref_dirname(ref: str) -> str:
@@ -456,19 +642,12 @@ def _strip_comments_joined(tex: str) -> str:
     return "".join(out)
 
 
-def _project_has(base: Path, rel: str) -> bool:
-    """Whether the project contains this file.
-
-    A DVC-tracked figure isn't in the working tree until it's pulled, but
-    its ``.dvc`` pointer is always in Git, and it's every bit as much a
-    project file -- and a stage input -- as one stored directly. Without
-    this, detection would depend on whether the caller had pulled, and a
-    server working from a fresh clone would miss every DVC-tracked figure.
-    """
-    return (base / rel).is_file() or (base / f"{rel}.dvc").is_file()
-
-
-def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
+def detect_inputs(
+    target_path: str,
+    wdir: str | None = None,
+    is_output: Callable[[str], bool] | None = None,
+    is_exact_output: Callable[[str], bool] | None = None,
+) -> list[str]:
     """Find the project files a LaTeX document reads.
 
     A document's class, style, bibliography, and figure files are inputs
@@ -489,14 +668,39 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     Paths are returned relative to ``wdir`` -- the same frame as
     ``target_path`` and the rest of a stage's paths -- sorted, and with
     the target itself excluded (it's already a dependency).
+
+    ``is_output`` says if the file is created by a pipeline stage, taking paths
+    in that frame. Such a figure is an input even before the stage first
+    makes it, e.g., on a fresh clone, when it isn't in the project yet.
+    ``is_exact_output`` says if a stage declares it as is, rather than by
+    matching an iterated stage's output pattern.
     """
     base = Path(wdir) if wdir else Path(".")
-    root = Path(target_path)
+    # Each folder is listed once, since most names tried aren't there, e.g.,
+    # every package from TeX Live, with each extension TeX would try
+    listings: dict[str, set[str]] = {}
+
+    def is_project_file(rel: str) -> bool:
+        folder, name = posixpath.split(rel)
+        if folder not in listings:
+            try:
+                listings[folder] = set(os.listdir(base / folder))
+            except OSError:
+                listings[folder] = set()
+        # A DVC-tracked figure isn't in the working tree until it's pulled,
+        # but its .dvc pointer is in Git, and it's every bit as much an
+        # input as one stored directly
+        listed = listings[folder]
+        if name in listed and (base / rel).is_file():
+            return True
+        return f"{name}.dvc" in listed
+
+    root = posixpath.normpath(Path(target_path).as_posix())
     found: set[str] = set()
     # Source files whose own inputs still need collecting, and everything
     # already visited, so a pair of files including each other terminates.
     queue = [root]
-    seen = {root.as_posix()}
+    seen = {root}
     while queue:
         current = queue.pop()
         try:
@@ -505,33 +709,59 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
             )
         except (OSError, UnicodeDecodeError):
             continue
+        # TeX resolves a reference against the compile's working directory,
+        # which is the root document's; a nested file written as if paths
+        # were relative to itself is common enough to try too
+        parents = list(
+            dict.fromkeys(
+                [posixpath.dirname(root), posixpath.dirname(current)]
+            )
+        )
         for command, arg in _INPUT_RE.findall(tex):
             for raw in [n.strip() for n in arg.split(",")]:
-                if not raw or raw.startswith(("http://", "https://")):
+                # A macro's parameter, e.g., #1, or a name built from macros
+                # isn't a file
+                if (
+                    not raw
+                    or "#" in raw
+                    or "\\" in raw
+                    or raw.startswith(("http://", "https://"))
+                ):
                     continue
-                # TeX resolves a reference against the compile's working
-                # directory, which is the root document's; a nested file
-                # written as if paths were relative to itself is common
-                # enough to try too. Names as written come first, since a
-                # reference can already carry its extension.
-                names = [raw] + [
-                    raw + ext for ext in _INPUT_COMMANDS[command] if ext
-                ]
+                # Names as written come first, and TeX doesn't add an
+                # extension to one already carrying one it would try
+                exts = _INPUT_COMMANDS[command]
+                names = [raw]
+                if posixpath.splitext(raw)[1] not in exts:
+                    names += [raw + ext for ext in exts if ext]
                 candidates = [
-                    parent / name
+                    posixpath.normpath(posixpath.join(parent, name))
                     for name in names
-                    for parent in dict.fromkeys([root.parent, current.parent])
+                    for parent in parents
                 ]
-                for candidate in candidates:
-                    rel = Path(os.path.normpath(candidate)).as_posix()
-                    if rel.startswith("..") or not _project_has(base, rel):
-                        continue
-                    if rel != root.as_posix():
-                        found.add(rel)
-                    if Path(rel).suffix in _SOURCE_EXTS and rel not in seen:
-                        seen.add(rel)
-                        queue.append(Path(rel))
-                    break
+                candidates = [c for c in candidates if not c.startswith("..")]
+                # A name a stage only might make, by matching an iterated
+                # stage's output pattern, is tried last, since such a pattern
+                # can match most names
+                rel = next(
+                    (
+                        c
+                        for c in candidates
+                        if is_project_file(c)
+                        or (is_exact_output is not None and is_exact_output(c))
+                    ),
+                    None,
+                )
+                if rel is None and is_output is not None:
+                    rel = next((c for c in candidates if is_output(c)), None)
+                if rel is None:
+                    continue
+                if rel != root:
+                    found.add(rel)
+                is_source = posixpath.splitext(rel)[1] in _SOURCE_EXTS
+                if is_source and rel not in seen:
+                    seen.add(rel)
+                    queue.append(rel)
     return sorted(found)
 
 
@@ -549,6 +779,12 @@ _CK_COMMAND_RE = re.compile(
     r"\\ck(?P<kind>(?P<value>v)alue|figure|table|include)"
     r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
     r"(?(value)\s*\{(?P<second>[^}]*)\})"
+)
+# \ckrefval[format]{citation key}{name}, a value quoted from a reference,
+# which reads from the file Calkit writes them all to
+_CK_REFVAL_RE = re.compile(
+    r"\\ckrefval\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
+    r"\s*\{(?P<second>[^}]*)\}"
 )
 _PACKAGE_RE = re.compile(
     r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}"
@@ -583,6 +819,28 @@ class CkComponent:
     # How calkit.sty formats a value: siunitx options, or a Python format
     # spec, e.g., .2f
     format: str = ""
+    # For a value quoted from a reference, its citation key and name
+    ref: tuple[str, str] | None = None
+    # What calkit.sty names a value by, when not its path, e.g., a value
+    # quoted from a reference by its citation key, since TeX can't name the
+    # file its values are written to
+    label: str | None = None
+
+
+def ref_component(key: str, name: str, format: str = "") -> CkComponent:
+    """The value a \\ckrefval quotes, as a component read from the file
+    of its reference's values, which calkit.sty names ``ref:<key>``.
+    """
+    from calkit.references.values import get_values_path
+
+    return CkComponent(
+        "value",
+        get_values_path(key),
+        name,
+        format,
+        ref=(key, name),
+        label=f"ref:{key}",
+    )
 
 
 def _read_leniently(path: str) -> str | None:
@@ -617,21 +875,33 @@ def read_ck_usage(
     )
     if not loads:
         return False, []
-    found: list[CkComponent] = []
+    found: list[tuple[int, CkComponent]] = []
     for match in _CK_COMMAND_RE.finditer(text):
         kind, option, first = match.group("kind", "option", "first")
         option, second = option or "", match.group("second") or ""
         if "#" in first + second:
             continue
         if kind == "value":
-            found.append(
-                CkComponent(
-                    kind, first.strip(), second.strip(), option.strip()
-                )
+            component = CkComponent(
+                kind, first.strip(), second.strip(), option.strip()
             )
         else:
-            found.append(CkComponent(kind, first.strip()))
-    return True, list(dict.fromkeys(found))
+            component = CkComponent(kind, first.strip())
+        found.append((match.start(), component))
+    for match in _CK_REFVAL_RE.finditer(text):
+        option, first, second = match.group("option", "first", "second")
+        if "#" in first + second:
+            continue
+        found.append(
+            (
+                match.start(),
+                ref_component(
+                    first.strip(), second.strip(), (option or "").strip()
+                ),
+            )
+        )
+    found.sort(key=lambda item: item[0])
+    return True, list(dict.fromkeys(c for _, c in found))
 
 
 def component_candidates(
@@ -658,6 +928,12 @@ def component_candidates(
         exts = _GRAPHICS_EXTS if component.kind == "figure" else [".tex"]
         if posixpath.splitext(rel)[1].lower() not in exts:
             return [rel + ext for ext in exts] + [rel], None
+    # A value cited from a notebook is one its cells make, which the
+    # pipeline saves beside it
+    elif rel.lower().endswith(".ipynb"):
+        from calkit.notebooks import get_notebook_values_path
+
+        return [get_notebook_values_path(rel)], None
     return [rel], None
 
 
@@ -673,6 +949,11 @@ def component_path(
     for candidate in candidates:
         if exists(candidate):
             return candidate, None
+    if component.kind == "value" and component.path.lower().endswith(".ipynb"):
+        return None, (
+            f"No values saved from {component.path} yet; add it as a cell "
+            "output and run the pipeline"
+        )
     return None, f"{component.path} is not in the project yet"
 
 
@@ -742,16 +1023,58 @@ def include_figure(
         return changed
     # calkit.sty has to be loaded for \ckfigure
     text = changed.get(document) or _read_leniently(str(base / root)) or ""
+    loading = add_package_load(text)
+    if loading != text:
+        changed[document] = loading
+    return changed
+
+
+def add_package_load(text: str) -> str:
+    """A document's text with ``\\usepackage{calkit}`` before its
+    ``\\begin{document}``, unless it loads calkit.sty already or has none.
+    """
     loaded = [
         name.strip()
         for names in _PACKAGE_RE.findall(_strip_comments(text))
         for name in names.split(",")
     ]
     begin = re.search(r"^[ \t]*\\begin\{document\}", text, re.M)
-    if "calkit" not in loaded and begin is not None:
-        at = begin.start()
-        changed[document] = text[:at] + "\\usepackage{calkit}\n" + text[at:]
-    return changed
+    if "calkit" in loaded or begin is None:
+        return text
+    at = begin.start()
+    newline = "\r\n" if "\r\n" in text else "\n"
+    return text[:at] + "\\usepackage{calkit}" + newline + text[at:]
+
+
+def load_package(document: str) -> bool:
+    """Add ``\\usepackage{calkit}`` to a document that uses calkit.sty's
+    commands, itself or in the files it inputs, without loading it, since it
+    can't compile otherwise. Returns whether it was added.
+    """
+    lines = flatten(document, read=_read_leniently)
+    text = "\n".join(_strip_comments(line.text) for line in lines)
+    loads = any(
+        "calkit" in (name.strip() for name in m.group(1).split(","))
+        for m in _PACKAGE_RE.finditer(text)
+    )
+    if loads or (
+        _CK_COMMAND_RE.search(text) is None
+        and _CK_REFVAL_RE.search(text) is None
+    ):
+        return False
+    # Read as written, so its line endings are kept, and left alone if it
+    # isn't UTF-8, which writing back would garble
+    try:
+        with open(document, encoding="utf-8", newline="") as f:
+            source = f.read()
+    except UnicodeDecodeError:
+        return False
+    loading = add_package_load(source)
+    if loading == source:
+        return False
+    with open(document, "w", encoding="utf-8", newline="") as f:
+        f.write(loading)
+    return True
 
 
 def root_documents(folder: str) -> list[str]:
@@ -936,10 +1259,17 @@ def plan_ck_components(
         written.add((c.path, c.key))
         rel, problem, here = find(c)
         if rel is None:
-            problems.append(str(problem))
+            # A reference with no values recorded has no file of them
+            problems.append(
+                f"calkit.yaml records no value '{c.ref[1]}' quoted from "
+                f"'{c.ref[0]}'"
+                if c.ref
+                else str(problem)
+            )
             continue
+        name = c.label or c.path
         if not here:
-            start = f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{"
+            start = f"\\cksetvalue{{{name}}}{{{c.key}}}{{"
             kept_line = next(
                 (
                     line + "\n"
@@ -958,13 +1288,18 @@ def plan_ck_components(
                 loaded[rel] = read_data(rel)
             kind, text = tex_value(resolve_key(loaded[rel], c.key or ""))
         except KeyError:
-            problems.append(f"{c.path} has no {c.key}")
+            problems.append(
+                f"calkit.yaml records no value '{c.ref[1]}' quoted from "
+                f"'{c.ref[0]}'"
+                if c.ref
+                else f"{c.path} has no {c.key}"
+            )
             continue
         except Exception as e:
             problems.append(f"{c.key} from {c.path}: {e}")
             continue
         lines.append(
-            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
+            f"\\cksetvalue{{{name}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
         )
     return CkMapping(files=files, values="".join(lines), problems=problems)
 
@@ -1001,10 +1336,6 @@ def map_ck_components(
     Returns what couldn't be brought in, e.g., a file the pipeline hasn't
     produced yet. Those print as ``??`` rather than failing the build.
     """
-    import calkit.git
-    import calkit.resources
-    from calkit.questions import read_evidence_file
-
     named = [] if os.path.isdir(path or ".") else [path]
     folder = os.path.dirname(path) if named else path
     docs = list(
@@ -1044,6 +1375,8 @@ def map_ck_components(
             shutil.rmtree(out)
         # Only the one Calkit wrote, and never one that's committed
         if os.path.isfile(style_path):
+            import calkit.git
+
             with open(style_path, encoding="utf-8", errors="replace") as f:
                 ours = "Calkit project components" in f.read()
             try:
@@ -1061,6 +1394,12 @@ def map_ck_components(
             if ours and not committed:
                 os.remove(style_path)
         return []
+    # Imported only here, since most documents use no components, and
+    # GitPython alone is a noticeable part of a build's startup
+    import calkit.git
+    import calkit.resources
+    from calkit.questions import read_evidence_file
+
     # Component paths are relative to the project, wherever the document is
     root = os.path.abspath(folder or ".")
     while not os.path.isfile(os.path.join(root, "calkit.yaml")):
@@ -1082,7 +1421,13 @@ def map_ck_components(
             )
             link_base = f"{hub}/{ck_info['owner']}/{ck_info['name']}"
     except Exception:
-        pass
+        ck_info = None
+    # Values quoted from references are read from the file Calkit writes
+    # them to, which is brought up to date with calkit.yaml first
+    if ck_info is not None and any(c.ref for c in components):
+        from calkit.references.values import write_values_file
+
+        write_values_file(ck_info, wdir=root)
     if previous_values is None:
         try:
             with open(os.path.join(out, VALUES_FNAME), encoding="utf-8") as f:
@@ -1254,7 +1599,11 @@ LOCAL_DOCX_MERGES_DIR = os.path.join(LOCAL_DIR, "docx-merges")
 DOCX_BUILD_DIR = os.path.join(LOCAL_DIR, "latex-docx-build")
 # Word bookmark names: 40 chars max, letters/digits/underscores
 _INCLUDE_RE = re.compile(
-    r"^\s*\\(input|include|subfile|import)\{([^}]*)\}(?:\{([^}]*)\})?"
+    r"^\s*\\(input|include|subfile|import)\s*\{([^}]*)\}(?:\s*\{([^}]*)\})?"
+)
+# An include anywhere in a line, e.g., after text
+_INLINE_INCLUDE_RE = re.compile(
+    r"\\(input|include|subfile|import)\s*\{([^}]*)\}(?:\s*\{([^}]*)\})?"
 )
 _BLOCK_START_RE = re.compile(
     r"^\s*\\(begin|end|section|subsection|subsubsection|chapter|part|item|"
@@ -1579,8 +1928,19 @@ def flatten(
             return
         seen.add(key)
         for i, line in enumerate(text.split("\n"), 1):
-            m = None if markdown else _INCLUDE_RE.match(_strip_comments(line))
-            if m:
+            matches = (
+                []
+                if markdown
+                else list(_INLINE_INCLUDE_RE.finditer(_strip_comments(line)))
+            )
+            if not matches:
+                out.append(SourceLine(rel, i, line))
+                continue
+            # Text around an include is kept, on the line it's on
+            pos = 0
+            for m in matches:
+                if line[pos : m.start()].strip():
+                    out.append(SourceLine(rel, i, line[pos : m.start()]))
                 cmd, a, b = m.groups()
                 target = Path(b) if cmd == "import" and b else Path(a)
                 start = base / a if cmd == "import" else base
@@ -1590,8 +1950,9 @@ def flatten(
                 # TeX reads \input paths from where it compiles, and only
                 # \import moves that to the imported file's folder
                 visit(child, child.parent if cmd == "import" else base)
-                continue
-            out.append(SourceLine(rel, i, line))
+                pos = m.end()
+            if line[pos:].strip():
+                out.append(SourceLine(rel, i, line[pos:]))
 
     visit(main, main.parent)
     return out

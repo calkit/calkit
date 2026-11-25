@@ -10,7 +10,7 @@ import threading
 import time
 from collections import OrderedDict
 from copy import deepcopy
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 import git
 import requests
@@ -45,9 +45,10 @@ from app.core import (
     params_from_url,
     utcnow,
 )
+from app.db import engine
 from app.dvc import (
     expand_dvc_lock_outs,
-    get_data_fpath_for_md5,
+    find_md5_object,
     read_dvc_dir_cached,
 )
 from app.git import (
@@ -73,8 +74,12 @@ from app.models import (
 from app.models.core import ROLE_IDS
 from app.pipeline import find_stage_for_path
 from app.storage import (
+    ProjectStorage,
+    get_internal_storage,
     get_object_fs,
     get_object_url,
+    get_project_object_url,
+    get_project_storage_locations,
     make_data_fpath,
     remove_gcs_content_type,
 )
@@ -285,6 +290,72 @@ def get_project(
     return project
 
 
+def get_storage_locations_for_project(
+    project: Project,
+) -> list[ProjectStorage]:
+    """Get every storage a project's DVC objects may be in, in lookup order.
+
+    Uses the session the project was loaded in, so this must run on that
+    session's thread.
+    """
+    state = sqlalchemy.inspect(project, raiseerr=False)
+    session = state.session if state is not None else None
+    if session is None:
+        # Not from the database, so it can only use the hub's own storage
+        return [get_internal_storage()]
+    return get_project_storage_locations(cast(Session, session), project)
+
+
+def find_out_object(
+    project: Project,
+    dvc_out: dict[str, Any],
+    storage_locations: list[ProjectStorage] | None = None,
+) -> tuple[ProjectStorage, str] | None:
+    """Where a DVC output's bytes sit in storage, or None if not pushed.
+
+    An output imported from another Calkit project is a pointer whose
+    ``remote`` names that project (``calkit:owner/project``) and is
+    ``push: false``, so its bytes only ever live in the source project's
+    storage locations. That is where such a lookup goes; anything else is
+    looked up in ``storage_locations``, which default to this project's.
+    """
+    md5 = dvc_out.get("md5")
+    if not md5:
+        return None
+    remote = str(dvc_out.get("remote") or "")
+    if remote.startswith("calkit:") and "/" in remote:
+        owner_name, project_name = remote[len("calkit:") :].split("/", 1)
+        # A session of its own, since this may run on a worker thread
+        with Session(engine) as session:
+            try:
+                source: Project | None = get_project(
+                    session=session,
+                    owner_name=owner_name,
+                    project_name=project_name,
+                )
+            except HTTPException:
+                source = None
+            source_storage_locations = (
+                get_storage_locations_for_project(source)
+                if source is not None
+                else [get_internal_storage()]
+            )
+            return find_md5_object(
+                owner_name=owner_name,
+                project_name=project_name,
+                md5=md5,
+                storage_locations=source_storage_locations,
+            )
+    if storage_locations is None:
+        storage_locations = get_storage_locations_for_project(project)
+    return find_md5_object(
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+        md5=md5,
+        storage_locations=storage_locations,
+    )
+
+
 def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
     """Every DVC-tracked output in a tree, keyed by path.
 
@@ -389,21 +460,16 @@ def read_project_file(
             current_user=current_user,
             min_access_level="read",
         )
-    fs = get_object_fs()
-    fpath = app.dvc.object_fpath_for_out(
-        owner_name=project.owner_account_name,
-        project_name=project.name,
-        dvc_out=out,
-        fs=fs,
-    )
-    if fpath is None:
+    found = find_out_object(project=project, dvc_out=out)
+    if found is None:
         where = (
             f"{remote[len('calkit:') :]}'s storage"
             if remote.startswith("calkit:")
             else "storage"
         )
         raise HTTPException(404, f"'{path}' has not been pushed to {where}")
-    with fs.open(fpath, "rb") as f:
+    obj_storage, fpath = found
+    with obj_storage.fs.open(fpath, "rb") as f:
         data = bytes(f.read(max_bytes + 1))
     if len(data) > max_bytes:
         raise HTTPException(413, f"'{path}' is too large to read")
@@ -464,6 +530,7 @@ def read_app_file(
         return tree.read_bytes(full_path)
     owner_name = project.owner_account_name
     project_name = project.name
+    storage_locations = get_storage_locations_for_project(project)
     # dvc.lock outs are expanded per file and cached on the bytes of
     # dvc.lock, so the whole app resolves out of one cached mapping. Only a
     # directory tracked with `dvc add` needs the pointer-file scan below,
@@ -479,16 +546,19 @@ def read_app_file(
         md5 = out.get("md5", "")
         if not md5.endswith(".dir"):
             return None
-        dir_fpath = get_data_fpath_for_md5(
+        dir_obj = find_md5_object(
             owner_name=owner_name,
             project_name=project_name,
             md5=md5,
+            storage_locations=storage_locations,
         )
         # The .dir object is a JSON list of {"md5": ..., "relpath": ...},
         # which is how we map a request path onto the object holding its
         # bytes. Reads of it are cached by object path.
         entries = (
-            read_dvc_dir_cached(dir_fpath) if dir_fpath is not None else None
+            read_dvc_dir_cached(dir_obj[0].fs, dir_obj[1])
+            if dir_obj is not None
+            else None
         )
         md5_by_relpath = {
             e.get("relpath"): e.get("md5")
@@ -501,16 +571,15 @@ def read_app_file(
     # object, which is a listing rather than anything servable
     if not file_md5 or file_md5.endswith(".dir"):
         return None
-    fs = get_object_fs()
-    file_fpath = get_data_fpath_for_md5(
+    file_obj = find_md5_object(
         owner_name=owner_name,
         project_name=project_name,
         md5=file_md5,
-        fs=fs,
+        storage_locations=storage_locations,
     )
-    if file_fpath is None:
+    if file_obj is None:
         return None
-    with fs.open(file_fpath, "rb") as f:
+    with file_obj[0].fs.open(file_obj[1], "rb") as f:
         return f.read()
 
 
@@ -524,6 +593,40 @@ def get_contents_from_repo(
         project=project,
         tree=get_repo_tree_for_ref(repo, ref),
         path=path,
+    )
+
+
+def readable_project_clause(current_user: User) -> Any:
+    """Projects the user can read, as a SQL predicate, for a query that
+    outer joins ``Project.user_access_records``.
+
+    GitHub-derived access only counts once it's been resolved and cached for
+    the user, i.e., they've opened the project before.
+    """
+    return or_(
+        Project.is_public,
+        Project.owner_account_id == current_user.account.id,
+        # A row in the unified access table with either a native Calkit
+        # grant (role_id, e.g., an invite redemption) or GitHub-derived
+        # access. A row with both null is a cached "no access" result.
+        and_(
+            UserProjectAccess.user_id == current_user.id,
+            or_(
+                UserProjectAccess.role_id.is_not(None),  # type: ignore
+                UserProjectAccess.github_access.is_not(None),  # type: ignore
+            ),
+        ),
+        Project.owner_account.has(  # type: ignore
+            and_(
+                Account.org_id.is_not(None),  # type: ignore
+                select(UserOrgMembership)
+                .where(
+                    UserOrgMembership.user_id == current_user.id,
+                    UserOrgMembership.org_id == Account.org_id,
+                )
+                .exists(),
+            )
+        ),
     )
 
 
@@ -731,9 +834,14 @@ def normalize_ck_info_paths(ck_info: dict[str, Any]) -> dict[str, Any]:
                 continue
             if isinstance(item.get("path"), str):
                 item["path"] = normalize_artifact_path(item["path"])
-            # References items carry their own files, each with a path
+            # References items carry their own files, by citation key, or
+            # as a list of key and path, as Calkit wrote before
             files = item.get("files")
-            if isinstance(files, list):
+            if isinstance(files, dict):
+                for key, path in files.items():
+                    if isinstance(path, str):
+                        files[key] = normalize_artifact_path(path)
+            elif isinstance(files, list):
                 for f in files:
                     if isinstance(f, dict) and isinstance(f.get("path"), str):
                         f["path"] = normalize_artifact_path(f["path"])
@@ -858,9 +966,11 @@ def get_ck_info_and_dvc_outs_from_tree(
     t_parse = time.perf_counter() - t1
     logger.info(f"Parsed calkit.yaml and dvc.lock in {t_parse * 1000:.0f}ms")
     t2 = time.perf_counter()
-    fs = get_object_fs()
     dvc_lock_outs = expand_dvc_lock_outs(
-        dvc_lock, owner_name=owner_name, project_name=project_name, fs=fs
+        dvc_lock,
+        owner_name=owner_name,
+        project_name=project_name,
+        storage_locations=get_storage_locations_for_project(project),
     )
     t_expand = time.perf_counter() - t2
     logger.info(f"Expanded DVC lock outs in {t_expand * 1000:.0f}ms")
@@ -904,7 +1014,14 @@ def get_contents_from_tree(
     dvc_lock_outs: dict | None = None,
     zip_path_map: dict | None = None,
     dvc_lock: dict | None = None,
+    storage_locations: list[ProjectStorage] | None = None,
 ) -> ContentsItem:
+    """Get a file or directory listing from a tree.
+
+    DVC objects are looked up in ``storage_locations``, which default to the
+    project's, looked up through the session it was loaded in. Callers on a
+    worker thread must pass them.
+    """
     owner_name = project.owner_account_name
     project_name = project.name
     # Prevent path traversal attacks
@@ -930,7 +1047,6 @@ def get_contents_from_tree(
         ck_info, dvc_lock_outs, zip_path_map, dvc_lock = (
             get_ck_info_and_dvc_outs_from_tree(project, tree)
         )
-    fs = get_object_fs()
     dvc_lock_out_dirs = [
         p for p, obj in dvc_lock_outs.items() if obj["type"] == "dir"
     ]
@@ -966,15 +1082,17 @@ def get_contents_from_tree(
             ck_objects[item["path"]] = item
             # Handle files inside references objects
             if category == "references":
-                ref_item_files = item.get("files", [])
-                for rif in ref_item_files:
-                    if "path" in rif:
-                        ck_objects[rif["path"]] = dict(
-                            kind="references item file",
-                            references_path=item["path"],
-                            path=rif["path"],
-                            key=rif.get("key"),
-                        )
+                import calkit.references.values
+
+                for key, path in calkit.references.values.get_reference_files(
+                    item
+                ).items():
+                    ck_objects[path] = dict(
+                        kind="references item file",
+                        references_path=item["path"],
+                        path=path,
+                        key=key,
+                    )
     # Find any DVC outs for Calkit objects
     ck_outs = {}
     for p, obj in ck_objects.items():
@@ -1160,6 +1278,8 @@ def get_contents_from_tree(
         if size > RETURN_CONTENT_SIZE_LIMIT:
             logger.info(f"{path} is greater than return size limit")
             md5 = hashlib.md5(content).hexdigest()
+            # A cache of the Git file, so it's in the hub's own storage
+            fs = get_object_fs()
             fp = make_data_fpath(
                 owner_name=owner_name,
                 project_name=project_name,
@@ -1230,27 +1350,26 @@ def get_contents_from_tree(
         content = None
         url = None
         if md5:
-            fp = app.dvc.object_fpath_for_out(
-                owner_name=owner_name,
-                project_name=project_name,
+            found = find_out_object(
+                project=project,
                 dvc_out=dvc_out,
-                fs=fs,
+                storage_locations=storage_locations,
             )
-            if fp is not None:
-                url = get_object_url(
-                    fp, fname=os.path.basename(dvc_fpath), fs=fs
+            if found is not None:
+                url = get_project_object_url(
+                    found[0],
+                    found[1],
+                    fname=os.path.basename(dvc_fpath or path),
                 )
-            # No fs.exists() guard: get_data_fpath_for_md5 only returns a path
-            # it has already confirmed exists, so re-checking is a wasted
-            # round trip on every artifact.
+            # No fs.exists(), since find_out_object only returns paths that exist
             if (
                 size is not None
                 and size <= RETURN_CONTENT_SIZE_LIMIT
-                and fp is not None
+                and found is not None
                 and not path.endswith(".h5")
                 and not path.endswith(".parquet")
             ):
-                with fs.open(fp, "rb") as f:
+                with found[0].fs.open(found[1], "rb") as f:
                     content = base64.b64encode(f.read()).decode()
         return ContentsItem.model_validate(
             dict(
@@ -1276,15 +1395,16 @@ def get_contents_from_tree(
             else:
                 dvc_out = dvc_lock_outs[path]
             md5 = dvc_out["md5"]
-            fp = app.dvc.object_fpath_for_out(
-                owner_name=owner_name,
-                project_name=project_name,
+            found = find_out_object(
+                project=project,
                 dvc_out=dvc_out,
-                fs=fs,
+                storage_locations=storage_locations,
             )
             url = (
-                get_object_url(fp, fname=os.path.basename(path), fs=fs)
-                if fp
+                get_project_object_url(
+                    found[0], found[1], fname=os.path.basename(path)
+                )
+                if found is not None
                 else None
             )
             size = dvc_out.get("size")
@@ -1292,16 +1412,17 @@ def get_contents_from_tree(
             # Read small files inline from object storage, mirroring the
             # Calkit-object branch above, so callers can use their content
             # without a second round trip through the presigned URL.
-            # As above, fp is already known to exist, so no fs.exists() guard.
+            # As above, the object is already known to exist, so no
+            # fs.exists() guard.
             content = None
             if (
                 size is not None
                 and size <= RETURN_CONTENT_SIZE_LIMIT
-                and fp is not None
+                and found is not None
                 and not path.endswith(".h5")
                 and not path.endswith(".parquet")
             ):
-                with fs.open(fp, "rb") as f:
+                with found[0].fs.open(found[1], "rb") as f:
                     content = base64.b64encode(f.read()).decode()
             # TODO: If this is a directory, list dir_items
             return ContentsItem.model_validate(

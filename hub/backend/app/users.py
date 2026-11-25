@@ -4,13 +4,14 @@ import hmac
 import json
 import logging
 import secrets
-from datetime import datetime, timedelta
+import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
 from fastapi import HTTPException
 from requests.exceptions import JSONDecodeError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, func, select
 
 import app.stripe
 from app import utcnow
@@ -23,22 +24,39 @@ from app.core import (
     sanitize_account_name,
 )
 from app.github import token_resp_text_to_dict
-from app.messaging import EMAIL_VERIFICATION_CODE_MINUTES
+from app.messaging import (
+    EMAIL_VERIFICATION_CODE_MINUTES,
+    generate_confirm_email_change_email,
+    generate_confirm_two_factor_email,
+    generate_email_changed_email,
+    generate_two_factor_locked_email,
+    send_email,
+)
 from app.models import (
     Account,
+    DeviceAuth,
+    RefreshToken,
     User,
     UserCreate,
+    UserDailyCount,
     UserEmailVerification,
     UserExternalCredential,
     UserGitHubToken,
     UserSubscription,
+    UserTOTP,
     UserUpdate,
 )
 from app.security import (
+    create_second_factor_token as security_create_second_factor_token,
+)
+from app.security import (
+    decode_second_factor_token,
     decrypt_secret,
     encrypt_secret,
     generate_email_verification_token,
+    generate_totp_secret,
     get_password_hash,
+    match_totp_step,
     verify_email_verification_token,
     verify_password,
 )
@@ -222,6 +240,9 @@ def update_user(
         password = user_data["password"]
         hashed_password = get_password_hash(password)
         extra_data["hashed_password"] = hashed_password
+    # Deactivating a user signs them out everywhere
+    if user_data.get("is_active") is False:
+        end_sign_in_sessions(session=session, user=db_user)
     db_user.sqlmodel_update(user_data, update=extra_data)
     session.add(db_user)
     session.commit()
@@ -230,7 +251,14 @@ def update_user(
 
 
 def get_user_by_email(*, session: Session, email: str) -> User | None:
-    statement = select(User).where(User.email == email)
+    """Get a user by email, ignoring case, preferring an exact match, since
+    older accounts may differ only in case.
+    """
+    statement = (
+        select(User)
+        .where(func.lower(User.email) == email.lower())
+        .order_by(col(User.email) != email)
+    )
     session_user = session.exec(statement).first()
     return session_user
 
@@ -245,28 +273,92 @@ def email_is_verified(*, session: Session, user: User) -> bool:
 
 EMAIL_VERIFICATION_RESEND_SECONDS = 60
 EMAIL_VERIFICATION_MAX_ATTEMPTS = 5
+# Across every emailed code, i.e., for verifying an address, changing it, or
+# setting up two-factor authentication, so guessing can't go on by asking
+# for new codes
+EMAILED_CODES_PER_DAY = 10
+WRONG_EMAILED_CODES_PER_DAY = 20
 
 
-def hash_email_verification_code(code: str) -> str:
+def get_daily_count(
+    session: Session, user: User, kind: str, limit: int, detail: str
+) -> UserDailyCount:
+    """Today's count of something limited per day for the user, locked for
+    updating, refusing with a 429 once it has reached the limit.
+    """
+    from sqlalchemy.dialects.postgresql import insert
+
+    today = utcnow().date()
+    session.exec(
+        insert(UserDailyCount)
+        .values(user_id=user.id, kind=kind, day=today, count=0)
+        .on_conflict_do_nothing()
+    )
+    row = session.exec(
+        select(UserDailyCount)
+        .where(UserDailyCount.user_id == user.id)
+        .where(UserDailyCount.kind == kind)
+        .with_for_update()
+    ).one()
+    if row.day != today:
+        row.day = today
+        row.count = 0
+    if row.count >= limit:
+        session.commit()
+        raise HTTPException(429, detail)
+    return row
+
+
+def count_wrong_emailed_code(session: Session, user: User) -> UserDailyCount:
+    """Today's count of wrong emailed codes, which the caller adds to if
+    another one is wrong.
+    """
+    return get_daily_count(
+        session,
+        user,
+        "wrong-emailed-codes",
+        WRONG_EMAILED_CODES_PER_DAY,
+        "Too many wrong codes today; try again tomorrow",
+    )
+
+
+def count_emailed_code(session: Session, user: User) -> None:
+    """Count a code about to be emailed, refusing past the daily limit."""
+    row = get_daily_count(
+        session,
+        user,
+        "emailed-codes",
+        EMAILED_CODES_PER_DAY,
+        "Too many codes sent today; try again tomorrow",
+    )
+    row.count += 1
+    session.add(row)
+
+
+def hash_email_verification_code(code: str, email: str | None = None) -> str:
     """The stored form of a code: an HMAC under the server's secret.
 
     Six digits is too small a space to protect with a slow hash alone,
     which is why guesses are counted; keying the hash keeps a leaked table
-    from being useful on its own.
+    from being useful on its own. An emailed code is bound to the address
+    it proves: the current one for verifying, or the new one for changing
+    it, so it can't vouch for any other.
     """
+    message = code if email is None else f"{code}\n{email.lower()}"
     return hmac.new(
-        settings.SECRET_KEY.encode(), code.encode(), "sha256"
+        settings.SECRET_KEY.encode(), message.encode(), "sha256"
     ).hexdigest()
 
 
 def create_email_verification(
-    *, session: Session, user: User
+    *, session: Session, user: User, new_email: str | None = None
 ) -> tuple[str, str]:
     """Issue a fresh code and link token for the user's current email.
 
     Returns the code and the token, which the caller emails. Any earlier
     code stops working. Raises 429 when one was sent less than a minute
-    ago, so the endpoint can't be used to flood an inbox.
+    ago, so the endpoint can't be used to flood an inbox, or when too many
+    were sent today.
     """
     now = utcnow()
     existing = user.email_verification
@@ -278,16 +370,16 @@ def create_email_verification(
         raise HTTPException(
             429, "A code was just sent. Wait a minute before asking again."
         )
+    count_emailed_code(session, user)
     code = f"{secrets.randbelow(10**6):06d}"
     expires = now + timedelta(minutes=EMAIL_VERIFICATION_CODE_MINUTES)
+    code_hash = hash_email_verification_code(code, new_email or user.email)
     if existing is None:
         existing = UserEmailVerification(
-            user_id=user.id,
-            code_hash=hash_email_verification_code(code),
-            expires=expires,
+            user_id=user.id, code_hash=code_hash, expires=expires
         )
     else:
-        existing.code_hash = hash_email_verification_code(code)
+        existing.code_hash = code_hash
         existing.created = now
         existing.expires = expires
         existing.attempts = 0
@@ -326,34 +418,165 @@ def mark_email_verified(*, session: Session, user: User) -> User:
     return user
 
 
-def confirm_email_verification_code(
-    *, session: Session, user: User, code: str
-) -> User:
-    """Check an entered code and, if it's right, mark the email verified.
+def check_email_verification_code(
+    *, session: Session, user: User, code: str, new_email: str | None = None
+) -> None:
+    """Check a code emailed to the user's current address, using it up.
 
-    A wrong code counts as an attempt; past the limit the code is thrown
-    away and a new one has to be requested, which is what keeps guessing
-    all million of them from being an option.
+    A wrong code counts as an attempt; past the limit the code stops
+    working and a new one has to be requested, and wrong codes are limited
+    per day too, which is what keeps guessing all million of them from
+    being an option. The code is kept until it's used, so asking for
+    another is still limited to once a minute.
     """
     pending = user.email_verification
     if pending is None:
         raise HTTPException(400, "No verification code has been sent")
+    # Locked, so parallel guesses can't all get in under the limit
+    session.refresh(pending, with_for_update=True)
+    if pending.attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+        raise HTTPException(400, "Too many wrong codes; request a new one")
     if pending.expires < utcnow():
-        session.delete(pending)
-        session.commit()
         raise HTTPException(400, "That code has expired; request a new one")
+    wrong_today = count_wrong_emailed_code(session, user)
     if not hmac.compare_digest(
-        pending.code_hash, hash_email_verification_code(code.strip())
+        pending.code_hash,
+        hash_email_verification_code(code.strip(), new_email or user.email),
     ):
         pending.attempts += 1
-        if pending.attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
-            session.delete(pending)
-            session.commit()
-            raise HTTPException(400, "Too many wrong codes; request a new one")
+        wrong_today.count += 1
         session.add(pending)
+        session.add(wrong_today)
         session.commit()
+        if pending.attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            raise HTTPException(400, "Too many wrong codes; request a new one")
         raise HTTPException(400, "That code isn't right")
+    session.delete(pending)
+    # So saving the user later doesn't try to save the deleted code too
+    session.flush()
+    session.expire(user, ["email_verification"])
+
+
+def confirm_email_verification_code(
+    *, session: Session, user: User, code: str
+) -> User:
+    """Check an entered code and, if it's right, mark the email verified."""
+    check_email_verification_code(session=session, user=user, code=code)
     return mark_email_verified(session=session, user=user)
+
+
+def send_email_change_code(
+    *, session: Session, user: User, new_email: str
+) -> None:
+    """Email a code to the user's current address for changing it.
+
+    Whoever holds a session could otherwise move the account to an address
+    they control, and with it everything that's proven by email, e.g.,
+    setting up a second factor or resetting the password.
+    """
+    if not user.email_verified:
+        raise HTTPException(400, "An unverified email can be changed as is")
+    code, _ = create_email_verification(
+        session=session, user=user, new_email=new_email
+    )
+    email_data = generate_confirm_email_change_email(
+        email_to=user.email, new_email=new_email, code=code
+    )
+    send_email(
+        email_to=user.email,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
+
+
+def change_email(
+    *,
+    session: Session,
+    user: User,
+    new_email: str,
+    code: str | None,
+    keep_session: uuid.UUID,
+) -> None:
+    """Change the user's email, which takes a code sent to the current one
+    for this new address if it's verified.
+
+    The new address isn't verified until the user proves it is. The old one
+    hears about it, and every other sign-in ends.
+    """
+    old_email = user.email
+    was_verified = user.email_verified
+    if was_verified:
+        if not code:
+            raise HTTPException(
+                403, "Changing a verified email takes a code sent to it"
+            )
+        check_email_verification_code(
+            session=session, user=user, code=code, new_email=new_email
+        )
+    user.email = new_email
+    user.email_verified_at = None
+    session.add(user)
+    end_sign_in_sessions(session=session, user=user, keep=keep_session)
+    if was_verified and settings.emails_enabled:
+        email_data = generate_email_changed_email(
+            email_to=old_email, new_email=new_email
+        )
+        send_email(
+            email_to=old_email,
+            subject=email_data.subject,
+            html_content=email_data.html_content,
+        )
+
+
+def end_sign_in_sessions(
+    *, session: Session, user: User, keep: uuid.UUID | None = None
+) -> None:
+    """Sign the user out everywhere, except the session to keep, e.g.,
+    after their password changes.
+
+    Access tokens are short-lived, and anything sensitive also checks that
+    its session is still live, so this takes effect right away there.
+    """
+    tokens = session.exec(
+        select(RefreshToken)
+        .where(RefreshToken.user_id == user.id)
+        .where(RefreshToken.is_active)
+    ).all()
+    for token in tokens:
+        if keep is None or token.session_id != keep:
+            token.is_active = False
+            session.add(token)
+    forget_device_authorizations(session=session, user_id=user.id)
+
+
+def forget_device_authorizations(
+    *, session: Session, user_id: uuid.UUID
+) -> None:
+    """Drop CLI logins the user authorized but no CLI has picked up yet,
+    since the session ending may be the one that authorized them, which
+    isn't recorded.
+    """
+    pending = session.exec(
+        select(DeviceAuth).where(DeviceAuth.user_id == user_id)
+    ).all()
+    for auth_request in pending:
+        session.delete(auth_request)
+
+
+def end_sign_in_session(
+    *, session: Session, user_id: uuid.UUID, session_id: uuid.UUID
+) -> None:
+    """Sign out one sign-in, e.g., when its owner signs out."""
+    tokens = session.exec(
+        select(RefreshToken)
+        .where(RefreshToken.user_id == user_id)
+        .where(RefreshToken.session_id == session_id)
+        .where(RefreshToken.is_active)
+    ).all()
+    for token in tokens:
+        token.is_active = False
+        session.add(token)
+    forget_device_authorizations(session=session, user_id=user_id)
 
 
 def confirm_email_verification_token(*, session: Session, token: str) -> User:
@@ -908,6 +1131,401 @@ def save_google_token(
     )
 
 
+def check_external_account_unclaimed(
+    session: Session, user: User, provider: str, provider_account_id: str
+) -> None:
+    """Refuse connecting an account on a service that's connected to another
+    Calkit user, since each can only belong to one.
+    """
+    others = session.exec(
+        select(UserExternalCredential).where(
+            UserExternalCredential.provider == provider,
+            UserExternalCredential.user_id != user.id,
+            func.lower(UserExternalCredential.provider_account_id)
+            == provider_account_id.lower(),
+        )
+    ).first()
+    if others is not None:
+        raise HTTPException(
+            409, "That account is connected to another Calkit account"
+        )
+
+
+HF_TOKEN_URL = "https://huggingface.co/oauth/token"
+
+
+def save_huggingface_token(
+    session: Session,
+    user: User,
+    hf_resp: dict[str, Any],
+    new_login: bool = False,
+) -> None:
+    """Save a Hugging Face OAuth token response, keeping the existing refresh
+    token and account details when the response doesn't include them.
+
+    A new login can't replace the HF account storage is using.
+    """
+    existing = get_external_credential(
+        session=session, user=user, provider="huggingface"
+    )
+    refresh_token = hf_resp.get("refresh_token")
+    if not refresh_token and existing is not None:
+        refresh_token = json.loads(
+            decrypt_secret(existing.secret_payload)
+        ).get("refresh_token")
+    # The username and orgs are what storage can be created under
+    headers = {"Authorization": f"Bearer {hf_resp['access_token']}"}
+    try:
+        resp = requests.get(
+            "https://huggingface.co/oauth/userinfo",
+            headers=headers,
+            timeout=15,
+        )
+    except requests.RequestException:
+        resp = None
+    if resp is not None and resp.ok:
+        info = resp.json()
+        username = info.get("preferred_username")
+        orgs = [
+            org.get("preferred_username")
+            for org in info.get("orgs", [])
+            if org.get("preferred_username")
+        ]
+        metadata = {"orgs": orgs}
+    elif existing is not None and not new_login:
+        username = existing.provider_account_id
+        metadata = existing.metadata_json or {}
+    else:
+        raise HTTPException(502, "Failed to get Hugging Face account info")
+    if new_login:
+        check_external_account_unclaimed(
+            session, user, "huggingface", str(username)
+        )
+    if (
+        new_login
+        and existing is not None
+        and existing.provider_account_id
+        and str(username).lower() != existing.provider_account_id.lower()
+    ):
+        from app.storage import get_credential_resources
+
+        if get_credential_resources(session, user.id, provider="huggingface"):
+            raise HTTPException(
+                409,
+                "Storage uses Hugging Face account "
+                f"{existing.provider_account_id}; disconnect first",
+            )
+    expires_in = hf_resp.get("expires_in")
+    save_external_credential(
+        session=session,
+        user=user,
+        provider="huggingface",
+        secret_payload=json.dumps(
+            {
+                "access_token": hf_resp["access_token"],
+                "refresh_token": refresh_token,
+            }
+        ),
+        credential_type="oauth2",
+        scopes=hf_resp.get("scope"),
+        provider_account_id=username,
+        metadata_json=metadata,
+        expires=(
+            utcnow() + timedelta(seconds=int(expires_in))
+            if expires_in
+            else None
+        ),
+    )
+
+
+def get_huggingface_token(session: Session, user: User) -> str:
+    """Get a user's Hugging Face access token, refreshing it if needed."""
+
+    def get_needs_refresh(credential: UserExternalCredential) -> bool:
+        return (
+            credential.expires is not None
+            and (utcnow() + timedelta(minutes=5)) >= credential.expires
+        )
+
+    credential = get_external_credential(
+        session=session, user=user, provider="huggingface"
+    )
+    if credential is None:
+        raise HTTPException(
+            401, "User needs to authenticate with Hugging Face"
+        )
+    if not get_needs_refresh(credential):
+        tokens = json.loads(decrypt_secret(credential.secret_payload))
+        return str(tokens["access_token"])
+    # Concurrent refreshes take turns under a row lock, like in
+    # `get_github_token`, since a rejected refresh disconnects the account
+    credential_id = credential.id
+    session.expire(credential)
+    credential = session.exec(
+        select(UserExternalCredential)
+        .where(UserExternalCredential.id == credential_id)
+        .with_for_update()
+    ).first()
+    if credential is None:
+        raise HTTPException(
+            401, "User needs to authenticate with Hugging Face"
+        )
+    tokens = json.loads(decrypt_secret(credential.secret_payload))
+    if not get_needs_refresh(credential):
+        return str(tokens["access_token"])
+    if not tokens.get("refresh_token"):
+        raise HTTPException(
+            401,
+            "Hugging Face token expired. Please reconnect your account.",
+        )
+    logger.info(f"Refreshing Hugging Face token for {user.email}")
+    try:
+        resp = requests.post(
+            HF_TOKEN_URL,
+            data=dict(
+                grant_type="refresh_token",
+                refresh_token=tokens["refresh_token"],
+            ),
+            auth=(
+                settings.HF_CLIENT_ID or "",
+                settings.HF_CLIENT_SECRET or "",
+            ),
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        logger.error(f"Failed to reach Hugging Face: {e}")
+        raise HTTPException(503, "Hugging Face unavailable") from e
+    if resp.status_code != 200:
+        logger.error(
+            f"Failed to refresh Hugging Face token for {user.email}: "
+            f"{resp.status_code} {resp.text[:200]}"
+        )
+        if resp.status_code not in (400, 401):
+            raise HTTPException(503, "Hugging Face unavailable")
+        session.delete(credential)
+        session.commit()
+        raise HTTPException(
+            401,
+            "Hugging Face token refresh failed. "
+            "Please reconnect your account.",
+        )
+    hf_resp = resp.json()
+    save_huggingface_token(session=session, user=user, hf_resp=hf_resp)
+    return str(hf_resp["access_token"])
+
+
+BOX_TOKEN_URL = "https://api.box.com/oauth2/token"
+BOX_API_URL = "https://api.box.com/2.0"
+# Box refresh tokens lapse after this long unused
+BOX_REFRESH_TOKEN_LIFETIME = timedelta(days=60)
+
+
+def save_box_token(
+    session: Session,
+    user: User,
+    box_resp: dict[str, Any],
+    new_login: bool = False,
+) -> None:
+    """Save a Box OAuth token response.
+
+    Box refresh tokens are single-use, so each response replaces the last.
+    A new login can't replace the Box account storage is using.
+    """
+    existing = get_external_credential(
+        session=session, user=user, provider="box"
+    )
+    headers = {"Authorization": f"Bearer {box_resp['access_token']}"}
+    try:
+        resp = requests.get(
+            f"{BOX_API_URL}/users/me",
+            params={"fields": "id,login,name,enterprise"},
+            headers=headers,
+            timeout=15,
+        )
+    except requests.RequestException:
+        resp = None
+    if resp is not None and resp.ok:
+        info = resp.json()
+        account_id = str(info["id"])
+        # The enterprise, e.g., a university, decides which apps its users
+        # can authorize
+        enterprise = info.get("enterprise") or {}
+        metadata = {
+            "login": info.get("login"),
+            "name": info.get("name"),
+            "enterprise": enterprise.get("name"),
+        }
+    elif existing is not None and not new_login:
+        account_id = str(existing.provider_account_id)
+        metadata = existing.metadata_json or {}
+    else:
+        raise HTTPException(502, "Failed to get Box account info")
+    if new_login:
+        check_external_account_unclaimed(session, user, "box", account_id)
+    if (
+        new_login
+        and existing is not None
+        and existing.provider_account_id
+        and account_id != existing.provider_account_id
+    ):
+        from app.storage import get_credential_resources
+
+        if get_credential_resources(session, user.id, provider="box"):
+            login = (existing.metadata_json or {}).get("login")
+            raise HTTPException(
+                409,
+                f"Storage uses Box account {login}; disconnect first",
+            )
+    now = utcnow()
+    save_external_credential(
+        session=session,
+        user=user,
+        provider="box",
+        secret_payload=json.dumps(
+            {
+                "access_token": box_resp["access_token"],
+                "refresh_token": box_resp["refresh_token"],
+            }
+        ),
+        credential_type="oauth2",
+        provider_account_id=account_id,
+        metadata_json=metadata,
+        expires=now + timedelta(seconds=int(box_resp["expires_in"])),
+        refresh_token_expires=now + BOX_REFRESH_TOKEN_LIFETIME,
+    )
+
+
+def get_box_token(session: Session, user: User, force: bool = False) -> str:
+    """Get a user's Box access token, refreshing it if needed, or always
+    with ``force``, e.g., to keep an unused connection from lapsing.
+    """
+
+    def get_needs_refresh(credential: UserExternalCredential) -> bool:
+        return force or (
+            credential.expires is not None
+            and (utcnow() + timedelta(minutes=5)) >= credential.expires
+        )
+
+    credential = get_external_credential(
+        session=session, user=user, provider="box"
+    )
+    if credential is None:
+        raise HTTPException(401, "User needs to authenticate with Box")
+    tokens = json.loads(decrypt_secret(credential.secret_payload))
+    if not tokens.get("refresh_token"):
+        raise HTTPException(401, "Box connection lapsed; reconnect Box")
+    if not get_needs_refresh(credential):
+        return str(tokens["access_token"])
+    # Concurrent refreshes take turns under a row lock, since each refresh
+    # token works once, and a second refresh with it would disconnect the
+    # account
+    credential_id = credential.id
+    updated = credential.updated
+    session.expire(credential)
+    credential = session.exec(
+        select(UserExternalCredential)
+        .where(UserExternalCredential.id == credential_id)
+        .with_for_update()
+    ).first()
+    if credential is None:
+        raise HTTPException(401, "User needs to authenticate with Box")
+    tokens = json.loads(decrypt_secret(credential.secret_payload))
+    # Another request refreshed it while this one waited
+    if credential.updated != updated or not get_needs_refresh(credential):
+        return str(tokens["access_token"])
+    logger.info(f"Refreshing Box token for {user.email}")
+    try:
+        resp = requests.post(
+            BOX_TOKEN_URL,
+            data=dict(
+                grant_type="refresh_token",
+                refresh_token=tokens["refresh_token"],
+                client_id=settings.BOX_CLIENT_ID or "",
+                client_secret=settings.BOX_CLIENT_SECRET or "",
+            ),
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        logger.error(f"Failed to reach Box: {e}")
+        raise HTTPException(503, "Box unavailable") from e
+    if resp.status_code != 200:
+        logger.error(
+            f"Failed to refresh Box token for {user.email}: "
+            f"{resp.status_code} {resp.text[:200]}"
+        )
+        try:
+            error = resp.json().get("error")
+        except ValueError:
+            error = None
+        # Anything else, e.g., the hub's own client credentials being wrong,
+        # isn't the connection's fault
+        if error != "invalid_grant":
+            raise HTTPException(503, "Box unavailable")
+        # Kept, without its tokens, so which Box account the storage it
+        # reaches is in is still known when the user reconnects
+        credential.secret_payload = encrypt_secret(json.dumps({}))
+        credential.expires = None
+        credential.refresh_token_expires = None
+        session.add(credential)
+        session.commit()
+        app.mixpanel.user_connection_lapsed(user, "box")
+        raise HTTPException(401, "Box connection lapsed; reconnect Box")
+    box_resp = resp.json()
+    save_box_token(session=session, user=user, box_resp=box_resp)
+    return str(box_resp["access_token"])
+
+
+def refresh_idle_box_tokens() -> int:
+    """Refresh Box connections nobody has used for a month, so they don't
+    lapse at 60 days. Run daily on the worker, by ``app.cron``. Returns how
+    many were refreshed.
+    """
+    from app.db import engine
+
+    n_refreshed = 0
+    with Session(engine) as session:
+        credentials = session.exec(
+            select(UserExternalCredential).where(
+                UserExternalCredential.provider == "box",
+                col(UserExternalCredential.refresh_token_expires)
+                < utcnow() + timedelta(days=30),
+            )
+        ).all()
+        for credential in credentials:
+            try:
+                get_box_token(session, credential.user, force=True)
+                n_refreshed += 1
+            except HTTPException as e:
+                logger.warning(
+                    f"Failed to refresh Box token for "
+                    f"{credential.user.email}: {e.detail}"
+                )
+    logger.info(f"Refreshed {n_refreshed} idle Box connections")
+    return n_refreshed
+
+
+def revoke_box_token(credential: UserExternalCredential) -> None:
+    """Revoke a Box connection's tokens at Box, so they stop working there
+    too. Best effort, since the connection is being removed either way.
+    """
+    tokens = json.loads(decrypt_secret(credential.secret_payload))
+    for token in (tokens.get("refresh_token"), tokens.get("access_token")):
+        if not token:
+            continue
+        try:
+            requests.post(
+                "https://api.box.com/oauth2/revoke",
+                data={
+                    "client_id": settings.BOX_CLIENT_ID or "",
+                    "client_secret": settings.BOX_CLIENT_SECRET or "",
+                    "token": token,
+                },
+                timeout=15,
+            )
+        except requests.RequestException as e:
+            logger.warning(f"Failed to revoke Box token: {e}")
+
+
 def save_zotero_request_token(
     session: Session, user: User, request_token: dict[str, str]
 ) -> None:
@@ -1045,3 +1663,212 @@ def check_user_subscription_active(session: Session, user: User) -> bool:
     )
     session.commit()
     return True
+
+
+# How long a second factor entered in a session covers sensitive actions
+SECOND_FACTOR_HOURS = 12
+# The HttpOnly cookie that holds a session's proof of entering one
+SECOND_FACTOR_COOKIE = "second_factor"
+# Wrong authenticator codes a day, per sign-in and per account
+TOTP_MAX_FAILED_ATTEMPTS = 5
+WRONG_TOTP_CODES_PER_DAY = 20
+# Error details the frontend recognizes, to prompt for a code or set one up
+SECOND_FACTOR_SETUP_REQUIRED = "Two-factor authentication setup required"
+SECOND_FACTOR_REQUIRED = "Two-factor authentication code required"
+
+
+def start_totp_setup(
+    session: Session, user: User, session_id: uuid.UUID
+) -> str:
+    """Start setting up an authenticator app, returning its secret.
+
+    A code is also emailed, which confirming takes along with one from the
+    app, so someone holding a leaked credential for the account can't add
+    their own app without the user's email too. Only the sign-in that
+    started it sees the secret and can finish it.
+    """
+    totp = user.totp
+    if totp is not None and totp.confirmed_at is not None:
+        raise HTTPException(409, "Two-factor authentication is already set up")
+    # Otherwise the code could go to an address that isn't the user's
+    if not user.email_verified:
+        raise HTTPException(403, "Verify your email first")
+    now = utcnow()
+    # Starting again right away, e.g., after a reload, carries on with the
+    # setup in progress rather than emailing another code
+    if (
+        totp is not None
+        and (now - totp.created).total_seconds()
+        < EMAIL_VERIFICATION_RESEND_SECONDS
+    ):
+        if totp.setup_session_id != session_id:
+            raise HTTPException(
+                409, "Two-factor setup was just started in another session"
+            )
+        return decrypt_secret(totp.secret)
+    count_emailed_code(session, user)
+    secret = generate_totp_secret()
+    email_code = f"{secrets.randbelow(10**6):06d}"
+    if totp is None:
+        totp = UserTOTP(user_id=user.id, secret=encrypt_secret(secret))
+    totp.secret = encrypt_secret(secret)
+    totp.setup_session_id = session_id
+    totp.created = now
+    totp.email_code_hash = hash_email_verification_code(email_code)
+    totp.email_code_expires = now + timedelta(
+        minutes=EMAIL_VERIFICATION_CODE_MINUTES
+    )
+    totp.email_code_attempts = 0
+    session.add(totp)
+    session.commit()
+    email_data = generate_confirm_two_factor_email(
+        email_to=user.email, code=email_code
+    )
+    send_email(
+        email_to=user.email,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
+    return secret
+
+
+def check_totp_setup_email_code(
+    session: Session, user: User, totp: UserTOTP, code: str
+) -> None:
+    """Check the code emailed when setting up an authenticator app."""
+    # Locked, so parallel guesses can't all get in under the limit
+    session.refresh(totp, with_for_update=True)
+    if totp.email_code_hash is None or totp.email_code_expires is None:
+        raise HTTPException(400, "No setup code has been sent")
+    if totp.email_code_expires < utcnow():
+        raise HTTPException(400, "That code has expired; start setup again")
+    wrong_today = count_wrong_emailed_code(session, user)
+    if not hmac.compare_digest(
+        totp.email_code_hash, hash_email_verification_code(code.strip())
+    ):
+        totp.email_code_attempts += 1
+        wrong_today.count += 1
+        session.add(wrong_today)
+        if totp.email_code_attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            totp.email_code_hash = None
+            session.add(totp)
+            session.commit()
+            raise HTTPException(400, "Too many wrong codes; start setup again")
+        session.add(totp)
+        session.commit()
+        raise HTTPException(400, "The emailed code isn't right")
+
+
+def check_totp_code(
+    session: Session,
+    user: User,
+    totp: UserTOTP,
+    code: str,
+    session_id: uuid.UUID,
+) -> None:
+    """Check an authenticator code, recording it as used if it's valid.
+
+    Codes are six digits, so wrong ones are limited per day for the sign-in
+    entering them, which locks only that sign-in, so a stolen one can't
+    lock out the owner, and for the account, so signing in again doesn't
+    give more guesses. The user hears when either runs out. A code can't be
+    used twice, so one seen over a shoulder or in a log is worthless.
+    """
+    # Locked, so parallel guesses can't all get in under the limit, and a
+    # code can't be used twice at once
+    session.refresh(totp, with_for_update=True)
+    wrong_today = get_daily_count(
+        session,
+        user,
+        "wrong-totp-codes",
+        WRONG_TOTP_CODES_PER_DAY,
+        "Too many wrong codes today; try again tomorrow",
+    )
+    wrong_here = get_daily_count(
+        session,
+        user,
+        f"totp:{session_id.hex[:27]}",
+        TOTP_MAX_FAILED_ATTEMPTS,
+        "Too many wrong codes; sign in again to try more",
+    )
+    step = match_totp_step(decrypt_secret(totp.secret), code)
+    if step is None or (
+        totp.last_used_step is not None and step <= totp.last_used_step
+    ):
+        wrong_today.count += 1
+        wrong_here.count += 1
+        locked = (
+            wrong_today.count >= WRONG_TOTP_CODES_PER_DAY
+            or wrong_here.count >= TOTP_MAX_FAILED_ATTEMPTS
+        )
+        session.add(wrong_today)
+        session.add(wrong_here)
+        session.commit()
+        if locked and settings.emails_enabled:
+            # Counts start over at midnight UTC
+            now = utcnow()
+            tomorrow = datetime.combine(
+                now.date() + timedelta(days=1), datetime.min.time()
+            )
+            email_data = generate_two_factor_locked_email(
+                email_to=user.email,
+                minutes=int((tomorrow - now).total_seconds() // 60) + 1,
+            )
+            send_email(
+                email_to=user.email,
+                subject=email_data.subject,
+                html_content=email_data.html_content,
+            )
+        raise HTTPException(400, "Invalid code")
+    # This sign-in starts over, and other sign-ins' counts from before
+    # today are done with
+    session.delete(wrong_here)
+    stale = session.exec(
+        select(UserDailyCount)
+        .where(UserDailyCount.user_id == user.id)
+        .where(col(UserDailyCount.kind).startswith("totp:"))
+        .where(UserDailyCount.day < utcnow().date())
+    ).all()
+    for row in stale:
+        session.delete(row)
+    totp.last_used_step = step
+    totp.last_verified_at = utcnow()
+    session.add(totp)
+    session.commit()
+
+
+def create_second_factor_token(user: User, session_id: uuid.UUID) -> str:
+    """A token for the session that just entered a second factor."""
+    return security_create_second_factor_token(
+        user.id, session_id, timedelta(hours=SECOND_FACTOR_HOURS)
+    )
+
+
+def require_second_factor(
+    user: User, session_id: uuid.UUID, token: str | None
+) -> int:
+    """Refuse sensitive actions unless this session entered a second
+    factor recently, returning when that stops counting, in seconds since
+    the epoch.
+
+    What proves it is the token the session got when it entered a code, in
+    an HttpOnly cookie, not a record on the account, so entering a code in
+    one browser doesn't also vouch for every other credential the user has.
+    """
+    totp = user.totp
+    if totp is None or totp.confirmed_at is None:
+        raise HTTPException(403, SECOND_FACTOR_SETUP_REQUIRED)
+    payload = decode_second_factor_token(token) if token else None
+    if (
+        payload is None
+        or payload.get("sub") != str(user.id)
+        or payload.get("sid") != str(session_id)
+    ):
+        raise HTTPException(403, SECOND_FACTOR_REQUIRED)
+    # Tokens from before it was last set up don't count
+    issued = datetime.fromtimestamp(payload.get("iat", 0), tz=UTC).replace(
+        tzinfo=None
+    )
+    if issued < totp.confirmed_at.replace(microsecond=0):
+        raise HTTPException(403, SECOND_FACTOR_REQUIRED)
+    return int(payload["exp"])

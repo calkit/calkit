@@ -40,6 +40,14 @@ const vscodeStub = {
   Uri: {
     file: (f: string) => ({ fsPath: f, scheme: "file", path: f }),
   },
+  Range: class Range {
+    constructor(
+      public readonly startLine: number,
+      public readonly startCharacter: number,
+      public readonly endLine: number,
+      public readonly endCharacter: number,
+    ) {}
+  },
 };
 
 // Inject it into require cache before importing sidebar.ts
@@ -270,4 +278,91 @@ test("questions show their H A V V row once checked, and their sign-offs", () =>
     "Read it.\n\nthe question was edited after it",
   );
   assert.equal((validated.iconPath as any).id, "warning");
+  // Evidence with no kind is a file, opened at the lines it cites, unless a
+  // key makes it a result
+  provider.refresh(
+    "/workspace",
+    {
+      questions: [
+        {
+          question: "Where did it go wrong?",
+          answer: "In the write-up.",
+          evidence: [
+            { path: "results/run/RESULTS.md", lines: "8-12" },
+            { kind: null, path: "logs/agent.txt", lines: 3 },
+            { path: "results/fit.json", key: "E" },
+            { kind: "figure", path: "figures/fit.png" },
+          ],
+        },
+      ],
+    },
+    undefined,
+    new Set(),
+  );
+  const [question] = provider.getChildren(section);
+  const evidence = provider.getChildren(question).slice(1);
+  assert.deepEqual(
+    evidence.map((e) => e.description),
+    [
+      "results/run/RESULTS.md, lines 8–12",
+      "logs/agent.txt, line 3",
+      "results/fit.json",
+      "figures/fit.png",
+    ],
+  );
+  assert.deepEqual(
+    evidence.map((e) => (e.iconPath as any).id),
+    ["file", "file", "graph", "file-media"],
+  );
+  const selection = evidence[0].command?.arguments?.[1].selection;
+  assert.equal(selection.startLine, 7);
+  assert.equal(selection.endLine, 11);
+  assert.equal(evidence[2].command?.arguments?.length, 1);
+});
+
+test("an artifact someone created has an origin, wherever it's recorded", () => {
+  const provider = new CalkitSidebarProvider();
+  provider.refresh(
+    "/workspace",
+    {
+      datasets: [{ path: "data/other.csv" }],
+      figures: [{ path: "figures/drawn.svg", created_by: { name: "Sam" } }],
+      // Recorded under misc, as the hub once did for data
+      misc: [
+        {
+          path: "data/runs",
+          created_by: [{ name: "Pat Lee", email: "pat@example.com" }],
+        },
+      ],
+    },
+    undefined,
+    new Set(),
+    undefined,
+    [],
+    ["figures/plot.png"],
+    ["data/runs"],
+  );
+  // Only what says nothing of where it came from needs attention
+  assert.equal(provider.getAttentionCount(), 2);
+  const p = provider as any;
+  const runs = p
+    .getArtifactItems("datasets")
+    .find(
+      (i: { description?: string; label?: string; tooltip?: string }) =>
+        i.description === "data/runs",
+    );
+  assert.equal(runs.tooltip, "data/runs — created by Pat Lee");
+  const props = p.getArtifactProps("data/runs", "dataset");
+  const created = props.find(
+    (i: { description?: string; label?: string; tooltip?: string }) =>
+      i.label === "Created by",
+  );
+  assert.equal(created.description, "Pat Lee");
+  const other = p
+    .getArtifactItems("datasets")
+    .find(
+      (i: { description?: string; label?: string; tooltip?: string }) =>
+        i.description === "data/other.csv",
+    );
+  assert.equal(other.tooltip, "data/other.csv — no source defined");
 });

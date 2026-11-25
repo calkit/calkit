@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.exc import DataError
-from sqlmodel import Field, SQLModel, select
+from sqlmodel import Field, Session, SQLModel, select
 
 import app.github
 import app.stripe
@@ -272,9 +272,33 @@ def post_org(
     )
 
 
+OrgRole = Literal["read", "write", "admin", "owner"]
+
+
+def _get_org_role(org: Org, user: User) -> str | None:
+    for membership in org.user_memberships:
+        if membership.user_id == user.id:
+            return membership.role_name
+    return None
+
+
+def _check_can_manage_members(org: Org, current_user: User) -> str | None:
+    """Raise a 403 unless the user is a superuser or an org owner or admin.
+
+    Returns the current user's role in the org, if any.
+    """
+    role = _get_org_role(org=org, user=current_user)
+    if current_user.is_superuser:
+        return role
+    if role not in ["owner", "admin"]:
+        logger.info("User is not an admin or owner of this org")
+        raise HTTPException(403)
+    return role
+
+
 class OrgMemberPost(BaseModel):
     username: str
-    role: Literal["read", "write", "admin", "owner"]
+    role: OrgRole
 
 
 @router.post("/orgs/{org_name}/members")
@@ -288,37 +312,135 @@ def add_org_member(
     if org is None:
         logger.info("Org '{org_name}' does not exist")
         raise HTTPException(404)
-    # Ensure the current user is an org admin or owner
-    role = None
-    for membership in current_user.org_memberships:
-        if membership.org.account.name == org_name:
-            role = membership.role_name
-    if role not in ["owner", "admin"]:
-        logger.info("User is not an admin or owner of this org")
-        raise HTTPException(403)
+    _check_can_manage_members(org=org, current_user=current_user)
     # TODO: Check that this user is a member of the GitHub org?
-    user_query = select(User).where(User.account.has(name=req.username))
+    user_query = select(User).where(
+        User.account.has(name=req.username.lower())
+    )
     user = session.exec(user_query).first()
     if user is None:
         logger.info("Requested user does not exist")
         raise HTTPException(404, "User does not exist")
     if user in [m.user for m in org.user_memberships]:
         raise HTTPException(400, "User already exists in org")
-    # Make sure this org has enough seats left
-    subscription = org.subscription
-    if not org.subscription_valid:
-        logger.info(f"Org {org_name} has no valid subscription")
-        raise HTTPException(400, "No valid subscription")
-    n_users = subscription.n_users
-    taken = len(org.user_memberships)
-    left = n_users - taken
-    if left <= 0:
-        logger.info("No seats left")
-        raise HTTPException(400, "No more seats left for this org")
+    # Superusers bypass seat limits so they can repair an org's membership
+    # without changing its subscription
+    if not current_user.is_superuser:
+        # Make sure this org has enough seats left
+        subscription = org.subscription
+        if not org.subscription_valid:
+            logger.info(f"Org {org_name} has no valid subscription")
+            raise HTTPException(400, "No valid subscription")
+        n_users = subscription.n_users
+        taken = len(org.user_memberships)
+        left = n_users - taken
+        if left <= 0:
+            logger.info("No seats left")
+            raise HTTPException(400, "No more seats left for this org")
     membership = UserOrgMembership(
         user=user, org=org, role_id=ROLE_IDS[req.role]
     )
     session.add(membership)
+    session.commit()
+    return Message(message="success")
+
+
+def _get_member_to_modify(
+    org: Org,
+    username: str,
+    new_role: str | None,
+    current_user: User,
+    session: Session,
+) -> UserOrgMembership:
+    """Get a membership the current user may change to ``new_role``.
+
+    A ``new_role`` of ``None`` means removal. Only owners and superusers may
+    touch owners or grant the owner role, and nobody may remove or demote the
+    org's last owner.
+
+    Locks the org's row until the caller commits, so concurrent changes to its
+    members are each checked against what the others committed.
+    """
+    session.exec(select(Org).where(Org.id == org.id).with_for_update()).one()
+    # Memberships read before the lock may be stale
+    session.expire_all()
+    current_role = _check_can_manage_members(
+        org=org, current_user=current_user
+    )
+    user_query = select(User).where(
+        User.account.has(name=username.lower())  # type: ignore[attr-defined]
+    )
+    user = session.exec(user_query).first()
+    if user is None:
+        raise HTTPException(404, "User does not exist")
+    membership = None
+    for m in org.user_memberships:
+        if m.user_id == user.id:
+            membership = m
+    if membership is None:
+        raise HTTPException(404, "User is not a member of this org")
+    touches_owner = membership.role_name == "owner" or new_role == "owner"
+    if (
+        touches_owner
+        and current_role != "owner"
+        and not current_user.is_superuser
+    ):
+        raise HTTPException(403, "Only org owners can manage owners")
+    if membership.role_name == "owner" and new_role != "owner":
+        n_owners = sum(m.role_name == "owner" for m in org.user_memberships)
+        if n_owners <= 1:
+            raise HTTPException(400, "Cannot remove the org's last owner")
+    return membership
+
+
+class OrgMemberPatch(BaseModel):
+    role: OrgRole
+
+
+@router.patch("/orgs/{org_name}/members/{username}")
+def update_org_member(
+    org_name: str,
+    username: str,
+    req: OrgMemberPatch,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Message:
+    org = get_org_from_db(org_name=org_name, session=session)
+    if org is None:
+        logger.info(f"Org '{org_name}' does not exist")
+        raise HTTPException(404)
+    membership = _get_member_to_modify(
+        org=org,
+        username=username,
+        new_role=req.role,
+        current_user=current_user,
+        session=session,
+    )
+    membership.role_id = ROLE_IDS[req.role]
+    session.add(membership)
+    session.commit()
+    return Message(message="success")
+
+
+@router.delete("/orgs/{org_name}/members/{username}")
+def delete_org_member(
+    org_name: str,
+    username: str,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Message:
+    org = get_org_from_db(org_name=org_name, session=session)
+    if org is None:
+        logger.info(f"Org '{org_name}' does not exist")
+        raise HTTPException(404)
+    membership = _get_member_to_modify(
+        org=org,
+        username=username,
+        new_role=None,
+        current_user=current_user,
+        session=session,
+    )
+    session.delete(membership)
     session.commit()
     return Message(message="success")
 
@@ -462,7 +584,7 @@ def get_org_storage(
 
 class OrgUserPublic(BaseModel):
     name: str
-    github_name: str
+    github_name: str | None
     role: str
 
 
@@ -476,12 +598,8 @@ def get_org_users(
     if org is None:
         logger.info(f"Org '{org_name}' does not exist")
         raise HTTPException(404)
-    # Ensure the current user is an org admin or owner
-    role = None
-    for membership in current_user.org_memberships:
-        if membership.org.account.name == org_name:
-            role = membership.role_name
-    if role is None:
+    role = _get_org_role(org=org, user=current_user)
+    if role is None and not current_user.is_superuser:
         logger.info("User is not a member of this org")
         raise HTTPException(403)
     resp = []

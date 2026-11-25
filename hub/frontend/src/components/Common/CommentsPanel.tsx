@@ -25,6 +25,7 @@ import { FaCheck, FaGithub, FaReply, FaUndo } from "react-icons/fa"
 
 import type { ProjectComment } from "../../client"
 import LoadingSpinner from "./LoadingSpinner"
+import { safeHref } from "../../lib/strings"
 
 // Normalized comment shape the panel renders, independent of which backend
 // (ProjectComment vs ReleaseComment) produced it. Callers map their SDK type
@@ -208,7 +209,7 @@ export default function CommentsPanel({
             </Text>
             {c.externalUrl && (
               <Link
-                href={c.externalUrl}
+                href={safeHref(c.externalUrl)}
                 isExternal
                 color="gray.500"
                 onClick={(e) => e.stopPropagation()}

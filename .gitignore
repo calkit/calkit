@@ -5,6 +5,7 @@ dev.ipynb
 site
 .env
 .venv
+.pixi
 .coverage*
 coverage.xml
 import.log

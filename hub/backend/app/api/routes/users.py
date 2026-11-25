@@ -2,27 +2,37 @@
 
 import logging
 import secrets
+import urllib.parse
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, Sequence
+from typing import Annotated, Any, Literal, Sequence
 
 import requests
 import sqlalchemy
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import Field, col, func, or_, select
 
 import app.projects
+import app.storage
 import app.stripe
+import app.tasks
 from app import mixpanel, users, zotero
 from app.api.deps import (
+    PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
     PAT_VERIFIER_LENGTH_BYTES,
+    CurrentSession,
     CurrentUser,
+    NoMachineSessionToken,
     SessionDep,
+    SessionUser,
+    SignedIn,
+    TokenDep,
     get_current_active_superuser,
+    get_current_session,
 )
 from app.api.routes.login import CLI_LOGIN_DESCRIPTION
 from app.config import settings
@@ -62,10 +72,16 @@ from app.models import (
 )
 from app.security import (
     get_password_hash,
+    hash_token_verifier,
     verify_password,
 )
 from app.storage import get_storage_usage
-from app.subscriptions import PLAN_IDS, get_monthly_price, get_storage_limit
+from app.subscriptions import (
+    PLAN_IDS,
+    get_account_storage_limit,
+    get_monthly_price,
+    get_storage_limit,
+)
 from app.zenodo import AUTH_URL as ZENODO_AUTH_URL
 from calkit.overleaf import AuthError, WebClient
 
@@ -195,10 +211,21 @@ def create_user(*, session: SessionDep, user_in: UserCreate) -> UserPublic:
 
 @router.patch("/user")
 def update_current_user(
-    *, session: SessionDep, user_in: UserUpdateMe, current_user: CurrentUser
+    *,
+    session: SessionDep,
+    user_in: UserUpdateMe,
+    current_user: CurrentUser,
+    token: TokenDep,
 ) -> UserPublic:
-    """Update own user."""
-    if user_in.email:
+    """Update own user.
+
+    Changing the email takes a signed-in session, not a token.
+    """
+    if user_in.email and user_in.email.lower() == current_user.email.lower():
+        # Same address, so only the case changes
+        current_user.email = user_in.email
+    elif user_in.email:
+        signed_in = get_current_session(session, token)
         existing_user = users.get_user_by_email(
             session=session, email=user_in.email
         )
@@ -206,7 +233,16 @@ def update_current_user(
             raise HTTPException(
                 status_code=409, detail="User with this email already exists"
             )
-    user_data = user_in.model_dump(exclude_unset=True)
+        users.change_email(
+            session=session,
+            user=current_user,
+            new_email=user_in.email,
+            code=user_in.email_code,
+            keep_session=signed_in.session_id,
+        )
+    user_data = user_in.model_dump(
+        exclude_unset=True, exclude={"email", "email_code"}
+    )
     current_user.sqlmodel_update(user_data)
     session.add(current_user)
     session.commit()
@@ -214,11 +250,43 @@ def update_current_user(
     return current_user
 
 
+class EmailChangeCode(BaseModel):
+    email: EmailStr
+
+
+@router.post("/user/email-change-code")
+def post_user_email_change_code(
+    req: EmailChangeCode, signed_in: CurrentSession, session: SessionDep
+) -> Message:
+    """Email the current address a code for changing it to another, which
+    only works for that address.
+    """
+    if not settings.emails_enabled:
+        raise HTTPException(503, "Email isn't configured on this server")
+    users.send_email_change_code(
+        session=session, user=signed_in.user, new_email=req.email
+    )
+    return Message(message="Code sent")
+
+
+@router.post("/user/sessions/end-others")
+def post_user_sessions_end_others(
+    session: SessionDep, signed_in: CurrentSession
+) -> Message:
+    """Sign out of every other session, e.g., other browsers and CLIs."""
+    users.end_sign_in_sessions(
+        session=session, user=signed_in.user, keep=signed_in.session_id
+    )
+    session.commit()
+    return Message(message="Signed out of other sessions")
+
+
 @router.patch("/user/password")
 def update_current_user_password(
-    *, session: SessionDep, body: UpdatePassword, current_user: CurrentUser
+    *, session: SessionDep, body: UpdatePassword, signed_in: CurrentSession
 ) -> Message:
-    """Update own password."""
+    """Update own password, signing out everywhere else."""
+    current_user = signed_in.user
     if not verify_password(
         body.current_password, current_user.hashed_password
     ):
@@ -231,6 +299,9 @@ def update_current_user_password(
     hashed_password = get_password_hash(body.new_password)
     current_user.hashed_password = hashed_password
     session.add(current_user)
+    users.end_sign_in_sessions(
+        session=session, user=current_user, keep=signed_in.session_id
+    )
     session.commit()
     return Message(message="Password updated successfully")
 
@@ -725,16 +796,39 @@ class TokenResp(UserTokenPublic, Token):
     pass
 
 
-@router.post("/user/tokens")
+@router.post("/user/tokens", dependencies=[NoMachineSessionToken])
 def post_user_token(
-    session: SessionDep, current_user: CurrentUser, req: TokenPost
+    session: SessionDep,
+    current_user: CurrentUser,
+    access_token: TokenDep,
+    req: TokenPost,
 ) -> TokenResp:
+    """Create a personal access token.
+
+    A full one takes a signed-in session, so a token can't mint more of
+    itself, while one scoped to DVC, which the CLI makes, doesn't. Neither
+    can be made with a linked machine's session token, which would then
+    outlive it.
+    """
+    if req.scope is None:
+        get_current_session(session, access_token)
+    # One made with a machine's CLI token is the machine's too, so revoking
+    # the machine revokes it
+    machine_id = None
+    if access_token.startswith("ckp_"):
+        caller = session.exec(
+            select(UserToken).where(
+                UserToken.selector == access_token[4:PAT_SELECTOR_END_CHAR_IDX]
+            )
+        ).first()
+        if caller is not None:
+            machine_id = caller.machine_id
     # Generate a random token and hash it
     # Prepend 'ckp_' to indicate it's a Calkit user personal access token
     selector = secrets.token_hex(PAT_SELECTOR_LENGTH_BYTES)
     verifier = secrets.token_hex(PAT_VERIFIER_LENGTH_BYTES)
     token_str = f"ckp_{selector}{verifier}"
-    hashed_verifier = get_password_hash(verifier)
+    hashed_verifier = hash_token_verifier(verifier)
     token = UserToken(
         user_id=current_user.id,
         expires=utcnow() + timedelta(days=req.expires_days),
@@ -743,6 +837,7 @@ def post_user_token(
         selector=selector,
         hashed_verifier=hashed_verifier,
         description=req.description,
+        machine_id=machine_id,
     )
     session.add(token)
     session.commit()
@@ -761,6 +856,7 @@ class TokenPatch(BaseModel):
 def patch_user_token(
     session: SessionDep,
     current_user: CurrentUser,
+    access_token: TokenDep,
     token_id: uuid.UUID,
     req: TokenPatch,
 ) -> UserTokenPublic:
@@ -769,6 +865,13 @@ def patch_user_token(
         raise HTTPException(404)
     if token.user_id != current_user.id:
         raise HTTPException(403, "Not your token")
+    # Turning one back on takes a signed-in session, since it may have been
+    # turned off for leaking, and a machine's stay off, since they're turned
+    # off when it's revoked or issued a new one
+    if req.is_active and not token.is_active:
+        get_current_session(session, access_token)
+        if token.machine_id is not None:
+            raise HTTPException(409, "A machine's token can't be turned on")
     token.is_active = req.is_active
     session.commit()
     session.refresh(token)
@@ -825,6 +928,11 @@ class ConnectedAccounts(BaseModel):
     overleaf_session: bool = False
     google: bool
     zotero: bool
+    huggingface: bool = False
+    box: bool = False
+    # Which account each connected service is, where known, e.g., a username
+    # or email, by provider
+    account_names: dict[str, str] = {}
     # Whether a Calkit CLI has ever authenticated as this user, which is the
     # only reliable way to know the CLI is installed: the local server it
     # would otherwise be detected by is usually not running.
@@ -893,6 +1001,39 @@ def get_user_connected_accounts(
         ).one()
         > 0
     )
+    huggingface_connected = False
+    try:
+        users.get_huggingface_token(session=session, user=current_user)
+        huggingface_connected = True
+    except HTTPException as e:
+        # An outage doesn't mean the account was disconnected
+        huggingface_connected = e.status_code == 503
+    box_connected = False
+    try:
+        users.get_box_token(session=session, user=current_user)
+        box_connected = True
+    except HTTPException as e:
+        box_connected = e.status_code == 503
+    account_names = {}
+    if github_connected and current_user.github_username:
+        account_names["github"] = current_user.github_username
+    for provider, connected in (
+        ("google", google_connected),
+        ("huggingface", huggingface_connected),
+        ("box", box_connected),
+        ("zotero", zotero_cred is not None),
+    ):
+        credential = current_user.get_external_credential(provider=provider)
+        if not connected or credential is None:
+            continue
+        metadata = credential.metadata_json or {}
+        name = metadata.get("login") or metadata.get("username")
+        name = name or credential.provider_account_id
+        # Since one may be at a university, for example
+        if metadata.get("enterprise"):
+            name = f"{name} ({metadata['enterprise']})"
+        if name:
+            account_names[provider] = str(name)
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
@@ -901,6 +1042,9 @@ def get_user_connected_accounts(
         overleaf_session=overleaf_session,
         google=google_connected,
         zotero=zotero_cred is not None,
+        huggingface=huggingface_connected,
+        box=box_connected,
+        account_names=account_names,
         cli=cli_connected,
     )
 
@@ -952,7 +1096,7 @@ class ExternalTokenResponse(BaseModel):
     access_token: str
 
 
-@router.get("/user/zenodo-token")
+@router.get("/user/zenodo-token", dependencies=[NoMachineSessionToken])
 def get_user_zenodo_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:
@@ -960,7 +1104,7 @@ def get_user_zenodo_token(
     return ExternalTokenResponse(access_token=token)
 
 
-@router.get("/user/github-token")
+@router.get("/user/github-token", dependencies=[NoMachineSessionToken])
 def get_user_github_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:
@@ -976,6 +1120,186 @@ class TokenPut(BaseModel):
 class OAuthCodeExchange(BaseModel):
     code: str
     redirect_uri: str
+
+
+class HuggingFaceAuthStartRequest(BaseModel):
+    # Generated and checked by the browser, for CSRF protection
+    state: str
+
+
+class HuggingFaceAuthStart(BaseModel):
+    authorize_url: str
+    redirect_uri: str
+
+
+# Enough to create buckets
+HF_OAUTH_SCOPES = "openid profile manage-repos"
+
+
+@router.post("/user/huggingface-auth/start")
+def post_user_huggingface_auth_start(
+    current_user: CurrentUser, req: HuggingFaceAuthStartRequest
+) -> HuggingFaceAuthStart:
+    """Get the URL to send the user to for connecting Hugging Face.
+
+    It's built here since the client ID is only configured on the backend.
+    """
+    if not settings.HF_CLIENT_ID:
+        raise HTTPException(501, "Hugging Face isn't configured on this hub")
+    redirect_uri = f"{settings.frontend_host.rstrip('/')}/auth/huggingface"
+    params = urllib.parse.urlencode(
+        dict(
+            client_id=settings.HF_CLIENT_ID,
+            redirect_uri=redirect_uri,
+            scope=HF_OAUTH_SCOPES,
+            state=req.state,
+            response_type="code",
+        )
+    )
+    return HuggingFaceAuthStart(
+        authorize_url=f"https://huggingface.co/oauth/authorize?{params}",
+        redirect_uri=redirect_uri,
+    )
+
+
+@router.post("/user/huggingface-auth")
+def post_user_huggingface_auth(
+    session: SessionDep,
+    current_user: CurrentUser,
+    req: OAuthCodeExchange,
+) -> Message:
+    """Connect Hugging Face using an authorization code."""
+    if not settings.HF_CLIENT_ID or not settings.HF_CLIENT_SECRET:
+        raise HTTPException(501, "Hugging Face isn't configured on this hub")
+    resp = requests.post(
+        users.HF_TOKEN_URL,
+        data=dict(
+            grant_type="authorization_code",
+            code=req.code,
+            redirect_uri=req.redirect_uri,
+        ),
+        auth=(settings.HF_CLIENT_ID, settings.HF_CLIENT_SECRET),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        logger.error(
+            f"Hugging Face auth failed: {resp.status_code} {resp.text[:200]}"
+        )
+        raise HTTPException(400, "Failed to authenticate with Hugging Face")
+    first = (
+        users.get_external_credential(
+            session=session, user=current_user, provider="huggingface"
+        )
+        is None
+    )
+    users.save_huggingface_token(
+        session=session,
+        user=current_user,
+        hf_resp=resp.json(),
+        new_login=True,
+    )
+    mixpanel.user_connected_huggingface(current_user, first=first)
+    return Message(message="success")
+
+
+class HuggingFaceAccount(BaseModel):
+    username: str | None
+    # Namespaces the user granted access to, where storage can be created
+    orgs: list[str]
+
+
+@router.get("/user/huggingface-account")
+def get_user_huggingface_account(
+    session: SessionDep, current_user: CurrentUser
+) -> HuggingFaceAccount:
+    # Validates, and refreshes if needed
+    users.get_huggingface_token(session=session, user=current_user)
+    credential = current_user.get_external_credential(provider="huggingface")
+    assert credential is not None
+    return HuggingFaceAccount(
+        username=credential.provider_account_id,
+        orgs=(credential.metadata_json or {}).get("orgs", []),
+    )
+
+
+class BoxAuthStartRequest(BaseModel):
+    # Generated and checked by the browser, for CSRF protection
+    state: str
+
+
+class BoxAuthStart(BaseModel):
+    authorize_url: str
+    redirect_uri: str
+
+
+# Box has no scope limited to one folder; clients only get tokens downscoped
+# to their project's
+BOX_OAUTH_SCOPES = "root_readwrite"
+
+
+@router.post("/user/box-auth/start")
+def post_user_box_auth_start(
+    current_user: CurrentUser, req: BoxAuthStartRequest
+) -> BoxAuthStart:
+    """Get the URL to send the user to for connecting Box.
+
+    It's built here since the client ID is only configured on the backend.
+    """
+    if not settings.BOX_CLIENT_ID:
+        raise HTTPException(501, "Box isn't configured on this hub")
+    redirect_uri = f"{settings.frontend_host.rstrip('/')}/auth/box"
+    params = urllib.parse.urlencode(
+        dict(
+            client_id=settings.BOX_CLIENT_ID,
+            redirect_uri=redirect_uri,
+            scope=BOX_OAUTH_SCOPES,
+            state=req.state,
+            response_type="code",
+        )
+    )
+    return BoxAuthStart(
+        authorize_url=f"https://account.box.com/api/oauth2/authorize?{params}",
+        redirect_uri=redirect_uri,
+    )
+
+
+@router.post("/user/box-auth")
+def post_user_box_auth(
+    session: SessionDep,
+    current_user: CurrentUser,
+    req: OAuthCodeExchange,
+) -> Message:
+    """Connect Box using an authorization code."""
+    if not settings.BOX_CLIENT_ID or not settings.BOX_CLIENT_SECRET:
+        raise HTTPException(501, "Box isn't configured on this hub")
+    resp = requests.post(
+        users.BOX_TOKEN_URL,
+        data=dict(
+            grant_type="authorization_code",
+            code=req.code,
+            redirect_uri=req.redirect_uri,
+            client_id=settings.BOX_CLIENT_ID,
+            client_secret=settings.BOX_CLIENT_SECRET,
+        ),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        logger.error(f"Box auth failed: {resp.status_code} {resp.text[:200]}")
+        raise HTTPException(400, "Failed to authenticate with Box")
+    first = (
+        users.get_external_credential(
+            session=session, user=current_user, provider="box"
+        )
+        is None
+    )
+    users.save_box_token(
+        session=session,
+        user=current_user,
+        box_resp=resp.json(),
+        new_login=True,
+    )
+    mixpanel.user_connected_box(current_user, first=first)
+    return Message(message="success")
 
 
 @router.put("/user/overleaf-token")
@@ -1068,7 +1392,7 @@ def post_user_google_auth(
 @router.post("/user/github-auth")
 def post_user_github_auth(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: SessionUser,
     req: OAuthCodeExchange,
 ) -> Message:
     """Link a GitHub account to the signed-in user.
@@ -1077,6 +1401,8 @@ def post_user_github_auth(
     GitHub identity; logging in through GitHub is a separate flow that
     resolves an account rather than attaching to one.
     """
+    # It takes a signed-in session, not a token, since the GitHub account
+    # can then sign in
     logger.info(f"Received GitHub auth request for user {current_user.email}")
     resp = requests.get(
         "https://github.com/login/oauth/access_token",
@@ -1197,7 +1523,7 @@ def post_user_zotero_auth(
     return Message(message="success")
 
 
-@router.get("/user/overleaf-token")
+@router.get("/user/overleaf-token", dependencies=[NoMachineSessionToken])
 def get_user_overleaf_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:
@@ -1207,13 +1533,89 @@ def get_user_overleaf_token(
 
 @router.delete("/user/external-credentials/{provider}")
 def delete_user_external_credential(
-    session: SessionDep, current_user: CurrentUser, provider: str
+    session: SessionDep,
+    current_user: CurrentUser,
+    provider: str,
+    storage_action: Literal["transfer", "orphan"] | None = None,
 ) -> Message:
-    """Disconnect an external account by deleting its credential."""
+    """Disconnect an external account by deleting its credential.
+
+    Storage reached with the account, e.g., HF buckets, would become
+    unreachable, so if there is any, ``storage_action`` says what to do with
+    it: ``transfer`` its objects to the hub's own storage first, which
+    happens on the worker, with the account disconnected once it's done,
+    or ``orphan`` them, i.e., leave them where they are, out of reach of
+    their projects. Nothing is deleted from the service either way.
+    """
     if provider == "github":
         raise HTTPException(
             403, "Cannot disconnect GitHub as it is your login method"
         )
+    resources = app.storage.get_credential_resources(
+        session, current_user.id, provider=provider
+    )
+    service_name = app.storage.STORAGE_PROVIDER_NAMES.get(provider)
+    if (
+        service_name is not None
+        and app.tasks.get_storage_transfer_status(current_user.id)[0]
+        == "running"
+    ):
+        raise HTTPException(
+            409, "Transfer to Calkit Hub storage already running"
+        )
+    if resources and storage_action is None:
+        raise HTTPException(
+            409, "Storage uses this account; transfer or orphan it"
+        )
+    if resources:
+        assert storage_action is not None
+        mixpanel.user_disconnected_with_storage(
+            current_user,
+            provider,
+            storage_action,
+            n_storage=len(resources),
+            n_projects=len(
+                {
+                    p.id
+                    for r in resources
+                    for p in app.storage.get_resource_projects(session, r)
+                }
+            ),
+        )
+    if resources and storage_action == "transfer":
+        # Everything has to fit in each owner's plan
+        needed: dict[str, float] = {}
+        for resource in resources:
+            for owner_name, gb in app.storage.get_resource_gb_to_copy(
+                session, resource
+            ).items():
+                needed[owner_name] = needed.get(owner_name, 0) + gb
+        for resource in resources:
+            account = resource.owner_account
+            if account.name not in needed:
+                continue
+            used = get_storage_usage(account.name)
+            limit = get_account_storage_limit(account)
+            if used + needed[account.name] > limit:
+                raise HTTPException(
+                    413,
+                    f"{needed[account.name]:.2f} GB from {service_name} "
+                    f"won't fit in {account.name}'s Calkit Hub storage "
+                    f"({used:.2f} of {limit} GB used)",
+                )
+        # The job switches each project to the hub's own storage before
+        # copying its objects, with reads falling back to the service until
+        # then
+        if not app.tasks.enqueue_storage_transfer(
+            str(current_user.id), provider
+        ):
+            raise HTTPException(503, "Transfers unavailable")
+        return Message(
+            message=f"Transferring files to Calkit Hub storage; "
+            f"{service_name} disconnects when done"
+        )
+    for resource in resources:
+        session.delete(resource)
     credential = users.get_external_credential(
         session=session,
         user=current_user,
@@ -1221,6 +1623,8 @@ def delete_user_external_credential(
         label="default",
     )
     if credential:
+        if provider == "box":
+            users.revoke_box_token(credential)
         session.delete(credential)
     # Also delete legacy tokens if they exist
     if provider == "zenodo" and current_user.zenodo_token:
@@ -1382,3 +1786,179 @@ def delete_user_onboarding_flag(
             done=False,
         )
     return Message(message="Success")
+
+
+class TOTPStatus(BaseModel):
+    enabled: bool
+    # Whether this session entered a code recently enough for sensitive
+    # actions, as proven by the cookie it got for doing so, and until when
+    verified: bool
+    verified_until: datetime | None = None
+
+
+SecondFactorCookie = Annotated[
+    str | None, Cookie(alias=users.SECOND_FACTOR_COOKIE)
+]
+
+
+def _totp_status(
+    signed_in: SignedIn, second_factor_token: str | None = None
+) -> TOTPStatus:
+    totp = signed_in.user.totp
+    enabled = totp is not None and totp.confirmed_at is not None
+    try:
+        expires = users.require_second_factor(
+            signed_in.user, signed_in.session_id, second_factor_token
+        )
+    except HTTPException:
+        return TOTPStatus(enabled=enabled, verified=False)
+    return TOTPStatus(
+        enabled=enabled,
+        verified=True,
+        verified_until=datetime.fromtimestamp(expires, tz=UTC),
+    )
+
+
+def _totp_status_with_cookie(
+    signed_in: SignedIn, response: Response
+) -> TOTPStatus:
+    """The status after a code was entered, setting the cookie that proves
+    it for this session.
+    """
+    token = users.create_second_factor_token(
+        signed_in.user, signed_in.session_id
+    )
+    response.set_cookie(
+        users.SECOND_FACTOR_COOKIE,
+        token,
+        max_age=users.SECOND_FACTOR_HOURS * 3600,
+        path="/",
+        secure=settings.ENVIRONMENT != "local",
+        httponly=True,
+        samesite="strict",
+    )
+    return _totp_status(signed_in, token)
+
+
+@router.get("/user/totp")
+def get_user_totp(
+    signed_in: CurrentSession, second_factor: SecondFactorCookie = None
+) -> TOTPStatus:
+    """Whether two-factor authentication is set up, and whether this session
+    has entered a code recently.
+    """
+    return _totp_status(signed_in, second_factor)
+
+
+class TOTPSetup(BaseModel):
+    secret: str
+    otpauth_uri: str
+
+
+@router.post("/user/totp")
+def post_user_totp(
+    session: SessionDep, signed_in: CurrentSession
+) -> TOTPSetup:
+    """Start setting up an authenticator app, emailing a code that
+    confirming takes along with one from the app.
+    """
+    from urllib.parse import quote
+
+    current_user = signed_in.user
+    secret = users.start_totp_setup(
+        session, current_user, signed_in.session_id
+    )
+    label = quote(f"Calkit:{current_user.email}")
+    return TOTPSetup(
+        secret=secret,
+        otpauth_uri=f"otpauth://totp/{label}?secret={secret}&issuer=Calkit",
+    )
+
+
+class TOTPCode(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+class TOTPConfirm(TOTPCode):
+    # The code emailed when setup started
+    email_code: str = Field(min_length=6, max_length=8)
+
+
+@router.post("/user/totp/confirm")
+def post_user_totp_confirm(
+    session: SessionDep,
+    signed_in: CurrentSession,
+    req: TOTPConfirm,
+    response: Response,
+) -> TOTPStatus:
+    """Finish setting up an authenticator app with a code from it and the
+    one emailed, in the session that started it.
+    """
+    current_user = signed_in.user
+    totp = current_user.totp
+    if totp is None:
+        raise HTTPException(
+            404, "Two-factor authentication isn't being set up"
+        )
+    if totp.confirmed_at is not None:
+        raise HTTPException(409, "Two-factor authentication is already set up")
+    if totp.setup_session_id != signed_in.session_id:
+        raise HTTPException(
+            409, "Two-factor setup was started in another session"
+        )
+    users.check_totp_setup_email_code(
+        session, current_user, totp, req.email_code
+    )
+    users.check_totp_code(
+        session, current_user, totp, req.code, signed_in.session_id
+    )
+    totp.confirmed_at = utcnow()
+    totp.email_code_hash = None
+    session.add(totp)
+    session.commit()
+    session.refresh(current_user)
+    return _totp_status_with_cookie(signed_in, response)
+
+
+@router.post("/user/totp/verify")
+def post_user_totp_verify(
+    session: SessionDep,
+    signed_in: CurrentSession,
+    req: TOTPCode,
+    response: Response,
+) -> TOTPStatus:
+    """Enter a code, getting an HttpOnly cookie that lets this session take
+    sensitive actions for a while.
+    """
+    current_user = signed_in.user
+    totp = current_user.totp
+    if totp is None or totp.confirmed_at is None:
+        raise HTTPException(404, "Two-factor authentication isn't set up")
+    users.check_totp_code(
+        session, current_user, totp, req.code, signed_in.session_id
+    )
+    session.refresh(current_user)
+    return _totp_status_with_cookie(signed_in, response)
+
+
+@router.delete("/user/totp")
+def delete_user_totp(
+    session: SessionDep, signed_in: CurrentSession, req: TOTPCode
+) -> TOTPStatus:
+    """Turn off two-factor authentication, which takes a current code and
+    signs out every other session.
+    """
+    current_user = signed_in.user
+    totp = current_user.totp
+    if totp is None or totp.confirmed_at is None:
+        raise HTTPException(404, "Two-factor authentication isn't set up")
+    users.check_totp_code(
+        session, current_user, totp, req.code, signed_in.session_id
+    )
+    session.delete(totp)
+    users.end_sign_in_sessions(
+        session=session, user=current_user, keep=signed_in.session_id
+    )
+    session.commit()
+    session.refresh(current_user)
+    return _totp_status(signed_in)

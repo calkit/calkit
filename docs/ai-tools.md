@@ -73,6 +73,24 @@ For Claude Code, create a `CLAUDE.md` at the repo root with the same content
 Calkit ships agent skills covering `calkit.yaml` structure, stage
 kinds, environment types, and CLI commands.
 
+<!-- TODO: needs human review -->
+
+To install Claude Code, Codex, or OpenCode along with Calkit's plugin, run
+one of:
+
+```bash
+calkit install claude
+calkit install codex
+calkit install opencode
+```
+
+If the agent is already installed, this only adds the plugin.
+To update the plugin in every agent on this machine, run:
+
+```bash
+calkit update agent-skills
+```
+
 ### Claude Code
 
 Claude Code supports a plugin system that loads skills on demand.
@@ -98,6 +116,11 @@ This gives you these action skills:
   update automatically
 - **`/calkit:check-questions`**: reviews whether the project's answers still
   follow from their evidence
+- **`/calkit:review-paper`**: helps peer review a manuscript, checking its
+  references, trying to reproduce its results, and filing your comments,
+  while leaving the judgment to you. See
+  [peer reviewing a paper](tutorials/peer-review.md).
+  <!-- TODO: needs human review -->
 - **`/calkit:resolve-merge-conflicts`**: resolves merge conflicts, choosing
   for each pipeline stage which run's results to keep. See
   [merging branches](version-control.md#merging-branches).
@@ -112,12 +135,56 @@ the calkit marketplace, and toggle auto-update on. Or update manually:
 /plugin marketplace update
 ```
 
-### Other AI agents like OpenCode and OpenAI Codex
+<!-- TODO: needs human review -->
 
-Simply run:
+### Codex
+
+Calkit is also a Codex plugin marketplace with the same skills.
+From a terminal, run:
 
 ```bash
-calkit update agent-skills
+codex plugin marketplace add calkit/calkit \
+  --sparse .agents/plugins --sparse agent-plugin
+codex plugin add calkit@calkit
+```
+
+The `--sparse` options keep Codex from cloning the whole Calkit repo.
+You can also run `/plugins` in Codex and install it from the Calkit tab.
+Start a new session afterward.
+Type `$` to select a skill like `calkit:create-pipeline` explicitly.
+
+Codex checks for updates when it starts and installs them automatically.
+To update by hand, run:
+
+```bash
+codex plugin marketplace upgrade calkit
+```
+
+<!-- TODO: needs human review -->
+
+### OpenCode
+
+With OpenCode 2 or newer, run:
+
+```bash
+opencode plugin add 'git+https://github.com/calkit/calkit.git#main::path:agent-plugin'
+```
+
+This adds the skills with a `calkit-` prefix, e.g., `calkit-create-pipeline`.
+OpenCode checks for plugin updates when it starts, but doesn't install them
+on its own.
+To update, run:
+
+```bash
+opencode plugin update
+```
+
+### Other AI agents
+
+For other agents that read skills from `~/.agents/skills`, run:
+
+```bash
+calkit update agent-skills --copy
 ```
 
 This copies skills into `~/.agents/skills`.
@@ -129,8 +196,8 @@ For command details, see the
 
 ## What the Calkit conventions cover
 
-The skills installed by `calkit update agent-skills` (or loaded by the Claude
-Code plugin) include:
+The skills loaded by the plugins (or installed by
+`calkit update agent-skills --copy`) include:
 
 - The `calkit.yaml` schema: All top-level sections and their purpose
 - All pipeline stage kinds and their required/optional fields

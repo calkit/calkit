@@ -45,6 +45,36 @@ pipeline:
       target_path: paper/main.tex
 ```
 
+<!-- TODO: needs human review -->
+
+## Previewing in VS Code
+
+`calkit run` brings everything the document depends on up to date first,
+which can take a while.
+To see how a change to the document looks,
+use the "Preview PDF" button in the editor toolbar for a document a `latex`
+stage builds.
+It builds the document the way its stage does, in the stage's environment,
+with the figures and other inputs as they are, without running the stages
+that make them.
+The PDF goes where the stage puts it,
+and the stage still shows as out of date until `calkit run` builds it,
+if the document or its inputs changed.
+It won't start while the pipeline is running.
+
+For a project whose documents build with a
+[TeX Live environment](environments.md#tex-live),
+`calkit update vscode-config` sets up LaTeX Workshop to build them that way,
+so it also previews each time you save,
+and "Preview PDF" uses the same build.
+Otherwise, LaTeX Workshop builds on save with its own settings,
+and "Preview PDF" builds in a terminal.
+LaTeX Workshop looks for every document's PDF in one place:
+if all the `latex` stages set the same `output_dir`, it looks there,
+so a document no stage builds won't show in its viewer;
+otherwise, it looks beside each document,
+so a stage that puts its PDF elsewhere won't.
+
 ## Using a template
 
 To start a new document from scratch, `calkit new publication` writes the
@@ -64,8 +94,11 @@ calkit new publication paper \
 Available templates are `latex/article` (generic), `latex/ieee-conference`
 (IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
 (chapters, for a thesis or technical report).
-The environment created uses Calkit's LaTeX Docker image,
-which can build all of them.
+
+<!-- TODO: needs human review -->
+
+The environment created is a [TeX Live environment](environments.md#tex-live),
+which downloads the packages a document uses the first time it's built.
 
 ## Packages
 
@@ -78,9 +111,16 @@ Installed packages are kept in the project in `.calkit/local/texmf`,
 which is ignored by Git,
 so they don't need to be installed again on the next build.
 
-Packages are only installed automatically when building with Calkit's
-image, either directly, i.e., with no environment specified,
-or in a Docker environment built from it.
+<!-- TODO: needs human review -->
+
+Packages are only installed automatically in a
+[TeX Live environment](environments.md#tex-live),
+whose lock gains them,
+or a Docker environment built from Calkit's image.
+With no environment specified,
+`calkit latex build` uses the LaTeX installed on your machine if there is
+one, and otherwise a TeX Live environment Calkit keeps for the machine
+in `~/.calkit/texlive`.
 For other images or a LaTeX distribution installed on your machine,
 you'll need to install packages the usual way.
 
@@ -96,9 +136,12 @@ Pass `--no-detect-inputs` to turn this off, and `--input` to add more.
 `calkit xr` detects the same inputs when the command it wraps builds a
 document.
 
-Undeclared inputs mean editing the class file doesn't rebuild the paper, and
-the web app's in-browser editor, which loads exactly what the stage declares,
-can't compile the document at all.
+The stage also depends on whatever the document includes this way when the
+pipeline is compiled, declared or not,
+so a figure added later, e.g., on Overleaf, rebuilds the paper when it
+changes.
+Declaring them still matters for the web app's in-browser editor,
+which loads exactly what the stage declares.
 
 ## Including project components
 
@@ -116,6 +159,11 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
 - `\ckvalue[format]{path}{key}` prints a value from a JSON, YAML, or TOML
   file.
   Keys are separated by dots to reach into nested values, e.g., `fit.slope`.
+  <!-- TODO: needs human review -->
+  For a value saved from a notebook cell, use the notebook's path,
+  e.g., `\ckvalue[.3f]{fit-rates.ipynb}{k_25}`.
+  See [saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells)
+  for more info.
 - `\ckfigure[options]{path}` includes a figure, with the same options as
   `\includegraphics`.
 - `\cktable{path}` includes a table a stage writes.
@@ -158,6 +206,13 @@ build.
 These commands are optional.
 `\includegraphics` and `\input` work as usual for files in the document's
 folder.
+
+<!-- TODO: needs human review -->
+
+A value quoted from a reference rather than computed by the pipeline is
+written `\ckrefval[format]{citation key}{name}`, from what `calkit.yaml`
+records for the reference.
+See [quoting values from references](references.md#quoting-values-from-references).
 
 ### Formatting values
 
@@ -511,6 +566,9 @@ The metadata a thread can have:
   that the thread is about, and `occ`, which occurrence of that text it is.
   Without a highlight, a thread is about the whole paragraph.
 - `issue`: the URL of an issue that mirrors the thread, e.g., on GitHub.
+<!-- TODO: needs human review -->
+- `overleaf`: the ID of the Overleaf comment thread it's kept in step with,
+  set by the [browser extension](browser-ext/index.md#comments-on-the-pdf).
 
 Tools keep any other metadata they don't recognize when they rewrite a
 thread, so newer attributes survive older tools.

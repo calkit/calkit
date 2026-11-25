@@ -1,5 +1,6 @@
 """Tests for ``calkit.reproducibility``."""
 
+import json
 import os
 import subprocess
 
@@ -8,7 +9,10 @@ from calkit.dvc import run_dvc_command
 from calkit.reproducibility import (
     ReproCheck,
     check_reproducibility,
+    find_literals_in_project,
     find_retyped_values,
+    find_scripts_not_in_pipeline,
+    find_unattributed_numbers,
 )
 
 
@@ -109,7 +113,9 @@ def test_check_reproducibility(tmp_dir):
     ]
     # Scripts are the tracked ones no stage names, in either pipeline;
     # tooling and environment directories don't count, nor do untracked
-    # files, and a nested project's files are relative to it
+    # files, and a nested project's files are relative to it. A folder a
+    # stage reads or writes covers the scripts in it, e.g., a package's
+    # modules or data written as Python
     ck_info["environments"] = {
         "py": {"kind": "venv", "path": "requirements.txt", "prefix": "myenv"}
     }
@@ -119,6 +125,8 @@ def test_check_reproducibility(tmp_dir):
                 "kind": "jupyter-notebook",
                 "notebook_path": "analysis.ipynb",
                 "environment": "py",
+                "inputs": ["src/pkg"],
+                "outputs": ["data"],
             }
         }
     }
@@ -147,6 +155,8 @@ def test_check_reproducibility(tmp_dir):
         "myenv/hook.sh",
         "requirements.txt",
         "untracked.py",
+        "src/pkg/mod.py",
+        "data/params.py",
     ]:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w") as f:
@@ -163,6 +173,8 @@ def test_check_reproducibility(tmp_dir):
             ".devcontainer",
             "myenv",
             "requirements.txt",
+            "src",
+            "data",
         ]
     )
     res = check_reproducibility()
@@ -172,6 +184,14 @@ def test_check_reproducibility(tmp_dir):
     assert res.scripts_not_in_pipeline == ["explore.R", "scripts/orphan.py"]
     assert res.n_scripts_not_in_pipeline == 2
     assert "Scripts not run by any pipeline stage: 2" in res.to_pretty()
+    # A folder that's only named, e.g., like the environment, isn't read or
+    # written, so it doesn't cover what's in it
+    os.makedirs("py")
+    with open("py/tool.py", "w") as f:
+        f.write("")
+    subprocess.check_call(["git", "add", "py/tool.py"])
+    assert "py/tool.py" in find_scripts_not_in_pipeline()
+    subprocess.check_call(["git", "rm", "-q", "--cached", "py/tool.py"])
     assert "lacking provenance: 2" in res.to_pretty()
     # Both make it into the recommendation once the basics are in place,
     # scripts first, since an unrun script is a gap in the pipeline itself
@@ -263,6 +283,70 @@ def test_check_reproducibility(tmp_dir):
         for g in res.provenance_gaps
         if "mystery" not in g and "exported" not in g
     ] == expected
+    # Files outside the project that pipeline scripts and notebooks read or
+    # write only exist on one machine, which is found from anywhere, e.g.,
+    # by the hub, which doesn't run from the project
+    assert res.paths_outside_project == []
+    assert "outside the project used by pipeline scripts: 0" in (
+        res.to_pretty()
+    )
+    ck_info["pipeline"]["stages"]["fit"] = {
+        "kind": "python-script",
+        "script_path": "scripts/fit.py",
+        "environment": "py",
+    }
+    # One named relative to its working directory is found there
+    ck_info["pipeline"]["stages"]["wake"] = {
+        "kind": "python-script",
+        "wdir": "analysis",
+        "script_path": "wake.py",
+        "environment": "py",
+    }
+    os.makedirs("analysis", exist_ok=True)
+    with open("analysis/wake.py", "w") as f:
+        f.write('open("/Users/me/Box/wake.csv")\n')
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("scripts/fit.py", "w") as f:
+        f.write(
+            "import pandas as pd\n"
+            'df = pd.read_csv("/Users/me/Box/runs.csv")\n'
+            'df.to_csv("data/fit.csv")\n'
+            'df.to_csv("../shared/fit.csv")\n'
+        )
+    with open("analysis.ipynb", "w") as f:
+        json.dump(
+            {
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "source": ['open("~/Desktop/notes.txt")'],
+                    }
+                ],
+                "metadata": {},
+            },
+            f,
+        )
+    wdir = os.getcwd()
+    os.chdir("paper")
+    try:
+        res = check_reproducibility(wdir=wdir)
+    finally:
+        os.chdir(wdir)
+    assert sorted(res.paths_outside_project) == [
+        "analysis.ipynb reads ~/Desktop/notes.txt",
+        "analysis/wake.py reads /Users/me/Box/wake.csv",
+        "scripts/fit.py reads /Users/me/Box/runs.csv",
+        "scripts/fit.py writes ../shared/fit.csv",
+    ]
+    assert "outside the project used by pipeline scripts: 4" in (
+        res.to_pretty()
+    )
+    assert "outside" in res.categories_with_detail
+    rec = ReproCheck.model_validate(
+        good | {"paths_outside_project": res.paths_outside_project}
+    ).recommendation
+    assert "4 files outside the project" in rec  # type: ignore
 
 
 def test_check_call():
@@ -289,7 +373,7 @@ def test_check_call():
     assert "yo" in out
 
 
-def test_find_retyped_values():
+def test_find_retyped_values(tmp_dir):
     def values(tex, project_values=None):
         return [
             (f["value"], f["line"], f["column"])
@@ -323,6 +407,9 @@ def test_find_retyped_values():
     assert values(r"\\cite{smith0.42}", project) == []
     assert values(r"\\href{https://x.org/0.42}{link}", project) == []
     assert values("% a comment with 0.42", project) == []
+    # Or on a line marked as not results, whatever else its comment says
+    assert values("Cd is 0.42. % calkit: ignore, a coincidence", project) == []
+    assert values("Cd is 0.42. \\% calkit: ignore", project) != []
     assert values(r"\\setlength{\\parindent}{0.55in}", widths) == []
     # A value has to be distinctive before its appearance means anything:
     # a small integer or a one-digit decimal turns up in every paper
@@ -349,4 +436,236 @@ def test_find_retyped_values():
     assert findings[0]["line"] == 2
     assert findings[0]["context"] == "and then 0.42 here"
     assert "results.json:Cd" in findings[0]["reason"]
+    # The fix is to read it with calkit.sty, unless the document already
+    # reads it through a json-to-latex stage's commands
+    assert "\\ckvalue{results.json}{Cd}" in findings[0]["suggestion"]
+    assert "json-to-latex" not in findings[0]["suggestion"]
+    findings = find_retyped_values(
+        "and then 0.42 here", "main.tex", project, {"results.json:Cd"}
+    )
     assert "json-to-latex" in findings[0]["suggestion"]
+    # Calkit's own commands are masked, whatever their paths and options
+    assert (
+        values(
+            r"\ckvalue[round-precision=0.42]{runs/0.42.json}{Cd}"
+            r" \cktable{tables/0.42} \ckinclude{text/0.42}"
+            "\n\\ckvalue [.2f] {runs/0.42.json}\n  {Cd} \\cktable {t/0.42}",
+            project,
+        )
+        == []
+    )
+    # In a project, the results files a document reads with \ckvalue are
+    # within its reach, every number a key names at any depth but not those
+    # in lists, as are those a json-to-latex stage reads, while what
+    # Calkit writes for calkit.sty and tables stages write, one by one or in
+    # a folder, aren't manuscripts
+    for path, data in {
+        "results/drag.json": {
+            "Cd": 0.42,
+            "cases": {"a": {"cp": 0.7321}},
+            "runs": [{"Re": 12500}],
+            "history": list(range(3000)),
+        },
+        "results/lift.json": {"Cl": 1.234},
+        "results/wake.json": {"St": 0.215},
+    }.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(data, f)
+    files = {
+        "paper/main.tex": (
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "Read: \\ckvalue[.2f]{results/drag.json}{Cd}.\n"
+            "Typed: 0.42 and 0.7321.\n"
+            "Not typed: 1000 samples in 2019, run 12500.\n"
+            "\\cktable{tables/summary}\n\\input{../gen/t2}\n"
+            "\\end{document}\n"
+        ),
+        "paper/_calkit/values.tex": (
+            "\\cksetvalue{results/drag.json}{Cd}{n}{0.42}\n"
+        ),
+        "tables/summary.tex": "0.42 & 0.7321 \\\\\n",
+        "gen/t2.tex": "0.42 & 0.7321 \\\\\n",
+        "other/main.tex": (
+            "\\documentclass{article}\n\\begin{document}\n"
+            "\\input{lift}\nTyped: 1.234 and 0.215.\n\\end{document}\n"
+        ),
+        "other/lift.tex": "\\newcommand\\lift[1][all]{1.234}\n",
+    }
+    for path, text in files.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+    stages = {
+        "table": {
+            "cmd": "python table.py",
+            "wdir": "scripts",
+            "outs": ["../tables/summary.tex"],
+        },
+        "tables": {"cmd": "python tables.py", "outs": ["gen"]},
+        "paper": {
+            "cmd": "calkit latex build -e tex --no-check paper/main.tex",
+            "deps": [
+                "paper/main.tex",
+                "results/drag.json",
+                "paper/calkit.sty",
+                "paper/_calkit/values.tex",
+                "tables/summary.tex",
+            ],
+            "outs": ["paper/main.pdf"],
+        },
+        "lift": {
+            "cmd": "calkit latex from-json results/lift.json "
+            "--output other/lift.tex",
+            "deps": ["results/lift.json"],
+            "outs": ["other/lift.tex"],
+        },
+        # Its output isn't input by any document, so it isn't the fix
+        "wake": {
+            "cmd": "calkit latex from-json results/wake.json "
+            "--output other/wake.tex",
+            "deps": ["results/wake.json"],
+            "outs": ["other/wake.tex"],
+        },
+        "other": {
+            "cmd": "calkit latex build other/main.tex",
+            "deps": ["other/main.tex"],
+            "outs": ["other/main.pdf"],
+        },
+    }
+    retyped = find_literals_in_project(".", {}, stages)["retyped"]
+    assert [(f["file"], f["value"], f["source"]) for f in retyped] == [
+        ("other/main.tex", "1.234", "results/lift.json:Cl"),
+        ("other/main.tex", "0.215", "results/wake.json:St"),
+        ("paper/main.tex", "0.42", "results/drag.json:Cd"),
+        ("paper/main.tex", "0.7321", "results/drag.json:cases.a.cp"),
+    ]
+    suggestions = [f["suggestion"] for f in retyped]
+    assert "json-to-latex" in suggestions[0]
+    assert "\\ckvalue{results/wake.json}{St}" in suggestions[1]
+    assert "\\ckvalue{results/drag.json}{cases.a.cp}" in suggestions[3]
+
+
+def test_find_unattributed_numbers():
+    def values(tex, project_values=None):
+        return [
+            (f["value"], f["line"], f["cited"])
+            for f in find_unattributed_numbers(tex, "main.tex", project_values)
+        ]
+
+    tex = (
+        "The deficit was 0.47.\n"
+        "Smith~\\cite{smith} reports 0.52.\n"
+        "The pump draws 1.25 kW. % calkit: ignore, from its datasheet\n"
+    )
+    assert values(tex) == [("0.47", 1, False), ("0.52", 2, True)]
+    # One the project computes is left to find_retyped_values
+    assert values(tex, {"0.47": "results.json:Deficit"}) == [("0.52", 2, True)]
+
+
+def test_find_unattributed_numbers_markdown():
+    def values(md):
+        return [
+            (f["value"], f["line"], f["cited"])
+            for f in find_unattributed_numbers(md, "index.qmd", markdown=True)
+        ]
+
+    md = (
+        "---\n"
+        "title: Run 2.5\n"
+        "---\n"
+        "The rotation score exceeds $0.97$, and 12.5% of runs fail.\n"
+        "The slope is `{python} f'{slope:.2f}'`, as `x = 0.33` shows.\n"
+        "Liu et al. [@liu2025, p. 3.1] report 0.52, and @liu2025 0.61.\n"
+        "See @fig-orbit-2.1 and [the data](https://example.com/v1.2).\n"
+        "![Orbit](orbit.png){#fig-orbit width=50.5%}\n"
+        "We used Python 3.13 and version 2.1 of it.\n"
+        "The pump draws 1.25 kW. <!-- calkit: ignore, from its datasheet -->\n"
+        "<!-- A note on 0.44 -->\n"
+        "```python\n"
+        "threshold = 0.25\n"
+        "```\n"
+        "It drifts by 0.003 ± 0.001 per step.\n"
+        "The RMS is <!-- ckvalue r.json rms .4f -->0.2933<!-- /ckvalue -->.\n"
+    )
+    assert values(md) == [
+        ("0.97", 4, False),
+        ("12.5%", 4, False),
+        ("0.52", 6, True),
+        ("0.61", 6, True),
+        ("0.003 ± 0.001", 15, False),
+    ]
+    # A long line, e.g., a Markdown paragraph, is shown around the number
+    long = "Words " * 40 + "the score is 0.93 here " + "and more " * 40
+    (finding,) = find_unattributed_numbers(long, "index.md", markdown=True)
+    assert finding["context"].startswith("…")
+    assert finding["context"].endswith("…")
+    assert "the score is 0.93 here" in finding["context"]
+    assert len(finding["context"]) < 140
+
+
+def test_check_reproducibility_markdown_numbers(tmp_dir):
+    # A notebook a Quarto stage renders is read cell by cell, and so is a
+    # Markdown publication, but not a notebook a stage only executes
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "id": "a",
+                "metadata": {},
+                "source": ["# Results\n", "\n", "The score exceeds $0.97$."],
+            },
+            {
+                "cell_type": "code",
+                "id": "b",
+                "metadata": {},
+                "execution_count": None,
+                "outputs": [],
+                "source": "print(0.93)",
+            },
+        ],
+    }
+    for path in ["index.ipynb", "explore.ipynb"]:
+        with open(path, "w") as f:
+            json.dump(nb, f)
+    with open("summary.md", "w") as f:
+        f.write("Errors fell by 4.5%.\n")
+    calkit.save_calkit_info(
+        {
+            "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
+            "publications": [{"path": "summary.md", "kind": "report"}],
+            "pipeline": {
+                "stages": {
+                    "pub": {
+                        "kind": "quarto",
+                        "target_path": "index.ipynb",
+                        "environment": "py",
+                    },
+                    "explore": {
+                        "kind": "jupyter-notebook",
+                        "notebook_path": "explore.ipynb",
+                        "environment": "py",
+                    },
+                }
+            },
+        }
+    )
+    res = check_reproducibility()
+    found = [
+        (f["file"], f.get("cell"), f["line"], f["value"])
+        for f in res.unattributed_numbers
+    ]
+    assert found == [
+        ("index.ipynb", 0, 3, "0.97"),
+        ("summary.md", None, 1, "4.5%"),
+    ]
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "-c", "numbers"],
+        text=True,
+        env=os.environ | {"COLUMNS": "200"},
+    )
+    assert "index.ipynb cell 1, 3:" in out

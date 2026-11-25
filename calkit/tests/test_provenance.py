@@ -87,6 +87,12 @@ def test_source_from_location():
     }
     with pytest.raises(ValueError, match="Cannot tell where"):
         source_from_location("just-a-name")
+    # A ref given for a project is what it follows
+    assert source_from_location("o/p/figures/a.png", ref="v1") == {
+        "project": "o/p",
+        "path": "figures/a.png",
+        "git_ref": "v1",
+    }
     # Where each lands with no destination given
     assert (
         default_dest_path(source_from_location("https://x.org/a/b.csv"))
@@ -102,6 +108,54 @@ def test_source_from_location():
         default_dest_path(source_from_location("o/p/scripts/setup.sh"))
         == "scripts/setup.sh"
     )
+
+
+def test_project_sources_from_hub_links(monkeypatch):
+    from calkit.provenance import source_from_location
+
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    # Written short, with or without a scheme
+    for written in [
+        "calkit.io/o/p/figures/a.png",
+        "https://calkit.io/o/p/figures/a.png",
+    ]:
+        assert source_from_location(written) == {
+            "project": "o/p",
+            "path": "figures/a.png",
+        }, written
+    # As a file's page on the hub shows it, ref and all, which an explicit
+    # ref overrides
+    page = "https://calkit.io/o/p/files?path=figures/a.png&ref=abc1234"
+    assert source_from_location(page) == {
+        "project": "o/p",
+        "path": "figures/a.png",
+        "git_ref": "abc1234",
+    }
+    assert source_from_location(page, ref="v2")["git_ref"] == "v2"
+    assert source_from_location("calkit.io/o/p/a.png", ref="v2") == {
+        "project": "o/p",
+        "path": "a.png",
+        "git_ref": "v2",
+    }
+    # A link that names no file
+    for written in ["calkit.io/o/p", "https://calkit.io/o/p/files"]:
+        with pytest.raises(ValueError, match="not a file in it"):
+            source_from_location(written)
+    with pytest.raises(ValueError, match="doesn't name a project"):
+        source_from_location("https://calkit.io/o")
+    # Another built-in hub would be fetched from this one
+    with pytest.raises(ValueError, match="this project uses the hub"):
+        source_from_location("staging.calkit.io/o/p/a.png")
+    # Anything else is read as it was before
+    assert source_from_location("https://example.com/o/p/a.png") == {
+        "url": "https://example.com/o/p/a.png"
+    }
+    # A self-hosted hub's links are read the same way
+    monkeypatch.setenv("CALKIT_HUB", "https://hub.example.edu")
+    assert source_from_location("hub.example.edu/o/p/a.png") == {
+        "project": "o/p",
+        "path": "a.png",
+    }
 
 
 def test_source_from_ssh_clone_urls():
@@ -172,6 +226,310 @@ def test_fetch_rejects_doi():
 
     with pytest.raises(ValueError, match="calkit import zenodo"):
         fetch({"doi": "10.5281/zenodo.1"}, dest_path="x")
+
+
+def test_fetch_from_a_project_records_its_commit(tmp_dir, monkeypatch):
+    import base64
+
+    import calkit
+    from calkit.provenance import fetch
+
+    calls = []
+    response: dict = {
+        "content": base64.b64encode(b"png bytes").decode(),
+        "commit_sha": "a" * 40,
+        "calkit_object": {
+            "kind": "figure",
+            "path": "figures/a.png",
+            "title": "A figure",
+        },
+    }
+
+    def get(path, params=None, **kwargs):
+        calls.append((path, params))
+        if path == "/projects/o/p":
+            return {"git_repo_url": "https://github.com/o/p"}
+        return response
+
+    monkeypatch.setattr(calkit.hub, "get", get)
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    # A ref is asked for, and the commit it resolved to is recorded
+    entry: dict = {}
+    source, lock = fetch(
+        {"project": "o/p", "path": "figures/a.png", "git_ref": "v1"},
+        dest_path="figs/a.png",
+        source_entry=entry,
+    )
+    assert calls[-1] == ("/projects/o/p/contents/figures/a.png", {"ref": "v1"})
+    with open("figs/a.png", "rb") as f:
+        assert f.read() == b"png bytes"
+    assert source["git_ref"] == "v1"
+    assert lock["git_rev"] == "a" * 40
+    assert lock["hash"].startswith("sha256:")
+    # The lock says where it came from too, including the hub and the repo
+    # behind the project, so it stands on its own
+    assert {k: v for k, v in lock.items() if k not in ("hash", "fetched")} == {
+        "source": {
+            "kind": "calkit",
+            "hub": "https://calkit.io",
+            "project": "o/p",
+            "path": "figures/a.png",
+            "git_repo_url": "https://github.com/o/p",
+            "git_ref": "v1",
+        },
+        "git_rev": "a" * 40,
+    }
+    assert entry["title"] == "A figure"
+    # With no ref, the default branch is read, and still pinned in the lock
+    _, lock = fetch({"project": "o/p", "path": "figures/a.png"}, "b.png")
+    assert calls[-1] == ("/projects/o/p/contents/figures/a.png", None)
+    assert lock["git_rev"] == "a" * 40
+    # A hub that doesn't say what commit it read leaves it unrecorded
+    del response["commit_sha"]
+    _, lock = fetch({"project": "o/p", "path": "figures/a.png"}, "c.png")
+    assert "git_rev" not in lock
+
+
+def test_get_imports_with_updates(tmp_dir, monkeypatch):
+    import base64
+
+    from requests.exceptions import ConnectionError
+
+    import calkit
+    from calkit.provenance import (
+        get_imports_with_updates,
+        hash_path,
+        write_import_lock,
+    )
+
+    served: dict = {}
+    calls = []
+
+    def get(path, params=None, **kwargs):
+        calls.append(path)
+        if served.get("offline"):
+            raise ConnectionError("offline")
+        name = path.rsplit("/", 1)[-1]
+        if name == "private.png":
+            raise ValueError("403")
+        return {
+            "content": base64.b64encode(served[name]).decode(),
+            "commit_sha": served.get("commit_sha", "b" * 40),
+        }
+
+    monkeypatch.setattr(calkit.hub, "get", get)
+    ck_info: dict = {"figures": [], "misc": []}
+    for name in ["same.png", "newer.png", "private.png", "pinned.png"]:
+        with open(name, "wb") as f:
+            f.write(b"v1")
+        ck_info["figures"].append(
+            {"path": name, "imported_from": {"project": "o/p", "path": name}}
+        )
+        write_import_lock(name, {"hash": hash_path(name), "git_rev": "a" * 40})
+    served.update({"same.png": b"v1", "newer.png": b"v2"})
+    # One from a Git repo can't be checked without cloning it
+    ck_info["misc"].append(
+        {
+            "path": "same.png",
+            "imported_from": {"git_repo_url": "https://x/r.git", "path": "a"},
+        }
+    )
+    # The source's commit moved, but only one file changed with it, and
+    # one that can't be read is skipped
+    ck_info["figures"] = ck_info["figures"][:3]
+    assert get_imports_with_updates(ck_info) == ["newer.png"]
+    assert len(calls) == 3
+    # A recorded commit the source is still at needs no comparing
+    served["commit_sha"] = "a" * 40
+    assert get_imports_with_updates(ck_info) == []
+    # Offline, checking stops at the first failure rather than waiting on
+    # each import in turn
+    served["offline"] = True
+    calls.clear()
+    assert get_imports_with_updates(ck_info) == []
+    assert len(calls) == 1
+
+
+def test_get_import_statuses(tmp_dir, monkeypatch):
+    import base64
+    import os
+    import subprocess
+    from types import SimpleNamespace
+
+    import git as gitpy
+    import requests
+
+    import calkit
+    from calkit.provenance import (
+        get_import_statuses,
+        hash_path,
+        write_import_lock,
+    )
+
+    def get(path, params=None, **kwargs):
+        name = path.rsplit("/", 1)[-1]
+        return {
+            "content": base64.b64encode(
+                b"v2" if name == "newer.png" else b"v1"
+            ).decode(),
+            "commit_sha": "b" * 40,
+        }
+
+    served_etag = {"value": '"e1"'}
+
+    def head(url, **kwargs):
+        return SimpleNamespace(ok=True, headers={"ETag": served_etag["value"]})
+
+    monkeypatch.setattr(calkit.hub, "get", get)
+    monkeypatch.setattr(requests, "head", head)
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    # A Git repo with an annotated tag, whose branch moves on later
+    src = gitpy.Repo.init("src", initial_branch="main")
+    with open("src/a.txt", "w") as f:
+        f.write("a\n")
+    src.git.add(A=True)
+    src.git.commit(m="one", author="T <t@x.org>")
+    first = src.head.commit.hexsha
+    src.create_tag("v1", message="Version 1")
+
+    def hub(path, git_ref=None, git_rev=first):
+        source = {
+            "kind": "calkit",
+            "hub": "https://calkit.io",
+            "project": "o/p",
+        }
+        source |= {"path": path} | ({"git_ref": git_ref} if git_ref else {})
+        return {"source": source, "git_rev": git_rev}
+
+    def git_lock(ref, rev=first):
+        source = {
+            "kind": "git",
+            "repo_url": "src",
+            "path": "a.txt",
+            "ref": ref,
+        }
+        return {"source": source, "git_rev": rev}
+
+    imports = {
+        "same.png": (
+            {"project": "o/p", "path": "same.png"},
+            hub("same.png"),
+        ),
+        "newer.png": (
+            {"project": "o/p", "path": "newer.png"},
+            hub("newer.png"),
+        ),
+        "pinned.png": (
+            {"project": "o/p", "path": "x", "git_ref": first[:9]},
+            hub("x", git_ref=first[:9]),
+        ),
+        "moved.png": (
+            {"project": "o/p", "path": "y"},
+            hub("old/y", git_rev=None),
+        ),
+        "edited.png": (
+            {"project": "o/p", "path": "edited.png"},
+            {"git_rev": first},
+        ),
+        "gone.png": (
+            {"project": "o/p", "path": "gone.png"},
+            {"git_rev": first},
+        ),
+        "main.txt": (
+            {"git_repo_url": "src", "path": "a.txt", "git_ref": "main"},
+            git_lock("main"),
+        ),
+        "tag.txt": (
+            {"git_repo_url": "src", "path": "a.txt", "git_ref": "v1"},
+            git_lock("v1"),
+        ),
+        "unlocked.txt": (
+            {"git_repo_url": "src", "path": "a.txt", "git_ref": "main"},
+            git_lock("main", rev=None),
+        ),
+        "web.csv": (
+            {"url": "https://x.org/web.csv"},
+            {
+                "source": {"kind": "url", "url": "https://x.org/web.csv"},
+                "etag": '"e1"',
+            },
+        ),
+        "bare.csv": (
+            {"url": "https://x.org/bare.csv"},
+            {"source": {"kind": "url", "url": "https://x.org/bare.csv"}},
+        ),
+    }
+    ck_info: dict = {"figures": []}
+    for path, (source, lock) in imports.items():
+        with open(path, "wb") as f:
+            f.write(b"v1")
+        ck_info["figures"].append({"path": path, "imported_from": source})
+        lock = {k: v for k, v in lock.items() if v is not None}
+        write_import_lock(path, lock | {"hash": hash_path(path)})
+    with open("edited.png", "ab") as f:
+        f.write(b" changed")
+    os.remove("gone.png")
+
+    def statuses() -> dict:
+        return {
+            s["path"]: (s["status"], s["detail"])
+            for s in get_import_statuses(ck_info)
+        }
+
+    got = statuses()
+    assert got["same.png"] == ("up-to-date", None)
+    assert got["newer.png"] == ("update-available", "at bbbbbbbbb")
+    assert got["pinned.png"] == ("up-to-date", f"pinned to {first[:9]}")
+    # calkit.yaml was edited to name another file, and not synced since
+    assert got["moved.png"] == (
+        "source-changed",
+        "calkit.yaml names a different source",
+    )
+    assert got["edited.png"][0] == "edited"
+    assert got["gone.png"][0] == "missing"
+    assert got["main.txt"] == ("up-to-date", None)
+    # An annotated tag is compared by the commit it points to
+    assert got["tag.txt"] == ("up-to-date", None)
+    # With no commit recorded, there's nothing to say it moved from
+    assert got["unlocked.txt"] == (
+        "unknown",
+        "no commit was recorded when it was fetched",
+    )
+    # A URL is asked whether it still has the same version, not downloaded
+    assert got["web.csv"] == ("up-to-date", None)
+    assert got["bare.csv"] == ("unknown", "its server gave nothing to compare")
+    served_etag["value"] = '"e2"'
+    assert statuses()["web.csv"] == ("update-available", "its ETag changed")
+    # A branch at a new commit may or may not have changed the file
+    with open("src/b.txt", "w") as f:
+        f.write("b\n")
+    src.git.add(A=True)
+    src.git.commit(m="two", author="T <t@x.org>")
+    second = src.head.commit.hexsha
+    got = statuses()
+    assert got["main.txt"] == ("source-moved", f"main is at {second[:9]}")
+    assert got["tag.txt"] == ("up-to-date", None)
+    # A quick check leaves Git repos alone
+    quick = get_import_statuses(ck_info, check_git=False)
+    assert [s["status"] for s in quick if s["path"] == "main.txt"] == [
+        "unknown"
+    ]
+    # A Git repo that doesn't answer stops the rest being asked, rather than
+    # each waiting out its own timeout
+    calls = []
+
+    def timeout(*args, **kwargs):
+        calls.append(args)
+        raise subprocess.TimeoutExpired(args[0], 30)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    got = statuses()
+    assert len(calls) == 1
+    assert (
+        got["main.txt"][1]
+        == got["tag.txt"][1]
+        == ("the source couldn't be reached")
+    )
 
 
 def test_git_source_records_intent_not_resolved_state():
@@ -247,7 +605,7 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     assert out["git_ref"] == "feature/foo"
     assert out["path"] == "scripts/a.sh"
     # What it resolved to comes back separately, for the lock file
-    assert lock["rev"] and lock["hash"].startswith("sha256:")
+    assert lock["git_rev"] and lock["hash"].startswith("sha256:")
     with open("a.sh") as f:
         assert f.read() == "on-feature\n"
     # A ref that resolves as recorded is never widened, even when a longer
@@ -363,12 +721,23 @@ def test_import_lock_store(tmp_dir):
     )
 
     assert read_import_locks() == {}
-    write_import_lock("b.txt", {"rev": "abc1234"})
-    write_import_lock("a.txt", {"rev": "def5678"})
+    write_import_lock("b.txt", {"git_rev": "abc1234"})
+    write_import_lock("a.txt", {"git_rev": "def5678"})
     assert list(read_import_locks()) == ["a.txt", "b.txt"]
     # Dropping one leaves the rest
     write_import_lock("b.txt", None)
     assert list(read_import_locks()) == ["a.txt"]
+    # A commit recorded as 'rev', as earlier versions named it, reads as
+    # 'git_rev', and is written that way from then on
+    with open(IMPORT_LOCK_FPATH, "w") as f:
+        json.dump({"a.txt": {"rev": "def5678"}, "e.txt": {"git_rev": "1"}}, f)
+    assert read_import_locks()["a.txt"] == {"git_rev": "def5678"}
+    write_import_lock("e.txt", {"git_rev": "2"})
+    with open(IMPORT_LOCK_FPATH) as f:
+        assert json.load(f) == {
+            "a.txt": {"git_rev": "def5678"},
+            "e.txt": {"git_rev": "2"},
+        }
     # An older version appended a list of Zenodo events here; it is read as
     # absent rather than crashing, since nothing ever consumed it
     with open(IMPORT_LOCK_FPATH, "w") as f:
@@ -384,7 +753,7 @@ def test_import_lock_store(tmp_dir):
         f.write("edited\n")
     assert local_edit("f.txt", lock)
     assert not local_edit("f.txt", None)
-    assert not local_edit("f.txt", {"rev": "abc1234"})
+    assert not local_edit("f.txt", {"git_rev": "abc1234"})
     # A hash written by a version using a different algorithm is not
     # mistaken for an edited file; it just can't be compared
     assert not local_edit("f.txt", {"hash": "blake3:" + "0" * 64})
@@ -408,11 +777,11 @@ def test_import_lock_store(tmp_dir):
     # 'fetched' says when this version arrived, not when it was last
     # checked for, so re-recording the same state leaves the file alone --
     # otherwise every refresh would be a commit
-    write_import_lock("c.txt", {"rev": "abc1234", "fetched": "2026-01-01"})
-    write_import_lock("c.txt", {"rev": "abc1234", "fetched": "2026-06-30"})
+    write_import_lock("c.txt", {"git_rev": "abc1234", "fetched": "2026-01-01"})
+    write_import_lock("c.txt", {"git_rev": "abc1234", "fetched": "2026-06-30"})
     assert read_import_locks()["c.txt"]["fetched"] == "2026-01-01"
     # A different revision is a new version, so the time moves
-    write_import_lock("c.txt", {"rev": "def5678", "fetched": "2026-06-30"})
+    write_import_lock("c.txt", {"git_rev": "def5678", "fetched": "2026-06-30"})
     assert read_import_locks()["c.txt"]["fetched"] == "2026-06-30"
 
 
@@ -657,6 +1026,34 @@ def test_find_provenance_gaps():
                 "deps": ["summarize.py", "params.yaml", "data/loose.json"],
                 "outs": ["results/summary.json"],
             },
+            # Plots made one by one into a folder, which another copies
+            "plot": {
+                "cmd": "python plot.py",
+                "deps": ["plot.py", "data/measured.csv"],
+                "outs": ["plots/a.png"],
+            },
+            "plot-raw": {
+                "cmd": "python plot-raw.py",
+                "deps": ["plot-raw.py", "data/raw.csv"],
+                "outs": ["plots/b.png"],
+            },
+            "copy-plots": {
+                "cmd": "calkit map-paths",
+                "deps": ["plots"],
+                "outs": ["paper/plots"],
+            },
+            # Named like the folder above, but nothing writes into it
+            "copy-plot": {
+                "cmd": "calkit map-paths",
+                "deps": ["plot"],
+                "outs": ["paper/plot"],
+            },
+            # Writes into the folder it reads
+            "tidy": {
+                "cmd": "python tidy.py",
+                "deps": ["tidy.py", "inbox"],
+                "outs": ["inbox/tidy.csv"],
+            },
         }
     }
     # A run records its inputs, which is what's followed where it exists
@@ -673,6 +1070,12 @@ def test_find_provenance_gaps():
         }
     }
     data = {".csv", ".json", ".png"}
+    # What's on disk in the folders stages write into, besides their outputs
+    listing = {
+        "plots": ["a.png", "b.png", "photo.png", "scan.png.dvc", ".gitignore"],
+        "plot": ["old.png"],
+        "inbox": ["tidy.csv", "dropped.csv"],
+    }
 
     def gaps(paths: list[str]) -> list[str]:
         return [
@@ -683,8 +1086,11 @@ def test_find_provenance_gaps():
                 dvc_yaml=dvc_yaml,
                 dvc_lock=dvc_lock,
                 is_data=lambda p: (
-                    p.startswith("data/") or posixpath.splitext(p)[1] in data
+                    p.startswith("data/")
+                    or posixpath.splitext(p)[1] in data
+                    or p in listing
                 ),
+                listdir=lambda p: listing.get(p, []),
             )
         ]
 
@@ -718,6 +1124,26 @@ def test_find_provenance_gaps():
     assert gaps(["data/box.csv", "data/laptop.csv"]) == [
         "data/box.csv is imported from somewhere that can't be checked",
         "data/laptop.csv is imported from somewhere that can't be checked",
+    ]
+    # A folder is followed back through the stages making what's in it,
+    # and what else is in it is a gap of its own, pulled or not
+    assert gaps(["paper/plots/a.png"]) == [
+        "origin not defined for data/raw.csv (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/b.png <- stage plot-raw "
+        "<- data/raw.csv)",
+        "origin not defined for plots/photo.png (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/photo.png)",
+        "origin not defined for plots/scan.png (paper/plots/a.png "
+        "<- stage copy-plots <- plots <- plots/scan.png)",
+    ]
+    # A folder nothing writes into is a gap as a whole
+    assert gaps(["paper/plot"]) == [
+        "origin not defined for plot (paper/plot <- stage copy-plot <- plot)"
+    ]
+    # A stage's own output doesn't account for the folder it reads
+    assert gaps(["inbox/tidy.csv"]) == [
+        "origin not defined for inbox/dropped.csv (inbox/tidy.csv "
+        "<- stage tidy <- inbox <- inbox/dropped.csv)"
     ]
     # A matrix stage that hasn't run produces nothing known yet
     assert gaps(["figures/sweep-1.png"]) == [
@@ -764,3 +1190,319 @@ def test_is_data_path(tmp_path):
     assert is_data("pointers")
     assert is_data("store.zarr")
     assert is_data("nested")
+
+
+def test_get_import_info():
+    from calkit.provenance import get_import_info
+
+    # A bare string is read the way the calkit.yaml schema reads it
+    assert get_import_info(None) is None
+    assert get_import_info({"doi": "10.1/x"}) == {"doi": "10.1/x"}
+    assert get_import_info("https://doi.org/10.5281/zenodo.3960218") == {
+        "doi": "10.5281/zenodo.3960218"
+    }
+    assert get_import_info("https://example.com/data.csv") == {
+        "url": "https://example.com/data.csv"
+    }
+    assert get_import_info("a colleague's USB stick") == {
+        "description": "a colleague's USB stick"
+    }
+    # Links that aren't http(s) are dropped, since they're shown as links,
+    # but SSH clone URLs are kept
+    assert get_import_info(
+        {"url": "javascript:alert(1)", "date": "2026-01-02"}
+    ) == {"date": "2026-01-02"}
+    assert get_import_info(
+        {"git_repo_url": " JavaScript://github.com/%0Aalert(1)", "path": "a"}
+    ) == {"path": "a"}
+    assert get_import_info({"git_repo_url": "git@github.com:a/b"}) == {
+        "git_repo_url": "git@github.com:a/b"
+    }
+
+
+def test_get_path_provenance():
+    import json
+
+    from calkit.provenance import get_path_provenance
+
+    files = {
+        "results/metrics.json": json.dumps({"rmse": 0.12, "fit": {"b": 1.2}}),
+        "scripts/analyze.py": "",
+        "data/raw.csv": "",
+        "data/downloaded/a.csv": "",
+        "paper/drawn.svg": "",
+        "paper/figures/plot.png": "",
+        "figures/plot.png": "",
+        "nbs/fit.ipynb": "{}",
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json": json.dumps(
+            {"k": 0.25}
+        ),
+    }
+    ck_info = {
+        "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
+        "datasets": [
+            {"path": "data/downloaded", "imported_from": "https://x.org/d"},
+        ],
+        "figures": [
+            {
+                "path": "paper/drawn.svg",
+                "created_by": {"name": "Ada", "with_ai": "Claude"},
+            },
+        ],
+        "pipeline": {
+            "stages": {
+                "analyze": {
+                    "kind": "python-script",
+                    "script_path": "scripts/analyze.py",
+                    "environment": "py",
+                    "outputs": ["results/metrics.json", "figures/plot.png"],
+                },
+                "fit": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "nbs/fit.ipynb",
+                    "environment": "py",
+                    "cell_outputs": [
+                        {"kind": "value", "cell_id": "a", "variable_name": "k"}
+                    ],
+                },
+                "copy-figs": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/plot.png",
+                            "dest": "paper/figures/plot.png",
+                        }
+                    ],
+                },
+            }
+        },
+    }
+    dvc_yaml = {
+        "stages": {
+            "analyze": {
+                "cmd": "python scripts/analyze.py",
+                "deps": [
+                    "scripts/analyze.py",
+                    "pyproject.toml",
+                    "data/raw.csv",
+                    "data/downloaded",
+                ],
+                "outs": ["results/metrics.json", "figures/plot.png"],
+            },
+            "copy-figs": {
+                "cmd": "calkit map-paths",
+                "deps": ["figures/plot.png"],
+                "outs": ["paper/figures/plot.png"],
+            },
+            "fit": {
+                "cmd": "calkit nb execute nbs/fit.ipynb",
+                "deps": [".calkit/notebooks/cleaned/nbs/fit.ipynb"],
+                "outs": [
+                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+                ],
+            },
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            name: {
+                "deps": [{"path": d} for d in stage["deps"]],
+                "outs": [{"path": o} for o in stage["outs"]],
+            }
+            for name, stage in dvc_yaml["stages"].items()
+        }
+    }
+
+    def get(path, key=None, statuses=None):
+        return get_path_provenance(
+            path,
+            key=key,
+            ck_info=ck_info,
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            stage_statuses=statuses
+            or {
+                "analyze": {"status": "up-to-date"},
+                "copy-figs": {"status": "up-to-date"},
+                "fit": {"status": "up-to-date"},
+            },
+            is_file=lambda p: p in files,
+            is_dir=lambda p: p == "data/downloaded",
+            listdir=lambda p: ["a.csv"] if p == "data/downloaded" else [],
+            read_bytes=lambda p: files[p].encode(),
+        )
+
+    # A value in a results file, the stage making it, what to open to change
+    # it, and what it reads, but not its environment's spec, nor raw data
+    # with no origin that the gaps say
+    metrics = get("results/metrics.json", key="fit.b")
+    assert metrics["exists"] and metrics["value"] == 1.2
+    assert metrics["stage"] == "analyze"
+    assert metrics["stage_kind"] == "python-script"
+    assert metrics["source"] == "scripts/analyze.py"
+    assert metrics["inputs"] == ["data/raw.csv", "data/downloaded"]
+    assert metrics["stage_status"] == {"status": "up-to-date"}
+    assert [g["path"] for g in metrics["gaps"]] == ["data/raw.csv"]
+    assert get("results/metrics.json", key="nope")["value_error"] == (
+        "nope isn't in results/metrics.json"
+    )
+    # A value cited from a notebook is the one its cells saved
+    fit = get("nbs/fit.ipynb", key="k")
+    assert fit["value"] == 0.25
+    assert fit["stage"] == "fit"
+    # A copy is described by what made the original, and is stale if the
+    # copy is
+    copy = get(
+        "paper/figures/plot.png",
+        statuses={
+            "analyze": {"status": "up-to-date"},
+            "copy-figs": {"status": "stale"},
+        },
+    )
+    assert copy["copied_from"] == "figures/plot.png"
+    assert copy["copy_stage"] == "copy-figs" and copy["stage"] == "analyze"
+    assert copy["stale_reason"] == "pipeline"
+    # So is one whose stage has never run, so hasn't made it yet
+    not_run = get(
+        "results/metrics.json",
+        statuses={
+            "analyze": {"status": "not-run"},
+            "copy-figs": {"status": "up-to-date"},
+        },
+    )
+    assert not_run["stale_reason"] == "pipeline"
+    # What calkit.yaml says it came from, including for a folder it's in
+    drawn = get("paper/drawn.svg")
+    assert drawn["origin"] == "Created by Ada with Claude"
+    assert drawn["stage"] is None and drawn["gaps"] == []
+    imported = get("data/downloaded/a.csv")
+    assert imported["origin_url"] == "https://x.org/d"
+    assert imported["origin_path"] == "data/downloaded"
+    assert imported["input_to_stages"] == ["analyze"]
+    # Something nothing makes or records is a gap itself
+    assert [g["path"] for g in get("data/raw.csv")["gaps"]] == ["data/raw.csv"]
+    assert not get("missing.png")["exists"]
+
+
+def test_add_origin_and_add_creator():
+    import copy
+
+    from calkit.provenance import add_creator, add_origin
+
+    url = {"url": "https://x.org/a"}
+    person = {"name": "Pat", "email": "pat@example.com"}
+    ck_info: dict = {
+        "figures": [
+            {"path": "./figures/a.png", "title": "A"},
+            {"path": "figures/b.png", "stage": "plot"},
+        ]
+    }
+    # A declared figure saying nothing of where it came from gets it, in a
+    # copy
+    before = copy.deepcopy(ck_info)
+    ck_info, entry = add_origin(
+        ck_info, "figures/a.png", imported_from={"url": "https://x.org/a"}
+    )
+    assert entry["imported_from"] == {"url": "https://x.org/a"}
+    assert ck_info["figures"][0]["imported_from"] == entry["imported_from"]
+    assert "misc" not in ck_info
+    assert "imported_from" not in before["figures"][0]
+    # Anything else is a misc artifact
+    ck_info, _ = add_origin(
+        ck_info, "drawings/c.svg", created_by=[person], title="C"
+    )
+    assert ck_info["misc"] == [
+        {"path": "drawings/c.svg", "title": "C", "created_by": person}
+    ]
+    # Several people stay a list
+    ck_info, _ = add_origin(
+        ck_info, "drawings/g.svg", created_by=[person, {"email": "me@x.org"}]
+    )
+    assert ck_info["misc"].pop()["created_by"] == [
+        person,
+        {"email": "me@x.org"},
+    ]
+    for path, kwargs, error in [
+        ("figures/b.png", {"imported_from": url}, "already declared"),
+        ("figures/a.png", {"imported_from": url}, "already declared"),
+        ("drawings/d.svg", {}, "who created it or where"),
+        ("figures/d.png", {"created_by": [person]}, "can't be the origin"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            add_origin(ck_info, path, **kwargs)
+    # Who made a file, unless something already says, matched however its
+    # path is written
+    ck_info["misc"].append({"path": "./drawings/f.psd"})
+    before = copy.deepcopy(ck_info)
+    ck_info = add_creator(
+        ck_info,
+        ["drawings/c.svg", "drawings/e.psd", "drawings/f.psd"],
+        {"email": "me@x.org"},
+    )
+    assert before["misc"][1] == {"path": "./drawings/f.psd"}
+    assert ck_info["misc"][0]["created_by"] == person
+    assert ck_info["misc"][1] == {
+        "path": "./drawings/f.psd",
+        "created_by": {"email": "me@x.org"},
+    }
+    assert ck_info["misc"][2] == {
+        "path": "drawings/e.psd",
+        "created_by": {"email": "me@x.org"},
+    }
+    assert len(ck_info["misc"]) == 3
+
+
+def test_get_origin_suggestions(tmp_path):
+    import json
+
+    from calkit.provenance import get_origin_suggestions
+
+    files = {
+        "plot.py": "import matplotlib.pyplot as plt\nplt.savefig('figures/a.png')\n",
+        "other.py": "import matplotlib.pyplot as plt\nplt.savefig('b.png')\n",
+        "figures/a.png": "png",
+        "paper/figures/a.png": "png",
+        "paper/figures/c.png": "drawn",
+        "drawings/c.pptx": "pptx",
+        "drawings/c.txt": "notes",
+    }
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "outputs": [],
+                "execution_count": None,
+                "source": [
+                    "import matplotlib.pyplot as plt\n",
+                    "plt.savefig('paper/figures/a.png')",
+                ],
+            }
+        ],
+        "metadata": {"kernelspec": {"name": "python3", "language": "python"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    files["fit.ipynb"] = json.dumps(notebook)
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    paths = sorted(files)
+    # What writes it first, then what writes the file it's a copy of
+    assert get_origin_suggestions(
+        "paper/figures/a.png", paths, wdir=str(tmp_path)
+    ) == [
+        {
+            "kind": "notebook",
+            "source": "fit.ipynb",
+            "writes": "paper/figures/a.png",
+        },
+        {"kind": "script", "source": "plot.py", "writes": "figures/a.png"},
+    ]
+    # A drawing of the same name it's exported from
+    assert get_origin_suggestions(
+        "paper/figures/c.png", paths, wdir=str(tmp_path)
+    ) == [{"kind": "exported", "source": "drawings/c.pptx"}]
+    # Nothing for what nothing writes or has the name of
+    assert get_origin_suggestions("x.png", paths, wdir=str(tmp_path)) == []

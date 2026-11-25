@@ -52,13 +52,63 @@ import Markdown from "../Common/Markdown"
 import SandboxedHtml from "../Common/SandboxedHtml"
 import Tooltip from "../Common/Tooltip"
 import FigureView, { PlotlyThumbnail } from "../Figures/FigureView"
-import FileContent from "../Files/FileContent"
+import FileContent, { isShownFromUrl } from "../Files/FileContent"
 import PublicationView from "../Publications/PublicationView"
 import TableView from "../Tables/TableView"
 import QuestionStatusLetters, {
+  formatLines,
   isEvidenceMissing,
   isEvidenceStale,
+  parseLines,
 } from "./QuestionStatus"
+
+// Past this, a plain file the listing didn't inline is linked, not read
+const MAX_FILE_TEXT_BYTES = 10_000_000
+
+/**
+ * A response's text, or undefined once it passes ``maxBytes``, so a file of
+ * unknown size, e.g., inside a DVC-tracked directory, is read only if small.
+ */
+const readTextUpTo = async (
+  response: Response,
+  maxBytes: number,
+): Promise<string | undefined> => {
+  if (!response.body) {
+    const text = await response.text()
+    return text.length > maxBytes ? undefined : text
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return undefined
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
+
+/** Whether file content, base64-encoded, looks binary rather than text. */
+const isBinaryContent = (content: string) => {
+  try {
+    return atob(content.slice(0, 8192)).includes("\u0000")
+  } catch {
+    return false
+  }
+}
 
 const IMG_MIME: Record<string, string> = {
   png: "image/png",
@@ -117,6 +167,11 @@ const evidencePage = (evidence: QuestionEvidence) => {
 }
 
 const evidenceTitle = (evidence: QuestionEvidence) => {
+  // A plain file is named by its path, which the card shows under this
+  if (evidence.kind == null) {
+    const lines = formatLines(evidence.lines)
+    return lines ? `File, ${lines}` : "File"
+  }
   if (evidence.kind === "figure") {
     return evidence.figure?.title ?? evidence.path
   }
@@ -352,7 +407,11 @@ function EvidenceCard({
   let icon = null
   if (evidence.kind === "table") {
     icon = <Icon as={FiGrid} color="gray.500" flexShrink={0} />
-  } else if (evidence.kind === "publication" || evidence.kind === "document") {
+  } else if (
+    evidence.kind === "publication" ||
+    evidence.kind === "document" ||
+    evidence.kind == null
+  ) {
     icon = <Icon as={FaRegFileAlt} color="gray.500" flexShrink={0} />
   }
   const body = (
@@ -452,10 +511,17 @@ function EvidenceDetail({
     evidence.kind === "publication" && !!evidence.publication,
   )
   // Cited by path rather than declared, so its content comes from the tree
+  const isPlainFile = evidence.kind == null
   const citedByPath =
+    isPlainFile ||
     evidence.kind === "document" ||
     (evidence.kind === "publication" && !evidence.publication)
-  const isHtml = evidence.path.toLowerCase().endsWith(".html")
+  const highlightLines = isPlainFile ? parseLines(evidence.lines) : undefined
+  // Cited at some lines, HTML is shown as the source they count
+  const isHtml =
+    evidence.path.toLowerCase().endsWith(".html") && !highlightLines
+  // Images, PDFs, and slides are shown from their URL, not read as text
+  const shownFromUrl = isShownFromUrl(evidence.path)
   const documentRequest = useQuery({
     queryKey: [
       "projects",
@@ -475,13 +541,22 @@ function EvidenceDetail({
         })
       ).data
       // A large file comes back as a download URL rather than inline, which
-      // the viewer can't render as text, so read it from there
-      if (!item.content && item.url) {
+      // the viewer can't render as text, so read it from there. A plain
+      // file could be anything, so one too big to be worth reading is
+      // left as a link, and one of unknown size is read only up to that.
+      const tooBig =
+        isPlainFile && item.size != null && item.size > MAX_FILE_TEXT_BYTES
+      if (!item.content && item.url && !shownFromUrl && !tooBig) {
         const response = await fetch(item.url)
         if (!response.ok) {
           throw new Error(`Could not read ${evidence.path}`)
         }
-        return { ...item, content: encodeBase64Utf8(await response.text()) }
+        const text = isPlainFile
+          ? await readTextUpTo(response, MAX_FILE_TEXT_BYTES)
+          : await response.text()
+        return text === undefined
+          ? item
+          : { ...item, content: encodeBase64Utf8(text) }
       }
       return item
     },
@@ -527,8 +602,28 @@ function EvidenceDetail({
       )
     }
     const item = documentRequest.data
-    if (!item?.content) {
+    const unread = !item?.content && !(shownFromUrl && item?.url)
+    if (unread && !item?.url) {
       return <NotFound evidence={evidence} />
+    }
+    // Too big to read, or what no viewer can draw, e.g., an archive
+    if (
+      !item ||
+      unread ||
+      (!shownFromUrl && item.content && isBinaryContent(item.content))
+    ) {
+      return (
+        <Text fontSize="sm" color="gray.500">
+          {evidence.path} can't be shown here.{" "}
+          {item?.url ? (
+            <Link href={item.url} isExternal>
+              Download it <Icon as={FaExternalLinkAlt} boxSize={2.5} />
+            </Link>
+          ) : (
+            "Open it from the link above."
+          )}
+        </Text>
+      )
     }
     if (isHtml) {
       return (
@@ -537,7 +632,15 @@ function EvidenceDetail({
         </Box>
       )
     }
-    return <FileContent item={item} />
+    return (
+      <FileContent
+        item={item}
+        accountName={accountName}
+        projectName={projectName}
+        gitRef={ref}
+        highlightLines={highlightLines}
+      />
+    )
   }
   if (evidence.kind === "publication") {
     if (publicationsRequest.isPending) {

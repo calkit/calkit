@@ -1,0 +1,6 @@
+.calkit/notebooks/cleaned/analysis.ipynb
+
+/.quarto/
+**/*.quarto_ipynb
+/analysis.html
+/report.html

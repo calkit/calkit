@@ -50,12 +50,9 @@ def update_devcontainer(
     os.makedirs(out_dir, exist_ok=True)
     out_fpath = os.path.join(out_dir, "devcontainer.json")
     typer.echo(f"Writing to {out_fpath}")
+    ck_info = calkit.load_calkit_info(wdir=wdir)
     with open(out_fpath, "w", encoding="utf-8") as f:
-        f.write(
-            calkit_resources.read_text(
-                "devcontainer", calkit_resources.DEVCONTAINER_FNAME
-            )
-        )
+        f.write(calkit_resources.make_devcontainer_spec(ck_info, wdir=wdir))
     if not no_commit:
         repo = calkit.git.get_repo(wdir)
         rel_path = os.path.join(".devcontainer", "devcontainer.json")
@@ -67,13 +64,16 @@ def update_devcontainer(
 @update_app.command(name="license")
 def update_license(
     copyright_holder: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--copyright-holder",
             "-c",
-            help="Copyright holder, e.g., your full name.",
+            help=(
+                "Copyright holder, e.g., your full name. "
+                "Defaults to Git's user.name config."
+            ),
         ),
-    ],
+    ] = None,
     no_commit: Annotated[
         bool,
         typer.Option(
@@ -85,6 +85,24 @@ def update_license(
     """Update license with a reasonable default
     (MIT for code, CC-BY-4.0 for other files).
     """
+    if copyright_holder is None:
+        # Git's user.name is the name it already knows them by
+        from git.exc import InvalidGitRepositoryError
+
+        try:
+            user_name = (
+                calkit.git.get_repo()
+                .config_reader()
+                .get_value("user", "name", default=None)
+            )
+        except InvalidGitRepositoryError:
+            user_name = None
+        copyright_holder = str(user_name) if user_name else None
+        if copyright_holder is None:
+            raise_error(
+                "No copyright holder given and Git's user.name is not "
+                "set; pass --copyright-holder"
+            )
     with open("LICENSE", "w") as f:
         f.write(
             calkit.licenses.LICENSE_TEMPLATE_DUAL.format(
@@ -303,28 +321,9 @@ def update_release(
                     service=publisher.lower(),  # type: ignore
                     as_json=False,  # We only get a 204 back
                 )
-            typer.echo(f"Uploading {filename}")
-            fpath = os.path.join(release_files_dir, filename)
-            # First, initiate the file upload
-            calkit.invenio.post(
-                f"/records/{record_id}/draft/files",
-                json=[{"key": filename}],
-                service=publisher.lower(),  # type: ignore
-            )
-            # Then upload the file content
-            with open(fpath, "rb") as f:
-                file_data = f.read()
-                resp = calkit.invenio.put(
-                    f"/records/{record_id}/draft/files/{filename}/content",
-                    headers={"Content-Type": "application/octet-stream"},
-                    as_json=False,
-                    service=publisher.lower(),  # type: ignore
-                    data=file_data,
-                )
-                typer.echo(f"Status code: {resp.status_code}")
-            # Commit the file
-            calkit.invenio.post(
-                f"/records/{record_id}/draft/files/{filename}/commit",
+            calkit.invenio.upload_file_with_progress(
+                record_id,
+                os.path.join(release_files_dir, filename),
                 service=publisher.lower(),  # type: ignore
             )
     # TODO: Add ability to update metadata
@@ -361,8 +360,12 @@ def update_vscode_config(
     for fname in calkit_resources.VSCODE_FNAMES:
         out_fpath = os.path.join(out_dir, fname)
         typer.echo(f"Writing to {out_fpath}")
+        if fname == "settings.json":
+            txt = calkit_resources.make_vscode_settings(wdir=wdir)
+        else:
+            txt = calkit_resources.read_text("vscode", fname)
         with open(out_fpath, "w", encoding="utf-8") as f:
-            f.write(calkit_resources.read_text("vscode", fname))
+            f.write(txt)
         repo.git.add(os.path.join(".vscode", fname))
     if not no_commit and repo.git.diff(["--staged", "--", ".vscode"]):
         repo.git.commit([".vscode", "-m", "Update VS Code config"])
@@ -387,6 +390,17 @@ def update_github_actions(
             help="Do not create a Git commit for the updated GitHub Actions.",
         ),
     ] = False,
+    on: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--on",
+            help=(
+                "Event that runs the workflow, e.g., push or "
+                "workflow_dispatch; repeat for more. "
+                "An existing workflow's are kept if not given."
+            ),
+        ),
+    ] = None,
 ):
     """Update a project's GitHub Actions to match this version of Calkit's
     recommendations.
@@ -404,23 +418,18 @@ def update_github_actions(
     txt_out = None
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
     os.makedirs(out_dir, exist_ok=True)
-    for fname in sorted(os.listdir(out_dir)):
-        if fname.endswith(".yaml") or fname.endswith(".yml"):
-            fpath = os.path.join(out_dir, fname)
-            with open(fpath, encoding="utf-8") as f:
-                txt = f.read()
-            if calkit_resources.uses_run_action(txt):
-                fname_out = fname
-                # A workflow that's still the example gets replaced outright,
-                # picking up any other improvements to it, but one that's been
-                # customized only has its action ref updated
-                if not calkit_resources.is_default_github_actions_workflow(
-                    txt
-                ):
-                    txt_out = calkit_resources.set_action_ref(txt)
-                break
+    existing = calkit_resources.find_run_workflows(wdir)
+    if existing:
+        fname_out, txt = existing[0]
+        # A workflow that's still the example gets replaced outright, picking
+        # up any other improvements to it, but one that's been customized
+        # only has its action ref updated
+        if not calkit_resources.is_default_github_actions_workflow(txt):
+            txt_out = calkit_resources.set_action_ref(txt)
     if txt_out is None:
-        txt_out = calkit_resources.render_github_actions_workflow()
+        txt_out = calkit_resources.render_github_actions_workflow(on=on)
+    elif on is not None:
+        txt_out = calkit_resources.set_workflow_triggers(txt_out, on)
     out_fpath = os.path.join(out_dir, fname_out)
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w", encoding="utf-8") as f:
@@ -517,8 +526,126 @@ def update_notebook(
         raise_error(f"Failed to update notebook: {e}")
 
 
+@update_app.command(name="markdown")
+def update_markdown(
+    paths: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Markdown files to update. Defaults to those declared as "
+                "markdown stages."
+            )
+        ),
+    ] = None,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help=(
+                "Change nothing, and fail if any file shows a value its "
+                "results file no longer holds, or an imported image that "
+                "doesn't match its import."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Update the values Markdown files show, and check their imported images.
+
+    Each value marker's text, e.g., the 0.29 in
+    '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is
+    rewritten from the JSON, YAML, or TOML results file and key it names.
+    A format written in brackets, 'ckvalue[.2f] ...', as LaTeX's \\ckvalue
+    takes one, is moved after the key. Nothing else in the file changes. This is the update 'calkit run' makes after running
+    the pipeline, for a project without one, e.g., one whose results are
+    imported.
+
+    Each local image a file shows that calkit.yaml records as imported,
+    including one written from the project root like /images/fig.png, is
+    checked against what the import fetched: it should exist and not have
+    been edited since. Images are only checked, never changed; 'calkit
+    sync import' is what brings in a newer version.
+    """
+    import calkit.markdown
+    import calkit.provenance
+
+    ck_info = calkit.load_calkit_info()
+    locks = calkit.provenance.read_import_locks()
+    if not paths:
+        paths = sorted(
+            set(calkit.markdown.get_markdown_stages(ck_info).values())
+        )
+    if not paths:
+        raise_error(
+            "No Markdown files given, and none are declared as markdown stages"
+        )
+    results = calkit.markdown.results_by_name(ck_info)
+    # Values quoted from references come from calkit.yaml, so a check needs
+    # no file, and the file Calkit writes them to is brought up to date
+    import calkit.references.values
+
+    refvals = calkit.references.values.get_values_data(ck_info)
+    if not check:
+        calkit.references.values.write_values_file(ck_info)
+    stale = []
+    problems = []
+    for path in paths:
+        if not os.path.isfile(path):
+            raise_error(f"{path} does not exist")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        for image in calkit.markdown.get_image_paths(text, path, rooted=True):
+            found = calkit.provenance.find_artifact(ck_info, image)
+            if found is None or not found[1].get("imported_from"):
+                continue
+            source = calkit.provenance.describe_source(
+                found[1]["imported_from"]
+            )
+            if not os.path.isfile(image):
+                problems.append(
+                    f"{path} shows {image}, imported from {source}, which "
+                    "does not exist; run 'calkit sync import' to fetch it"
+                )
+            elif calkit.provenance.local_edit(image, locks.get(image)):
+                problems.append(
+                    f"{path} shows {image}, which has been edited since it "
+                    f"was imported from {source}"
+                )
+        try:
+            new_text, changed = calkit.markdown.set_values(
+                text, path, results=results, data=refvals
+            )
+        except calkit.markdown.MarkdownParseError as e:
+            raise_error(str(e))
+        if not changed:
+            continue
+        stale.append(path)
+        if check:
+            typer.echo(f"Values in {path} are out of date")
+            continue
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(new_text)
+        typer.echo(f"Updated values in {path}")
+    for problem in problems:
+        warn(problem)
+    if check and (stale or problems):
+        raise_error(
+            f"{len(stale)} file(s) show out-of-date values and "
+            f"{len(problems)} imported image(s) don't match their imports"
+        )
+
+
 @update_app.command(name="agent-skills")
 def update_agent_skills(
+    copy: Annotated[
+        bool,
+        typer.Option(
+            "--copy",
+            help=(
+                "Copy the skills to `~/.agents/skills` instead, for agents "
+                "without Calkit's plugin."
+            ),
+        ),
+    ] = False,
     quiet: Annotated[
         bool,
         typer.Option(
@@ -527,8 +654,33 @@ def update_agent_skills(
             help="Suppress non-essential output.",
         ),
     ] = False,
-):
-    """Copy packaged Calkit agent skills to `~/.agents/skills`."""
+) -> None:
+    """Update Calkit's plugin in each coding agent on this machine.
+
+    Copies of the skills in `~/.agents/skills` are removed, since they
+    shadow or duplicate the plugin's.
+    """
+    import re
+
+    from calkit import install
+
+    def fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
+        skill_md = os.path.join(dest_dir, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            return
+        with open(skill_md) as f:
+            content = f.read()
+        content = re.sub(
+            r"^(name:\s*)(.+)$",
+            f"\\g<1>{prefixed_name}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        with open(skill_md, "w") as f:
+            f.write(content)
+
+    # Find the skills, packaged or, in a dev install, in the repo
     source = resources.files("calkit").joinpath("agent_skills")
     source_repo = os.path.abspath(
         os.path.join(
@@ -542,50 +694,72 @@ def update_agent_skills(
     use_packaged = source.is_dir()
     if not use_packaged and not os.path.isdir(source_repo):
         raise_error("Bundled agent skills are missing from this installation")
-    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
-    os.makedirs(dest_root, exist_ok=True)
-
-    def _fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
-        skill_md = os.path.join(dest_dir, "SKILL.md")
-        if not os.path.isfile(skill_md):
-            return
-        with open(skill_md) as f:
-            content = f.read()
-        import re
-
-        content = re.sub(
-            r"^(name:\s*)(.+)$",
-            f"\\g<1>{prefixed_name}",
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        with open(skill_md, "w") as f:
-            f.write(content)
-
-    copied = 0
     if use_packaged:
-        for entry in source.iterdir():
-            if not entry.is_dir():
-                continue
-            prefixed = f"calkit-{entry.name}"
-            dest = os.path.join(dest_root, prefixed)
-            with resources.as_file(entry) as source_dir:
-                shutil.copytree(source_dir, dest, dirs_exist_ok=True)
-            _fix_skill_name(dest, prefixed)
-            copied += 1
+        skill_names = [e.name for e in source.iterdir() if e.is_dir()]
     else:
-        for name in os.listdir(source_repo):
-            source_dir = os.path.join(source_repo, name)
-            if not os.path.isdir(source_dir):
-                continue
+        skill_names = [
+            name
+            for name in os.listdir(source_repo)
+            if os.path.isdir(os.path.join(source_repo, name))
+        ]
+    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
+    # Copy for agents without the plugin
+    if copy:
+        os.makedirs(dest_root, exist_ok=True)
+        for name in skill_names:
             prefixed = f"calkit-{name}"
             dest = os.path.join(dest_root, prefixed)
-            shutil.copytree(source_dir, dest, dirs_exist_ok=True)
-            _fix_skill_name(dest, prefixed)
-            copied += 1
-    if not quiet:
-        typer.echo(f"Updated {copied} skills in {dest_root}")
+            if use_packaged:
+                with resources.as_file(source.joinpath(name)) as source_dir:
+                    shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            else:
+                shutil.copytree(
+                    os.path.join(source_repo, name), dest, dirs_exist_ok=True
+                )
+            fix_skill_name(dest, prefixed)
+        if not quiet:
+            typer.echo(f"Updated {len(skill_names)} skills in {dest_root}")
+        return
+    # Update the plugin in each agent found
+    n_found = 0
+    updated = []
+    for agent in install.AGENT_PLUGIN_CMDS:
+        binary_path = install.find(agent)
+        if binary_path is None:
+            continue
+        n_found += 1
+        if not install.is_agent_logged_in(agent, binary_path):
+            warn(
+                f"'{agent}' not logged in, so its Calkit plugin can't be "
+                f"updated; run '{agent} auth login'"
+            )
+            continue
+        if not quiet:
+            typer.echo(f"Updating Calkit plugin in '{agent}'")
+        if install.update_agent_plugin(agent, binary_path):
+            updated.append(agent)
+        else:
+            warn(f"Failed to update Calkit plugin in '{agent}'")
+    if n_found and not updated:
+        raise_error("Failed to update Calkit plugin in any coding agent")
+    if not updated:
+        warn(
+            "No coding agents updated; install one with, e.g., "
+            "'calkit install claude', or use '--copy' for other agents"
+        )
+        return
+    # Remove copies, which only now have a plugin to stand in for them, in
+    # an agent that reads them
+    if not set(updated) & set(install.AGENTS_READING_SKILL_COPIES):
+        return
+    n_removed = 0
+    for name in skill_names:
+        copy_path = os.path.join(dest_root, f"calkit-{name}")
+        if os.path.isdir(copy_path):
+            shutil.rmtree(copy_path)
+            n_removed += 1
+    if n_removed and not quiet:
+        typer.echo(f"Removed {n_removed} copied skills from {dest_root}")
 
 
 def _load_env(env_name: str) -> tuple[dict, dict]:
@@ -895,6 +1069,7 @@ def update_docker_env(
         bool,
         typer.Option(
             "--lock",
+            "--relock",
             help=(
                 "Rebuild or repull the image and write fresh lock files for "
                 "every architecture."
@@ -903,11 +1078,6 @@ def update_docker_env(
     ] = False,
 ) -> None:
     """Update a docker environment."""
-    from calkit.environments import (
-        get_all_docker_lock_fpaths,
-        get_env_lock_fpath,
-    )
-
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "docker":
         raise_error(f"Environment '{env_name}' is not a docker environment")
@@ -927,24 +1097,8 @@ def update_docker_env(
     if image is not None or registry is not None:
         calkit.save_calkit_info(ck_info)
         typer.echo(f"Updated docker environment '{env_name}'")
-    if not lock:
-        return
-    # Relocking throws away the existing lock files so the image is fetched or
-    # rebuilt from the environment's spec, which is the only way to pick up an
-    # image whose tag has been moved out from under a recorded digest
-    for lock_fpath in get_all_docker_lock_fpaths(env_name=env_name):
-        if os.path.isfile(lock_fpath):
-            typer.echo(f"Removing lock file: {lock_fpath}")
-            os.remove(lock_fpath)
-    legacy_lock_fpath = get_env_lock_fpath(
-        env=env, env_name=env_name, as_posix=False, legacy=True
-    )
-    if legacy_lock_fpath is not None and os.path.isfile(legacy_lock_fpath):
-        os.remove(legacy_lock_fpath)
-    from calkit.cli.check import check_environment
-
-    typer.echo(f"Relocking docker environment '{env_name}'")
-    check_environment(env_name=env_name, verbose=True)
+    if lock:
+        calkit.environments.relock(env_name=env_name, env=env)
 
 
 @update_app.command(name="latex-image")
@@ -1124,17 +1278,18 @@ def update_environment(
             "--lock",
             "--relock",
             help=(
-                "Record this machine's properties in a system "
-                "environment's lock file, replacing the machine it is "
-                "locked to. Invalidates every stage that depends on it."
+                "Rebuild the environment from its spec and lock it again, "
+                "taking the newest versions the spec allows, or for a "
+                "system environment, lock it to this machine. Reruns every "
+                "stage that depends on it."
             ),
         ),
     ] = False,
 ) -> None:
     """Update an environment.
 
-    Currently supports adding packages to Julia and Nix (flake) envs, and
-    re-locking a system environment to this machine.
+    Supports relocking any environment, and adding packages to Julia and
+    Nix (flake) envs.
     """
     from calkit.cli.main import run_in_env
 
@@ -1154,11 +1309,8 @@ def update_environment(
         env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
-            raise_error(
-                f"Environment '{env_name}' is not a system or switch "
-                "environment, so it has no machine to lock; its lock file is "
-                "derived from its spec"
-            )
+            calkit.environments.relock(env_name=env_name, env=env)
+            return
         # A switch's lock describes the machine its pick runs on
         machine_name, machine_env = env_name, env
         if kind == calkit.environments.SWITCH_KIND:
@@ -1232,7 +1384,7 @@ def update_environment(
     if add_packages is None:
         raise_error(
             "No updates specified. Use --add to specify packages to add, or "
-            "--lock to re-lock a system environment to this machine."
+            "--lock to relock the environment."
         )
     env = found
     assert isinstance(add_packages, list)
@@ -1480,14 +1632,60 @@ def update_figure(
             help="Name of the pipeline stage that produces this figure.",
         ),
     ] = None,
+    created_by_email: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-email",
+            help="Email of whoever made this figure, for one drawn by hand rather than produced by a stage.",
+        ),
+    ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-name", help="Name of whoever made this figure."
+        ),
+    ] = None,
+    created_by_orcid: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-orcid", help="ORCID of whoever made this figure."
+        ),
+    ] = None,
+    created_with_ai: Annotated[
+        list[str],
+        typer.Option(
+            "--created-with-ai",
+            help=(
+                "Generative AI tool they used, e.g. 'Claude Opus 5'. "
+                "Repeat for several."
+            ),
+        ),
+    ] = [],
 ) -> None:
     """Update a figure entry in calkit.yaml."""
+    from pydantic import ValidationError
+
+    from calkit.cli.new import _person_from_options
+    from calkit.models.core import Figure
+
     if imported_from is not None and imported_from_url is not None:
         raise_error(
             "--imported-from says where this came from on its own, so it "
             "can't be combined with --imported-from-url."
         )
-    if imported_from is None and imported_from_url is None and stage is None:
+    created_by = _person_from_options(
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
+    )
+    if (
+        imported_from is None
+        and imported_from_url is None
+        and stage is None
+        and created_by is None
+    ):
         raise_error("No updates specified.")
     source_dict = None
     if imported_from is not None:
@@ -1498,19 +1696,24 @@ def update_figure(
     figures = ck_info.get("figures", [])
     for fig in figures:
         if fig.get("path") == path:
-            if source_dict is not None:
-                fig["imported_from"] = source_dict
-            if stage is not None:
-                fig["stage"] = stage
             break
     else:
-        entry: dict = {"path": path}
-        if source_dict is not None:
-            entry["imported_from"] = source_dict
-        if stage is not None:
-            entry["stage"] = stage
-        figures.append(entry)
+        fig = {"path": path}
+        figures.append(fig)
         ck_info["figures"] = figures
+    if source_dict is not None:
+        fig["imported_from"] = source_dict
+    if stage is not None:
+        fig["stage"] = stage
+    if created_by is not None:
+        fig["created_by"] = created_by
+    try:
+        Figure.model_validate(fig)
+    except ValidationError as e:
+        raise_error(
+            "Invalid figure: "
+            + "; ".join(str(err["msg"]) for err in e.errors())
+        )
     calkit.save_calkit_info(ck_info)
 
 
@@ -1721,6 +1924,9 @@ def update_path_storage(
             if isinstance(out, dict) and out.get("storage") == "dvc-zip":
                 raise_error(f"{path} is stored zipped, which can't move yet")
             return f"outputs.{n}"
+        for n, out in enumerate(stage.get("cell_outputs") or []):
+            if out.get("output_path") and here(out["output_path"]) == path:
+                return f"cell_outputs.{n}"
         try:
             model = Pipeline.model_validate(
                 {"stages": {stage_name: stage}}
@@ -1751,6 +1957,9 @@ def update_path_storage(
         return None
 
     def set_storage(stage_name: str, stage: dict, key: str) -> None:
+        if key.startswith("cell_outputs."):
+            stage["cell_outputs"][int(key.split(".")[1])]["storage"] = to
+            return
         # Back to the default rather than spelled out where it can be
         if key.startswith("outputs."):
             n = int(key.split(".")[1])
@@ -1994,10 +2203,40 @@ def update_dataset(
             help="Name of the pipeline stage that produces this dataset.",
         ),
     ] = None,
+    created_by_email: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-email",
+            help="Email of whoever collected this data, for one collected for the project rather than imported or computed.",
+        ),
+    ] = None,
+    created_by_name: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-name", help="Name of whoever collected this data."
+        ),
+    ] = None,
+    created_by_orcid: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-orcid", help="ORCID of whoever collected this data."
+        ),
+    ] = None,
+    created_with_ai: Annotated[
+        list[str],
+        typer.Option(
+            "--created-with-ai",
+            help=(
+                "Generative AI tool they used, e.g. 'Claude Opus 5'. "
+                "Repeat for several."
+            ),
+        ),
+    ] = [],
 ) -> None:
     """Update a dataset entry in calkit.yaml."""
     from pydantic import ValidationError
 
+    from calkit.cli.new import _person_from_options
     from calkit.models.core import (
         Dataset,
         _ImportedFromDoi,
@@ -2040,7 +2279,14 @@ def update_dataset(
             "recorded in .calkit/imports.json by 'calkit sync import'. Use "
             "--imported-from-git-ref to say what to follow."
         )
-    if not sources_given and stage is None:
+    created_by = _person_from_options(
+        "created-by",
+        created_by_email,
+        created_by_orcid,
+        created_with_ai,
+        name=created_by_name,
+    )
+    if not sources_given and stage is None and created_by is None:
         raise_error("No updates specified.")
     source_dict: dict | None = None
     if sources_given:
@@ -2087,6 +2333,8 @@ def update_dataset(
         ds["imported_from"] = source_dict
     if stage is not None:
         ds["stage"] = stage
+    if created_by is not None:
+        ds["created_by"] = created_by
     # Checked as a whole, so an import added to a dataset someone collected
     # is refused here rather than left for the next validation to find
     try:
@@ -2145,8 +2393,7 @@ def is_connected_to_hub() -> bool:
     import calkit.dvc
 
     try:
-        repo = calkit.git.get_repo()
-        has_git_remote = "origin" in [r.name for r in repo.remotes]
+        has_git_remote = bool(calkit.git.get_repo().remotes)
     except Exception:
         return False
     if not has_git_remote:
@@ -2233,13 +2480,27 @@ def update_hub(
     git_repo_url = ck_info.get("git_repo_url")
     if git_repo_url is None:
         try:
-            url = calkit.git.get_repo().remotes.origin.url
+            remotes = list(calkit.git.get_repo().remotes)
+        except Exception:
+            remotes = []
+        # A project with one remote pushes there, whatever it's called
+        remote = next((r for r in remotes if r.name == "origin"), None)
+        if remote is None and len(remotes) == 1:
+            remote = remotes[0]
+        if remote is None and remotes:
+            raise_error(
+                "This project has several Git remotes and none named "
+                "'origin'; set 'git_repo_url' in calkit.yaml to the one to "
+                "connect"
+            )
+        if remote is not None:
+            url = remote.url
             # The hub identifies repos by their https URL
             if url.startswith("git@github.com:"):
                 url = "https://github.com/" + url.split(":", 1)[1]
             git_repo_url = url.removesuffix(".git")
-        except Exception:
-            git_repo_url = None
+    # Only a repo the hub creates can hold commits of its own to join
+    hub_makes_repo = git_repo_url is None
     if git_repo_url is None and not create_repo:
         from calkit.core import is_tty
 
@@ -2265,12 +2526,32 @@ def update_hub(
         ck_info["hub"] = hub
     hub_url = calkit.hub.get_hub_url()
     typer.echo(f"Connecting '{name}' to {hub_url}")
+    # Logging in is asked about here, not started by the lookup itself, so
+    # someone can decline it
     try:
-        user = calkit.hub.get_current_user()
+        user = calkit.hub.get("/user", allow_login=False)
     except Exception as e:
-        raise_error(
-            f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+        from calkit.core import is_tty
+
+        # No token raises ValueError; a rejected one, 401 or 403
+        status_code = getattr(getattr(e, "response", None), "status_code", 0)
+        if not isinstance(e, ValueError) and status_code not in (401, 403):
+            raise_error(f"Failed to reach {hub_url}: {e}")
+        if not is_tty() or not calkit.hub.is_interactive_login_allowed():
+            raise_error(
+                f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+            )
+        typer.echo(f"Not logged in to {hub_url}")
+        answer = typer.prompt(
+            "Log in now? [Y/n]", default="y", show_default=False
         )
+        if answer.strip().lower() not in ("", "y", "yes"):
+            raise_error("Not logged in; run 'calkit hub login' first")
+        try:
+            calkit.hub.run_device_flow()
+            user = calkit.hub.get("/user", allow_login=False)
+        except Exception as e:
+            raise_error(f"Failed to log in to {hub_url}: {e}")
     owner = ck_info.get("owner") or user.get("github_username")
     # A project that already exists on the hub, e.g., one created there
     # for this repo, is connected to rather than created again, which the
@@ -2328,7 +2609,7 @@ def update_hub(
     if isinstance(resp, dict) and resp.get("git_repo_url"):
         git_repo_url = resp["git_repo_url"]
         repo = calkit.git.get_repo()
-        if "origin" not in [r.name for r in repo.remotes]:
+        if not repo.remotes:
             typer.echo(f"Adding Git remote: {git_repo_url}")
             repo.git.remote(["add", "origin", git_repo_url])
         ck_info["git_repo_url"] = git_repo_url
@@ -2377,7 +2658,10 @@ def update_hub(
         if to_commit:
             typer.echo("Committing changes")
             repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
-        _adopt_hub_history(repo)
+        # Joining an existing repo's history this way would drop whatever
+        # was pushed to it that this clone doesn't have yet
+        if hub_makes_repo and resp is not None:
+            _adopt_hub_history(repo)
     calkit.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
 
 

@@ -39,6 +39,7 @@ jobs:
       BACKEND_CORS_ORIGINS: "https://${{ vars.DOMAIN }}"
       STACK_NAME: ${{ vars.STACK_NAME }}
       SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      RELAY_SECRET_KEY: ${{ secrets.RELAY_SECRET_KEY }}
       FERNET_KEY: "${{ secrets.FERNET_KEY }}"
       FIRST_SUPERUSER: ${{ vars.FIRST_SUPERUSER }}
       FIRST_SUPERUSER_PASSWORD: ${{ secrets.FIRST_SUPERUSER_PASSWORD }}
@@ -76,6 +77,10 @@ jobs:
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       ZOTERO_CLIENT_KEY: ${{ secrets.ZOTERO_CLIENT_KEY }}
       ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
+      HF_CLIENT_ID: ${{ secrets.HF_CLIENT_ID }}
+      HF_CLIENT_SECRET: ${{ secrets.HF_CLIENT_SECRET }}
+      BOX_CLIENT_ID: ${{ secrets.BOX_CLIENT_ID }}
+      BOX_CLIENT_SECRET: ${{ secrets.BOX_CLIENT_SECRET }}
       GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
     steps:
       - name: Validate release tag

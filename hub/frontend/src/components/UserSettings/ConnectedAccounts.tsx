@@ -7,18 +7,32 @@ import {
   IconButton,
   Input,
   Link,
+  ListItem,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
+  Radio,
+  RadioGroup,
+  SkeletonText,
+  Stack,
   Text,
+  UnorderedList,
   useDisclosure,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import mixpanel from "mixpanel-browser"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FaCheck, FaPlus, FaTimes, FaTrash } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
 import LoadingSpinner from "../Common/LoadingSpinner"
 
 import type { AxiosError } from "axios"
-import { type TokenPut, UsersService } from "../../client"
+import { StorageService, type TokenPut, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { appName } from "../../lib/core"
 import { handleError } from "../../lib/errors"
@@ -28,6 +42,9 @@ import {
   getGoogleAuthUrl,
   getGoogleRedirectUri,
 } from "../../lib/google"
+import { startBoxAuth } from "../../lib/box"
+import { startHuggingFaceAuth } from "../../lib/huggingface"
+import { getStorageLabel, getStorageUrl } from "../../lib/storage"
 import {
   getZenodoAuthUrl,
   getZenodoRedirectUri,
@@ -35,11 +52,84 @@ import {
 } from "../../lib/zenodo"
 import UpdateOverleafToken from "./UpdateOverleafToken"
 
+type StorageAction = "transfer" | "orphan"
+// Services storage can be connected from, by provider
+const STORAGE_SERVICES: Record<string, string> = {
+  huggingface: "Hugging Face",
+  box: "Box",
+}
+
 function ConnectedAccounts() {
   const clientId = import.meta.env.VITE_ZENODO_CLIENT_ID
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
+  const { disconnect } = useSearch({ from: "/_layout/settings" })
+  const navigate = useNavigate({ from: "/settings" })
+  const setDisconnect = (provider: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, disconnect: provider }) })
+  // A service whose storage disconnecting would strand, e.g., Hugging Face
+  const storageProvider =
+    disconnect && disconnect in STORAGE_SERVICES ? disconnect : undefined
+  const serviceName = storageProvider ? STORAGE_SERVICES[storageProvider] : ""
+  const serviceStorageQuery = useQuery({
+    queryKey: ["user", storageProvider, "storage"],
+    queryFn: () =>
+      StorageService.getUserServiceStorage({
+        provider: storageProvider as "huggingface" | "box",
+      }).then((response) => response.data),
+    enabled: storageProvider !== undefined,
+  })
+  // A transfer to Calkit Hub storage runs on the server, so it's checked
+  // until it's done
+  const transferQuery = useQuery({
+    queryKey: ["user", "storage-transfer"],
+    queryFn: () =>
+      StorageService.getUserStorageTransfer().then((response) => response.data),
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 5000 : false,
+  })
+  // Once it's done, the service is disconnected
+  const transferStatus = transferQuery.data?.status
+  const lastTransferStatus = useRef(transferStatus)
+  useEffect(() => {
+    if (lastTransferStatus.current === "running" && !transferStatus) {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "connected-accounts"],
+      })
+    }
+    lastTransferStatus.current = transferStatus
+  }, [transferStatus, queryClient])
+  const [storageAction, setStorageAction] = useState<StorageAction>("transfer")
+  const disconnectStorageServiceMutation = useMutation({
+    mutationFn: () =>
+      UsersService.deleteUserExternalCredential({
+        provider: storageProvider as string,
+        storage_action: serviceStorageQuery.data?.length ? storageAction : null,
+      }).then((response) => response.data),
+    onSuccess: (data) => {
+      mixpanel.track("Disconnected account", {
+        provider: storageProvider,
+        storage_action: storageAction,
+      })
+      showToast("Success!", data.message, "success")
+      setDisconnect(undefined)
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "connected-accounts"],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["user", storageProvider, "storage"],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["user", "storage-transfer"],
+      })
+    },
+  })
   const [isEditingOverleaf, setIsEditingOverleaf] = useState(false)
   const [overleafToken, setOverleafToken] = useState("")
 
@@ -68,11 +158,36 @@ function ConnectedAccounts() {
       handleError(err, showToast)
     },
   })
+  const connectHuggingFaceMutation = useMutation({
+    mutationFn: () => {
+      mixpanel.track("Clicked connect Hugging Face", {
+        from: "connected accounts",
+      })
+      return startHuggingFaceAuth("/settings?tab=connected-accounts")
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+  })
+  const connectBoxMutation = useMutation({
+    mutationFn: () => {
+      mixpanel.track("Clicked connect Box", { from: "connected accounts" })
+      return startBoxAuth("/settings?tab=connected-accounts")
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+  })
   const connectedAccountsQuery = useQuery({
     queryFn: () =>
       UsersService.getUserConnectedAccounts().then((response) => response.data),
     queryKey: ["user", "connected-accounts"],
   })
+  // Which account each service is connected as, e.g., a username
+  const getAccountNameText = (provider: string) => {
+    const name = connectedAccountsQuery.data?.account_names?.[provider]
+    return name ? <Text color="ui.dim">{name}</Text> : null
+  }
   const ghInstallQuery = useQuery({
     queryFn: () =>
       UsersService.getUserGithubAppInstallations().then(
@@ -159,7 +274,10 @@ function ConnectedAccounts() {
           <HStack align="center">
             <Text>GitHub:</Text>
             {connectedAccountsQuery.data?.github ? (
-              <Icon as={FaCheck} color="green.500" />
+              <>
+                <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("github")}
+              </>
             ) : (
               // Accounts created through Google or email start without a
               // GitHub identity, which project creation needs
@@ -312,6 +430,7 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.google ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("google")}
                 <IconButton
                   aria-label="Disconnect Google"
                   icon={<FaTrash />}
@@ -333,6 +452,7 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.zotero ? (
               <>
                 <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("zotero")}
                 <IconButton
                   aria-label="Disconnect Zotero"
                   icon={<FaTrash />}
@@ -354,10 +474,156 @@ function ConnectedAccounts() {
               </Button>
             )}
           </HStack>
+          <HStack mt={4}>
+            <Text>Hugging Face:</Text>
+            {connectedAccountsQuery.data?.huggingface ? (
+              <>
+                <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("huggingface")}
+                {transferQuery.data?.provider === "huggingface" &&
+                transferQuery.data.status === "running" ? (
+                  <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
+                ) : (
+                  <IconButton
+                    aria-label="Disconnect Hugging Face"
+                    icon={<FaTrash />}
+                    size="xs"
+                    variant="ghost"
+                    colorScheme="red"
+                    onClick={() => setDisconnect("huggingface")}
+                  />
+                )}
+                {transferQuery.data?.provider === "huggingface" &&
+                  transferQuery.data?.status === "failed" && (
+                    <Text color="ui.danger">
+                      Transfer failed
+                      {transferQuery.data.error
+                        ? `: ${transferQuery.data.error}`
+                        : ""}
+                    </Text>
+                  )}
+              </>
+            ) : (
+              <Button
+                variant="primary"
+                size="xs"
+                onClick={() => connectHuggingFaceMutation.mutate()}
+                isLoading={connectHuggingFaceMutation.isPending}
+              >
+                Connect
+              </Button>
+            )}
+          </HStack>
+          <HStack mt={4}>
+            <Text>Box:</Text>
+            {connectedAccountsQuery.data?.box ? (
+              <>
+                <Icon as={FaCheck} color="green.500" />
+                {getAccountNameText("box")}
+                {transferQuery.data?.provider === "box" &&
+                transferQuery.data.status === "running" ? (
+                  <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
+                ) : (
+                  <IconButton
+                    aria-label="Disconnect Box"
+                    icon={<FaTrash />}
+                    size="xs"
+                    variant="ghost"
+                    colorScheme="red"
+                    onClick={() => setDisconnect("box")}
+                  />
+                )}
+                {transferQuery.data?.provider === "box" &&
+                  transferQuery.data.status === "failed" && (
+                    <Text color="ui.danger">
+                      Transfer failed
+                      {transferQuery.data.error
+                        ? `: ${transferQuery.data.error}`
+                        : ""}
+                    </Text>
+                  )}
+              </>
+            ) : (
+              <Button
+                variant="primary"
+                size="xs"
+                onClick={() => connectBoxMutation.mutate()}
+                isLoading={connectBoxMutation.isPending}
+              >
+                Connect
+              </Button>
+            )}
+          </HStack>
           <UpdateOverleafToken
             isOpen={overleafTokenModal.isOpen}
             onClose={overleafTokenModal.onClose}
           />
+          <Modal
+            isOpen={storageProvider !== undefined}
+            onClose={() => setDisconnect(undefined)}
+            size={{ base: "sm", md: "md" }}
+            isCentered
+            motionPreset="none"
+          >
+            <ModalOverlay />
+            <ModalContent>
+              <ModalHeader>Disconnect {serviceName}</ModalHeader>
+              <ModalCloseButton />
+              <ModalBody>
+                {serviceStorageQuery.isPending ? (
+                  <SkeletonText noOfLines={3} />
+                ) : serviceStorageQuery.data?.length ? (
+                  <>
+                    <Text>Storage using this account:</Text>
+                    <UnorderedList mt={2}>
+                      {serviceStorageQuery.data.map((r) => (
+                        <ListItem key={r.id}>
+                          <Link href={getStorageUrl(r)} isExternal>
+                            {getStorageLabel(r)}
+                          </Link>
+                          {r.projects.length > 0 &&
+                            ` (${r.projects.join(", ")})`}
+                        </ListItem>
+                      ))}
+                    </UnorderedList>
+                    <RadioGroup
+                      mt={4}
+                      value={storageAction}
+                      onChange={(value) =>
+                        setStorageAction(value as StorageAction)
+                      }
+                    >
+                      <Stack>
+                        <Radio value="transfer">
+                          Transfer to Calkit Hub storage
+                        </Radio>
+                        <Radio value="orphan">
+                          Leave on {serviceName} (projects lose access)
+                        </Radio>
+                      </Stack>
+                    </RadioGroup>
+                    <Text mt={3} fontSize="sm" color="ui.dim">
+                      Files stay on {serviceName} either way. To delete them, go
+                      there.
+                    </Text>
+                  </>
+                ) : (
+                  <Text>No storage uses this account.</Text>
+                )}
+              </ModalBody>
+              <ModalFooter gap={3}>
+                <Button
+                  variant="danger"
+                  onClick={() => disconnectStorageServiceMutation.mutate()}
+                  isLoading={disconnectStorageServiceMutation.isPending}
+                  isDisabled={serviceStorageQuery.isPending}
+                >
+                  Disconnect
+                </Button>
+                <Button onClick={() => setDisconnect(undefined)}>Cancel</Button>
+              </ModalFooter>
+            </ModalContent>
+          </Modal>
         </>
       )}
     </Container>

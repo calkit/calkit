@@ -107,7 +107,7 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -121,11 +121,11 @@ jobs:
           auto-activate-base: true
           conda-remove-defaults: true
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
+        uses: prefix-dev/setup-pixi@9936258fee697aff89b3fed6ca1f80a382ef694e # v0.11.3
         with:
           run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@8d13b44e0eb1620c4e2d2d0a4ceee7d98100b955 # v3.1.6
+        uses: julia-actions/install-juliaup@ac1bed66e8369307bff3d25a4fa3f6b85cdfcfe7 # v3.1.7
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       # Juliaup installs Julia but leaves the depot empty, and the first Pkg
@@ -161,7 +161,53 @@ jobs:
         uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           r-version: latest
+      # For exporting slides, with fonts metric-compatible with Office's
+      - name: Install LibreOffice Impress
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends \
+            libreoffice-impress fonts-crosextra-carlito fonts-crosextra-caladea
+      # Like the run action, so checks get a build's digest without a push
+      - name: Switch Docker to the containerd image store
+        if: runner.os == 'Linux'
+        run: |
+          sudo mkdir -p /etc/docker
+          sudo python3 - /etc/docker/daemon.json <<'EOF'
+          import json
+          import os
+          import sys
+
+          path = sys.argv[1]
+          cfg = {}
+          if os.path.exists(path) and os.path.getsize(path):
+              with open(path) as f:
+                  cfg = json.load(f)
+          cfg.setdefault("features", {})["containerd-snapshotter"] = True
+          with open(path, "w") as f:
+              json.dump(cfg, f, indent=2)
+          EOF
+          sudo systemctl restart docker
+          docker info --format '{{json .DriverStatus}}'
+      # TeX Live's historic archive, which the frozen release's packages
+      # come from, is one server, and a run that downloads them all can time
+      # out on it. They never change, so they're kept. Restore only, as for
+      # the Julia depot: warm-texlive-store.yml saves them in the default
+      # branch's scope. Only downloads, not environments built from them,
+      # so a change to how those are built is still tested.
+      - name: Restore TeX Live downloads
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.calkit/texlive/pkgs
+            ~/.calkit/texlive/tlpdb
+            ${{ runner.temp }}/texlive-home/.calkit/texlive/pkgs
+            ${{ runner.temp }}/texlive-home/.calkit/texlive/tlpdb
+          key: texlive-store-${{ runner.os }}-
+          restore-keys: texlive-store-${{ runner.os }}-
       - name: Run tests
+        env:
+          CALKIT_TEST_TEXLIVE_HOME: ${{ runner.temp }}/texlive-home
         run: |
           pixi --version
           conda --version
@@ -173,7 +219,8 @@ jobs:
   jupyterlab-ext:
     needs: changes
     if: needs.changes.outputs.jlab == 'true'
-    runs-on: ubuntu-latest
+    # Playwright 1.56 cannot install Chromium on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: jupyterlab-ext
@@ -187,7 +234,7 @@ jobs:
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
       - name: Setup uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run

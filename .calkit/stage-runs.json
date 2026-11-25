@@ -94,22 +94,22 @@
     }
   },
   "latex-word-round-trip": {
-    "start_time": "2026-11-25T00:16:25.650000",
-    "end_time": "2026-11-25T00:16:55.492000",
+    "start_time": "2026-11-25T19:39:08.597000",
+    "end_time": "2026-11-25T19:39:42.663000",
     "environment": "dev",
-    "git_rev": "5e276b92782f053c64f8c66ea9e54a7b6e63554a",
+    "git_rev": "7a55f62bcec6764fc4cdb02545de212502da7798",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:7459ae2860bc780641d70f66ce57b2d8229355084d5af24fd7847f8c44327247",
-    "calkit_version": "0.53.1.dev6+g5e276b92",
-    "calkit_git_rev": "5e276b92782f053c64f8c66ea9e54a7b6e63554a",
+    "dvc_lock_hash": "sha256:d082a448d77060437c47a1cb3856d704ee52d28ef8945372bed3e1004b11d012",
+    "calkit_version": "0.53.1.dev10+g7a55f62b",
+    "calkit_git_rev": "7a55f62bcec6764fc4cdb02545de212502da7798",
     "system": {
-      "machine_id": "ec26ed72c80cda594c7e16432bd1f6ef",
+      "machine_id": "ca28fd2600df4422aa47c00aa83b8a79",
       "os": "Linux",
-      "os_version": "7.0.0-1016-aws",
+      "os_version": "7.0.0-1020-azure",
       "machine": "x86_64",
       "processor": "",
       "cpu_count": 4,
-      "memory_gb": 15.3
+      "memory_gb": 15.6
     }
   },
   "latex-word-round-trip-figure": {

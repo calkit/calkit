@@ -20,7 +20,6 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-import calkit.eol
 import calkit.latex
 from calkit.cli import raise_error, warn
 
@@ -4751,7 +4750,7 @@ def merge_docx(
     for path, content in files.items():
         new = "\n".join(content)
         if new != Path(path).read_text(encoding="utf-8"):
-            calkit.eol.write_text(path, new)
+            calkit.write_text(path, new)
     rev = None
     try:
         rev = calkit.git.get_repo().head.commit.hexsha
@@ -4877,7 +4876,7 @@ def edit_comment(
         edit(tc)
         tc.id = tc.id or calkit.latex.new_comment_id()
         calkit.latex.write_comment(lines, tc)
-    calkit.eol.write_text(path, "\n".join(lines))
+    calkit.write_text(path, "\n".join(lines))
     return tc
 
 

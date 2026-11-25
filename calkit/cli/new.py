@@ -16,7 +16,6 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-import calkit.eol
 from calkit.cli import AliasGroup, OptionalValueCommand, raise_error, warn
 from calkit.core import ryaml
 
@@ -568,10 +567,10 @@ def new_project(
         except Exception:
             warn("Could not set authentication for Calkit DVC remote")
         # Before adding, so what's committed is normalized by the rules
-        calkit.eol.write_rules(abs_path)
+        calkit.write_eol_rules(abs_path)
         # Commit this stuff to Git
         repo.git.add(".")
-        calkit.eol.convert_worktree(abs_path)
+        calkit.convert_worktree_eol(abs_path)
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Create new project from {template_name}"])
         calkit.record_project_path(abs_path)
@@ -585,7 +584,7 @@ def new_project(
         subprocess.run(["git", "init", "-q"], cwd=abs_path)
     repo = calkit.git.get_repo(abs_path)
     # Before anything is added, so what's committed is normalized by them
-    if calkit.eol.write_rules(abs_path):
+    if calkit.write_eol_rules(abs_path):
         repo.git.add(".gitattributes")
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
@@ -633,7 +632,7 @@ def new_project(
         except Exception as e:
             warn(f"Failed to set up Calkit DVC remote: {e}")
     # Files written here have this platform's line endings
-    calkit.eol.convert_worktree(abs_path)
+    calkit.convert_worktree_eol(abs_path)
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     calkit.record_project_path(abs_path)
@@ -1176,7 +1175,7 @@ def new_comment(
             pathlib.Path(review).read_text(encoding="utf-8").split("\n")
         )
         review_lines = calkit.reviews.add(review_lines, comment, section)
-        calkit.eol.write_text(review, "\n".join(review_lines))
+        calkit.write_text(review, "\n".join(review_lines))
         ordinal = next(
             i
             for i, c in enumerate(calkit.reviews.parse(review_lines), 1)
@@ -1205,7 +1204,7 @@ def new_comment(
         calkit.latex.add_comment(lines, line, tc)
     except ValueError as e:
         raise_error(str(e))
-    calkit.eol.write_text(path, "\n".join(lines))
+    calkit.write_text(path, "\n".join(lines))
     if as_json:
         blks = calkit.latex.file_blocks(path, lines)
         typer.echo(

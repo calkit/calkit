@@ -23,7 +23,7 @@ dependencies = [
   "sentry-sdk[fastapi]<2.0.0,>=1.40.6",
   "pyjwt<3.0.0,>=2.8.0",
   # Beyond template dependencies
-  "s3fs==2026.4.0",
+  "s3fs==2026.9.0",
   "python-slugify==9.2.0",
   "cryptography==50.0.2",
   "gitpython>=3.1.47",

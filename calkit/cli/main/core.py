@@ -557,7 +557,10 @@ def clone(
     typer.echo(f"Moving into repo dir: {location}")
     os.chdir(location)
     if hub_credentials:
-        calkit.git.configure_github_credentials(calkit.git.get_repo())
+        cloned = calkit.git.get_repo()
+        calkit.git.configure_github_credentials(cloned)
+        for key, value in calkit.git.configure_identity(cloned).items():
+            typer.echo(f"Set Git {key} to {value} from your hub account")
     calkit.record_project_path()
     # So Git merges dvc.lock and stage run records stage by stage
     calkit.merge.configure_driver()

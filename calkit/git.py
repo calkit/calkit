@@ -1011,3 +1011,44 @@ def configure_github_credentials(repo: git.Repo) -> None:
             writer.remove_option('credential "https://github.com"', "helper")
     for key, value in get_github_credential_config():
         repo.git.config("--local", "--add", key, value)
+
+
+def configure_identity(repo: git.Repo) -> dict[str, str]:
+    """Set Git's name and email for commits in a repo from the user's hub
+    account, for any Git has none of, e.g., on a new machine, where
+    committing would fail, or on macOS, be done as the user at this
+    machine's hostname, which GitHub can't link to anyone.
+
+    Returns what was set, by key.
+    """
+    import calkit
+
+    def get_value(key: str) -> str | None:
+        try:
+            return str(repo.git.config("--get", key)).strip() or None
+        except git.GitCommandError:
+            return None
+
+    missing = [k for k in ("user.name", "user.email") if not get_value(k)]
+    if not missing:
+        return {}
+    try:
+        user = calkit.hub.get("/user", allow_login=False, max_retries=2)
+    except Exception:
+        return {}
+    github_name = user.get("github_username")
+    values = {
+        "user.name": user.get("full_name") or github_name,
+        "user.email": user.get("email")
+        or (
+            f"{github_name}@users.noreply.github.com" if github_name else None
+        ),
+    }
+    configured = {}
+    with repo.config_writer("repository") as writer:
+        for key in missing:
+            if values[key]:
+                section, option = key.split(".")
+                writer.set_value(section, option, values[key])
+                configured[key] = values[key]
+    return configured

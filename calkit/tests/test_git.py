@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import git
 import pytest
@@ -845,3 +846,41 @@ def test_configure_github_credentials(tmp_dir, monkeypatch, httpserver):
     )
     assert result.returncode != 0
     assert "Couldn't get GitHub token from hub" in result.stderr
+
+
+def test_configure_identity(tmp_dir, monkeypatch):
+    import calkit.git
+
+    global_config = os.path.join(tmp_dir, "global.gitconfig")
+    open(global_config, "w").close()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", global_config)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    user = {"full_name": "Ada Lovelace", "email": "ada@example.com"}
+    monkeypatch.setattr(calkit.hub, "get", lambda *args, **kwargs: user)
+    repo = git.Repo.init("repo")
+    # Both from the hub account, then nothing once Git has them
+    assert calkit.git.configure_identity(repo) == {
+        "user.name": "Ada Lovelace",
+        "user.email": "ada@example.com",
+    }
+    assert repo.git.config("--local", "user.email") == "ada@example.com"
+    assert calkit.git.configure_identity(repo) == {}
+    # Only what's missing, e.g., not a name set for every repo
+    repo = git.Repo.init("other")
+    with open(global_config, "w") as f:
+        f.write("[user]\n\tname = Ada\n")
+    assert calkit.git.configure_identity(repo) == {
+        "user.email": "ada@example.com"
+    }
+    # A GitHub account's no-reply address without an email
+    repo = git.Repo.init("third")
+    user = {"full_name": None, "email": None, "github_username": "ada"}
+    assert calkit.git.configure_identity(repo) == {
+        "user.email": "ada@users.noreply.github.com"
+    }
+    # Nothing when the hub can't say, e.g., when not signed in
+    monkeypatch.setattr(
+        calkit.hub, "get", Mock(side_effect=ValueError("No token found"))
+    )
+    repo = git.Repo.init("fourth")
+    assert calkit.git.configure_identity(repo) == {}

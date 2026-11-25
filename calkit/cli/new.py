@@ -196,6 +196,10 @@ def new_project(
     from calkit.cli.update import update_devcontainer
     from calkit.dvc import run_dvc_command
 
+    def _configure_identity(repo: git.Repo) -> None:
+        for key, value in calkit.git.configure_identity(repo).items():
+            typer.echo(f"Set Git {key} to {value} from your hub account")
+
     docs_url = "https://docs.calkit.org"
     success_message = (
         "\nCongrats on creating your new Calkit project!\n\n"
@@ -271,6 +275,8 @@ def new_project(
                 raise_error(f"Failed to initialize DVC repository: {e}")
             # Commit the DVC init changes
             if not no_commit:
+                if hub is not None:
+                    _configure_identity(repo)
                 repo.git.add(".dvc")
                 repo.git.commit(["-m", "Initialize DVC"])
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
@@ -359,14 +365,15 @@ def new_project(
                 ]
             )
             if os.path.isdir(os.path.join(abs_path, ".git")):
-                calkit.git.configure_github_credentials(
-                    calkit.git.get_repo(abs_path)
-                )
+                cloned = calkit.git.get_repo(abs_path)
+                calkit.git.configure_github_credentials(cloned)
+                _configure_identity(cloned)
         elif repo is None:
             typer.echo("Fetching from newly created Git repo")
             repo = git.Repo.init(abs_path, initial_branch="main")
             repo.git.remote(["add", "origin", resp["git_repo_url"]])
             calkit.git.configure_github_credentials(repo)
+            _configure_identity(repo)
             repo.git.fetch()
             checkout_cmd = ["-t", "origin/main"]
             if overwrite:
@@ -376,6 +383,7 @@ def new_project(
             except GitCommandError as e:
                 raise_error(f"Failed to check out main branch: {e}")
         else:
+            _configure_identity(repo)
             # Create a calkit.yaml file if one does not exist
             calkit_fpath = os.path.join(abs_path, "calkit.yaml")
             if not os.path.isfile(calkit_fpath):

@@ -1417,8 +1417,16 @@ def start_job(msg: dict) -> dict:
         check_clone_location(location)
         if not os.path.isdir(location):
             raise ValueError(f"{location} isn't a folder")
+        # One an earlier try made the project in picks up where it
+        # stopped, e.g., before Overleaf could be connected
+        made = {}
         if os.path.exists(os.path.join(location, ".git")):
-            raise ValueError(f"{location} is already a Git repo")
+            try:
+                made = calkit.load_calkit_info(wdir=location, read_only=True)
+            except Exception:
+                made = {}
+            if made.get("name") != name or made.get("owner") != owner:
+                raise ValueError(f"{location} is already a Git repo")
         hub = msg.get("hub")
         title = msg.get("title")
         overleaf_url = msg.get("overleafProjectUrl")
@@ -1444,15 +1452,23 @@ def start_job(msg: dict) -> dict:
             raise ValueError("A kind of document is needed")
         wdir = location
         cmd = calkit_cmd + ["hub", "login", "--hub", hub]
-        then = [
-            calkit_cmd
-            + ["new", "project", ".", "--hub", hub, "--name", name]
-            + ["--title", title.strip()]
-            + (["--public"] if msg.get("isPublic") else []),
-            calkit_cmd
-            + ["overleaf", "import", overleaf_url, path, "--kind", doc_kind],
-            calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
-        ]
+        then = []
+        if not made:
+            then.append(
+                calkit_cmd
+                + ["new", "project", ".", "--hub", hub, "--name", name]
+                + ["--title", title.strip()]
+                + (["--public"] if msg.get("isPublic") else [])
+            )
+        if path not in (made.get("overleaf_sync") or {}):
+            then.append(
+                calkit_cmd
+                + ["overleaf", "import", overleaf_url, path]
+                + ["--kind", doc_kind]
+            )
+        then.append(
+            calkit_cmd + ["save", "-a", "-m", "Add files from this machine"]
+        )
     elif kind == "clone":
         location = msg.get("location") or os.path.join(
             calkit.get_user_home(), "calkit", name

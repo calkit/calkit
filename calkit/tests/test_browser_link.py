@@ -726,6 +726,24 @@ def test_start_job(tmp_path, monkeypatch):
         calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
     ]
     os.remove(calkit.browser_link.get_job_path(creating["id"]))
+    # Trying again where an earlier try made the project picks up where it
+    # stopped, e.g., before the paper could be imported
+    subprocess.check_call(["git", "init", "-q", str(analysis)])
+    (analysis / "calkit.yaml").write_text("owner: me\nname: dye\n")
+    resumed = start_job(create)
+    assert resumed["then"] == creating["then"][1:]
+    os.remove(calkit.browser_link.get_job_path(resumed["id"]))
+    (analysis / "calkit.yaml").write_text(
+        "owner: me\nname: dye\noverleaf_sync:\n  paper: {}\n"
+    )
+    resumed = start_job(create)
+    assert resumed["then"] == creating["then"][2:]
+    os.remove(calkit.browser_link.get_job_path(resumed["id"]))
+    # But not in a repo of another project
+    (analysis / "calkit.yaml").write_text("owner: me\nname: other\n")
+    with pytest.raises(ValueError, match="already a Git repo"):
+        start_job(create)
+    (analysis / "calkit.yaml").write_text("owner: me\nname: dye\n")
     for bad, error in [
         ({"location": str(project)}, "already a Git repo"),
         ({"location": str(analysis / "fit.py")}, "isn't a folder"),

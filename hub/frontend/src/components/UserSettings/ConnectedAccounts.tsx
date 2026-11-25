@@ -611,24 +611,29 @@ function ConnectedAccounts() {
                     onClick={() => setDisconnect(`s3:${c.name}`)}
                     isDisabled={
                       transferQuery.data?.provider === "s3" &&
+                      transferQuery.data.label === c.name &&
                       transferQuery.data.status === "running"
                     }
                   />
+                  {transferQuery.data?.provider === "s3" &&
+                    transferQuery.data.label === c.name &&
+                    transferQuery.data.status === "running" && (
+                      <Text color="ui.dim">
+                        Transferring to Calkit Hub storage
+                      </Text>
+                    )}
+                  {transferQuery.data?.provider === "s3" &&
+                    transferQuery.data.label === c.name &&
+                    transferQuery.data.status === "failed" && (
+                      <Text color="ui.danger">
+                        Transfer failed
+                        {transferQuery.data.error
+                          ? `: ${transferQuery.data.error}`
+                          : ""}
+                      </Text>
+                    )}
                 </HStack>
               ))}
-              {transferQuery.data?.provider === "s3" &&
-                transferQuery.data.status === "running" && (
-                  <Text color="ui.dim">Transferring to Calkit Hub storage</Text>
-                )}
-              {transferQuery.data?.provider === "s3" &&
-                transferQuery.data.status === "failed" && (
-                  <Text color="ui.danger">
-                    Transfer failed
-                    {transferQuery.data.error
-                      ? `: ${transferQuery.data.error}`
-                      : ""}
-                  </Text>
-                )}
               <Button
                 variant="primary"
                 size="xs"
@@ -680,9 +685,13 @@ function ConnectedAccounts() {
                     <UnorderedList mt={2}>
                       {serviceStorageQuery.data.map((r) => (
                         <ListItem key={r.id}>
-                          <Link href={getStorageUrl(r)} isExternal>
-                            {getStorageLabel(r)}
-                          </Link>
+                          {getStorageUrl(r) ? (
+                            <Link href={getStorageUrl(r)} isExternal>
+                              {getStorageLabel(r)}
+                            </Link>
+                          ) : (
+                            getStorageLabel(r)
+                          )}
                           {r.projects.length > 0 &&
                             ` (${r.projects.join(", ")})`}
                         </ListItem>

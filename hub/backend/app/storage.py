@@ -405,7 +405,7 @@ def check_s3_endpoint_url(endpoint_url: str, resolve: bool = True) -> None:
     are allowed, e.g., the dev MinIO.
 
     Resolving here is only for a clear error when keys are saved, since a
-    host can resolve differently later; ``connect_public_socket`` is what
+    host can resolve differently later; ``make_public_socket`` is what
     keeps connections off private networks.
     """
     from urllib.parse import urlparse
@@ -431,11 +431,34 @@ def check_s3_endpoint_url(endpoint_url: str, resolve: bool = True) -> None:
     except (socket.gaierror, UnicodeError):
         raise S3EndpointError(f"Can't resolve {hostname}")
     for info in infos:
-        if not ipaddress.ip_address(info[4][0]).is_global:
+        if not address_is_public(info[4][0]):
             raise S3EndpointError(f"{hostname} isn't public")
 
 
-def connect_public_socket(addr_info: Any) -> socket.socket:
+# IPv6 prefixes that carry an IPv4 address, e.g., for NAT64, so a private
+# one could be reached through them
+EMBEDDED_IPV4_NETWORKS = [
+    ipaddress.ip_network(n)
+    for n in ("64:ff9b::/96", "64:ff9b:1::/48", "::/96")
+]
+
+
+def address_is_public(address: str) -> bool:
+    """Whether an IP address is on the public internet, including any IPv4
+    address embedded in an IPv6 one.
+    """
+    ip = ipaddress.ip_address(address)
+    if not ip.is_global:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped or ip.sixtofour or ip.teredo:
+            return False
+        if any(ip in network for network in EMBEDDED_IPV4_NETWORKS):
+            return False
+    return True
+
+
+def make_public_socket(addr_info: Any) -> socket.socket:
     """Make a socket for connecting to S3 storage, refusing addresses that
     aren't public.
 
@@ -443,7 +466,7 @@ def connect_public_socket(addr_info: Any) -> socket.socket:
     host that resolves differently later can reach the hub's own network.
     """
     family, type_, proto, _, sockaddr = addr_info
-    if not ipaddress.ip_address(sockaddr[0]).is_global:
+    if not address_is_public(sockaddr[0]):
         raise OSError(f"Refusing to connect to {sockaddr[0]}")
     return socket.socket(family=family, type=type_, proto=proto)
 
@@ -469,7 +492,7 @@ def get_s3_fs(
         config_kwargs["s3"] = {"addressing_style": "path"}
     if settings.ENVIRONMENT != "local":
         config_kwargs["connector_args"] = {
-            "socket_factory": connect_public_socket
+            "socket_factory": make_public_socket
         }
     return s3fs.S3FileSystem(
         key=access_key_id,
@@ -635,6 +658,18 @@ def get_project_storage_locations(
     return storage_locations + [internal]
 
 
+def path_is_readable(storage: ProjectStorage, path: str) -> bool:
+    """Whether a project's path can be read from a storage.
+
+    A dedicated S3 bucket or prefix, e.g., an existing DVC remote, may hold
+    other files, so only DVC's objects are read from it, rather than letting
+    everyone who can read the project read the whole bucket.
+    """
+    if storage.backend == "s3" and storage.is_dedicated:
+        return path == "files" or path.startswith("files/")
+    return True
+
+
 def get_project_storage(
     session: "Session", project: "Project"
 ) -> ProjectStorage:
@@ -663,6 +698,8 @@ def find_project_object(
         storage_locations = get_project_storage_locations(session, project)
     owner_name = project.owner_account_name
     for storage in storage_locations:
+        if not path_is_readable(storage, path):
+            continue
         fpath = storage.make_project_path(owner_name, project.name, path)
         if storage.fs.exists(fpath):
             return storage, fpath

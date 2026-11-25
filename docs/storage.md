@@ -199,6 +199,8 @@ so many projects can share one bucket.
 If the bucket or prefix should hold only this project's files,
 e.g., because it's already the project's DVC remote,
 check "Only this project's files."
+Calkit only reads DVC's files from it,
+so anything else in the bucket stays private.
 
 If the keys can only read the bucket,
 Calkit reads files from it but sends new files where they went before.
@@ -208,7 +210,20 @@ without giving the keys to anyone.
 
 Files go directly between your machine and the bucket,
 using links Calkit signs with your keys.
-Collaborators never see the keys.
+Collaborators never see the secret key.
+
+To show the contents of files stored with DVC on calkit.io,
+e.g., tables,
+the bucket has to allow requests from calkit.io in its CORS rules,
+e.g., with the AWS CLI:
+
+```sh
+aws s3api put-bucket-cors --bucket my-bucket --cors-configuration \
+  '{"CORSRules": [{"AllowedOrigins": ["https://calkit.io"], "AllowedMethods": ["GET"]}]}'
+```
+
+For storage other than AWS, add `--endpoint-url` with its endpoint.
+Without the rule, pushing and pulling still work.
 Disconnecting keys works like it does for Hugging Face,
 and your files stay in the bucket either way.
 

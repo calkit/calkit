@@ -202,6 +202,8 @@ class StorageTransferStatus(BaseModel):
     error: str | None = None
     # Where it's from, e.g., "huggingface"
     provider: str | None = None
+    # For S3, the connection's name
+    label: str | None = None
 
 
 @router.get("/user/storage-transfer")
@@ -211,10 +213,15 @@ def get_user_storage_transfer(
     """Get the status of moving the storage reached with one of the current
     user's accounts on a service to the hub's own storage.
     """
-    status, error, provider = app.tasks.get_storage_transfer_status(
+    status, error, provider, label = app.tasks.get_storage_transfer_status(
         current_user.id
     )
-    return StorageTransferStatus(status=status, error=error, provider=provider)
+    return StorageTransferStatus(
+        status=status,
+        error=error,
+        provider=provider,
+        label=label if provider == "s3" else None,
+    )
 
 
 class ProjectStoragePut(BaseModel):
@@ -230,12 +237,22 @@ class ProjectHfBucketPost(BaseModel):
     bucket: str
 
 
-def is_transferring(user_id: uuid.UUID, provider: str) -> bool:
+def is_transferring(
+    user_id: uuid.UUID, provider: str, label: str = "default"
+) -> bool:
     """Whether storage reached with a user's account on a service, e.g.,
     ``"huggingface"``, is being moved to the hub's own storage.
+
+    For S3, ``label`` is the connection's name.
     """
-    status, _, transferring = app.tasks.get_storage_transfer_status(user_id)
-    return status == "running" and transferring == provider
+    status, _, transferring, transferring_label = (
+        app.tasks.get_storage_transfer_status(user_id)
+    )
+    return (
+        status == "running"
+        and transferring == provider
+        and (provider != "s3" or transferring_label == label)
+    )
 
 
 def set_project_storage(
@@ -409,6 +426,11 @@ def put_project_storage(
         if is_transferring(
             resource.credential_user_id,
             storage.STORAGE_KIND_PROVIDERS.get(resource.kind, ""),
+            label=(
+                resource.credential.label
+                if resource.credential is not None
+                else "default"
+            ),
         ):
             raise HTTPException(
                 409, "Storage being transferred to Calkit Hub storage"
@@ -609,6 +631,12 @@ S3_URL_RE = re.compile(
 )
 
 
+class ProjectS3BucketSettings(ProjectStorageSettings):
+    # The storage the bucket is, which is read-only if the keys can only
+    # read it
+    added: StorageResourcePublic
+
+
 class ProjectS3BucketPost(BaseModel):
     # The name of the current user's S3 connection, i.e., keys, to use
     connection: str
@@ -626,7 +654,7 @@ def post_project_s3_bucket(
     req: ProjectS3BucketPost,
     session: SessionDep,
     current_user: CurrentUser,
-) -> ProjectStorageSettings:
+) -> ProjectS3BucketSettings:
     """Send a project's new DVC objects to an S3 bucket, reached with one of
     the current user's S3 connections.
 
@@ -659,7 +687,7 @@ def post_project_s3_bucket(
     if credential is None:
         raise HTTPException(404, f"S3 connection '{req.connection}' not found")
     # Its storage is about to be removed, along with the connection
-    if is_transferring(current_user.id, "s3"):
+    if is_transferring(current_user.id, "s3", label=req.connection):
         raise HTTPException(
             409, "S3 storage being transferred to Calkit Hub storage"
         )
@@ -709,8 +737,9 @@ def post_project_s3_bucket(
                 endpoint_url=endpoint_url,
                 region=metadata.get("region"),
             )
-            # AWS signs for the bucket's own region
-            region = metadata.get("region")
+            # AWS signs for the bucket's own region, and other storage for
+            # the connection's, so it can change with the keys
+            region = None
             if not endpoint_url:
                 region = storage.get_s3_bucket_region(fs, bucket_name)
         except storage.S3EndpointError as e:
@@ -794,4 +823,7 @@ def post_project_s3_bucket(
             from_kind=from_kind,
             to_kind="s3-bucket",
         )
-    return get_project_storage_settings(project)
+    return ProjectS3BucketSettings(
+        **get_project_storage_settings(project).model_dump(),
+        added=to_public(resource),
+    )

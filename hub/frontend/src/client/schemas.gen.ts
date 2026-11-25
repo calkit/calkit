@@ -8527,6 +8527,34 @@ export const ProjectS3BucketPostSchema = {
   title: "ProjectS3BucketPost",
 } as const
 
+export const ProjectS3BucketSettingsSchema = {
+  properties: {
+    dvc: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StorageResourcePublic",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    previous: {
+      items: {
+        $ref: "#/components/schemas/StorageResourcePublic",
+      },
+      type: "array",
+      title: "Previous",
+    },
+    added: {
+      $ref: "#/components/schemas/StorageResourcePublic",
+    },
+  },
+  type: "object",
+  required: ["dvc", "previous", "added"],
+  title: "ProjectS3BucketSettings",
+} as const
+
 export const ProjectStatsSchema = {
   properties: {
     total: {
@@ -12743,6 +12771,17 @@ export const StorageTransferStatusSchema = {
         },
       ],
       title: "Provider",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
     },
   },
   type: "object",

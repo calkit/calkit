@@ -195,16 +195,22 @@ def test_storage_resources_and_project_storage(
     # While it's being transferred to the hub's own storage, it can't be
     # selected again, and no more can be made with that HF account
     response = client.get("/user/storage-transfer", headers=owner_headers)
-    assert response.json() == {"status": None, "error": None, "provider": None}
+    assert response.json() == {
+        "status": None,
+        "error": None,
+        "provider": None,
+        "label": None,
+    }
     with patch(
         "app.tasks.get_storage_transfer_status",
-        return_value=("running", None, "huggingface"),
+        return_value=("running", None, "huggingface", "default"),
     ):
         response = client.get("/user/storage-transfer", headers=owner_headers)
         assert response.json() == {
             "status": "running",
             "error": None,
             "provider": "huggingface",
+            "label": None,
         }
         response = client.put(
             project_url, headers=owner_headers, json={"dvc_storage_id": hf_id}
@@ -344,28 +350,16 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
         str(settings.OBJECT_STORAGE_SECRET),
         endpoint_url=endpoint_url,
     ).mkdir(bucket_name)
-    keys = {
-        "endpoint_url": f"{endpoint_url}/",
-        "access_key_id": settings.OBJECT_STORAGE_KEY,
-        "secret_access_key": settings.OBJECT_STORAGE_SECRET,
-    }
-    connections = "/user/s3-connections"
-    assert client.get(connections, headers=headers).json() == []
     response = client.put(
-        f"{connections}/Bad_Name", headers=headers, json=keys
+        "/user/s3-connections/osn",
+        headers=headers,
+        json={
+            "endpoint_url": endpoint_url,
+            "access_key_id": settings.OBJECT_STORAGE_KEY,
+            "secret_access_key": settings.OBJECT_STORAGE_SECRET,
+        },
     )
-    assert response.status_code == 422
-    response = client.put(f"{connections}/osn", headers=headers, json=keys)
     assert response.status_code == 200
-    # Keys under a name already saved are only replaced when asked to
-    response = client.put(f"{connections}/osn", headers=headers, json=keys)
-    assert response.status_code == 409
-    listed = client.get(connections, headers=headers).json()
-    assert [(c["name"], c["endpoint_url"]) for c in listed] == [
-        ("osn", endpoint_url)
-    ]
-    # Secrets never go back out
-    assert "secret_access_key" not in listed[0]
     url = f"/projects/{owner}/{projects[0].name}/storage/s3-bucket"
     for body, status_code in (
         ({"connection": "nope", "url": f"s3://{bucket_name}"}, 404),
@@ -381,6 +375,7 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
     response = client.post(url, headers=headers, json=body)
     assert response.status_code == 200, response.text
     dvc = response.json()["dvc"]
+    assert response.json()["added"] == dvc
     assert dvc["kind"] == "s3-bucket"
     assert dvc["bucket"] == f"{bucket_name}/calkit"
     assert dvc["name"] == bucket_name
@@ -391,6 +386,8 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
     assert response.json()["dvc"]["id"] == dvc["id"]
     resource = db.get(StorageResource, uuid.UUID(dvc["id"]))
     assert resource is not None
+    # Other storage signs for the connection's region, which can change
+    assert resource.region is None
     target = storage.get_resource_storage(db, resource)
     for project in projects[:2]:
         marker = target.make_project_path(
@@ -400,24 +397,21 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
     # Keys that can only read make a source to read from, with new objects
     # going where they did
     third = f"/projects/{owner}/{projects[2].name}/storage/s3-bucket"
+    shared = {
+        "connection": "osn",
+        "url": f"s3://{bucket_name}/shared",
+        "dedicated": True,
+    }
     with patch(
         "app.api.routes.storage.storage.claim_project_folder",
         side_effect=PermissionError,
     ):
-        response = client.post(
-            third,
-            headers=headers,
-            json={
-                "connection": "osn",
-                "url": f"s3://{bucket_name}/shared",
-                "dedicated": True,
-            },
-        )
+        response = client.post(third, headers=headers, json=shared)
     assert response.status_code == 200, response.text
-    settings_resp = response.json()
-    assert settings_resp["dvc"] is None
-    read_only = settings_resp["previous"][0]
+    assert response.json()["dvc"] is None
+    read_only = response.json()["added"]
     assert read_only["read_only"] and read_only["dedicated"]
+    assert response.json()["previous"] == [read_only]
     response = client.put(
         f"/projects/{owner}/{projects[2].name}/storage",
         headers=headers,
@@ -425,43 +419,23 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
     )
     assert response.status_code == 409
     # Once the keys can write, adding the bucket again makes it writable
-    response = client.post(
-        third,
-        headers=headers,
-        json={
-            "connection": "osn",
-            "url": f"s3://{bucket_name}/shared",
-            "dedicated": True,
-        },
-    )
+    response = client.post(third, headers=headers, json=shared)
     assert response.status_code == 200, response.text
     assert response.json()["dvc"]["id"] == read_only["id"]
     assert not response.json()["dvc"]["read_only"]
-    # The endpoint can't change under storage using it, but the keys can
-    response = client.put(
-        f"{connections}/osn",
-        headers=headers,
-        json=keys | {"endpoint_url": "http://elsewhere:9000", "replace": True},
-    )
-    assert response.status_code == 409
-    response = client.put(
-        f"{connections}/osn", headers=headers, json=keys | {"replace": True}
-    )
-    assert response.status_code == 200
-    # Removing the connection needs a choice for its storage
-    disconnect = "/user/external-credentials/s3"
-    response = client.delete(
-        disconnect, headers=headers, params={"label": "osn"}
-    )
-    assert response.status_code == 409
-    response = client.delete(
-        disconnect,
-        headers=headers,
-        params={"label": "osn", "storage_action": "orphan"},
-    )
-    assert response.status_code == 200
-    assert client.get(connections, headers=headers).json() == []
-    db.expire_all()
-    assert db.get(StorageResource, uuid.UUID(dvc["id"])) is None
-    reloaded = db.get(Project, projects[0].id)
-    assert reloaded is not None and reloaded.dvc_storage_id is None
+    # While one connection's storage is being transferred, it can't be
+    # used, but another connection's can
+    with patch(
+        "app.tasks.get_storage_transfer_status",
+        return_value=("running", None, "s3", "osn"),
+    ):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == 409
+        response = client.get("/user/storage-transfer", headers=headers)
+        assert response.json()["label"] == "osn"
+    with patch(
+        "app.tasks.get_storage_transfer_status",
+        return_value=("running", None, "s3", "aws"),
+    ):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == 200

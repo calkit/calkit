@@ -4951,6 +4951,18 @@ export type ProjectS3BucketPost = {
 }
 
 /**
+ * ProjectS3BucketSettings
+ */
+export type ProjectS3BucketSettings = {
+  dvc: StorageResourcePublic | null
+  /**
+   * Previous
+   */
+  previous: Array<StorageResourcePublic>
+  added: StorageResourcePublic
+}
+
+/**
  * ProjectStats
  */
 export type ProjectStats = {
@@ -7311,6 +7323,10 @@ export type StorageTransferStatus = {
    * Provider
    */
   provider?: string | null
+  /**
+   * Label
+   */
+  label?: string | null
 }
 
 /**
@@ -18166,7 +18182,7 @@ export type PostProjectS3BucketResponses = {
   /**
    * Successful Response
    */
-  200: ProjectStorageSettings
+  200: ProjectS3BucketSettings
 }
 
 export type PostProjectS3BucketResponse =

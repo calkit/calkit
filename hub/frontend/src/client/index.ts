@@ -1314,6 +1314,7 @@ export type {
   ProjectPublic,
   ProjectPushEventPost,
   ProjectS3BucketPost,
+  ProjectS3BucketSettings,
   ProjectsPublic,
   ProjectStats,
   ProjectStatus,

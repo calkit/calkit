@@ -87,33 +87,35 @@ def enqueue_warm(
 
 def get_storage_transfer_status(
     user_id: Any,
-) -> tuple[str | None, str | None, str | None]:
+) -> tuple[str | None, str | None, str | None, str | None]:
     """Get the status of a user's storage transfer, i.e., ``"running"``,
     ``"failed"``, or None if there isn't one, the error if it failed, and
-    the provider it's from, e.g., ``"huggingface"``.
+    the provider it's from, e.g., ``"huggingface"``, and for S3, the
+    connection's name.
     """
     client = get_client()
     if client is None or not settings.REDIS_URL:
-        return None, None, None
+        return None, None, None, None
     try:
         from rq.exceptions import NoSuchJobError
         from rq.job import Job
 
         job = Job.fetch(f"storage-transfer-{user_id}", connection=client)
     except NoSuchJobError:
-        return None, None, None
+        return None, None, None, None
     except Exception as e:
         logger.warning(f"Could not get storage transfer status: {e}")
-        return None, None, None
+        return None, None, None, None
     # Jobs queued before Box was supported only have the user ID
     provider = job.args[1] if len(job.args) > 1 else "huggingface"
+    label = job.args[2] if len(job.args) > 2 else "default"
     status = job.get_status()
     if status in ("queued", "started", "deferred", "scheduled"):
-        return "running", None, provider
+        return "running", None, provider, label
     if status == "failed":
         lines = (job.exc_info or "").strip().splitlines()
-        return "failed", lines[-1] if lines else None, provider
-    return None, None, None
+        return "failed", lines[-1] if lines else None, provider, label
+    return None, None, None, None
 
 
 def enqueue_storage_transfer(

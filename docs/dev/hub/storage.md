@@ -188,7 +188,11 @@ Writing a project's `.calkit-project` file shows whether the keys can
 write;
 storage they can only read is added to the project's previous storage,
 so it's read from but never written to.
+A dedicated bucket or prefix may hold other files,
+so only DVC's objects, under `files/`, are read from it,
+rather than everyone who can read the project reading the whole bucket.
 The hub only reaches endpoints on the public internet,
+checking each connection's address as it's made,
 since it would otherwise make requests into its own network for users.
 
 ### Keeping connections alive
@@ -330,8 +334,9 @@ is worth evaluating before building this.
   but the hub could never show files stored this way,
   and every collaborator would need their own credential.
 - **Storage IDs instead of names** in paths and buckets,
-which would make renames free,
-but leave storage unreadable outside Calkit.
+  which would make renames free,
+  but leave storage unreadable outside Calkit.
+
 <!-- TODO: needs human review -->
 
 - **Keys for each project rather than each user**,

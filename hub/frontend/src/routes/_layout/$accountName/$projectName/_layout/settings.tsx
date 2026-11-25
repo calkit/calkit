@@ -24,7 +24,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import mixpanel from "mixpanel-browser"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -263,19 +263,26 @@ const UseS3Bucket = ({
     register,
     handleSubmit,
     reset,
+    setValue,
     watch,
     formState: { errors },
   } = useForm<UseS3BucketForm>({
     mode: "onBlur",
     defaultValues: emptyS3Bucket,
   })
-  // Starts fresh each time it opens, with saved keys selected if any
+  // Starts fresh each time it opens, with saved keys selected if any, but
+  // not again while it's open, so a failed attempt keeps what was typed
   const firstConnection = connectionsQuery.data?.[0]?.name
+  const connectionsLoaded = !connectionsQuery.isPending
+  const wasReset = useRef(false)
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      wasReset.current = false
+    } else if (connectionsLoaded && !wasReset.current) {
+      wasReset.current = true
       reset({ ...emptyS3Bucket, connection: firstConnection ?? "" })
     }
-  }, [isOpen, firstConnection, reset])
+  }, [isOpen, connectionsLoaded, firstConnection, reset])
   const isNew = !watch("connection")
   const mutation = useMutation({
     mutationFn: async (data: UseS3BucketForm) => {
@@ -289,6 +296,11 @@ const UseS3Bucket = ({
             secret_access_key: data.secret_access_key,
           },
         })
+        // Saved, so trying again, e.g., with another bucket, reuses them
+        await queryClient.invalidateQueries({
+          queryKey: ["user", "s3-connections"],
+        })
+        setValue("connection", data.name)
       }
       return StorageService.postProjectS3Bucket({
         owner_name: accountName,
@@ -304,13 +316,11 @@ const UseS3Bucket = ({
       mixpanel.track("Used S3 bucket", {
         new_connection: !variables.connection,
         dedicated: variables.dedicated,
-        read_only: !data.dvc || data.dvc.kind !== "s3-bucket",
+        read_only: data.added.read_only,
       })
       showToast(
         "Success!",
-        data.dvc?.kind === "s3-bucket"
-          ? "Storage updated."
-          : "Read-only bucket added.",
+        data.added.read_only ? "Read-only bucket added." : "Storage updated.",
         "success",
       )
       onClose()
@@ -331,7 +341,6 @@ const UseS3Bucket = ({
   const onSubmit: SubmitHandler<UseS3BucketForm> = (data) => {
     mutation.mutate(data)
   }
-
   return (
     <Modal
       isOpen={isOpen}

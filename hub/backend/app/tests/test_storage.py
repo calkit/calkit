@@ -713,15 +713,25 @@ def test_s3_storage(db: Session) -> None:
         # redirect or the host resolving differently
         guarded = storage.get_s3_fs("key", "secret", "https://s3.example.org")
         assert guarded.config_kwargs["connector_args"] == {
-            "socket_factory": storage.connect_public_socket
+            "socket_factory": storage.make_public_socket
         }
-    for address in ("127.0.0.1", "10.1.2.3", "169.254.169.254", "::1"):
+    # Including private IPv4 addresses inside IPv6 ones, e.g., for NAT64
+    for address in (
+        "127.0.0.1",
+        "10.1.2.3",
+        "169.254.169.254",
+        "::1",
+        "::ffff:10.0.0.1",
+        "64:ff9b::a00:1",
+        "2002:a00:1::1",
+    ):
         family = socket.AF_INET6 if ":" in address else socket.AF_INET
         with pytest.raises(OSError):
-            storage.connect_public_socket(
+            storage.make_public_socket(
                 (family, socket.SOCK_STREAM, 6, "", (address, 443))
             )
-    sock = storage.connect_public_socket(
+    assert storage.address_is_public("2606:4700:4700::1111")
+    sock = storage.make_public_socket(
         (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
     )
     sock.close()

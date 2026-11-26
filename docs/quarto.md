@@ -222,6 +222,7 @@ since it's running, and neither is a stage's last run that hasn't been
 recorded yet, which happens when the pipeline finishes.
 Rendering with Quarto directly, e.g., with `quarto preview`,
 shows the panels as of the last time Calkit rendered the document,
+saying so if a `.qmd` document has changed since,
 and a document Calkit hasn't rendered on this machine says no provenance
 is recorded,
 with each table shown only by its path, keeping its caption and label.

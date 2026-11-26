@@ -48,6 +48,25 @@ local function find_project_dir()
   end
 end
 
+-- Whether the document changed since Calkit wrote its panels, e.g., in
+-- 'quarto preview', which a notebook does by rendering with --execute
+local outdated = nil
+local function is_outdated(data)
+  if outdated == nil then
+    outdated = false
+    local input = quarto.doc.input_file
+    local f = io.open(input, "rb")
+    local notebook = input:lower():match("%.ipynb$")
+    if data.source_sha1 and f ~= nil and not notebook then
+      outdated = pandoc.utils.sha1(f:read("a")) ~= data.source_sha1
+    end
+    if f ~= nil then
+      f:close()
+    end
+  end
+  return outdated
+end
+
 -- What Calkit wrote for this document, or false if nothing
 local records = nil
 local function load_records()
@@ -322,6 +341,17 @@ local function provenance_div(el)
     out:extend(el.content)
   end
   out:extend(blocks(record.panel))
+  if is_outdated(data) then
+    local title = "Document changed since panels recorded"
+    out:insert(callout("warning", title, pandoc.Blocks({
+      pandoc.Para({
+        pandoc.Str("Render"), pandoc.Space(), pandoc.Str("with"),
+        pandoc.Space(), pandoc.Code("calkit quarto render"),
+        pandoc.Space(), pandoc.Str("or"), pandoc.Space(),
+        pandoc.Code("calkit run"), pandoc.Str("."),
+      }),
+    })))
+  end
   return out
 end
 

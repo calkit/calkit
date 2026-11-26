@@ -737,6 +737,25 @@ local function find_project_dir()
   end
 end
 
+-- Whether the document changed since Calkit wrote its panels, e.g., in
+-- 'quarto preview', which a notebook does by rendering with --execute
+local outdated = nil
+local function is_outdated(data)
+  if outdated == nil then
+    outdated = false
+    local input = quarto.doc.input_file
+    local f = io.open(input, "rb")
+    local notebook = input:lower():match("%.ipynb$")
+    if data.source_sha1 and f ~= nil and not notebook then
+      outdated = pandoc.utils.sha1(f:read("a")) ~= data.source_sha1
+    end
+    if f ~= nil then
+      f:close()
+    end
+  end
+  return outdated
+end
+
 -- What Calkit wrote for this document, or false if nothing
 local records = nil
 local function load_records()
@@ -1011,6 +1030,17 @@ local function provenance_div(el)
     out:extend(el.content)
   end
   out:extend(blocks(record.panel))
+  if is_outdated(data) then
+    local title = "Document changed since panels recorded"
+    out:insert(callout("warning", title, pandoc.Blocks({
+      pandoc.Para({
+        pandoc.Str("Render"), pandoc.Space(), pandoc.Str("with"),
+        pandoc.Space(), pandoc.Code("calkit quarto render"),
+        pandoc.Space(), pandoc.Str("or"), pandoc.Space(),
+        pandoc.Code("calkit run"), pandoc.Str("."),
+      }),
+    })))
+  end
   return out
 end
 
@@ -2174,8 +2204,11 @@ def write_provenance(
 
     Written before every render, so the panels say how the pipeline stood
     when the document was rendered, and kept out of Git, like the rest of
-    ``.calkit/local``.
+    ``.calkit/local``, with the document's SHA-1, so what shows them can
+    tell it changed since.
     """
+    import hashlib
+
     import calkit
     import calkit.dvc
 
@@ -2244,6 +2277,9 @@ def write_provenance(
         read_bytes=read_bytes,
         open_text=open_text,
     )
+    # So what shows them can tell the document changed since
+    with open(get_full_path(document_path), "rb") as f:
+        panels["source_sha1"] = hashlib.sha1(f.read()).hexdigest()
     calkit.core.ensure_local_dir(wdir)
     rel_path = get_provenance_path(document_path)
     fpath = get_full_path(rel_path)

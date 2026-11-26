@@ -1,5 +1,6 @@
 """Tests for ``calkit.quarto``."""
 
+import hashlib
 import io
 import json
 import shutil
@@ -936,8 +937,23 @@ def test_provenance_filter(tmp_path: Path) -> None:
     assert "Figure out of date: waiting on data/clean.csv" in md
     assert "Table out of date: scripts/clean.py modified" in md
     assert "Document out of date: 2 of 2 outputs" in md
-    # Rendered without Calkit, with nothing recorded, it says so
-    (tmp_path / calkit.quarto.get_provenance_path("report.qmd")).unlink()
+    # Rendered without Calkit after the document changed, it says so
+    record_path = tmp_path / calkit.quarto.get_provenance_path("report.qmd")
+    record = json.loads(record_path.read_text())
+    assert (
+        record["source_sha1"]
+        == hashlib.sha1((tmp_path / "report.qmd").read_bytes()).hexdigest()
+    )
+    with open(tmp_path / "report.qmd", "a") as f:
+        f.write("\nMore text.\n")
+    subprocess.check_call(
+        ["quarto", "render", "report.qmd", "--to", "gfm", "-o", "report.md"],
+        cwd=tmp_path,
+    )
+    md = (tmp_path / "report.md").read_text()
+    assert md.count("Document changed since panels recorded") == 4
+    # With nothing recorded, it says so
+    record_path.unlink()
     subprocess.check_call(
         ["quarto", "render", "report.qmd", "--to", "gfm", "-o", "report.md"],
         cwd=tmp_path,

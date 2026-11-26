@@ -7,26 +7,41 @@ on:
   pull_request:
     paths:
       - "actions/check/**"
-      # The action reads 'calkit status --check --json' output
+      # The action runs 'calkit status --check', which writes its annotation
+      # and job summary
       - "calkit/**"
       - "!calkit/tests/**"
       - ".github/workflows/test-check-action.yml"
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   check:
-    name: check
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      # The action checks the workspace root, so this repo goes in a
-      # subdirectory and a project is made around it
       - name: Check out this repo
         uses: actions/checkout@v7
         with:
           path: _calkit
           # Since hatch-vcs derives the version from the release tags
           fetch-depth: 0
+
+      - name: Test getting the version from the action's ref
+        run: |
+          get_version() { bash _calkit/actions/check/get-version.sh "$1"; }
+          test "$(get_version /a/_actions/calkit/calkit/v0.54.0/actions/check)" = 0.54.0
+          test "$(get_version 'D:\a\_actions\calkit\calkit\v0.55.1rc2\actions\check')" = 0.55.1rc2
+          test -z "$(get_version /a/_actions/calkit/calkit/main/actions/check)"
+          test -z "$(get_version "$PWD/_calkit/actions/check")"
 
       - name: Setup uv
         uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
@@ -39,22 +54,23 @@ jobs:
           HATCH_BUILD_NO_HOOKS: "true"
         run: |
           uv tool install ./_calkit
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          uv tool dir --bin >> "$GITHUB_PATH"
 
       - name: Create project with up-to-date pipeline
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email \
             '41898282+github-actions[bot]@users.noreply.github.com'
+          mkdir proj
+          cd proj
           git init -q
-          echo "_calkit/" > .gitignore
           calkit init
           cat > calkit.yaml <<'EOF'
           pipeline:
             stages:
               copy:
                 kind: shell-command
-                command: cat in.txt > out.txt
+                command: echo done > out.txt
                 environment: _system
                 inputs: [in.txt]
                 outputs: [{path: out.txt, storage: git}]
@@ -65,18 +81,76 @@ jobs:
           git commit -qm "Run pipeline"
 
       - name: Check up-to-date pipeline
+        id: fresh
         uses: ./_calkit/actions/check
+        with:
+          working_directory: proj
 
       - name: Make pipeline stale
-        run: echo b > in.txt
+        run: echo b > proj/in.txt
 
       - name: Check stale pipeline
         id: stale
         continue-on-error: true
         uses: ./_calkit/actions/check
+        with:
+          working_directory: proj
 
-      - name: Verify stale check failed and said why
+      # The workspace root has no calkit.yaml
+      - name: Check outside project
+        id: outside
+        continue-on-error: true
+        uses: ./_calkit/actions/check
+
+      - name: Verify results
+        env:
+          FRESH_PASSED: ${{ steps.fresh.outputs.passed }}
+          FRESH_SUMMARY: ${{ steps.fresh.outputs.summary }}
+          STALE_OUTCOME: ${{ steps.stale.outcome }}
+          STALE_PASSED: ${{ steps.stale.outputs.passed }}
+          STALE_SUMMARY: ${{ steps.stale.outputs.summary }}
+          OUTSIDE_OUTCOME: ${{ steps.outside.outcome }}
+          OUTSIDE_SUMMARY: ${{ steps.outside.outputs.summary }}
         run: |
-          test "${{ steps.stale.outcome }}" = failure
-          jq -e '.check.problems == ["copy: in.txt modified"]' \
-            "$RUNNER_TEMP/calkit-status.json"
+          set -x
+          test "$FRESH_PASSED" = true
+          [[ "$FRESH_SUMMARY" == *"### Up to date"* ]]
+          test "$STALE_OUTCOME" = failure
+          test "$STALE_PASSED" = false
+          [[ "$STALE_SUMMARY" == *"- copy: in.txt modified"* ]]
+          [[ "$STALE_SUMMARY" == *"Run 'calkit run' and commit."* ]]
+          test "$OUTSIDE_OUTCOME" = failure
+          [[ "$OUTSIDE_SUMMARY" == *"### No calkit.yaml"* ]]
+
+  # Without Calkit installed, the action installs it, here a release that
+  # predates --check, which the action says rather than failing silently
+  install:
+    name: install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v7
+        with:
+          path: _calkit
+
+      - name: Check with an old Calkit
+        id: old
+        continue-on-error: true
+        uses: ./_calkit/actions/check
+        with:
+          version: 0.53.0
+
+      - name: Verify it was installed and on PATH
+        env:
+          OUTCOME: ${{ steps.old.outcome }}
+          PASSED: ${{ steps.old.outputs.passed }}
+        run: |
+          set -x
+          test "$OUTCOME" = failure
+          test "$PASSED" = false
+          calkit --version | grep -F 0.53.0

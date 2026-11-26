@@ -14,7 +14,24 @@ inputs:
       a branch or commit. Ignored if Calkit is already installed.
     required: false
     default: ""
-outputs: {}
+  working_directory:
+    description: Project directory, relative to the workspace.
+    required: false
+    default: "."
+  env_check:
+    description: >-
+      Whether to check environments, which creates them, so a change to one's
+      definition makes the stages using it stale. Their tools, e.g., Conda,
+      must then be set up first.
+    required: false
+    default: "false"
+outputs:
+  passed:
+    description: Whether the pipeline is up to date ("true" or "false").
+    value: ${{ steps.check.outputs.passed }}
+  summary:
+    description: The Markdown job summary Calkit wrote, listing stale stages.
+    value: ${{ steps.check.outputs.summary }}
 runs:
   using: composite
   steps:
@@ -22,7 +39,6 @@ runs:
       id: tools
       shell: bash
       run: |
-        set -euo pipefail
         if command -v uv >/dev/null 2>&1; then
           echo "uv_missing=false" >> "$GITHUB_OUTPUT"
         else
@@ -44,58 +60,47 @@ runs:
       env:
         VERSION: ${{ inputs.version }}
       run: |
-        set -euo pipefail
         version="$VERSION"
         if [ -z "$version" ]; then
-          # The ref is in the path the action is checked out at, e.g.,
-          # .../_actions/calkit/calkit/v0.54.0/actions/check
-          action_path="${GITHUB_ACTION_PATH//\\//}"
-          ref=$(basename "$(dirname "$(dirname "$action_path")")")
-          if [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$ ]]; then
-            version="${ref#v}"
-          fi
+          version=$(bash "$GITHUB_ACTION_PATH/get-version.sh" "$GITHUB_ACTION_PATH")
         fi
         if [ -n "$version" ]; then
           uv tool install "calkit-python==$version"
         else
           uv tool install calkit-python
         fi
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        uv tool dir --bin >> "$GITHUB_PATH"
 
-    # Environments aren't checked, so none are created, which keeps this fast
+    # Calkit annotates the result and writes the job summary itself, since
+    # GITHUB_ACTIONS is set
     - name: Check pipeline
+      id: check
       shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        ENV_CHECK: ${{ inputs.env_check }}
       run: |
-        set -uo pipefail
         calkit --version
-        status_path="$RUNNER_TEMP/calkit-status.json"
-        calkit status --category pipeline --no-env-check --check --json \
-          > "$status_path"
-        code=$?
-        # E.g., a version of Calkit without --check, or one that failed before
-        # it could check
-        if ! jq -e '.check' "$status_path" > /dev/null 2>&1; then
+        args=(--category pipeline --check)
+        if [ "$ENV_CHECK" != "true" ]; then
+          args+=(--no-env-check)
+        fi
+        # The shell exits on error, so the result is kept rather than failing
+        code=0
+        calkit status "${args[@]}" || code=$?
+        if [ "$code" = 0 ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+        fi
+        delimiter="calkit-summary-$RANDOM$RANDOM"
+        {
+          echo "summary<<$delimiter"
+          cat "$GITHUB_STEP_SUMMARY"
+          echo "$delimiter"
+        } >> "$GITHUB_OUTPUT"
+        # E.g., a version of Calkit without --check
+        if [ "$code" != 0 ] && [ ! -s "$GITHUB_STEP_SUMMARY" ]; then
           echo "::error title=Calkit check::'calkit status --check' exited $code with no result"
-          exit $(( code == 0 ? 1 : code ))
         fi
-        if [ "$(jq -r '.check.passed' "$status_path")" = true ]; then
-          echo "Pipeline is up to date."
-          echo "### Pipeline up to date" >> "$GITHUB_STEP_SUMMARY"
-          exit 0
-        fi
-        message=$(jq -r '.check
-          | [.summary + (if (.problems | length) > 0 then ":" else "" end)]
-            + (.problems | map("  " + .))
-            + (if .fix then [.fix] else [] end)
-          | join("\n")' "$status_path")
-        # Annotations take newlines escaped
-        escaped="${message//\%/%25}"
-        escaped="${escaped//$'\r'/%0D}"
-        escaped="${escaped//$'\n'/%0A}"
-        echo "::error title=Calkit check::$escaped"
-        jq -r '.check
-          | ["### " + .summary, ""]
-            + (.problems | map("- " + .))
-            + (if .fix then ["", .fix] else [] end)
-          | join("\n")' "$status_path" >> "$GITHUB_STEP_SUMMARY"
-        exit 1
+        exit "$code"

@@ -1499,6 +1499,7 @@ def get_provenance_panels(
     is_dir: Callable[[str], bool],
     listdir: Callable[[str], list[str]],
     read_bytes: Callable[[str], bytes],
+    document_stage: str | None = None,
 ) -> dict:
     """What each ``ckprovenance`` div in a document shows, as nodes the
     Quarto filter turns into Pandoc's AST: for each file, keyed by its
@@ -1512,7 +1513,8 @@ def get_provenance_panels(
     made from are checked, hashing what they read and make with
     ``get_hash``, which gives a project path's MD5, or None if it doesn't
     exist. The other functions read the project, as for
-    ``calkit.provenance.get_path_provenance``.
+    ``calkit.provenance.get_path_provenance``. ``document_stage`` names
+    the stage that renders the document, which is otherwise its Quarto stage, if any.
     """
     import csv
     import io
@@ -2073,7 +2075,8 @@ def get_provenance_panels(
             get_paths(stage.get("deps"), wdir),
             get_paths(stage.get("outs"), wdir),
         )
-    doc_stage = next(
+    # The stage that renders it, named, or else its Quarto stage
+    doc_stage = document_stage or next(
         (
             name
             for name, stage in ck_stages.items()
@@ -2132,6 +2135,7 @@ def write_provenance(
     document_path: str,
     ck_info: dict,
     wdir: str | None = None,
+    document_stage: str | None = None,
 ) -> str:
     """Write what a document's ``ckprovenance`` divs show, from the project
     in ``wdir`` as it is, returning where, relative to it.
@@ -2172,6 +2176,7 @@ def write_provenance(
     panels = get_provenance_panels(
         divs,
         document_path,
+        document_stage=document_stage,
         ck_info=ck_info,
         dvc_yaml=read_yaml("dvc.yaml"),
         dvc_lock=read_yaml("dvc.lock"),

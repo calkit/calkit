@@ -529,10 +529,16 @@ def test_provenance_panels(tmp_path: Path) -> None:
     files["data/clean.csv"] = "data/clean.csv-1"
     content = {"data/clean.csv": b"x,y\n1,2\n3,4\n5,6\n"}
 
-    def get_panels(text: str, hashes: dict) -> dict:
+    def get_panels(
+        text: str,
+        hashes: dict,
+        document_path: str = "report.qmd",
+        document_stage: str | None = None,
+    ) -> dict:
         return calkit.quarto.get_provenance_panels(
-            calkit.quarto.extract_provenance_divs(text, "report.qmd"),
-            "report.qmd",
+            calkit.quarto.extract_provenance_divs(text, document_path),
+            document_path,
+            document_stage=document_stage,
             ck_info=ck_info,
             dvc_yaml={"stages": dvc_stages},
             dvc_lock={"stages": lock_stages},
@@ -669,6 +675,13 @@ def test_provenance_panels(tmp_path: Path) -> None:
     assert get_titles(res["panels"]["data/clean.csv"]["panel"][0]) == [
         "Table has incomplete provenance: origin not defined for data/raw.csv"
     ]
+    # A document no Quarto stage renders can name the stage that does
+    doc = get_panels("::: ckprovenance\n:::\n", files, "index.md")["document"]
+    assert get_titles(doc["panel"][0]) == [
+        "Document has incomplete provenance: no stage renders it"
+    ]
+    doc = get_panels("::: ckprovenance\n:::\n", files, "index.md", "report")
+    assert "Rendered by: stage report" in get_text(doc["document"]["panel"])
     # Written where the filter reads it, beside nothing else
     assert calkit.quarto.get_provenance_path("pub/report.qmd") == (
         ".calkit/local/provenance/pub/report.qmd.json"

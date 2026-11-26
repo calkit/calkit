@@ -82,3 +82,33 @@ just want to check that the pipeline can run without errors.
 See the
 [documentation](https://github.com/calkit/calkit/tree/main/actions/run)
 for all available options.
+
+<!-- TODO: needs human review -->
+
+## Checking the pipeline is up to date
+
+If the pipeline is run locally and its outputs committed, a workflow can
+instead fail a pull request whose outputs are stale:
+
+```yaml
+name: Check pipeline
+
+on:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: calkit/calkit/actions/check@v0.54.0
+```
+
+This runs `calkit status --check`, which exits nonzero when the pipeline is
+stale, naming each stale stage and what changed.
+The fix is to run `calkit run` and commit.
+No environments are created, so the check is fast,
+but outputs stored with DVC aren't pulled, so they're reported missing.
+See the
+[documentation](https://github.com/calkit/calkit/tree/main/actions/check)
+for details.

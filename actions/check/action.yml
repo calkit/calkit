@@ -1,0 +1,101 @@
+name: Check Calkit pipeline
+description: >
+  Fail if a Calkit project's pipeline is stale, i.e., its committed outputs
+  don't match its inputs, saying which stages and what changed.
+branding:
+  icon: check-circle
+  color: green
+inputs:
+  version:
+    description: >-
+      Version of calkit-python to install, e.g., 0.54.0. By default, the
+      version of the action's release tag, so a new release can't fail the
+      check by itself, or the latest release when the action is referenced by
+      a branch or commit. Ignored if Calkit is already installed.
+    required: false
+    default: ""
+outputs: {}
+runs:
+  using: composite
+  steps:
+    - name: Check for uv and Calkit
+      id: tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v uv >/dev/null 2>&1; then
+          echo "uv_missing=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "uv_missing=true" >> "$GITHUB_OUTPUT"
+        fi
+        if command -v calkit >/dev/null 2>&1; then
+          echo "calkit_missing=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "calkit_missing=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Setup uv
+      if: ${{ steps.tools.outputs.uv_missing == 'true' && steps.tools.outputs.calkit_missing == 'true' }}
+      uses: astral-sh/setup-uv@v5
+
+    - name: Install Calkit
+      if: ${{ steps.tools.outputs.calkit_missing == 'true' }}
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        version="$VERSION"
+        if [ -z "$version" ]; then
+          # The ref is in the path the action is checked out at, e.g.,
+          # .../_actions/calkit/calkit/v0.54.0/actions/check
+          action_path="${GITHUB_ACTION_PATH//\\//}"
+          ref=$(basename "$(dirname "$(dirname "$action_path")")")
+          if [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$ ]]; then
+            version="${ref#v}"
+          fi
+        fi
+        if [ -n "$version" ]; then
+          uv tool install "calkit-python==$version"
+        else
+          uv tool install calkit-python
+        fi
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    # Environments aren't checked, so none are created, which keeps this fast
+    - name: Check pipeline
+      shell: bash
+      run: |
+        set -uo pipefail
+        calkit --version
+        status_path="$RUNNER_TEMP/calkit-status.json"
+        calkit status --category pipeline --no-env-check --check --json \
+          > "$status_path"
+        code=$?
+        # E.g., a version of Calkit without --check, or one that failed before
+        # it could check
+        if ! jq -e '.check' "$status_path" > /dev/null 2>&1; then
+          echo "::error title=Calkit check::'calkit status --check' exited $code with no result"
+          exit $(( code == 0 ? 1 : code ))
+        fi
+        if [ "$(jq -r '.check.passed' "$status_path")" = true ]; then
+          echo "Pipeline is up to date."
+          echo "### Pipeline up to date" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        message=$(jq -r '.check
+          | [.summary + (if (.problems | length) > 0 then ":" else "" end)]
+            + (.problems | map("  " + .))
+            + (if .fix then [.fix] else [] end)
+          | join("\n")' "$status_path")
+        # Annotations take newlines escaped
+        escaped="${message//\%/%25}"
+        escaped="${escaped//$'\r'/%0D}"
+        escaped="${escaped//$'\n'/%0A}"
+        echo "::error title=Calkit check::$escaped"
+        jq -r '.check
+          | ["### " + .summary, ""]
+            + (.problems | map("- " + .))
+            + (if .fix then ["", .fix] else [] end)
+          | join("\n")' "$status_path" >> "$GITHUB_STEP_SUMMARY"
+        exit 1

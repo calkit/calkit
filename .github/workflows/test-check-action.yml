@@ -1,0 +1,82 @@
+name: Test check action
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "actions/check/**"
+      # The action reads 'calkit status --check --json' output
+      - "calkit/**"
+      - "!calkit/tests/**"
+      - ".github/workflows/test-check-action.yml"
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # The action checks the workspace root, so this repo goes in a
+      # subdirectory and a project is made around it
+      - name: Check out this repo
+        uses: actions/checkout@v7
+        with:
+          path: _calkit
+          # Since hatch-vcs derives the version from the release tags
+          fetch-depth: 0
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+
+      # The action skips installing Calkit when it's already on PATH, so this
+      # tests the CLI being changed rather than the last release
+      - name: Install Calkit from the working tree
+        env:
+          # Building the JupyterLab extension needs Node and isn't used here
+          HATCH_BUILD_NO_HOOKS: "true"
+        run: |
+          uv tool install ./_calkit
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Create project with up-to-date pipeline
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+          git init -q
+          echo "_calkit/" > .gitignore
+          calkit init
+          cat > calkit.yaml <<'EOF'
+          pipeline:
+            stages:
+              copy:
+                kind: shell-command
+                command: cat in.txt > out.txt
+                environment: _system
+                inputs: [in.txt]
+                outputs: [{path: out.txt, storage: git}]
+          EOF
+          echo a > in.txt
+          calkit run
+          git add -A
+          git commit -qm "Run pipeline"
+
+      - name: Check up-to-date pipeline
+        uses: ./_calkit/actions/check
+
+      - name: Make pipeline stale
+        run: echo b > in.txt
+
+      - name: Check stale pipeline
+        id: stale
+        continue-on-error: true
+        uses: ./_calkit/actions/check
+
+      - name: Verify stale check failed and said why
+        run: |
+          test "${{ steps.stale.outcome }}" = failure
+          jq -e '.check.problems == ["copy: in.txt modified"]' \
+            "$RUNNER_TEMP/calkit-status.json"

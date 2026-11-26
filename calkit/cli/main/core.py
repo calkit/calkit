@@ -692,6 +692,16 @@ def get_status(
     as_json: Annotated[
         bool, typer.Option("--json", help="Output status as JSON.")
     ] = False,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help=(
+                "Exit nonzero if the pipeline is stale or its status is "
+                "unavailable, e.g., in CI."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """View status (project, version control, and/or pipeline)."""
     from contextlib import AbstractContextManager, nullcontext
@@ -767,6 +777,75 @@ def get_status(
             return dict(pipeline_status.dvc_data_status)
         return dict(calkit.dvc.get_dvc_repo().data_status())
 
+    missing_output_paths: list[str] = []
+
+    def describe_changes(stage: calkit.pipeline.StaleStage) -> str:
+        # What made a stage stale, as briefly as possible
+        changes = []
+        if stage.modified_command:
+            changes.append("command modified")
+        for path in stage.modified_inputs + stage.modified_outputs:
+            changes.append(f"{path} modified")
+        # Outputs are only the cause when nothing upstream of them changed
+        if not changes:
+            for path in stage.stale_outputs:
+                if os.path.exists(path):
+                    changes.append(f"{path} not in cache")
+                else:
+                    changes.append(f"{path} missing")
+                    missing_output_paths.append(path)
+        return ", ".join(changes) or "stale"
+
+    def get_check_result() -> dict[str, Any]:
+        # Whether the pipeline is up to date, and if not, why and what to do
+        result: dict[str, Any] = {
+            "passed": False,
+            "summary": "Pipeline status unavailable",
+            "problems": [],
+            "fix": None,
+        }
+        if running_status is not None:
+            result["summary"] = "Pipeline running"
+        elif pipeline_status is None:
+            pass
+        elif pipeline_status.errors:
+            result["problems"] = pipeline_status.errors
+        elif pipeline_status.failed_environment_checks:
+            result["problems"] = [
+                f"{name}: environment check failed"
+                for name in pipeline_status.failed_environment_checks
+            ]
+            result["fix"] = "Run 'calkit check env -n <name>' for details."
+        elif pipeline_status.is_stale:
+            result["summary"] = "Out of date"
+            result["problems"] = [
+                f"{name}: "
+                + describe_changes(pipeline_status.stale_stages[name])
+                for name in pipeline_status.stale_stage_names
+            ]
+            result["fix"] = "Run 'calkit run' and commit."
+            # E.g., outputs stored with DVC that weren't pulled
+            if missing_output_paths:
+                result["fix"] = (
+                    "Run 'calkit run' and commit, or 'calkit pull' for "
+                    "missing outputs."
+                )
+        else:
+            result["passed"] = True
+            result["summary"] = "Up to date"
+        return result
+
+    def exit_if_check_failed() -> None:
+        if not check or check_result["passed"]:
+            return
+        lines = [
+            check_result["summary"] + (":" if check_result["problems"] else "")
+        ]
+        lines += ["  " + problem for problem in check_result["problems"]]
+        if check_result["fix"]:
+            lines.append(check_result["fix"])
+        raise_error("\n".join(lines))
+
     dotenv.load_dotenv(dotenv_path=".env")
     # Status only reads calkit.yaml, so skip the slower round-trip parser
     ck_info = calkit.load_calkit_info(read_only=True)
@@ -822,7 +901,7 @@ def get_status(
                 or ck_info.get("subprojects")
                 or os.path.isfile("dvc.yaml")
             ):
-                typer.echo("Initializing DVC repository")
+                typer.echo("Initializing DVC repository", err=as_json)
                 try:
                     result = calkit.dvc.init(quiet=True)
                     if result != 0:
@@ -845,6 +924,8 @@ def get_status(
                 )
     else:
         categories = default_categories
+    if check and not {"pipeline", "dvc"} & set(categories):
+        raise_error("--check needs pipeline category")
     # Without calkit.yaml, these would read as an empty project
     if {"project", "questions", "pipeline", "imports"} & set(categories):
         # Stop at the Git top level, since a nested repo is its own project,
@@ -996,6 +1077,7 @@ def get_status(
                     storage_problems = calkit.dvc.get_storage_problems()
                 except Exception:
                     pass
+    check_result = get_check_result()
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:
@@ -1073,7 +1155,10 @@ def get_status(
                 )
         if import_statuses is not None:
             status_dict["imports"] = import_statuses
+        if check:
+            status_dict["check"] = check_result
         print(json.dumps(status_dict, indent=2, default=str))
+        exit_if_check_failed()
         return
     if "project" in categories:
         print_sep("Project")
@@ -1195,6 +1280,7 @@ def get_status(
         print_sep("Pipeline")
         if running_status is not None:
             _print_running_pipeline_status(running_status)
+            exit_if_check_failed()
             return
         for switch_name, picked in (
             pipeline_status.switches if pipeline_status else {}
@@ -1213,6 +1299,7 @@ def get_status(
             warn("Pipeline status unavailable due to errors:")
             for error in pipeline_status.errors:
                 warn(error)
+            exit_if_check_failed()
             return
         if pipeline_status and not pipeline_status.has_pipeline:
             typer.echo("This project has no pipeline.")
@@ -1228,6 +1315,7 @@ def get_status(
                 "Pipeline status unavailable until the failed environment "
                 "checks above are resolved."
             )
+            exit_if_check_failed()
             return
         elif pipeline_status and pipeline_status.is_stale:
             typer.echo("Stale stages:")
@@ -1308,6 +1396,7 @@ def get_status(
                     warn(f"          {input_path}:", prefix="")
                     for path in files:
                         warn(f"            {path}", prefix="")
+    exit_if_check_failed()
 
 
 @app.command(name="diff")

@@ -1722,21 +1722,34 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
 def test_diff(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(["git", "commit", "-qm", "Init", "--allow-empty"])
-    # Results are summarized as Markdown, or as JSON
-    out = subprocess.check_output(["calkit", "diff", "--results"], text=True)
+    # Results are summarized as Markdown, in UTF-8 even when redirected, as
+    # to a job summary, or as JSON
+    out = subprocess.check_output(
+        ["calkit", "diff", "--results"], encoding="utf-8"
+    )
     assert out.startswith("## Changed results\n")
+    assert "→ working tree" in out
     assert "No results changed." in out
     out = subprocess.check_output(
         ["calkit", "diff", "-r", "--base", "HEAD", "--json"], text=True
     )
     assert json.loads(out)["stages"] == []
     # Options for one mode aren't taken by the other
-    for args in [["--base", "HEAD"], ["--json"], ["-r", "--staged"]]:
+    for args in [
+        ["--base", "HEAD"],
+        ["--json"],
+        ["--max", "3"],
+        ["-r", "--staged"],
+    ]:
         res = subprocess.run(
             ["calkit", "diff", *args], capture_output=True, text=True
         )
         assert res.returncode == 1
         assert "results" in res.stderr
+    res = subprocess.run(
+        ["calkit", "diff", "-r", "--max", "0"], capture_output=True, text=True
+    )
+    assert res.returncode == 2
     res = subprocess.run(
         ["calkit", "diff", "-r", "--base", "nope"],
         capture_output=True,

@@ -250,12 +250,15 @@ or `--json` for the data behind it.
 A DVC-stored output is compared by the hashes `dvc.lock` records,
 and its values are only shown if the old and new versions are in the local
 cache, since nothing is pulled.
+Compared to the working tree, it also checks which stages are stale,
+which compiles the pipeline to `dvc.yaml` the way `calkit status` does.
 
 <!-- TODO: needs human review -->
 
 To show the summary on a GitHub Actions run, write it to the job summary
 after the pipeline runs.
-The checkout needs the default branch's history to find the merge base:
+The checkout needs the base branch's history to find where the pull
+request started:
 
 ```yaml
 steps:
@@ -267,8 +270,15 @@ steps:
     uses: calkit/calkit/actions/run@main
   - name: Summarize changed results
     if: github.event_name == 'pull_request'
-    run: calkit diff --results >> "$GITHUB_STEP_SUMMARY"
+    run: >-
+      calkit diff --results
+      --base "$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+      >> "$GITHUB_STEP_SUMMARY"
 ```
+
+The run action only pulls DVC data for the revision it checked out,
+so DVC-stored values from the base show as not in the local cache;
+Git-stored ones are compared in full.
 
 ## Merging branches
 

@@ -149,14 +149,14 @@ calkit diff [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                                                                |
-| ----------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `--staged`        | boolean | no       | False   | Show a diff from files staged with Git.                                                                                    |
-| `--results`, `-r` | boolean | no       | False   | Summarize changed results as Markdown: stages that reran or are stale, values, figures, tables, and questions citing them. |
-| `--base`          | str     | no       |         | Revision to compare results from. Defaults to the merge base with the default branch.                                      |
-| `--to`            | str     | no       |         | Revision to compare results to. Defaults to working tree.                                                                  |
-| `--max`           | int     | no       | 10      | Most items to list in each section.                                                                                        |
-| `--json`          | boolean | no       | False   | Print changed results as JSON.                                                                                             |
+| Option            | Type      | Required | Default | Description                                                                                                                |
+| ----------------- | --------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `--staged`        | boolean   | no       | False   | Show a diff from files staged with Git.                                                                                    |
+| `--results`, `-r` | boolean   | no       | False   | Summarize changed results as Markdown: stages that reran or are stale, values, figures, tables, and questions citing them. |
+| `--base`          | str       | no       |         | Revision to compare results from. Defaults to the merge base with the default branch.                                      |
+| `--to`            | str       | no       |         | Revision to compare results to. Defaults to working tree.                                                                  |
+| `--max`           | int range | no       |         | Most items to list in each section. Defaults to 10.                                                                        |
+| `--json`          | boolean   | no       | False   | Print changed results as JSON.                                                                                             |
 
 <a id="top-command-add"></a>
 

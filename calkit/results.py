@@ -11,11 +11,19 @@ and the questions citing them.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 # Extensions whose keys can be read, which are the ones a question's
 # value evidence can cite
 EXTENSIONS = (".json", ".toml", ".yaml", ".yml")
+# What DVC names a file, or a directory's manifest, in its cache by
+MD5_RE = re.compile(r"\A[0-9a-f]{32}(\.dir)?\Z")
+# Results bigger than this are listed as changed, not compared key by key
+MAX_COMPARED_BYTES = 10_000_000
+# Directories whose PDFs are figures, since a PDF elsewhere is usually a
+# document, e.g., a paper
+FIGURE_DIR_NAMES = ("figures", "figs", "fig", "figure", "plots")
 
 
 def list_results(
@@ -172,7 +180,6 @@ def get_changes(
     import calkit.dvc
     import calkit.git
     from calkit.detect import FIGURE_EXTENSIONS, TABLE_EXTENSIONS
-    from calkit.models.pipeline import LatexStage
     from calkit.questions import (
         _load_calkit_yaml_text,
         _values_equal,
@@ -184,20 +191,32 @@ def get_changes(
         # Git names paths from the repo's root
         return posixpath.normpath(posixpath.join(prefix, path))
 
-    def read_git(ref: str | None, path: str) -> bytes | None:
+    def read_git(
+        ref: str | None, path: str, max_bytes: int | None = None
+    ) -> bytes | None:
+        # Raises ValueError if it's bigger than max_bytes
         if ref is not None:
-            return calkit.git.read_at_ref(repo, ref, get_root_path(path))
-        try:
-            with open(os.path.join(project_dir, path), "rb") as f:
-                return f.read()
-        except OSError:
-            return None
+            try:
+                blob = repo.commit(ref).tree[get_root_path(path)]
+            except Exception:
+                return None
+            if max_bytes is not None and blob.size > max_bytes:
+                raise ValueError("too large to compare")
+            return bytes(blob.data_stream.read())
+        return read_file(os.path.join(project_dir, path), max_bytes)
 
-    def read_cache(md5: str | None) -> bytes | None:
+    def read_cache(
+        md5: str | None, max_bytes: int | None = None
+    ) -> bytes | None:
         if not md5:
             return None
+        return read_file(os.path.join(cache_dir, md5[:2], md5[2:]), max_bytes)
+
+    def read_file(path: str, max_bytes: int | None = None) -> bytes | None:
         try:
-            with open(os.path.join(cache_dir, md5[:2], md5[2:]), "rb") as f:
+            if max_bytes is not None and os.path.getsize(path) > max_bytes:
+                raise ValueError("too large to compare")
+            with open(path, "rb") as f:
                 return f.read()
         except OSError:
             return None
@@ -218,13 +237,29 @@ def get_changes(
         return loaded if isinstance(loaded, dict) else {}
 
     def list_git_paths(*args: str) -> list[str]:
+        # NUL-separated, since Git otherwise quotes non-ASCII names
         try:
-            out = str(getattr(repo.git, args[0])(*args[1:], "--", prefix))
+            out = str(
+                getattr(repo.git, args[0])("-z", *args[1:], "--", prefix)
+            )
         except Exception:
             return []
-        return [
-            posixpath.relpath(p, prefix) for p in out.splitlines() if p.strip()
-        ]
+        return [posixpath.relpath(p, prefix) for p in out.split("\0") if p]
+
+    def is_safe_path(path: str) -> bool:
+        # A hand-edited dvc.lock or manifest mustn't read outside the project
+        return not (
+            posixpath.isabs(path)
+            or path == ".."
+            or path.startswith("../")
+            or re.match(r"^[A-Za-z]:", path) is not None
+        )
+
+    def get_md5(value: Any) -> str | None:
+        # Anything else could name a file outside the cache
+        return (
+            value if isinstance(value, str) and MD5_RE.match(value) else None
+        )
 
     def get_outs(lock: dict, stage_wdirs: dict) -> dict[str, tuple]:
         outs = {}
@@ -237,7 +272,8 @@ def get_changes(
                             stage_wdir, Path(str(out["path"])).as_posix()
                         )
                     )
-                    outs[path] = (out.get("md5") or None, str(name))
+                    if is_safe_path(path):
+                        outs[path] = (get_md5(out.get("md5")), str(name))
         return outs
 
     def read_manifest(md5: str | None) -> dict[str, str] | None:
@@ -249,9 +285,19 @@ def get_changes(
             return None
         try:
             entries = json.loads(content)
-            return {str(e["relpath"]): str(e["md5"]) for e in entries}
+            files = {
+                posixpath.normpath(Path(str(e["relpath"])).as_posix()): (
+                    get_md5(e["md5"])
+                )
+                for e in entries
+            }
         except Exception:
             return None
+        return {
+            rel: file_md5
+            for rel, file_md5 in files.items()
+            if file_md5 and is_safe_path(rel)
+        }
 
     def get_kind(path: str) -> str:
         # A declared result is kept apart from other files by its type
@@ -266,6 +312,12 @@ def get_changes(
         ext = posixpath.splitext(path)[1].lower()
         if ext in EXTENSIONS:
             return "value"
+        if ext == ".pdf":
+            in_figures = any(
+                part.lower() in FIGURE_DIR_NAMES
+                for part in posixpath.dirname(path).split("/")
+            )
+            return "figure" if in_figures else "other"
         if ext in FIGURE_EXTENSIONS:
             return "figure"
         if ext in TABLE_EXTENSIONS:
@@ -382,6 +434,7 @@ def get_changes(
         git_changed = list_git_paths("diff", "--name-only", base_sha, to_sha)
     # Stages, in the order the target runs them
     stages: list[dict[str, Any]] = []
+    stale_check_error: str | None = None
     for name in list(to_lock) + [n for n in base_lock if n not in to_lock]:
         old, new = base_lock.get(name), to_lock.get(name)
         n_changed_outputs = sum(
@@ -413,6 +466,7 @@ def get_changes(
     if to_sha is None and check_pipeline:
         from calkit.pipeline import get_status
 
+        stale = set()
         try:
             status = get_status(
                 ck_info=calkit.load_calkit_info(wdir=project_dir),
@@ -420,8 +474,10 @@ def get_changes(
                 check_environments=False,
             )
             stale = {n.split("@")[0] for n in status.stale_stage_names}
-        except Exception:
-            stale = set()
+            if status.errors:
+                stale_check_error = "; ".join(status.errors)
+        except Exception as e:
+            stale_check_error = str(e) or type(e).__name__
         listed = set()
         for stage in stages:
             if stage["name"].split("@")[0] in stale:
@@ -497,21 +553,6 @@ def get_changes(
         for st in ((info.get("pipeline") or {}).get("stages") or {}).values():
             if not isinstance(st, dict):
                 continue
-            # A document's build, e.g., a paper's PDF, isn't a figure
-            doc_path = None
-            if st.get("kind") == "markdown":
-                doc_path = st.get("target_path")
-            elif st.get("kind") == "latex":
-                try:
-                    doc_path = LatexStage.model_validate(st).pdf_path
-                except Exception:
-                    pass
-            if doc_path:
-                other_paths.add(
-                    posixpath.normpath(
-                        posixpath.join(st.get("wdir") or "", doc_path)
-                    )
-                )
             for o in st.get("cell_outputs") or []:
                 if isinstance(o, dict) and o.get("output_path"):
                     cell_output_kinds[
@@ -545,18 +586,17 @@ def get_changes(
             in_git = path in to_git_paths or path in base_git_paths
         storage = "git" if in_git else "dvc"
         kind = get_kind(path)
-        old_content = new_content = None
-        if not directory:
-            old_content = (
-                read_git(base_sha, path) if in_git else read_cache(old_md5)
+        if old_md5 is None and new_md5 is None and not directory:
+            # Found by Git rather than dvc.lock
+            existed = path in base_git_paths
+            exists = (
+                path in to_git_paths
+                if to_sha is not None
+                else os.path.isfile(os.path.join(project_dir, path))
             )
-            new_content = (
-                read_git(to_sha, path)
-                if in_git or to_sha is None
-                else read_cache(new_md5)
-            )
-        existed = old_md5 is not None or old_content is not None
-        exists = new_md5 is not None or new_content is not None
+        else:
+            existed = old_md5 is not None
+            exists = new_md5 is not None
         if not existed and not exists:
             continue
         output: dict[str, Any] = {
@@ -572,7 +612,25 @@ def get_changes(
                 else "modified"
             ),
         }
+        if directory:
+            output["directory"] = True
+        # Only a result's contents are read, and only up to a size
         if kind == "value" and output["change"] == "modified":
+            try:
+                old_content = (
+                    read_git(base_sha, path, MAX_COMPARED_BYTES)
+                    if in_git
+                    else read_cache(old_md5, MAX_COMPARED_BYTES)
+                )
+                new_content = (
+                    read_git(to_sha, path, MAX_COMPARED_BYTES)
+                    if in_git or to_sha is None
+                    else read_cache(new_md5, MAX_COMPARED_BYTES)
+                )
+            except ValueError as e:
+                output["note"] = str(e)
+                outputs.append(output)
+                continue
             if old_content is None or new_content is None:
                 output["note"] = (
                     "not in local cache" if storage == "dvc" else "unreadable"
@@ -635,14 +693,18 @@ def get_changes(
                             }
                         )
                 continue
-            changes.append(
-                {
-                    "path": ev_path,
-                    "change": matched[0]["change"]
-                    if len(matched) == 1
-                    else "modified",
-                }
-            )
+            # Inside a directory whose files couldn't be compared, it's only
+            # known that something in the directory changed
+            if any(
+                o.get("directory") and ev_path.startswith(o["path"] + "/")
+                for o in matched
+            ):
+                change = "directory changed"
+            elif len(matched) == 1:
+                change = matched[0]["change"]
+            else:
+                change = "modified"
+            changes.append({"path": ev_path, "change": change})
         if changes:
             questions.append(
                 {
@@ -656,6 +718,7 @@ def get_changes(
         "base_label": base_label,
         "to": to_sha,
         "stages": stages,
+        "stale_check_error": stale_check_error,
         "outputs": outputs,
         "questions": questions,
     }
@@ -726,8 +789,16 @@ def format_changes(changes: dict, max_items: int = 10) -> str:
     stages = changes.get("stages") or []
     outputs = changes.get("outputs") or []
     questions = changes.get("questions") or []
+    # A failed stale check can't say nothing changed
+    error = changes.get("stale_check_error")
+    if error:
+        error = " ".join(str(error).split())
+        if len(error) > 200:
+            error = error[:199] + "…"
+        lines += ["", f"Stale stages unknown: {error}"]
     if not (stages or outputs or questions):
-        lines += ["", "No results changed."]
+        if not error:
+            lines += ["", "No results changed."]
         return "\n".join(lines) + "\n"
     # Stages
     if stages:

@@ -1348,9 +1348,13 @@ def diff(
         ),
     ] = None,
     max_items: Annotated[
-        int,
-        typer.Option("--max", help="Most items to list in each section."),
-    ] = 10,
+        int | None,
+        typer.Option(
+            "--max",
+            min=1,
+            help="Most items to list in each section. Defaults to 10.",
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Print changed results as JSON."),
@@ -1363,8 +1367,8 @@ def diff(
     are only read if they're in the local cache.
     """
     if not results:
-        if base is not None or to is not None or json_output:
-            raise_error("--base, --to, and --json need --results")
+        if any(o is not None for o in (base, to, max_items)) or json_output:
+            raise_error("--base, --to, --max, and --json need --results")
     elif staged:
         raise_error("--staged can't be used with --results")
     if results:
@@ -1374,13 +1378,22 @@ def diff(
             changes = calkit.results.get_changes(base=base, to=to)
         except ValueError as e:
             raise_error(str(e))
+        if changes.get("stale_check_error"):
+            warn(
+                f"Stale stages unknown: {changes['stale_check_error']}",
+                err=True,
+            )
         if json_output:
             typer.echo(json.dumps(changes, indent=2, default=str))
-        else:
-            typer.echo(
-                calkit.results.format_changes(changes, max_items=max_items),
-                nl=False,
-            )
+            return
+        text = calkit.results.format_changes(
+            changes, max_items=max_items or 10
+        )
+        # Markdown is UTF-8 wherever it's written, e.g., a job summary,
+        # though a redirected stream on Windows defaults to cp1252
+        typer.echo(
+            text if sys.stdout.isatty() else text.encode("utf-8"), nl=False
+        )
         return
     print_sep("Code (Git)")
     git_cmd = ["git", "diff"]

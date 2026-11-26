@@ -1,13 +1,14 @@
 """Tests for ``results``."""
 
+import json
 import os
-import shutil
 import subprocess
 
 import git
 import pytest
 
 import calkit
+import calkit.overleaf
 import calkit.results
 
 SUMMARY = """{
@@ -255,7 +256,7 @@ def test_get_changes(tmp_dir):
     # pulled
     git("add", "-A")
     git("commit", "-qm", "Change scale")
-    shutil.rmtree(os.path.join(".dvc", "cache"))
+    calkit.overleaf.rmtree(os.path.join(".dvc", "cache"))
     changes = calkit.results.get_changes(
         base=default_branch, to="HEAD", check_pipeline=False
     )
@@ -266,17 +267,17 @@ def test_get_changes(tmp_dir):
     assert "big.json` (DVC, `make`): not in local cache" in (
         calkit.results.format_changes(changes)
     )
-    # A figure edited by hand is a change too, as is an added or removed
-    # stage, and an edit to a stage's inputs makes it stale
-    os.remove("figures/same.png")
-    with open("notes.png", "w") as f:
+    # A declared figure edited by hand is a change too, even with a name
+    # Git would quote, and an edit to a stage's inputs makes it stale
+    with open("notes-café.png", "w") as f:
         f.write("drawn")
     ck_info = calkit.load_calkit_info()
-    ck_info["figures"] = [{"path": "notes.png", "title": "Notes"}]
+    ck_info["figures"] = [{"path": "notes-café.png", "title": "Notes"}]
     calkit.save_calkit_info(ck_info)
     with open("scale.txt", "w") as f:
         f.write("2")
     changes = calkit.results.get_changes(base="HEAD")
+    assert changes["stale_check_error"] is None
     assert changes["stages"] == [
         {
             "name": "make",
@@ -287,8 +288,114 @@ def test_get_changes(tmp_dir):
         }
     ]
     outputs = {o["path"]: o for o in changes["outputs"]}
-    assert outputs["notes.png"]["change"] == "added"
-    assert outputs["notes.png"]["stage"] is None
+    assert outputs["notes-café.png"]["change"] == "added"
+    assert outputs["notes-café.png"]["storage"] == "git"
+    assert outputs["notes-café.png"]["stage"] is None
+    # A stale check that fails says so, rather than that nothing changed
+    ck_info["pipeline"]["stages"]["make"]["kind"] = "nope"
+    calkit.save_calkit_info(ck_info)
+    changes = calkit.results.get_changes(base="HEAD")
+    assert "nope" in changes["stale_check_error"]
+    text = calkit.results.format_changes(changes)
+    assert "Stale stages unknown: " in text
+    assert "No results changed." not in text
+    git("checkout", "-q", "--", ".")
+    git("clean", "-fdq")
+    # Directory outputs are compared file by file, from DVC's manifests or
+    # Git, and a PDF is only a figure in a figures directory
+    with open("dirs.py", "w") as f:
+        f.write(
+            "import json, os\n"
+            "scale = float(open('scale.txt').read())\n"
+            "for d in ['dvcdir', 'gitdir']:\n"
+            "    os.makedirs(d, exist_ok=True)\n"
+            "    json.dump({'x': scale}, open(f'{d}/a.json', 'w'))\n"
+            "    open(f'{d}/b.txt', 'w').write('same')\n"
+            "open('paper.pdf', 'w').write(str(scale))\n"
+            "open('figures/plot.pdf', 'w').write(str(scale))\n"
+        )
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"]["stages"]["dirs"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "python dirs.py",
+        "inputs": ["dirs.py", "scale.txt"],
+        "outputs": [
+            {"path": "dvcdir", "storage": "dvc"},
+            {"path": "gitdir", "storage": "git"},
+            {"path": "paper.pdf", "storage": "git"},
+            {"path": "figures/plot.pdf", "storage": "git"},
+        ],
+    }
+    ck_info["questions"].append(
+        {
+            "question": "What's x?",
+            "evidence": [
+                {"kind": "value", "path": "dvcdir/a.json", "key": "x"}
+            ],
+        }
+    )
+    calkit.save_calkit_info(ck_info)
+    run()
+    git("add", "-A")
+    git("commit", "-qm", "Add dirs")
+    # A stage is added in one direction and removed in the other
+    changes = calkit.results.get_changes(
+        base="HEAD~1", to="HEAD", check_pipeline=False
+    )
+    assert ("dirs", "added") in [
+        (s["name"], s["change"]) for s in changes["stages"]
+    ]
+    changes = calkit.results.get_changes(
+        base="HEAD", to="HEAD~1", check_pipeline=False
+    )
+    assert ("dirs", "removed") in [
+        (s["name"], s["change"]) for s in changes["stages"]
+    ]
+    with open("scale.txt", "w") as f:
+        f.write("3")
+    run()
+    changes = calkit.results.get_changes(check_pipeline=False, base="HEAD")
+    outputs = {o["path"]: o for o in changes["outputs"]}
+    assert outputs["dvcdir/a.json"]["storage"] == "dvc"
+    assert outputs["dvcdir/a.json"]["values"][0]["new"] == 3.0
+    assert outputs["gitdir/a.json"]["storage"] == "git"
+    assert outputs["gitdir/a.json"]["values"][0]["old"] == 1.5
+    assert "dvcdir/b.txt" not in outputs and "gitdir/b.txt" not in outputs
+    assert outputs["paper.pdf"]["kind"] == "other"
+    assert outputs["figures/plot.pdf"]["kind"] == "figure"
+    questions = {q["question"]: q for q in changes["questions"]}
+    assert questions["What's x?"]["evidence"][0]["new"] == 3.0
+    # Without the manifests, only the DVC directory is known to have
+    # changed, and so is all a question citing a file in it can say
+    git("add", "-A")
+    git("commit", "-qm", "Change scale again")
+    calkit.overleaf.rmtree(os.path.join(".dvc", "cache"))
+    changes = calkit.results.get_changes(
+        base="HEAD~1", to="HEAD", check_pipeline=False
+    )
+    outputs = {o["path"]: o for o in changes["outputs"]}
+    assert outputs["dvcdir"]["directory"] is True
+    assert "gitdir/a.json" in outputs
+    questions = {q["question"]: q for q in changes["questions"]}
+    assert questions["What's x?"]["evidence"] == [
+        {"path": "dvcdir/a.json", "change": "directory changed"}
+    ]
+    # Nothing outside the project or the cache is read, whatever dvc.lock
+    # says
+    with open(os.path.join("..", "outside.json"), "w") as f:
+        f.write('{"secret": 1}')
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)
+    lock["stages"]["make"]["outs"] += [
+        {"path": "../outside.json", "md5": "0" * 32},
+        {"path": "results/fit.json", "md5": "../../../outside.json"},
+    ]
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    changes = calkit.results.get_changes(base="HEAD", check_pipeline=False)
+    assert not any(o["path"].startswith("..") for o in changes["outputs"])
+    assert "secret" not in json.dumps(changes)
     # A revision that isn't there says so
     with pytest.raises(ValueError, match="nope"):
         calkit.results.get_changes(base="nope")

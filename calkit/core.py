@@ -1446,6 +1446,8 @@ def check_dep_exists(
 
     TODO: Add version checking.
     """
+    import shutil
+
     if kind == "env-var":
         return name in os.environ
     if kind == "calkit-config":
@@ -1457,30 +1459,12 @@ def check_dep_exists(
         return True
     if system_info is not None and system_info.get(f"{name.lower()}_version"):
         return True
-    # Conda and mamba are frequently installed but not on the PATH (most
-    # commonly on Windows), so search their typical install locations
-    # rather than relying on the bare name being directly executable.
-    if name in ("conda", "mamba"):
-        from calkit.conda import find_conda_exe, find_mamba_exe
-
-        exe = find_conda_exe() if name == "conda" else find_mamba_exe()
-        return exe is not None
-    # Apps that aren't run by their name, or not on every OS
-    if name in ("word", "excel", "powerpoint"):
-        from calkit.office import app_installed
-
-        return app_installed(name)
-    if name == "libreoffice":
-        from calkit.docx import find_soffice
-
-        return find_soffice() is not None
-    # Apps Calkit exports with can be installed off the PATH, e.g., as a
-    # macOS app bundle
-    from calkit.export import exporters
-
-    known = {e.name: e for e in exporters()}
-    if name.lower() in known:
-        return known[name.lower()].find_executable() is not None
+    if find_app_path(name) is not None:
+        return True
+    # One on the PATH that wasn't found where Calkit looks for it is
+    # another program, e.g., a 'word' that isn't Microsoft Word
+    if shutil.which(name) is not None:
+        return False
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -1498,23 +1482,27 @@ def check_dep_exists(
 
 
 def find_app_path(name: str) -> str | None:
-    """Find where an app is installed, as :func:`check_dep_exists` looks,
-    which can be off the PATH, e.g., Conda in its usual install location.
-    """
+    """Find where an app is installed, which can be off the PATH."""
     import shutil
 
+    import calkit.office
+
+    # Conda and mamba are frequently installed but not on the PATH (most
+    # commonly on Windows), so search their typical install locations
+    # rather than relying on the bare name being directly executable.
     if name in ("conda", "mamba"):
         from calkit.conda import find_conda_exe, find_mamba_exe
 
         return find_conda_exe() if name == "conda" else find_mamba_exe()
-    if name in ("word", "excel", "powerpoint"):
-        import calkit.office
-
+    # Apps that aren't run by their name, or not on every OS
+    if name in calkit.office.OFFICE_APPS:
         return calkit.office.find_app_path(name)
     if name == "libreoffice":
         from calkit.docx import find_soffice
 
         return find_soffice()
+    # Apps Calkit exports with can be installed off the PATH, e.g., as a
+    # macOS app bundle
     from calkit.export import exporters
 
     known = {e.name: e for e in exporters()}
@@ -2041,8 +2029,7 @@ def check_requirements(
     where an app was found. An env var's value is never in it, since
     secrets are kept in them.
     """
-    import shutil
-
+    import calkit.office
     from calkit import install as _install
 
     def abbreviate_home(path: str) -> str:
@@ -2058,13 +2045,21 @@ def check_requirements(
             return
         path = find_app_path(name)
         details = [version] if version else []
-        # A folder is an app bundle, which isn't run by name anyway
+        # Office apps and app bundles, which are folders, aren't run from
+        # the PATH anyway
         if (
             path is not None
             and os.path.isfile(path)
-            and not shutil.which(name)
+            and name not in calkit.office.OFFICE_APPS
         ):
-            details.append("not on PATH")
+            path_dirs = [
+                os.path.normcase(os.path.abspath(d))
+                for d in os.environ.get("PATH", "").split(os.pathsep)
+                if d
+            ]
+            found_dir = os.path.dirname(os.path.abspath(path))
+            if os.path.normcase(found_dir) not in path_dirs:
+                details.append("not on PATH")
         report(
             f"{declared_name}: "
             + ("found" if path is None else abbreviate_home(path))
@@ -2098,11 +2093,10 @@ def check_requirements(
         reqs = get_requirements(ck_info)
         # Git is how a project exists at all, so the host needs it whether
         # or not anyone wrote it down, e.g., as git>=2.30
-        if "git" not in [
-            _normalize_requirement(r)["name"]
-            for r in reqs
-            if isinstance(r, str)
-        ]:
+        if not any(
+            r["kind"] == "app" and r["name"] == "git"
+            for r in map(_normalize_requirement, reqs)
+        ):
             reqs.append("git")
     # Resolve TTY interactivity once so a single per-call answer drives
     # every prompt (env-var, app installer, setup step).

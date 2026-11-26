@@ -71,6 +71,7 @@ def build(
     import calkit.quarto
     from calkit.cli.main.core import run_in_env
     from calkit.cli.quarto import _RUN_IN_DIR
+    from calkit.markdown import MarkdownParseError, results_by_name
 
     # The project is wherever calkit.yaml is above here, since a stage
     # builds from its working directory
@@ -110,46 +111,57 @@ def build(
             f"{problem}. MyST is 'mystmd' in a Conda, Pixi, uv, or pip "
             "environment"
         )
-    # What the provenance panels say is decided now, from the pipeline as
-    # it stands, for the plugin to show
+    # Where each document's components and values came from, and the
+    # values, are worked out now, from the pipeline as it stands, for the
+    # plugin to show, since MyST doesn't read results files
     myst_dir = Path(os.path.relpath(wdir, project_dir)).as_posix()
     myst_dir = "" if myst_dir == "." else myst_dir
     stage = calkit.myst.get_build_stage(myst_dir or ".", ck_info)
     # Every document's, including what it includes, so a record can't
-    # outlive the directives it was written for
+    # outlive what it was written for
     found = []
-    for document in calkit.myst.find_documents(myst_dir, wdir=project_dir):
-        text = calkit.quarto.read_document_text(
-            os.path.join(project_dir, document)
-        )
-        divs = (
-            calkit.myst.extract_directives(
-                text,
-                document,
-                read_text=lambda p: calkit.quarto.read_document_text(
-                    os.path.join(project_dir, p)
-                ),
+    try:
+        for document in calkit.myst.find_documents(myst_dir, wdir=project_dir):
+            text = calkit.quarto.read_document_text(
+                os.path.join(project_dir, document)
             )
-            if text is not None
-            else []
-        )
-        if divs:
-            found.append((document, divs))
-            continue
-        record_path = os.path.join(
-            project_dir, calkit.quarto.get_provenance_path(document)
-        )
-        if os.path.isfile(record_path):
-            os.remove(record_path)
-    if found:
-        problem = calkit.myst.get_plugin_problem(myst_dir, wdir=project_dir)
-        if problem is not None:
-            raise_error(problem)
+            components, roles = (
+                calkit.myst.extract_document(
+                    text,
+                    document,
+                    read_text=lambda p: calkit.quarto.read_document_text(
+                        os.path.join(project_dir, p)
+                    ),
+                    results=results_by_name(ck_info),
+                )
+                if text is not None
+                else ([], [])
+            )
+            if components or roles:
+                found.append((document, components, roles))
+                continue
+            record_path = os.path.join(
+                project_dir, calkit.quarto.get_provenance_path(document)
+            )
+            if os.path.isfile(record_path):
+                os.remove(record_path)
+        if found:
+            problem = calkit.myst.get_plugin_problem(
+                myst_dir, wdir=project_dir
+            )
+            if problem is not None:
+                raise_error(problem)
         # What they show is what the stage is built from, or it won't
         # rebuild when that changes
-        if stage is not None:
+        if found and stage is not None:
             unlisted = calkit.myst.get_unlisted_paths(
-                [d.path for _, divs in found for d in divs if d.path],
+                [c.path for _, components, _ in found for c in components]
+                + [
+                    v.path
+                    for _, _, roles in found
+                    for _, _, v in roles
+                    if not v.ref
+                ],
                 stage,
                 wdir=project_dir,
             )
@@ -163,15 +175,30 @@ def build(
                         posixpath.relpath(p, stage_wdir) for p in unlisted
                     )
                 )
-        for document, divs in found:
-            calkit.quarto.write_provenance(
-                divs,
+        if any(v.ref for _, _, roles in found for _, _, v in roles):
+            from calkit.references.values import write_values_file
+
+            write_values_file(ck_info, wdir=project_dir)
+        for document, components, roles in found:
+            values = [v for _, _, v in roles]
+            texts = calkit.quarto.check_values(
+                values, document, wdir=project_dir
+            )
+            record_path = calkit.quarto.write_provenance(
+                components,
                 document,
                 ck_info,
                 wdir=project_dir,
                 document_stage=stage,
+                values=values,
             )
-        calkit.myst.write_plugin(myst_dir, wdir=project_dir)
+            calkit.myst.add_role_values(
+                os.path.join(project_dir, record_path), roles, texts
+            )
+        if found:
+            calkit.myst.write_plugin(myst_dir, wdir=project_dir)
+    except (MarkdownParseError, ValueError) as e:
+        raise_error(str(e))
     cmd = ["myst", "build"] + (myst_args or [])
     if environment == "_system":
         # Resolved first, so a 'myst.cmd' shim is found on Windows

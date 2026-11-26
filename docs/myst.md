@@ -18,7 +18,7 @@ There's no MyST stage kind yet,
 so a site is built by a `command` stage running `calkit myst build`
 in the folder with its `myst.yml`,
 listing what it's built from as `inputs`,
-including the files its documents show,
+including the files and results files its documents show,
 which `calkit myst build` fails without, so the site is built again when
 they change:
 
@@ -47,52 +47,94 @@ this machine,
 unless the project lists `myst` as a [requirement](requirements.md)
 or the environment is `_system`.
 
-## Showing where figures and tables came from
+## Figures, tables, files, and values from the pipeline
 
 <!-- TODO: needs human review -->
 
-As in a [Quarto document](quarto.md#showing-where-figures-and-tables-came-from),
-a `ckprovenance` directive shows a figure or table with a panel saying
-which stage made it, in which environment, what it read,
-and whether it's up to date per `dvc.lock`,
-so readers can see where it came from without Calkit:
+A document can show a figure, table, or other file from anywhere in the
+project by its path, as LaTeX's `\ckfigure`, `\cktable`, and `\ckinclude`
+and [Quarto's](quarto.md#figures-tables-and-other-files-from-the-pipeline)
+divs do, with directives like MyST's own `figure`,
+whose content is the caption:
 
 ```markdown
-:::{ckprovenance} ../figures/fit.png
+:::{ckfigure} figures/fit.png
 :label: fig-fit
 :width: 80%
 The fit, with its residuals.
 :::
 
-As [](#fig-fit) shows, ...
-
-:::{ckprovenance} ../results/fits.csv
+:::{cktable} results/fits.csv
 :label: tbl-fits
 :rows: 10
 Each run's fit.
+:::
+
+:::{ckinclude} results/summary.md
 :::
 ```
 
 <!-- TODO: needs human review -->
 
-The file is relative to the document,
-and shown as MyST would show it, numbered and referred to by its label,
-with the directive's content as its caption:
-an image as a figure, a CSV or TSV file as a table,
+Paths are relative to the project.
+`ckfigure` shows an image as a numbered figure, with `figure`'s options,
+e.g., `width`, `cktable` a CSV or TSV file as a numbered table,
 up to `:rows:` rows (25 by default),
-and anything else by its path, unless `:kind:` says otherwise, i.e.,
-`figure`, `table`, or `file`.
-With no file, it shows a panel about the document itself,
-listing each pipeline output it's made from and whether each is up to
-date, with a graph of the stages that make them,
-which `:table: false` or `:graph: false` leaves out.
-The panels say the same as they do in a Quarto document,
-since Calkit works out what they say the same way for both.
+and `ckinclude` a Markdown file's content, or any other file by its path.
+`:name:` works as `:label:` does, and options can be lines or a YAML
+block.
 
 <!-- TODO: needs human review -->
 
-The directive comes from a MyST plugin Calkit writes beside `myst.yml`,
-in `_extensions/calkit/myst.mjs`, which `myst.yml` lists:
+Values are shown with the `ckvalue` and `ckrefval` roles,
+whose content reads as Quarto's shortcodes' arguments do,
+e.g., a results file or a declared result's name, a key, and a format,
+or a notebook and the variable a cell saved:
+
+```markdown
+The slope is {ckvalue}`results/fit.json fit.slope .3f`,
+and k is {ckvalue}`fit.ipynb k_25 .3f`,
+as in {ckrefval}`liu2025 noise-sigma`.
+```
+
+<!-- TODO: needs human review -->
+
+`calkit myst build` reads and formats the values, as Quarto and LaTeX
+documents format them, so MyST doesn't read results files itself.
+Everything shown this way has to be among the build stage's `inputs`,
+including results files, and a notebook's saved values, e.g.,
+`.calkit/notebooks/outputs/fit.ipynb/values.json`;
+`calkit myst build` fails, naming what to add, when it isn't.
+That's checked when the stage runs,
+so a stage set up before an input was missing is caught the next time it
+runs.
+Directives and roles in a file a document `{include}`s count for the
+document.
+
+## Showing where they came from
+
+<!-- TODO: needs human review -->
+
+As in a [Quarto document](quarto.md#showing-where-figures-tables-and-values-came-from),
+each component is shown with where it came from collapsed under it,
+saying what's wrong while it's collapsed, e.g.,
+"Out of date: scripts/clean.py modified",
+and, opened, a graph of the stages it's made from and nothing else,
+then each of them, with its kind, environment, script or command,
+last run, every input, and what it makes on the way,
+with links to files on GitHub or GitLab and to components shown in the
+document.
+A value is followed by a small mark, or a ⚠ when it's out of date,
+linking to where it came from, which MyST shows when the mark's hovered,
+in a collapsed section at the end of the document.
+`:provenance: false`, or `provenance=false` in a role, turns it off for
+one, and `show_provenance: false` in `calkit.yaml` for the whole project.
+What's shown is worked out the same way it is for Quarto.
+
+<!-- TODO: needs human review -->
+
+The directives and roles come from a MyST plugin Calkit writes beside
+`myst.yml`, in `_extensions/calkit/myst.mjs`, which `myst.yml` lists:
 
 ```yaml
 project:
@@ -103,23 +145,23 @@ project:
 `calkit myst build` fails if it's not listed, saying so.
 Keep the plugin in Git, as with Quarto's extension,
 since without it MyST builds the site anyway,
-without the figures and tables the directives show.
-Each time it builds, it works out what every panel says from
-`calkit.yaml`, `.calkit/stage-runs.json`,
-and whether each stage is up to date as `calkit status` would say,
-and writes it to `.calkit/local/provenance`, which isn't kept in Git,
-for the plugin to read.
-Options can be written as `:key: value` lines or a YAML block,
-and directives in a file a document `{include}`s count for the document,
-with paths relative to it, as MyST reads them.
+without what the directives and roles show.
+Each time it builds, it works out where everything came from,
+and the values, and writes them to `.calkit/local/provenance`,
+which isn't kept in Git, for the plugin to read.
 The document's own outputs, i.e., those of the stage that runs
 `calkit myst build` in its folder, aren't checked,
 since it can't say whether what's being built is up to date.
 Building with MyST directly, e.g., with `myst start`,
-shows the panels as of the last time Calkit built the project,
-saying so if a document has changed since,
-and a document Calkit hasn't built on this machine says no provenance is
-recorded, with each table shown only by its path, keeping its label.
+shows what was recorded the last time Calkit built the project,
+saying so if a document has changed since;
+a document Calkit hasn't built on this machine says nothing is recorded,
+with each table shown only by its path, keeping its label,
+and shows `??` for its values.
 `myst start` also doesn't notice when a script or data file changes,
-so a panel can say a figure is up to date when it isn't anymore
+so a view can say a figure is up to date when it isn't anymore
 until the project is built again.
+MyST doesn't tell its plugins which format it's building,
+so other formats get the same collapsed sections:
+its Word export leaves them out, reporting each as a node it can't show,
+and its other exports haven't been checked yet.

@@ -7,15 +7,18 @@ import posixpath
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from calkit.quarto import Component, QuartoValue
 
 # A MyST plugin, written beside myst.yml, which lists it under
 # project.plugins, in the folder Calkit writes Quarto's extension to
 PLUGIN_PATH = "_extensions/calkit/myst.mjs"
 # What myst.yml lists to load the plugin
 PLUGIN_CONFIG = f"project:\n  plugins:\n    - {PLUGIN_PATH}\n"
-# The directive that shows a file with where it came from, named as
-# Quarto's class is
-PROVENANCE_DIRECTIVE = "ckprovenance"
+# A role showing a value, e.g., {ckvalue}`results/fit.json slope .2f`
+_ROLE_RE = re.compile(r"\{(?P<name>ckvalue|ckrefval)\}`(?P<args>[^`]*)`")
 # The files MyST builds a project from
 DOCUMENT_EXTS = (".md", ".ipynb")
 # A fence: backticks or tildes opening a code block, or with a {name}, a
@@ -36,61 +39,23 @@ LITERAL_DIRECTIVES = {
     "raw",
     "csv-table",
 }
-# Turns the panels Calkit wrote before building into MyST's AST, deciding
-# nothing about what they say, which is decided in Python, the same as for
+# Turns what Calkit recorded before building into MyST's AST, deciding
+# nothing about what it says, which is decided in Python, the same as for
 # Quarto, and tested there
 PLUGIN_JS = r"""// Written by Calkit; changes are overwritten by 'calkit myst build'.
-// Shows the file a {ckprovenance} directive names, as a figure, a table,
-// or its name, with where it came from and whether it's up to date, or
-// with no argument, the document's provenance. Calkit decides what each
-// panel says before building, and writes it to .calkit/local/provenance;
-// this only turns it into MyST's AST.
+// Shows a file from the project with {ckfigure}, {cktable} for a CSV or
+// TSV file, or {ckinclude} for anything else, and values with {ckvalue}
+// and {ckrefval}, with where each came from collapsed under it, or for a
+// value, behind a marker linking to it. Calkit works out the values and
+// what that says before building, and writes it to
+// .calkit/local/provenance; this only turns it into MyST's AST.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-const PICTURE_EXTS = new Set([
-  ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf",
-]);
-const TABLE_EXTS = new Set([".csv", ".tsv"]);
+const MARKDOWN_EXTS = new Set([".md"]);
 
-// A warning with a title, saying to build with Calkit
-function warning(title) {
-  return {
-    type: "admonition",
-    kind: "warning",
-    children: [
-      { type: "admonitionTitle", children: [{ type: "text", value: title }] },
-      {
-        type: "paragraph",
-        children: [
-          { type: "text", value: "Build with " },
-          { type: "inlineCode", value: "calkit myst build" },
-          { type: "text", value: " or " },
-          { type: "inlineCode", value: "calkit run" },
-          { type: "text", value: "." },
-        ],
-      },
-    ],
-  };
-}
-
-// Whether the document changed since Calkit wrote its panels, e.g., in
-// 'myst start'
-function isOutdated(records, docPath) {
-  if (!records.source_sha1) {
-    return false;
-  }
-  try {
-    const digest = crypto.createHash("sha1")
-      .update(fs.readFileSync(docPath)).digest("hex");
-    return digest !== records.source_sha1;
-  } catch {
-    return false;
-  }
-}
-
-// The Calkit project's folder, which the panels are kept under
+// The Calkit project's folder, which paths are relative to
 function findProjectDir(start) {
   let dir = start;
   while (true) {
@@ -105,7 +70,7 @@ function findProjectDir(start) {
   }
 }
 
-// What Calkit wrote for a document, read each time, since 'myst start'
+// What Calkit recorded for a document, read each time, since 'myst start'
 // keeps this loaded across rebuilds
 function loadRecords(docPath) {
   const projectDir = findProjectDir(path.dirname(docPath));
@@ -120,30 +85,32 @@ function loadRecords(docPath) {
   }
 }
 
-// Paragraphs, text, and Mermaid are MyST's own nodes already
-function convert(node, hidden) {
-  const { section, ...rest } = node;
-  if (section && hidden.has(section)) {
-    return [];
+// Whether the document changed since Calkit recorded it, e.g., in
+// 'myst start'
+function isOutdated(records, docPath) {
+  if (!records || !records.source_sha1) {
+    return false;
   }
-  if (rest.type === "admonition") {
-    const out = {
-      type: "admonition",
-      kind: rest.kind,
-      children: [
-        { type: "admonitionTitle", children: rest.title },
-        ...convertAll(rest.children, hidden),
-      ],
-    };
-    if (rest.dropdown) {
-      out.class = "dropdown";
-    }
-    return [out];
+  try {
+    const digest = crypto.createHash("sha1")
+      .update(fs.readFileSync(docPath)).digest("hex");
+    return digest !== records.source_sha1;
+  } catch {
+    return false;
   }
-  if (rest.type === "table") {
+}
+
+function isOff(value) {
+  return value === false
+    || ["false", "no", "0", "off"].includes(String(value).toLowerCase());
+}
+
+// Paragraphs, text, links, and Mermaid are MyST's own nodes already
+function convert(node) {
+  if (node.type === "table") {
     return [{
       type: "table",
-      children: rest.children.map((row) => ({
+      children: node.children.map((row) => ({
         type: "tableRow",
         children: row.children.map((cell) => ({
           type: "tableCell",
@@ -153,84 +120,117 @@ function convert(node, hidden) {
       })),
     }];
   }
-  return [rest];
+  return [node];
 }
 
-function convertAll(nodes, hidden) {
-  return (nodes || []).flatMap((node) => convert(node, hidden));
+function convertAll(nodes) {
+  return (nodes || []).flatMap((node) => convert(node));
 }
 
-const ckprovenance = {
-  name: "ckprovenance",
-  doc: "Show a file with where it came from and whether it's up to date, "
-    + "or with no argument, the document's provenance.",
-  arg: {
-    type: String,
-    doc: "The file, relative to the document. Omit it for the document.",
-  },
-  options: {
-    label: { type: String, alias: ["name"], doc: "Label to refer to it." },
-    kind: { type: String, doc: "figure, table, or file." },
-    width: { type: String, doc: "Width, as on a figure." },
-    align: { type: String, doc: "left, center, or right." },
-    alt: { type: String, doc: "Alt text." },
-    rows: { type: Number, doc: "Rows of a table to show (25)." },
-    table: { type: Boolean, doc: "Show the document's outputs (true)." },
-    graph: { type: Boolean, doc: "Show the document's graph (true)." },
-  },
-  body: { type: "myst", doc: "The caption, or a lead-in for the document." },
-  run(data, vfile) {
-    const src = (data.arg || "").trim();
-    const options = data.options || {};
-    const caption = data.body || [];
-    const hidden = new Set(
-      ["table", "graph"].filter((key) => options[key] === false),
-    );
-    const docPath = vfile.path ? path.resolve(vfile.path) : null;
-    const records = docPath ? loadRecords(docPath) : null;
-    let record = null;
-    if (records) {
-      record = src ? (records.panels || {})[src] : records.document;
-    }
-    // A figure or table, numbered and referred to by its label, with the
-    // directive's body as its caption
-    const container = (kind, children) => {
-      const out = { type: "container", kind, children };
-      if (options.label) {
-        out.label = options.label;
-        out.identifier = options.label.toLowerCase();
-      }
-      if (caption.length > 0) {
-        const node = { type: "caption", children: caption };
-        if (kind === "table") {
-          children.unshift(node);
-        } else {
-          children.push(node);
+function getSummary(provenance, outdated) {
+  const out = [...provenance.summary];
+  if (outdated) {
+    out.push({
+      type: "text", value: " · recorded before this document changed",
+    });
+  }
+  return out;
+}
+
+function getView(provenance, outdated) {
+  const out = [];
+  if (outdated) {
+    out.push({
+      type: "paragraph",
+      children: [{
+        type: "text",
+        value: "The document changed since this was recorded; build it "
+          + "with Calkit to update it.",
+      }],
+    });
+  }
+  return [...out, ...convertAll(provenance.view)];
+}
+
+// Collapsed, saying what's wrong while it is
+function getDetails(summary, view) {
+  return {
+    type: "details",
+    class: "ck-provenance",
+    children: [{ type: "summary", children: summary }, ...view],
+  };
+}
+
+function getUnrecorded() {
+  return getDetails(
+    [{ type: "text", value: "⚠️ No provenance recorded" }],
+    [{
+      type: "paragraph",
+      children: [
+        { type: "text", value: "Build with " },
+        { type: "inlineCode", value: "calkit myst build" },
+        { type: "text", value: " or " },
+        { type: "inlineCode", value: "calkit run" },
+        { type: "text", value: "." },
+      ],
+    }],
+  );
+}
+
+const OPTIONS = {
+  label: { type: String, alias: ["name"], doc: "Label to refer to it." },
+  provenance: { type: Boolean, doc: "Show where it came from (true)." },
+};
+
+function makeComponent(name, kind, options) {
+  return {
+    name,
+    doc: `Show a ${kind} from the project, with where it came from.`,
+    arg: { type: String, required: true, doc: "Its path in the project." },
+    options: { ...OPTIONS, ...options },
+    body: { type: "myst", doc: "The caption." },
+    run(data, vfile, ctx) {
+      const src = (data.arg || "").trim();
+      const opts = data.options || {};
+      const caption = data.body || [];
+      const docPath = vfile.path ? path.resolve(vfile.path) : null;
+      const records = docPath ? loadRecords(docPath) : null;
+      const record = records ? (records.components || {})[src] : null;
+      const projectDir = docPath
+        ? findProjectDir(path.dirname(docPath)) : process.cwd();
+      const url = record ? record.url : path.relative(
+        docPath ? path.dirname(docPath) : projectDir,
+        path.join(projectDir, src),
+      ).split(path.sep).join("/");
+      // Numbered and referred to by its label, with the body as caption
+      const container = (children) => {
+        const out = { type: "container", kind, children };
+        if (opts.label) {
+          out.label = opts.label;
+          out.identifier = opts.label.toLowerCase();
         }
-      }
-      return out;
-    };
-    const image = () => {
-      const out = { type: "image", url: src };
-      for (const key of ["width", "align", "alt"]) {
-        if (options[key]) {
-          out[key] = options[key];
+        if (caption.length > 0) {
+          const node = { type: "caption", children: caption };
+          if (kind === "table") {
+            children.unshift(node);
+          } else {
+            children.push(node);
+          }
         }
-      }
-      return out;
-    };
-    if (!record) {
-      // Shown as it would be, as far as that can be without Calkit,
-      // keeping the label and caption, so references still resolve
-      const ext = path.extname(src).toLowerCase();
-      const kind = (options.kind || "").toLowerCase();
+        return out;
+      };
       const out = [];
-      if (!src) {
-        out.push(...caption);
-      } else if (kind === "figure" || (!kind && PICTURE_EXTS.has(ext))) {
-        out.push(container("figure", [image()]));
-      } else if (kind === "table" || (!kind && TABLE_EXTS.has(ext))) {
-        out.push(container("table", [{
+      if (kind === "figure") {
+        const image = { type: "image", url };
+        for (const key of ["width", "align", "alt"]) {
+          if (opts[key]) {
+            image[key] = opts[key];
+          }
+        }
+        out.push(container([image]));
+      } else if (kind === "table") {
+        out.push(container(record ? convertAll(record.body) : [{
+          // Only its name, keeping its label, so references resolve
           type: "table",
           children: [{
             type: "tableRow",
@@ -241,56 +241,173 @@ const ckprovenance = {
           }],
         }]));
       } else {
-        const name = { type: "inlineCode", value: src };
-        out.push({ type: "paragraph", children: [name] }, ...caption);
+        let content = null;
+        if (MARKDOWN_EXTS.has(path.extname(src).toLowerCase())
+          && ctx && ctx.parseMyst) {
+          try {
+            const text = fs.readFileSync(path.join(projectDir, src), "utf8");
+            content = ctx.parseMyst(text).children;
+          } catch {
+            content = null;
+          }
+        }
+        out.push(...(content || [{
+          type: "paragraph", children: [{ type: "inlineCode", value: src }],
+        }]), ...caption);
       }
-      out.push(warning("No provenance recorded"));
+      if (isOff(opts.provenance)) {
+        return out;
+      }
+      if (!record) {
+        out.push(getUnrecorded());
+      } else if (record.provenance) {
+        const outdated = isOutdated(records, docPath);
+        out.push(getDetails(
+          getSummary(record.provenance, outdated),
+          getView(record.provenance, outdated),
+        ));
+      }
       return out;
+    },
+  };
+}
+
+// Where a value's view is, at the end of the document
+function getValueId(key) {
+  return "ck-value-" + key.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function makeValueRole(name) {
+  return {
+    name,
+    doc: "Show a value from the pipeline, or quoted from a reference, as "
+      + "its Quarto shortcode does, with where it came from.",
+    body: { type: String, doc: "As the shortcode's arguments." },
+    run(data, vfile) {
+      const body = (data.body || "").trim();
+      const docPath = vfile.path ? path.resolve(vfile.path) : null;
+      const records = docPath ? loadRecords(docPath) : null;
+      const role = records ? ((records.roles || {})[name] || {})[body] : null;
+      if (!role) {
+        return [{ type: "text", value: "??" }];
+      }
+      const out = [{ type: "text", value: role.text }];
+      const value = (records.values || {})[role.key];
+      if (!role.provenance || !value || !value.provenance) {
+        return out;
+      }
+      // A quiet marker, or a warning one, linking to where it came from,
+      // which MyST shows when it's hovered
+      const warn = value.provenance.state !== "ok"
+        || isOutdated(records, docPath);
+      out.push({
+        type: "crossReference",
+        identifier: getValueId(role.key),
+        label: getValueId(role.key),
+        ckValue: role.key,
+        children: [{
+          type: "superscript",
+          children: [{ type: "text", value: warn ? "⚠" : "ⓘ" }],
+        }],
+      });
+      return out;
+    },
+  };
+}
+
+function walk(node, visit) {
+  visit(node);
+  for (const child of node.children || []) {
+    walk(child, visit);
+  }
+}
+
+// The views of the values the document shows, collapsed at its end, where
+// their markers link to
+const valueViews = {
+  name: "calkit-value-views",
+  stage: "document",
+  plugin: () => (tree, vfile) => {
+    const keys = [];
+    walk(tree, (node) => {
+      if (node.type === "crossReference" && node.ckValue
+        && !keys.includes(node.ckValue)) {
+        keys.push(node.ckValue);
+      }
+    });
+    if (keys.length === 0 || !vfile.path) {
+      return;
     }
-    const out = [];
-    if (record.kind === "figure") {
-      out.push(container("figure", [image()]));
-    } else if (record.kind === "table") {
-      out.push(container("table", convertAll(record.body, hidden)));
-    } else {
-      out.push(...convertAll(record.body, hidden), ...caption);
-    }
-    out.push(...convertAll(record.panel, hidden));
-    if (isOutdated(records, docPath)) {
-      out.push(warning("Document changed since panels recorded"));
-    }
-    return out;
+    const docPath = path.resolve(vfile.path);
+    const records = loadRecords(docPath) || {};
+    const outdated = isOutdated(records, docPath);
+    const views = keys.map((key) => {
+      const provenance = records.values[key].provenance;
+      return {
+        type: "admonition",
+        kind: provenance.state === "ok" && !outdated ? "note" : "warning",
+        identifier: getValueId(key),
+        label: getValueId(key),
+        children: [
+          {
+            type: "admonitionTitle",
+            children: getSummary(provenance, outdated),
+          },
+          ...getView(provenance, outdated),
+        ],
+      };
+    });
+    tree.children.push({
+      type: "block",
+      children: [getDetails(
+        [{ type: "text", value: "Where the values came from" }], views,
+      )],
+    });
   },
 };
 
-export default { name: "Calkit", directives: [ckprovenance] };
+export default {
+  name: "Calkit",
+  directives: [
+    makeComponent("ckfigure", "figure", {
+      width: { type: String, doc: "Width, as on a figure." },
+      align: { type: String, doc: "left, center, or right." },
+      alt: { type: String, doc: "Alt text." },
+    }),
+    makeComponent("cktable", "table", {
+      rows: { type: Number, doc: "Rows to show (25)." },
+    }),
+    makeComponent("ckinclude", "include", {}),
+  ],
+  roles: [makeValueRole("ckvalue"), makeValueRole("ckrefval")],
+  transforms: [valueViews],
+};
 """
 
 
-def extract_directives(
+def extract_document(
     text: str,
     document_path: str,
     read_text: Callable[[str], str | None] | None = None,
-) -> list:
-    """Find the ``ckprovenance`` directives in a MyST document, in order,
-    as ``calkit.quarto.ProvenanceDiv``, skipping those in code blocks and
-    directives whose content is literal, e.g., ``{code-cell}``.
+    results: dict[str, str] | None = None,
+) -> tuple[list[Component], list[tuple[str, str, QuartoValue]]]:
+    """Find the ``ckfigure``, ``cktable``, and ``ckinclude`` directives in a
+    MyST document, and the values it shows with ``ckvalue`` and
+    ``ckrefval`` roles, in order, skipping code blocks and directives whose
+    content is literal, e.g., ``{code-cell}``.
 
-    The file a directive names is relative to the document, as MyST reads
-    an image's, and ``:kind:`` overrides what its extension says to show it
-    as. Options can be ``:key: value`` lines or a YAML block. With
-    ``read_text``, which reads a project path, or None if it can't, the
-    files the document ``{include}``s are read too, with their paths
-    relative to the document, as MyST reads them.
+    A directive names its file, relative to the project, as LaTeX's
+    ``\\ckfigure`` and the roles do, with options as ``:key: value`` lines or
+    a YAML block. A role's content reads as Quarto's shortcode's arguments
+    do, e.g., ``{ckvalue}`results/fit.json slope .2f```, and each is
+    returned with its role's name and content, as the plugin finds it.
+    With ``read_text``, which reads a project path, or None if it can't,
+    the files the document ``{include}``s are read too, with their paths
+    relative to the document, as MyST reads them. ``results`` maps
+    declared results' names to their paths.
     """
     import calkit
-    from calkit.quarto import (
-        _NOUNS,
-        FIGURE_EXTS,
-        TABLE_DELIMITERS,
-        TABLE_ROW_LIMIT,
-        ProvenanceDiv,
-    )
+    from calkit.quarto import extract_values, get_component
 
     def get_options(lines: list[str]) -> dict:
         options: dict = {}
@@ -336,6 +453,22 @@ def extract_directives(
                     stack.pop()
                 continue
             if m is None:
+                # Read as Quarto's shortcode, on its line, so a mistake
+                # names it
+                for role in _ROLE_RE.finditer(line):
+                    found = extract_values(
+                        "\n" * i
+                        + "{{< "
+                        + role.group("name")
+                        + " "
+                        + role.group("args")
+                        + " >}}",
+                        chain[-1],
+                        results=results,
+                    )
+                    values.append(
+                        (role.group("name"), role.group("args"), found[0])
+                    )
                 continue
             if closes:
                 stack.pop()
@@ -356,34 +489,18 @@ def extract_directives(
                 if included_text is not None:
                     scan(included_text, chain + (included,))
                 continue
-            if name != PROVENANCE_DIRECTIVE:
-                continue
-            options = get_options(lines[i + 1 :])
-            if not arg:
-                divs.append(ProvenanceDiv("", "", "document", line=i + 1))
-                continue
-            path = posixpath.normpath(posixpath.join(base, arg))
-            ext = posixpath.splitext(arg)[1].lower()
-            kind = options.get("kind", "").lower()
-            if kind not in _NOUNS:
-                kind = (
-                    "figure"
-                    if ext in FIGURE_EXTS
-                    else "table"
-                    if ext in TABLE_DELIMITERS
-                    else "file"
-                )
-            try:
-                rows = int(options.get("rows", TABLE_ROW_LIMIT))
-            except ValueError:
-                rows = TABLE_ROW_LIMIT
-            divs.append(ProvenanceDiv(arg, path, kind, line=i + 1, rows=rows))
+            component = get_component(
+                name, arg, get_options(lines[i + 1 :]), line=i + 1
+            )
+            if component is not None:
+                components.append(component)
 
     document_path = posixpath.normpath(Path(document_path).as_posix())
     base = posixpath.dirname(document_path)
-    divs: list = []
+    components: list[Component] = []
+    values: list[tuple[str, str, QuartoValue]] = []
     scan(text, (document_path,))
-    return divs
+    return components, values
 
 
 def find_documents(myst_dir: str, wdir: str | None = None) -> list[str]:
@@ -508,6 +625,36 @@ def get_unlisted_paths(
             or any(under(path, p) for p in made)
         )
     ]
+
+
+def add_role_values(
+    record_path: str,
+    roles: list[tuple[str, str, QuartoValue]],
+    texts: list[str],
+) -> None:
+    """Add what each role shows to a document's record, by its name and
+    content, as the plugin finds it: the value's text, formatted as Quarto
+    and LaTeX format it, what its provenance is recorded under, and
+    whether to show it.
+    """
+    import json
+
+    import calkit
+    from calkit.quarto import get_value_key
+
+    with open(record_path, encoding="utf-8") as f:
+        record = json.load(f)
+    by_role: dict[str, dict] = {}
+    for (name, args, value), text in zip(roles, texts):
+        by_role.setdefault(name, {})[args.strip()] = {
+            "text": text,
+            "key": get_value_key(value),
+            "provenance": value.provenance,
+        }
+    record["roles"] = by_role
+    calkit.core.write_if_changed(
+        record_path, json.dumps(record, indent=2, ensure_ascii=False) + "\n"
+    )
 
 
 def write_plugin(myst_dir: str, wdir: str | None = None) -> None:

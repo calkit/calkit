@@ -1,51 +1,119 @@
 """Tests for ``calkit.myst``."""
 
+import json
 from pathlib import Path
+
+import pytest
 
 import calkit
 import calkit.myst
+from calkit.markdown import MarkdownParseError
 
 
 def test_directives(tmp_path: Path) -> None:
-    # Directives are found with colons or backticks, outside code and
-    # literal directives, whose closing fences don't open code blocks, with
-    # a path relative to the document, shown as its extension says unless
-    # they say otherwise, with options as lines or a YAML block
+    # Components are found with colons or backticks, outside code and
+    # literal directives, whose closing fences don't open code blocks, named
+    # by their directive, with a path relative to the project and options
+    # as lines or a YAML block
     text = (
-        ":::{ckprovenance} ../figures/plot.svg\n"
+        ":::{ckfigure} figures/plot.svg\n"
         ":label: fig-plot\n:width: 50%\nThe plot.\n:::\n"
-        "```python\n:::{ckprovenance} in-code.png\n```\n"
+        "```python\n:::{ckfigure} in-code.png\n```\n"
         "```{note}\nA note.\n```\n"
-        "```{ckprovenance} data.csv\n:rows: 2\n```\n"
-        "```{code-cell} python\n:::{ckprovenance} in-cell.png\n:::\n```\n"
-        "~~~\n:::{ckprovenance} in-tilde.png\n~~~\n"
-        "::::{ckprovenance} notes.txt\n---\nkind: table\nrows: many\n---\n::::\n"
+        "```{cktable} data/clean.csv\n:name: tbl-data\n:rows: 2\n```\n"
+        "```{code-cell} python\n:::{ckfigure} in-cell.png\n:::\n```\n"
+        "~~~\n:::{ckfigure} in-tilde.png\n~~~\n"
+        "::::{ckinclude} notes.md\n---\nprovenance: false\nrows: many\n---\n::::\n"
         ":::{figure} other.png\n:::\n"
-        ":::{ckprovenance}\n:graph: false\n:::\n"
+        ":::{ckfigure}\n:::\n"
+        "The slope is {ckvalue}`results/fit.json fit.slope .2f` and k is "
+        "{ckvalue}`fit.ipynb k_25 provenance=false`, quoting "
+        "{ckrefval}`liu2025 sigma`.\n"
+        "```\n{ckvalue}`in-code.json x`\n```\n"
         ":::{include} part.md\n:::\n"
     )
     parts = {
         "site/pages/part.md": (
-            ":::{ckprovenance} inc.csv\n:::\n"
+            ":::{cktable} inc.csv\n:::\n{ckvalue}`metrics n`\n"
             ":::{include} part.md\n:::\n:::{include} index.md\n:::\n"
         ),
         "site/pages/index.md": text,
     }
-    divs = calkit.myst.extract_directives(
-        text, "site/pages/index.md", read_text=parts.get
+    components, roles = calkit.myst.extract_document(
+        text,
+        "site/pages/index.md",
+        read_text=parts.get,
+        results={"metrics": "results/metrics.yaml"},
     )
-    assert [(d.src, d.path, d.kind, d.line, d.rows) for d in divs] == [
-        ("../figures/plot.svg", "site/figures/plot.svg", "figure", 1, 25),
-        ("data.csv", "site/pages/data.csv", "table", 12, 2),
-        ("notes.txt", "site/pages/notes.txt", "table", 22, 25),
-        ("", "", "document", 30, 25),
-        # Included, relative to the including document, as MyST reads it,
-        # once, however files include each other
-        ("inc.csv", "site/pages/inc.csv", "table", 1, 25),
-    ]
     assert [
-        d.src for d in calkit.myst.extract_directives(text, "site/index.md")
-    ][-1] == ""
+        (c.kind, c.src, c.path, c.label, c.line, c.rows, c.provenance)
+        for c in components
+    ] == [
+        (
+            "figure",
+            "figures/plot.svg",
+            "figures/plot.svg",
+            "fig-plot",
+            1,
+            25,
+            True,
+        ),
+        ("table", "data/clean.csv", "data/clean.csv", "tbl-data", 12, 2, True),
+        ("include", "notes.md", "notes.md", "", 23, 25, False),
+        # Included, once, however files include each other
+        ("table", "inc.csv", "inc.csv", "", 1, 25, True),
+    ]
+    # Values from roles read as Quarto's shortcodes do, with their role and
+    # content, as the plugin finds them, from what's included too
+    assert [
+        (name, args, v.path, v.key, v.format, v.ref, v.provenance, v.line)
+        for name, args, v in roles
+    ] == [
+        (
+            "ckvalue",
+            "results/fit.json fit.slope .2f",
+            "results/fit.json",
+            "fit.slope",
+            ".2f",
+            None,
+            True,
+            33,
+        ),
+        (
+            "ckvalue",
+            "fit.ipynb k_25 provenance=false",
+            ".calkit/notebooks/outputs/fit.ipynb/values.json",
+            "k_25",
+            None,
+            None,
+            False,
+            33,
+        ),
+        (
+            "ckrefval",
+            "liu2025 sigma",
+            ".calkit/reference-values/liu2025.json",
+            "sigma",
+            None,
+            ("liu2025", "sigma"),
+            True,
+            33,
+        ),
+        (
+            "ckvalue",
+            "metrics n",
+            "results/metrics.yaml",
+            "n",
+            None,
+            None,
+            True,
+            3,
+        ),
+    ]
+    # A mistake in one names its line
+    with pytest.raises(MarkdownParseError, match="names no key") as e:
+        calkit.myst.extract_document("\n{ckvalue}`a.json`\n", "site/index.md")
+    assert e.value.line == 2
     # Documents are found in the project's folder, but not what's built or
     # installed there
     (tmp_path / "site" / "pages").mkdir(parents=True)
@@ -85,6 +153,24 @@ def test_directives(tmp_path: Path) -> None:
             assert calkit.myst.PLUGIN_CONFIG in problem
             assert "site/myst.yml" in problem
     calkit.myst.write_plugin("site", wdir=str(tmp_path))
+    # What roles show is added to the record by their role and content
+    record_path = tmp_path / "record.json"
+    record_path.write_text(json.dumps({"values": {}}))
+    calkit.myst.add_role_values(str(record_path), roles[:2], ["0.12", "0.031"])
+    assert json.loads(record_path.read_text())["roles"] == {
+        "ckvalue": {
+            "results/fit.json fit.slope .2f": {
+                "text": "0.12",
+                "key": "results/fit.json:fit.slope",
+                "provenance": True,
+            },
+            "fit.ipynb k_25 provenance=false": {
+                "text": "0.031",
+                "key": ".calkit/notebooks/outputs/fit.ipynb/values.json:k_25",
+                "provenance": False,
+            },
+        }
+    }
     plugin_path = tmp_path / "site" / calkit.myst.PLUGIN_PATH
     assert plugin_path.read_text() == calkit.myst.PLUGIN_JS
     # The stage that builds it runs 'calkit myst build' in its folder

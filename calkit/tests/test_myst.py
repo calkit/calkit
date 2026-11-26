@@ -124,7 +124,9 @@ def test_directives(tmp_path: Path) -> None:
             },
             f,
         )
+    # And exists or another stage makes it, since otherwise it can't be
+    (tmp_path / "b.csv").write_text("")
     assert calkit.myst.get_unlisted_paths(
-        paths + ["b.csv"], "site", str(tmp_path)
+        paths + ["b.csv", "gone.csv"], "site", str(tmp_path)
     ) == ["b.csv"]
     assert calkit.myst.get_unlisted_paths(paths, "other", str(tmp_path)) == []

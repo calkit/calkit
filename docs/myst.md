@@ -18,7 +18,9 @@ There's no MyST stage kind yet,
 so a site is built by a `command` stage running `calkit myst build`
 in the folder with its `myst.yml`,
 listing what it's built from as `inputs`,
-including the files its documents show:
+including the files its documents show,
+which `calkit myst build` fails without, so the site is built again when
+they change:
 
 ```yaml
 pipeline:
@@ -99,15 +101,25 @@ project:
 ```
 
 `calkit myst build` fails if it's not listed, saying so.
+Keep the plugin in Git, as with Quarto's extension,
+since without it MyST builds the site anyway,
+without the figures and tables the directives show.
 Each time it builds, it works out what every panel says from
-`calkit.yaml`, `dvc.lock`, and `.calkit/stage-runs.json`,
+`calkit.yaml`, `.calkit/stage-runs.json`,
+and whether each stage is up to date as `calkit status` would say,
 and writes it to `.calkit/local/provenance`, which isn't kept in Git,
 for the plugin to read.
+Options can be written as `:key: value` lines or a YAML block,
+and directives in a file a document `{include}`s count for the document,
+with paths relative to it, as MyST reads them.
 The document's own outputs, i.e., those of the stage that runs
 `calkit myst build` in its folder, aren't checked,
 since it can't say whether what's being built is up to date.
 Building with MyST directly, e.g., with `myst start`,
 shows the panels as of the last time Calkit built the project,
-and `myst start` doesn't notice when a script or data file changes,
+saying so if a document has changed since,
+and a document Calkit hasn't built on this machine says no provenance is
+recorded, with each table shown only by its path, keeping its label.
+`myst start` also doesn't notice when a script or data file changes,
 so a panel can say a figure is up to date when it isn't anymore
 until the project is built again.

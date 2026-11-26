@@ -41,7 +41,7 @@ def test_build(tmp_path: Path) -> None:
         'height="10"/>\'\n)\n'
     )
     stage = {"kind": "python-script", "environment": "_system"}
-    ck_info = {
+    ck_info: dict = {
         "requirements": ["myst"],
         "datasets": [{"path": "data/raw.csv", "created_by": {"name": "Jo"}}],
         "pipeline": {
@@ -80,8 +80,10 @@ def test_build(tmp_path: Path) -> None:
     }
     with open(tmp_path / "calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    # With a directive in backticks first, whose closing fence doesn't open
+    # a code block
     (tmp_path / "site" / "index.md").write_text(
-        "# Report\n\n"
+        "# Report\n\n```{tip}\nA tip.\n```\n\n"
         ":::{ckprovenance} ../figures/plot.svg\n:label: fig-plot\n"
         "The plot.\n:::\n\n"
         "See [](#fig-plot) and [](#tbl-data).\n\n"
@@ -101,6 +103,19 @@ def test_build(tmp_path: Path) -> None:
     (tmp_path / "site" / "myst.yml").write_text(
         config + "  plugins:\n    - _extensions/calkit/myst.mjs\n"
     )
+    # What it shows has to be among the stage's inputs, so it rebuilds
+    site_stage = ck_info["pipeline"]["stages"]["site"]
+    site_stage["inputs"] = site_stage["inputs"][:-1]
+    with open(tmp_path / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "run"], capture_output=True, text=True, cwd=tmp_path
+    )
+    assert res.returncode != 0
+    assert "add to its inputs: ../data/clean.csv" in res.stdout + res.stderr
+    site_stage["inputs"].append("../data/clean.csv")
+    with open(tmp_path / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
     subprocess.check_call(["calkit", "run"], cwd=tmp_path)
     assert (tmp_path / "site" / calkit.myst.PLUGIN_PATH).is_file()
     # MyST numbers and refers to what it shows, so it's a figure and table,
@@ -131,10 +146,31 @@ def test_build(tmp_path: Path) -> None:
         "Table out of date: scripts/clean.py modified",
         "Document out of date: 2 of 2 outputs",
     ]
-    # Built without Calkit, with nothing recorded, it says so
-    (tmp_path / calkit.quarto.get_provenance_path("site/index.md")).unlink()
+    # Built without Calkit after the document changed, it says so
+    with open(tmp_path / "site" / "index.md", "a") as f:
+        f.write("\nMore text.\n")
+    subprocess.check_call(
+        ["myst", "build", "index.md", "--md", "--ci"],
+        cwd=tmp_path / "site",
+    )
+    assert get_titles().count("Document changed since panels recorded") == 3
+    # As it does with nothing recorded, still numbering and referring to
+    # the table
+    record_path = tmp_path / calkit.quarto.get_provenance_path("site/index.md")
+    record_path.unlink()
     subprocess.check_call(
         ["myst", "build", "index.md", "--md", "--ci"],
         cwd=tmp_path / "site",
     )
     assert get_titles() == ["No provenance recorded"] * 3
+    with open(tmp_path / "site" / "_build" / "exports" / "index.md") as f:
+        text = f.read().replace("\xa0", " ")
+    assert "See [Figure 1](#fig-plot) and [Table 1](#tbl-data)." in text
+    # A record is removed with the directives it was for
+    res = build("-e", "_system", "--", "index.md", "--md", "--ci")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert record_path.is_file()
+    (tmp_path / "site" / "index.md").write_text("# Report\n\nNo panels.\n")
+    res = build("-e", "_system", "--", "index.md", "--md", "--ci")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert not record_path.exists()

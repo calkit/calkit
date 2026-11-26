@@ -464,16 +464,19 @@ def get_unlisted_paths(
     """The project paths a stage's documents show that aren't among the
     inputs ``dvc.yaml`` lists for it, or in one, nor its outputs, in order.
 
-    Nothing is, if ``dvc.yaml`` doesn't have the stage yet.
+    Nothing is, if ``dvc.yaml`` doesn't have the stage yet, and a path that
+    doesn't exist, which no stage makes, can't be an input, so it's left
+    for its panel to say it's missing.
     """
     import calkit
 
     def under(path: str, parent: str) -> bool:
         return path == parent or path.startswith(parent.rstrip("/") + "/")
 
-    def get_paths(items: list | None) -> list[str]:
+    def get_paths(dvc_stage: dict, key: str) -> list[str]:
+        base = dvc_stage.get("wdir") or ""
         found = []
-        for item in items or []:
+        for item in dvc_stage.get(key) or []:
             if isinstance(item, dict):
                 item = item.get("path") or next(iter(item), None)
             if isinstance(item, str):
@@ -485,17 +488,25 @@ def get_unlisted_paths(
             dvc_yaml = calkit.core._load_yaml_readonly(f) or {}
     except OSError:
         return []
-    dvc_stage = (dvc_yaml.get("stages") or {}).get(stage)
-    if not isinstance(dvc_stage, dict):
+    dvc_stages = {
+        name: s
+        for name, s in (dvc_yaml.get("stages") or {}).items()
+        if isinstance(s, dict)
+    }
+    if stage not in dvc_stages:
         return []
-    base = dvc_stage.get("wdir") or ""
-    listed = get_paths(dvc_stage.get("deps")) + get_paths(
-        dvc_stage.get("outs")
+    listed = get_paths(dvc_stages[stage], "deps") + get_paths(
+        dvc_stages[stage], "outs"
     )
+    made = [p for s in dvc_stages.values() for p in get_paths(s, "outs")]
     return [
         path
         for path in dict.fromkeys(paths)
         if not any(under(path, p) for p in listed)
+        and (
+            os.path.exists(os.path.join(wdir or "", path))
+            or any(under(path, p) for p in made)
+        )
     ]
 
 

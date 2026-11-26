@@ -2224,22 +2224,29 @@ def write_provenance(
         return data if isinstance(data, dict) else {}
 
     def get_status(name: str) -> dict:
-        # From DVC, run from the project so it names paths relative to it
-        if not dvc_stages:
-            try:
-                repo = calkit.dvc.get_dvc_repo(
-                    wdir=os.path.abspath(wdir or ".")
-                )
-                dvc_stages.update(
-                    {stage.addressing: stage for stage in repo.index.stages}
-                )
-            except Exception as e:
-                raise ValueError(f"Can't read the pipeline to check it: {e}")
-        if name not in dvc_stages:
-            return {"status": "not-run"}
+        # From DVC, run from the project, so it names stages and paths as
+        # dvc.lock does, e.g., 'clean' rather than '../dvc.yaml:clean'
         prev_wdir = os.getcwd()
         try:
             os.chdir(wdir or ".")
+            if not dvc_stages:
+                try:
+                    repo = calkit.dvc.get_dvc_repo(wdir=".")
+                    dvc_stages.update(
+                        {s.addressing: s for s in repo.index.stages}
+                    )
+                except Exception as e:
+                    raise ValueError(
+                        f"Can't read the pipeline to check it: {e}"
+                    )
+            if name not in dvc_stages:
+                return {
+                    "status": "not-run",
+                    "modified_command": False,
+                    "modified_inputs": [],
+                    "modified_outputs": [],
+                    "missing_outputs": [],
+                }
             return get_stage_status(dvc_stages[name])
         finally:
             os.chdir(prev_wdir)

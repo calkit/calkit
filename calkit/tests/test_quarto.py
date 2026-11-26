@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -774,6 +775,26 @@ def test_stage_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # One that hasn't changed is up to date again
     write_pipeline(make, each_cmd)
     assert all(s["status"] == "up-to-date" for s in get_statuses().values())
+    # Panels are written from DVC's status, rendered from a stage's working
+    # directory too, which DVC would otherwise name stages relative to
+    (tmp_path / "sub").mkdir()
+    monkeypatch.chdir(tmp_path / "sub")
+    divs = calkit.quarto.extract_provenance_divs(
+        "::: {.ckprovenance src=out.txt}\n:::\n", "doc.qmd"
+    )
+    (tmp_path / "doc.qmd").write_text("")
+    for content, title in [
+        ("in\n", "File up to date"),
+        ("changed\n", "File out of date: in.txt modified"),
+    ]:
+        (tmp_path / "in.txt").write_text(content)
+        record_path = calkit.quarto.write_provenance(
+            divs, "doc.qmd", {}, wdir=str(tmp_path)
+        )
+        record = json.loads((tmp_path / record_path).read_text())
+        panel = record["panels"]["out.txt"]["panel"][0]
+        assert panel["title"][0]["value"] == title
+    assert os.getcwd() == str(tmp_path / "sub")
 
 
 def test_filter_problem(tmp_path: Path) -> None:

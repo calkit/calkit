@@ -214,7 +214,7 @@ saying so, rather than rendering the divs as plain ones.
 
 What each panel says is worked out from `calkit.yaml`, `dvc.lock`, and
 `.calkit/stage-runs.json` each time the stage renders the document,
-and written to `.calkit/local/quarto-provenance`,
+and written to `.calkit/local/provenance`,
 which isn't kept in Git, for the extension to read.
 Rendering with Quarto directly, e.g., with `quarto preview`,
 shows the panels as of the last time Calkit rendered the document,

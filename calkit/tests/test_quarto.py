@@ -671,7 +671,7 @@ def test_provenance_panels(tmp_path: Path) -> None:
     ]
     # Written where the filter reads it, beside nothing else
     assert calkit.quarto.get_provenance_path("pub/report.qmd") == (
-        ".calkit/local/quarto-provenance/pub/report.qmd.json"
+        ".calkit/local/provenance/pub/report.qmd.json"
     )
 
 

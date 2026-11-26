@@ -4,7 +4,7 @@
 -- as a figure, a table, or its name, with where it came from and whether
 -- it's up to date, or with no src, the document's provenance. Calkit
 -- decides what each panel says before rendering, and writes it to
--- .calkit/local/quarto-provenance; this only turns it into Pandoc's AST.
+-- .calkit/local/provenance; this only turns it into Pandoc's AST.
 -- It has to run at pre-ast, so Quarto numbers the figures and tables and
 -- builds the callouts after.
 
@@ -57,7 +57,7 @@ local function load_records()
   local project_dir = find_project_dir()
   local rel = pandoc.path.make_relative(quarto.doc.input_file, project_dir)
   local content = read_file(pandoc.path.join({
-    project_dir, ".calkit", "local", "quarto-provenance",
+    project_dir, ".calkit", "local", "provenance",
     (rel:gsub("\\", "/")) .. ".json",
   }))
   if content ~= nil then

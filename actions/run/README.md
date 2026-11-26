@@ -98,19 +98,18 @@ Environments the pipeline uses are cached too, unless `cache_envs` is set to
 of building them.
 Conda, pixi, uv, uv-venv, and venv environments are cached;
 other kinds, e.g., Docker and Julia, are built as before.
-The cache key comes from `calkit describe env-cache`, and changes when an
+The cache key comes from `calkit describe env-cache`, and changes when any
 environment's definition, spec, lock, or input files do.
-It's also scoped to the runner's platform and OS release and to the absolute
+It also changes with the runner's platform and OS release and the absolute
 paths cached, since, e.g., conda environments aren't relocatable.
 On GitHub-hosted runners, the checkout is always at
 `/home/runner/work/<repo>/<repo>`, so this holds from run to run.
-When a lock changes, the most recent cache with the same scope is restored
-instead, and checking the environment updates or rebuilds what doesn't
-match, which is also what happens to a restored environment that doesn't
-work on the runner.
-Environments are saved even if a stage fails, but only once every one has
-been checked successfully, so a run limited to some stages, e.g., with
-`run_args`, saves them only if those stages use all of them.
+Only a cache with exactly that key is restored, so after a lock changes,
+the environments are built from scratch, as they would be without caching.
+An environment built from an older lock can keep packages the new one
+dropped, which would hide a dependency a fresh build doesn't have.
+When there's no cache, the environments are built and saved before any stage
+runs, so nothing a stage installs into one at run time is saved with it.
 Caches count toward the repository's
 [10 GB limit](https://docs.github.com/en/actions/reference/dependency-caching-reference#usage-limits-and-eviction-policy),
 past which GitHub evicts the least recently used, so a project with large

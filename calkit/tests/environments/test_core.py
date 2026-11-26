@@ -2202,6 +2202,38 @@ def test_get_cached_env_states(tmp_dir):
     assert status.environment_checks == {}
 
 
+def test_get_env_prefix(tmp_dir: Path) -> None:
+    with open("environment.yml", "w") as f:
+        f.write("name: main\nprefix: .conda-envs/spec\ndependencies: []\n")
+    with open("named.yml", "w") as f:
+        f.write("name: named\ndependencies: []\n")
+    envs: dict = {
+        "conda": {"kind": "conda", "path": "environment.yml"},
+        "pinned": {
+            "kind": "conda",
+            "path": "environment.yml",
+            "prefix": ".conda-envs/pinned",
+        },
+        "named": {"kind": "conda", "path": "named.yml"},
+        "uv": {"kind": "uv", "path": os.path.join("sub", "pyproject.toml")},
+        "venv": {"kind": "uv-venv", "path": "requirements.txt"},
+        "pixi": {"kind": "pixi", "path": "pixi.toml", "name": "gpu"},
+        "img": {"kind": "docker", "image": "alpine"},
+    }
+    get_prefix = calkit.environments.get_env_prefix
+    # A conda env's own prefix wins over its spec's
+    assert get_prefix("conda", envs) == ".conda-envs/spec"
+    assert get_prefix("pinned", envs) == ".conda-envs/pinned"
+    # One kept by name has none of its own
+    assert get_prefix("named", envs) is None
+    assert get_prefix("uv", envs) == os.path.join("sub", ".venv")
+    assert get_prefix("venv", envs) == ".venv"
+    assert get_prefix("pixi", envs) == os.path.join(".pixi", "envs", "gpu")
+    assert get_prefix("img", envs) is None
+    with pytest.raises(ValueError, match="has no 'path'"):
+        get_prefix("nopath", {"nopath": {"kind": "venv"}})
+
+
 def test_get_env_cache_spec(tmp_dir: Path) -> None:
     envs: dict = {
         "main": {
@@ -2248,11 +2280,10 @@ def test_get_env_cache_spec(tmp_dir: Path) -> None:
         os.path.join(".calkit", "envs", "py", ".venv")
     )
     assert prefix in spec["paths"]
-    assert spec["key"].startswith(spec["restore_key"])
-    assert spec["restore_key"].startswith("calkit-envs-")
-    assert not spec["ready"]
+    assert spec["key"].startswith("calkit-envs-")
     # With conda, a named env is where conda creates it
-    conda_info = json.dumps({"root_prefix": "/conda"})
+    conda_root = os.path.abspath("/conda")
+    conda_info = json.dumps({"root_prefix": conda_root})
     with (
         mock.patch("calkit.conda.find_conda_exe", return_value="conda"),
         mock.patch(
@@ -2263,8 +2294,8 @@ def test_get_env_cache_spec(tmp_dir: Path) -> None:
         ),
     ):
         named = get_spec(env_names=["named", "py"])
-    assert named["environments"]["named"]["prefix"] == os.path.abspath(
-        os.path.join("/conda", "envs", "named")
+    assert named["environments"]["named"]["prefix"] == os.path.join(
+        conda_root, "envs", "named"
     )
     # A uv venv's interpreter, which uv may have installed, is cached too
     assert named["environments"]["py"]["paths"][1] == os.path.abspath(
@@ -2273,7 +2304,7 @@ def test_get_env_cache_spec(tmp_dir: Path) -> None:
     # The same inputs give the same key
     spec = get_spec(env_names=["main"])
     assert get_spec(env_names=["main"])["key"] == spec["key"]
-    # A new lock changes the key but not what it can be restored from
+    # A new lock changes it
     lock = calkit.environments.get_env_lock_fpath(
         env_name="main", env=envs["main"]
     )
@@ -2283,42 +2314,24 @@ def test_get_env_cache_spec(tmp_dir: Path) -> None:
         f.write("locked\n")
     relocked = get_spec(env_names=["main"])
     assert relocked["key"] != spec["key"]
-    assert relocked["restore_key"] == spec["restore_key"]
-    # So does its definition
+    # So do its spec and definition
+    with open("environment.yml", "w") as f:
+        f.write("name: main\ndependencies:\n  - python\n  - numpy\n")
+    respecced = get_spec(env_names=["main"])
+    assert respecced["key"] not in (spec["key"], relocked["key"])
     envs["main"]["description"] = "Main."
     write_ck_info()
     redefined = get_spec(env_names=["main"])
-    assert redefined["key"] not in (spec["key"], relocked["key"])
-    # Somewhere else, it's restored from a different set of caches, since
-    # conda envs aren't relocatable
+    assert redefined["key"] != respecced["key"]
+    # And where it's kept, since conda envs aren't relocatable
     envs["main"]["prefix"] = ".conda-envs/other"
     write_ck_info()
-    assert get_spec(env_names=["main"])["restore_key"] != spec["restore_key"]
-    envs["main"]["prefix"] = ".conda-envs/main"
-    write_ck_info()
-    # Ready once checked successfully against what it's built from now
-    os.makedirs(prefix)
-    calkit.environments.save_cache(
-        env_name="main", env=envs["main"], success=False
-    )
-    assert not get_spec(env_names=["main"])["ready"]
-    calkit.environments.save_cache(
-        env_name="main", env=envs["main"], success=True
-    )
-    ready = get_spec(env_names=["main"])
-    assert ready["ready"] and ready["environments"]["main"]["ready"]
-    # Running stages writing into the prefix doesn't change that
-    with open(os.path.join(prefix, "new.txt"), "w") as f:
-        f.write("new\n")
-    assert get_spec(env_names=["main"])["ready"]
-    # But a change to its spec does, until it's checked again
-    with open("environment.yml", "w") as f:
-        f.write("name: main\ndependencies:\n  - python\n  - numpy\n")
-    assert not get_spec(env_names=["main"])["ready"]
+    assert get_spec(env_names=["main"])["key"] != redefined["key"]
+    # A cache of other environments never matches
+    assert get_spec(env_names=["py"])["key"] != redefined["key"]
     # Nothing to cache gives no key
     nothing = get_spec(env_names=["img"])
     assert nothing["key"] is None and nothing["paths"] == []
-    assert not nothing["ready"]
     with pytest.raises(ValueError, match="not defined"):
         get_spec(env_names=["nope"])
 

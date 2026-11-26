@@ -2831,7 +2831,7 @@ Options:
 
 Describe what to cache to restore environments, e.g., in CI.
 
-Prints the paths to save and a key that changes when an environment's definition, spec, lock, or inputs do, scoped to this platform and those absolute paths. 'ready' says whether every cached environment has been checked successfully here since it last changed, so is worth saving.
+Prints the paths to save and a key that changes when an environment's definition, spec, lock, or inputs do, or the platform or those absolute paths. Restore only a cache with exactly this key, since one built from an older lock can keep packages the new one dropped.
 
 Usage:
 

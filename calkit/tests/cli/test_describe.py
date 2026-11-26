@@ -128,9 +128,8 @@ def test_describe_env_cache(tmp_dir: Path) -> None:
         )
         spec = json.loads(out)
         assert set(spec["environments"]) == {"py"}
-        assert spec["key"].startswith(spec["restore_key"])
+        assert spec["key"].startswith("calkit-envs-")
         assert os.path.abspath(".venv") in spec["paths"]
-        assert spec["ready"] is False
     # Or those named
     out = subprocess.check_output(
         ["calkit", "describe", "env-cache", "-n", "img", "--json"], text=True

@@ -1628,23 +1628,11 @@ def check_venv(
         this_prefix = os.path.abspath(prefix_full_path)
         return os.path.normcase(this_prefix) not in os.path.normcase(content)
 
-    def python_missing() -> bool:
-        """Check if the venv's interpreter is gone, e.g., a symlink to a
-        Python since removed, as when a venv is restored onto another
-        machine.
-        """
-        if _platform.system() == "Windows":
-            exe = os.path.join(prefix_full_path, "Scripts", "python.exe")
-        else:
-            exe = os.path.join(prefix_full_path, "bin", "python")
-        return not os.path.exists(exe)
-
     if not os.path.isdir(prefix_full_path):
         create_venv()
-    elif (moved := venv_was_moved()) or python_missing():
+    elif venv_was_moved():
         if not quiet:
-            why = "it was moved" if moved else "its Python is missing"
-            typer.echo(f"Recreating {kind} at {prefix} since {why}")
+            typer.echo(f"Recreating {kind} at {prefix} since it was moved")
         # uv refuses to create over an existing env, and packages are
         # reinstalled from the lock file below
         try:

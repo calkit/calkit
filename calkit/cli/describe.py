@@ -127,9 +127,9 @@ def describe_env_cache(
     """Describe what to cache to restore environments, e.g., in CI.
 
     Prints the paths to save and a key that changes when an environment's
-    definition, spec, lock, or inputs do, scoped to this platform and those
-    absolute paths. 'ready' says whether every cached environment has been
-    checked successfully here since it last changed, so is worth saving.
+    definition, spec, lock, or inputs do, or the platform or those absolute
+    paths. Restore only a cache with exactly this key, since one built from
+    an older lock can keep packages the new one dropped.
     """
     from calkit.environments import get_env_cache_spec
 
@@ -140,13 +140,7 @@ def describe_env_cache(
     if json_output:
         echo_json(spec)
         return
-    _echo_description(
-        {
-            "key": spec["key"],
-            "restore_key": spec["restore_key"],
-            "ready": spec["ready"],
-        }
-    )
+    _echo_description({"key": spec["key"]})
     for path in spec["paths"]:
         typer.echo(f"path: {path}")
     for env_name, desc in spec["environments"].items():

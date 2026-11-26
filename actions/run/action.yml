@@ -333,45 +333,6 @@ runs:
       run: |
         echo "::notice::Detected kind 'docker' in calkit.yaml, but Docker CLI is not available on this runner. Install Docker on the runner to use docker environments."
 
-    # The key changes with any environment's definition, spec, lock, or
-    # inputs, and is scoped to the absolute paths cached, since, e.g., conda
-    # environments aren't relocatable. An older Calkit without the command
-    # just builds them.
-    - name: Describe environments to cache
-      if: ${{ inputs.cache_envs == 'true' }}
-      id: env-cache
-      shell: bash
-      run: |
-        set -euo pipefail
-        if ! spec=$(calkit describe env-cache --json); then
-          echo "::warning::Couldn't describe environments to cache, so they'll be built"
-          exit 0
-        fi
-        key=$(jq -r '.key // empty' <<<"$spec")
-        if [ -z "$key" ]; then
-          echo "No environments to cache"
-          exit 0
-        fi
-        {
-          echo "key=$key"
-          echo "restore_key=$(jq -r .restore_key <<<"$spec")"
-          echo "paths<<CALKIT_ENV_CACHE_PATHS"
-          jq -r '.paths[]' <<<"$spec"
-          echo "CALKIT_ENV_CACHE_PATHS"
-        } >> "$GITHUB_OUTPUT"
-
-    # An environment restored from an older cache, i.e., from before its
-    # lock changed, or one that doesn't work here, is updated or rebuilt
-    # when the pipeline checks it
-    - name: Restore environments
-      if: ${{ steps.env-cache.outputs.key }}
-      id: env-cache-restore
-      uses: actions/cache/restore@v5
-      with:
-        path: ${{ steps.env-cache.outputs.paths }}
-        key: ${{ steps.env-cache.outputs.key }}
-        restore-keys: ${{ steps.env-cache.outputs.restore_key }}
-
     - name: Restore DVC cache for current branch
       if: ${{ inputs.cache_dvc == 'true' }}
       id: cache-dvc-restore
@@ -444,35 +405,83 @@ runs:
         CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
         CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
 
+    # After pulling, since an environment's inputs can be DVC-tracked. The
+    # key changes with any environment's definition, spec, lock, or inputs,
+    # and with the absolute paths cached, since, e.g., conda environments
+    # aren't relocatable. An older Calkit without the command just builds
+    # them.
+    - name: Describe environments to cache
+      if: ${{ inputs.cache_envs == 'true' }}
+      id: env-cache
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! spec=$(calkit describe env-cache --json); then
+          echo "::warning::Couldn't describe environments to cache, so they'll be built"
+          exit 0
+        fi
+        key=$(jq -r '.key // empty' <<<"$spec")
+        if [ -z "$key" ]; then
+          echo "No environments to cache"
+          exit 0
+        fi
+        {
+          echo "key=$key"
+          echo "names=$(jq -r '[.environments | to_entries[] | select(.value.cached) | .key] | join(" ")' <<<"$spec")"
+          echo "paths<<CALKIT_ENV_CACHE_PATHS"
+          jq -r '.paths[]' <<<"$spec"
+          echo "CALKIT_ENV_CACHE_PATHS"
+        } >> "$GITHUB_OUTPUT"
+
+    # Only an exact match, since checking an environment built from an
+    # older lock doesn't always remove what the new one dropped, so it could
+    # pass for one built fresh
+    - name: Restore environments
+      if: ${{ steps.env-cache.outputs.key }}
+      id: env-cache-restore
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.env-cache.outputs.paths }}
+        key: ${{ steps.env-cache.outputs.key }}
+
+    # Built and saved before any stage runs, so nothing a stage installs
+    # into one is saved with it. A failed check isn't fatal here, since the
+    # pipeline's own check reports it.
+    - name: Build environments to cache
+      if: >-
+        ${{ steps.env-cache.outputs.key
+        && steps.env-cache-restore.outputs.cache-hit != 'true' }}
+      id: env-cache-build
+      shell: bash
+      env:
+        NAMES: ${{ steps.env-cache.outputs.names }}
+        CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+        CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+      run: |
+        set -uo pipefail
+        built=true
+        for name in $NAMES; do
+          if ! calkit check env -n "$name"; then
+            built=false
+          fi
+        done
+        if [ "$built" != true ]; then
+          echo "::notice::Not caching environments, since not all of them could be built"
+        fi
+        echo "built=$built" >> "$GITHUB_OUTPUT"
+
+    - name: Save environments
+      if: ${{ steps.env-cache-build.outputs.built == 'true' }}
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ steps.env-cache.outputs.paths }}
+        key: ${{ steps.env-cache.outputs.key }}
+
     - run: calkit run ${{ inputs.run_args }}
       shell: bash
       env:
         CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
         CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
-
-    # Saved even if a stage failed, but only once every environment has
-    # been checked here, so a partly built one, or one a subset of stages
-    # didn't need, isn't saved under the key for all of them
-    - name: Check environments to cache
-      if: >-
-        ${{ !cancelled() && steps.env-cache.outputs.key
-        && steps.env-cache-restore.outputs.cache-hit != 'true' }}
-      id: env-cache-ready
-      shell: bash
-      run: |
-        set -euo pipefail
-        ready=$(calkit describe env-cache --json | jq -r .ready) || ready=false
-        if [ "$ready" != true ]; then
-          echo "::notice::Not caching environments, since not all of them were checked successfully"
-        fi
-        echo "ready=$ready" >> "$GITHUB_OUTPUT"
-
-    - name: Save environments
-      if: ${{ !cancelled() && steps.env-cache-ready.outputs.ready == 'true' }}
-      uses: actions/cache/save@v5
-      with:
-        path: ${{ steps.env-cache.outputs.paths }}
-        key: ${{ steps.env-cache.outputs.key }}
 
     - run: calkit save -am "Run pipeline"
       if: ${{ inputs.save == 'true' }}

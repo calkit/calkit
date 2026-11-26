@@ -1607,6 +1607,43 @@ def record_build_inputs(env_name: str, env: dict) -> None:
         db.commit()
 
 
+def get_env_prefix(
+    env_name: str, envs: dict, wdir: str | None = None
+) -> str | None:
+    """Where an env is built here, relative to ``wdir`` unless absolute.
+
+    Covers venv, uv-venv, uv, and pixi envs, and conda envs kept at a
+    prefix. A conda env without one is kept among conda's own, by name, so
+    gives None, as do kinds with nothing built in a folder of their own.
+    """
+    env = get_env(env_name, envs) or {}
+    kind = env.get("kind")
+    path = os.path.expandvars(env.get("path") or "")
+    spec_dir = os.path.dirname(path)
+    prefix = None
+    if kind in ("venv", "uv-venv"):
+        if env.get("prefix"):
+            prefix = env["prefix"]
+        elif path:
+            prefix = get_default_venv_prefix(envs, path, env_name)
+        else:
+            raise ValueError(f"Environment '{env_name}' has no 'path'")
+    elif kind == "uv":
+        prefix = os.path.join(spec_dir, ".venv")
+    elif kind == "pixi":
+        prefix = os.path.join(
+            spec_dir, ".pixi", "envs", env.get("name") or "default"
+        )
+    elif kind == "conda":
+        with open(os.path.join(wdir or "", path), encoding="utf-8") as f:
+            spec = yaml.safe_load(f) or {}
+        # A prefix in the spec is where conda creates it, too
+        prefix = env.get("prefix") or spec.get("prefix")
+    if prefix is None:
+        return None
+    return os.path.expandvars(str(prefix))
+
+
 def remove_built_env(env_name: str, envs: dict) -> str | None:
     """Remove what was built for an env, so checking it rebuilds it.
 
@@ -1618,50 +1655,34 @@ def remove_built_env(env_name: str, envs: dict) -> str | None:
     kind = env.get("kind")
     path = os.path.expandvars(env.get("path") or "")
     spec_dir = os.path.dirname(path)
-    target = None
-    if kind in ("venv", "uv-venv"):
-        if env.get("prefix"):
-            target = env["prefix"]
-        elif path:
-            target = get_default_venv_prefix(envs, path, env_name)
-        else:
-            raise ValueError(f"Environment '{env_name}' has no 'path'")
-    elif kind == "uv":
-        target = os.path.join(spec_dir, ".venv")
-    elif kind == "pixi":
-        target = os.path.join(spec_dir, ".pixi", "envs")
+    if kind == "pixi":
+        # Every env the manifest defines, not just this one
+        target: str | None = os.path.join(spec_dir, ".pixi", "envs")
     elif kind == "renv":
         env_dir = spec_dir if path.endswith("DESCRIPTION") else path
         target = os.path.join(env_dir, "renv", "library")
-    elif kind == "conda":
+    else:
+        target = get_env_prefix(env_name, envs)
+    if target is None and kind == "conda":
         with open(path, encoding="utf-8") as f:
-            spec = yaml.safe_load(f) or {}
-        # A prefix in the spec is where conda creates it, too
-        target = env.get("prefix") or spec.get("prefix")
-        if target is None:
-            name = spec.get("name")
-            if not name:
-                raise ValueError(f"'{path}' names no environment")
-            from calkit.conda import find_conda_exe
+            name = (yaml.safe_load(f) or {}).get("name")
+        if not name:
+            raise ValueError(f"'{path}' names no environment")
+        from calkit.conda import find_conda_exe
 
-            conda_exe = find_conda_exe()
-            if conda_exe is None:
-                raise ValueError("conda not found")
-            existing = json.loads(
-                subprocess.check_output(
-                    [conda_exe, "env", "list", "--json"]
-                ).decode()
-            )["envs"]
-            if name not in [os.path.basename(e) for e in existing]:
-                return None
-            subprocess.check_call(
-                [conda_exe, "env", "remove", "-y", "-n", name]
-            )
-            return f"conda environment '{name}'"
-    if target is None:
-        return None
-    target = os.path.expandvars(str(target))
-    if not os.path.exists(target):
+        conda_exe = find_conda_exe()
+        if conda_exe is None:
+            raise ValueError("conda not found")
+        existing = json.loads(
+            subprocess.check_output(
+                [conda_exe, "env", "list", "--json"]
+            ).decode()
+        )["envs"]
+        if name not in [os.path.basename(e) for e in existing]:
+            return None
+        subprocess.check_call([conda_exe, "env", "remove", "-y", "-n", name])
+        return f"conda environment '{name}'"
+    if target is None or not os.path.exists(target):
         return None
     shutil.rmtree(target)
     return target
@@ -2606,16 +2627,13 @@ def get_env_cache_spec(
     """What to save to restore the project's environments elsewhere.
 
     Covers the environments the pipeline uses, or ``env_names``. The
-    ``key`` changes whenever what an environment is built from does, i.e.,
-    its definition, spec, lock, or input files, and is scoped to this
-    platform, OS release, and the absolute paths cached, since environments
-    like conda's aren't relocatable. ``restore_key`` matches any cache with
-    the same scope, e.g., from before a lock changed, which is still worth
-    restoring, since checking an environment updates or rebuilds whatever
-    doesn't match its lock.
-
-    An environment is ``ready`` once its last check here succeeded against
-    its current definition, spec, and lock, so is worth saving.
+    ``key`` changes whenever what any of them is built from does, i.e., its
+    definition, spec, lock, or input files, and with the platform, OS
+    release, and the absolute paths cached, since environments like conda's
+    aren't relocatable. Only a cache with exactly this key is meant to be
+    restored: checking an environment installs what its lock is missing,
+    but doesn't always remove what it no longer has, so one built from an
+    older lock could pass as current.
     """
     import calkit
 
@@ -2646,61 +2664,27 @@ def get_env_cache_spec(
             return None
         return out.strip() or None
 
-    def get_conda_envs_dir() -> str:
-        from calkit.conda import find_conda_exe
-
-        conda_exe = find_conda_exe()
-        if conda_exe is None:
-            raise ValueError("conda not found")
-        info = json.loads(
-            subprocess.check_output([conda_exe, "info", "--json"])
-        )
-        return os.path.join(info["root_prefix"], "envs")
-
     def get_prefix(env_name: str, env: dict) -> str:
-        kind = env.get("kind")
-        path = os.path.expandvars(env.get("path") or "")
-        spec_dir = os.path.dirname(path)
-        if kind in ("venv", "uv-venv"):
-            if not path:
-                raise ValueError("no 'path'")
-            prefix = env.get("prefix") or get_default_venv_prefix(
-                envs, path, env_name
-            )
-        elif kind == "uv":
-            prefix = os.path.join(spec_dir, ".venv")
-        elif kind == "pixi":
-            prefix = os.path.join(
-                spec_dir, ".pixi", "envs", env.get("name") or "default"
-            )
-        else:
-            # Where checking a conda env creates it
-            with open(os.path.join(wdir or "", path), encoding="utf-8") as f:
-                spec = yaml.safe_load(f) or {}
-            prefix = env.get("prefix") or spec.get("prefix")
-            if prefix is None:
-                if not spec.get("name"):
-                    raise ValueError(f"'{path}' names no environment")
-                return os.path.join(get_conda_envs_dir(), spec["name"])
-        return os.path.abspath(
-            os.path.join(wdir or "", os.path.expandvars(str(prefix)))
-        )
+        prefix = get_env_prefix(env_name, envs, wdir=wdir)
+        if prefix is None:
+            # A conda env kept by name, among conda's own
+            from calkit.conda import find_conda_exe
 
-    def is_ready(env_name: str, env: dict, prefix: str, content: dict) -> bool:
-        if not os.path.isdir(prefix):
-            return False
-        with get_cache_db() as db:
-            checked = db.get(make_cache_key(env_name=env_name, wdir=wdir))
-        if not checked or not checked.get("success"):
-            return False
-        # Not the prefix's hash, since running stages can write into it,
-        # e.g., Python's bytecode caches
-        hashes = checked.get("hashes") or {}
-        return bool(
-            hashes.get("env_hash") == content["env_hash"]
-            and hashes.get("env_path_hash") == content["spec_md5"]
-            and hashes.get("env_lock_hash") == content["lock_md5"]
-        )
+            spec_fpath = os.path.join(
+                wdir or "", os.path.expandvars(env["path"])
+            )
+            with open(spec_fpath, encoding="utf-8") as f:
+                name = (yaml.safe_load(f) or {}).get("name")
+            if not name:
+                raise ValueError(f"'{env['path']}' names no environment")
+            conda_exe = find_conda_exe()
+            if conda_exe is None:
+                raise ValueError("conda not found")
+            info = json.loads(
+                subprocess.check_output([conda_exe, "info", "--json"])
+            )
+            prefix = os.path.join(info["root_prefix"], "envs", name)
+        return os.path.abspath(os.path.join(wdir or "", prefix))
 
     if env_names is None:
         names, ck_info, _ = get_pipeline_env_names(wdir=wdir)
@@ -2709,6 +2693,7 @@ def get_env_cache_spec(
         ck_info = calkit.load_calkit_info(wdir=wdir)
     envs = ck_info.get("environments") or {}
     descs: dict[str, dict] = {}
+    contents: dict[str, dict] = {}
     for env_name in names:
         env = get_env(env_name, envs)
         if env is None:
@@ -2732,7 +2717,7 @@ def get_env_cache_spec(
             desc["reason"] = str(e)
             continue
         lock_fpath = get_env_lock_fpath(env=env, env_name=env_name, wdir=wdir)
-        content = {
+        contents[env_name] = {
             "env_hash": hash_dict(env),
             "spec_md5": get_md5_or_none(env.get("path")),
             "lock_md5": (
@@ -2754,39 +2739,22 @@ def get_env_cache_spec(
             "prefix": prefix,
             "paths": paths,
             "lock_path": lock_fpath,
-            "ready": is_ready(env_name, env, prefix, content),
-            "content": content,
         }
-    cached = {k: v for k, v in descs.items() if v["cached"]}
-    paths = sorted({p for d in cached.values() for p in d["paths"]})
-    if not cached:
-        return {
-            "key": None,
-            "restore_key": None,
-            "paths": [],
-            "ready": False,
-            "environments": descs,
-        }
-    platform_name = _conda_venv_platform()
-    scope_hash = hash_dict(
-        {
-            "version": ENV_CACHE_VERSION,
-            "platform": platform_name,
-            "os": get_os_release(),
-            "paths": paths,
-        }
-    )[:12]
-    content_hash = hash_dict(
-        {k: v.pop("content") for k, v in sorted(cached.items())}
-    )[:16]
-    restore_key = f"calkit-envs-{platform_name}-{scope_hash}-"
-    return {
-        "key": restore_key + content_hash,
-        "restore_key": restore_key,
-        "paths": paths,
-        "ready": all(d["ready"] for d in cached.values()),
-        "environments": descs,
-    }
+    paths = sorted({p for d in descs.values() for p in d.get("paths", [])})
+    key = None
+    if contents:
+        platform_name = _conda_venv_platform()
+        key_hash = hash_dict(
+            {
+                "version": ENV_CACHE_VERSION,
+                "platform": platform_name,
+                "os": get_os_release(),
+                "paths": paths,
+                "environments": contents,
+            }
+        )
+        key = f"calkit-envs-{platform_name}-{key_hash[:24]}"
+    return {"key": key, "paths": paths, "environments": descs}
 
 
 # How much of what a failed environment check printed is kept to show

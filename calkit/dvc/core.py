@@ -2698,7 +2698,9 @@ def hash_directory(path: str) -> dict:
                 num_files += 1
             except Exception:
                 continue
-    # Compute directory hash from entries
+    # Compute directory hash from entries sorted by path, as DVC sorts them,
+    # which isn't the order they're walked in, e.g., 'a/x' before 'b'
+    entries.sort(key=lambda e: e["relpath"])
     # DVC uses json.dumps with sort_keys=True to ensure deterministic output
     dir_hash = hashlib.md5(
         json.dumps(entries, sort_keys=True).encode()

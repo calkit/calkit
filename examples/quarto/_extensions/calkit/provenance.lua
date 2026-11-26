@@ -20,6 +20,7 @@ local PICTURE_EXTS = {
   [".svg"] = true, [".png"] = true, [".jpg"] = true, [".jpeg"] = true,
   [".gif"] = true, [".webp"] = true, [".pdf"] = true,
 }
+local TABLE_EXTS = {[".csv"] = true, [".tsv"] = true}
 
 local function read_file(fpath)
   local f = io.open(fpath, "r")
@@ -261,11 +262,30 @@ local function provenance_div(el)
   end
   local out = pandoc.Blocks({})
   if record == nil then
+    -- Shown as it would be, as far as that can be without Calkit, keeping
+    -- the id and caption, so cross-references still resolve
     local _, ext = pandoc.path.split_extension(src)
-    if PICTURE_EXTS[ext:lower()] then
+    ext = ext:lower()
+    local kind = (el.attributes.kind or ""):lower()
+    if src == "" then
+      out:extend(el.content)
+    elseif kind == "figure" or (kind == "" and PICTURE_EXTS[ext]) then
       out:extend(get_figure(
         el, pandoc.Blocks({pandoc.Plain({get_image(el, src)})})
       ))
+    elseif kind == "table" or (kind == "" and TABLE_EXTS[ext]) then
+      local item = pandoc.utils.from_simple_table(pandoc.SimpleTable(
+        {}, {pandoc.AlignDefault}, {0}, {},
+        {{{pandoc.Plain({pandoc.Code(src)})}}}
+      ))
+      item.attr = pandoc.Attr(el.identifier, {}, {})
+      if #el.content > 0 then
+        item.caption = {long = el.content}
+      end
+      out:insert(item)
+    else
+      out:insert(pandoc.Para({pandoc.Code(src)}))
+      out:extend(el.content)
     end
     out:insert(callout("warning", "No provenance recorded", pandoc.Blocks({
       pandoc.Para({

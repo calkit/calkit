@@ -1,12 +1,15 @@
 """Tests for ``calkit.quarto``."""
 
+import io
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+import calkit.dvc
 import calkit.quarto
 from calkit.markdown import MarkdownParseError
 
@@ -407,49 +410,6 @@ def test_provenance_panels(tmp_path: Path) -> None:
         ("notes.txt", "pub/pages/notes.txt", "table", 9, 25),
         ("", "", "document", 13, 25),
     ]
-    # A stage that's run is checked against what dvc.lock recorded
-    lock_stage = {
-        "cmd": "python plot.py",
-        "deps": [{"path": "a.csv", "hash": "md5", "md5": "a1"}],
-        "outs": [{"path": "b.svg", "hash": "md5", "md5": "b1"}],
-    }
-    hashes = {"a.csv": "a1", "b.svg": "b1"}
-    cases: list[tuple[str, dict, dict[str, str | None], dict]] = [
-        ("plot", {"cmd": "python plot.py"}, {}, {"status": "up-to-date"}),
-        (
-            "plot",
-            {"cmd": "python plot.py"},
-            {"a.csv": "a2", "b.svg": None},
-            {"modified_inputs": ["a.csv"], "missing_outputs": ["b.svg"]},
-        ),
-        (
-            "plot",
-            {"cmd": "python plot2.py", "wdir": "sub"},
-            {"sub/b.svg": "b2"},
-            {"modified_command": True, "modified_outputs": ["sub/b.svg"]},
-        ),
-        # An iterated stage's command, and hashes from before DVC 3, aren't
-        ("plot@1", {"cmd": "${item}"}, {}, {"status": "up-to-date"}),
-    ]
-    for name, dvc_stage, changes, expected in cases:
-        current: dict[str, str | None] = {
-            **hashes,
-            "sub/a.csv": "a1",
-            "sub/b.svg": "b1",
-            **changes,
-        }
-        got = calkit.quarto.get_stage_freshness(
-            name, lock_stage, dvc_stage, current.get
-        )
-        assert {k: got[k] for k in expected} == expected, (name, changes)
-        assert got["status"] == ("stale" if changes else "up-to-date")
-    old_entry = {"path": "a.csv", "md5": "x"}
-    assert (
-        calkit.quarto.get_stage_freshness(
-            "plot", {"deps": [old_entry]}, None, hashes.get
-        )["status"]
-        == "up-to-date"
-    )
     # A project: raw data cleaned, then plotted, and rendered in a report
     ck_info = {
         "datasets": [
@@ -520,6 +480,11 @@ def test_provenance_panels(tmp_path: Path) -> None:
         },
         # A run that isn't the one dvc.lock records isn't shown
         "clean": {"start_time": "2026-11-19T10:00:00", "dvc_lock_hash": "x"},
+        # Nor is the document's own, since it's running
+        "report": {
+            "start_time": "2026-11-20T10:00:00",
+            "dvc_lock_hash": calkit.dvc.stage_lock_hash(lock_stages["report"]),
+        },
     }
     files = {
         entry["path"]: entry["md5"]
@@ -527,13 +492,21 @@ def test_provenance_panels(tmp_path: Path) -> None:
         for entry in stage["deps"] + stage["outs"]
     }
     files["data/clean.csv"] = "data/clean.csv-1"
-    content = {"data/clean.csv": b"x,y\n1,2\n3,4\n5,6\n"}
+    content = {"data/clean.csv": "x,y\n1,2\n3,4\n5,6\n"}
+    up_to_date = {
+        "status": "up-to-date",
+        "modified_command": False,
+        "modified_inputs": [],
+        "modified_outputs": [],
+        "missing_outputs": [],
+    }
 
     def get_panels(
         text: str,
         hashes: dict,
         document_path: str = "report.qmd",
         document_stage: str | None = None,
+        statuses: dict[str, dict] | None = None,
     ) -> dict:
         return calkit.quarto.get_provenance_panels(
             calkit.quarto.extract_provenance_divs(text, document_path),
@@ -543,11 +516,15 @@ def test_provenance_panels(tmp_path: Path) -> None:
             dvc_yaml={"stages": dvc_stages},
             dvc_lock={"stages": lock_stages},
             stage_runs=stage_runs,
-            get_hash=hashes.get,
+            get_stage_status=lambda name: {
+                **up_to_date,
+                **(statuses or {}).get(name, {}),
+            },
             is_file=lambda p: p in hashes,
             is_dir=lambda p: False,
             listdir=lambda p: [],
-            read_bytes=lambda p: content[p],
+            read_bytes=lambda p: content[p].encode(),
+            open_text=lambda p: io.StringIO(content[p]),
         )
 
     text = (
@@ -584,14 +561,17 @@ def test_provenance_panels(tmp_path: Path) -> None:
         in (plot_text)
     )
     assert ".calkit" not in plot_text
-    # A table is shown cut short, and a run not recorded in dvc.lock isn't
+    # A table is shown cut short, and a run not recorded in dvc.lock says
+    # so, e.g., one since the pipeline started
     table = panels["data/clean.csv"]
     assert table["kind"] == "table"
     assert (
         get_text(table["body"])
         == "xy\n12\n34\nFirst 2 rows of data/clean.csv\n"
     )
-    assert "Last run" not in get_text(table["panel"])
+    assert "Last run: not recorded for its current outputs\n" in get_text(
+        table["panel"]
+    )
     # Something imported says from where, and something nothing accounts
     # for says how to fix it
     photo = panels["figures/photo.png"]["panel"][0]
@@ -623,6 +603,7 @@ def test_provenance_panels(tmp_path: Path) -> None:
     doc_text = get_text(doc)
     assert get_titles(doc) == ["Document up to date"]
     assert "Rendered by: stage report, quarto\n" in doc_text
+    assert "Last run" not in doc_text
     assert "Environment: _system, i.e., none\n" in doc_text
     assert "data/clean.csvclean✅ up to date\n" in doc_text
     assert "figures/plot.svgplot✅ up to date\n" in doc_text
@@ -636,8 +617,15 @@ def test_provenance_panels(tmp_path: Path) -> None:
     assert '("figures/plot.svg"):::ok' in graph["value"]
     # An edited script makes what it made out of date, and what's made from
     # that wait on it, with even the document's own edits not counted
-    edited = {**files, "scripts/clean.py": "2", "report.qmd": "2"}
-    res = get_panels(text, edited)
+    stale = {"status": "stale", "modified_inputs": ["scripts/clean.py"]}
+    res = get_panels(
+        text,
+        files,
+        statuses={
+            "clean": stale,
+            "report": {**stale, "modified_inputs": ["report.qmd"]},
+        },
+    )
     assert get_titles(res["panels"]["figures/plot.svg"]["panel"][0]) == [
         "Figure out of date: waiting on data/clean.csv"
     ]
@@ -653,15 +641,35 @@ def test_provenance_panels(tmp_path: Path) -> None:
     graph = next(c for c in doc["children"] if c.get("section") == "graph")
     assert '("data/clean.csv"):::stale' in graph["value"]
     assert '("figures/plot.svg"):::waiting' in graph["value"]
-    # As do an output edited by hand and one deleted
-    changed: list[tuple[dict[str, str | None], str]] = [
-        ({"figures/plot.svg": "2"}, "modified outside pipeline"),
-        ({"data/clean.csv": None}, "data/clean.csv missing"),
+    # As do an output edited by hand, a deleted input, and a stage that
+    # always runs, which doesn't hold up what's made from it
+    missing = {k: v for k, v in files.items() if k != "data/clean.csv"}
+    cases: list[tuple[dict, dict, str]] = [
+        (
+            files,
+            {"plot": {"status": "stale", "modified_outputs": ["figures"]}},
+            "Figure out of date: modified outside pipeline",
+        ),
+        (
+            missing,
+            {
+                "plot": {
+                    "status": "stale",
+                    "modified_inputs": ["data/clean.csv"],
+                },
+                "clean": {
+                    "status": "stale",
+                    "missing_outputs": ["data/clean.csv"],
+                },
+            },
+            "Figure out of date: data/clean.csv missing",
+        ),
+        (files, {"clean": {"status": "always-run"}}, "Figure up to date"),
     ]
-    for changes, title in changed:
-        res = get_panels(text, {**files, **changes})
+    for hashes, statuses, title in cases:
+        res = get_panels(text, hashes, statuses=statuses)
         assert get_titles(res["panels"]["figures/plot.svg"]["panel"][0]) == [
-            "Figure out of date: " + title
+            title
         ]
     # Raw data with no origin is a gap the document reports too
     ck_info["datasets"] = []
@@ -688,6 +696,85 @@ def test_provenance_panels(tmp_path: Path) -> None:
     )
 
 
+def test_stage_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def dvc(*args: str) -> str:
+        return subprocess.check_output(
+            [sys.executable, "-m", "dvc", *args], text=True, cwd=tmp_path
+        )
+
+    def get_statuses() -> dict[str, dict]:
+        repo = calkit.dvc.get_dvc_repo(str(tmp_path))
+        return {
+            stage.addressing: calkit.quarto.get_stage_status(stage)
+            for stage in repo.index.stages
+        }
+
+    def write_pipeline(make: dict, each_cmd: str) -> None:
+        with open(tmp_path / "dvc.yaml", "w") as f:
+            calkit.ryaml.dump(
+                {
+                    "stages": {
+                        "make": {"cmd": "cp in.txt out.txt", **make},
+                        "each": {
+                            "matrix": {"n": ["x", "y"]},
+                            "cmd": each_cmd,
+                            "outs": ["${item.n}.txt"],
+                        },
+                    }
+                },
+                f,
+            )
+
+    monkeypatch.chdir(tmp_path)
+    dvc("init", "--no-scm")
+    (tmp_path / "in.txt").write_text("in\n")
+    (tmp_path / "extra.txt").write_text("extra\n")
+    make = {"deps": ["in.txt"], "outs": ["out.txt"]}
+    each_cmd = "echo ${item.n} > ${item.n}.txt"
+    write_pipeline(make, each_cmd)
+    dvc("repro")
+    assert {n: s["status"] for n, s in get_statuses().items()} == {
+        "make": "up-to-date",
+        "each@x": "up-to-date",
+        "each@y": "up-to-date",
+    }
+    # It says what DVC does, for what's read or made being added or removed,
+    # which DVC doesn't count for an output, and an iterated stage's command
+    # changing, without the repo lock
+    cases: list[tuple[dict, str, set[str], dict]] = [
+        (
+            {**make, "deps": ["in.txt", "extra.txt"]},
+            each_cmd,
+            {"make"},
+            {"modified_inputs": ["extra.txt"]},
+        ),
+        (
+            {**make, "outs": ["out.txt", "out2.txt"]},
+            each_cmd,
+            {"make"},
+            {"missing_outputs": ["out2.txt"]},
+        ),
+        ({**make, "outs": []}, each_cmd, set(), {}),
+        (
+            make,
+            "echo ${item.n}! > ${item.n}.txt",
+            {"each@x", "each@y"},
+            {"modified_command": True},
+        ),
+    ]
+    for case_make, case_cmd, names, expected in cases:
+        write_pipeline(case_make, case_cmd)
+        stale = set(json.loads(dvc("status", "--json")))
+        got = get_statuses()
+        assert {n for n, s in got.items() if s["status"] == "stale"} == stale
+        assert stale == names, (case_make, case_cmd)
+        for name in names:
+            assert {k: got[name][k] for k in expected} == expected
+    # One that hasn't changed is up to date again
+    write_pipeline(make, each_cmd)
+    assert all(s["status"] == "up-to-date" for s in get_statuses().values())
+
+
 def test_filter_problem(tmp_path: Path) -> None:
     listed = (
         "---\ntitle: T\nfilters:\n  - at: pre-ast\n    path: calkit\n---\n"
@@ -703,6 +790,14 @@ def test_filter_problem(tmp_path: Path) -> None:
         problem = calkit.quarto.get_filter_problem(text, "doc.qmd")
         assert problem is not None and match in problem
         assert calkit.quarto.FILTER_CONFIG in problem
+    # One listed for a format runs for that format
+    html_only = (
+        "---\nformat:\n  html+raw:\n    filters:\n"
+        "      - {at: pre-ast, path: calkit}\n---\n"
+    )
+    for to, ok in [(None, True), ("html", True), ("pdf", False)]:
+        problem = calkit.quarto.get_filter_problem(html_only, "doc.qmd", to=to)
+        assert (problem is None) == ok, to
     # The Quarto project's config, or a folder's metadata, can list it
     (tmp_path / "pub" / "pages").mkdir(parents=True)
     (tmp_path / "pub" / "_quarto.yml").write_text(
@@ -745,6 +840,8 @@ def test_provenance_filter(tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
     (tmp_path / "figures").mkdir()
     (tmp_path / "data" / "raw.csv").write_text("x,y\n1,2\n3,4\n")
+    # With a byte order mark and something that isn't UTF-8
+    (tmp_path / "data" / "bom.csv").write_bytes(b"\xef\xbb\xbfp,q\n\xff,2\n")
     (tmp_path / "scripts" / "clean.py").write_text(
         "import shutil\nshutil.copy('data/raw.csv', 'data/clean.csv')\n"
     )
@@ -756,7 +853,10 @@ def test_provenance_filter(tmp_path: Path) -> None:
     stage = {"kind": "python-script", "environment": "_system"}
     ck_info = {
         "requirements": ["quarto"],
-        "datasets": [{"path": "data/raw.csv", "created_by": {"name": "Jo"}}],
+        "datasets": [
+            {"path": "data/raw.csv", "created_by": {"name": "Jo"}},
+            {"path": "data/bom.csv", "created_by": {"name": "Jo"}},
+        ],
         "pipeline": {
             "stages": {
                 "clean": {
@@ -789,6 +889,7 @@ def test_provenance_filter(tmp_path: Path) -> None:
         "The plot.\n:::\n\n"
         "See @fig-plot and @tbl-data.\n\n"
         "::: {.ckprovenance src=data/clean.csv #tbl-data}\nThe data.\n:::\n\n"
+        "::: {.ckprovenance src=data/bom.csv #tbl-bom} :::\nBOM.\n:::\n\n"
         "::: {.ckprovenance graph=false}\n:::\n\n"
         "::: {.calkit-provenance}\n:::\n"
     )
@@ -819,6 +920,8 @@ def test_provenance_filter(tmp_path: Path) -> None:
     assert "Table 1: The data." in md
     assert 'href="#fig-plot" class="quarto-xref">Figure 1' in md
     assert "| 1   | 2   |" in md
+    assert "| p   | q   |" in md
+    assert "Table 2: BOM." in md
     assert "Made by:** stage `plot`" in md
     assert "Not checked:** `report.html`" in md
     # A section turned off isn't there, nor is a misnamed div left silent
@@ -841,4 +944,6 @@ def test_provenance_filter(tmp_path: Path) -> None:
     )
     md = (tmp_path / "report.md").read_text().replace("\xa0", " ")
     assert "Figure 1: The plot." in md
-    assert md.count("No provenance recorded") == 3
+    assert 'href="#tbl-data" class="quarto-xref">Table 1' in md
+    assert "Table 1: The data." in md
+    assert md.count("No provenance recorded") == 4

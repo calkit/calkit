@@ -212,14 +212,19 @@ saying so, rather than rendering the divs as plain ones.
 
 <!-- TODO: needs human review -->
 
-What each panel says is worked out from `calkit.yaml`, `dvc.lock`, and
-`.calkit/stage-runs.json` each time the stage renders the document,
+What each panel says is worked out each time the stage renders the
+document, from `calkit.yaml`, `.calkit/stage-runs.json`,
+and whether each stage is up to date as `calkit status` would say,
 and written to `.calkit/local/provenance`,
 which isn't kept in Git, for the extension to read.
+When the document's own stage last ran isn't shown,
+since it's running, and neither is a stage's last run that hasn't been
+recorded yet, which happens when the pipeline finishes.
 Rendering with Quarto directly, e.g., with `quarto preview`,
 shows the panels as of the last time Calkit rendered the document,
 and a document Calkit hasn't rendered on this machine says no provenance
-is recorded.
+is recorded,
+with each table shown only by its path, keeping its caption and label.
 `quarto preview` also doesn't notice when a script or data file changes,
 since it only watches the document's own files,
 so a panel can say a figure is up to date when it isn't anymore

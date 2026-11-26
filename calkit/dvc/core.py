@@ -2678,6 +2678,8 @@ def hash_directory(path: str) -> dict:
 
     Returns a dictionary formatted like a DVC lock file entry.
     Uses DVC's approach: hash each file and combine into directory hash.
+    Files ``.dvcignore`` excludes are still hashed, so the result differs
+    from DVC's for a directory with any.
     """
     entries = []
     total_size = 0

@@ -147,7 +147,7 @@ def render(
         )
         filter_problem = (
             calkit.quarto.get_filter_problem(
-                text, document_rel, wdir=project_dir
+                text, document_rel, wdir=project_dir, to=to
             )
             if divs
             else None

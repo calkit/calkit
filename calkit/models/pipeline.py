@@ -1967,11 +1967,20 @@ class QuartoStage(Stage):
             if calkit.quarto.PROVENANCE_CLASS in text
             else []
         )
+        # Except what it makes itself, e.g., a figure its code draws
+        own_paths = [
+            posixpath.normpath(posixpath.join(self.wdir or "", p))
+            for p in self.dvc_out_paths
+        ]
         self._value_paths = list(
             dict.fromkeys(
                 d.path
                 for d in divs
                 if d.path
+                and not any(
+                    d.path == p or d.path.startswith(p.rstrip("/") + "/")
+                    for p in own_paths
+                )
                 and (
                     exists(d.path)
                     or exists(d.path + ".dvc")

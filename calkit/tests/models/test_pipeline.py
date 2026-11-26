@@ -533,6 +533,30 @@ def test_quartostage(tmp_path):
     )
     assert s.dvc_deps[-2:] == ["../results/metrics.json", "../data/n.json"]
     assert (tmp_path / "_extensions/calkit/calkit.lua").is_file()
+    # The files its provenance divs show are inputs too, except what it
+    # makes itself, which can't be both
+    (tmp_path / "figures").mkdir()
+    (tmp_path / "figures" / "plot.svg").write_text("<svg/>")
+    (tmp_path / "report" / "report.qmd").write_text(
+        '::: {.ckprovenance src="../figures/plot.svg"}\n:::\n'
+        "::: {.ckprovenance src=own/fig.svg}\n:::\n"
+        "::: {.ckprovenance src=own.csv}\n:::\n"
+        "::: {.ckprovenance src=../data/n.json kind=file}\n:::\n"
+        "::: {.ckprovenance src=gone.png}\n:::\n"
+        "::: {.ckprovenance}\n:::\n"
+    )
+    s.outputs = ["own", "own.csv"]
+    s.preprocess(
+        str(tmp_path),
+        lambda p: p in ("report/own/fig.svg", "report/own.csv", "data/n.json"),
+        write_files=True,
+    )
+    assert s.dvc_deps == [
+        "report.qmd",
+        "../figures/plot.svg",
+        "../data/n.json",
+    ]
+    s.outputs = []
     # One that shows nothing has nothing extra
     (tmp_path / "report" / "report.qmd").write_text("No values.\n")
     s.preprocess(str(tmp_path), lambda p: False, write_files=True)

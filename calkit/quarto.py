@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 # A Quarto extension, so documents use the shortcode without listing it,
 # written where Quarto looks for one: the Quarto project's folder, or the
@@ -709,6 +709,7 @@ local PICTURE_EXTS = {
   [".svg"] = true, [".png"] = true, [".jpg"] = true, [".jpeg"] = true,
   [".gif"] = true, [".webp"] = true, [".pdf"] = true,
 }
+local TABLE_EXTS = {[".csv"] = true, [".tsv"] = true}
 
 local function read_file(fpath)
   local f = io.open(fpath, "r")
@@ -950,11 +951,30 @@ local function provenance_div(el)
   end
   local out = pandoc.Blocks({})
   if record == nil then
+    -- Shown as it would be, as far as that can be without Calkit, keeping
+    -- the id and caption, so cross-references still resolve
     local _, ext = pandoc.path.split_extension(src)
-    if PICTURE_EXTS[ext:lower()] then
+    ext = ext:lower()
+    local kind = (el.attributes.kind or ""):lower()
+    if src == "" then
+      out:extend(el.content)
+    elseif kind == "figure" or (kind == "" and PICTURE_EXTS[ext]) then
       out:extend(get_figure(
         el, pandoc.Blocks({pandoc.Plain({get_image(el, src)})})
       ))
+    elseif kind == "table" or (kind == "" and TABLE_EXTS[ext]) then
+      local item = pandoc.utils.from_simple_table(pandoc.SimpleTable(
+        {}, {pandoc.AlignDefault}, {0}, {},
+        {{{pandoc.Plain({pandoc.Code(src)})}}}
+      ))
+      item.attr = pandoc.Attr(el.identifier, {}, {})
+      if #el.content > 0 then
+        item.caption = {long = el.content}
+      end
+      out:insert(item)
+    else
+      out:insert(pandoc.Para({pandoc.Code(src)}))
+      out:extend(el.content)
     end
     out:insert(callout("warning", "No provenance recorded", pandoc.Blocks({
       pandoc.Para({
@@ -1338,9 +1358,9 @@ TABLE_ROW_LIMIT = 25
 # What a panel calls what it's about
 _NOUNS = {"figure": "Figure", "table": "Table", "file": "File"}
 # A fenced div's opening line, e.g., ::: {.ckprovenance src="a.png"}, or
-# ::: name, which Pandoc reads as a class
+# ::: name, which Pandoc reads as a class, optionally with colons after
 _DIV_OPEN_RE = re.compile(
-    r"^\s*:{3,}\s*(?:\{(?P<attrs>[^}]*)\}|(?P<cls>[\w-]+))\s*$"
+    r"^\s*:{3,}\s*(?:\{(?P<attrs>[^}]*)\}|(?P<cls>[\w-]+))(?:\s*:+)?\s*$"
 )
 _DIV_ATTR_RE = re.compile(
     r"\.(?P<cls>[\w-]+)|#(?P<id>[\w:.-]+)"
@@ -1432,56 +1452,56 @@ def extract_provenance_divs(
     return divs
 
 
-def get_stage_freshness(
-    name: str,
-    lock_stage: dict,
-    dvc_stage: dict | None,
-    get_hash: Callable[[str], str | None],
-) -> dict:
-    """How a stage that's run stands against what ``dvc.lock`` recorded,
-    as the hub gives a stage's status, from hashing its inputs and outputs
-    rather than asking DVC, which a running pipeline has locked.
+def get_stage_status(stage: Any) -> dict:
+    """How a DVC stage stands against what ``dvc.lock`` recorded, as the
+    hub gives a stage's status, from DVC's own checks, so what it reads or
+    makes being added or removed, ``.dvcignore``, and an iterated stage's
+    command count, and hashes DVC has already computed are reused.
 
-    ``get_hash`` gives a project path's MD5 as DVC computes it, or None if
-    it doesn't exist. Paths in what's returned are relative to the project.
-    An entry from before DVC 3, hashed differently, is taken as unchanged.
+    ``Stage.status`` asserts the repo lock is held, which ``dvc repro``
+    holds while a stage runs, so the checks it makes are called directly;
+    they only read. Paths are as DVC names them, i.e., relative to the
+    working directory.
     """
-    wdir = (dvc_stage or {}).get("wdir") or ""
-
-    def check(entries: list | None) -> tuple[list[str], list[str]]:
-        modified, missing = [], []
-        for entry in entries or []:
-            if not isinstance(entry, dict) or not isinstance(
-                entry.get("path"), str
-            ):
-                continue
-            path = posixpath.normpath(posixpath.join(wdir, entry["path"]))
-            current = get_hash(path)
-            if current is None:
-                missing.append(path)
-            elif entry.get("hash") == "md5" and current != entry.get("md5"):
-                modified.append(path)
-        return modified, missing
-
-    modified_inputs, missing_inputs = check(lock_stage.get("deps"))
-    modified_outputs, missing_outputs = check(lock_stage.get("outs"))
-    # An iterated stage's command is only concrete in dvc.lock
-    modified_command = (
-        "@" not in name
-        and dvc_stage is not None
-        and dvc_stage.get("cmd") != lock_stage.get("cmd")
+    found: list = []
+    if not stage.frozen:
+        stage._status_deps(found)
+    stage._status_outs(found, filter_info=None)
+    stage._status_always_changed(found)
+    stage._status_stage(found)
+    modified_inputs = []
+    modified_outputs = []
+    missing_outputs = []
+    for item in found:
+        if not isinstance(item, dict):
+            continue
+        for path, change in (item.get("changed deps") or {}).items():
+            modified_inputs.append(Path(path).as_posix())
+        for path, change in (item.get("changed outs") or {}).items():
+            path = Path(path).as_posix()
+            if change == "deleted":
+                missing_outputs.append(path)
+            elif change != "not in cache":
+                modified_outputs.append(path)
+    modified_command = any(
+        item in ("changed command", "changed checksum") for item in found
     )
     stale = (
-        modified_command
-        or modified_inputs
-        or missing_inputs
+        modified_inputs
         or modified_outputs
         or missing_outputs
+        or modified_command
     )
     return {
-        "status": "stale" if stale else "up-to-date",
+        "status": (
+            "stale"
+            if stale
+            else "always-run"
+            if "always changed" in found
+            else "up-to-date"
+        ),
         "modified_command": modified_command,
-        "modified_inputs": modified_inputs + missing_inputs,
+        "modified_inputs": modified_inputs,
         "modified_outputs": modified_outputs,
         "missing_outputs": missing_outputs,
     }
@@ -1494,11 +1514,12 @@ def get_provenance_panels(
     dvc_yaml: dict,
     dvc_lock: dict,
     stage_runs: dict,
-    get_hash: Callable[[str], str | None],
+    get_stage_status: Callable[[str], dict],
     is_file: Callable[[str], bool],
     is_dir: Callable[[str], bool],
     listdir: Callable[[str], list[str]],
     read_bytes: Callable[[str], bytes],
+    open_text: Callable[[str], IO[str]],
     document_stage: str | None = None,
 ) -> dict:
     """What each ``ckprovenance`` div in a document shows, as nodes the
@@ -1509,15 +1530,16 @@ def get_provenance_panels(
     outputs it's made from and whether each is.
 
     The document's own outputs are left out, since it can't say whether
-    what's being rendered is up to date. Only the stages the document is
-    made from are checked, hashing what they read and make with
-    ``get_hash``, which gives a project path's MD5, or None if it doesn't
-    exist. The other functions read the project, as for
-    ``calkit.provenance.get_path_provenance``. ``document_stage`` names
-    the stage that renders the document, which is otherwise its Quarto stage, if any.
+    what's being rendered is up to date, as is when its stage last ran,
+    since that's being recorded. Only the stages the document is made from
+    are checked, with ``get_stage_status``, which gives a stage in
+    ``dvc.lock``'s status, as ``get_stage_status`` does. ``open_text``
+    opens a file as text to read a table from, and the other functions
+    read the project, as for ``calkit.provenance.get_path_provenance``.
+    ``document_stage`` names the stage that renders the document, which is
+    otherwise its Quarto stage, if any.
     """
     import csv
-    import io
 
     import calkit.dvc
     import calkit.pipeline
@@ -1576,6 +1598,9 @@ def get_provenance_panels(
                 out.append(posixpath.normpath(posixpath.join(wdir, item)))
         return out
 
+    def exists(path: str) -> bool:
+        return is_file(path) or is_dir(path)
+
     def is_bookkeeping(path: str) -> bool:
         # E.g., environment locks, which a stage's environment names
         return path.startswith(".calkit/") or path == "calkit.yaml"
@@ -1592,12 +1617,7 @@ def get_provenance_panels(
     def get_status(name: str) -> dict:
         if name not in statuses:
             if name in lock_stages:
-                statuses[name] = get_stage_freshness(
-                    name,
-                    lock_stages[name],
-                    yaml_stages.get(name.split("@")[0]),
-                    get_hash,
-                )
+                statuses[name] = get_stage_status(name)
             else:
                 statuses[name] = {
                     "status": "not-run",
@@ -1621,7 +1641,7 @@ def get_provenance_panels(
                     and producer != name
                     and not is_bookkeeping(dep)
                     and (
-                        get_status(producer)["status"] != "up-to-date"
+                        get_status(producer)["status"] in ("stale", "not-run")
                         or get_waiting(producer)
                     )
                 ):
@@ -1635,14 +1655,14 @@ def get_provenance_panels(
         status = get_status(stage)
         if status["status"] == "not-run":
             return "not-run", f"stage {stage} not run"
-        if get_hash(path) is None:
+        if not exists(path):
             return "missing", "missing"
         if status["status"] == "stale":
             if any(under(path, p) for p in status["modified_outputs"]):
                 return "stale", "modified outside pipeline"
             if status["modified_inputs"]:
                 return "stale", ", ".join(
-                    p + (" missing" if get_hash(p) is None else " modified")
+                    p + (" modified" if exists(p) else " missing")
                     for p in status["modified_inputs"]
                 )
             if status["modified_command"]:
@@ -1710,9 +1730,13 @@ def get_provenance_panels(
             nodes.append(make_text(f" ({', '.join(k for k in kinds if k)})"))
         return nodes
 
-    def get_stage_paragraphs(stage: str, label: str) -> list[dict]:
+    def get_stage_paragraphs(
+        stage: str, label: str, show_run: bool = True
+    ) -> list[dict]:
         # Which stage, its environment, and where it last ran, if the
-        # record of that run is for what dvc.lock says it made
+        # record of that run is for what dvc.lock says it made, which it
+        # isn't for a stage that's run since the pipeline started, since
+        # runs are recorded when it's done
         made = [
             make_strong(f"{label}:"),
             make_text(" "),
@@ -1732,12 +1756,18 @@ def get_provenance_panels(
             )
         run = stage_runs.get(stage)
         lock_stage = lock_stages.get(stage)
-        if (
-            isinstance(run, dict)
-            and lock_stage is not None
-            and run.get("dvc_lock_hash")
-            == calkit.dvc.stage_lock_hash(lock_stage)
-        ):
+        if not show_run or lock_stage is None:
+            return out
+        if not isinstance(run, dict) or run.get(
+            "dvc_lock_hash"
+        ) != calkit.dvc.stage_lock_hash(lock_stage):
+            out.append(
+                make_paragraph(
+                    make_strong("Last run:"),
+                    make_text(" not recorded for its current outputs"),
+                )
+            )
+        else:
             system = run.get("system") or {}
             parts = [str(run.get("start_time") or "")[:10]] + [
                 " ".join(
@@ -1760,20 +1790,19 @@ def get_provenance_panels(
         return out
 
     def get_table_body(div: ProvenanceDiv) -> list[dict]:
-        try:
-            content = read_bytes(div.path).decode("utf-8")
-        except Exception:
-            return [make_paragraph(make_emphasis(f"Can't read {div.src}"))]
+        # Only as far as is shown, and one more row to tell it's cut short
         delimiter = TABLE_DELIMITERS.get(
             posixpath.splitext(div.path)[1].lower(), ","
         )
         rows = []
-        for i, row in enumerate(
-            csv.reader(io.StringIO(content), delimiter=delimiter)
-        ):
-            if i > div.rows + 1:
-                break
-            rows.append(row)
+        try:
+            with open_text(div.path) as f:
+                for row in csv.reader(f, delimiter=delimiter):
+                    rows.append(row)
+                    if len(rows) > div.rows + 1:
+                        break
+        except (OSError, csv.Error):
+            return [make_paragraph(make_emphasis(f"Can't read {div.src}"))]
         if not rows:
             return [make_paragraph(make_emphasis(f"{div.src} is empty"))]
         header, body = rows[0], rows[1 : div.rows + 1]
@@ -1840,11 +1869,7 @@ def get_provenance_panels(
             for path in dict.fromkeys(inputs):
                 producer = get_producer(path)
                 if any(under(path, p) for p in status["modified_inputs"]):
-                    state = (
-                        "⛔ missing"
-                        if get_hash(path) is None
-                        else "⚠️ modified"
-                    )
+                    state = "⚠️ modified" if exists(path) else "⛔ missing"
                 elif (
                     producer is not None
                     and get_output_state(path, producer)[0] != "ok"
@@ -1942,13 +1967,21 @@ def get_provenance_panels(
 
     def get_document_panel() -> dict:
         roots = [d.path for d in divs if d.path]
+        own = stages[doc_stage][1] if doc_stage in stages else []
         if doc_stage in stages:
             roots = stages[doc_stage][0] + roots
-        roots = [r for r in dict.fromkeys(roots) if not is_bookkeeping(r)]
+        # Not what it makes itself, which it can't say anything about
+        roots = [
+            r
+            for r in dict.fromkeys(roots)
+            if not is_bookkeeping(r) and not any(under(r, o) for o in own)
+        ]
         order = [n for n in get_closure(roots) if n != doc_stage]
         children = []
         if doc_stage in stages:
-            children += get_stage_paragraphs(doc_stage, "Rendered by")
+            children += get_stage_paragraphs(
+                doc_stage, "Rendered by", show_run=False
+            )
         rows = [
             make_row(
                 [make_strong("Output")],
@@ -1989,7 +2022,6 @@ def get_provenance_panels(
                     states,
                 )
             )
-        own = stages[doc_stage][1] if doc_stage in stages else []
         if own:
             children.append(
                 make_paragraph(
@@ -2158,21 +2190,41 @@ def write_provenance(
             return {}
         return data if isinstance(data, dict) else {}
 
-    def get_hash(path: str) -> str | None:
-        if path not in hashes:
-            full_path = get_full_path(path)
-            hashes[path] = (
-                calkit.dvc.hash_path(full_path)["md5"]
-                if os.path.exists(full_path)
-                else None
-            )
-        return hashes[path]
+    def get_status(name: str) -> dict:
+        # From DVC, run from the project so it names paths relative to it
+        if not dvc_stages:
+            try:
+                repo = calkit.dvc.get_dvc_repo(
+                    wdir=os.path.abspath(wdir or ".")
+                )
+                dvc_stages.update(
+                    {stage.addressing: stage for stage in repo.index.stages}
+                )
+            except Exception as e:
+                raise ValueError(f"Can't read the pipeline to check it: {e}")
+        if name not in dvc_stages:
+            return {"status": "not-run"}
+        prev_wdir = os.getcwd()
+        try:
+            os.chdir(wdir or ".")
+            return get_stage_status(dvc_stages[name])
+        finally:
+            os.chdir(prev_wdir)
 
     def read_bytes(path: str) -> bytes:
         with open(get_full_path(path), "rb") as f:
             return f.read()
 
-    hashes: dict[str, str | None] = {}
+    def open_text(path: str) -> IO[str]:
+        # Without a byte order mark, and with what isn't UTF-8 replaced
+        return open(
+            get_full_path(path),
+            encoding="utf-8-sig",
+            errors="replace",
+            newline="",
+        )
+
+    dvc_stages: dict[str, Any] = {}
     panels = get_provenance_panels(
         divs,
         document_path,
@@ -2181,7 +2233,7 @@ def write_provenance(
         dvc_yaml=read_yaml("dvc.yaml"),
         dvc_lock=read_yaml("dvc.lock"),
         stage_runs=calkit.core.read_stage_runs(wdir=wdir),
-        get_hash=get_hash,
+        get_stage_status=get_status,
         is_file=lambda p: os.path.isfile(get_full_path(p)),
         is_dir=lambda p: os.path.isdir(get_full_path(p)),
         listdir=lambda p: (
@@ -2190,6 +2242,7 @@ def write_provenance(
             else []
         ),
         read_bytes=read_bytes,
+        open_text=open_text,
     )
     calkit.core.ensure_local_dir(wdir)
     rel_path = get_provenance_path(document_path)
@@ -2202,13 +2255,19 @@ def write_provenance(
 
 
 def get_filter_problem(
-    text: str, document_path: str, wdir: str | None = None
+    text: str,
+    document_path: str,
+    wdir: str | None = None,
+    to: str | None = None,
 ) -> str | None:
     """Why the filter that shows ``ckprovenance`` divs won't run for a
     document, or None if it will, from the ``filters`` its front matter,
     its folders' ``_metadata.yml``, and its Quarto project's
     ``_quarto.yml`` list, since Quarto only runs a filter that's listed,
     and this one has to run before Quarto numbers figures.
+
+    Filters listed for a format count for that format, i.e., ``to``, e.g.,
+    ``html``, or for any without one.
     """
     import io
 
@@ -2223,10 +2282,17 @@ def get_filter_problem(
 
     def get_filters(meta: dict) -> list:
         found = list(meta.get("filters") or [])
-        for fmt in (meta.get("format") or {}).values():
-            if isinstance(fmt, dict):
+        formats = meta.get("format")
+        for name, fmt in (
+            formats if isinstance(formats, dict) else {}
+        ).items():
+            # E.g., html for an html+raw or an html with extensions
+            base = re.split(r"[+-]", str(name))[0]
+            if isinstance(fmt, dict) and (to is None or base == to_base):
                 found += list(fmt.get("filters") or [])
         return found
+
+    to_base = re.split(r"[+-]", to)[0] if to else None
 
     document_path = posixpath.normpath(Path(document_path).as_posix())
     filters = []

@@ -6,3 +6,7 @@ quarto-required: ">=1.4.0"
 contributes:
   shortcodes:
     - calkit.lua
+  # Listed by a document as {at: pre-ast, path: calkit}, before Quarto's own
+  # filters number figures and build callouts
+  filters:
+    - provenance.lua

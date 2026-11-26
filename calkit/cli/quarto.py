@@ -76,8 +76,9 @@ def render(
     the same version, unless the project lists 'quarto' as a requirement or
     the environment is `_system`, i.e., this machine.
     The values the document shows with the 'ckvalue' shortcode are checked
-    first, and the Quarto extension that reads them from their results
-    files is written.
+    first, what its 'ckprovenance' divs say about where its figures and
+    tables came from is worked out, and the Quarto extension that shows
+    both is written.
     """
     import calkit
     import calkit.environments
@@ -135,9 +136,32 @@ def render(
             write_values_file(ck_info, wdir=project_dir)
         if values:
             calkit.quarto.check_values(values, document_rel, wdir=project_dir)
+        # What the provenance panels say is decided now, from the pipeline
+        # as it stands, for the filter to show
+        divs = (
+            calkit.quarto.extract_provenance_divs(
+                text, document_rel, wdir=project_dir
+            )
+            if calkit.quarto.PROVENANCE_CLASS in text
+            else []
+        )
+        filter_problem = (
+            calkit.quarto.get_filter_problem(
+                text, document_rel, wdir=project_dir
+            )
+            if divs
+            else None
+        )
+        if divs and filter_problem is None:
+            calkit.quarto.write_provenance(
+                divs, document_rel, ck_info, wdir=project_dir
+            )
+        if values or divs:
             calkit.quarto.write_components(document_rel, wdir=project_dir)
     except (MarkdownParseError, ValueError) as e:
         raise_error(str(e))
+    if filter_problem is not None:
+        raise_error(filter_problem)
     cmd = ["quarto", "render", target_path]
     if to is not None:
         cmd += ["--to", to]

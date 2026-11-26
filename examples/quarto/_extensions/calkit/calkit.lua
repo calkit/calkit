@@ -580,4 +580,47 @@ return {
     end
     return pandoc.Str(text)
   end,
+  -- A value quoted from a reference: its citation key, its name, and
+  -- optionally a format, from the file Calkit writes them all to
+  ["ckrefval"] = function(args, kwargs)
+    if project_dir == nil then
+      project_dir = find_project_dir()
+    end
+    local slots = {"", "", ""}
+    for i = 1, math.min(#args, 3) do
+      slots[i] = pandoc.utils.stringify(args[i])
+    end
+    -- The name and format can be given by name, as for ckvalue
+    for name, slot in pairs({key = 2, format = 3}) do
+      local value = pandoc.utils.stringify(kwargs[name] or "")
+      if value ~= "" then
+        slots[slot] = value
+      end
+    end
+    local key, name, fmt = slots[1], slots[2], slots[3]
+    -- One file per reference, named for its key percent-encoded, as
+    -- Python's urllib.parse.quote(key, safe="") writes it
+    local file = key:gsub("[^A-Za-z0-9_%.~%-]", function(c)
+      return string.format("%%%02X", string.byte(c))
+    end)
+    local data = load_data(".calkit/reference-values/" .. file .. ".json")
+    local value = nil
+    if type(data) == "table" then
+      value = data[name]
+    end
+    if value == nil then
+      quarto.log.warning(
+        "calkit.yaml records no value " .. name .. " quoted from " .. key
+      )
+      return pandoc.Str("??")
+    end
+    local text = format_value(value, fmt)
+    if text == nil then
+      quarto.log.warning(
+        "Can't show ckrefval " .. key .. " " .. name .. " " .. fmt
+      )
+      return pandoc.Str("??")
+    end
+    return pandoc.Str(text)
+  end,
 }

@@ -1884,8 +1884,9 @@ class QuartoStage(Stage):
         default=[], description="Extra arguments passed to 'quarto render'."
     )
 
-    # The results files the document's ckvalue shortcodes read, relative to
-    # the project, set by preprocess
+    # The results files the document's ckvalue shortcodes read, and the
+    # files its ckprovenance divs show, relative to the project, set by
+    # preprocess
     _value_paths: list[str] = PrivateAttr(default_factory=list)
     # The documents it embeds cells' outputs from, and outputs of the stages
     # that execute them, so it renders after them, relative to the project
@@ -1958,17 +1959,39 @@ class QuartoStage(Stage):
                 )
                 if exists(p) or is_output(p)
             ]
-        if "ckvalue" not in text and "ckrefval" not in text:
-            return
-        try:
-            ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
-            values = calkit.quarto.extract_values(
-                text,
-                self.project_target_path,
-                results=results_by_name(ck_info),
+        # The files its provenance divs show, which it renders after
+        divs = (
+            calkit.quarto.extract_provenance_divs(
+                text, self.project_target_path, wdir=project_dir
             )
-        except (MarkdownParseError, ValueError):
-            values = []
+            if calkit.quarto.PROVENANCE_CLASS in text
+            else []
+        )
+        self._value_paths = list(
+            dict.fromkeys(
+                d.path
+                for d in divs
+                if d.path
+                and (
+                    exists(d.path)
+                    or exists(d.path + ".dvc")
+                    or is_output(d.path)
+                )
+            )
+        )
+        values = []
+        if "ckvalue" in text or "ckrefval" in text:
+            try:
+                ck_info = calkit.load_calkit_info(
+                    wdir=project_dir, read_only=True
+                )
+                values = calkit.quarto.extract_values(
+                    text,
+                    self.project_target_path,
+                    results=results_by_name(ck_info),
+                )
+            except (MarkdownParseError, ValueError):
+                values = []
         for value in values:
             if (
                 exists(value.path)
@@ -1976,7 +1999,7 @@ class QuartoStage(Stage):
                 or is_output(value.path)
             ) and value.path not in self._value_paths:
                 self._value_paths.append(value.path)
-        if write_files and values:
+        if write_files and (values or divs):
             calkit.quarto.write_components(
                 self.project_target_path, wdir=project_dir
             )

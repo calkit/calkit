@@ -135,3 +135,94 @@ See [`examples/quarto`](https://github.com/calkit/calkit/tree/main/examples/quar
 for a project that does all of these:
 a Julia simulation, a Python notebook that fits it,
 and an R report that shows values from each and the notebook's figure.
+
+## Showing where figures and tables came from
+
+<!-- TODO: needs human review -->
+
+A reader of a rendered document can see where each figure or table came
+from, and whether it's up to date, without Calkit,
+by showing it with a `ckprovenance` div rather than an image or a table:
+
+```markdown
+::: {.ckprovenance src="figures/fit.png" #fig-fit width="80%"}
+The fit, with its residuals.
+:::
+
+As @fig-fit shows, ...
+
+::: {.ckprovenance src="results/fits.csv" #tbl-fits rows="10"}
+Each run's fit.
+:::
+```
+
+<!-- TODO: needs human review -->
+
+The file is shown as Quarto would show it, numbered and cross-referenced
+by its id, with the div's content as its caption,
+and under it a panel saying which stage made it,
+in which environment, when and where it last ran,
+what it read, and whether it's up to date per `dvc.lock`.
+An image is shown as a figure, a CSV or TSV file as a table,
+up to `rows` rows (25 by default),
+and anything else by its path, unless `kind` says otherwise, i.e.,
+`figure`, `table`, or `file`.
+Like an image's, `src` is relative to the document,
+or to its Quarto project with a leading `/`.
+The panel is collapsed when everything is up to date,
+and otherwise says what's wrong in its title, e.g.,
+an input modified since the stage ran,
+an input made by a stage that's out of date itself,
+or an input with no recorded origin, which leaves the figure with
+incomplete provenance.
+A file no stage makes says where it came from if `calkit.yaml` records it,
+e.g., with `imported_from`.
+
+<!-- TODO: needs human review -->
+
+A div with no `src` shows a panel about the document itself:
+each pipeline output it's made from, however far back,
+whether each is up to date,
+and a graph of the stages that make them,
+drawn with Quarto's Mermaid in HTML and shown as source in other formats.
+`table="false"` or `graph="false"` leaves either out.
+The document's own outputs aren't checked,
+since it can't say whether what's being rendered is up to date;
+`calkit status` checks them.
+
+```markdown
+::: {.ckprovenance}
+:::
+```
+
+<!-- TODO: needs human review -->
+
+Quarto only runs the extension's filter if the document lists it,
+in its front matter or `_quarto.yml`,
+and it has to run before Quarto numbers figures and builds callouts:
+
+```yaml
+filters:
+  - at: pre-ast
+    path: calkit
+```
+
+`calkit quarto render` fails if it's not listed,
+saying so, rather than rendering the divs as plain ones.
+
+<!-- TODO: needs human review -->
+
+What each panel says is worked out from `calkit.yaml`, `dvc.lock`, and
+`.calkit/stage-runs.json` each time the stage renders the document,
+and written to `.calkit/local/quarto-provenance`,
+which isn't kept in Git, for the extension to read.
+Rendering with Quarto directly, e.g., with `quarto preview`,
+shows the panels as of the last time Calkit rendered the document,
+and a document Calkit hasn't rendered on this machine says no provenance
+is recorded.
+`quarto preview` also doesn't notice when a script or data file changes,
+since it only watches the document's own files,
+so a panel can say a figure is up to date when it isn't anymore
+until the document is rendered again.
+The files the divs show are inputs to the document's stage,
+so it renders after the stages that make them.

@@ -52,6 +52,7 @@
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`quarto`](#command-group-quarto)                | Work with Quarto.                                                                                            |
+| [`myst`](#command-group-myst)                    | Work with MyST.                                                                                              |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
@@ -4785,6 +4786,44 @@ Options:
 | `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.         |
 | `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                     |
 | `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                        |
+
+<a id="command-group-myst"></a>
+
+### `calkit myst`
+
+Work with MyST.
+
+| Command                           | Description                                                                            |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| [`build`](#subcommand-myst-build) | Build the MyST project in this folder, i.e., where its myst.yml is, in an environment. |
+
+<a id="subcommand-myst-build"></a>
+
+#### `calkit myst build`
+
+Build the MyST project in this folder, i.e., where its myst.yml is, in an environment.
+
+What its documents' 'ckprovenance' directives say about where their figures and tables came from is worked out first, from the pipeline as it stands, and the MyST plugin that shows them is written. MyST has to come from the environment, so every machine builds with the same version, unless the project lists 'myst' as a requirement or the environment is `_system`, i.e., this machine.
+
+Usage:
+
+```text
+calkit myst build [OPTIONS] [MYST-ARGS...]
+```
+
+Arguments:
+
+| Argument    | Type      | Required | Default | Description                                                |
+| ----------- | --------- | -------- | ------- | ---------------------------------------------------------- |
+| `myst_args` | list[str] | no       |         | Arguments for 'myst build', after '--', e.g., '-- --html'. |
+
+Options:
+
+| Option                 | Type    | Required | Default | Description                                                                                                              |
+| ---------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--environment`, `-e`  | str     | no       |         | Environment to build in, which should provide MyST, or `_system` for MyST installed on this machine. There's no default. |
+| `--allow-machine-myst` | boolean | no       | False   | Allow MyST installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.      |
+| `--no-check`           | boolean | no       | False   | Don't check the environment is valid before building.                                                                    |
 
 <a id="command-group-overleaf-ol"></a>
 

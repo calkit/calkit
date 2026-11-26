@@ -69,6 +69,7 @@ from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
+from calkit.cli.myst import myst_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
@@ -116,6 +117,7 @@ app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(quarto_app, name="quarto", help="Work with Quarto.")
+app.add_typer(myst_app, name="myst", help="Work with MyST.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(

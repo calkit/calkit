@@ -82,3 +82,59 @@ just want to check that the pipeline can run without errors.
 See the
 [documentation](https://github.com/calkit/calkit/tree/main/actions/run)
 for all available options.
+
+<!-- TODO: needs human review -->
+
+## Caching environments
+
+The action caches the environments the pipeline uses, e.g., conda
+environments and virtual environments, keyed by their spec and lock files,
+so a run whose environments haven't changed restores them instead of
+building them.
+`calkit describe env-cache` shows what's cached and the key.
+This makes it cheap to use the project's own environment in other
+workflows, e.g., to render a website with the version of Quarto the
+environment pins, rather than installing one separately,
+which may not be the version used by authors and the pipeline.
+For example, a workflow that publishes a Quarto site to GitHub Pages:
+
+```yaml
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # Restores the environments, building them only if their locks
+      # changed, and pulls or runs whatever the site shows
+      - name: Run pipeline
+        uses: calkit/calkit/actions/run@main
+        with:
+          save: "false"
+      - name: Render site
+        run: calkit xenv -n main -- quarto render
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
+```
+
+Set `cache_envs: "false"` to turn this off, e.g., if large environments that
+change often would use up the repository's
+[cache storage](https://docs.github.com/en/actions/reference/dependency-caching-reference#usage-limits-and-eviction-policy).

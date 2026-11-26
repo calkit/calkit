@@ -2592,6 +2592,203 @@ def get_cached_env_states(
     return states
 
 
+# Bumped to invalidate every saved environment cache, e.g., when what's
+# cached for a kind changes
+ENV_CACHE_VERSION = 1
+# Kinds whose built environment is a set of directories that can be saved
+# and restored, e.g., by CI
+KINDS_CACHED = ["conda", "pixi", "uv", "uv-venv", "venv"]
+
+
+def get_env_cache_spec(
+    env_names: list[str] | None = None, wdir: str | None = None
+) -> dict:
+    """What to save to restore the project's environments elsewhere.
+
+    Covers the environments the pipeline uses, or ``env_names``. The
+    ``key`` changes whenever what an environment is built from does, i.e.,
+    its definition, spec, lock, or input files, and is scoped to this
+    platform, OS release, and the absolute paths cached, since environments
+    like conda's aren't relocatable. ``restore_key`` matches any cache with
+    the same scope, e.g., from before a lock changed, which is still worth
+    restoring, since checking an environment updates or rebuilds whatever
+    doesn't match its lock.
+
+    An environment is ``ready`` once its last check here succeeded against
+    its current definition, spec, and lock, so is worth saving.
+    """
+    import calkit
+
+    def get_os_release() -> str:
+        system = platform.system()
+        if system == "Linux":
+            try:
+                info = platform.freedesktop_os_release()
+            except OSError:
+                return system
+            return f"{info.get('ID')}-{info.get('VERSION_ID')}"
+        if system == "Darwin":
+            return f"macos-{platform.mac_ver()[0].split('.')[0]}"
+        return f"{system}-{platform.release()}"
+
+    def get_md5_or_none(path: str | None) -> str | None:
+        if not path:
+            return None
+        path = os.path.join(wdir or "", os.path.expandvars(path))
+        return calkit.get_md5(path) if os.path.isfile(path) else None
+
+    def get_uv_python_dir() -> str | None:
+        try:
+            out = subprocess.check_output(
+                ["uv", "python", "dir"], text=True, stderr=subprocess.DEVNULL
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        return out.strip() or None
+
+    def get_conda_envs_dir() -> str:
+        from calkit.conda import find_conda_exe
+
+        conda_exe = find_conda_exe()
+        if conda_exe is None:
+            raise ValueError("conda not found")
+        info = json.loads(
+            subprocess.check_output([conda_exe, "info", "--json"])
+        )
+        return os.path.join(info["root_prefix"], "envs")
+
+    def get_prefix(env_name: str, env: dict) -> str:
+        kind = env.get("kind")
+        path = os.path.expandvars(env.get("path") or "")
+        spec_dir = os.path.dirname(path)
+        if kind in ("venv", "uv-venv"):
+            if not path:
+                raise ValueError("no 'path'")
+            prefix = env.get("prefix") or get_default_venv_prefix(
+                envs, path, env_name
+            )
+        elif kind == "uv":
+            prefix = os.path.join(spec_dir, ".venv")
+        elif kind == "pixi":
+            prefix = os.path.join(
+                spec_dir, ".pixi", "envs", env.get("name") or "default"
+            )
+        else:
+            # Where checking a conda env creates it
+            with open(os.path.join(wdir or "", path), encoding="utf-8") as f:
+                spec = yaml.safe_load(f) or {}
+            prefix = env.get("prefix") or spec.get("prefix")
+            if prefix is None:
+                if not spec.get("name"):
+                    raise ValueError(f"'{path}' names no environment")
+                return os.path.join(get_conda_envs_dir(), spec["name"])
+        return os.path.abspath(
+            os.path.join(wdir or "", os.path.expandvars(str(prefix)))
+        )
+
+    def is_ready(env_name: str, env: dict, prefix: str, content: dict) -> bool:
+        if not os.path.isdir(prefix):
+            return False
+        with get_cache_db() as db:
+            checked = db.get(make_cache_key(env_name=env_name, wdir=wdir))
+        if not checked or not checked.get("success"):
+            return False
+        # Not the prefix's hash, since running stages can write into it,
+        # e.g., Python's bytecode caches
+        hashes = checked.get("hashes") or {}
+        return bool(
+            hashes.get("env_hash") == content["env_hash"]
+            and hashes.get("env_path_hash") == content["spec_md5"]
+            and hashes.get("env_lock_hash") == content["lock_md5"]
+        )
+
+    if env_names is None:
+        names, ck_info, _ = get_pipeline_env_names(wdir=wdir)
+    else:
+        names = list(env_names)
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    envs = ck_info.get("environments") or {}
+    descs: dict[str, dict] = {}
+    for env_name in names:
+        env = get_env(env_name, envs)
+        if env is None:
+            raise ValueError(f"Environment '{env_name}' is not defined")
+        kind = env.get("kind")
+        desc: dict = {"kind": kind, "cached": False}
+        descs[env_name] = desc
+        # A switch is whichever environment it picks here
+        if kind == SWITCH_KIND:
+            picked = resolve_switch(env_name, envs)
+            desc["reason"] = f"switch picking '{picked}' here"
+            if picked is not None and picked not in names:
+                names.append(picked)
+            continue
+        if kind not in KINDS_CACHED:
+            desc["reason"] = f"'{kind}' environments aren't cached"
+            continue
+        try:
+            prefix = get_prefix(env_name, env)
+        except (ValueError, OSError, subprocess.CalledProcessError) as e:
+            desc["reason"] = str(e)
+            continue
+        lock_fpath = get_env_lock_fpath(env=env, env_name=env_name, wdir=wdir)
+        content = {
+            "env_hash": hash_dict(env),
+            "spec_md5": get_md5_or_none(env.get("path")),
+            "lock_md5": (
+                calkit.get_md5(lock_fpath)
+                if lock_fpath and os.path.isfile(lock_fpath)
+                else None
+            ),
+            "input_md5s": {
+                p: get_md5_or_none(p)
+                for p in get_env_input_paths(env, env_name)
+            },
+        }
+        paths = [prefix]
+        # A uv venv links to its interpreter, which uv may have installed
+        if kind in ("uv", "uv-venv") and (python_dir := get_uv_python_dir()):
+            paths.append(os.path.abspath(python_dir))
+        desc |= {
+            "cached": True,
+            "prefix": prefix,
+            "paths": paths,
+            "lock_path": lock_fpath,
+            "ready": is_ready(env_name, env, prefix, content),
+            "content": content,
+        }
+    cached = {k: v for k, v in descs.items() if v["cached"]}
+    paths = sorted({p for d in cached.values() for p in d["paths"]})
+    if not cached:
+        return {
+            "key": None,
+            "restore_key": None,
+            "paths": [],
+            "ready": False,
+            "environments": descs,
+        }
+    platform_name = _conda_venv_platform()
+    scope_hash = hash_dict(
+        {
+            "version": ENV_CACHE_VERSION,
+            "platform": platform_name,
+            "os": get_os_release(),
+            "paths": paths,
+        }
+    )[:12]
+    content_hash = hash_dict(
+        {k: v.pop("content") for k, v in sorted(cached.items())}
+    )[:16]
+    restore_key = f"calkit-envs-{platform_name}-{scope_hash}-"
+    return {
+        "key": restore_key + content_hash,
+        "restore_key": restore_key,
+        "paths": paths,
+        "ready": all(d["ready"] for d in cached.values()),
+        "environments": descs,
+    }
+
+
 # How much of what a failed environment check printed is kept to show
 FAILED_CHECK_OUTPUT_LINES = 20
 

@@ -91,6 +91,31 @@ The restore step first looks for the
 most recent cache for the current branch and then falls back to the default
 branch cache if the current branch cache doesn't exist yet.
 
+<!-- TODO: needs human review -->
+
+Environments the pipeline uses are cached too, unless `cache_envs` is set to
+`false`, so a run whose environments haven't changed restores them instead
+of building them.
+Conda, pixi, uv, uv-venv, and venv environments are cached;
+other kinds, e.g., Docker and Julia, are built as before.
+The cache key comes from `calkit describe env-cache`, and changes when an
+environment's definition, spec, lock, or input files do.
+It's also scoped to the runner's platform and OS release and to the absolute
+paths cached, since, e.g., conda environments aren't relocatable.
+On GitHub-hosted runners, the checkout is always at
+`/home/runner/work/<repo>/<repo>`, so this holds from run to run.
+When a lock changes, the most recent cache with the same scope is restored
+instead, and checking the environment updates or rebuilds what doesn't
+match, which is also what happens to a restored environment that doesn't
+work on the runner.
+Environments are saved even if a stage fails, but only once every one has
+been checked successfully, so a run limited to some stages, e.g., with
+`run_args`, saves them only if those stages use all of them.
+Caches count toward the repository's
+[10 GB limit](https://docs.github.com/en/actions/reference/dependency-caching-reference#usage-limits-and-eviction-policy),
+past which GitHub evicts the least recently used, so a project with large
+environments that change often may want to turn this off.
+
 ## System dependencies
 
 System dependencies like `uv`, `pixi`, `conda`, `juliaup` will be installed

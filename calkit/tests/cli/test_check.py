@@ -172,6 +172,17 @@ def test_check_venv_moved(tmp_dir):
     else:
         cmd = f". \"{activate_fpath}\" && python -c 'import requests'"
     subprocess.check_call(cmd, shell=True)
+    # So is one whose Python is gone, as when it's restored onto a machine
+    # without the interpreter it links to
+    if sys.platform != "win32":
+        python_fpath = os.path.join(".venv", "bin", "python")
+        os.remove(python_fpath)
+        os.symlink("/calkit-test-no-such-python", python_fpath)
+        subprocess.check_call(
+            ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+        )
+        assert os.path.exists(python_fpath)
+        subprocess.check_call(cmd, shell=True)
     # A local package is installed from the spec rather than locked, so the
     # lock still installs once the project has moved
     os.makedirs(os.path.join("a", "pkg"))

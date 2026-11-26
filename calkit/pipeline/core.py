@@ -1045,8 +1045,10 @@ def get_gated_stages(
     here: a requirement of the stage or of an environment it uses isn't
     met where it would run, a switch it uses picks nothing here, or a
     machine it locks isn't this one. The second is stages that can't run
-    because something is wrong, e.g., their machine can't be reached. Both
-    are skipped, keeping their outputs, but only the first is expected.
+    because something is wrong, e.g., their machine can't be reached, or
+    an app an environment they use is built with, e.g., Conda, isn't
+    installed. Both are skipped, keeping their outputs, but only the first
+    is expected.
 
     Requirements are only checked here, never prompted for or installed,
     and anything the checks print goes to stderr, keeping stdout for,
@@ -1058,9 +1060,11 @@ def get_gated_stages(
     Each stage skipped only for requirements this machine doesn't meet,
     i.e., not also for a machine lock, is added to ``requirements_by_stage``
     with its own and its environments' requirements, which may be offered
-    later, e.g., by ``calkit run`` for a stage it would run. Each of those,
-    and each stage skipped for an output a skipped stage hasn't made, that
-    needs such an output is added to ``blocked_by`` with those stages.
+    later, e.g., by ``calkit run`` for a stage it would run, as is each
+    skipped for an app its environments are built with, with those apps.
+    Each of those, and each stage skipped for an output a skipped stage
+    hasn't made, that needs such an output is added to ``blocked_by`` with
+    those stages.
 
     ``failed_environments`` maps environments that failed their check to a
     reason, which a stage using one is skipped for, as for a requirement.
@@ -1401,6 +1405,23 @@ def get_gated_stages(
                     f"; giving environment '{local_machines[0]}' a 'host' "
                     "would let its stages run there from here over SSH"
                 )
+        # The apps its environments are built with, e.g., Conda, are offered
+        # like declared requirements, but lacking one is something wrong
+        # rather than the project saying the stage can't run here
+        implied_reason = None
+        if (reason is None or unmet is not None) and machine_name is None:
+            implied = envs_mod.get_implied_requirements(
+                [env for _, env in resolved], ck_info
+            )
+            if implied:
+                implied_reason, _ = check(
+                    ["requirements", None, implied],
+                    lambda: requirements_problem(implied, None, {}),
+                )
+            if implied_reason is not None:
+                unmet = (unmet or []) + implied
+                if reason is None:
+                    reason, is_error = implied_reason, True
         # Locks are checked for a stage that only lacks requirements too,
         # since meeting them wouldn't let it run if a lock rules it out
         wants_unmet = unmet is not None and requirements_by_stage is not None
@@ -1417,7 +1438,7 @@ def get_gated_stages(
                 )
                 if lock_reason is not None:
                     unmet = None
-                    if reason is None:
+                    if reason is None or reason == implied_reason:
                         reason, is_error = lock_reason, lock_is_error
                     break
         if unmet is not None and requirements_by_stage is not None:
@@ -1452,7 +1473,9 @@ def get_gated_stages(
     # What each is waiting on, once every skipped stage is known, including
     # those offered their requirements, which need these too
     if blocked_by is not None:
-        offered = {n for n in requirements_by_stage or {} if n in gated}
+        offered = {
+            n for n in requirements_by_stage or {} if n in gated or n in errors
+        }
         for name in waiting | offered:
             upstream_names = {
                 u

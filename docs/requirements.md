@@ -242,6 +242,8 @@ pass---an unanswerable question isn't a satisfied one.
 
 ## Stage or environment specific requirements
 
+<!-- TODO: needs human review: the clause on implied apps -->
+
 Requirements in the project's `requirements` section apply to the whole
 project, so a machine that doesn't meet them can't run anything.
 A requirement that only some stages have can go on those stages, or on
@@ -249,7 +251,9 @@ an environment that describes a machine, i.e., a `system`, `slurm` or
 `pbs` environment, which applies it to every stage using that
 environment.
 Other environments, e.g., `conda` or `uv-venv`, describe what's
-installed rather than the machine, so they can't have requirements;
+installed rather than the machine, so they can't declare requirements,
+beyond the app each is built with, which they
+[imply](#apps-environments-are-built-with);
 pair one with a machine instead, as in `cluster:py`:
 
 ```yaml
@@ -316,7 +320,8 @@ as does running without a terminal, e.g., in CI.
 
 `calkit check reqs` checks everything a machine needs to run the whole
 project: the project's requirements, and those of every stage and
-environment, except a switch's options it doesn't pick here,
+environment, including the app each environment is built with,
+except a switch's options it doesn't pick here,
 reporting each one that isn't met by where it's declared.
 With `--stale`, it only checks what `calkit run` needs now:
 the project's requirements, and those of the stages `calkit status`
@@ -329,7 +334,8 @@ Some skips still fail the run, after the stages that can run have run:
   `calkit run fetch`, is out of date and can't run.
 - A stage is out of date and can't run because something is wrong
   rather than because the project says so, e.g., its machine can't be
-  reached, or one of its environments failed its check.
+  reached, one of its environments failed its check, or the app one is
+  built with isn't installed.
 - Any stage is out of date and can't run, with `calkit run --strict`,
   e.g., in CI for a project whose stages should all run there.
   The `calkit/run` action takes it as `run_args: --strict`.
@@ -358,6 +364,34 @@ pipeline:
 
 Calkit finds Microsoft Word and LibreOffice where they install,
 so `word` and `libreoffice` work as app requirements.
+
+<!-- TODO: needs human review -->
+
+### Apps environments are built with
+
+A stage needs the app its environments are built with on the machine
+where it runs, so that app is a requirement without being declared:
+
+| Environment kind | App       |
+| ---------------- | --------- |
+| `conda`          | `conda`   |
+| `uv`, `uv-venv`  | `uv`      |
+| `pixi`           | `pixi`    |
+| `julia`          | `julia`   |
+| `renv`           | `Rscript` |
+| `nix`            | `nix`     |
+
+If the project declares one of these anywhere, e.g., with a
+`version_spec` or `setup_command`, that's what's checked instead.
+Docker isn't on the list, since Calkit offers to install or start it when
+an environment needs it.
+Lacking one of these isn't the project saying a stage can't run here, so
+on a terminal `calkit run` offers to
+[install](#auto-installing-apps) it,
+and otherwise fails the run, printing the install command,
+rather than skipping the stage.
+`calkit check reqs` checks them too, except for an environment only
+used on another machine.
 
 ## Pinning the Calkit CLI version
 

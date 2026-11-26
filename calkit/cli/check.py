@@ -1918,8 +1918,9 @@ def check_project_requirements(
 ) -> None:
     """Check that this machine meets the project's requirements.
 
-    That's the project's own, and those of every stage and environment, so
-    this says whether the whole project can run here. Subprojects' are
+    That's the project's own, and those of every stage and environment,
+    including the app each environment is built with, e.g., Conda, so this
+    says whether the whole project can run here. Subprojects' are
     checked too. On a terminal, what's missing is offered, as by
     'calkit run'. Those of an environment on another machine are checked
     there, by 'calkit run'.
@@ -2014,6 +2015,10 @@ def check_project_requirements(
             # environments that's another machine
             env_names: list[str] = []
             remote_env_by_stage: dict[str, str | None] = {}
+            # Where each is used, since the app an environment is built
+            # with is needed where its stages run
+            used_here: set[str] = set()
+            used_elsewhere: set[str] = set()
             for name, stage in stages.items():
                 qualified = calkit.qualify_with_project(wdir, name)
                 if not isinstance(stage, dict) or (
@@ -2034,6 +2039,9 @@ def check_project_requirements(
                 ]
                 remote_env_by_stage[name] = (
                     remote_env_names[0] if remote_env_names else None
+                )
+                (used_elsewhere if remote_env_names else used_here).update(
+                    used
                 )
             # Without --stale, those no stage uses too, except a switch's
             # options it doesn't pick here, which nothing needs
@@ -2062,7 +2070,12 @@ def check_project_requirements(
                         )
             for env_name in env_names:
                 env = envs_mod.get_env(env_name, envs) or {}
-                if not env.get("requirements"):
+                requirements = list(env.get("requirements") or [])
+                if env_name in used_here or env_name not in used_elsewhere:
+                    requirements += envs_mod.get_implied_requirements(
+                        [env], info
+                    )
+                if not requirements:
                     continue
                 where = (
                     "environment "
@@ -2074,7 +2087,7 @@ def check_project_requirements(
                         "machine; 'calkit run' checks it there"
                     )
                     continue
-                check(where, requirements=env["requirements"])
+                check(where, requirements=requirements)
             for name, elsewhere in remote_env_by_stage.items():
                 stage_reqs = stages[name].get("requirements")
                 if not stage_reqs:

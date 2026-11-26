@@ -14,6 +14,7 @@ import git
 import pytest
 
 import calkit
+import calkit.conda
 import calkit.environments
 
 
@@ -424,6 +425,37 @@ def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(calkit_app, ["check", "reqs", "--stale"])
     assert result.exit_code != 0
     assert "the project: env-var 'CK_PROJECT' not found" in result.output
+    # The app an environment is built with is required, except for one only
+    # used on another machine, and a declared one is checked instead
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
+    monkeypatch.setattr(calkit.conda, "find_mamba_exe", lambda: None)
+    for name in ("py", "far-py"):
+        ck_info["environments"][name] = {
+            "kind": "conda",
+            "path": "environment.yml",
+        }
+    ck_info["pipeline"]["stages"]["b"]["environment"] = "py"
+    ck_info["pipeline"]["stages"]["remote"]["environment"] = "far:far-py"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    for name, value in every.items():
+        monkeypatch.setenv(name, value)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert "App 'conda' is not installed" in result.output
+    assert "An installer is available" in result.output
+    assert (
+        "environment 'py': app 'conda' not found on this machine"
+    ) in result.output
+    assert "far-py" not in result.output
+    ck_info["pipeline"]["stages"]["b"]["requirements"].append("conda>=1")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert "stage 'b': app 'conda' not found" in result.output
+    assert "environment 'py'" not in result.output
+    assert result.output.count("App 'conda' is not installed") == 1
 
 
 @pytest.mark.skipif(

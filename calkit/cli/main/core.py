@@ -3926,8 +3926,11 @@ def run(
             gated.pop(name, None)
             errors.pop(name, None)
             unmet_requirements.pop(name, None)
+        # One that lacks an app may be offered it, and is reported at the
+        # end if it's still skipped
         for stage_name, reason in errors.items():
-            warn(f"Stage '{stage_name}' can't run: {reason}")
+            if stage_name not in unmet_requirements:
+                warn(f"Stage '{stage_name}' can't run: {reason}")
         gate_errors.update(errors)
         gated_stages.update(gated | errors)
 
@@ -4452,6 +4455,7 @@ def run(
                     if blocked_by.get(gated_name, set()) & set(gated_stages):
                         continue
                     del gated_stages[gated_name]
+                    gate_errors.pop(gated_name, None)
                     met.append(gated_name)
                     freed = True
             if not met:

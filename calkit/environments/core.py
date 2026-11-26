@@ -2434,6 +2434,52 @@ def runs_elsewhere(env: dict) -> bool:
     return False
 
 
+# The app each kind of environment is built and run with, which a stage
+# using one needs whether or not the project says so. Docker and MATLAB
+# aren't here, since Docker offers itself when it's needed.
+KIND_APPS = {
+    "conda": "conda",
+    "julia": "julia",
+    "nix": "nix",
+    "pixi": "pixi",
+    "renv": "Rscript",
+    "uv": "uv",
+    "uv-venv": "uv",
+}
+
+
+def get_implied_requirements(envs: list[dict], ck_info: dict) -> list[str]:
+    """The apps these environments are built with, as requirements.
+
+    Those the project declares anywhere, e.g., with a ``version_spec`` or
+    ``setup_command``, are left out, so the declared one is what's checked
+    and offered.
+    """
+    from calkit.core import _normalize_requirement, get_requirements
+    from calkit.install import NAME_ALIASES
+
+    declared = list(get_requirements(ck_info))
+    for item in [
+        *(ck_info.get("environments") or {}).values(),
+        *((ck_info.get("pipeline") or {}).get("stages") or {}).values(),
+    ]:
+        if isinstance(item, dict):
+            declared += item.get("requirements") or []
+    declared_names = set()
+    for raw in declared:
+        try:
+            req = _normalize_requirement(raw)
+        except ValueError:
+            # Reported where it's checked
+            continue
+        if req["kind"] == "app":
+            declared_names.add(NAME_ALIASES.get(req["name"], req["name"]))
+    names = [KIND_APPS.get(str(env.get("kind"))) for env in envs]
+    return list(
+        dict.fromkeys(n for n in names if n and n not in declared_names)
+    )
+
+
 def get_pipeline_env_names(
     ck_info: dict | None = None,
     wdir: str | None = None,

@@ -5260,6 +5260,99 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         assert set(gated) == expected
 
 
+def test_get_gated_stages_for_apps_environments_are_built_with(
+    tmp_dir, monkeypatch
+):
+    import calkit.conda
+
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
+    monkeypatch.setattr(calkit.conda, "find_mamba_exe", lambda: None)
+    monkeypatch.delenv("CK_TEST_TOKEN", raising=False)
+    token = {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+
+    def make_stage(env: str, **kwargs: object) -> dict:
+        return (
+            {"kind": "shell-command", "command": "true"}
+            | {"environment": env}
+            | kwargs
+        )
+
+    ck_info: dict = {
+        "environments": {
+            "py": {"kind": "conda", "path": "environment.yml"},
+            "uv-env": {"kind": "uv-venv", "path": "requirements.txt"},
+            "pinned": {"kind": "system", "lock": ["hostname"]},
+            "far": {"kind": "system", "host": "calkit-test.invalid"},
+        },
+        "pipeline": {
+            "stages": {
+                "py-stage": make_stage("py", outputs=["py.txt"]),
+                "after": make_stage(
+                    "_system", inputs=[{"from_stage_outputs": "py-stage"}]
+                ),
+                "uv-stage": make_stage("uv-env"),
+                "token-stage": make_stage("py", requirements=[token]),
+                "pinned-py": make_stage("pinned:py"),
+                "far-py": make_stage("far:py"),
+            }
+        },
+    }
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=ck_info["environments"]["pinned"], env_name="pinned"
+    )
+    assert lock_fpath is not None
+    os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+    with open(lock_fpath, "w") as f:
+        json.dump({"hostname": "calkit-test.invalid"}, f)
+    by_requirements: dict[str, list] = {}
+    blocked_by: dict[str, set[str]] = {}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        interactive=False,
+        system_info={},
+        requirements_by_stage=by_requirements,
+        blocked_by=blocked_by,
+    )
+    # Lacking the app an environment is built with is something wrong, not
+    # the project saying the stage can't run here, but it's offered the same
+    assert set(errors) == {"py-stage", "after"}
+    assert errors["py-stage"] == (
+        "app 'conda' not found on this machine; 'calkit check reqs --stale' "
+        "offers to install or set up what's missing"
+    )
+    assert blocked_by == {"after": {"py-stage"}}
+    # One the project says can't run here is still skipped for that, and
+    # offered the app too, but not one locked to another machine, nor is
+    # one on another machine held up by this one
+    assert set(gated) == {"token-stage", "pinned-py"}
+    assert "CK_TEST_TOKEN" in gated["token-stage"]
+    assert "locked to another machine" in gated["pinned-py"]
+    assert by_requirements == {
+        "py-stage": ["conda"],
+        "token-stage": [token, "conda"],
+    }
+    # A declared one is checked instead, as declared
+    conda = {"name": "conda", "version_spec": ">=1"}
+    ck_info["pipeline"]["stages"]["token-stage"]["requirements"] = [conda]
+    by_requirements = {}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=["py-stage", "token-stage"],
+        interactive=False,
+        system_info={},
+        requirements_by_stage=by_requirements,
+    )
+    assert set(gated) == {"token-stage"} and errors == {}
+    assert by_requirements == {"token-stage": [conda]}
+    # Once it's here, nothing's skipped for it
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: sys.executable)
+    del ck_info["pipeline"]["stages"]["token-stage"]
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, interactive=False, system_info={}
+    )
+    assert set(gated) == {"pinned-py"} and errors == {}
+
+
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
     tmp_dir,
 ):

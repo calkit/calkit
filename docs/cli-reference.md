@@ -4224,7 +4224,7 @@ Options:
 
 Check that this machine meets the project's requirements.
 
-That's the project's own, and those of every stage and environment, so this says whether the whole project can run here. Subprojects' are checked too. On a terminal, what's missing is offered, as by 'calkit run'. Those of an environment on another machine are checked there, by 'calkit run'.
+That's the project's own, and those of every stage and environment, including the app each environment is built with, e.g., Conda, so this says whether the whole project can run here. Subprojects' are checked too. On a terminal, what's missing is offered, as by 'calkit run'. Those of an environment on another machine are checked there, by 'calkit run'.
 
 Usage:
 

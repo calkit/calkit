@@ -5149,6 +5149,78 @@ def test_run_offers_requirements_of_stages_that_would_run(
         assert f.read().strip() == "docs"
 
 
+def test_run_offers_apps_environments_are_built_with(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    import calkit.core
+    import calkit.install
+
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("")
+    ck_info = {
+        "environments": {
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "pipeline": {
+            "stages": {
+                "a": {
+                    "kind": "shell-command",
+                    "command": "echo a > a.txt",
+                    "environment": "py",
+                    "outputs": [{"path": "a.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # uv is missing until it's installed
+    installed: list[str] = []
+    check_dep_exists = calkit.core.check_dep_exists
+
+    def fake_check_dep_exists(name: str, *args, **kwargs) -> bool:
+        if name == "uv":
+            return "uv" in installed
+        return check_dep_exists(name, *args, **kwargs)
+
+    def fake_install(app: str, **kwargs) -> bool:
+        installed.append(app)
+        return True
+
+    monkeypatch.setattr(calkit.core, "check_dep_exists", fake_check_dep_exists)
+    monkeypatch.setattr(calkit.install, "install", fake_install)
+    runner = CliRunner()
+    # Without a terminal nothing is asked, and the run fails, saying how to
+    # install it
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    res = runner.invoke(calkit_app, ["run"])
+    assert res.exit_code != 0
+    assert "App 'uv' is not installed" in res.output
+    assert "An installer is available" in res.output
+    assert (
+        "Stage 'a' is out of date and couldn't run: app 'uv' not found on "
+        "this machine"
+    ) in res.output
+    assert "Run this to install" not in res.output
+    # On a terminal it's offered, and declining still fails
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    res = runner.invoke(calkit_app, ["run"], input="n\n")
+    assert res.exit_code != 0
+    assert "Stage 'a' is out of date, but this machine" in res.output
+    assert res.output.count("Run this to install 'uv'?") == 1
+    assert "Stage 'a' can't run:" not in res.output
+    assert not installed
+    # Accepting installs it, and the stage runs
+    res = runner.invoke(calkit_app, ["run"], input="\n")
+    assert res.exit_code == 0, res.output
+    assert installed == ["uv"]
+    with open("a.txt") as f:
+        assert f.read().strip() == "a"
+
+
 def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {

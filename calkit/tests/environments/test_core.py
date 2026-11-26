@@ -3050,3 +3050,49 @@ def test_check_all_in_pipeline_quiet(tmp_dir, monkeypatch, capfd):
     assert not res["py"]["success"]
     assert "output" not in res["py"]
     assert "line 29" in capfd.readouterr().out
+
+
+def test_get_implied_requirements():
+    envs = [
+        {"kind": "conda", "path": "environment.yml"},
+        {"kind": "uv", "path": "pyproject.toml"},
+        {"kind": "uv-venv", "path": "requirements.txt"},
+        {"kind": "pixi", "path": "pixi.toml"},
+        {"kind": "julia", "path": "Project.toml", "julia": "1.11"},
+        {"kind": "renv", "path": "DESCRIPTION"},
+        {"kind": "nix", "path": "flake.nix"},
+        {"kind": "docker", "image": "ubuntu"},
+        {"kind": "matlab", "version": "R2024a"},
+        {"kind": "system"},
+        {"kind": "slurm"},
+        {"kind": "venv", "path": "requirements.txt"},
+    ]
+    get = calkit.environments.get_implied_requirements
+    # Each app once, and none for Docker, which offers itself, or for kinds
+    # built with nothing beyond Calkit
+    assert get(envs, {}) == ["conda", "uv", "pixi", "julia", "Rscript", "nix"]
+    assert get([], {}) == []
+    # One declared anywhere in the project is what's checked instead,
+    # however it's written
+    declared: list[dict] = [
+        {"requirements": [{"name": "conda", "setup_command": "echo"}]},
+        {"dependencies": ["uv>=0.5"]},
+        {"environments": {"py": {"kind": "system", "requirements": ["pixi"]}}},
+        {
+            "pipeline": {
+                "stages": {
+                    "a": {"requirements": [{"kind": "app", "name": "julia"}]}
+                }
+            }
+        },
+    ]
+    for ck_info, left_out in zip(declared, ["conda", "uv", "pixi", "julia"]):
+        implied = get(envs, ck_info)
+        assert left_out not in implied
+        assert len(implied) == 5
+    # Something other than an app of the same name doesn't count, and a
+    # malformed one is left to be reported where it's checked
+    assert "conda" in get(
+        envs[:1],
+        {"requirements": [{"kind": "env-var", "name": "conda"}, {"x": 1}]},
+    )

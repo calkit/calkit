@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -114,20 +115,54 @@ def build(
     myst_dir = Path(os.path.relpath(wdir, project_dir)).as_posix()
     myst_dir = "" if myst_dir == "." else myst_dir
     stage = calkit.myst.get_build_stage(myst_dir or ".", ck_info)
+    # Every document's, including what it includes, so a record can't
+    # outlive the directives it was written for
     found = []
     for document in calkit.myst.find_documents(myst_dir, wdir=project_dir):
         text = calkit.quarto.read_document_text(
             os.path.join(project_dir, document)
         )
-        if text is None or calkit.quarto.PROVENANCE_CLASS not in text:
-            continue
-        divs = calkit.myst.extract_directives(text, document)
+        divs = (
+            calkit.myst.extract_directives(
+                text,
+                document,
+                read_text=lambda p: calkit.quarto.read_document_text(
+                    os.path.join(project_dir, p)
+                ),
+            )
+            if text is not None
+            else []
+        )
         if divs:
             found.append((document, divs))
+            continue
+        record_path = os.path.join(
+            project_dir, calkit.quarto.get_provenance_path(document)
+        )
+        if os.path.isfile(record_path):
+            os.remove(record_path)
     if found:
         problem = calkit.myst.get_plugin_problem(myst_dir, wdir=project_dir)
         if problem is not None:
             raise_error(problem)
+        # What they show is what the stage is built from, or it won't
+        # rebuild when that changes
+        if stage is not None:
+            unlisted = calkit.myst.get_unlisted_paths(
+                [d.path for _, divs in found for d in divs if d.path],
+                stage,
+                wdir=project_dir,
+            )
+            if unlisted:
+                stage_wdir = myst_dir or "."
+                raise_error(
+                    f"Stage '{stage}' doesn't list what its documents show "
+                    "as inputs, so it won't rebuild when they change; add "
+                    "to its inputs: "
+                    + ", ".join(
+                        posixpath.relpath(p, stage_wdir) for p in unlisted
+                    )
+                )
         for document, divs in found:
             calkit.quarto.write_provenance(
                 divs,

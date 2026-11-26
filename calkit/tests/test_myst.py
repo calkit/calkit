@@ -2,30 +2,50 @@
 
 from pathlib import Path
 
+import calkit
 import calkit.myst
 
 
 def test_directives(tmp_path: Path) -> None:
-    # Directives are found with colons or backticks, outside code, with a
-    # path relative to the document, shown as its extension says unless
-    # they say otherwise
+    # Directives are found with colons or backticks, outside code and
+    # literal directives, whose closing fences don't open code blocks, with
+    # a path relative to the document, shown as its extension says unless
+    # they say otherwise, with options as lines or a YAML block
     text = (
         ":::{ckprovenance} ../figures/plot.svg\n"
         ":label: fig-plot\n:width: 50%\nThe plot.\n:::\n"
         "```python\n:::{ckprovenance} in-code.png\n```\n"
-        "```{ckprovenance} data.csv\n:rows: 2\n:::{ckprovenance} inside.png\n"
-        "```\n"
-        "::::{ckprovenance} notes.txt\n:kind: table\n:rows: many\n::::\n"
+        "```{note}\nA note.\n```\n"
+        "```{ckprovenance} data.csv\n:rows: 2\n```\n"
+        "```{code-cell} python\n:::{ckprovenance} in-cell.png\n:::\n```\n"
+        "~~~\n:::{ckprovenance} in-tilde.png\n~~~\n"
+        "::::{ckprovenance} notes.txt\n---\nkind: table\nrows: many\n---\n::::\n"
         ":::{figure} other.png\n:::\n"
         ":::{ckprovenance}\n:graph: false\n:::\n"
+        ":::{include} part.md\n:::\n"
     )
-    divs = calkit.myst.extract_directives(text, "site/pages/index.md")
+    parts = {
+        "site/pages/part.md": (
+            ":::{ckprovenance} inc.csv\n:::\n"
+            ":::{include} part.md\n:::\n:::{include} index.md\n:::\n"
+        ),
+        "site/pages/index.md": text,
+    }
+    divs = calkit.myst.extract_directives(
+        text, "site/pages/index.md", read_text=parts.get
+    )
     assert [(d.src, d.path, d.kind, d.line, d.rows) for d in divs] == [
         ("../figures/plot.svg", "site/figures/plot.svg", "figure", 1, 25),
-        ("data.csv", "site/pages/data.csv", "table", 9, 2),
-        ("notes.txt", "site/pages/notes.txt", "table", 13, 25),
-        ("", "", "document", 19, 25),
+        ("data.csv", "site/pages/data.csv", "table", 12, 2),
+        ("notes.txt", "site/pages/notes.txt", "table", 22, 25),
+        ("", "", "document", 30, 25),
+        # Included, relative to the including document, as MyST reads it,
+        # once, however files include each other
+        ("inc.csv", "site/pages/inc.csv", "table", 1, 25),
     ]
+    assert [
+        d.src for d in calkit.myst.extract_directives(text, "site/index.md")
+    ][-1] == ""
     # Documents are found in the project's folder, but not what's built or
     # installed there
     (tmp_path / "site" / "pages").mkdir(parents=True)
@@ -87,3 +107,24 @@ def test_directives(tmp_path: Path) -> None:
     }
     assert calkit.myst.get_build_stage("site", ck_info) == "site"
     assert calkit.myst.get_build_stage(".", ck_info) is None
+    # What it shows has to be among its inputs, or in one, unless it makes
+    # it, for it to rebuild when that changes
+    paths = ["figures/plot.svg", "data/a.csv", "site/_build/x.png", "b.csv"]
+    assert calkit.myst.get_unlisted_paths(paths, "site", str(tmp_path)) == []
+    with open(tmp_path / "dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "site": {
+                        "wdir": "site",
+                        "deps": ["index.md", "../figures/plot.svg", "../data"],
+                        "outs": [{"_build": {"cache": False}}],
+                    }
+                }
+            },
+            f,
+        )
+    assert calkit.myst.get_unlisted_paths(
+        paths + ["b.csv"], "site", str(tmp_path)
+    ) == ["b.csv"]
+    assert calkit.myst.get_unlisted_paths(paths, "other", str(tmp_path)) == []

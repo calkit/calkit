@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 # A MyST plugin, written beside myst.yml, which lists it under
@@ -12,15 +13,29 @@ from pathlib import Path
 PLUGIN_PATH = "_extensions/calkit/myst.mjs"
 # What myst.yml lists to load the plugin
 PLUGIN_CONFIG = f"project:\n  plugins:\n    - {PLUGIN_PATH}\n"
+# The directive that shows a file with where it came from, named as
+# Quarto's class is
+PROVENANCE_DIRECTIVE = "ckprovenance"
 # The files MyST builds a project from
 DOCUMENT_EXTS = (".md", ".ipynb")
-# A {ckprovenance} directive's opening line, with colons or backticks
-_DIRECTIVE_RE = re.compile(
-    r"^\s*(?P<fence>`{3,}|:{3,})\{ckprovenance\}\s*(?P<arg>.*?)\s*$"
+# A fence: backticks or tildes opening a code block, or with a {name}, a
+# directive, as colons always do, or closing one when it's bare
+_FENCE_RE = re.compile(
+    r"^\s*(?P<fence>`{3,}|~{3,}|:{3,})\s*"
+    r"(?:\{(?P<name>[^}\s]+)\}\s*(?P<arg>.*?)|(?P<info>.*?))\s*$"
 )
 _OPTION_RE = re.compile(r"^\s*:(?P<key>[\w-]+):\s*(?P<value>.*?)\s*$")
-_CODE_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(?!\s*\{)")
-
+# Directives whose content is read as it's written, like a code block's
+LITERAL_DIRECTIVES = {
+    "code",
+    "code-block",
+    "code-cell",
+    "sourcecode",
+    "math",
+    "mermaid",
+    "raw",
+    "csv-table",
+}
 # Turns the panels Calkit wrote before building into MyST's AST, deciding
 # nothing about what they say, which is decided in Python, the same as for
 # Quarto, and tested there
@@ -30,12 +45,50 @@ PLUGIN_JS = r"""// Written by Calkit; changes are overwritten by 'calkit myst bu
 // with no argument, the document's provenance. Calkit decides what each
 // panel says before building, and writes it to .calkit/local/provenance;
 // this only turns it into MyST's AST.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
 const PICTURE_EXTS = new Set([
   ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf",
 ]);
+const TABLE_EXTS = new Set([".csv", ".tsv"]);
+
+// A warning with a title, saying to build with Calkit
+function warning(title) {
+  return {
+    type: "admonition",
+    kind: "warning",
+    children: [
+      { type: "admonitionTitle", children: [{ type: "text", value: title }] },
+      {
+        type: "paragraph",
+        children: [
+          { type: "text", value: "Build with " },
+          { type: "inlineCode", value: "calkit myst build" },
+          { type: "text", value: " or " },
+          { type: "inlineCode", value: "calkit run" },
+          { type: "text", value: "." },
+        ],
+      },
+    ],
+  };
+}
+
+// Whether the document changed since Calkit wrote its panels, e.g., in
+// 'myst start'
+function isOutdated(records, docPath) {
+  if (!records.source_sha1) {
+    return false;
+  }
+  try {
+    const digest = crypto.createHash("sha1")
+      .update(fs.readFileSync(docPath)).digest("hex");
+    return digest !== records.source_sha1;
+  } catch {
+    return false;
+  }
+}
 
 // The Calkit project's folder, which the panels are kept under
 function findProjectDir(start) {
@@ -133,7 +186,8 @@ const ckprovenance = {
     const hidden = new Set(
       ["table", "graph"].filter((key) => options[key] === false),
     );
-    const records = vfile.path ? loadRecords(path.resolve(vfile.path)) : null;
+    const docPath = vfile.path ? path.resolve(vfile.path) : null;
+    const records = docPath ? loadRecords(docPath) : null;
     let record = null;
     if (records) {
       record = src ? (records.panels || {})[src] : records.document;
@@ -166,30 +220,31 @@ const ckprovenance = {
       return out;
     };
     if (!record) {
+      // Shown as it would be, as far as that can be without Calkit,
+      // keeping the label and caption, so references still resolve
+      const ext = path.extname(src).toLowerCase();
+      const kind = (options.kind || "").toLowerCase();
       const out = [];
-      if (PICTURE_EXTS.has(path.extname(src).toLowerCase())) {
+      if (!src) {
+        out.push(...caption);
+      } else if (kind === "figure" || (!kind && PICTURE_EXTS.has(ext))) {
         out.push(container("figure", [image()]));
+      } else if (kind === "table" || (!kind && TABLE_EXTS.has(ext))) {
+        out.push(container("table", [{
+          type: "table",
+          children: [{
+            type: "tableRow",
+            children: [{
+              type: "tableCell",
+              children: [{ type: "inlineCode", value: src }],
+            }],
+          }],
+        }]));
+      } else {
+        const name = { type: "inlineCode", value: src };
+        out.push({ type: "paragraph", children: [name] }, ...caption);
       }
-      out.push({
-        type: "admonition",
-        kind: "warning",
-        children: [
-          {
-            type: "admonitionTitle",
-            children: [{ type: "text", value: "No provenance recorded" }],
-          },
-          {
-            type: "paragraph",
-            children: [
-              { type: "text", value: "Build with " },
-              { type: "inlineCode", value: "calkit myst build" },
-              { type: "text", value: " or " },
-              { type: "inlineCode", value: "calkit run" },
-              { type: "text", value: "." },
-            ],
-          },
-        ],
-      });
+      out.push(warning("No provenance recorded"));
       return out;
     }
     const out = [];
@@ -201,6 +256,9 @@ const ckprovenance = {
       out.push(...convertAll(record.body, hidden), ...caption);
     }
     out.push(...convertAll(record.panel, hidden));
+    if (isOutdated(records, docPath)) {
+      out.push(warning("Document changed since panels recorded"));
+    }
     return out;
   },
 };
@@ -209,14 +267,23 @@ export default { name: "Calkit", directives: [ckprovenance] };
 """
 
 
-def extract_directives(text: str, document_path: str) -> list:
+def extract_directives(
+    text: str,
+    document_path: str,
+    read_text: Callable[[str], str | None] | None = None,
+) -> list:
     """Find the ``ckprovenance`` directives in a MyST document, in order,
-    as ``calkit.quarto.ProvenanceDiv``, skipping those in code blocks.
+    as ``calkit.quarto.ProvenanceDiv``, skipping those in code blocks and
+    directives whose content is literal, e.g., ``{code-cell}``.
 
     The file a directive names is relative to the document, as MyST reads
     an image's, and ``:kind:`` overrides what its extension says to show it
-    as.
+    as. Options can be ``:key: value`` lines or a YAML block. With
+    ``read_text``, which reads a project path, or None if it can't, the
+    files the document ``{include}``s are read too, with their paths
+    relative to the document, as MyST reads them.
     """
+    import calkit
     from calkit.quarto import (
         _NOUNS,
         FIGURE_EXTS,
@@ -225,54 +292,97 @@ def extract_directives(text: str, document_path: str) -> list:
         ProvenanceDiv,
     )
 
-    document_path = posixpath.normpath(Path(document_path).as_posix())
-    lines = text.splitlines()
-    divs = []
-    fence = None
-    for i, line in enumerate(lines):
-        if fence is not None:
-            if line.strip() and line.strip() == fence[0] * len(line.strip()):
-                if len(line.strip()) >= len(fence):
-                    fence = None
-            continue
-        m = _CODE_FENCE_RE.match(line)
-        if m is not None:
-            fence = m.group(1)
-            continue
-        m = _DIRECTIVE_RE.match(line)
-        if m is None:
-            continue
-        options = {}
-        for option_line in lines[i + 1 :]:
-            option = _OPTION_RE.match(option_line)
+    def get_options(lines: list[str]) -> dict:
+        options: dict = {}
+        if lines and lines[0].strip() == "---":
+            block = []
+            for line in lines[1:]:
+                if line.strip() == "---":
+                    break
+                block.append(line)
+            try:
+                loaded = calkit.core._load_yaml_readonly("\n".join(block))
+            except Exception:
+                loaded = None
+            if isinstance(loaded, dict):
+                options = {str(k): str(v) for k, v in loaded.items()}
+            return options
+        for line in lines:
+            option = _OPTION_RE.match(line)
             if option is None:
                 break
             options[option.group("key")] = option.group("value")
-        # A directive in backticks closes like a code block
-        if m.group("fence").startswith("`"):
-            fence = m.group("fence")
-        src = m.group("arg")
-        if not src:
-            divs.append(ProvenanceDiv("", "", "document", line=i + 1))
-            continue
-        path = posixpath.normpath(
-            posixpath.join(posixpath.dirname(document_path), src)
-        )
-        ext = posixpath.splitext(src)[1].lower()
-        kind = options.get("kind", "").lower()
-        if kind not in _NOUNS:
-            kind = (
-                "figure"
-                if ext in FIGURE_EXTS
-                else "table"
-                if ext in TABLE_DELIMITERS
-                else "file"
+        return options
+
+    def scan(text: str, chain: tuple[str, ...]) -> None:
+        # The files being read, so ones that include each other stop
+        lines = text.splitlines()
+        # Each open fence's character and length, and whether its content
+        # is literal
+        stack: list[tuple[str, int, bool]] = []
+        for i, line in enumerate(lines):
+            m = _FENCE_RE.match(line)
+            fence = m.group("fence") if m is not None else ""
+            closes = (
+                m is not None
+                and not m.group("name")
+                and not m.group("info")
+                and bool(stack)
+                and stack[-1][0] == fence[0]
+                and len(fence) >= stack[-1][1]
             )
-        try:
-            rows = int(options.get("rows", TABLE_ROW_LIMIT))
-        except ValueError:
-            rows = TABLE_ROW_LIMIT
-        divs.append(ProvenanceDiv(src, path, kind, line=i + 1, rows=rows))
+            if stack and stack[-1][2]:
+                if closes:
+                    stack.pop()
+                continue
+            if m is None:
+                continue
+            if closes:
+                stack.pop()
+                continue
+            name = m.group("name")
+            if name is None:
+                # A code block, since colons only make directives
+                if not fence.startswith(":"):
+                    stack.append((fence[0], len(fence), True))
+                continue
+            stack.append((fence[0], len(fence), name in LITERAL_DIRECTIVES))
+            arg = m.group("arg") or ""
+            if name == "include" and read_text is not None and arg:
+                included = posixpath.normpath(posixpath.join(base, arg))
+                included_text = (
+                    read_text(included) if included not in chain else None
+                )
+                if included_text is not None:
+                    scan(included_text, chain + (included,))
+                continue
+            if name != PROVENANCE_DIRECTIVE:
+                continue
+            options = get_options(lines[i + 1 :])
+            if not arg:
+                divs.append(ProvenanceDiv("", "", "document", line=i + 1))
+                continue
+            path = posixpath.normpath(posixpath.join(base, arg))
+            ext = posixpath.splitext(arg)[1].lower()
+            kind = options.get("kind", "").lower()
+            if kind not in _NOUNS:
+                kind = (
+                    "figure"
+                    if ext in FIGURE_EXTS
+                    else "table"
+                    if ext in TABLE_DELIMITERS
+                    else "file"
+                )
+            try:
+                rows = int(options.get("rows", TABLE_ROW_LIMIT))
+            except ValueError:
+                rows = TABLE_ROW_LIMIT
+            divs.append(ProvenanceDiv(arg, path, kind, line=i + 1, rows=rows))
+
+    document_path = posixpath.normpath(Path(document_path).as_posix())
+    base = posixpath.dirname(document_path)
+    divs: list = []
+    scan(text, (document_path,))
     return divs
 
 
@@ -346,6 +456,47 @@ def get_build_stage(myst_dir: str, ck_info: dict) -> str | None:
         ):
             return str(name)
     return None
+
+
+def get_unlisted_paths(
+    paths: list[str], stage: str, wdir: str | None = None
+) -> list[str]:
+    """The project paths a stage's documents show that aren't among the
+    inputs ``dvc.yaml`` lists for it, or in one, nor its outputs, in order.
+
+    Nothing is, if ``dvc.yaml`` doesn't have the stage yet.
+    """
+    import calkit
+
+    def under(path: str, parent: str) -> bool:
+        return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+    def get_paths(items: list | None) -> list[str]:
+        found = []
+        for item in items or []:
+            if isinstance(item, dict):
+                item = item.get("path") or next(iter(item), None)
+            if isinstance(item, str):
+                found.append(posixpath.normpath(posixpath.join(base, item)))
+        return found
+
+    try:
+        with open(os.path.join(wdir or "", "dvc.yaml"), encoding="utf-8") as f:
+            dvc_yaml = calkit.core._load_yaml_readonly(f) or {}
+    except OSError:
+        return []
+    dvc_stage = (dvc_yaml.get("stages") or {}).get(stage)
+    if not isinstance(dvc_stage, dict):
+        return []
+    base = dvc_stage.get("wdir") or ""
+    listed = get_paths(dvc_stage.get("deps")) + get_paths(
+        dvc_stage.get("outs")
+    )
+    return [
+        path
+        for path in dict.fromkeys(paths)
+        if not any(under(path, p) for p in listed)
+    ]
 
 
 def write_plugin(myst_dir: str, wdir: str | None = None) -> None:

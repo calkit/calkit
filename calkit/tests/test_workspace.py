@@ -601,10 +601,13 @@ def test_verify_machine_id_catches_a_host_pointing_somewhere_else():
     # project never named. Asking the machine who it is is the only way to
     # tell, and it can only be asked once we've connected.
     w = ws.Workspace(host="box", wdir="/w", machine_id="abc-123")
-    with pytest.raises(ws.MachineMismatch, match="not the machine"):
+    with pytest.raises(ws.MachineMismatch, match="not the machine") as e:
         ws.verify_machine_id(
             w, {"machine_id_hash": calkit.hash_machine_id("def-456")}
         )
+    # Both sides shown hashed, so the two can be compared at a glance
+    assert str(calkit.hash_machine_id("abc-123")) in str(e.value)
+    assert "abc-123" not in str(e.value)
     # Matching is quiet, however the two were written
     ws.verify_machine_id(
         w, {"machine_id_hash": calkit.hash_machine_id("ABC123")}

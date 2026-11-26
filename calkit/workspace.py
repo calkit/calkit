@@ -833,7 +833,8 @@ def verify_machine_id(workspace: Workspace, system_info: dict) -> None:
         return
     raise MachineMismatch(
         f"'{workspace.host}' is not the machine this environment names. "
-        f"It expects machine ID '{workspace.machine_id}', but that host "
+        "It expects machine ID "
+        f"'{calkit.hash_machine_id(workspace.machine_id)}', but that host "
         f"reports '{reported}'. If the name now points at a different "
         "machine, correct 'host'; if the machine itself was rebuilt or "
         "replaced, update 'machine_id' to the new value it reports."

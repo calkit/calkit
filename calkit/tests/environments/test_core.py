@@ -1763,6 +1763,8 @@ def test_machine_id_is_reported_and_lockable(tmp_dir: str) -> None:
     assert props["machine_id_hash"] == calkit.hash_machine_id("abcd")
     assert "machine_id" not in props
     hashed = calkit.hash_machine_id("abc-123")
+    # A null in a lock file is no ID, not a hash of the word 'None'
+    assert envs.lock_value("machine-id", None) is None
     env = {"kind": "system", "lock": ["machine-id"]}
     with mock.patch.object(
         calkit, "get_system_info", return_value={"machine_id_hash": hashed}
@@ -1966,6 +1968,17 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
         "cpu-count": elsewhere["cpu_count"],
         "os": "SomeOtherOS",
     }
+    # and a broken lock is just replaced, since it would be rewritten anyway
+    for broken in ["{not json", "[1, 2]"]:
+        with open(lock_fpath, "w") as f:
+            f.write(broken)
+        envs.write_system_env_lock(
+            env_name="bench", env=auto, system_info=elsewhere
+        )
+        assert envs.read_system_env_lock(env_name="bench", env=auto) == {
+            "cpu-count": elsewhere["cpu_count"],
+            "os": "SomeOtherOS",
+        }
     assert (
         envs.switch_machine_lock_env({"lock": ["os"], "relock": "auto"})[
             "relock"

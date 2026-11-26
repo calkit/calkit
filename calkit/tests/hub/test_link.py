@@ -2713,6 +2713,19 @@ def test_install_remote(monkeypatch):
     with pytest.raises(ValueError, match="root"):
         hub_link.install_remote("root@cluster")
     assert posted == {}
+    # Registered from this machine, its ID is hashed before it's sent
+    import calkit
+
+    raw_id = "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0"
+    monkeypatch.setattr(calkit, "get_machine_id", lambda: raw_id)
+    monkeypatch.setattr(hub_link, "use_own_hub", lambda: "https://api.hub")
+    monkeypatch.setattr(hub_link, "get_hub_url", lambda: "https://hub")
+    monkeypatch.setattr(hub_link, "get_link_public_jwk", lambda: {})
+    monkeypatch.setattr(hub_link, "save_config", lambda cfg: None)
+    hub_link.register(name="box")
+    assert posted["machine_id"] == calkit.hash_machine_id(raw_id)
+    sent = json.dumps(posted).lower()
+    assert "0f1e2d3c4b5a69788796a5b4c3d2e1f0" not in sent.replace("-", "")
 
 
 def test_hubs(tmp_path, monkeypatch):

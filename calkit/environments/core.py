@@ -134,7 +134,8 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
     "elsewhere with the same name satisfies it. Prefer 'machine-id'.",
     "machine-id": "A stable identifier for the machine itself, read from "
     "the platform and recorded as a Calkit-specific hash, e.g., "
-    "'sha256:3f1c...', so the platform's own ID isn't published. Pins "
+    "'sha256:3f1c...', so the platform's own ID isn't published. A lock "
+    "written before IDs were hashed keeps the raw one until relocked. Pins "
     "results to one specific machine, and unlike 'hostname' survives "
     "renaming it. Declaring a 'machine_id' on the environment says where "
     "to run, not that results depend on it, so lock this to also keep "
@@ -197,7 +198,7 @@ def lock_value(prop: str, value: object) -> object:
         return SYSTEM_LOCK_PROPERTY_PRECISION[prop](value)
     # A lock from before machine IDs were hashed records the raw one
     if prop == "machine-id":
-        return calkit.hash_machine_id(str(value))
+        return calkit.hash_machine_id(None if value is None else str(value))
     source, part = split_version_lock(prop)
     if not source.endswith("-version"):
         return value

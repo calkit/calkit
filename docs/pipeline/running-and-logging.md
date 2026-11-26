@@ -44,6 +44,14 @@ e.g., macOS's hardware UUID or Linux's `/etc/machine-id`,
 rather than that ID itself,
 which can't always be reset and which other software uses too.
 A system environment that locks `machine-id` records the same hash.
+A run record or lock written before Calkit hashed machine IDs
+keeps the raw ID until it's rewritten,
+so each release archived from the project publishes it until then.
+A stage's entry is rewritten when that stage runs again,
+e.g., with `calkit run --force`,
+and a lock when it's relocked with `calkit update env -n NAME --lock`,
+which reruns the stages that depend on it.
+The project's Git history keeps the earlier values regardless.
 
 If the `--log` option is specified,
 DVC logs will be sent into `.calkit/logs` while the run is executing,

@@ -36,7 +36,7 @@ except ImportError:
     UTC = _timezone.utc
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Iterator, Literal
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
 if TYPE_CHECKING:
     from calkit.models import ProjectInfo, ProjectStatus
@@ -1497,6 +1497,32 @@ def check_dep_exists(
         return False
 
 
+def find_app_path(name: str) -> str | None:
+    """Find where an app is installed, as :func:`check_dep_exists` looks,
+    which can be off the PATH, e.g., Conda in its usual install location.
+    """
+    import shutil
+
+    if name in ("conda", "mamba"):
+        from calkit.conda import find_conda_exe, find_mamba_exe
+
+        return find_conda_exe() if name == "conda" else find_mamba_exe()
+    if name in ("word", "excel", "powerpoint"):
+        import calkit.office
+
+        return calkit.office.find_app_path(name)
+    if name == "libreoffice":
+        from calkit.docx import find_soffice
+
+        return find_soffice()
+    from calkit.export import exporters
+
+    known = {e.name: e for e in exporters()}
+    if name.lower() in known:
+        return known[name.lower()].find_executable()
+    return shutil.which(name)
+
+
 def system_property_requirement_kinds() -> dict[str, str]:
     """Requirement kinds that name a machine property, and their info keys.
 
@@ -1678,8 +1704,9 @@ def _normalize_requirement(req) -> dict:
 
 def check_property_requirement(
     req: dict, system_info: dict, described_as: str = "this machine"
-) -> None:
-    """Check one machine-property requirement against a machine.
+) -> Any:
+    """Check one machine-property requirement against a machine, and return
+    the value that meets it, e.g., the name of the GPU that does.
 
     ``system_info`` is what :func:`get_system_info` reports, either from
     here or from the far end of an SSH connection, so the same constraints
@@ -1795,7 +1822,7 @@ def check_property_requirement(
         for gpu_value in values:
             try:
                 check_value(gpu_value)
-                return
+                return gpu_value
             except ValueError as e:
                 problems.append(str(e))
         if len(problems) == 1:
@@ -1805,6 +1832,7 @@ def check_property_requirement(
             + "; ".join(problems)
         )
     check_value(value)
+    return value
 
 
 def _fmt_prop(value: float) -> str:
@@ -1849,8 +1877,9 @@ def check_app_version(
     system_info: dict | None = None,
     described_as: str = "this machine",
     probe_locally: bool = True,
-) -> None:
-    """Check an installed app against a version specifier.
+) -> str | None:
+    """Check an installed app against a version specifier, and return the
+    version found, if it could be read.
 
     ``system_info`` supplies versions for the tools a system description
     already collects; anything else is asked directly, unless the machine
@@ -1875,7 +1904,7 @@ def check_app_version(
             f"Warning: could not read {name}'s version on {described_as}, so "
             f"'{spec}' was not checked"
         )
-        return
+        return None
     spec_str = spec if spec[0] in "<>=!~" else f"=={spec}"
     try:
         spec_set = SpecifierSet(spec_str)
@@ -1888,12 +1917,13 @@ def check_app_version(
             f"Warning: {name} reports version '{found}' on {described_as}, "
             f"which can't be compared against '{spec}'"
         )
-        return
+        return None
     if parsed not in spec_set:
         raise ValueError(
             f"app '{name}' is version {found} on {described_as}, but "
             f"'{spec_str}' is required"
         )
+    return found
 
 
 def get_version_checked_app_names(
@@ -1983,6 +2013,7 @@ def check_requirements(
     requirements: list | None = None,
     described_as: str = "this machine",
     checked: dict[str, str | None] | None = None,
+    report: Callable[[str], None] | None = None,
 ) -> None:
     """Check that a project's declared requirements are satisfied.
 
@@ -2005,8 +2036,56 @@ def check_requirements(
     failures abort with the fix-it command printed for the user to run.
     ``aws-credentials`` requirements are checked the same way, by
     :func:`calkit.requirements.check_aws_credentials_req`.
+
+    ``report`` is given a line for each requirement met, saying how, e.g.,
+    where an app was found. An env var's value is never in it, since
+    secrets are kept in them.
     """
+    import shutil
+
     from calkit import install as _install
+
+    def abbreviate_home(path: str) -> str:
+        """Write a path in the home directory from ``~``."""
+        home = os.path.expanduser("~")
+        if path == home or path.startswith(home + os.sep):
+            return "~" + path[len(home) :]
+        return path
+
+    def report_app(declared_name: str, name: str, version: str | None) -> None:
+        """Report where an app was found, and its version if checked."""
+        if report is None:
+            return
+        path = find_app_path(name)
+        details = [version] if version else []
+        # A folder is an app bundle, which isn't run by name anyway
+        if (
+            path is not None
+            and os.path.isfile(path)
+            and not shutil.which(name)
+        ):
+            details.append("not on PATH")
+        report(
+            f"{declared_name}: "
+            + ("found" if path is None else abbreviate_home(path))
+            + (f" ({', '.join(details)})" if details else "")
+        )
+
+    def describe_property_requirement(req: dict) -> str:
+        """Describe what a machine-property requirement asks for."""
+        parts = [
+            f"{key} {_fmt_prop(req[key])}"
+            for key in ("min", "max")
+            if req.get(key) is not None
+        ]
+        for key in ("equals", "matches"):
+            value = req.get(key)
+            if value is not None:
+                values = [value] if isinstance(value, str) else value
+                parts.append(key + " " + " or ".join(f"'{v}'" for v in values))
+        if req.get("version_spec"):
+            parts.append(str(req["version_spec"]))
+        return ", ".join(parts)
 
     if requirements is not None:
         # An environment's own list is checked exactly as declared: it
@@ -2018,8 +2097,12 @@ def check_requirements(
             ck_info = load_calkit_info(wdir=wdir)
         reqs = get_requirements(ck_info)
         # Git is how a project exists at all, so the host needs it whether
-        # or not anyone wrote it down.
-        if "git" not in reqs:
+        # or not anyone wrote it down, e.g., as git>=2.30
+        if "git" not in [
+            _normalize_requirement(r)["name"]
+            for r in reqs
+            if isinstance(r, str)
+        ]:
             reqs.append("git")
     # Resolve TTY interactivity once so a single per-call answer drives
     # every prompt (env-var, app installer, setup step).
@@ -2080,10 +2163,13 @@ def check_requirements(
                             use_cache=use_cache,
                             requirements=[req],
                             described_as=described_as,
+                            report=report,
                         )
                         checked[key] = None
                     except ValueError as e:
                         checked[key] = str(e)
+                elif report is not None and checked[key] is None:
+                    report(f"{req['name']}: checked above")
                 problem = checked[key]
                 if problem is not None:
                     problems.append(problem)
@@ -2107,10 +2193,26 @@ def check_requirements(
         ):
             info = {**info, "gpus": [dict(g) for g in get_gpus()]}
         for req in buckets["_property"]:
-            check_property_requirement(req, info, described_as=described_as)
+            value = check_property_requirement(
+                req, info, described_as=described_as
+            )
+            if report is None:
+                continue
+            # A machine's raw ID should be kept confidential
+            if req["kind"] == "machine-id":
+                report("machine-id: matches")
+                continue
+            if isinstance(value, float):
+                value = _fmt_prop(value)
+            report(
+                f"{req['kind']}: {value} "
+                f"({describe_property_requirement(req)})"
+            )
     for req in buckets["env-var"]:
         req_name = req["name"]
         if req_name in os.environ:
+            if report is not None:
+                report(f"{req_name}: set")
             continue
         # On a TTY, prompt the user and persist to .env so the very next
         # ``calkit run`` works without a separate setup step. Non-TTY
@@ -2119,6 +2221,8 @@ def check_requirements(
             from calkit.requirements import prompt_for_env_var_req
 
             if prompt_for_env_var_req(req) is not None:
+                if report is not None:
+                    report(f"{req_name}: set")
                 continue
         msg = f"env-var '{req_name}' not found"
         if req.get("setup_command"):
@@ -2130,7 +2234,9 @@ def check_requirements(
     for req in buckets["env-var-path"]:
         from calkit.requirements import check_env_var_path_req
 
-        check_env_var_path_req(req, interactive=interactive)
+        path = check_env_var_path_req(req, interactive=interactive)
+        if report is not None:
+            report(f"{req['name']}: {abbreviate_home(path)}")
     for req in buckets["app"]:
         declared_name = req["name"]
         # Checked and installed as the binary it provides, e.g., code for
@@ -2146,16 +2252,22 @@ def check_requirements(
                 from calkit.requirements import check_calkit_version
 
                 check_calkit_version(spec)
+            if report is not None:
+                from calkit import __version__
+
+                report(f"{declared_name}: {__version__}")
             continue
         spec = req.get("version_spec")
         if check_dep_exists(req_name, "app", system_info=system_info):
+            version = None
             if spec:
-                check_app_version(
+                version = check_app_version(
                     req_name,
                     spec,
                     system_info=system_info,
                     described_as=described_as,
                 )
+            report_app(declared_name, req_name, version)
             continue
         # Offer the project's own way to install it, or else the registered
         # native installer when we have one
@@ -2183,13 +2295,15 @@ def check_requirements(
             if _install.prompt_and_install(
                 req_name, interactive=interactive, entry=override
             ) and check_dep_exists(req_name, "app", system_info=system_info):
+                version = None
                 if spec:
-                    check_app_version(
+                    version = check_app_version(
                         req_name,
                         spec,
                         system_info=system_info,
                         described_as=described_as,
                     )
+                report_app(declared_name, req_name, version)
                 continue
         # Some apps have no installer here but a known way in, e.g., a
         # system package manager on Linux
@@ -2208,6 +2322,8 @@ def check_requirements(
         req_kind = req["kind"]
         if not check_dep_exists(req_name, req_kind, system_info=system_info):
             raise ValueError(f"{req_kind} '{req_name}' not found")
+        if report is not None:
+            report(f"{req_name}: found")
     for req in buckets["setup"]:
         from calkit.requirements import check_setup_dep
 
@@ -2216,6 +2332,7 @@ def check_requirements(
             interactive=interactive,
             use_cache=use_cache,
             wdir=wdir,
+            report=report,
         )
         if not ok:
             raise ValueError(
@@ -2229,6 +2346,7 @@ def check_requirements(
             interactive=interactive,
             use_cache=use_cache,
             wdir=wdir,
+            report=report,
         )
         if not ok:
             raise ValueError(

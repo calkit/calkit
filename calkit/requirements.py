@@ -225,6 +225,16 @@ def cache_clear(*, wdir: str | None = None) -> None:
         cache.clear()
 
 
+def describe_cache_hit(name: str, entry: dict) -> str:
+    """Say a requirement passed as of a cache entry, and how long ago."""
+    age_s = max(int(time.time() - entry.get("passed_at", 0)), 0)
+    # In its largest whole unit, e.g., 2h rather than 2h13m
+    unit = next(
+        (u for u, n in reversed(_TTL_UNITS.items()) if age_s >= n), "s"
+    )
+    return f"{name}: passed {age_s // _TTL_UNITS[unit]}{unit} ago (cached)"
+
+
 def _run_shell(
     cmd: str, *, capture: bool = True
 ) -> subprocess.CompletedProcess:
@@ -252,6 +262,7 @@ def check_setup_dep(
     interactive: bool | None = None,
     use_cache: bool = True,
     wdir: str | None = None,
+    report: Callable[[str], None] | None = None,
 ) -> bool:
     """Check a ``kind: setup`` dependency.
 
@@ -260,6 +271,7 @@ def check_setup_dep(
     ``cache_ttl`` (defaulting to one day) under ``.calkit/local`` so
     repeated runs skip re-probing. The caller can pass ``use_cache=False``
     to bypass and force re-probing, which the CLI exposes as ``--no-cache``.
+    ``report`` is told how a satisfied one was met, e.g., from the cache.
     """
     name = req.get("name")
     if not name:
@@ -279,6 +291,8 @@ def check_setup_dep(
     if use_cache and ttl_seconds > 0:
         hit = cache_lookup(name, check_command, wdir=wdir)
         if hit is not None:
+            if report is not None:
+                report(describe_cache_hit(name, hit))
             return True
 
     def probe() -> str | None:
@@ -295,6 +309,7 @@ def check_setup_dep(
         interactive=interactive,
         ttl_seconds=ttl_seconds,
         wdir=wdir,
+        report=report,
     )
 
 
@@ -304,6 +319,7 @@ def check_aws_credentials_req(
     interactive: bool | None = None,
     use_cache: bool = True,
     wdir: str | None = None,
+    report: Callable[[str], None] | None = None,
 ) -> bool:
     """Check a ``kind: aws-credentials`` dependency.
 
@@ -347,7 +363,10 @@ def check_aws_credentials_req(
     ]
     cache_key = " ".join(cmd + aws_env) + f" == {account_id}"
     if use_cache and ttl_seconds > 0:
-        if cache_lookup(name, cache_key, wdir=wdir) is not None:
+        hit = cache_lookup(name, cache_key, wdir=wdir)
+        if hit is not None:
+            if report is not None:
+                report(describe_cache_hit(name, hit))
             return True
 
     def probe() -> str | None:
@@ -387,6 +406,7 @@ def check_aws_credentials_req(
         interactive=interactive,
         ttl_seconds=ttl_seconds,
         wdir=wdir,
+        report=report,
     )
 
 
@@ -648,8 +668,9 @@ def prompt_for_env_var_path_req(
     return value
 
 
-def check_env_var_path_req(req: dict[str, Any], interactive: bool) -> None:
-    """Check an ``env-var-path`` requirement, asking for it on a terminal.
+def check_env_var_path_req(req: dict[str, Any], interactive: bool) -> str:
+    """Check an ``env-var-path`` requirement, asking for it on a terminal,
+    and return the path it's set to.
 
     Raises
     ------
@@ -658,10 +679,11 @@ def check_env_var_path_req(req: dict[str, Any], interactive: bool) -> None:
         so the fix can be copied.
     """
     name = req["name"]
-    if resolve_env_var_path(name) is not None:
-        return
-    if interactive and prompt_for_env_var_path_req(req) is not None:
-        return
+    path = resolve_env_var_path(name)
+    if path is None and interactive:
+        path = prompt_for_env_var_path_req(req)
+    if path is not None:
+        return path
     current = os.environ.get(name)
     msg = (
         f"env-var-path '{name}' {_describe_missing_path(current)}"
@@ -743,6 +765,7 @@ def _probe_or_set_up(
     interactive: bool,
     ttl_seconds: int,
     wdir: str | None,
+    report: Callable[[str], None] | None = None,
 ) -> bool:
     """Probe a req, then prompt-and-run setup on TTY, else print and abort.
 
@@ -757,6 +780,8 @@ def _probe_or_set_up(
     if failure_reason is None:
         if ttl_seconds > 0:
             cache_record(name, cache_key, ttl_seconds, wdir=wdir)
+        if report is not None:
+            report(f"{name}: passed")
         return True
     print(f"Setup requirement '{name}' is not satisfied.")
     if failure_reason:
@@ -797,4 +822,6 @@ def _probe_or_set_up(
         return False
     if ttl_seconds > 0:
         cache_record(name, cache_key, ttl_seconds, wdir=wdir)
+    if report is not None:
+        report(f"{name}: passed after setup")
     return True

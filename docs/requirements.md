@@ -323,6 +323,13 @@ the project's requirements, and those of the stages `calkit status`
 lists as out of date and of their environments.
 Both cover subprojects too.
 
+<!-- TODO: needs human review -->
+
+With `--verbose`, it lists each requirement it checks and how it's met,
+e.g., where an app was found and its version, or that a setup step's
+last pass was reused from the cache.
+An env var is only said to be set, since its value may be a secret.
+
 Some skips still fail the run, after the stages that can run have run:
 
 - One of the stages named on the command line, e.g.,

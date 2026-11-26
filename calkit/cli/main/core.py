@@ -1318,8 +1318,70 @@ def diff(
             "--staged", help="Show a diff from files staged with Git."
         ),
     ] = False,
+    results: Annotated[
+        bool,
+        typer.Option(
+            "--results",
+            "-r",
+            help=(
+                "Summarize changed results as Markdown: stages that reran "
+                "or are stale, values, figures, tables, and questions "
+                "citing them."
+            ),
+        ),
+    ] = False,
+    base: Annotated[
+        str | None,
+        typer.Option(
+            "--base",
+            help=(
+                "Revision to compare results from. Defaults to the merge "
+                "base with the default branch."
+            ),
+        ),
+    ] = None,
+    to: Annotated[
+        str | None,
+        typer.Option(
+            "--to",
+            help="Revision to compare results to. Defaults to working tree.",
+        ),
+    ] = None,
+    max_items: Annotated[
+        int,
+        typer.Option("--max", help="Most items to list in each section."),
+    ] = 10,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print changed results as JSON."),
+    ] = False,
 ) -> None:
-    """Get a unified Git and DVC diff."""
+    """Get a unified Git and DVC diff, or summarize changed results.
+
+    With --results, two revisions are compared for a reviewer, e.g., of a
+    pull request. DVC-stored outputs are compared by hash, and their values
+    are only read if they're in the local cache.
+    """
+    if not results:
+        if base is not None or to is not None or json_output:
+            raise_error("--base, --to, and --json need --results")
+    elif staged:
+        raise_error("--staged can't be used with --results")
+    if results:
+        import calkit.results
+
+        try:
+            changes = calkit.results.get_changes(base=base, to=to)
+        except ValueError as e:
+            raise_error(str(e))
+        if json_output:
+            typer.echo(json.dumps(changes, indent=2, default=str))
+        else:
+            typer.echo(
+                calkit.results.format_changes(changes, max_items=max_items),
+                nl=False,
+            )
+        return
     print_sep("Code (Git)")
     git_cmd = ["git", "diff"]
     if staged:

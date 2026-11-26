@@ -1719,6 +1719,33 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
     assert (clone_dir / "results" / "out.txt").is_file()
 
 
+def test_diff(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(["git", "commit", "-qm", "Init", "--allow-empty"])
+    # Results are summarized as Markdown, or as JSON
+    out = subprocess.check_output(["calkit", "diff", "--results"], text=True)
+    assert out.startswith("## Changed results\n")
+    assert "No results changed." in out
+    out = subprocess.check_output(
+        ["calkit", "diff", "-r", "--base", "HEAD", "--json"], text=True
+    )
+    assert json.loads(out)["stages"] == []
+    # Options for one mode aren't taken by the other
+    for args in [["--base", "HEAD"], ["--json"], ["-r", "--staged"]]:
+        res = subprocess.run(
+            ["calkit", "diff", *args], capture_output=True, text=True
+        )
+        assert res.returncode == 1
+        assert "results" in res.stderr
+    res = subprocess.run(
+        ["calkit", "diff", "-r", "--base", "nope"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 1
+    assert "Can't find revision 'nope'" in res.stderr
+
+
 def test_status(tmp_dir):
     # Without a calkit.yaml this isn't a project, which status says
     res = subprocess.run(["calkit", "status"], capture_output=True, text=True)

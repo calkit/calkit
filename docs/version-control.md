@@ -230,6 +230,46 @@ Options:
   Only compatible when adding one path.
 - `--push`: Push to the Git or DVC remote after committing.
 
+<!-- TODO: needs human review -->
+
+## Reviewing what a change did to results
+
+A pull request that changes an analysis can change its results,
+and `dvc.lock`'s hashes don't say how.
+`calkit diff --results` summarizes it in Markdown for a reviewer:
+which stages reran or are now stale,
+each changed value, old and new, with its relative change for a number,
+which figures and tables changed,
+and which questions have answers citing evidence that changed.
+
+By default it compares the working tree to the merge base with the default
+branch, i.e., to where the branch started.
+Pass `--base` and `--to` to compare other revisions,
+`--max` to list more or fewer items in each section,
+or `--json` for the data behind it.
+A DVC-stored output is compared by the hashes `dvc.lock` records,
+and its values are only shown if the old and new versions are in the local
+cache, since nothing is pulled.
+
+<!-- TODO: needs human review -->
+
+To show the summary on a GitHub Actions run, write it to the job summary
+after the pipeline runs.
+The checkout needs the default branch's history to find the merge base:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+    with:
+      ref: ${{ github.head_ref || github.ref_name }}
+      fetch-depth: 0
+  - name: Run Calkit
+    uses: calkit/calkit/actions/run@main
+  - name: Summarize changed results
+    if: github.event_name == 'pull_request'
+    run: calkit diff --results >> "$GITHUB_STEP_SUMMARY"
+```
+
 ## Merging branches
 
 Calkit keeps a record of each pipeline stage's last run,

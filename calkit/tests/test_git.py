@@ -843,9 +843,12 @@ def test_configure_github_credentials(tmp_dir, monkeypatch, httpserver):
     if fake_system:
         assert "password=system" in fill("gitlab.com")
     # Credentials the user set up themselves are kept, e.g., with
-    # 'gh auth setup-git'
+    # 'gh auth setup-git', which also resets the system's helpers
     with open(global_config, "w") as f:
-        f.write('[credential "https://github.com"]\n' + helper % "users")
+        f.write(
+            '[credential "https://github.com"]\n\thelper =\n'
+            + helper % "users"
+        )
     own = git.Repo.init("own")
     assert calkit.git.get_github_credential_args() == []
     assert not calkit.git.configure_github_credentials(own)

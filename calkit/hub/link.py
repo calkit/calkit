@@ -6,7 +6,7 @@ holds a websocket to the relay, through which the owner's browser opens and
 attaches to shell sessions in those workspaces. Sessions belong to this
 process, so they survive browsers and relay connections coming and going.
 
-See docs/dev/adrs/0001-linked-machines.md and docs/dev/hub-link-protocol.md.
+See docs/dev/hub/linked-machines.md.
 """
 
 from __future__ import annotations
@@ -3955,7 +3955,7 @@ class HubLink:
             await asyncio.sleep(min(30, self.idle_exit_seconds))
             # Anything running or watching keeps it up, e.g., a pipeline
             # run with no browser left, or loops once links run them (see
-            # the ADR)
+            # docs/dev/hub/linked-machines.md#loops)
             if self.sessions or self.channels or self.workspace_actions:
                 last_used = loop.time()
             elif loop.time() - last_used >= self.idle_exit_seconds:

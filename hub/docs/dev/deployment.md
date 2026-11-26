@@ -198,8 +198,7 @@ A few deployment notes:
 
 The stack includes a `relay` service that pairs browsers with links, the
 Calkit processes users run to link their own machines to the hub, over
-websockets (see `docs/dev/adrs/0001-linked-machines.md` and
-`docs/dev/hub-link-protocol.md` at the repo root).
+websockets (see `docs/dev/hub/linked-machines.md` at the repo root).
 It's served at `relay.$DOMAIN`.
 
 - No extra DNS: `relay.$DOMAIN` is covered by the wildcard subdomain, and

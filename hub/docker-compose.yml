@@ -419,7 +419,7 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.tls.certresolver=le
 
   # Pairs browsers with machines over websockets. One process, so both ends
-  # of a pairing meet in memory; see docs/dev/hub-link-protocol.md.
+  # of a pairing meet in memory; see docs/dev/hub/linked-machines.md.
   relay:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
     restart: always

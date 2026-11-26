@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -365,55 +366,61 @@ def test_refval_shortcode(tmp_path, monkeypatch):
     assert "A 0.10 B α C ?? D 0.1 E 7" in out
 
 
-def test_provenance_panels(tmp_path: Path) -> None:
-    def get_titles(node: dict) -> list[str]:
-        titles = [t["value"] for t in node.get("title", [])]
-        for child in node.get("children") or []:
-            if isinstance(child, dict):
-                titles += get_titles(child)
-        return titles
-
+def test_provenance_records(tmp_path: Path) -> None:
     def get_text(node: dict | list) -> str:
         if isinstance(node, list):
             return "".join(get_text(n) for n in node)
         out = (
-            str(node.get("value", ""))
-            if node.get("type") != "admonition"
-            else ""
+            str(node.get("value", "")) if node.get("type") != "mermaid" else ""
         )
-        for key in ("title", "children"):
-            out += get_text(node.get(key) or [])
+        out += get_text(node.get("children") or [])
+        if node.get("type") == "link":
+            out += f"<{node['url']}>"
         return out + (
             "\n" if node.get("type") in ("paragraph", "tableRow") else ""
         )
 
-    # Divs are found outside code, with a src relative to the document, or
-    # its Quarto project with a leading slash, shown as their extension says
-    # unless they say otherwise
-    (tmp_path / "pub").mkdir()
-    (tmp_path / "pub" / "_quarto.yml").write_text(
-        "project:\n  type: default\n"
-    )
+    def get_graph(provenance: dict) -> str:
+        return str(
+            next(
+                n["value"]
+                for n in provenance["view"]
+                if n["type"] == "mermaid"
+            )
+        )
+
+    # Components are found outside code, named by their class, with a path
+    # relative to the project, as values' are, and an id and options
     text = (
-        '::: {.ckprovenance src="../figures/plot.svg" #fig-plot width="50%"}\n'
+        '::: {.ckfigure src="figures/plot.svg" #fig-plot width="50%"}\n'
         "Caption\n:::\n"
-        "```markdown\n::: {.ckprovenance src=in-code.png}\n```\n"
-        "::: {#tbl-data .ckprovenance src='/data.csv' rows=2}\n:::\n"
-        "::: {.ckprovenance src=notes.txt kind=table}\n:::\n"
+        "```markdown\n::: {.ckfigure src=in-code.png}\n```\n"
+        "::: {#tbl-data .cktable src='/data/clean.csv' rows=2} :::\n:::\n"
+        "::: {.ckinclude src=notes.md provenance=false}\n:::\n"
         "::: {.callout-note src=other.png}\n:::\n"
-        "::: ckprovenance\n:::\n"
+        "::: {.ckfigure}\n:::\n"
     )
-    divs = calkit.quarto.extract_provenance_divs(
-        text, "pub/pages/doc.qmd", wdir=str(tmp_path)
-    )
-    assert [(d.src, d.path, d.kind, d.line, d.rows) for d in divs] == [
-        ("../figures/plot.svg", "pub/figures/plot.svg", "figure", 1, 25),
-        ("/data.csv", "pub/data.csv", "table", 7, 2),
-        ("notes.txt", "pub/pages/notes.txt", "table", 9, 25),
-        ("", "", "document", 13, 25),
+    components = calkit.quarto.extract_components(text)
+    assert [
+        (c.kind, c.src, c.path, c.label, c.line, c.rows, c.provenance)
+        for c in components
+    ] == [
+        (
+            "figure",
+            "figures/plot.svg",
+            "figures/plot.svg",
+            "fig-plot",
+            1,
+            25,
+            True,
+        ),
+        ("table", "/data/clean.csv", "data/clean.csv", "tbl-data", 7, 2, True),
+        ("include", "notes.md", "notes.md", "", 9, 25, False),
     ]
-    # A project: raw data cleaned, then plotted, and rendered in a report
-    ck_info = {
+    assert calkit.quarto.has_components(text)
+    assert not calkit.quarto.has_components("No components.")
+    # A project: raw data cleaned, then plotted, and a notebook's value
+    ck_info: dict = {
         "datasets": [
             {"path": "data/raw.csv", "created_by": {"name": "Jane Doe"}},
         ],
@@ -423,14 +430,33 @@ def test_provenance_panels(tmp_path: Path) -> None:
                 "imported_from": {"url": "https://example.com/photo.png"},
             }
         ],
+        "references": [
+            {
+                "path": "refs.bib",
+                "values": {"liu2025": {"sigma": {"value": 0.1, "page": 4}}},
+            }
+        ],
         "environments": {"py": {"kind": "uv-venv", "path": "reqs.txt"}},
         "pipeline": {
             "stages": {
-                "clean": {"kind": "python-script", "environment": "py"},
-                "plot": {"kind": "python-script", "environment": "py"},
+                "clean": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "scripts/clean.py",
+                },
+                "plot": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "scripts/plot.py",
+                },
+                "fit": {
+                    "kind": "jupyter-notebook",
+                    "environment": "py",
+                    "notebook_path": "fit.ipynb",
+                },
                 "report": {
                     "kind": "quarto",
-                    "target_path": "report.qmd",
+                    "target_path": "pub/report.qmd",
                     "environment": "_system",
                 },
             }
@@ -440,36 +466,50 @@ def test_provenance_panels(tmp_path: Path) -> None:
     def get_entry(path: str) -> dict:
         return {"path": path, "hash": "md5", "md5": path + "-1"}
 
+    values_path = ".calkit/notebooks/outputs/fit.ipynb/values.json"
     dvc_stages = {
-        "clean": {"cmd": "python scripts/clean.py"},
-        "plot": {"cmd": "python scripts/plot.py"},
-        "report": {"cmd": "calkit quarto render report.qmd"},
-        "gone": {"cmd": "echo"},
+        "clean": {
+            "cmd": "python scripts/clean.py",
+            "outs": [
+                {"data/clean.csv": {"cache": False}},
+                "results/big.parquet",
+            ],
+        },
+        "plot": {
+            "cmd": "python scripts/plot.py",
+            "outs": [{"figures/plot.svg": {"cache": False}}],
+        },
+        "fit": {"cmd": "calkit nb execute fit.ipynb", "outs": [values_path]},
+        "report": {"cmd": "calkit quarto render report.qmd", "wdir": "pub"},
     }
     lock_stages: dict[str, dict] = {
         "clean": {
             "cmd": "python scripts/clean.py",
             "deps": [get_entry("scripts/clean.py"), get_entry("data/raw.csv")],
-            "outs": [get_entry("data/clean.csv")],
+            "outs": [
+                get_entry("data/clean.csv"),
+                get_entry("results/big.parquet"),
+            ],
         },
         "plot": {
             "cmd": "python scripts/plot.py",
             "deps": [
                 get_entry("scripts/plot.py"),
                 get_entry("data/clean.csv"),
+                get_entry("results/big.parquet"),
                 get_entry(".calkit/env-locks/py.txt"),
             ],
             "outs": [get_entry("figures/plot.svg")],
         },
+        "fit": {
+            "cmd": "calkit nb execute fit.ipynb",
+            "deps": [get_entry("fit.ipynb")],
+            "outs": [get_entry(values_path)],
+        },
         "report": {
             "cmd": "calkit quarto render report.qmd",
-            "deps": [
-                get_entry("report.qmd"),
-                get_entry("figures/plot.svg"),
-                get_entry("data/clean.csv"),
-                get_entry("figures/photo.png"),
-            ],
-            "outs": [get_entry("report.html")],
+            "deps": [get_entry("report.qmd"), get_entry("own.png")],
+            "outs": [get_entry("report.html"), get_entry("own.png")],
         },
     }
     stage_runs = {
@@ -482,18 +522,12 @@ def test_provenance_panels(tmp_path: Path) -> None:
         },
         # A run that isn't the one dvc.lock records isn't shown
         "clean": {"start_time": "2026-11-19T10:00:00", "dvc_lock_hash": "x"},
-        # Nor is the document's own, since it's running
-        "report": {
-            "start_time": "2026-11-20T10:00:00",
-            "dvc_lock_hash": calkit.dvc.stage_lock_hash(lock_stages["report"]),
-        },
     }
     files = {
-        entry["path"]: entry["md5"]
+        entry["path"]
         for stage in lock_stages.values()
         for entry in stage["deps"] + stage["outs"]
-    }
-    files["data/clean.csv"] = "data/clean.csv-1"
+    } | {"figures/sketch.png", "figures/photo.png"}
     content = {"data/clean.csv": "x,y\n1,2\n3,4\n5,6\n"}
     up_to_date = {
         "status": "up-to-date",
@@ -502,19 +536,26 @@ def test_provenance_panels(tmp_path: Path) -> None:
         "modified_outputs": [],
         "missing_outputs": [],
     }
+    # Files in Git link to the repo's host, at the commit a run recorded
+    in_git = {
+        "scripts/clean.py",
+        "scripts/plot.py",
+        "data/raw.csv",
+        "fit.ipynb",
+    }
 
-    def get_panels(
+    def get_records(
         text: str,
-        hashes: dict,
-        document_path: str = "report.qmd",
-        document_stage: str | None = None,
+        present: set[str] = files,
         statuses: dict[str, dict] | None = None,
+        values: list | None = None,
+        info: dict = ck_info,
+        check: tuple[bool, str | None] = (False, None),
     ) -> dict:
-        return calkit.quarto.get_provenance_panels(
-            calkit.quarto.extract_provenance_divs(text, document_path),
-            document_path,
-            document_stage=document_stage,
-            ck_info=ck_info,
+        return calkit.quarto.get_provenance_records(
+            calkit.quarto.extract_components(text),
+            "pub/report.qmd",
+            ck_info=info,
             dvc_yaml={"stages": dvc_stages},
             dvc_lock={"stages": lock_stages},
             stage_runs=stage_runs,
@@ -522,138 +563,158 @@ def test_provenance_panels(tmp_path: Path) -> None:
                 **up_to_date,
                 **(statuses or {}).get(name, {}),
             },
-            is_file=lambda p: p in hashes,
+            is_file=lambda p: p in present,
             is_dir=lambda p: False,
             listdir=lambda p: [],
             read_bytes=lambda p: content[p].encode(),
             open_text=lambda p: io.StringIO(content[p]),
+            values=values,
+            get_file_url=lambda p, sha: (
+                f"https://host.example/{sha or 'HEAD'}/{p}"
+                if p in in_git
+                else None
+            ),
+            check_reference_value=lambda key, name: check,
         )
 
     text = (
-        "::: {.ckprovenance src=figures/plot.svg #fig-plot}\n:::\n"
-        "::: {.ckprovenance src=data/clean.csv rows=2}\n:::\n"
-        "::: {.ckprovenance src=figures/photo.png}\n:::\n"
-        "::: {.ckprovenance src=figures/sketch.png}\n:::\n"
-        "::: {.ckprovenance src=figures/gone.png}\n:::\n"
-        "::: {.ckprovenance}\n:::\n"
+        "::: {.ckfigure src=figures/plot.svg #fig-plot}\n:::\n"
+        "::: {.cktable src=data/clean.csv #tbl-data rows=2}\n:::\n"
+        "::: {.ckfigure src=figures/photo.png}\n:::\n"
+        "::: {.ckfigure src=figures/sketch.png}\n:::\n"
+        "::: {.ckfigure src=figures/gone.png}\n:::\n"
+        "::: {.ckfigure src=own.png}\n:::\n"
+        "::: {.ckfigure src=figures/plot.svg provenance=false}\n:::\n"
     )
-    files["figures/sketch.png"] = "s"
-    res = get_panels(text, files)
-    panels = res["panels"]
-    assert list(panels) == [
+    records = get_records(text)["components"]
+    assert list(records) == [
         "figures/plot.svg",
         "data/clean.csv",
         "figures/photo.png",
         "figures/sketch.png",
         "figures/gone.png",
+        "own.png",
     ]
-    plot = panels["figures/plot.svg"]
-    assert (plot["kind"], plot["body"]) == ("figure", [])
-    assert plot["panel"][0]["kind"] == "note"
-    assert plot["panel"][0]["dropdown"]
-    plot_text = get_text(plot["panel"])
-    assert plot_text.startswith("Figure up to date")
-    assert "Made by: stage plot, python-script\n" in plot_text
-    assert "Environment: py (uv-venv)\n" in plot_text
-    assert "Last run: 2026-11-20, Linux x86_64, commit abcdef1\n" in plot_text
-    # Its script first, without Calkit's bookkeeping, e.g., its
-    # environment's lock
-    assert (
-        "scripts/plot.py✅ unchanged\ndata/clean.csvclean✅ unchanged\n"
-        in (plot_text)
+    plot = records["figures/plot.svg"]
+    # Referred to from where the document is
+    assert (plot["kind"], plot["url"], plot["body"]) == (
+        "figure",
+        "../figures/plot.svg",
+        [],
     )
-    assert ".calkit" not in plot_text
-    # A table is shown cut short, and a run not recorded in dvc.lock says
-    # so, e.g., one since the pipeline started
-    table = panels["data/clean.csv"]
+    provenance = plot["provenance"]
+    # Quiet while it's up to date, with nothing for formats that can't
+    # expand
+    assert provenance["state"] == "ok"
+    assert get_text(provenance["summary"]) == "Provenance"
+    assert provenance["line"] is None
+    view = get_text(provenance["view"])
+    # The whole chain, upstream first, with each stage's kind, environment,
+    # script, last run, and every input, with where each came from
+    assert view.index("Stage clean") < view.index("Stage plot")
+    assert "Stage clean (python-script), environment py (uv-venv)\n" in view
+    assert (
+        "Runs scripts/clean.py<https://host.example/HEAD/scripts/clean.py>\n"
+        in view
+    )
+    assert "Last run not recorded for its current outputs\n" in view
+    assert (
+        "Runs scripts/plot.py<https://host.example/abcdef123456/scripts/plot.py>\n"
+        in view
+    )
+    assert "Last run 2026-11-20, Linux x86_64, commit abcdef1\n" in view
+    assert (
+        "data/raw.csv<https://host.example/HEAD/data/raw.csv>Created by Jane Doe"
+        "✅ unchanged\n" in view
+    )
+    # What's shown in the document links there, and what DVC keeps, by hash
+    assert "data/clean.csv<#tbl-data>stage clean✅ unchanged\n" in view
+    assert (
+        "results/big.parquet (DVC md5 results)stage clean✅ unchanged\n"
+        in view
+    )
+    assert "Makes figures/plot.svg<#fig-plot>\n" in view
+    # Without Calkit's bookkeeping, e.g., an environment's lock
+    assert ".calkit" not in view
+    # The graph is only of what it's made from
+    graph = get_graph(provenance)
+    assert '[["clean"]]' in graph and '[["plot"]]' in graph
+    assert "fit" not in graph and "report" not in graph
+    assert '("figures/plot.svg"):::ok' in graph
+    assert "class f" in graph and "target" in graph
+    # A table is shown cut short
+    table = records["data/clean.csv"]
     assert table["kind"] == "table"
     assert (
         get_text(table["body"])
         == "xy\n12\n34\nFirst 2 rows of data/clean.csv\n"
     )
-    assert "Last run: not recorded for its current outputs\n" in get_text(
-        table["panel"]
-    )
+    assert "plot" not in get_graph(table["provenance"])
     # Something imported says from where, and something nothing accounts
-    # for says how to fix it
-    photo = panels["figures/photo.png"]["panel"][0]
-    assert get_titles(photo)[0].startswith("Figure: Imported from")
+    # for says so while collapsed, with how to fix it
+    photo = records["figures/photo.png"]["provenance"]
+    assert photo["state"] == "ok"
     assert "https://example.com/photo.png" in json.dumps(photo)
-    sketch = panels["figures/sketch.png"]["panel"][0]
-    assert sketch["kind"] == "warning"
-    assert get_titles(sketch) == [
+    sketch = records["figures/sketch.png"]["provenance"]
+    assert sketch["state"] == "incomplete"
+    assert get_text(sketch["summary"]) == (
+        "⚠️ Incomplete provenance: origin not defined for figures/sketch.png"
+    )
+    assert get_text(sketch["line"]) == (
         "Figure has incomplete provenance: origin not defined for "
         "figures/sketch.png"
-    ]
-    assert (
-        "To fix figures/sketch.png: it's exported from something else"
-        in get_text(sketch)
     )
-    assert get_titles(panels["figures/gone.png"]["panel"][0]) == [
-        "Figure missing"
-    ]
-    # So does the document showing them
-    assert res["document"]["panel"][0]["kind"] == "warning"
-    # Without them, it lists what it's made from, but not its own output
-    text = "".join(
-        line + "\n"
-        for line in text.splitlines()
-        if "sketch" not in line and "gone" not in line
+    assert "To fix figures/sketch.png: it's exported from something else" in (
+        get_text(sketch["view"])
     )
-    res = get_panels(text, files)
-    doc = res["document"]["panel"][0]
-    doc_text = get_text(doc)
-    assert get_titles(doc) == ["Document up to date"]
-    assert "Rendered by: stage report, quarto\n" in doc_text
-    assert "Last run" not in doc_text
-    assert "Environment: _system, i.e., none\n" in doc_text
-    assert "data/clean.csvclean✅ up to date\n" in doc_text
-    assert "figures/plot.svgplot✅ up to date\n" in doc_text
-    assert "Not checked: report.html, this document's own output" in doc_text
-    assert "report.htmlreport" not in doc_text
-    sections = {c.get("section") for c in doc["children"]}
-    assert {"table", "graph"} <= sections
-    graph = next(c for c in doc["children"] if c.get("section") == "graph")
-    assert graph["type"] == "mermaid"
-    assert '[["plot"]]' in graph["value"]
-    assert '("figures/plot.svg"):::ok' in graph["value"]
+    assert get_text(records["figures/gone.png"]["provenance"]["summary"]) == (
+        "⛔ Missing"
+    )
+    # What the document makes itself can't be said to be up to date
+    assert get_text(records["own.png"]["provenance"]["summary"]) == (
+        "Provenance: made by this document"
+    )
+    # Turned off for one, which still counts, or for the project
+    off = get_records(
+        "::: {.ckfigure src=figures/plot.svg provenance=false}\n:::\n"
+    )
+    assert off["components"]["figures/plot.svg"]["provenance"] is None
+    off = get_records(text, info={**ck_info, "show_provenance": False})
+    assert all(r["provenance"] is None for r in off["components"].values())
     # An edited script makes what it made out of date, and what's made from
-    # that wait on it, with even the document's own edits not counted
+    # that wait on it, said while collapsed
     stale = {"status": "stale", "modified_inputs": ["scripts/clean.py"]}
-    res = get_panels(
-        text,
-        files,
-        statuses={
-            "clean": stale,
-            "report": {**stale, "modified_inputs": ["report.qmd"]},
-        },
+    records = get_records(text, statuses={"clean": stale})["components"]
+    provenance = records["figures/plot.svg"]["provenance"]
+    assert provenance["state"] == "stale"
+    assert get_text(provenance["summary"]) == (
+        "⚠️ Out of date: waiting on data/clean.csv, results/big.parquet"
     )
-    assert get_titles(res["panels"]["figures/plot.svg"]["panel"][0]) == [
-        "Figure out of date: waiting on data/clean.csv"
-    ]
-    plot_text = get_text(res["panels"]["figures/plot.svg"]["panel"])
-    assert "data/clean.csvclean⚠️ out of date\n" in plot_text
-    assert "To update: calkit run\n" in plot_text
-    assert get_titles(res["panels"]["data/clean.csv"]["panel"][0]) == [
-        "Table out of date: scripts/clean.py modified"
-    ]
-    doc = res["document"]["panel"][0]
-    assert doc["kind"] == "danger"
-    assert get_titles(doc) == ["Document out of date: 2 of 2 outputs"]
-    graph = next(c for c in doc["children"] if c.get("section") == "graph")
-    assert '("data/clean.csv"):::stale' in graph["value"]
-    assert '("figures/plot.svg"):::waiting' in graph["value"]
+    assert get_text(provenance["line"]) == (
+        "Figure out of date: waiting on data/clean.csv, results/big.parquet"
+    )
+    view = get_text(provenance["view"])
+    assert (
+        "scripts/clean.py<https://host.example/HEAD/scripts/clean.py>✅"
+        not in view
+    )
+    assert "⚠️ modified" in view
+    assert "data/clean.csv<#tbl-data>stage clean⚠️ out of date\n" in view
+    assert "To update: calkit run\n" in view
+    assert '("data/clean.csv"):::stale' in get_graph(provenance)
+    assert get_text(records["data/clean.csv"]["provenance"]["summary"]) == (
+        "⚠️ Out of date: scripts/clean.py modified"
+    )
     # As do an output edited by hand, a deleted input, and a stage that
     # always runs, which doesn't hold up what's made from it
-    missing = {k: v for k, v in files.items() if k != "data/clean.csv"}
-    cases: list[tuple[dict, dict, str]] = [
+    cases: list[tuple[set[str], dict, str]] = [
         (
             files,
             {"plot": {"status": "stale", "modified_outputs": ["figures"]}},
-            "Figure out of date: modified outside pipeline",
+            "⚠️ Out of date: modified outside pipeline",
         ),
         (
-            missing,
+            files - {"data/clean.csv"},
             {
                 "plot": {
                     "status": "stale",
@@ -664,35 +725,87 @@ def test_provenance_panels(tmp_path: Path) -> None:
                     "missing_outputs": ["data/clean.csv"],
                 },
             },
-            "Figure out of date: data/clean.csv missing",
+            "⚠️ Out of date: data/clean.csv missing",
         ),
-        (files, {"clean": {"status": "always-run"}}, "Figure up to date"),
+        (files, {"clean": {"status": "always-run"}}, "Provenance"),
     ]
-    for hashes, statuses, title in cases:
-        res = get_panels(text, hashes, statuses=statuses)
-        assert get_titles(res["panels"]["figures/plot.svg"]["panel"][0]) == [
-            title
-        ]
-    # Raw data with no origin is a gap the document reports too
-    ck_info["datasets"] = []
-    res = get_panels(text, files)
-    doc = res["document"]["panel"][0]
-    assert doc["kind"] == "warning"
-    assert get_titles(doc) == [
-        "Document has incomplete provenance: origin not defined for "
-        "data/raw.csv"
+    for present, statuses, summary in cases:
+        records = get_records(text, present, statuses)["components"]
+        provenance = records["figures/plot.svg"]["provenance"]
+        assert get_text(provenance["summary"]) == summary
+    # Raw data with no origin is a gap in what's made from it
+    no_origin = {**ck_info, "datasets": []}
+    records = get_records(text, info=no_origin)["components"]
+    assert get_text(records["data/clean.csv"]["provenance"]["summary"]) == (
+        "⚠️ Incomplete provenance: origin not defined for data/raw.csv"
+    )
+    assert (
+        "data/raw.csv<https://host.example/HEAD/data/raw.csv>❔ origin not defined"
+        in (get_text(records["data/clean.csv"]["provenance"]["view"]))
+    )
+    # Values: from a results file, from a notebook's cell, and quoted from a
+    # reference, keyed as what shows them looks them up
+    values = calkit.quarto.extract_values(
+        "{{< ckvalue results/big.parquet n >}} "
+        "{{< ckvalue fit.ipynb k_25 .3f >}} "
+        "{{< ckrefval liu2025 sigma >}} {{< ckrefval liu2025 other >}} "
+        "{{< ckvalue fit.ipynb k_35 provenance=false >}}",
+        "pub/report.qmd",
+    )
+    assert [v.provenance for v in values] == [True, True, True, True, False]
+    records = get_records("", values=values)["values"]
+    assert list(records) == [
+        "results/big.parquet:n",
+        f"{values_path}:k_25",
+        "ref:liu2025:sigma",
+        "ref:liu2025:other",
+        f"{values_path}:k_35",
     ]
-    assert get_titles(res["panels"]["data/clean.csv"]["panel"][0]) == [
-        "Table has incomplete provenance: origin not defined for data/raw.csv"
+    assert records[f"{values_path}:k_35"]["provenance"] is None
+    result = records["results/big.parquet:n"]["provenance"]
+    assert get_text(result["view"]).startswith(
+        "n in results/big.parquet (DVC md5 results)\n"
+    )
+    assert '[["clean"]]' in get_graph(result)
+    nb_value = records[f"{values_path}:k_25"]["provenance"]
+    assert get_text(nb_value["view"]).startswith(
+        "k_25, saved from a cell of fit.ipynb<https://host.example/HEAD/fit.ipynb>\n"
+    )
+    assert "Stage fit (jupyter-notebook)" in get_text(nb_value["view"])
+    stale_values = get_records("", statuses={"clean": stale}, values=values)[
+        "values"
     ]
-    # A document no Quarto stage renders can name the stage that does
-    doc = get_panels("::: ckprovenance\n:::\n", files, "index.md")["document"]
-    assert get_titles(doc["panel"][0]) == [
-        "Document has incomplete provenance: no stage renders it"
-    ]
-    doc = get_panels("::: ckprovenance\n:::\n", files, "index.md", "report")
-    assert "Rendered by: stage report" in get_text(doc["document"]["panel"])
-    # Written where the filter reads it, beside nothing else
+    assert get_text(
+        stale_values["results/big.parquet:n"]["provenance"]["summary"]
+    ) == ("⚠️ Out of date: scripts/clean.py modified")
+    # One from a reference says what it's recorded as, and whether it
+    # matched the reference's PDF, rather than a pipeline
+    reference = records["ref:liu2025:sigma"]["provenance"]
+    assert reference["state"] == "ok"
+    assert get_text(reference["view"]).startswith(
+        "sigma, quoted from reference liu2025 in refs.bib\n"
+        "Recorded as 0.1, on page 4\n"
+        "Not checked against its PDF"
+    )
+    assert not any(n["type"] == "mermaid" for n in reference["view"])
+    for check, state, summary in [
+        ((True, None), "ok", "Provenance"),
+        (
+            (True, "0.1 isn't on page 4"),
+            "stale",
+            "⚠️ Doesn't match its reference: 0.1 isn't on page 4",
+        ),
+    ]:
+        checked = get_records("", values=values, check=check)["values"]
+        reference = checked["ref:liu2025:sigma"]["provenance"]
+        assert (reference["state"], get_text(reference["summary"])) == (
+            state,
+            summary,
+        )
+    assert get_text(records["ref:liu2025:other"]["provenance"]["summary"]) == (
+        "⛔ Not recorded for its reference"
+    )
+    # Written where what renders it reads it
     assert calkit.quarto.get_provenance_path("pub/report.qmd") == (
         ".calkit/local/provenance/pub/report.qmd.json"
     )
@@ -779,21 +892,21 @@ def test_stage_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # directory too, which DVC would otherwise name stages relative to
     (tmp_path / "sub").mkdir()
     monkeypatch.chdir(tmp_path / "sub")
-    divs = calkit.quarto.extract_provenance_divs(
-        "::: {.ckprovenance src=out.txt}\n:::\n", "doc.qmd"
+    components = calkit.quarto.extract_components(
+        "::: {.ckinclude src=out.txt}\n:::\n"
     )
     (tmp_path / "doc.qmd").write_text("")
-    for content, title in [
-        ("in\n", "File up to date"),
-        ("changed\n", "File out of date: in.txt modified"),
+    for content, summary in [
+        ("in\n", "Provenance"),
+        ("changed\n", "⚠️ Out of date: in.txt modified"),
     ]:
         (tmp_path / "in.txt").write_text(content)
         record_path = calkit.quarto.write_provenance(
-            divs, "doc.qmd", {}, wdir=str(tmp_path)
+            components, "doc.qmd", {}, wdir=str(tmp_path)
         )
         record = json.loads((tmp_path / record_path).read_text())
-        panel = record["panels"]["out.txt"]["panel"][0]
-        assert panel["title"][0]["value"] == title
+        provenance = record["components"]["out.txt"]["provenance"]
+        assert provenance["summary"][0]["value"] == summary
     assert os.getcwd() == str(tmp_path / "sub")
 
 
@@ -849,6 +962,8 @@ def test_filter_problem(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(shutil.which("quarto") is None, reason="needs Quarto")
 def test_provenance_filter(tmp_path: Path) -> None:
+    import nbformat
+
     def render(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["calkit", "quarto", "render", "-e", "_system", *args],
@@ -857,107 +972,226 @@ def test_provenance_filter(tmp_path: Path) -> None:
             cwd=tmp_path,
         )
 
+    def read_html() -> str:
+        html = (tmp_path / "report.html").read_text()
+        return html.replace("\xa0", " ").replace("&nbsp;", " ")
+
+    def get_summaries(html: str) -> list[tuple[str, str]]:
+        return re.findall(
+            r'<details class="ck-provenance ([^"]*)"><summary>(.*?)</summary>',
+            html,
+        )
+
+    def get_values(html: str) -> list[tuple[str, str, str]]:
+        return re.findall(
+            r'<button type="button" class="ck-value ([^"]*)" '
+            r'popovertarget="([^"]*)"[^>]*>([^<]*)',
+            html,
+        )
+
     subprocess.check_call(["calkit", "init"], cwd=tmp_path)
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "data").mkdir()
-    (tmp_path / "figures").mkdir()
+    subprocess.check_call(
+        ["git", "remote", "add", "origin", "git@github.com:example/proj.git"],
+        cwd=tmp_path,
+    )
+    for folder in ["scripts", "data", "figures", "results"]:
+        (tmp_path / folder).mkdir()
     (tmp_path / "data" / "raw.csv").write_text("x,y\n1,2\n3,4\n")
     # With a byte order mark and something that isn't UTF-8
     (tmp_path / "data" / "bom.csv").write_bytes(b"\xef\xbb\xbfp,q\n\xff,2\n")
     (tmp_path / "scripts" / "clean.py").write_text(
-        "import shutil\nshutil.copy('data/raw.csv', 'data/clean.csv')\n"
+        "import json, shutil\n"
+        "shutil.copy('data/raw.csv', 'data/clean.csv')\n"
+        "json.dump({'fit': {'slope': 0.123456}}, open('results/fit.json', 'w'))\n"
     )
     (tmp_path / "scripts" / "plot.py").write_text(
         "open('figures/plot.svg', 'w').write(\n"
         '    \'<svg xmlns="http://www.w3.org/2000/svg" width="10" '
         'height="10"/>\'\n)\n'
     )
+    nb = nbformat.v4.new_notebook()
+    nb.cells = [nbformat.v4.new_code_cell("k_25 = 0.0309")]
+    nbformat.write(nb, str(tmp_path / "fit.ipynb"))
+    subprocess.check_call(
+        ["calkit", "new", "uv-venv", "-n", "py", "ipykernel"], cwd=tmp_path
+    )
     stage = {"kind": "python-script", "environment": "_system"}
-    ck_info = {
-        "requirements": ["quarto"],
-        "datasets": [
-            {"path": "data/raw.csv", "created_by": {"name": "Jo"}},
-            {"path": "data/bom.csv", "created_by": {"name": "Jo"}},
-        ],
-        "pipeline": {
-            "stages": {
-                "clean": {
-                    **stage,
-                    "script_path": "scripts/clean.py",
-                    "inputs": ["data/raw.csv"],
-                    "outputs": [{"path": "data/clean.csv", "storage": "git"}],
-                },
-                "plot": {
-                    **stage,
-                    "script_path": "scripts/plot.py",
-                    "inputs": ["data/clean.csv"],
-                    "outputs": [
-                        {"path": "figures/plot.svg", "storage": "git"}
-                    ],
-                },
-                "report": {
-                    "kind": "quarto",
-                    "target_path": "report.qmd",
-                    "environment": "_system",
-                    "outputs": ["report.html"],
-                },
-            }
-        },
+    ck_info = calkit.load_calkit_info(wdir=str(tmp_path))
+    ck_info.update(
+        {
+            "requirements": ["quarto"],
+            "datasets": [
+                {"path": "data/raw.csv", "created_by": {"name": "Jo"}},
+                {"path": "data/bom.csv", "created_by": {"name": "Jo"}},
+            ],
+            "references": [
+                {
+                    "path": "refs.bib",
+                    "values": {
+                        "liu2025": {"sigma": {"value": 0.1, "page": 4}}
+                    },
+                }
+            ],
+        }
+    )
+    ck_info["pipeline"] = {
+        "stages": {
+            "clean": {
+                **stage,
+                "script_path": "scripts/clean.py",
+                "inputs": ["data/raw.csv"],
+                "outputs": [
+                    {"path": "data/clean.csv", "storage": "git"},
+                    {"path": "results/fit.json", "storage": "git"},
+                ],
+            },
+            "plot": {
+                **stage,
+                "script_path": "scripts/plot.py",
+                "inputs": ["data/clean.csv"],
+                "outputs": [{"path": "figures/plot.svg", "storage": "git"}],
+            },
+            "fit": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "fit.ipynb",
+                "environment": "py",
+                "html_storage": None,
+                "cell_outputs": [
+                    {
+                        "kind": "value",
+                        "cell_id": nb.cells[0].id,
+                        "variable_name": "k_25",
+                    }
+                ],
+            },
+            "report": {
+                "kind": "quarto",
+                "target_path": "report.qmd",
+                "environment": "_system",
+                "outputs": ["report.html"],
+            },
+        }
     }
     with open(tmp_path / "calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    (tmp_path / "refs.bib").write_text(
+        "@article{liu2025, title={T}, author={Liu}, year={2025}}\n"
+    )
     body = (
-        '::: {.ckprovenance src="figures/plot.svg" #fig-plot width="50%"}\n'
+        '::: {.ckfigure src="figures/plot.svg" #fig-plot width="50%"}\n'
         "The plot.\n:::\n\n"
-        "See @fig-plot and @tbl-data.\n\n"
-        "::: {.ckprovenance src=data/clean.csv #tbl-data}\nThe data.\n:::\n\n"
-        "::: {.ckprovenance src=data/bom.csv #tbl-bom} :::\nBOM.\n:::\n\n"
-        "::: {.ckprovenance graph=false}\n:::\n\n"
-        "::: {.calkit-provenance}\n:::\n"
+        "The slope is {{< ckvalue results/fit.json fit.slope .3f >}}, k is "
+        "{{< ckvalue fit.ipynb k_25 .3f >}}, sigma is "
+        "{{< ckrefval liu2025 sigma >}}, and not shown, "
+        "{{< ckvalue results/fit.json fit.slope .1f provenance=false >}}; "
+        "see @fig-plot and @tbl-data.\n\n"
+        "::: {.cktable src=data/clean.csv #tbl-data}\nThe data.\n:::\n\n"
+        "::: {.cktable src=data/bom.csv #tbl-bom provenance=false} :::\n"
+        "BOM.\n:::\n\n"
+        "::: {.ckprovenance}\n:::\n"
     )
     # Without the filter listed, it fails before rendering, saying what to
     # add
-    (tmp_path / "report.qmd").write_text("---\ntitle: Report\n---\n\n" + body)
+    (tmp_path / "report.qmd").write_text(
+        "---\ntitle: Report\n---\n\n::: {.ckfigure src=figures/plot.svg}\n:::\n"
+    )
     res = render("report.qmd")
     assert res.returncode != 0
     assert calkit.quarto.FILTER_CONFIG in res.stdout + res.stderr
     (tmp_path / "report.qmd").write_text(
         "---\ntitle: Report\n" + calkit.quarto.FILTER_CONFIG + "---\n\n" + body
     )
+    # In Git, so the scripts link to the repo's host
+    subprocess.check_call(["git", "add", "-A"], cwd=tmp_path)
+    subprocess.check_call(
+        [
+            "git",
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "Add project",
+        ],
+        cwd=tmp_path,
+    )
     subprocess.check_call(["calkit", "run"], cwd=tmp_path)
-    # What it shows is what it's made from
+    # What it shows is what it's made from, even without its provenance
     with open(tmp_path / "dvc.yaml") as f:
         deps = calkit.ryaml.load(f)["stages"]["report"]["deps"]
-    assert {"figures/plot.svg", "data/clean.csv"} <= set(deps)
-    html = (tmp_path / "report.html").read_text()
-    assert "Figure up to date" in html
-    assert "Document up to date" in html
-    assert "callout-note" in html
+    assert {
+        "figures/plot.svg",
+        "data/clean.csv",
+        "data/bom.csv",
+        "results/fit.json",
+    } <= set(deps)
+    html = read_html()
+    # Numbered and cross-referenced by Quarto, so the filter ran first
+    assert "Figure 1: The plot." in html
+    assert "Table 1: The data." in html
+    assert "Table 2: BOM." in html
+    assert 'href="#fig-plot" class="quarto-xref">Figure 1' in html
+    # Each component's provenance is collapsed under it, quietly
+    assert get_summaries(html) == [("ck-ok", "Provenance")] * 2
+    # Expanded, it's how it came to be, with a graph of only what it's
+    # made from, and links to the repo's host and the document
+    figure_view = html.split('<details class="ck-provenance ck-ok">')[1]
+    figure_view = figure_view.split("</details>")[0]
+    assert '<pre class="ck-mermaid">' in figure_view
+    assert '[["clean"]]' in figure_view
+    assert "fit" not in figure_view.split("</pre>")[0]
+    assert (
+        'href="https://github.com/example/proj/blob/' in figure_view
+        and "/scripts/plot.py" in figure_view
+    )
+    assert '<a href="#tbl-data"><code>data/clean.csv</code></a>' in figure_view
+    # Values read as text, opening where they came from, except one with
+    # it turned off, and one from a reference says what it's recorded as
+    values = get_values(html)
+    assert [(c, v) for c, _, v in values] == [
+        ("ck-ok", "0.123"),
+        ("ck-ok", "0.031"),
+        ("ck-ok", "0.1"),
+    ]
+    assert "and not shown, 0.1;" in html
+    popovers = {}
+    for _, id_, _ in values:
+        popover = html.split(f'<div id="{id_}" popover="" class="ck-popover">')
+        popovers[id_] = re.sub(r"\s+", " ", popover[1].split("</div>")[0])
+    assert "saved from a cell of" in popovers[values[1][1]]
+    assert (
+        "<strong>Stage</strong> <code>fit</code> (jupyter-notebook)"
+        in popovers[values[1][1]]
+    )
+    assert (
+        "quoted from reference <code>liu2025</code>" in popovers[values[2][1]]
+    )
+    assert "Recorded as 0.1, on page 4" in popovers[values[2][1]]
+    # Other formats show the value, and nothing while it's up to date
     res = render("report.qmd", "--to", "gfm", "--", "-o", "report.md")
     assert res.returncode == 0, res.stdout + res.stderr
     md = (tmp_path / "report.md").read_text().replace("\xa0", " ")
-    # Numbered and cross-referenced by Quarto, so the filter ran first,
-    # with non-breaking spaces as plain ones
-    assert "Figure 1: The plot." in md
-    assert "Table 1: The data." in md
-    assert 'href="#fig-plot" class="quarto-xref">Figure 1' in md
-    assert "| 1   | 2   |" in md
+    assert "The slope is 0.123, k is 0.031, sigma is 0.1" in md
+    assert "Provenance" not in md and "out of date" not in md
     assert "| p   | q   |" in md
-    assert "Table 2: BOM." in md
-    assert "Made by:** stage `plot`" in md
-    assert "Not checked:** `report.html`" in md
-    # A section turned off isn't there, nor is a misnamed div left silent
-    assert "flowchart" not in md
-    assert "Use `.ckprovenance` rather than `.calkit-provenance`" in md
-    # An edited script makes what's made from it out of date
+    assert "Use .ckfigure, .cktable, or .ckinclude" in md
+    # An edited script makes what's made from it out of date, said while
+    # collapsed, inline for a value, and in a line in other formats
     with open(tmp_path / "scripts" / "clean.py", "a") as f:
         f.write("# Edited\n")
-    res = render("report.qmd", "--to", "gfm", "--", "-o", "report.md")
+    res = render("report.qmd")
     assert res.returncode == 0, res.stdout + res.stderr
+    html = read_html()
+    assert get_summaries(html) == [
+        ("ck-stale", "⚠️ Out of date: waiting on data/clean.csv"),
+        ("ck-stale", "⚠️ Out of date: scripts/clean.py modified"),
+    ]
+    assert [c for c, _, _ in get_values(html)][0] == "ck-stale"
+    assert '0.123<sup class="ck-flag" aria-hidden="true">⚠</sup>' in html
+    res = render("report.qmd", "--to", "gfm", "--", "-o", "report.md")
     md = (tmp_path / "report.md").read_text().replace("\xa0", " ")
-    assert "Figure out of date: waiting on data/clean.csv" in md
-    assert "Table out of date: scripts/clean.py modified" in md
-    assert "Document out of date: 2 of 2 outputs" in md
+    assert "*Figure out of date: waiting on data/clean.csv*" in md
     # Rendered without Calkit after the document changed, it says so
     record_path = tmp_path / calkit.quarto.get_provenance_path("report.qmd")
     record = json.loads(record_path.read_text())
@@ -967,20 +1201,16 @@ def test_provenance_filter(tmp_path: Path) -> None:
     )
     with open(tmp_path / "report.qmd", "a") as f:
         f.write("\nMore text.\n")
-    subprocess.check_call(
-        ["quarto", "render", "report.qmd", "--to", "gfm", "-o", "report.md"],
-        cwd=tmp_path,
-    )
-    md = (tmp_path / "report.md").read_text()
-    assert md.count("Document changed since panels recorded") == 4
-    # With nothing recorded, it says so
+    subprocess.check_call(["quarto", "render", "report.qmd"], cwd=tmp_path)
+    html = read_html()
+    assert all("ck-outdated" in c for c, _ in get_summaries(html))
+    assert html.count("recorded before this document changed") >= 2
+    # With nothing recorded, it says so, keeping the table's caption and id
     record_path.unlink()
-    subprocess.check_call(
-        ["quarto", "render", "report.qmd", "--to", "gfm", "-o", "report.md"],
-        cwd=tmp_path,
+    subprocess.check_call(["quarto", "render", "report.qmd"], cwd=tmp_path)
+    html = read_html()
+    assert (
+        get_summaries(html) == [("ck-missing", "⚠️ No provenance recorded")] * 2
     )
-    md = (tmp_path / "report.md").read_text().replace("\xa0", " ")
-    assert "Figure 1: The plot." in md
-    assert 'href="#tbl-data" class="quarto-xref">Table 1' in md
-    assert "Table 1: The data." in md
-    assert md.count("No provenance recorded") == 4
+    assert 'href="#tbl-data" class="quarto-xref">Table 1' in html
+    assert "Table 1: The data." in html

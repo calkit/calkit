@@ -30,6 +30,295 @@ local function find_project_dir()
   end
 end
 
+-- What Calkit recorded for this document, or false if nothing
+local records = nil
+local function load_records()
+  if records ~= nil then
+    return records
+  end
+  records = false
+  local project_dir = find_project_dir()
+  local rel = pandoc.path.make_relative(quarto.doc.input_file, project_dir)
+  local content = read_file(pandoc.path.join({
+    project_dir, ".calkit", "local", "provenance",
+    (rel:gsub("\\", "/")) .. ".json",
+  }))
+  if content ~= nil then
+    local ok, data = pcall(quarto.json.decode, content)
+    if ok and type(data) == "table" then
+      records = data
+    end
+  end
+  return records
+end
+
+-- Whether the document changed since Calkit recorded it, e.g., in
+-- 'quarto preview', which a notebook does by rendering with --execute
+local outdated = nil
+local function is_outdated(data)
+  if outdated == nil then
+    outdated = false
+    local input = quarto.doc.input_file
+    local f = io.open(input, "rb")
+    local notebook = input:lower():match("%.ipynb$")
+    if data and data.source_sha1 and f ~= nil and not notebook then
+      outdated = pandoc.utils.sha1(f:read("a")) ~= data.source_sha1
+    end
+    if f ~= nil then
+      f:close()
+    end
+  end
+  return outdated
+end
+
+local inlines, blocks
+
+-- Text as Str and Space inlines rather than one long Str
+local function words(value)
+  local out = pandoc.Inlines({})
+  local first = true
+  for piece in string.gmatch(tostring(value) .. " ", "([^ ]*) ") do
+    if not first then
+      out:insert(pandoc.Space())
+    end
+    if piece ~= "" then
+      out:insert(pandoc.Str(piece))
+    end
+    first = false
+  end
+  return out
+end
+
+local function inline(node)
+  local kind = node.type
+  if kind == "text" then
+    return words(node.value or "")
+  elseif kind == "strong" then
+    return pandoc.Inlines({pandoc.Strong(inlines(node.children))})
+  elseif kind == "emphasis" then
+    return pandoc.Inlines({pandoc.Emph(inlines(node.children))})
+  elseif kind == "inlineCode" then
+    return pandoc.Inlines({pandoc.Code(node.value or "")})
+  elseif kind == "link" then
+    return pandoc.Inlines({
+      pandoc.Link(inlines(node.children), node.url or ""),
+    })
+  end
+  quarto.log.warning("Calkit provenance: unknown inline " .. tostring(kind))
+  return pandoc.Inlines({})
+end
+
+inlines = function(nodes)
+  local out = pandoc.Inlines({})
+  for _, node in ipairs(nodes or {}) do
+    out:extend(inline(node))
+  end
+  return out
+end
+
+local function data_table(node)
+  local head, body, columns = {}, {}, 0
+  for index, row in ipairs(node.children or {}) do
+    local cells, header = {}, false
+    for _, item in ipairs(row.children or {}) do
+      if item.header then
+        header = true
+      end
+      table.insert(cells, {pandoc.Plain(inlines(item.children))})
+    end
+    if #cells > columns then
+      columns = #cells
+    end
+    if index == 1 and header then
+      head = cells
+    else
+      table.insert(body, cells)
+    end
+  end
+  local aligns, widths = {}, {}
+  for index = 1, columns do
+    aligns[index] = pandoc.AlignDefault
+    widths[index] = 0
+  end
+  return pandoc.utils.from_simple_table(
+    pandoc.SimpleTable({}, aligns, widths, head, body)
+  )
+end
+
+local function escape(value)
+  return (value:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+    :gsub('"', "&quot;"))
+end
+
+-- How a view looks, and drawing its graph with Quarto's own Mermaid when
+-- it's opened, since Mermaid can't measure text while it's hidden
+local ASSETS = [[
+<style>
+details.ck-provenance{margin:-.25rem 0 1rem;font-size:.85em;
+  color:var(--bs-secondary-color,#6c757d)}
+details.ck-provenance>summary{cursor:pointer;display:inline-block;
+  list-style:none}
+details.ck-provenance>summary::-webkit-details-marker{display:none}
+details.ck-provenance>summary::before{content:"\25B8  "}
+details.ck-provenance[open]>summary::before{content:"\25BE  "}
+details.ck-provenance:not(.ck-ok)>summary,
+details.ck-provenance.ck-outdated>summary{color:#b35900;font-weight:600}
+details.ck-provenance[open]{border-left:2px solid #dee2e6;
+  padding-left:.75rem}
+button.ck-value{all:unset;cursor:pointer;
+  border-bottom:1px dotted currentColor}
+button.ck-value:focus-visible{outline:2px solid #0d6efd;outline-offset:2px}
+button.ck-value:not(.ck-ok),button.ck-value.ck-outdated{
+  border-bottom-color:#b35900}
+.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em}
+.ck-popover{max-width:min(48rem,92vw);max-height:80vh;overflow:auto;
+  padding:1rem;border:1px solid #dee2e6;border-radius:.375rem;
+  font-size:.9em}
+.ck-popover table{border-collapse:collapse;margin-bottom:1rem}
+.ck-popover th,.ck-popover td{padding:.2rem .6rem;text-align:left;
+  border-bottom:1px solid #dee2e6}
+</style>
+<script>
+document.addEventListener("toggle", async (event) => {
+  const el = event.target;
+  if (!(el.open || event.newState === "open") || !window.mermaid) return;
+  for (const pre of el.querySelectorAll("pre.ck-mermaid:not([data-drawn])")) {
+    pre.dataset.drawn = "true";
+    const id = "ck-mermaid-" + Math.random().toString(36).slice(2);
+    const { svg } = await window.mermaid.render(id, pre.textContent);
+    pre.innerHTML = svg;
+  }
+}, true);
+</script>
+]]
+local assets_ready = false
+local function add_assets()
+  if assets_ready then
+    return
+  end
+  local share = os.getenv("QUARTO_SHARE_PATH")
+  if share then
+    local function asset(name)
+      return pandoc.path.join({share, "formats", "html", "mermaid", name})
+    end
+    -- The same files, under the same name, as Quarto's own diagrams
+    quarto.doc.add_html_dependency({
+      name = "quarto-diagram",
+      scripts = {asset("mermaid.min.js"), asset("mermaid-init.js")},
+      stylesheets = {asset("mermaid.css")},
+    })
+  end
+  quarto.doc.include_text("in-header", ASSETS)
+  assets_ready = true
+end
+
+local function block(node)
+  local kind = node.type
+  if kind == "paragraph" then
+    return pandoc.Blocks({pandoc.Para(inlines(node.children))})
+  elseif kind == "table" then
+    return pandoc.Blocks({data_table(node)})
+  elseif kind == "mermaid" then
+    if quarto.doc.is_format("html:js") then
+      return pandoc.Blocks({
+        pandoc.RawBlock(
+          "html",
+          '<pre class="ck-mermaid">' .. escape(node.value or "") .. "</pre>"
+        ),
+      })
+    end
+    return pandoc.Blocks({
+      pandoc.CodeBlock(node.value or "", pandoc.Attr("", {"default"}, {})),
+    })
+  end
+  quarto.log.warning("Calkit provenance: unknown block " .. tostring(kind))
+  return pandoc.Blocks({})
+end
+
+blocks = function(nodes)
+  local out = pandoc.Blocks({})
+  for _, node in ipairs(nodes or {}) do
+    out:extend(block(node))
+  end
+  return out
+end
+
+local function to_html(content)
+  return (pandoc.write(pandoc.Pandoc(content), "html"):gsub("%s+$", ""))
+end
+
+local function get_classes(base, provenance, data)
+  return base .. " ck-" .. (provenance.state or "ok")
+    .. (is_outdated(data) and " ck-outdated" or "")
+end
+
+-- The line shown while it's collapsed, which says what's wrong
+local function get_summary(provenance, data)
+  local out = inlines(provenance.summary)
+  if is_outdated(data) then
+    out:extend(words(" · recorded before this document changed"))
+  end
+  return out
+end
+
+-- How it came to be, under a note if the document changed since
+local function get_view(provenance, data)
+  local out = pandoc.Blocks({})
+  if is_outdated(data) then
+    out:insert(pandoc.Para(words(
+      "The document changed since this was recorded; render it with "
+        .. "Calkit to update it."
+    )))
+  end
+  out:extend(blocks(provenance.view))
+  return out
+end
+
+local n_popovers = 0
+local function with_provenance(text, key, kwargs)
+  local out = pandoc.Inlines({pandoc.Str(text)})
+  local flag = pandoc.utils.stringify(kwargs.provenance or ""):lower()
+  if flag == "false" or flag == "no" or flag == "0" or flag == "off"
+    or not quarto.doc.is_format("html:js") then
+    return out
+  end
+  local data = load_records()
+  local record = data and (data.values or {})[key] or nil
+  if record == nil or not record.provenance then
+    return out
+  end
+  add_assets()
+  local provenance = record.provenance
+  n_popovers = n_popovers + 1
+  local id = "ck-value-" .. n_popovers
+  local summary = get_summary(provenance, data)
+  local label = "Where " .. text .. " came from: "
+    .. pandoc.utils.stringify(summary)
+  local warn = provenance.state ~= "ok" or is_outdated(data)
+  local content = pandoc.Blocks({pandoc.Para(summary)})
+  content:extend(get_view(provenance, data))
+  quarto.doc.include_text(
+    "after-body",
+    '<div id="' .. id .. '" popover class="ck-popover">'
+      .. to_html(content) .. "</div>"
+  )
+  return pandoc.Inlines({
+    pandoc.RawInline(
+      "html",
+      '<button type="button" class="'
+        .. get_classes("ck-value", provenance, data)
+        .. '" popovertarget="' .. id .. '" aria-label="' .. escape(label)
+        .. '" title="' .. escape(pandoc.utils.stringify(summary)) .. '">'
+    ),
+    pandoc.Str(text),
+    pandoc.RawInline(
+      "html",
+      (warn and '<sup class="ck-flag" aria-hidden="true">⚠</sup>' or "")
+        .. "</button>"
+    ),
+  })
+end
+
 -- A number as YAML writes it, which Pandoc's metadata gives as text
 local yaml_specials = {
   [".inf"] = math.huge, ["+.inf"] = math.huge, ["-.inf"] = -math.huge,
@@ -578,7 +867,7 @@ return {
       )
       return pandoc.Str("??")
     end
-    return pandoc.Str(text)
+    return with_provenance(text, path .. ":" .. key, kwargs)
   end,
   -- A value quoted from a reference: its citation key, its name, and
   -- optionally a format, from the file Calkit writes them all to
@@ -621,6 +910,6 @@ return {
       )
       return pandoc.Str("??")
     end
-    return pandoc.Str(text)
+    return with_provenance(text, "ref:" .. key .. ":" .. name, kwargs)
   end,
 }

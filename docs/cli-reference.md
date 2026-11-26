@@ -4762,7 +4762,7 @@ Work with Quarto.
 
 Render a Quarto document in an environment.
 
-Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. The values the document shows with the 'ckvalue' shortcode are checked first, what its 'ckprovenance' divs say about where its figures and tables came from is worked out, and the Quarto extension that shows both is written.
+Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. The values the document shows with the 'ckvalue' shortcode are checked first, where they and the figures, tables, and files it shows with 'ckfigure', 'cktable', and 'ckinclude' came from is worked out, and the Quarto extension that shows them is written.
 
 Usage:
 

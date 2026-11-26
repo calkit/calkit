@@ -76,9 +76,9 @@ def render(
     the same version, unless the project lists 'quarto' as a requirement or
     the environment is `_system`, i.e., this machine.
     The values the document shows with the 'ckvalue' shortcode are checked
-    first, what its 'ckprovenance' divs say about where its figures and
-    tables came from is worked out, and the Quarto extension that shows
-    both is written.
+    first, where they and the figures, tables, and files it shows with
+    'ckfigure', 'cktable', and 'ckinclude' came from is worked out, and the
+    Quarto extension that shows them is written.
     """
     import calkit
     import calkit.environments
@@ -136,27 +136,29 @@ def render(
             write_values_file(ck_info, wdir=project_dir)
         if values:
             calkit.quarto.check_values(values, document_rel, wdir=project_dir)
-        # What the provenance panels say is decided now, from the pipeline
-        # as it stands, for the filter to show
-        divs = (
-            calkit.quarto.extract_provenance_divs(
-                text, document_rel, wdir=project_dir
-            )
-            if calkit.quarto.PROVENANCE_CLASS in text
+        # Where its components and values came from is decided now, from
+        # the pipeline as it stands, for the extension to show
+        components = (
+            calkit.quarto.extract_components(text)
+            if calkit.quarto.has_components(text)
             else []
         )
         filter_problem = (
             calkit.quarto.get_filter_problem(
                 text, document_rel, wdir=project_dir, to=to
             )
-            if divs
+            if components
             else None
         )
-        if divs and filter_problem is None:
+        if (components or values) and filter_problem is None:
             calkit.quarto.write_provenance(
-                divs, document_rel, ck_info, wdir=project_dir
+                components,
+                document_rel,
+                ck_info,
+                wdir=project_dir,
+                values=values,
             )
-        if values or divs:
+        if values or components:
             calkit.quarto.write_components(document_rel, wdir=project_dir)
     except (MarkdownParseError, ValueError) as e:
         raise_error(str(e))

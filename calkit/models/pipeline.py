@@ -1885,7 +1885,8 @@ class QuartoStage(Stage):
     )
 
     # The results files the document's ckvalue shortcodes read, and the
-    # files its ckprovenance divs show, relative to the project, set by
+    # files its ckfigure, cktable, and ckinclude divs show, relative to the
+    # project, set by
     # preprocess
     _value_paths: list[str] = PrivateAttr(default_factory=list)
     # The documents it embeds cells' outputs from, and outputs of the stages
@@ -1959,12 +1960,10 @@ class QuartoStage(Stage):
                 )
                 if exists(p) or is_output(p)
             ]
-        # The files its provenance divs show, which it renders after
+        # The files its components show, which it renders after
         divs = (
-            calkit.quarto.extract_provenance_divs(
-                text, self.project_target_path, wdir=project_dir
-            )
-            if calkit.quarto.PROVENANCE_CLASS in text
+            calkit.quarto.extract_components(text)
+            if calkit.quarto.has_components(text)
             else []
         )
         # Except what it makes itself, e.g., a figure its code draws

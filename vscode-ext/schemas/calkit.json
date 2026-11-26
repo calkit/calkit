@@ -14149,6 +14149,12 @@
       "title": "Results",
       "type": "array"
     },
+    "show_provenance": {
+      "default": true,
+      "description": "Show where each figure, table, file, and value a Quarto or MyST document shows from the project came from, collapsed under it. Each can turn it off for itself with 'provenance=false'.",
+      "title": "Show Provenance",
+      "type": "boolean"
+    },
     "showcase": {
       "anyOf": [
         {

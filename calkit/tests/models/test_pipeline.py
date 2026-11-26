@@ -533,17 +533,18 @@ def test_quartostage(tmp_path):
     )
     assert s.dvc_deps[-2:] == ["../results/metrics.json", "../data/n.json"]
     assert (tmp_path / "_extensions/calkit/calkit.lua").is_file()
-    # The files its provenance divs show are inputs too, except what it
-    # makes itself, which can't be both
+    # The files its components show are inputs too, whether or not where
+    # they came from is shown, except what it makes itself, which can't be
+    # both
     (tmp_path / "figures").mkdir()
     (tmp_path / "figures" / "plot.svg").write_text("<svg/>")
     (tmp_path / "report" / "report.qmd").write_text(
-        '::: {.ckprovenance src="../figures/plot.svg"}\n:::\n'
-        "::: {.ckprovenance src=own/fig.svg}\n:::\n"
-        "::: {.ckprovenance src=own.csv}\n:::\n"
-        "::: {.ckprovenance src=../data/n.json kind=file}\n:::\n"
-        "::: {.ckprovenance src=gone.png}\n:::\n"
-        "::: {.ckprovenance}\n:::\n"
+        '::: {.ckfigure src="figures/plot.svg"}\n:::\n'
+        "::: {.ckfigure src=report/own/fig.svg}\n:::\n"
+        "::: {.cktable src=report/own.csv}\n:::\n"
+        "::: {.ckinclude src=data/n.json provenance=false}\n:::\n"
+        "::: {.ckfigure src=gone.png}\n:::\n"
+        "::: {.ckfigure}\n:::\n"
     )
     s.outputs = ["own", "own.csv"]
     s.preprocess(

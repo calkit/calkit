@@ -45,15 +45,10 @@ _REFVAL_SHORTCODE_RE = re.compile(r"\{\{<\s*ckrefval\s+(?P<args>.*?)\s*>\}\}")
 # {{< embed analysis.ipynb#fig-decay >}}
 _EMBED_RE = re.compile(r"\{\{<\s*embed\s+[\"']?(?P<path>[^\s#\"'>]+)")
 
-# Reads each value from its results file when the document renders, finding
-# declared results' names in calkit.yaml, and formats it as Python would,
-# which ``check_values`` makes sure of before the pipeline renders.
-SHORTCODE_LUA = r"""---@diagnostic disable: undefined-global
--- Written by Calkit; changes are overwritten when the pipeline compiles.
--- Shows values from pipeline results with
--- {{< ckvalue results/metrics.json key .2f >}}, read from the results file
--- each time the document renders.
-
+# What the filter and the shortcodes share: reading what Calkit recorded
+# for the document, and turning a provenance view into Pandoc's AST or
+# HTML, deciding nothing about what it says, which is decided in Python
+PROVENANCE_LUA_COMMON = r"""
 local function read_file(fpath)
   local f = io.open(fpath, "r")
   if f == nil then
@@ -80,6 +75,491 @@ local function find_project_dir()
   end
 end
 
+-- What Calkit recorded for this document, or false if nothing
+local records = nil
+local function load_records()
+  if records ~= nil then
+    return records
+  end
+  records = false
+  local project_dir = find_project_dir()
+  local rel = pandoc.path.make_relative(quarto.doc.input_file, project_dir)
+  local content = read_file(pandoc.path.join({
+    project_dir, ".calkit", "local", "provenance",
+    (rel:gsub("\\", "/")) .. ".json",
+  }))
+  if content ~= nil then
+    local ok, data = pcall(quarto.json.decode, content)
+    if ok and type(data) == "table" then
+      records = data
+    end
+  end
+  return records
+end
+
+-- Whether the document changed since Calkit recorded it, e.g., in
+-- 'quarto preview', which a notebook does by rendering with --execute
+local outdated = nil
+local function is_outdated(data)
+  if outdated == nil then
+    outdated = false
+    local input = quarto.doc.input_file
+    local f = io.open(input, "rb")
+    local notebook = input:lower():match("%.ipynb$")
+    if data and data.source_sha1 and f ~= nil and not notebook then
+      outdated = pandoc.utils.sha1(f:read("a")) ~= data.source_sha1
+    end
+    if f ~= nil then
+      f:close()
+    end
+  end
+  return outdated
+end
+
+local inlines, blocks
+
+-- Text as Str and Space inlines rather than one long Str
+local function words(value)
+  local out = pandoc.Inlines({})
+  local first = true
+  for piece in string.gmatch(tostring(value) .. " ", "([^ ]*) ") do
+    if not first then
+      out:insert(pandoc.Space())
+    end
+    if piece ~= "" then
+      out:insert(pandoc.Str(piece))
+    end
+    first = false
+  end
+  return out
+end
+
+local function inline(node)
+  local kind = node.type
+  if kind == "text" then
+    return words(node.value or "")
+  elseif kind == "strong" then
+    return pandoc.Inlines({pandoc.Strong(inlines(node.children))})
+  elseif kind == "emphasis" then
+    return pandoc.Inlines({pandoc.Emph(inlines(node.children))})
+  elseif kind == "inlineCode" then
+    return pandoc.Inlines({pandoc.Code(node.value or "")})
+  elseif kind == "link" then
+    return pandoc.Inlines({
+      pandoc.Link(inlines(node.children), node.url or ""),
+    })
+  end
+  quarto.log.warning("Calkit provenance: unknown inline " .. tostring(kind))
+  return pandoc.Inlines({})
+end
+
+inlines = function(nodes)
+  local out = pandoc.Inlines({})
+  for _, node in ipairs(nodes or {}) do
+    out:extend(inline(node))
+  end
+  return out
+end
+
+local function data_table(node)
+  local head, body, columns = {}, {}, 0
+  for index, row in ipairs(node.children or {}) do
+    local cells, header = {}, false
+    for _, item in ipairs(row.children or {}) do
+      if item.header then
+        header = true
+      end
+      table.insert(cells, {pandoc.Plain(inlines(item.children))})
+    end
+    if #cells > columns then
+      columns = #cells
+    end
+    if index == 1 and header then
+      head = cells
+    else
+      table.insert(body, cells)
+    end
+  end
+  local aligns, widths = {}, {}
+  for index = 1, columns do
+    aligns[index] = pandoc.AlignDefault
+    widths[index] = 0
+  end
+  return pandoc.utils.from_simple_table(
+    pandoc.SimpleTable({}, aligns, widths, head, body)
+  )
+end
+
+local function escape(value)
+  return (value:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+    :gsub('"', "&quot;"))
+end
+
+-- How a view looks, and drawing its graph with Quarto's own Mermaid when
+-- it's opened, since Mermaid can't measure text while it's hidden
+local ASSETS = [[
+<style>
+details.ck-provenance{margin:-.25rem 0 1rem;font-size:.85em;
+  color:var(--bs-secondary-color,#6c757d)}
+details.ck-provenance>summary{cursor:pointer;display:inline-block;
+  list-style:none}
+details.ck-provenance>summary::-webkit-details-marker{display:none}
+details.ck-provenance>summary::before{content:"\25B8  "}
+details.ck-provenance[open]>summary::before{content:"\25BE  "}
+details.ck-provenance:not(.ck-ok)>summary,
+details.ck-provenance.ck-outdated>summary{color:#b35900;font-weight:600}
+details.ck-provenance[open]{border-left:2px solid #dee2e6;
+  padding-left:.75rem}
+button.ck-value{all:unset;cursor:pointer;
+  border-bottom:1px dotted currentColor}
+button.ck-value:focus-visible{outline:2px solid #0d6efd;outline-offset:2px}
+button.ck-value:not(.ck-ok),button.ck-value.ck-outdated{
+  border-bottom-color:#b35900}
+.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em}
+.ck-popover{max-width:min(48rem,92vw);max-height:80vh;overflow:auto;
+  padding:1rem;border:1px solid #dee2e6;border-radius:.375rem;
+  font-size:.9em}
+.ck-popover table{border-collapse:collapse;margin-bottom:1rem}
+.ck-popover th,.ck-popover td{padding:.2rem .6rem;text-align:left;
+  border-bottom:1px solid #dee2e6}
+</style>
+<script>
+document.addEventListener("toggle", async (event) => {
+  const el = event.target;
+  if (!(el.open || event.newState === "open") || !window.mermaid) return;
+  for (const pre of el.querySelectorAll("pre.ck-mermaid:not([data-drawn])")) {
+    pre.dataset.drawn = "true";
+    const id = "ck-mermaid-" + Math.random().toString(36).slice(2);
+    const { svg } = await window.mermaid.render(id, pre.textContent);
+    pre.innerHTML = svg;
+  }
+}, true);
+</script>
+]]
+local assets_ready = false
+local function add_assets()
+  if assets_ready then
+    return
+  end
+  local share = os.getenv("QUARTO_SHARE_PATH")
+  if share then
+    local function asset(name)
+      return pandoc.path.join({share, "formats", "html", "mermaid", name})
+    end
+    -- The same files, under the same name, as Quarto's own diagrams
+    quarto.doc.add_html_dependency({
+      name = "quarto-diagram",
+      scripts = {asset("mermaid.min.js"), asset("mermaid-init.js")},
+      stylesheets = {asset("mermaid.css")},
+    })
+  end
+  quarto.doc.include_text("in-header", ASSETS)
+  assets_ready = true
+end
+
+local function block(node)
+  local kind = node.type
+  if kind == "paragraph" then
+    return pandoc.Blocks({pandoc.Para(inlines(node.children))})
+  elseif kind == "table" then
+    return pandoc.Blocks({data_table(node)})
+  elseif kind == "mermaid" then
+    if quarto.doc.is_format("html:js") then
+      return pandoc.Blocks({
+        pandoc.RawBlock(
+          "html",
+          '<pre class="ck-mermaid">' .. escape(node.value or "") .. "</pre>"
+        ),
+      })
+    end
+    return pandoc.Blocks({
+      pandoc.CodeBlock(node.value or "", pandoc.Attr("", {"default"}, {})),
+    })
+  end
+  quarto.log.warning("Calkit provenance: unknown block " .. tostring(kind))
+  return pandoc.Blocks({})
+end
+
+blocks = function(nodes)
+  local out = pandoc.Blocks({})
+  for _, node in ipairs(nodes or {}) do
+    out:extend(block(node))
+  end
+  return out
+end
+
+local function to_html(content)
+  return (pandoc.write(pandoc.Pandoc(content), "html"):gsub("%s+$", ""))
+end
+
+local function get_classes(base, provenance, data)
+  return base .. " ck-" .. (provenance.state or "ok")
+    .. (is_outdated(data) and " ck-outdated" or "")
+end
+
+-- The line shown while it's collapsed, which says what's wrong
+local function get_summary(provenance, data)
+  local out = inlines(provenance.summary)
+  if is_outdated(data) then
+    out:extend(words(" · recorded before this document changed"))
+  end
+  return out
+end
+
+-- How it came to be, under a note if the document changed since
+local function get_view(provenance, data)
+  local out = pandoc.Blocks({})
+  if is_outdated(data) then
+    out:insert(pandoc.Para(words(
+      "The document changed since this was recorded; render it with "
+        .. "Calkit to update it."
+    )))
+  end
+  out:extend(blocks(provenance.view))
+  return out
+end
+"""
+
+# Turns what Calkit recorded for each of a document's components into
+# Pandoc's AST, deciding nothing about what it says
+PROVENANCE_LUA = (
+    r"""---@diagnostic disable: undefined-global
+-- Written by Calkit; changes are overwritten when the pipeline compiles.
+-- Shows a file from the project with ::: {.ckfigure src="figures/fit.png"},
+-- .cktable for a CSV or TSV file, or .ckinclude for anything else, with
+-- where it came from collapsed under it. Calkit decides what that says
+-- before rendering, and writes it to .calkit/local/provenance; this only
+-- turns it into Pandoc's AST. It has to run at pre-ast, so Quarto numbers
+-- figures and tables after.
+"""
+    + PROVENANCE_LUA_COMMON
+    + r"""
+local KINDS = {ckfigure = "figure", cktable = "table", ckinclude = "include"}
+local MARKDOWN_EXTS = {[".md"] = true, [".qmd"] = true}
+
+-- A file's path relative to the document, as an image's is read, when
+-- nothing's recorded to say it
+local function get_url(src)
+  local project_dir = find_project_dir()
+  return pandoc.path.make_relative(
+    pandoc.path.join({project_dir, src}),
+    pandoc.path.directory(quarto.doc.input_file),
+    true
+  )
+end
+
+local function get_image(el, url)
+  local attributes = {}
+  for _, key in ipairs({"width", "height", "fig-align", "fig-alt"}) do
+    if el.attributes[key] then
+      table.insert(attributes, {key, el.attributes[key]})
+    end
+  end
+  local alt = el.attributes.alt and words(el.attributes.alt)
+    or pandoc.Inlines({})
+  return pandoc.Image(alt, url, "", pandoc.Attr("", {}, attributes))
+end
+
+-- A Quarto figure, numbered and cross-referenced by the div's id, with its
+-- content as the caption, so citations and cross-references in it work
+local function get_figure(el, content)
+  if el.identifier == "" and #el.content == 0 then
+    return content
+  end
+  return pandoc.Blocks({
+    pandoc.Figure(
+      content, {long = el.content}, pandoc.Attr(el.identifier, {}, {})
+    ),
+  })
+end
+
+local function is_off(value)
+  value = (value or ""):lower()
+  return value == "false" or value == "no" or value == "0" or value == "off"
+end
+
+-- Collapsed under it in HTML, saying what's wrong while it is, and only
+-- that, in a line, in other formats
+local function get_provenance(provenance, data)
+  if quarto.doc.is_format("html:js") then
+    add_assets()
+    local classes = get_classes("ck-provenance", provenance, data)
+    local out = pandoc.Blocks({
+      pandoc.RawBlock(
+        "html",
+        '<details class="' .. classes .. '"><summary>'
+          .. to_html({pandoc.Plain(get_summary(provenance, data))})
+          .. "</summary>"
+      ),
+    })
+    out:extend(get_view(provenance, data))
+    out:insert(pandoc.RawBlock("html", "</details>"))
+    return out
+  end
+  if provenance.line then
+    return pandoc.Blocks({pandoc.Para({pandoc.Emph(inlines(provenance.line))})})
+  end
+  return pandoc.Blocks({})
+end
+
+local function unrecorded()
+  if not quarto.doc.is_format("html:js") then
+    return pandoc.Blocks({})
+  end
+  add_assets()
+  return pandoc.Blocks({
+    pandoc.RawBlock(
+      "html",
+      '<details class="ck-provenance ck-missing"><summary>'
+        .. "⚠️ No provenance recorded</summary>"
+    ),
+    pandoc.Para({
+      pandoc.Str("Render"), pandoc.Space(), pandoc.Str("with"),
+      pandoc.Space(), pandoc.Code("calkit quarto render"),
+      pandoc.Space(), pandoc.Str("or"), pandoc.Space(),
+      pandoc.Code("calkit run"), pandoc.Str("."),
+    }),
+    pandoc.RawBlock("html", "</details>"),
+  })
+end
+
+local function component_div(el, kind)
+  local src = el.attributes.src or ""
+  local data = load_records()
+  local record = data and (data.components or {})[src] or nil
+  local url = record and record.url or get_url(src)
+  local out = pandoc.Blocks({})
+  if kind == "figure" then
+    out:extend(get_figure(
+      el, pandoc.Blocks({pandoc.Plain({get_image(el, url)})})
+    ))
+  elseif kind == "table" then
+    local content = record and blocks(record.body) or pandoc.Blocks({
+      -- Only its name, keeping its id and caption, so references resolve
+      pandoc.utils.from_simple_table(pandoc.SimpleTable(
+        {}, {pandoc.AlignDefault}, {0}, {},
+        {{{pandoc.Plain({pandoc.Code(src)})}}}
+      )),
+    })
+    for index, item in ipairs(content) do
+      -- The id and caption go on the table, not a note after it
+      if index == 1 and item.t == "Table" then
+        item.attr = pandoc.Attr(el.identifier, {}, {})
+        if #el.content > 0 then
+          item.caption = {long = el.content}
+        end
+      end
+      out:insert(item)
+    end
+  else
+    local _, ext = pandoc.path.split_extension(src)
+    local text = MARKDOWN_EXTS[ext:lower()]
+      and read_file(pandoc.path.join({find_project_dir(), src})) or nil
+    local content = text and pandoc.read(text, "markdown").blocks
+      or pandoc.Blocks({pandoc.Para({pandoc.Code(src)})})
+    content:extend(el.content)
+    out:insert(pandoc.Div(content, pandoc.Attr(el.identifier, {}, {})))
+  end
+  if is_off(el.attributes.provenance) then
+    return out
+  end
+  if record == nil then
+    out:extend(unrecorded())
+  elseif record.provenance then
+    out:extend(get_provenance(record.provenance, data))
+  end
+  return out
+end
+
+local function handle(el)
+  for name, kind in pairs(KINDS) do
+    if el.classes:includes(name) then
+      return component_div(el, kind)
+    end
+  end
+  -- What these were called before, said rather than shown as a plain div
+  if el.classes:includes("ckprovenance") then
+    local body = pandoc.Blocks({
+      pandoc.Para(words(
+        "Use .ckfigure, .cktable, or .ckinclude rather than .ckprovenance."
+      )),
+    })
+    body:extend(el.content)
+    return pandoc.Div(
+      body,
+      pandoc.Attr("", {"callout-important"}, {{"title", "Not shown"}})
+    )
+  end
+  return nil
+end
+
+return {{Div = handle}}
+"""
+)
+
+# Shows a value with where it came from, behind a button that's the value
+# itself, opening a popover, saying what's wrong while it's closed, and
+# shows only the value in other formats
+VALUE_PROVENANCE_LUA = r"""
+local n_popovers = 0
+local function with_provenance(text, key, kwargs)
+  local out = pandoc.Inlines({pandoc.Str(text)})
+  local flag = pandoc.utils.stringify(kwargs.provenance or ""):lower()
+  if flag == "false" or flag == "no" or flag == "0" or flag == "off"
+    or not quarto.doc.is_format("html:js") then
+    return out
+  end
+  local data = load_records()
+  local record = data and (data.values or {})[key] or nil
+  if record == nil or not record.provenance then
+    return out
+  end
+  add_assets()
+  local provenance = record.provenance
+  n_popovers = n_popovers + 1
+  local id = "ck-value-" .. n_popovers
+  local summary = get_summary(provenance, data)
+  local label = "Where " .. text .. " came from: "
+    .. pandoc.utils.stringify(summary)
+  local warn = provenance.state ~= "ok" or is_outdated(data)
+  local content = pandoc.Blocks({pandoc.Para(summary)})
+  content:extend(get_view(provenance, data))
+  quarto.doc.include_text(
+    "after-body",
+    '<div id="' .. id .. '" popover class="ck-popover">'
+      .. to_html(content) .. "</div>"
+  )
+  return pandoc.Inlines({
+    pandoc.RawInline(
+      "html",
+      '<button type="button" class="'
+        .. get_classes("ck-value", provenance, data)
+        .. '" popovertarget="' .. id .. '" aria-label="' .. escape(label)
+        .. '" title="' .. escape(pandoc.utils.stringify(summary)) .. '">'
+    ),
+    pandoc.Str(text),
+    pandoc.RawInline(
+      "html",
+      (warn and '<sup class="ck-flag" aria-hidden="true">⚠</sup>' or "")
+        .. "</button>"
+    ),
+  })
+end
+"""
+
+# Reads each value from its results file when the document renders, finding
+# declared results' names in calkit.yaml, and formats it as Python would,
+# which ``check_values`` makes sure of before the pipeline renders.
+SHORTCODE_LUA = (
+    r"""---@diagnostic disable: undefined-global
+-- Written by Calkit; changes are overwritten when the pipeline compiles.
+-- Shows values from pipeline results with
+-- {{< ckvalue results/metrics.json key .2f >}}, read from the results file
+-- each time the document renders.
+"""
+    + PROVENANCE_LUA_COMMON
+    + VALUE_PROVENANCE_LUA
+    + r"""
 -- A number as YAML writes it, which Pandoc's metadata gives as text
 local yaml_specials = {
   [".inf"] = math.huge, ["+.inf"] = math.huge, ["-.inf"] = -math.huge,
@@ -628,7 +1108,7 @@ return {
       )
       return pandoc.Str("??")
     end
-    return pandoc.Str(text)
+    return with_provenance(text, path .. ":" .. key, kwargs)
   end,
   -- A value quoted from a reference: its citation key, its name, and
   -- optionally a format, from the file Calkit writes them all to
@@ -671,402 +1151,18 @@ return {
       )
       return pandoc.Str("??")
     end
-    return pandoc.Str(text)
+    return with_provenance(text, "ref:" .. key .. ":" .. name, kwargs)
   end,
 }
 """
+)
 
-# The class of a fenced div that shows a file with where it came from and
-# whether it's up to date, or with no src, the document's provenance
-PROVENANCE_CLASS = "ckprovenance"
-# Where Calkit writes what each document's panels say, for the filter to
-# read, relative to the project
+
+# Where Calkit writes where each document's components and values came
+# from, for what renders it to read, relative to the project
 PROVENANCE_DIR = ".calkit/local/provenance"
 # What a document lists to run the filter, before Quarto's own filters
 FILTER_CONFIG = "filters:\n  - at: pre-ast\n    path: calkit\n"
-
-# Turns the panels Calkit wrote before rendering into Pandoc's AST, deciding
-# nothing about what they say, which is decided in Python and tested there
-PROVENANCE_LUA = r"""---@diagnostic disable: undefined-global
--- Written by Calkit; changes are overwritten when the pipeline compiles.
--- Shows the file a ::: {.ckprovenance src="figures/fit.png"} div names,
--- as a figure, a table, or its name, with where it came from and whether
--- it's up to date, or with no src, the document's provenance. Calkit
--- decides what each panel says before rendering, and writes it to
--- .calkit/local/provenance; this only turns it into Pandoc's AST.
--- It has to run at pre-ast, so Quarto numbers the figures and tables and
--- builds the callouts after.
-
-local CALLOUT = {
-  note = "callout-note",
-  warning = "callout-warning",
-  danger = "callout-important",
-}
--- Misspellings of the class, said in the document rather than rendering
--- as a plain div with no provenance
-local MISNAMED = {"calkit-provenance", "ck-provenance"}
-local PICTURE_EXTS = {
-  [".svg"] = true, [".png"] = true, [".jpg"] = true, [".jpeg"] = true,
-  [".gif"] = true, [".webp"] = true, [".pdf"] = true,
-}
-local TABLE_EXTS = {[".csv"] = true, [".tsv"] = true}
-
-local function read_file(fpath)
-  local f = io.open(fpath, "r")
-  if f == nil then
-    return nil
-  end
-  local content = f:read("a")
-  f:close()
-  return content
-end
-
--- The Calkit project's folder, which the panels are kept under
-local function find_project_dir()
-  local dir = pandoc.path.directory(quarto.doc.input_file)
-  while true do
-    if read_file(pandoc.path.join({dir, "calkit.yaml"})) ~= nil then
-      return dir
-    end
-    local parent = pandoc.path.directory(dir)
-    if parent == dir then
-      return quarto.project.directory
-        or pandoc.path.directory(quarto.doc.input_file)
-    end
-    dir = parent
-  end
-end
-
--- Whether the document changed since Calkit wrote its panels, e.g., in
--- 'quarto preview', which a notebook does by rendering with --execute
-local outdated = nil
-local function is_outdated(data)
-  if outdated == nil then
-    outdated = false
-    local input = quarto.doc.input_file
-    local f = io.open(input, "rb")
-    local notebook = input:lower():match("%.ipynb$")
-    if data.source_sha1 and f ~= nil and not notebook then
-      outdated = pandoc.utils.sha1(f:read("a")) ~= data.source_sha1
-    end
-    if f ~= nil then
-      f:close()
-    end
-  end
-  return outdated
-end
-
--- What Calkit wrote for this document, or false if nothing
-local records = nil
-local function load_records()
-  if records ~= nil then
-    return records
-  end
-  records = false
-  local project_dir = find_project_dir()
-  local rel = pandoc.path.make_relative(quarto.doc.input_file, project_dir)
-  local content = read_file(pandoc.path.join({
-    project_dir, ".calkit", "local", "provenance",
-    (rel:gsub("\\", "/")) .. ".json",
-  }))
-  if content ~= nil then
-    local ok, data = pcall(quarto.json.decode, content)
-    if ok and type(data) == "table" then
-      records = data
-    end
-  end
-  return records
-end
-
--- Sections a div turns off, e.g., graph="false"
-local hidden = {}
-
-local inlines, blocks
-
--- Text as Str and Space inlines rather than one long Str
-local function words(value)
-  local out = pandoc.Inlines({})
-  local first = true
-  for piece in string.gmatch(tostring(value) .. " ", "([^ ]*) ") do
-    if not first then
-      out:insert(pandoc.Space())
-    end
-    if piece ~= "" then
-      out:insert(pandoc.Str(piece))
-    end
-    first = false
-  end
-  return out
-end
-
-local function inline(node)
-  local kind = node.type
-  if kind == "text" then
-    return words(node.value or "")
-  elseif kind == "strong" then
-    return pandoc.Inlines({pandoc.Strong(inlines(node.children))})
-  elseif kind == "emphasis" then
-    return pandoc.Inlines({pandoc.Emph(inlines(node.children))})
-  elseif kind == "inlineCode" then
-    return pandoc.Inlines({pandoc.Code(node.value or "")})
-  elseif kind == "link" then
-    return pandoc.Inlines({
-      pandoc.Link(inlines(node.children), node.url or ""),
-    })
-  end
-  quarto.log.warning("Calkit provenance: unknown inline " .. tostring(kind))
-  return pandoc.Inlines({})
-end
-
-inlines = function(nodes)
-  local out = pandoc.Inlines({})
-  for _, node in ipairs(nodes or {}) do
-    out:extend(inline(node))
-  end
-  return out
-end
-
-local function data_table(node)
-  local head, body, columns = {}, {}, 0
-  for index, row in ipairs(node.children or {}) do
-    local cells, header = {}, false
-    for _, item in ipairs(row.children or {}) do
-      if item.header then
-        header = true
-      end
-      table.insert(cells, {pandoc.Plain(inlines(item.children))})
-    end
-    if #cells > columns then
-      columns = #cells
-    end
-    if index == 1 and header then
-      head = cells
-    else
-      table.insert(body, cells)
-    end
-  end
-  local aligns, widths = {}, {}
-  for index = 1, columns do
-    aligns[index] = pandoc.AlignDefault
-    widths[index] = 0
-  end
-  return pandoc.utils.from_simple_table(
-    pandoc.SimpleTable({}, aligns, widths, head, body)
-  )
-end
-
-local function escape(value)
-  return (value:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
-end
-
--- Drawn by Quarto's own Mermaid, which it runs before Pandoc, so it's
--- asked for as a dependency, with the source shown where it can't draw
-local diagrams_ready = false
-local function mermaid(node)
-  local share = os.getenv("QUARTO_SHARE_PATH")
-  local source = tostring(node.value or "")
-  if share and quarto.doc.is_format("html:js") then
-    if not diagrams_ready then
-      local function asset(name)
-        return pandoc.path.join({share, "formats", "html", "mermaid", name})
-      end
-      quarto.doc.add_html_dependency({
-        name = "quarto-diagram",
-        scripts = {asset("mermaid.min.js"), asset("mermaid-init.js")},
-        stylesheets = {asset("mermaid.css")},
-      })
-      diagrams_ready = true
-    end
-    return pandoc.Blocks({
-      pandoc.RawBlock(
-        "html",
-        '<pre class="mermaid mermaid-js">' .. escape(source) .. "</pre>"
-      ),
-    })
-  end
-  return pandoc.Blocks({
-    pandoc.CodeBlock(source, pandoc.Attr("", {"default"}, {})),
-  })
-end
-
-local function callout(kind, title, content, collapse)
-  local attributes = {{"title", title}}
-  if collapse then
-    attributes[#attributes + 1] = {"collapse", "true"}
-  end
-  return pandoc.Div(
-    content, pandoc.Attr("", {CALLOUT[kind] or "callout-note"}, attributes)
-  )
-end
-
-local function block(node)
-  local kind = node.type
-  if node.section ~= nil and hidden[node.section] then
-    return pandoc.Blocks({})
-  end
-  if kind == "paragraph" then
-    return pandoc.Blocks({pandoc.Para(inlines(node.children))})
-  elseif kind == "table" then
-    return pandoc.Blocks({data_table(node)})
-  elseif kind == "mermaid" then
-    return mermaid(node)
-  elseif kind == "admonition" then
-    return pandoc.Blocks({
-      callout(
-        node.kind,
-        pandoc.utils.stringify(inlines(node.title)),
-        blocks(node.children),
-        node.dropdown
-      ),
-    })
-  end
-  quarto.log.warning("Calkit provenance: unknown block " .. tostring(kind))
-  return pandoc.Blocks({})
-end
-
-blocks = function(nodes)
-  local out = pandoc.Blocks({})
-  for _, node in ipairs(nodes or {}) do
-    out:extend(block(node))
-  end
-  return out
-end
-
-local function get_image(el, src)
-  local attributes = {}
-  for _, key in ipairs({"width", "height", "fig-align", "fig-alt"}) do
-    if el.attributes[key] then
-      table.insert(attributes, {key, el.attributes[key]})
-    end
-  end
-  local alt = el.attributes.alt and words(el.attributes.alt)
-    or pandoc.Inlines({})
-  return pandoc.Image(alt, src, "", pandoc.Attr("", {}, attributes))
-end
-
--- A Quarto figure, numbered and cross-referenced by the div's id, with its
--- content as the caption, so citations and cross-references in it work
-local function get_figure(el, content)
-  if el.identifier == "" and #el.content == 0 then
-    return content
-  end
-  return pandoc.Blocks({
-    pandoc.Figure(
-      content, {long = el.content}, pandoc.Attr(el.identifier, {}, {})
-    ),
-  })
-end
-
-local function provenance_div(el)
-  local src = el.attributes.src or ""
-  local data = load_records()
-  local record = nil
-  if data then
-    if src == "" then
-      record = data.document
-    else
-      record = (data.panels or {})[src]
-    end
-  end
-  local out = pandoc.Blocks({})
-  if record == nil then
-    -- Shown as it would be, as far as that can be without Calkit, keeping
-    -- the id and caption, so cross-references still resolve
-    local _, ext = pandoc.path.split_extension(src)
-    ext = ext:lower()
-    local kind = (el.attributes.kind or ""):lower()
-    if src == "" then
-      out:extend(el.content)
-    elseif kind == "figure" or (kind == "" and PICTURE_EXTS[ext]) then
-      out:extend(get_figure(
-        el, pandoc.Blocks({pandoc.Plain({get_image(el, src)})})
-      ))
-    elseif kind == "table" or (kind == "" and TABLE_EXTS[ext]) then
-      local item = pandoc.utils.from_simple_table(pandoc.SimpleTable(
-        {}, {pandoc.AlignDefault}, {0}, {},
-        {{{pandoc.Plain({pandoc.Code(src)})}}}
-      ))
-      item.attr = pandoc.Attr(el.identifier, {}, {})
-      if #el.content > 0 then
-        item.caption = {long = el.content}
-      end
-      out:insert(item)
-    else
-      out:insert(pandoc.Para({pandoc.Code(src)}))
-      out:extend(el.content)
-    end
-    out:insert(callout("warning", "No provenance recorded", pandoc.Blocks({
-      pandoc.Para({
-        pandoc.Str("Render"), pandoc.Space(), pandoc.Str("with"),
-        pandoc.Space(), pandoc.Code("calkit quarto render"),
-        pandoc.Space(), pandoc.Str("or"), pandoc.Space(),
-        pandoc.Code("calkit run"), pandoc.Str("."),
-      }),
-    })))
-    return out
-  end
-  hidden = {}
-  for _, section in ipairs({"table", "graph"}) do
-    local value = (el.attributes[section] or ""):lower()
-    hidden[section] = value == "false" or value == "no" or value == "0"
-  end
-  if record.kind == "figure" then
-    out:extend(get_figure(
-      el, pandoc.Blocks({pandoc.Plain({get_image(el, src)})})
-    ))
-  elseif record.kind == "table" then
-    for index, item in ipairs(blocks(record.body)) do
-      -- The id and caption go on the table, not a note after it
-      if index == 1 and item.t == "Table" then
-        item.attr = pandoc.Attr(el.identifier, {}, {})
-        if #el.content > 0 then
-          item.caption = {long = el.content}
-        end
-      end
-      out:insert(item)
-    end
-  else
-    out:extend(blocks(record.body))
-    out:extend(el.content)
-  end
-  out:extend(blocks(record.panel))
-  if is_outdated(data) then
-    local title = "Document changed since panels recorded"
-    out:insert(callout("warning", title, pandoc.Blocks({
-      pandoc.Para({
-        pandoc.Str("Render"), pandoc.Space(), pandoc.Str("with"),
-        pandoc.Space(), pandoc.Code("calkit quarto render"),
-        pandoc.Space(), pandoc.Str("or"), pandoc.Space(),
-        pandoc.Code("calkit run"), pandoc.Str("."),
-      }),
-    })))
-  end
-  return out
-end
-
-local function handle(el)
-  if el.classes:includes("ckprovenance") then
-    return provenance_div(el)
-  end
-  for _, name in ipairs(MISNAMED) do
-    if el.classes:includes(name) then
-      local body = pandoc.Blocks({
-        pandoc.Para({
-          pandoc.Str("Use"), pandoc.Space(), pandoc.Code(".ckprovenance"),
-          pandoc.Space(), pandoc.Str("rather"), pandoc.Space(),
-          pandoc.Str("than"), pandoc.Space(), pandoc.Code("." .. name),
-          pandoc.Str("."),
-        }),
-      })
-      body:extend(el.content)
-      return callout("danger", "No provenance shown", body)
-    end
-  end
-  return nil
-end
-
-return {{Div = handle}}
-"""
 
 
 @dataclass(frozen=True)
@@ -1083,6 +1179,8 @@ class QuartoValue:
     line: int = 0
     # For a value quoted from a reference, its citation key and name
     ref: tuple[str, str] | None = None
+    # Whether to show where it came from
+    provenance: bool = True
 
 
 def read_document_text(path: str) -> str | None:
@@ -1111,6 +1209,16 @@ def read_document_text(path: str) -> str | None:
     return "\n".join(texts)
 
 
+def _split_provenance_arg(args: str) -> tuple[str, bool]:
+    """A shortcode's arguments without ``provenance=false``, which turns
+    off showing where its value came from, and whether it's shown."""
+    m = re.search(r"(^|\s)provenance=(['\"]?)(\w+)\2(?=\s|$)", args)
+    if m is None:
+        return args, True
+    rest = (args[: m.start()] + args[m.end() :]).strip()
+    return rest, m.group(3).lower() not in ("false", "no", "0", "off")
+
+
 def extract_values(
     text: str, document_path: str, results: dict[str, str] | None = None
 ) -> list[QuartoValue]:
@@ -1133,7 +1241,8 @@ def extract_values(
     for i, line in enumerate(text.splitlines()):
         found = []
         for m in _SHORTCODE_RE.finditer(line):
-            got = _ckvalue_args(m.group("args"), path, i + 1)
+            args, provenance = _split_provenance_arg(m.group("args"))
+            got = _ckvalue_args(args, path, i + 1)
             found.append(
                 (
                     m.start(),
@@ -1149,12 +1258,14 @@ def extract_values(
                             kind=got["kind"],
                         ),
                         line=i + 1,
+                        provenance=provenance,
                     ),
                 )
             )
         # A citation key, a name, and a format, read the same way
         for m in _REFVAL_SHORTCODE_RE.finditer(line):
-            got = _ckvalue_args(m.group("args"), path, i + 1)
+            args, provenance = _split_provenance_arg(m.group("args"))
+            got = _ckvalue_args(args, path, i + 1)
             if got["kind"]:
                 raise MarkdownParseError(
                     f"'ckrefval' takes a citation key and a name, not "
@@ -1172,6 +1283,7 @@ def extract_values(
                         path=get_values_path(got["source"]),
                         line=i + 1,
                         ref=(got["source"], got["key"]),
+                        provenance=provenance,
                     ),
                 )
             )
@@ -1380,14 +1492,21 @@ def write_components(document_path: str, wdir: str | None = None) -> None:
             f.write(content)
 
 
-# What a div shows a file as, by its extension, unless it says with kind=
-FIGURE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf")
+# What each component's class, or directive in MyST, shows its file as, as
+# LaTeX's \ckfigure, \cktable, and \ckinclude do
+COMPONENT_KINDS = {
+    "ckfigure": "figure",
+    "cktable": "table",
+    "ckinclude": "include",
+}
 TABLE_DELIMITERS = {".csv": ",", ".tsv": "\t"}
-# Rows of a table shown before it's cut short, unless a div says with rows=
+# Rows of a table shown before it's cut short, unless it says with rows=
 TABLE_ROW_LIMIT = 25
-# What a panel calls what it's about
-_NOUNS = {"figure": "Figure", "table": "Table", "file": "File"}
-# A fenced div's opening line, e.g., ::: {.ckprovenance src="a.png"}, or
+# What a component is called where its provenance is described
+_NOUNS = {"figure": "Figure", "table": "Table", "include": "File"}
+# Files an included one is read as Markdown from
+MARKDOWN_EXTS = (".md", ".qmd")
+# A fenced div's opening line, e.g., ::: {.ckfigure src="a.png"}, or
 # ::: name, which Pandoc reads as a class, optionally with colons after
 _DIV_OPEN_RE = re.compile(
     r"^\s*:{3,}\s*(?:\{(?P<attrs>[^}]*)\}|(?P<cls>[\w-]+))(?:\s*:+)?\s*$"
@@ -1400,32 +1519,74 @@ _CODE_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 
 @dataclass(frozen=True)
-class ProvenanceDiv:
-    """One ``ckprovenance`` div in a Quarto document."""
+class Component:
+    """A figure, table, or other file from the project a document shows,
+    with a ``ckfigure``, ``cktable``, or ``ckinclude`` div or directive.
+    """
 
-    # The file it shows, as written, relative to the document, or "" for
-    # a panel about the document
-    src: str
-    # That file relative to the project, or "" for the document
-    path: str
-    # 'figure', 'table', 'file', or 'document'
+    # 'figure', 'table', or 'include'
     kind: str
+    # The file as written, relative to the project
+    src: str
+    # That file, normalized
+    path: str
+    # What it's referred to by, e.g., fig-fit, if anything
+    label: str = ""
     # 1-indexed line of the document
     line: int = 0
     rows: int = TABLE_ROW_LIMIT
+    # Whether to show where it came from
+    provenance: bool = True
 
 
-def extract_provenance_divs(
-    text: str, document_path: str, wdir: str | None = None
-) -> list[ProvenanceDiv]:
-    """Find the ``ckprovenance`` divs in a document, in order, skipping
-    those in code blocks.
+def has_components(text: str) -> bool:
+    """Whether a document's text might show any components, to skip the
+    rest cheaply."""
+    return any(name in text for name in COMPONENT_KINDS)
 
-    A ``src`` is relative to the document, or to its Quarto project with a
-    leading ``/``, as Quarto reads an image's, and ``kind`` overrides what
-    its extension says to show it as.
+
+def get_component(
+    name: str, src: str, options: dict[str, str], line: int = 0
+) -> Component | None:
+    """A component from its class or directive name, the file it names,
+    relative to the project, and its options, or None for another name or
+    no file.
     """
-    document_path = posixpath.normpath(Path(document_path).as_posix())
+    kind = COMPONENT_KINDS.get(name)
+    src = src.strip()
+    if kind is None or not src:
+        return None
+    try:
+        rows = int(options.get("rows", TABLE_ROW_LIMIT))
+    except ValueError:
+        rows = TABLE_ROW_LIMIT
+    return Component(
+        kind=kind,
+        src=src,
+        path=posixpath.normpath(src.lstrip("/")),
+        label=options.get("label") or options.get("name") or "",
+        line=line,
+        rows=rows,
+        provenance=str(options.get("provenance", "true")).strip().lower()
+        not in ("false", "no", "0", "off"),
+    )
+
+
+def get_value_key(value: QuartoValue) -> str:
+    """What a value's provenance is recorded under, as what shows it looks
+    it up: its results file and key, or its reference's key and name."""
+    if value.ref is not None:
+        return f"ref:{value.ref[0]}:{value.ref[1]}"
+    return f"{value.path}:{value.key}"
+
+
+def extract_components(text: str) -> list[Component]:
+    """Find the ``ckfigure``, ``cktable``, and ``ckinclude`` divs in a
+    Quarto document, in order, skipping those in code blocks.
+
+    Each names its file with ``src``, relative to the project, as
+    ``ckvalue`` does, and its id is what it's referred to by.
+    """
     divs = []
     fence = None
     for i, line in enumerate(text.splitlines()):
@@ -1449,36 +1610,19 @@ def extract_provenance_divs(
         for a in _DIV_ATTR_RE.finditer(m.group("attrs") or ""):
             if a.group("cls"):
                 classes.append(a.group("cls"))
+            elif a.group("id"):
+                attrs["label"] = a.group("id")
             elif a.group("key"):
                 attrs[a.group("key")] = next(
                     v for v in a.group("dq", "sq", "bare") if v is not None
                 )
-        if PROVENANCE_CLASS not in classes:
-            continue
-        src = attrs.get("src", "").strip()
-        if not src:
-            divs.append(ProvenanceDiv("", "", "document", line=i + 1))
-            continue
-        if src.startswith("/"):
-            base = get_quarto_dir(document_path, wdir)
-        else:
-            base = posixpath.dirname(document_path)
-        path = posixpath.normpath(posixpath.join(base, src.lstrip("/")))
-        ext = posixpath.splitext(src)[1].lower()
-        kind = attrs.get("kind", "").strip().lower()
-        if kind not in _NOUNS:
-            kind = (
-                "figure"
-                if ext in FIGURE_EXTS
-                else "table"
-                if ext in TABLE_DELIMITERS
-                else "file"
+        for name in classes:
+            component = get_component(
+                name, attrs.get("src", ""), attrs, line=i + 1
             )
-        try:
-            rows = int(attrs.get("rows", TABLE_ROW_LIMIT))
-        except ValueError:
-            rows = TABLE_ROW_LIMIT
-        divs.append(ProvenanceDiv(src, path, kind, line=i + 1, rows=rows))
+            if component is not None:
+                divs.append(component)
+                break
     return divs
 
 
@@ -1537,8 +1681,8 @@ def get_stage_status(stage: Any) -> dict:
     }
 
 
-def get_provenance_panels(
-    divs: list[ProvenanceDiv],
+def get_provenance_records(
+    components: list[Component],
     document_path: str,
     ck_info: dict,
     dvc_yaml: dict,
@@ -1550,22 +1694,40 @@ def get_provenance_panels(
     listdir: Callable[[str], list[str]],
     read_bytes: Callable[[str], bytes],
     open_text: Callable[[str], IO[str]],
+    values: list[QuartoValue] | None = None,
+    get_file_url: Callable[[str, str | None], str | None] = (
+        lambda path, commit_sha: None
+    ),
+    check_reference_value: Callable[[str, str], tuple[bool, str | None]] = (
+        lambda key, name: (False, None)
+    ),
     document_stage: str | None = None,
 ) -> dict:
-    """What each ``ckprovenance`` div in a document shows, as nodes the
-    Quarto filter turns into Pandoc's AST: for each file, keyed by its
-    ``src``, what to show it as, e.g., a table's rows, and a panel saying
-    the stage that made it, what it read, the environment, and whether
-    it's up to date per ``dvc.lock``; and for the document, the pipeline
-    outputs it's made from and whether each is.
+    """What a document shows for each of its components, keyed by the
+    file as written, as nodes that what renders the document turns into
+    its own, e.g., Pandoc's AST: what to show it as, e.g., a table's rows,
+    and, unless it's turned off for it or the project, its provenance.
 
-    The document's own outputs are left out, since it can't say whether
-    what's being rendered is up to date, as is when its stage last ran,
-    since that's being recorded. Only the stages the document is made from
-    are checked, with ``get_stage_status``, which gives a stage in
-    ``dvc.lock``'s status, as ``get_stage_status`` does. ``open_text``
-    opens a file as text to read a table from, and the other functions
-    read the project, as for ``calkit.provenance.get_path_provenance``.
+    Its provenance is a line saying whether it's up to date per
+    ``dvc.lock``, or what's wrong if not, shown even while what's behind it
+    is collapsed, a short line for formats that can't expand, and how it
+    came to be: a graph of the stages it's made from, however far back,
+    and each one's kind, environment, script or command, last run, every
+    input, and the outputs on the way to it.
+
+    The document's own outputs aren't checked, since it can't say whether
+    what's being rendered is up to date, and neither is when its stage last
+    ran. Stages are checked with ``get_stage_status``, which gives a stage
+    in ``dvc.lock``'s status, as ``get_stage_status`` does.
+    Values, from ``ckvalue`` and ``ckrefval``, are keyed as
+    ``get_value_key`` says, and a value quoted from a reference describes
+    the reference rather than a pipeline, with whether it matched the
+    reference's PDF, per ``check_reference_value``, which says whether it
+    was checked and what's wrong if anything.
+    ``get_file_url`` gives a link to a file in Git, at a commit, or the
+    current one if None, if there's a host to link to. ``open_text`` opens
+    a file as text to read a table from, and the other functions read the
+    project, as for ``calkit.provenance.get_path_provenance``.
     ``document_stage`` names the stage that renders the document, which is
     otherwise its Quarto stage, if any.
     """
@@ -1573,14 +1735,15 @@ def get_provenance_panels(
 
     import calkit.dvc
     import calkit.pipeline
+    from calkit.notebooks import get_notebook_of_values_path
     from calkit.provenance import (
-        find_provenance_gaps,
+        SOURCE_FIELDS,
         get_path_provenance,
         how_to_define_origin,
-        is_data_path,
     )
+    from calkit.references.values import iter_declared_values
 
-    # The nodes the filter reads, named as MyST's are
+    # The nodes what renders it reads, named as MyST's are
     def make_text(value: str) -> dict:
         return {"type": "text", "value": value}
 
@@ -1593,6 +1756,9 @@ def get_provenance_panels(
     def make_code(value: str) -> dict:
         return {"type": "inlineCode", "value": value}
 
+    def make_link(url: str, *children: dict) -> dict:
+        return {"type": "link", "url": url, "children": list(children)}
+
     def make_paragraph(*children: dict) -> dict:
         return {"type": "paragraph", "children": list(children)}
 
@@ -1603,17 +1769,6 @@ def get_provenance_panels(
                 {"type": "tableCell", "header": header, "children": cell}
                 for cell in cells
             ],
-        }
-
-    def make_admonition(
-        kind: str, title: str, children: list[dict], dropdown: bool = False
-    ) -> dict:
-        return {
-            "type": "admonition",
-            "kind": kind,
-            "title": [make_text(title)],
-            "children": children,
-            "dropdown": dropdown,
         }
 
     def under(path: str, parent: str) -> bool:
@@ -1723,26 +1878,35 @@ def get_provenance_panels(
                 visit(producer)
         return order
 
-    def get_gap_words(gap: dict) -> str:
-        if gap["unchecked"]:
-            return (
-                f"{gap['path']} imported from somewhere that can't be checked"
-            )
-        return f"origin not defined for {gap['path']}"
+    def get_run(stage: str) -> dict | None:
+        # The record of the run that made what dvc.lock says it made
+        run = stage_runs.get(stage)
+        lock_stage = lock_stages.get(stage)
+        if (
+            isinstance(run, dict)
+            and lock_stage is not None
+            and run.get("dvc_lock_hash")
+            == calkit.dvc.stage_lock_hash(lock_stage)
+        ):
+            return run
+        return None
 
-    def get_fix_paragraph(gaps: list[dict]) -> dict:
-        path = gaps[0]["path"]
-        return make_paragraph(
-            make_strong("To fix"),
-            make_text(" "),
-            make_code(path),
-            make_text(": " + how_to_define_origin(path)),
-        )
-
-    def get_update_paragraph() -> dict:
-        return make_paragraph(
-            make_strong("To update:"), make_text(" "), make_code("calkit run")
-        )
+    def get_path_nodes(path: str, commit_sha: str | None) -> list[dict]:
+        # A file, linked to where it's shown in the document, or on the
+        # repo's host if it's in Git, or with its hash if DVC stores it
+        if path in labels:
+            return [make_link("#" + labels[path], make_code(path))]
+        url = get_file_url(path, commit_sha)
+        if url:
+            return [make_link(url, make_code(path))]
+        if lock_md5s.get(path) and (
+            path in dvc_cached or is_file(path + ".dvc")
+        ):
+            return [
+                make_code(path),
+                make_text(f" (DVC md5 {lock_md5s[path][:7]})"),
+            ]
+        return [make_code(path)]
 
     def get_environment_nodes(stage: str) -> list[dict]:
         ck_stage = ck_stages.get(stage.split("@")[0]) or {}
@@ -1760,82 +1924,191 @@ def get_provenance_panels(
             nodes.append(make_text(f" ({', '.join(k for k in kinds if k)})"))
         return nodes
 
-    def get_stage_paragraphs(
-        stage: str, label: str, show_run: bool = True
-    ) -> list[dict]:
-        # Which stage, its environment, and where it last ran, if the
-        # record of that run is for what dvc.lock says it made, which it
-        # isn't for a stage that's run since the pipeline started, since
-        # runs are recorded when it's done
-        made = [
-            make_strong(f"{label}:"),
-            make_text(" "),
-            make_text("stage "),
-            make_code(stage),
+    def get_origin_nodes(path: str, gaps: list[dict]) -> list[dict]:
+        # Where a file no stage makes came from, or that nothing says
+        if any(under(path, g["path"]) or under(g["path"], path) for g in gaps):
+            return [make_text("❔ origin not defined")]
+        prov = get_path_provenance(
+            path,
+            ck_info=ck_info,
+            dvc_yaml={"stages": yaml_stages},
+            dvc_lock={"stages": lock_stages},
+            stage_statuses={},
+            is_file=is_file,
+            is_dir=is_dir,
+            listdir=listdir,
+            read_bytes=read_bytes,
+        )
+        if not prov["origin"]:
+            return []
+        if prov["origin_url"]:
+            return [make_link(prov["origin_url"], make_text(prov["origin"]))]
+        return [make_text(prov["origin"])]
+
+    def get_graph(order: list[str], target: str, on_path: set[str]) -> dict:
+        # The stages it's made from, between what each reads and makes on
+        # the way to it, colored by state
+        lines = ["flowchart LR"]
+        ids: dict[str, str] = {}
+
+        def get_id(path: str) -> str:
+            if path not in ids:
+                ids[path] = f"f{len(ids)}"
+                label = path.replace('"', "#quot;")
+                producer = get_producer(path)
+                style = ""
+                if producer is not None:
+                    state = get_output_state(path, producer)[0]
+                    style = {"ok": "ok", "waiting": "waiting"}.get(
+                        state, "stale"
+                    )
+                lines.append(
+                    f'  {ids[path]}("{label}")'
+                    + (f":::{style}" if style else "")
+                )
+                if path == target:
+                    lines.append(f"  class {ids[path]} target")
+            return ids[path]
+
+        for i, name in enumerate(order):
+            stage_id = f"s{i}"
+            lines.append(f'  {stage_id}[["{name}"]]')
+            for dep in stages[name][0]:
+                if not is_bookkeeping(dep):
+                    lines.append(f"  {get_id(dep)} --> {stage_id}")
+            for out in stages[name][1]:
+                if out in on_path or any(under(p, out) for p in on_path):
+                    lines.append(f"  {stage_id} --> {get_id(out)}")
+        lines += [
+            "  classDef ok fill:#e6f4ea,stroke:#1e8e3e",
+            "  classDef stale fill:#fce8e6,stroke:#d93025",
+            "  classDef waiting fill:#fef7e0,stroke:#f9ab00",
+            "  classDef target stroke-width:3px",
         ]
-        ck_stage = ck_stages.get(stage.split("@")[0]) or {}
+        return {"type": "mermaid", "value": "\n".join(lines)}
+
+    def get_stage_blocks(
+        name: str, on_path: set[str], gaps: list[dict]
+    ) -> list[dict]:
+        # One stage on the way to it: what it is, what it runs, where, when
+        # it last ran, everything it reads, and what it makes on the way
+        ck_stage = ck_stages.get(name.split("@")[0]) or {}
+        run = get_run(name)
+        commit_sha = (
+            str(run["git_rev"]) if run and run.get("git_rev") else None
+        )
+        head = [make_strong("Stage"), make_text(" "), make_code(name)]
         if ck_stage.get("kind"):
-            made.append(make_text(f", {ck_stage['kind']}"))
-        out = [make_paragraph(*made)]
-        env_nodes = get_environment_nodes(stage)
+            head.append(make_text(f" ({ck_stage['kind']})"))
+        env_nodes = get_environment_nodes(name)
         if env_nodes:
-            out.append(
+            head += [make_text(", environment "), *env_nodes]
+        blocks = [make_paragraph(*head)]
+        wdir = ck_stage.get("wdir") or ""
+        field = next((f for f in SOURCE_FIELDS if ck_stage.get(f)), None)
+        if field is not None:
+            source = posixpath.normpath(posixpath.join(wdir, ck_stage[field]))
+            blocks.append(
                 make_paragraph(
-                    make_strong("Environment:"), make_text(" "), *env_nodes
+                    make_text("Runs "), *get_path_nodes(source, commit_sha)
                 )
             )
-        run = stage_runs.get(stage)
-        lock_stage = lock_stages.get(stage)
-        if not show_run or lock_stage is None:
-            return out
-        if not isinstance(run, dict) or run.get(
-            "dvc_lock_hash"
-        ) != calkit.dvc.stage_lock_hash(lock_stage):
-            out.append(
+        elif isinstance(ck_stage.get("command"), str):
+            blocks.append(
                 make_paragraph(
-                    make_strong("Last run:"),
-                    make_text(" not recorded for its current outputs"),
+                    make_text("Runs "), make_code(ck_stage["command"])
                 )
             )
-        else:
+        if run is not None:
             system = run.get("system") or {}
             parts = [str(run.get("start_time") or "")[:10]] + [
                 " ".join(
                     str(system[k]) for k in ("os", "machine") if system.get(k)
                 )
             ]
-            nodes = [
-                make_strong("Last run:"),
-                make_text(" "),
-                make_text(", ".join(p for p in parts if p)),
-            ]
-            if run.get("git_rev"):
-                nodes += [
-                    make_text(", commit "),
-                    make_code(str(run["git_rev"])[:7]),
-                ]
+            nodes = [make_text("Last run " + ", ".join(p for p in parts if p))]
+            if commit_sha:
+                nodes += [make_text(", commit "), make_code(commit_sha[:7])]
                 if run.get("git_dirty"):
                     nodes.append(make_text(" with uncommitted changes"))
-            out.append(make_paragraph(*nodes))
-        return out
+            blocks.append(make_paragraph(*nodes))
+        elif name in lock_stages:
+            blocks.append(
+                make_paragraph(
+                    make_text("Last run not recorded for its current outputs")
+                )
+            )
+        status = get_status(name)
+        rows = [
+            make_row(
+                [make_strong("Input")],
+                [make_strong("From")],
+                [make_strong("State")],
+                header=True,
+            )
+        ]
+        for dep in stages[name][0]:
+            if is_bookkeeping(dep):
+                continue
+            producer = get_producer(dep)
+            if any(under(dep, p) for p in status["modified_inputs"]):
+                state = "⚠️ modified" if exists(dep) else "⛔ missing"
+            elif (
+                producer is not None
+                and get_output_state(dep, producer)[0] != "ok"
+            ):
+                state = "⚠️ out of date"
+            elif not exists(dep):
+                state = "⛔ missing"
+            else:
+                state = "✅ unchanged"
+            source_nodes = (
+                [make_text("stage "), make_code(producer)]
+                if producer is not None
+                else get_origin_nodes(dep, gaps)
+            )
+            rows.append(
+                make_row(
+                    get_path_nodes(dep, commit_sha),
+                    source_nodes,
+                    [make_text(state)],
+                )
+            )
+        if len(rows) > 1:
+            blocks.append({"type": "table", "children": rows})
+        made = [
+            out
+            for out in stages[name][1]
+            if out in on_path or any(under(p, out) for p in on_path)
+        ]
+        if made:
+            nodes = [make_text("Makes ")]
+            for i, out in enumerate(made):
+                if i:
+                    nodes.append(make_text(", "))
+                nodes += get_path_nodes(out, commit_sha)
+            blocks.append(make_paragraph(*nodes))
+        return blocks
 
-    def get_table_body(div: ProvenanceDiv) -> list[dict]:
+    def get_table_body(component: Component) -> list[dict]:
         # Only as far as is shown, and one more row to tell it's cut short
         delimiter = TABLE_DELIMITERS.get(
-            posixpath.splitext(div.path)[1].lower(), ","
+            posixpath.splitext(component.path)[1].lower(), ","
         )
         rows = []
         try:
-            with open_text(div.path) as f:
+            with open_text(component.path) as f:
                 for row in csv.reader(f, delimiter=delimiter):
                     rows.append(row)
-                    if len(rows) > div.rows + 1:
+                    if len(rows) > component.rows + 1:
                         break
         except (OSError, csv.Error):
-            return [make_paragraph(make_emphasis(f"Can't read {div.src}"))]
+            return [
+                make_paragraph(make_emphasis(f"Can't read {component.src}"))
+            ]
         if not rows:
-            return [make_paragraph(make_emphasis(f"{div.src} is empty"))]
-        header, body = rows[0], rows[1 : div.rows + 1]
+            return [make_paragraph(make_emphasis(f"{component.src} is empty"))]
+        header, body = rows[0], rows[1 : component.rows + 1]
         out = [
             {
                 "type": "table",
@@ -1845,18 +2118,21 @@ def get_provenance_panels(
                 + [make_row(*([make_text(v)] for v in row)) for row in body],
             }
         ]
-        if len(rows) > div.rows + 1:
+        if len(rows) > component.rows + 1:
             out.append(
                 make_paragraph(
-                    make_emphasis(f"First {div.rows} rows of {div.src}")
+                    make_emphasis(
+                        f"First {component.rows} rows of {component.src}"
+                    )
                 )
             )
         return out
 
-    def get_file_panel(div: ProvenanceDiv) -> dict:
-        noun = _NOUNS[div.kind]
+    def get_provenance(path: str, noun: str, intro: list[dict]) -> dict:
+        # Whether it's up to date, and how it came to be, after what
+        # ``intro`` says it is, e.g., for a value, its key in a file
         prov = get_path_provenance(
-            div.path,
+            path,
             ck_info=ck_info,
             dvc_yaml={"stages": yaml_stages},
             dvc_lock={"stages": lock_stages},
@@ -1868,244 +2144,206 @@ def get_provenance_panels(
         )
         stage = prov["stage"] if prov["stage"] in stages else None
         if stage is not None and stage == doc_stage:
-            return make_admonition(
-                "note", f"{noun} made by this document", [], dropdown=True
-            )
-        gaps = prov["gaps"]
-        children = []
-        if stage is not None:
-            children += get_stage_paragraphs(stage, "Made by")
-            if prov["copied_from"]:
-                children.append(
+            return {
+                "state": "ok",
+                "summary": [make_text("Provenance: made by this document")],
+                "line": None,
+                "view": intro
+                + [
                     make_paragraph(
-                        make_strong("Copied from:"),
-                        make_text(" "),
-                        make_code(prov["copied_from"]),
+                        make_text("Made by this document's own stage, "),
+                        make_code(stage),
+                        make_text(", which is being run."),
                     )
-                )
-            # What it read, with its script or notebook first
-            status = get_status(stage)
-            rows = [
-                make_row(
-                    [make_strong("Input")],
-                    [make_strong("Made by")],
-                    [make_strong("State")],
-                    header=True,
-                )
-            ]
-            inputs = ([prov["source"]] if prov["source"] else []) + prov[
-                "inputs"
-            ]
-            for path in dict.fromkeys(inputs):
-                producer = get_producer(path)
-                if any(under(path, p) for p in status["modified_inputs"]):
-                    state = "⚠️ modified" if exists(path) else "⛔ missing"
-                elif (
-                    producer is not None
-                    and get_output_state(path, producer)[0] != "ok"
-                ):
-                    state = "⚠️ out of date"
-                elif any(under(g["path"], path) for g in gaps):
-                    state = "❔ origin not defined"
-                else:
-                    state = "✅ unchanged"
-                rows.append(
-                    make_row(
-                        [make_code(path)],
-                        [make_code(producer) if producer else make_text("")],
-                        [make_text(state)],
-                    )
-                )
-            if len(rows) > 1:
-                children.append({"type": "table", "children": rows})
-        if prov["origin"]:
-            origin: dict = make_text(prov["origin"])
-            if prov["origin_url"]:
-                origin = {
-                    "type": "link",
-                    "url": prov["origin_url"],
-                    "children": [origin],
-                }
-            children.append(
-                make_paragraph(make_strong("Origin:"), make_text(" "), origin)
-            )
+                ],
+            }
+        gaps = prov["gaps"]
         if stage is None and not prov["origin"] and not gaps:
-            gaps = [{"path": div.path, "unchecked": False}]
-        # What's most wrong goes in the title
-        state = "ok"
+            gaps = [{"path": path, "unchecked": False}]
+        # What's most wrong is said while it's collapsed
+        state, words = "ok", "up to date"
         if not prov["exists"]:
-            state, title = "missing", f"{noun} missing"
+            state, words = "missing", "missing"
             if stage is not None and get_status(stage)["status"] == "not-run":
-                title += f": stage {stage} not run"
+                words += f": stage {stage} not run"
         elif stage is not None:
-            state, words = get_output_state(div.path, stage)
-            title = (
-                f"{noun} up to date"
-                if state == "ok"
-                else (f"{noun} out of date: {words}")
-            )
+            state, words = get_output_state(path, stage)
         if state == "ok" and gaps:
             state = "incomplete"
-            title = f"{noun} has incomplete provenance: " + get_gap_words(
-                gaps[0]
+            gap = gaps[0]
+            words = (
+                f"{gap['path']} imported from somewhere that can't be checked"
+                if gap["unchecked"]
+                else f"origin not defined for {gap['path']}"
             )
             if len(gaps) > 1:
-                title += f" and {len(gaps) - 1} more"
-        elif state == "ok" and stage is None:
-            title = f"{noun}: {prov['origin']}"
-        if state in ("stale", "waiting", "missing", "not-run"):
-            children.append(get_update_paragraph())
+                words += f" and {len(gaps) - 1} more"
+        if state == "ok":
+            summary = "Provenance"
+            line = None
+        elif state == "missing":
+            summary = "⛔ Missing" + words.removeprefix("missing")
+            line = f"{noun} {words}"
         elif state == "incomplete":
-            children.append(get_fix_paragraph(gaps))
-        kind = {"ok": "note", "incomplete": "warning"}.get(state, "danger")
-        return make_admonition(kind, title, children, dropdown=kind == "note")
-
-    def get_graph(order: list[str], states: dict[str, str]) -> dict:
-        # Each stage between what it reads and makes, colored by state
-        lines = ["flowchart LR"]
-        ids: dict[str, str] = {}
-
-        def get_id(path: str) -> str:
-            if path not in ids:
-                ids[path] = f"f{len(ids)}"
-                label = path.replace('"', "#quot;")
-                style = states.get(path)
-                lines.append(
-                    f'  {ids[path]}("{label}")'
-                    + (f":::{style}" if style else "")
+            summary = "⚠️ Incomplete provenance: " + words
+            line = f"{noun} has incomplete provenance: {words}"
+        else:
+            state = "stale"
+            summary = "⚠️ Out of date: " + words
+            line = f"{noun} out of date: {words}"
+        # How it came to be, stage by stage, upstream first
+        order = [n for n in get_closure([path]) if n != doc_stage]
+        on_path = {path}
+        for name in order:
+            on_path.update(d for d in stages[name][0] if not is_bookkeeping(d))
+        view: list[dict] = list(intro)
+        if order:
+            view.append(get_graph(order, path, on_path))
+            for name in order:
+                view += get_stage_blocks(name, on_path, gaps)
+        else:
+            nodes = get_origin_nodes(path, gaps)
+            view.append(
+                make_paragraph(
+                    make_text("Not made by a stage. "),
+                    *(
+                        nodes
+                        if nodes
+                        and nodes[0].get("value") != "❔ origin not defined"
+                        else [make_text("Nothing records where it came from.")]
+                    ),
                 )
-            return ids[path]
-
-        for i, name in enumerate(order):
-            stage_id = f"s{i}"
-            lines.append(f'  {stage_id}[["{name}"]]')
-            for dep in stages[name][0]:
-                if not is_bookkeeping(dep):
-                    lines.append(f"  {get_id(dep)} --> {stage_id}")
-            for out in stages[name][1]:
-                lines.append(f"  {stage_id} --> {get_id(out)}")
-        lines += [
-            "  classDef ok fill:#e6f4ea,stroke:#1e8e3e",
-            "  classDef stale fill:#fce8e6,stroke:#d93025",
-            "  classDef waiting fill:#fef7e0,stroke:#f9ab00",
-        ]
+            )
+        if prov["copied_from"]:
+            view.append(
+                make_paragraph(
+                    make_text("Copied from "),
+                    *get_path_nodes(prov["copied_from"], None),
+                )
+            )
+        if gaps:
+            view.append(
+                make_paragraph(
+                    make_strong("To fix"),
+                    make_text(" "),
+                    make_code(gaps[0]["path"]),
+                    make_text(": " + how_to_define_origin(gaps[0]["path"])),
+                )
+            )
+        if state in ("stale", "missing"):
+            view.append(
+                make_paragraph(
+                    make_strong("To update:"),
+                    make_text(" "),
+                    make_code("calkit run"),
+                )
+            )
         return {
-            "type": "mermaid",
-            "value": "\n".join(lines),
-            "section": "graph",
+            "state": state,
+            "summary": [make_text(summary)],
+            "line": [make_text(line)] if line else None,
+            "view": view,
         }
 
-    def get_document_panel() -> dict:
-        roots = [d.path for d in divs if d.path]
-        own = stages[doc_stage][1] if doc_stage in stages else []
-        if doc_stage in stages:
-            roots = stages[doc_stage][0] + roots
-        # Not what it makes itself, which it can't say anything about
-        roots = [
-            r
-            for r in dict.fromkeys(roots)
-            if not is_bookkeeping(r) and not any(under(r, o) for o in own)
+    def get_reference_provenance(key: str, name: str) -> dict:
+        # A value quoted from a reference comes from it, not a pipeline
+        found = [
+            (path, info)
+            for path, k, n, info in iter_declared_values(ck_info)
+            if k == key and n == name
         ]
-        order = [n for n in get_closure(roots) if n != doc_stage]
-        children = []
-        if doc_stage in stages:
-            children += get_stage_paragraphs(
-                doc_stage, "Rendered by", show_run=False
-            )
-        rows = [
-            make_row(
-                [make_strong("Output")],
-                [make_strong("Made by")],
-                [make_strong("State")],
-                header=True,
+        intro = [
+            make_paragraph(
+                make_code(name),
+                make_text(", quoted from reference "),
+                make_code(key),
+                *(
+                    [make_text(" in "), *get_path_nodes(found[0][0], None)]
+                    if found
+                    else []
+                ),
             )
         ]
-        marks = {"ok": "✅", "missing": "⛔"}
-        states = {}
-        n_outputs = 0
-        troubled = []
-        for name in order:
-            for out in stages[name][1]:
-                n_outputs += 1
-                state, words = get_output_state(out, name)
-                states[out] = (
-                    "ok"
-                    if state == "ok"
-                    else ("waiting" if state == "waiting" else "stale")
-                )
-                if state != "ok":
-                    troubled.append(out)
-                rows.append(
-                    make_row(
-                        [make_code(out)],
-                        [make_code(name)],
-                        [make_text(f"{marks.get(state, '⚠️')} {words}")],
+        if not found:
+            return {
+                "state": "missing",
+                "summary": [make_text("⛔ Not recorded for its reference")],
+                "line": [make_text(f"Value {name} not recorded for {key}")],
+                "view": intro
+                + [
+                    make_paragraph(
+                        make_text("calkit.yaml records no value "),
+                        make_code(name),
+                        make_text(" for "),
+                        make_code(key),
+                        make_text("; add it with "),
+                        make_code("calkit new ref-value"),
                     )
-                )
-        if n_outputs:
-            children.append(
-                {"type": "table", "children": rows, "section": "table"}
-            )
-            children.append(
-                get_graph(
-                    order + ([doc_stage] if doc_stage in stages else []),
-                    states,
-                )
-            )
-        if own:
-            children.append(
+                ],
+            }
+        info = found[0][1]
+        view = list(intro)
+        details = [make_text(f"Recorded as {info.get('value')}")]
+        if info.get("page") is not None:
+            details.append(make_text(f", on page {info['page']}"))
+        view.append(make_paragraph(*details))
+        if info.get("context"):
+            view.append(
                 make_paragraph(
-                    make_strong("Not checked:"),
-                    make_text(" "),
-                    *[
-                        node
-                        for i, path in enumerate(own)
-                        for node in [make_text(", ")] * bool(i)
-                        + [make_code(path)]
-                    ],
-                    make_text(", this document's own output; "),
-                    make_code("calkit status"),
+                    make_text("Where it says: "),
+                    make_emphasis(str(info["context"])),
+                )
+            )
+        checked, problem = check_reference_value(key, name)
+        if not checked:
+            view.append(
+                make_paragraph(
+                    make_text(
+                        "Not checked against its PDF, which isn't on the "
+                        "machine that rendered this; "
+                    ),
+                    make_code("calkit check repro"),
                     make_text(" checks it"),
                 )
             )
-        gaps = [
-            {"path": gap.path, "unchecked": gap.unchecked}
-            for gap in find_provenance_gaps(
-                roots,
-                ck_info=ck_info,
-                dvc_yaml={"stages": yaml_stages},
-                dvc_lock={"stages": lock_stages},
-                is_data=lambda p: is_data_path(
-                    p, is_file=is_file, is_dir=is_dir, listdir=listdir
-                ),
-                listdir=lambda p: listdir(p) if is_dir(p) else [],
+            state, summary, line = "ok", "Provenance", None
+        elif problem:
+            view.append(
+                make_paragraph(make_text(f"Doesn't match its PDF: {problem}"))
             )
-        ]
-        if troubled:
-            kind = "danger"
-            title = (
-                f"Document out of date: {len(troubled)} of {n_outputs} outputs"
-            )
-            children.append(get_update_paragraph())
-        elif gaps:
-            kind = "warning"
-            title = "Document has incomplete provenance: " + get_gap_words(
-                gaps[0]
-            )
-            if len(gaps) > 1:
-                title += f" and {len(gaps) - 1} more"
-            children.append(get_fix_paragraph(gaps))
-        elif doc_stage not in stages:
-            kind = "warning"
-            title = "Document has incomplete provenance: no stage renders it"
+            state = "stale"
+            summary = f"⚠️ Doesn't match its reference: {problem}"
+            line = f"Value doesn't match its reference: {problem}"
         else:
-            kind = "note"
-            title = "Document up to date"
-        return make_admonition(kind, title, children, dropdown=kind == "note")
+            view.append(make_paragraph(make_text("Matches its PDF")))
+            state, summary, line = "ok", "Provenance", None
+        return {
+            "state": state,
+            "summary": [make_text(summary)],
+            "line": [make_text(line)] if line else None,
+            "view": view,
+        }
+
+    def get_value_provenance(value: QuartoValue) -> dict:
+        if value.ref is not None:
+            return get_reference_provenance(*value.ref)
+        notebook_path = get_notebook_of_values_path(value.path)
+        where = (
+            [
+                make_text(", saved from a cell of "),
+                *get_path_nodes(notebook_path, None),
+            ]
+            if notebook_path
+            else [make_text(" in "), *get_path_nodes(value.path, None)]
+        )
+        intro = [make_paragraph(make_code(value.key), *where)]
+        return get_provenance(value.path, "Value", intro)
 
     document_path = posixpath.normpath(Path(document_path).as_posix())
     ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     envs = ck_info.get("environments") or {}
+    show = ck_info.get("show_provenance") is not False
+    values = values or []
     yaml_stages = {
         name: stage
         for name, stage in (dvc_yaml.get("stages") or {}).items()
@@ -2117,12 +2355,41 @@ def get_provenance_panels(
     # Each stage's inputs and outputs relative to the project, as run if
     # it has, since an iterated stage's are only concrete in dvc.lock
     stages: dict[str, tuple[list[str], list[str]]] = {}
+    lock_md5s: dict[str, str] = {}
     for name, stage in lock_stages.items():
         wdir = yaml_stages[name.split("@")[0]].get("wdir") or ""
         stages[name] = (
             get_paths((stage or {}).get("deps"), wdir),
             get_paths((stage or {}).get("outs"), wdir),
         )
+        for entry in ((stage or {}).get("outs") or []) + (
+            (stage or {}).get("deps") or []
+        ):
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str):
+                lock_md5s[
+                    posixpath.normpath(posixpath.join(wdir, entry["path"]))
+                ] = str(entry.get("md5") or "")
+    # What DVC keeps in its cache rather than Git, to show by its hash
+    dvc_cached = set()
+    for name, stage in yaml_stages.items():
+        for out in stage.get("outs") or []:
+            if isinstance(out, str):
+                dvc_cached.add(
+                    posixpath.normpath(
+                        posixpath.join(stage.get("wdir") or "", out)
+                    )
+                )
+            elif isinstance(out, dict):
+                out_path, opts = next(iter(out.items()))
+                if (
+                    not isinstance(opts, dict)
+                    or opts.get("cache") is not False
+                ):
+                    dvc_cached.add(
+                        posixpath.normpath(
+                            posixpath.join(stage.get("wdir") or "", out_path)
+                        )
+                    )
     locked_bases = {name.split("@")[0] for name in lock_stages}
     for name, stage in yaml_stages.items():
         if (
@@ -2153,64 +2420,77 @@ def get_provenance_panels(
         ),
         None,
     )
+    # What's shown in the document under a label, to link to there
+    labels = {c.path: c.label for c in reversed(components) if c.label}
     statuses: dict[str, dict] = {}
     waiting: dict[str, list[str]] = {}
     closure = get_closure(
-        [d.path for d in divs if d.path]
-        + (stages[doc_stage][0] if doc_stage in stages else [])
+        [c.path for c in components] + [v.path for v in values if not v.ref]
     )
-    out: dict[str, Any] = {"panels": {}, "document": None}
-    for div in divs:
-        if div.kind == "document":
-            if out["document"] is None:
-                out["document"] = {
-                    "kind": "document",
-                    "body": [],
-                    "panel": [get_document_panel()],
-                }
+    records: dict[str, dict] = {}
+    for component in components:
+        if component.src in records:
             continue
-        if div.src in out["panels"]:
-            continue
-        if div.kind == "table":
-            body = get_table_body(div)
-        elif div.kind == "file":
-            body = [make_paragraph(make_code(div.src))]
-        else:
-            body = []
-        out["panels"][div.src] = {
-            "kind": div.kind,
-            "body": body,
-            "panel": [get_file_panel(div)],
+        records[component.src] = {
+            "kind": component.kind,
+            # As the document refers to it, for an image
+            "url": posixpath.relpath(
+                component.path, posixpath.dirname(document_path) or "."
+            ),
+            "body": (
+                get_table_body(component) if component.kind == "table" else []
+            ),
+            "provenance": (
+                get_provenance(component.path, _NOUNS[component.kind], [])
+                if show and component.provenance
+                else None
+            ),
         }
-    return out
+    value_records: dict[str, dict] = {}
+    for value in values:
+        key = get_value_key(value)
+        if key not in value_records:
+            value_records[key] = {
+                "provenance": (
+                    get_value_provenance(value)
+                    if show and value.provenance
+                    else None
+                )
+            }
+    return {"components": records, "values": value_records}
 
 
 def get_provenance_path(document_path: str) -> str:
-    """Where the panels for a document are written, relative to the
-    project, as the filter finds them."""
+    """Where what a document's components and values came from is written,
+    relative to the project, as what renders it finds it."""
     document_path = posixpath.normpath(Path(document_path).as_posix())
     return posixpath.join(PROVENANCE_DIR, document_path + ".json")
 
 
 def write_provenance(
-    divs: list[ProvenanceDiv],
+    components: list[Component],
     document_path: str,
     ck_info: dict,
     wdir: str | None = None,
     document_stage: str | None = None,
+    values: list[QuartoValue] | None = None,
 ) -> str:
-    """Write what a document's ``ckprovenance`` divs show, from the project
-    in ``wdir`` as it is, returning where, relative to it.
+    """Write where a document's components and values came from, from the
+    project in ``wdir`` as it is, returning where, relative to it.
 
-    Written before every render, so the panels say how the pipeline stood
-    when the document was rendered, and kept out of Git, like the rest of
-    ``.calkit/local``, with the document's SHA-1, so what shows them can
-    tell it changed since.
+    Written before every render, so it says how the pipeline stood when the
+    document was rendered, and kept out of Git, like the rest of
+    ``.calkit/local``, with the document's SHA-1, so what shows it can
+    tell the document changed since. Files in Git link to the repo's host,
+    from ``git_repo_url`` in ``calkit.yaml``, or else the ``origin`` remote,
+    and values quoted from references are checked against PDFs of them on
+    this machine, without downloading any.
     """
     import hashlib
 
     import calkit
     import calkit.dvc
+    import calkit.git
 
     def get_full_path(path: str) -> str:
         return os.path.join(wdir or "", *path.split("/"))
@@ -2251,6 +2531,79 @@ def write_provenance(
         finally:
             os.chdir(prev_wdir)
 
+    def get_file_url(path: str, commit_sha: str | None) -> str | None:
+        # A file in Git on the repo's host, at a commit, or the current one
+        if not git_info:
+            git_info["remote"] = None
+            try:
+                repo = calkit.git.get_repo(os.path.abspath(wdir or "."))
+                remotes = {r.name: r for r in repo.remotes}
+                git_info["remote"] = ck_info.get("git_repo_url") or (
+                    remotes["origin"].url if "origin" in remotes else None
+                )
+                prefix = os.path.relpath(
+                    os.path.abspath(wdir or "."), repo.working_dir
+                )
+                git_info["prefix"] = Path(prefix).as_posix()
+                git_info["tracked"] = set(repo.git.ls_files().splitlines())
+                git_info["head"] = repo.head.commit.hexsha
+            except Exception:
+                git_info["remote"] = None
+        if not git_info["remote"]:
+            return None
+        repo_path = posixpath.normpath(
+            posixpath.join(git_info["prefix"], path)
+        )
+        if repo_path not in git_info["tracked"]:
+            return None
+        return calkit.git.get_web_file_url(
+            git_info["remote"], commit_sha or git_info["head"], repo_path
+        )
+
+    def check_reference_value(key: str, name: str) -> tuple[bool, str | None]:
+        # Against a PDF of the reference already on this machine
+        from calkit.references.check import load_collections
+        from calkit.references.values import (
+            check_value,
+            get_entry_file,
+            get_pdf,
+            iter_declared_values,
+            read_pdf_pages,
+        )
+
+        for collection_path, k, n, info in iter_declared_values(ck_info):
+            if (k, n) != (key, name):
+                continue
+            try:
+                collection = next(
+                    c
+                    for c in ck_info.get("references") or []
+                    if isinstance(c, dict) and c.get("path") == collection_path
+                )
+                entries = load_collections(
+                    wdir=wdir, paths=[collection_path]
+                ).get(collection_path, {})
+                pdf = get_pdf(
+                    collection_path,
+                    key,
+                    entry=entries.get(key),
+                    file=get_entry_file(collection, key),
+                    wdir=wdir,
+                    download=False,
+                    zotero_desktop=False,
+                )
+                if pdf is None:
+                    return False, None
+                return True, check_value(
+                    read_pdf_pages(pdf.path),
+                    info.get("value"),
+                    page=info.get("page"),
+                    context=info.get("context"),
+                )
+            except Exception:
+                return False, None
+        return False, None
+
     def read_bytes(path: str) -> bytes:
         with open(get_full_path(path), "rb") as f:
             return f.read()
@@ -2265,9 +2618,13 @@ def write_provenance(
         )
 
     dvc_stages: dict[str, Any] = {}
-    panels = get_provenance_panels(
-        divs,
+    git_info: dict[str, Any] = {}
+    records = get_provenance_records(
+        components,
         document_path,
+        values=values,
+        get_file_url=get_file_url,
+        check_reference_value=check_reference_value,
         document_stage=document_stage,
         ck_info=ck_info,
         dvc_yaml=read_yaml("dvc.yaml"),
@@ -2284,15 +2641,15 @@ def write_provenance(
         read_bytes=read_bytes,
         open_text=open_text,
     )
-    # So what shows them can tell the document changed since
+    # So what shows it can tell the document changed since
     with open(get_full_path(document_path), "rb") as f:
-        panels["source_sha1"] = hashlib.sha1(f.read()).hexdigest()
+        records["source_sha1"] = hashlib.sha1(f.read()).hexdigest()
     calkit.core.ensure_local_dir(wdir)
     rel_path = get_provenance_path(document_path)
     fpath = get_full_path(rel_path)
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     calkit.core.write_if_changed(
-        fpath, json.dumps(panels, indent=2, ensure_ascii=False) + "\n"
+        fpath, json.dumps(records, indent=2, ensure_ascii=False) + "\n"
     )
     return rel_path
 
@@ -2303,7 +2660,8 @@ def get_filter_problem(
     wdir: str | None = None,
     to: str | None = None,
 ) -> str | None:
-    """Why the filter that shows ``ckprovenance`` divs won't run for a
+    """Why the filter that shows ``ckfigure``, ``cktable``, and
+    ``ckinclude`` divs won't run for a
     document, or None if it will, from the ``filters`` its front matter,
     its folders' ``_metadata.yml``, and its Quarto project's
     ``_quarto.yml`` list, since Quarto only runs a filter that's listed,
@@ -2365,7 +2723,8 @@ def get_filter_problem(
         return None
     where = "listed" if not entries else "listed to run at pre-ast"
     return (
-        f"The '{PROVENANCE_CLASS}' divs in {document_path} need Calkit's "
-        f"filter {where}, before Quarto numbers figures; add this to its "
+        f"The ckfigure, cktable, and ckinclude divs in {document_path} "
+        f"need Calkit's filter {where}, before Quarto numbers figures; add "
+        "this to its "
         f"front matter or _quarto.yml:\n\n{FILTER_CONFIG}"
     )

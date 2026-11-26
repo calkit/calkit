@@ -960,3 +960,41 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
         warnings.warn(f"Failed to fetch history: {e}")
         return None
     return parse()
+
+
+# A remote written scp-style, e.g., git@github.com:owner/repo.git
+_SCP_REMOTE_RE = re.compile(
+    r"^(?:[\w.-]+@)?(?P<host>[\w.-]+):(?!//)(?P<path>.+)$"
+)
+
+
+def get_web_file_url(
+    remote_url: str, commit_sha: str, path: str
+) -> str | None:
+    """A link to a file at a commit on the host a Git remote is on, for
+    GitHub and GitLab, which lay their links out differently, or None for
+    any other, e.g., a folder on this machine.
+
+    The host is the remote's own, so a self-hosted GitLab works too, and
+    credentials in the URL are dropped. ``path`` is relative to the repo.
+    """
+    from urllib.parse import quote, urlsplit
+
+    remote_url = remote_url.strip()
+    m = _SCP_REMOTE_RE.match(remote_url)
+    if m is not None and "/" not in m.group("host"):
+        host, repo_path = m.group("host"), m.group("path")
+    else:
+        parts = urlsplit(remote_url)
+        if parts.scheme not in ("https", "http", "ssh", "git"):
+            return None
+        host, repo_path = parts.hostname or "", parts.path
+    repo_path = repo_path.strip("/").removesuffix(".git")
+    if not host or not repo_path or not commit_sha:
+        return None
+    file_path = quote(Path(path).as_posix().lstrip("/"))
+    if "github" in host.lower():
+        return f"https://{host}/{repo_path}/blob/{commit_sha}/{file_path}"
+    if "gitlab" in host.lower():
+        return f"https://{host}/{repo_path}/-/blob/{commit_sha}/{file_path}"
+    return None

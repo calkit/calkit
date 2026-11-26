@@ -28,7 +28,7 @@ dependencies = [
   "cryptography==50.0.2",
   "gitpython>=3.1.47",
   "ruamel-yaml==0.19.1",
-  "bibtexparser==1.4.1",
+  "bibtexparser==2.1.0",
   "filelock==3.16.0",
   "stripe==10.11.0",
   "mixpanel==4.10.1",

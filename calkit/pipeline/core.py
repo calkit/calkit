@@ -1038,6 +1038,7 @@ def get_gated_stages(
     requirements_by_stage: dict[str, list] | None = None,
     blocked_by: dict[str, set[str]] | None = None,
     failed_environments: dict[str, str] | None = None,
+    checked: dict[str, str | None] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -1068,6 +1069,10 @@ def get_gated_stages(
 
     ``failed_environments`` maps environments that failed their check to a
     reason, which a stage using one is skipped for, as for a requirement.
+
+    ``checked`` keeps what each requirement checked here came to, as for
+    :func:`calkit.check_requirements`, so another call with it, e.g., to
+    retry reaching machines, doesn't check or print them again.
     """
     import contextlib
     import json
@@ -1091,7 +1096,8 @@ def get_gated_stages(
     errors: dict[str, str] = {}
     cache: dict[str, tuple[str | None, bool]] = {}
     # Each requirement checked here, so one many stages share is checked once
-    checked: dict[str, str | None] = {}
+    if checked is None:
+        checked = {}
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
     # The apps that can export each kind
@@ -1409,9 +1415,19 @@ def get_gated_stages(
         # like declared requirements, but lacking one is something wrong
         # rather than the project saying the stage can't run here
         implied_reason = None
-        if (reason is None or unmet is not None) and machine_name is None:
+        # An inner env is built here unless the stage is sent to its machine
+        built_here = (
+            machine_name is None
+            or stage.get("kind") not in envs_mod.STAGE_KINDS_SENT_TO_OUTER_ENV
+        )
+        if (reason is None or unmet is not None) and built_here:
+            # Those declared for here, where the stage's own are only when
+            # it runs here too
+            declared = list(calkit.get_requirements(ck_info))
+            if machine_name is None:
+                declared += requirements
             implied = envs_mod.get_implied_requirements(
-                [env for _, env in resolved], ck_info
+                [env for _, env in resolved], declared
             )
             if implied:
                 implied_reason, _ = check(

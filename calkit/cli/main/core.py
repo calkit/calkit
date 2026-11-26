@@ -3897,6 +3897,8 @@ def run(
     def gate(stage_names: set[str] | None) -> None:
         """Skip the stages that can't run here, of these or all of them."""
         expanded = calkit.markdown.expand_ck_info(ck_info).ck_info
+        # What each requirement came to, so a retry doesn't check it again
+        checked: dict[str, str | None] = {}
         try:
             gated, errors = calkit.pipeline.get_gated_stages(
                 expanded,
@@ -3906,6 +3908,7 @@ def run(
                 manual=can_ask,
                 requirements_by_stage=unmet_requirements,
                 blocked_by=blocked_by,
+                checked=checked,
             )
             # A machine that couldn't be reached may only need asking about,
             # e.g., for its host
@@ -3916,6 +3919,7 @@ def run(
                         stage_names=set(errors),
                         system_info=system_info,
                         interactive=True,
+                        checked=checked,
                     )
                 gated |= retried
         except Exception as e:

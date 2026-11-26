@@ -456,6 +456,16 @@ def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "stage 'b': app 'conda' not found" in result.output
     assert "environment 'py'" not in result.output
     assert result.output.count("App 'conda' is not installed") == 1
+    # One declared for another machine isn't checked here, so doesn't count
+    ck_info["pipeline"]["stages"]["b"]["requirements"].remove("conda>=1")
+    ck_info["environments"]["far"]["requirements"].append("conda")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert (
+        "environment 'py': app 'conda' not found on this machine"
+    ) in result.output
 
 
 @pytest.mark.skipif(

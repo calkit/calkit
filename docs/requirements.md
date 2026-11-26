@@ -252,8 +252,8 @@ an environment that describes a machine, i.e., a `system`, `slurm` or
 environment.
 Other environments, e.g., `conda` or `uv-venv`, describe what's
 installed rather than the machine, so they can't declare requirements,
-beyond the app each is built with, which they
-[imply](#apps-environments-are-built-with);
+though each [implies](#apps-environments-are-built-with) the app it's
+built with;
 pair one with a machine instead, as in `cluster:py`:
 
 ```yaml
@@ -381,15 +381,17 @@ where it runs, so that app is a requirement without being declared:
 | `renv`           | `Rscript` |
 | `nix`            | `nix`     |
 
-If the project declares one of these anywhere, e.g., with a
-`version_spec` or `setup_command`, that's what's checked instead.
+If one of these is declared where the stage runs, i.e., in the
+project's requirements, the stage's, or those of a machine environment
+it runs on here, e.g., with a `version_spec` or `setup_command`,
+that's what's checked instead.
 Docker isn't on the list, since Calkit offers to install or start it when
 an environment needs it.
 Lacking one of these isn't the project saying a stage can't run here, so
 on a terminal `calkit run` offers to
-[install](#auto-installing-apps) it,
-and otherwise fails the run, printing the install command,
-rather than skipping the stage.
+[install](#auto-installing-apps) it.
+Otherwise, it prints the install command and skips the stage,
+and if the stage is out of date, the run fails.
 `calkit check reqs` checks them too, except for an environment only
 used on another machine.
 

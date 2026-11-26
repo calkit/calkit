@@ -5261,7 +5261,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
 
 
 def test_get_gated_stages_for_apps_environments_are_built_with(
-    tmp_dir, monkeypatch
+    tmp_dir, monkeypatch, capsys
 ):
     import calkit.conda
 
@@ -5294,6 +5294,10 @@ def test_get_gated_stages_for_apps_environments_are_built_with(
                 "token-stage": make_stage("py", requirements=[token]),
                 "pinned-py": make_stage("pinned:py"),
                 "far-py": make_stage("far:py"),
+                # Run here in its inner env, though its outer is far
+                "far-nb": make_stage(
+                    "far:py", kind="jupyter-notebook", notebook_path="n.ipynb"
+                ),
             }
         },
     }
@@ -5306,16 +5310,19 @@ def test_get_gated_stages_for_apps_environments_are_built_with(
         json.dump({"hostname": "calkit-test.invalid"}, f)
     by_requirements: dict[str, list] = {}
     blocked_by: dict[str, set[str]] = {}
+    checked: dict[str, str | None] = {}
     gated, errors = calkit.pipeline.get_gated_stages(
         ck_info,
         interactive=False,
         system_info={},
         requirements_by_stage=by_requirements,
         blocked_by=blocked_by,
+        checked=checked,
     )
+    assert "App 'conda' is not installed" in capsys.readouterr().err
     # Lacking the app an environment is built with is something wrong, not
     # the project saying the stage can't run here, but it's offered the same
-    assert set(errors) == {"py-stage", "after"}
+    assert set(errors) == {"py-stage", "after", "far-nb"}
     assert errors["py-stage"] == (
         "app 'conda' not found on this machine; 'calkit check reqs --stale' "
         "offers to install or set up what's missing"
@@ -5330,10 +5337,24 @@ def test_get_gated_stages_for_apps_environments_are_built_with(
     assert by_requirements == {
         "py-stage": ["conda"],
         "token-stage": [token, "conda"],
+        "far-nb": ["conda"],
     }
-    # A declared one is checked instead, as declared
+    # Checking again with what was checked, e.g., to retry reaching a
+    # machine, doesn't check or print it again
+    again = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=set(errors),
+        interactive=False,
+        system_info={},
+        checked=checked,
+    )
+    assert again == ({}, errors)
+    assert capsys.readouterr().err == ""
+    # One declared where the stage runs is checked instead, as declared, but
+    # not one declared for another stage or another machine
     conda = {"name": "conda", "version_spec": ">=1"}
     ck_info["pipeline"]["stages"]["token-stage"]["requirements"] = [conda]
+    ck_info["environments"]["far"]["requirements"] = ["conda"]
     by_requirements = {}
     gated, errors = calkit.pipeline.get_gated_stages(
         ck_info,
@@ -5342,8 +5363,9 @@ def test_get_gated_stages_for_apps_environments_are_built_with(
         system_info={},
         requirements_by_stage=by_requirements,
     )
-    assert set(gated) == {"token-stage"} and errors == {}
-    assert by_requirements == {"token-stage": [conda]}
+    assert set(gated) == {"token-stage"} and set(errors) == {"py-stage"}
+    assert by_requirements == {"token-stage": [conda], "py-stage": ["conda"]}
+    del ck_info["environments"]["far"]["requirements"]
     # Once it's here, nothing's skipped for it
     monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: sys.executable)
     del ck_info["pipeline"]["stages"]["token-stage"]

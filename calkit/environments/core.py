@@ -2448,23 +2448,17 @@ KIND_APPS = {
 }
 
 
-def get_implied_requirements(envs: list[dict], ck_info: dict) -> list[str]:
+def get_implied_requirements(envs: list[dict], declared: list) -> list[str]:
     """The apps these environments are built with, as requirements.
 
-    Those the project declares anywhere, e.g., with a ``version_spec`` or
+    Those in ``declared``, i.e., the requirements that apply where the
+    environments are used, e.g., with a ``version_spec`` or
     ``setup_command``, are left out, so the declared one is what's checked
     and offered.
     """
-    from calkit.core import _normalize_requirement, get_requirements
+    from calkit.core import _normalize_requirement
     from calkit.install import NAME_ALIASES
 
-    declared = list(get_requirements(ck_info))
-    for item in [
-        *(ck_info.get("environments") or {}).values(),
-        *((ck_info.get("pipeline") or {}).get("stages") or {}).values(),
-    ]:
-        if isinstance(item, dict):
-            declared += item.get("requirements") or []
     declared_names = set()
     for raw in declared:
         try:

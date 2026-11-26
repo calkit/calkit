@@ -700,11 +700,28 @@ def test_get_agent_info(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CODEX_THREAD_ID")
     monkeypatch.setenv("OPENCODE", "1")
     assert calkit.get_agent_info() == {"name": "OpenCode"}
+    monkeypatch.delenv("OPENCODE")
+    monkeypatch.setenv("GEMINI_CLI", "1")
+    assert calkit.get_agent_info() == {"name": "Gemini CLI"}
+    monkeypatch.delenv("GEMINI_CLI")
+    # One agent running another leaves both's variables, and neither says
+    # which ran the command, so both are listed
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CODEX_THREAD_ID", "0000-thread")
+    assert calkit.get_agent_info() == {
+        "name": "Claude Code",
+        "detected": ["Claude Code", "Codex"],
+    }
     # CALKIT_AGENT overrides what's detected, cut to a sane length
     monkeypatch.setenv("CALKIT_AGENT", " My Agent ")
     assert calkit.get_agent_info() == {"name": "My Agent"}
     monkeypatch.setenv("CALKIT_AGENT", "x" * 500)
     assert calkit.get_agent_info() == {"name": "x" * 100}
+    # Set empty or to 'none', it says no agent ran it, e.g., for a person
+    # running a command from an agent's shell
+    for value in ["", " ", "none", "None"]:
+        monkeypatch.setenv("CALKIT_AGENT", value)
+        assert calkit.get_agent_info() is None
 
 
 def test_check_requirements_checks_machine_properties(tmp_dir):

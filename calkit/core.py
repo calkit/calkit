@@ -2863,6 +2863,7 @@ AGENT_ENV_VARS = {
     "CLAUDECODE": "Claude Code",
     "CODEX_THREAD_ID": "Codex",
     "OPENCODE": "OpenCode",
+    "GEMINI_CLI": "Gemini CLI",
 }
 
 
@@ -2870,17 +2871,28 @@ def get_agent_info() -> dict | None:
     """The coding agent running this process, if it says so, e.g.,
     ``{"name": "Claude Code"}``.
 
-    ``CALKIT_AGENT`` names one Calkit can't detect, and takes precedence.
-    Otherwise it's read from what each agent sets in its shells, then from
-    ``AI_AGENT``, which some set and others can. This is only what the
-    environment says, not proof: a person can run a command from an agent's
-    shell, and anyone can set these.
+    ``CALKIT_AGENT`` takes precedence: it names one Calkit can't detect, or,
+    set empty or to 'none', says there's none, e.g., for a person running a
+    command from an agent's shell. Otherwise it's read from what each agent
+    sets in its shells, then from ``AI_AGENT``, which some set and others
+    can. One agent running another, e.g., Claude Code running Codex, leaves
+    both's variables set, with nothing saying which is which, so then every
+    one found is listed in ``detected`` and ``name`` is the first. This is
+    only what the environment says, not proof, since anyone can set these.
     """
-    for var in ("CALKIT_AGENT", *AGENT_ENV_VARS, "AI_AGENT"):
-        value = os.environ.get(var, "").strip()
-        if value:
-            return {"name": AGENT_ENV_VARS.get(var, value)[:100]}
-    return None
+    override = os.environ.get("CALKIT_AGENT")
+    if override is not None:
+        override = override.strip()
+        if not override or override.lower() == "none":
+            return None
+        return {"name": override[:100]}
+    detected = [n for v, n in AGENT_ENV_VARS.items() if os.environ.get(v)]
+    if len(detected) > 1:
+        return {"name": detected[0], "detected": detected}
+    if detected:
+        return {"name": detected[0]}
+    generic = os.environ.get("AI_AGENT", "").strip()
+    return {"name": generic[:100]} if generic else None
 
 
 def get_system_info(

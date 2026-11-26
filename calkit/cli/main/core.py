@@ -4971,6 +4971,10 @@ def run(
     }
     if skipped_stale:
         run_info["gated"] = skipped_stale
+    # The coding agent that ran it, if one says so
+    agent = calkit.get_agent_info()
+    if agent:
+        run_info["agent"] = agent
     if switch_picks:
         run_info["switches"] = switch_picks
         for stage_name, info in stage_run_info.items():
@@ -5030,8 +5034,6 @@ def run(
             or git_staged_files_before
             or git_untracked_files_before
         )
-        # The coding agent that ran it, if one says so
-        agent = calkit.get_agent_info()
         for stage_name in ran:
             env_name = stage_envs[stage_name]
             picks = stage_switch_picks[stage_name]

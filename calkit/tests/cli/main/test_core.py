@@ -2836,7 +2836,9 @@ def test_status_reports_running_pipeline(tmp_dir):
         proc.wait()
 
 
-def test_run_writes_private_logs(tmp_dir, monkeypatch):
+def test_run_writes_private_logs(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Whoever runs the tests, e.g., a coding agent, isn't the one recorded
     for var in ["CALKIT_AGENT", *calkit.core.AGENT_ENV_VARS, "AI_AGENT"]:
         monkeypatch.delenv(var, raising=False)
@@ -2905,6 +2907,10 @@ def test_run_writes_private_logs(tmp_dir, monkeypatch):
     assert rerun["start_time"] > entry["start_time"]
     assert rerun["agent"] == {"name": "Claude Code"}
     subprocess.check_call(["calkit", "check", "stage-runs"])
+    # The run's own record says so too
+    runs_dir = os.path.join(".calkit", "runs")
+    with open(os.path.join(runs_dir, os.listdir(runs_dir)[0])) as f:
+        assert json.load(f)["agent"] == {"name": "Claude Code"}
 
 
 def test_prune_run_logs(tmp_dir):

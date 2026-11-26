@@ -40,17 +40,25 @@ e.g., after `dvc commit` of an edited output.
 When `calkit run` is run from a coding agent's shell,
 the entry also records which agent it was,
 e.g., `"agent": {"name": "Claude Code"}`.
-Claude Code, Codex, and OpenCode are detected from the environment
-variables they set,
-and any other agent can name itself with `CALKIT_AGENT` or `AI_AGENT`,
-e.g., `CALKIT_AGENT="My Agent" calkit run`.
-`CALKIT_AGENT` also overrides what's detected.
-This is only what the environment said:
-a person can run a command from an agent's shell,
+Claude Code, Codex, OpenCode, and Gemini CLI are detected from the
+environment variables they set,
+and any other agent can name itself by setting `CALKIT_AGENT` or `AI_AGENT`,
+e.g., to `My Agent`.
+`CALKIT_AGENT` also overrides what's detected,
+and set empty or to `none`, it records no agent,
+e.g., for a person running `calkit run` from an agent's shell,
+or from an editor started from one,
+which inherits the agent's variables.
+One agent running another, e.g., Claude Code running Codex,
+leaves both's variables set, with nothing saying which ran the command,
+so each one found is listed in `detected`,
+and `name` is only the first of them.
+This is only what the environment said,
 and anyone can set these variables,
 so it isn't proof of who ran a stage,
 and no `agent` doesn't mean no agent was involved.
 It's informational only, so `calkit check stage-runs` ignores it.
+The run metadata described below records it too.
 
 If the `--log` option is specified,
 DVC logs will be sent into `.calkit/logs` while the run is executing,

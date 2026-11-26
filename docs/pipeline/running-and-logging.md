@@ -35,6 +35,16 @@ and a checksum of the stage's `dvc.lock` entry after it ran.
 doesn't match its recorded run,
 e.g., after `dvc commit` of an edited output.
 
+<!-- TODO: needs human review -->
+
+Since run records are often public,
+the machine is recorded as `machine_id_hash`,
+a Calkit-specific hash of the ID the platform gives it,
+e.g., macOS's hardware UUID or Linux's `/etc/machine-id`,
+rather than that ID itself,
+which can't always be reset and which other software uses too.
+A system environment that locks `machine-id` records the same hash.
+
 If the `--log` option is specified,
 DVC logs will be sent into `.calkit/logs` while the run is executing,
 and after it's complete, run metadata,

@@ -2912,9 +2912,10 @@ MPL_FONTS_DOCS_URL = (
     "https://docs.calkit.org/environments/"
     "#using-tex-from-python-eg-for-matplotlib"
 )
-# The machine properties recorded for each stage run
+# The machine properties recorded for each stage run. The machine ID is
+# hashed, as hostname is left out, since the record is often public.
 STAGE_RUN_SYSTEM_PROPERTIES = (
-    "machine_id",
+    "machine_id_hash",
     "os",
     "os_version",
     "machine",

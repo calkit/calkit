@@ -2592,7 +2592,7 @@ def test_install_remote(monkeypatch):
         "remote_system_info",
         lambda target: {
             "hostname": "login1.cluster",
-            "machine_id": "abc",
+            "machine_id_hash": "sha256:abc",
             "os": "Linux",
             "calkit_version": "1.0",
         },
@@ -2640,6 +2640,7 @@ def test_install_remote(monkeypatch):
     cfg = hub_link.install_remote("cluster", cron=True)
     # Registered from here with the far end's own details
     assert posted["hostname"] == "login1.cluster"
+    assert posted["machine_id"] == "sha256:abc"
     assert posted["platform"] == "linux"
     assert posted["hosts"] == ["cluster", "login1.cluster"]
     # without its key, which the link there sends at its first

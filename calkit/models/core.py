@@ -912,7 +912,8 @@ class MachineIdEqualsCondition(Model):
     model_config = ConfigDict(extra="forbid")
     machine_id_equals: str | list[str] = Field(
         description="ID of the machine, as 'calkit describe system' shows "
-        "it, ignoring case and dashes."
+        "it in 'machine_id_hash', or the platform's raw ID, ignoring case "
+        "and dashes."
     )
 
 
@@ -1437,7 +1438,8 @@ class SystemEnvironment(Environment):
     on the far end when it isn't---so a host that has come to point at a
     different box is reported rather than run on. ``host`` is still what
     reaches it, so both are worth declaring for a machine that isn't this
-    one. Run ``calkit describe system`` on a machine to read its ID.
+    one. Run ``calkit describe system`` on a machine to read its ID, which
+    it reports hashed, as ``machine_id_hash``.
 
     Declaring one says where to run, which is a separate question from
     whether results depend on the machine: moving a project to a new one
@@ -1469,7 +1471,8 @@ class SystemEnvironment(Environment):
     machine_id: str | None = Field(
         default=None,
         description="Stable identifier of the machine to run on, as "
-        "reported by 'calkit describe system'. Decides whether this is "
+        "'calkit describe system' reports it in 'machine_id_hash', or the "
+        "platform's raw ID. Decides whether this is "
         "that machine, in place of matching 'host' by name; 'host' is "
         "still how the machine is reached when it isn't this one. Says "
         "where to run, not that results depend on the machine; lock "
@@ -1605,7 +1608,7 @@ class SwitchEnvironment(Environment):
     - ``hostname_matches``: a glob the hostname matches, ignoring case.
     - ``os_is``: ``linux``, ``macos`` or ``windows``.
     - ``machine_id_equals``: this machine's ID, as
-      ``calkit describe system`` shows it.
+      ``calkit describe system`` shows it in ``machine_id_hash``.
     - ``gpu_vendor_is``: ``amd``, ``nvidia`` or ``apple``, for one of the
       machine's GPUs.
     - ``gpu_arch_is``: one of the machine's GPUs' architecture, e.g.,

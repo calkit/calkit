@@ -7,6 +7,7 @@ import sys
 import git
 import pytest
 
+import calkit
 import calkit.workspace as ws
 
 # Not a Windows defect to fix later: the workspace shell is only ever
@@ -518,12 +519,15 @@ def test_remote_system_info_reads_the_machine_that_runs_the_stage(
         ws.subprocess,
         "check_output",
         lambda argv, *a, **kw: (
-            b'Welcome\n{"Rscript_version": "4.3", "python_version": "3.11.2"}'
+            b'Welcome\n{"Rscript_version": "4.3", "python_version": "3.11.2", '
+            b'"machine_id": "AB-CD"}'
         ),
     )
+    # including its raw machine ID, which is hashed before it's recorded
     assert ws.remote_system_info(w) == {
         "rscript_version": "4.3",
         "calkit_python_version": "3.11.2",
+        "machine_id_hash": calkit.hash_machine_id("abcd"),
     }
 
     # Calkit has to be there to answer; say so rather than failing obscurely
@@ -598,13 +602,24 @@ def test_verify_machine_id_catches_a_host_pointing_somewhere_else():
     # tell, and it can only be asked once we've connected.
     w = ws.Workspace(host="box", wdir="/w", machine_id="abc-123")
     with pytest.raises(ws.MachineMismatch, match="not the machine"):
-        ws.verify_machine_id(w, {"machine_id": "def-456"})
+        ws.verify_machine_id(
+            w, {"machine_id_hash": calkit.hash_machine_id("def-456")}
+        )
     # Matching is quiet, however the two were written
-    ws.verify_machine_id(w, {"machine_id": "ABC123"})
+    ws.verify_machine_id(
+        w, {"machine_id_hash": calkit.hash_machine_id("ABC123")}
+    )
+    ws.verify_machine_id(
+        ws.Workspace(
+            host="box", wdir="/w", machine_id=calkit.hash_machine_id("abc123")
+        ),
+        {"machine_id_hash": calkit.hash_machine_id("ABC-123")},
+    )
     # An env that names no machine has nothing to check, so a far end that
     # reports anything at all is fine
     ws.verify_machine_id(
-        ws.Workspace(host="box", wdir="/w"), {"machine_id": "def-456"}
+        ws.Workspace(host="box", wdir="/w"),
+        {"machine_id_hash": calkit.hash_machine_id("def-456")},
     )
     # "Unknown" is not "different": an older Calkit on the far end doesn't
     # report the field, which is a reason to say nothing can be verified

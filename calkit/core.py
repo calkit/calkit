@@ -1744,6 +1744,9 @@ def check_property_requirement(
                 )
         if equals is not None:
             allowed = [equals] if isinstance(equals, str) else list(equals)
+            # A machine ID can be declared raw or hashed
+            if prop == "machine-id":
+                allowed = [hash_machine_id(str(a)) or a for a in allowed]
             # Matched case-insensitively because the same machine is 'Darwin'
             # or 'darwin' depending on who is writing it down, and nobody means
             # those to be different answers.
@@ -2619,15 +2622,36 @@ def normalize_machine_id(machine_id: str | None) -> str | None:
     return machine_id.strip().lower().replace("-", "") or None
 
 
+MACHINE_ID_HASH_PREFIX = "sha256:"
+
+
+def hash_machine_id(machine_id: str | None) -> str | None:
+    """A machine ID as Calkit records and prints it, e.g., 'sha256:3f1c...'.
+
+    The raw platform ID should be kept confidential (see machine-id(5)),
+    and the macOS one can't be reset, so what goes into a project's
+    committed files is a hash of it, with a Calkit-specific prefix so it
+    can't be matched against another program's plain hash of the same ID.
+    Either form can be given, so an ID already hashed comes back as is.
+    """
+    normalized = normalize_machine_id(machine_id)
+    if normalized is None:
+        return None
+    if normalized.startswith(MACHINE_ID_HASH_PREFIX):
+        return normalized
+    digest = hashlib.sha256(f"calkit-machine-id:{normalized}".encode())
+    return MACHINE_ID_HASH_PREFIX + digest.hexdigest()
+
+
 def machine_ids_match(a: str | None, b: str | None) -> bool:
     """Whether two machine IDs name the same machine.
 
-    An unknown ID matches nothing, including another unknown one: not
-    knowing which machine this is is never evidence that it's the one
-    being asked about.
+    Each can be raw or hashed, as ``hash_machine_id`` returns it. An unknown
+    ID matches nothing, including another unknown one: not knowing which
+    machine this is is never evidence that it's the one being asked about.
     """
-    norm_a = normalize_machine_id(a)
-    return norm_a is not None and norm_a == normalize_machine_id(b)
+    hash_a = hash_machine_id(a)
+    return hash_a is not None and hash_a == hash_machine_id(b)
 
 
 def get_machine_id() -> str | None:
@@ -2649,7 +2673,9 @@ def get_machine_id() -> str | None:
     platforms that supply nothing.
 
     Returns None where no identifier can be read. Callers must treat that
-    as "unknown", never as "different from the one I was given".
+    as "unknown", never as "different from the one I was given". This is
+    the raw ID, or the override as given; anything recorded or printed
+    takes ``hash_machine_id`` of it.
     """
     from calkit.config import read as read_config
 
@@ -2678,7 +2704,7 @@ def get_machine_properties() -> dict:
         "calkit_version": calkit.__version__,
         "calkit_git_rev": None,
         "hostname": socket.gethostname(),
-        "machine_id": get_machine_id(),
+        "machine_id_hash": hash_machine_id(get_machine_id()),
         "processor": platform.processor(),
         "platform": platform.platform(),
         "machine": platform.machine(),

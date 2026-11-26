@@ -556,6 +556,15 @@ def test_check_property_requirement():
         )
     with pytest.raises(ValueError, match="can't be read as a version"):
         check({"kind": "os", "version_spec": ">=1"}, info)
+    # A machine ID is reported hashed, and can be required raw or hashed
+    id_info = {"machine_id_hash": calkit.hash_machine_id("AB-CD")}
+    check({"kind": "machine-id", "equals": "abcd"}, id_info)
+    check(
+        {"kind": "machine-id", "equals": id_info["machine_id_hash"]}, id_info
+    )
+    with pytest.raises(ValueError, match="sha256:") as e:
+        check({"kind": "machine-id", "equals": "ef-01"}, id_info)
+    assert "ef-01" not in str(e.value)
     # A property the machine doesn't report is unanswered, not satisfied
     with pytest.raises(ValueError, match="doesn't report it"):
         check({"kind": "cpu-count", "min": 1}, {})

@@ -680,6 +680,33 @@ def test_get_gpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         calkit.core.get_gpus.cache_clear()
 
 
+def test_get_agent_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ["CALKIT_AGENT", *calkit.core.AGENT_ENV_VARS, "AI_AGENT"]:
+        monkeypatch.delenv(var, raising=False)
+    # Nothing set, or only blanks, is no agent rather than an unknown one
+    assert calkit.get_agent_info() is None
+    monkeypatch.setenv("AI_AGENT", " ")
+    assert calkit.get_agent_info() is None
+    # An agent Calkit doesn't know names itself through AI_AGENT
+    monkeypatch.setenv("AI_AGENT", "some-agent")
+    assert calkit.get_agent_info() == {"name": "some-agent"}
+    # One it knows is named by Calkit, not by what its variables hold
+    monkeypatch.setenv("AI_AGENT", "claude-code_2-1-0_agent")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert calkit.get_agent_info() == {"name": "Claude Code"}
+    monkeypatch.delenv("CLAUDECODE")
+    monkeypatch.setenv("CODEX_THREAD_ID", "0000-thread")
+    assert calkit.get_agent_info() == {"name": "Codex"}
+    monkeypatch.delenv("CODEX_THREAD_ID")
+    monkeypatch.setenv("OPENCODE", "1")
+    assert calkit.get_agent_info() == {"name": "OpenCode"}
+    # CALKIT_AGENT overrides what's detected, cut to a sane length
+    monkeypatch.setenv("CALKIT_AGENT", " My Agent ")
+    assert calkit.get_agent_info() == {"name": "My Agent"}
+    monkeypatch.setenv("CALKIT_AGENT", "x" * 500)
+    assert calkit.get_agent_info() == {"name": "x" * 100}
+
+
 def test_check_requirements_checks_machine_properties(tmp_dir):
     ck_info = {"requirements": [{"kind": "cpu-count", "min": 1}]}
     with open("calkit.yaml", "w") as f:

@@ -35,6 +35,23 @@ and a checksum of the stage's `dvc.lock` entry after it ran.
 doesn't match its recorded run,
 e.g., after `dvc commit` of an edited output.
 
+<!-- TODO: needs human review -->
+
+When `calkit run` is run from a coding agent's shell,
+the entry also records which agent it was,
+e.g., `"agent": {"name": "Claude Code"}`.
+Claude Code, Codex, and OpenCode are detected from the environment
+variables they set,
+and any other agent can name itself with `CALKIT_AGENT` or `AI_AGENT`,
+e.g., `CALKIT_AGENT="My Agent" calkit run`.
+`CALKIT_AGENT` also overrides what's detected.
+This is only what the environment said:
+a person can run a command from an agent's shell,
+and anyone can set these variables,
+so it isn't proof of who ran a stage,
+and no `agent` doesn't mean no agent was involved.
+It's informational only, so `calkit check stage-runs` ignores it.
+
 If the `--log` option is specified,
 DVC logs will be sent into `.calkit/logs` while the run is executing,
 and after it's complete, run metadata,

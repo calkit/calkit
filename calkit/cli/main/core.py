@@ -5030,6 +5030,8 @@ def run(
             or git_staged_files_before
             or git_untracked_files_before
         )
+        # The coding agent that ran it, if one says so
+        agent = calkit.get_agent_info()
         for stage_name in ran:
             env_name = stage_envs[stage_name]
             picks = stage_switch_picks[stage_name]
@@ -5058,6 +5060,8 @@ def run(
             entry["calkit_version"] = system_info.get("calkit_version")
             if system_info.get("calkit_git_rev"):
                 entry["calkit_git_rev"] = system_info["calkit_git_rev"]
+            if agent:
+                entry["agent"] = dict(agent)
             # The machine is the outer env's, as picked
             outer = env_name.split(calkit.environments.COMPOSITE_ENV_SEP)[0]
             outer = switch_picks.get(outer) or outer

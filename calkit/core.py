@@ -2857,6 +2857,31 @@ ALWAYS_REPORTED_APPS = (
     "julia",
 )
 
+# What each coding agent sets in the shells it runs commands in, read for
+# presence only, since some hold session IDs
+AGENT_ENV_VARS = {
+    "CLAUDECODE": "Claude Code",
+    "CODEX_THREAD_ID": "Codex",
+    "OPENCODE": "OpenCode",
+}
+
+
+def get_agent_info() -> dict | None:
+    """The coding agent running this process, if it says so, e.g.,
+    ``{"name": "Claude Code"}``.
+
+    ``CALKIT_AGENT`` names one Calkit can't detect, and takes precedence.
+    Otherwise it's read from what each agent sets in its shells, then from
+    ``AI_AGENT``, which some set and others can. This is only what the
+    environment says, not proof: a person can run a command from an agent's
+    shell, and anyone can set these.
+    """
+    for var in ("CALKIT_AGENT", *AGENT_ENV_VARS, "AI_AGENT"):
+        value = os.environ.get(var, "").strip()
+        if value:
+            return {"name": AGENT_ENV_VARS.get(var, value)[:100]}
+    return None
+
 
 def get_system_info(
     apps: list[str] | None = None,

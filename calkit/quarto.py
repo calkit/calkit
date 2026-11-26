@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any
+from typing import Any
 
 # A Quarto extension, so documents use the shortcode without listing it,
 # written where Quarto looks for one: the Quarto project's folder, or the
@@ -49,14 +49,28 @@ _EMBED_RE = re.compile(r"\{\{<\s*embed\s+[\"']?(?P<path>[^\s#\"'>]+)")
 # for the document, and turning a provenance view into Pandoc's AST or
 # HTML, deciding nothing about what it says, which is decided in Python
 PROVENANCE_LUA_COMMON = r"""
-local function read_file(fpath)
-  local f = io.open(fpath, "r")
+local function read_file(fpath, mode)
+  local f = io.open(fpath, mode or "r")
   if f == nil then
     return nil
   end
   local content = f:read("a")
   f:close()
   return content
+end
+
+-- A path as Python's posixpath.normpath writes it, so it's looked up as
+-- Calkit recorded it, e.g., results/fit.json for ./results/fit.json
+local function normpath(path)
+  local parts = {}
+  for part in (path:gsub("\\", "/")):gmatch("[^/]+") do
+    if part == ".." and #parts > 0 and parts[#parts] ~= ".." then
+      table.remove(parts)
+    elseif part ~= "." then
+      table.insert(parts, part)
+    end
+  end
+  return #parts > 0 and table.concat(parts, "/") or "."
 end
 
 -- The Calkit project's folder, which paths are relative to
@@ -104,16 +118,31 @@ local function is_outdated(data)
   if outdated == nil then
     outdated = false
     local input = quarto.doc.input_file
-    local f = io.open(input, "rb")
     local notebook = input:lower():match("%.ipynb$")
-    if data and data.source_sha1 and f ~= nil and not notebook then
-      outdated = pandoc.utils.sha1(f:read("a")) ~= data.source_sha1
-    end
-    if f ~= nil then
-      f:close()
+    local content = read_file(input, "rb")
+    if data and data.source_sha1 and content ~= nil and not notebook then
+      outdated = pandoc.utils.sha1(content) ~= data.source_sha1
     end
   end
   return outdated
+end
+
+-- What changed since Calkit recorded it, e.g., a figure made again by
+-- hand, or the document, which the view then says it's from before, or
+-- nil if nothing did
+local function get_changed(data, path, sha1)
+  if sha1 then
+    local content = read_file(
+      pandoc.path.join({find_project_dir(), path}), "rb"
+    )
+    if content == nil or pandoc.utils.sha1(content) ~= sha1 then
+      return path
+    end
+  end
+  if is_outdated(data) then
+    return "this document"
+  end
+  return nil
 end
 
 local inlines, blocks
@@ -195,9 +224,9 @@ local function escape(value)
     :gsub('"', "&quot;"))
 end
 
--- How a view looks, and drawing its graph with Quarto's own Mermaid when
--- it's opened, since Mermaid can't measure text while it's hidden
-local ASSETS = [[
+-- How a view looks; its graph is drawn by provenance.js when it's opened,
+-- loading Mermaid then, since it can't measure text while it's hidden
+local STYLE = [[
 <style>
 details.ck-provenance{margin:-.25rem 0 1rem;font-size:.85em;
   color:var(--bs-secondary-color,#6c757d)}
@@ -210,31 +239,23 @@ details.ck-provenance:not(.ck-ok)>summary,
 details.ck-provenance.ck-outdated>summary{color:#b35900;font-weight:600}
 details.ck-provenance[open]{border-left:2px solid #dee2e6;
   padding-left:.75rem}
+.ck-value{cursor:pointer;border-bottom:1px dotted currentColor}
 button.ck-value{all:unset;cursor:pointer;
   border-bottom:1px dotted currentColor}
 button.ck-value:focus-visible{outline:2px solid #0d6efd;outline-offset:2px}
-button.ck-value:not(.ck-ok),button.ck-value.ck-outdated{
-  border-bottom-color:#b35900}
-.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em}
+.ck-value:not(.ck-ok),.ck-value.ck-outdated{border-bottom-color:#b35900}
+.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em;
+  vertical-align:super}
 .ck-popover{max-width:min(48rem,92vw);max-height:80vh;overflow:auto;
   padding:1rem;border:1px solid #dee2e6;border-radius:.375rem;
   font-size:.9em}
 .ck-popover table{border-collapse:collapse;margin-bottom:1rem}
 .ck-popover th,.ck-popover td{padding:.2rem .6rem;text-align:left;
   border-bottom:1px solid #dee2e6}
+.ck-provenance svg,.ck-popover svg{--mermaid-label-fg-color:inherit;
+  --mermaid-node-fg-color:#6c757d}
+.ck-provenance svg .nodeLabel,.ck-popover svg .nodeLabel{color:inherit}
 </style>
-<script>
-document.addEventListener("toggle", async (event) => {
-  const el = event.target;
-  if (!(el.open || event.newState === "open") || !window.mermaid) return;
-  for (const pre of el.querySelectorAll("pre.ck-mermaid:not([data-drawn])")) {
-    pre.dataset.drawn = "true";
-    const id = "ck-mermaid-" + Math.random().toString(36).slice(2);
-    const { svg } = await window.mermaid.render(id, pre.textContent);
-    pre.innerHTML = svg;
-  }
-}, true);
-</script>
 ]]
 local assets_ready = false
 local function add_assets()
@@ -242,18 +263,22 @@ local function add_assets()
     return
   end
   local share = os.getenv("QUARTO_SHARE_PATH")
+  local resources = {}
   if share then
-    local function asset(name)
-      return pandoc.path.join({share, "formats", "html", "mermaid", name})
-    end
-    -- The same files, under the same name, as Quarto's own diagrams
-    quarto.doc.add_html_dependency({
-      name = "quarto-diagram",
-      scripts = {asset("mermaid.min.js"), asset("mermaid-init.js")},
-      stylesheets = {asset("mermaid.css")},
+    -- Copied beside provenance.js, but only loaded when a view opens
+    table.insert(resources, {
+      name = "mermaid.min.js",
+      path = pandoc.path.join({
+        share, "formats", "html", "mermaid", "mermaid.min.js",
+      }),
     })
   end
-  quarto.doc.include_text("in-header", ASSETS)
+  quarto.doc.add_html_dependency({
+    name = "calkit-provenance",
+    scripts = {quarto.utils.resolve_path("provenance.js")},
+    resources = resources,
+  })
+  quarto.doc.include_text("in-header", STYLE)
   assets_ready = true
 end
 
@@ -292,32 +317,113 @@ local function to_html(content)
   return (pandoc.write(pandoc.Pandoc(content), "html"):gsub("%s+$", ""))
 end
 
-local function get_classes(base, provenance, data)
+local function get_classes(base, provenance, changed)
   return base .. " ck-" .. (provenance.state or "ok")
-    .. (is_outdated(data) and " ck-outdated" or "")
+    .. (changed and " ck-outdated" or "")
 end
 
 -- The line shown while it's collapsed, which says what's wrong
-local function get_summary(provenance, data)
+local function get_summary(provenance, changed)
+  if changed and (provenance.state or "ok") == "ok" then
+    return words("⚠️ Recorded before " .. changed .. " changed")
+  end
   local out = inlines(provenance.summary)
-  if is_outdated(data) then
-    out:extend(words(" · recorded before this document changed"))
+  if changed then
+    out:extend(words(" · recorded before " .. changed .. " changed"))
   end
   return out
 end
 
--- How it came to be, under a note if the document changed since
-local function get_view(provenance, data)
+-- How it came to be, under a note if what it's about changed since
+local function get_view(provenance, changed)
   local out = pandoc.Blocks({})
-  if is_outdated(data) then
+  if changed then
     out:insert(pandoc.Para(words(
-      "The document changed since this was recorded; render it with "
-        .. "Calkit to update it."
+      "Recorded before " .. changed .. " changed; render the document "
+        .. "with Calkit to update this."
     )))
   end
   out:extend(blocks(provenance.view))
   return out
 end
+"""
+
+# Shows where each file a page loads from came from, and makes values into
+# buttons opening where they came from, except where a button can't go,
+# e.g., in a heading or link
+PROVENANCE_JS = r"""// Written by Calkit; changes are overwritten when the pipeline compiles.
+(() => {
+  const base = document.currentScript
+    ? document.currentScript.src.replace(/[^/]*$/, "")
+    : "";
+  let loading = null;
+  // Mermaid, loaded the first time a view with a graph opens, unless the
+  // page already has it
+  function loadMermaid() {
+    if (window.mermaid) {
+      return Promise.resolve(window.mermaid);
+    }
+    if (!loading) {
+      loading = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = base + "mermaid.min.js";
+        script.onload = () => {
+          window.mermaid.initialize({ startOnLoad: false });
+          resolve(window.mermaid);
+        };
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    }
+    return loading;
+  }
+  async function draw(root) {
+    const pres = root.querySelectorAll("pre.ck-mermaid:not([data-drawn])");
+    if (pres.length === 0) {
+      return;
+    }
+    let mermaid;
+    try {
+      mermaid = await loadMermaid();
+    } catch {
+      // Left as its source, e.g., in a page with everything embedded
+      return;
+    }
+    for (const pre of pres) {
+      pre.dataset.drawn = "true";
+      const id = "ck-mermaid-" + Math.random().toString(36).slice(2);
+      const { svg } = await mermaid.render(id, pre.textContent);
+      pre.innerHTML = svg;
+    }
+  }
+  document.addEventListener("toggle", (event) => {
+    const el = event.target;
+    if (el.open || event.newState === "open") {
+      draw(el);
+    }
+  }, true);
+  function addButtons() {
+    const spans = document.querySelectorAll("span.ck-value[data-ck-popover]");
+    for (const span of spans) {
+      if (span.closest("a, h1, h2, h3, h4, h5, h6, nav, .title, summary")) {
+        continue;
+      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = span.className;
+      button.title = span.title;
+      button.setAttribute("popovertarget", span.dataset.ckPopover);
+      button.setAttribute("aria-label", span.dataset.ckLabel);
+      button.append(...span.childNodes);
+      span.replaceWith(button);
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", addButtons);
+  } else {
+    addButtons();
+  }
+})();
 """
 
 # Turns what Calkit recorded for each of a document's components into
@@ -336,28 +442,38 @@ PROVENANCE_LUA = (
     + r"""
 local KINDS = {ckfigure = "figure", cktable = "table", ckinclude = "include"}
 local MARKDOWN_EXTS = {[".md"] = true, [".qmd"] = true}
+local TABLE_READERS = {[".csv"] = "csv", [".tsv"] = "tsv"}
+-- What a component takes for itself rather than passing to its figure
+local OWN_ATTRIBUTES = {src = true, rows = true, provenance = true}
 
--- A file's path relative to the document, as an image's is read, when
+local function is_off(value)
+  value = (value or ""):lower()
+  return value == "false" or value == "no" or value == "0" or value == "off"
+end
+
+-- The file's path relative to the document, as an image's is read, when
 -- nothing's recorded to say it
-local function get_url(src)
-  local project_dir = find_project_dir()
+local function get_url(path)
   return pandoc.path.make_relative(
-    pandoc.path.join({project_dir, src}),
+    pandoc.path.join({find_project_dir(), path}),
     pandoc.path.directory(quarto.doc.input_file),
     true
   )
 end
 
+-- An image with the div's figure options and classes, e.g., fig-pos or
+-- .lightbox, as Quarto reads them on one
 local function get_image(el, url)
   local attributes = {}
-  for _, key in ipairs({"width", "height", "fig-align", "fig-alt"}) do
-    if el.attributes[key] then
-      table.insert(attributes, {key, el.attributes[key]})
+  for key, value in pairs(el.attributes) do
+    if not OWN_ATTRIBUTES[key] and key ~= "alt" then
+      table.insert(attributes, {key, value})
     end
   end
+  table.sort(attributes, function(a, b) return a[1] < b[1] end)
   local alt = el.attributes.alt and words(el.attributes.alt)
     or pandoc.Inlines({})
-  return pandoc.Image(alt, url, "", pandoc.Attr("", {}, attributes))
+  return pandoc.Image(alt, url, "", pandoc.Attr("", el.classes, attributes))
 end
 
 -- A Quarto figure, numbered and cross-referenced by the div's id, with its
@@ -373,31 +489,102 @@ local function get_figure(el, content)
   })
 end
 
-local function is_off(value)
-  value = (value or ""):lower()
-  return value == "false" or value == "no" or value == "0" or value == "off"
+-- Text with any byte that isn't part of UTF-8 replaced, which Pandoc
+-- reads only
+local function to_utf8(text)
+  if utf8.len(text) then
+    return text
+  end
+  local out, i = {}, 1
+  while i <= #text do
+    local byte = text:byte(i)
+    local n = byte >= 0xF0 and 4 or byte >= 0xE0 and 3
+      or byte >= 0xC0 and 2 or 1
+    local piece = text:sub(i, i + n - 1)
+    if utf8.len(piece) == 1 then
+      table.insert(out, piece)
+      i = i + n
+    else
+      table.insert(out, "\239\191\189")
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
+-- A CSV or TSV file's rows, read when the document renders, so they're
+-- what the file has now, up to as many as it says
+local function get_table(path, rows)
+  local _, ext = pandoc.path.split_extension(path)
+  local reader = TABLE_READERS[ext:lower()] or "csv"
+  local text = read_file(pandoc.path.join({find_project_dir(), path}), "rb")
+  if text == nil then
+    return pandoc.Blocks({pandoc.Para({
+      pandoc.Emph(words("Can't read " .. path)),
+    })})
+  end
+  -- Without a byte order mark, and with what isn't UTF-8 replaced
+  text = to_utf8((text:gsub("^\239\187\191", "")))
+  local ok, doc = pcall(pandoc.read, text, reader)
+  if not ok or #doc.blocks == 0 or doc.blocks[1].t ~= "Table" then
+    return pandoc.Blocks({pandoc.Para({
+      pandoc.Emph(words("Can't read " .. path)),
+    })})
+  end
+  local tbl = doc.blocks[1]
+  local limit = tonumber(rows) or 25
+  local bodies = tbl.bodies
+  local body = bodies[1] and bodies[1].body or {}
+  local n_rows = #body
+  if n_rows > limit then
+    -- Set back whole, since what's read from the table is a copy
+    while #body > limit do
+      table.remove(body)
+    end
+    bodies[1].body = body
+    tbl.bodies = bodies
+  end
+  local out = pandoc.Blocks({tbl})
+  if n_rows > limit then
+    out:insert(pandoc.Para({pandoc.Emph(words(
+      (limit == 1 and "First row of " or "First " .. limit .. " rows of ")
+        .. path
+    ))}))
+  end
+  return out
 end
 
 -- Collapsed under it in HTML, saying what's wrong while it is, and only
 -- that, in a line, in other formats
-local function get_provenance(provenance, data)
+local function get_provenance(provenance, changed, path)
   if quarto.doc.is_format("html:js") then
     add_assets()
-    local classes = get_classes("ck-provenance", provenance, data)
+    local summary = get_summary(provenance, changed)
+    local classes = get_classes("ck-provenance", provenance, changed)
     local out = pandoc.Blocks({
       pandoc.RawBlock(
         "html",
-        '<details class="' .. classes .. '"><summary>'
-          .. to_html({pandoc.Plain(get_summary(provenance, data))})
-          .. "</summary>"
+        '<details class="' .. classes .. '"><summary aria-label="'
+          .. escape("Where " .. path .. " came from: "
+            .. pandoc.utils.stringify(summary))
+          .. '">' .. to_html({pandoc.Plain(summary)}) .. "</summary>"
       ),
     })
-    out:extend(get_view(provenance, data))
+    out:extend(get_view(provenance, changed))
     out:insert(pandoc.RawBlock("html", "</details>"))
     return out
   end
-  if provenance.line then
-    return pandoc.Blocks({pandoc.Para({pandoc.Emph(inlines(provenance.line))})})
+  local line = provenance.line and inlines(provenance.line) or nil
+  if changed then
+    line = line or pandoc.Inlines({})
+    if #line > 0 then
+      line:insert(pandoc.Str(";"))
+      line:insert(pandoc.Space())
+    end
+    line:extend(words("provenance recorded before " .. changed .. " changed"))
+  end
+  if line then
+    return pandoc.Blocks({pandoc.Para({pandoc.Emph(line)})})
   end
   return pandoc.Blocks({})
 end
@@ -425,36 +612,35 @@ end
 
 local function component_div(el, kind)
   local src = el.attributes.src or ""
+  local path = normpath(src:gsub("^/+", ""))
   local data = load_records()
   local record = data and (data.components or {})[src] or nil
-  local url = record and record.url or get_url(src)
+  local url = record and record.url or get_url(path)
   local out = pandoc.Blocks({})
   if kind == "figure" then
     out:extend(get_figure(
       el, pandoc.Blocks({pandoc.Plain({get_image(el, url)})})
     ))
   elseif kind == "table" then
-    local content = record and blocks(record.body) or pandoc.Blocks({
-      -- Only its name, keeping its id and caption, so references resolve
-      pandoc.utils.from_simple_table(pandoc.SimpleTable(
-        {}, {pandoc.AlignDefault}, {0}, {},
-        {{{pandoc.Plain({pandoc.Code(src)})}}}
-      )),
-    })
-    for index, item in ipairs(content) do
-      -- The id and caption go on the table, not a note after it
-      if index == 1 and item.t == "Table" then
-        item.attr = pandoc.Attr(el.identifier, {}, {})
-        if #el.content > 0 then
-          item.caption = {long = el.content}
-        end
+    local content = get_table(path, el.attributes.rows)
+    if el.identifier ~= "" or #el.content > 0 then
+      -- Quarto's own form of a table with a caption, which it numbers
+      local caption = pandoc.utils.blocks_to_inlines(el.content)
+      local float = pandoc.Blocks({content[1]})
+      if #caption > 0 then
+        float:insert(pandoc.Para(caption))
       end
-      out:insert(item)
+      out:insert(pandoc.Div(float, pandoc.Attr(el.identifier, {}, {})))
+      for index = 2, #content do
+        out:insert(content[index])
+      end
+    else
+      out:extend(content)
     end
   else
-    local _, ext = pandoc.path.split_extension(src)
+    local _, ext = pandoc.path.split_extension(path)
     local text = MARKDOWN_EXTS[ext:lower()]
-      and read_file(pandoc.path.join({find_project_dir(), src})) or nil
+      and read_file(pandoc.path.join({find_project_dir(), path})) or nil
     local content = text and pandoc.read(text, "markdown").blocks
       or pandoc.Blocks({pandoc.Para({pandoc.Code(src)})})
     content:extend(el.content)
@@ -464,9 +650,16 @@ local function component_div(el, kind)
     return out
   end
   if record == nil then
+    if data then
+      quarto.log.warning(
+        "Calkit recorded no provenance for " .. src .. "; is it in a "
+          .. "place 'calkit quarto render' doesn't look, e.g., an include?"
+      )
+    end
     out:extend(unrecorded())
   elseif record.provenance then
-    out:extend(get_provenance(record.provenance, data))
+    local changed = get_changed(data, path, record.sha1)
+    out:extend(get_provenance(record.provenance, changed, path))
   end
   return out
 end
@@ -474,6 +667,7 @@ end
 local function handle(el)
   for name, kind in pairs(KINDS) do
     if el.classes:includes(name) then
+      el.classes = el.classes:filter(function(c) return c ~= name end)
       return component_div(el, kind)
     end
   end
@@ -497,12 +691,12 @@ return {{Div = handle}}
 """
 )
 
-# Shows a value with where it came from, behind a button that's the value
-# itself, opening a popover, saying what's wrong while it's closed, and
-# shows only the value in other formats
+# Shows a value with where it came from, marked as text a script makes a
+# button opening a popover, except where a button can't go, saying what's
+# wrong while it's closed, and shows only the value in other formats
 VALUE_PROVENANCE_LUA = r"""
 local n_popovers = 0
-local function with_provenance(text, key, kwargs)
+local function with_provenance(text, key, path, kwargs)
   local out = pandoc.Inlines({pandoc.Str(text)})
   local flag = pandoc.utils.stringify(kwargs.provenance or ""):lower()
   if flag == "false" or flag == "no" or flag == "0" or flag == "off"
@@ -516,34 +710,48 @@ local function with_provenance(text, key, kwargs)
   end
   add_assets()
   local provenance = record.provenance
+  local changed = get_changed(data, path, record.sha1)
   n_popovers = n_popovers + 1
   local id = "ck-value-" .. n_popovers
-  local summary = get_summary(provenance, data)
-  local label = "Where " .. text .. " came from: "
-    .. pandoc.utils.stringify(summary)
-  local warn = provenance.state ~= "ok" or is_outdated(data)
-  local content = pandoc.Blocks({pandoc.Para(summary)})
-  content:extend(get_view(provenance, data))
+  local summary = get_summary(provenance, changed)
+  local warn = provenance.state ~= "ok" or changed ~= nil
+  local label = "Where " .. text .. " came from"
+  if warn then
+    label = label .. ": " .. pandoc.utils.stringify(summary)
+  end
+  -- Headed by what it is, e.g., its key in a file, which names it
+  local view = get_view(provenance, changed)
+  local content = pandoc.Blocks({})
+  if #view > 0 then
+    content:insert(pandoc.Div({view[1]}, pandoc.Attr(id .. "-title", {}, {})))
+  end
+  content:insert(pandoc.Para(summary))
+  for index = 2, #view do
+    content:insert(view[index])
+  end
   quarto.doc.include_text(
     "after-body",
-    '<div id="' .. id .. '" popover class="ck-popover">'
-      .. to_html(content) .. "</div>"
+    '<div id="' .. id .. '" popover class="ck-popover" role="dialog" '
+      .. 'aria-labelledby="' .. id .. '-title">' .. to_html(content)
+      .. "</div>"
   )
-  return pandoc.Inlines({
-    pandoc.RawInline(
-      "html",
-      '<button type="button" class="'
-        .. get_classes("ck-value", provenance, data)
-        .. '" popovertarget="' .. id .. '" aria-label="' .. escape(label)
-        .. '" title="' .. escape(pandoc.utils.stringify(summary)) .. '">'
-    ),
-    pandoc.Str(text),
-    pandoc.RawInline(
-      "html",
-      (warn and '<sup class="ck-flag" aria-hidden="true">⚠</sup>' or "")
-        .. "</button>"
-    ),
-  })
+  local inner = pandoc.Inlines({pandoc.Str(text)})
+  if warn then
+    inner:insert(pandoc.Span(
+      {pandoc.Str("⚠")},
+      pandoc.Attr("", {"ck-flag"}, {{"aria-hidden", "true"}})
+    ))
+  end
+  return pandoc.Inlines({pandoc.Span(inner, pandoc.Attr(
+    "",
+    {"ck-value", "ck-" .. (provenance.state or "ok"),
+      changed and "ck-outdated" or nil},
+    {
+      {"data-ck-popover", id},
+      {"data-ck-label", label},
+      {"title", pandoc.utils.stringify(summary)},
+    }
+  ))})
 end
 """
 
@@ -925,10 +1133,10 @@ local function get_results_path(source, kind)
   end
   -- A notebook stands for the values the pipeline saves from its cells
   if path:lower():match("%.ipynb$") then
-    path = ".calkit/notebooks/outputs/" .. (path:gsub("^%./", ""))
-      .. "/values.json"
+    path = ".calkit/notebooks/outputs/" .. normpath(path) .. "/values.json"
   end
-  return path
+  -- As Calkit records it, e.g., without a leading ./
+  return normpath(path)
 end
 
 -- A dotted key, e.g., fit.coeffs.0, with numbers indexing lists from 0
@@ -1108,7 +1316,7 @@ return {
       )
       return pandoc.Str("??")
     end
-    return with_provenance(text, path .. ":" .. key, kwargs)
+    return with_provenance(text, path .. ":" .. key, path, kwargs)
   end,
   -- A value quoted from a reference: its citation key, its name, and
   -- optionally a format, from the file Calkit writes them all to
@@ -1133,7 +1341,8 @@ return {
     local file = key:gsub("[^A-Za-z0-9_%.~%-]", function(c)
       return string.format("%%%02X", string.byte(c))
     end)
-    local data = load_data(".calkit/reference-values/" .. file .. ".json")
+    local values_path = ".calkit/reference-values/" .. file .. ".json"
+    local data = load_data(values_path)
     local value = nil
     if type(data) == "table" then
       value = data[name]
@@ -1151,7 +1360,9 @@ return {
       )
       return pandoc.Str("??")
     end
-    return with_provenance(text, "ref:" .. key .. ":" .. name, kwargs)
+    return with_provenance(
+      text, "ref:" .. key .. ":" .. name, values_path, kwargs
+    )
   end,
 }
 """
@@ -1478,6 +1689,7 @@ def write_components(document_path: str, wdir: str | None = None) -> None:
         posixpath.join(ext_dir, "_extension.yml"): EXTENSION_YML,
         posixpath.join(ext_dir, "calkit.lua"): SHORTCODE_LUA,
         posixpath.join(ext_dir, "provenance.lua"): PROVENANCE_LUA,
+        posixpath.join(ext_dir, "provenance.js"): PROVENANCE_JS,
     }
     for rel_path, content in contents.items():
         fpath = os.path.join(wdir or "", rel_path)
@@ -1509,7 +1721,8 @@ MARKDOWN_EXTS = (".md", ".qmd")
 # A fenced div's opening line, e.g., ::: {.ckfigure src="a.png"}, or
 # ::: name, which Pandoc reads as a class, optionally with colons after
 _DIV_OPEN_RE = re.compile(
-    r"^\s*:{3,}\s*(?:\{(?P<attrs>[^}]*)\}|(?P<cls>[\w-]+))(?:\s*:+)?\s*$"
+    r"^\s*(?:>\s*)*:{3,}\s*(?:\{(?P<attrs>[^}]*)\}|(?P<cls>[\w-]+))"
+    r"(?:\s*:+)?\s*$"
 )
 _DIV_ATTR_RE = re.compile(
     r"\.(?P<cls>[\w-]+)|#(?P<id>[\w:.-]+)"
@@ -1693,7 +1906,6 @@ def get_provenance_records(
     is_dir: Callable[[str], bool],
     listdir: Callable[[str], list[str]],
     read_bytes: Callable[[str], bytes],
-    open_text: Callable[[str], IO[str]],
     values: list[QuartoValue] | None = None,
     get_file_url: Callable[[str, str | None], str | None] = (
         lambda path, commit_sha: None
@@ -1718,20 +1930,22 @@ def get_provenance_records(
     The document's own outputs aren't checked, since it can't say whether
     what's being rendered is up to date, and neither is when its stage last
     ran. Stages are checked with ``get_stage_status``, which gives a stage
-    in ``dvc.lock``'s status, as ``get_stage_status`` does.
+    in ``dvc.lock``'s status, as ``get_stage_status`` does, or a file's
+    ``.dvc`` file's, named for it.
     Values, from ``ckvalue`` and ``ckrefval``, are keyed as
     ``get_value_key`` says, and a value quoted from a reference describes
     the reference rather than a pipeline, with whether it matched the
     reference's PDF, per ``check_reference_value``, which says whether it
     was checked and what's wrong if anything.
     ``get_file_url`` gives a link to a file in Git, at a commit, or the
-    current one if None, if there's a host to link to. ``open_text`` opens
-    a file as text to read a table from, and the other functions read the
-    project, as for ``calkit.provenance.get_path_provenance``.
+    current one if None, if there's a host to link to, which is also taken
+    to mean it's in Git. The other functions read the project, as for
+    ``calkit.provenance.get_path_provenance``. Each file shown is recorded
+    with its SHA-1, so what shows it can tell it changed since.
     ``document_stage`` names the stage that renders the document, which is
     otherwise its Quarto stage, if any.
     """
-    import csv
+    import hashlib
 
     import calkit.dvc
     import calkit.pipeline
@@ -2066,7 +2280,14 @@ def get_provenance_records(
                 [make_text("stage "), make_code(producer)]
                 if producer is not None
                 else get_origin_nodes(dep, gaps)
+                or [
+                    make_text(
+                        "in Git" if get_file_url(dep, commit_sha) else "—"
+                    )
+                ]
             )
+            if get_dvc_file_status(dep) == "stale":
+                state = "⚠️ modified since added to DVC"
             rows.append(
                 make_row(
                     get_path_nodes(dep, commit_sha),
@@ -2090,43 +2311,23 @@ def get_provenance_records(
             blocks.append(make_paragraph(*nodes))
         return blocks
 
-    def get_table_body(component: Component) -> list[dict]:
-        # Only as far as is shown, and one more row to tell it's cut short
-        delimiter = TABLE_DELIMITERS.get(
-            posixpath.splitext(component.path)[1].lower(), ","
-        )
-        rows = []
+    def get_sha1(path: str) -> str | None:
+        if not is_file(path):
+            return None
         try:
-            with open_text(component.path) as f:
-                for row in csv.reader(f, delimiter=delimiter):
-                    rows.append(row)
-                    if len(rows) > component.rows + 1:
-                        break
-        except (OSError, csv.Error):
-            return [
-                make_paragraph(make_emphasis(f"Can't read {component.src}"))
-            ]
-        if not rows:
-            return [make_paragraph(make_emphasis(f"{component.src} is empty"))]
-        header, body = rows[0], rows[1 : component.rows + 1]
-        out = [
-            {
-                "type": "table",
-                "children": [
-                    make_row(*([make_text(v)] for v in header), header=True)
-                ]
-                + [make_row(*([make_text(v)] for v in row)) for row in body],
-            }
-        ]
-        if len(rows) > component.rows + 1:
-            out.append(
-                make_paragraph(
-                    make_emphasis(
-                        f"First {component.rows} rows of {component.src}"
-                    )
-                )
-            )
-        return out
+            return hashlib.sha1(read_bytes(path)).hexdigest()
+        except Exception:
+            return None
+
+    def get_dvc_file_status(path: str) -> str | None:
+        # Whether a file DVC tracks with a .dvc file changed since it was
+        # added, from that file's own stage
+        if not is_file(path + ".dvc"):
+            return None
+        try:
+            return str(get_stage_status(path + ".dvc")["status"])
+        except Exception:
+            return None
 
     def get_provenance(path: str, noun: str, intro: list[dict]) -> dict:
         # Whether it's up to date, and how it came to be, after what
@@ -2168,6 +2369,8 @@ def get_provenance_records(
                 words += f": stage {stage} not run"
         elif stage is not None:
             state, words = get_output_state(path, stage)
+        elif get_dvc_file_status(path) == "stale":
+            state, words = "stale", "modified since added to DVC"
         if state == "ok" and gaps:
             state = "incomplete"
             gap = gaps[0]
@@ -2429,6 +2632,12 @@ def get_provenance_records(
     )
     records: dict[str, dict] = {}
     for component in components:
+        # Its provenance is worked out if any showing of it shows it
+        wanted = [
+            c
+            for c in components
+            if c.src == component.src and c.provenance and show
+        ]
         if component.src in records:
             continue
         records[component.src] = {
@@ -2437,25 +2646,28 @@ def get_provenance_records(
             "url": posixpath.relpath(
                 component.path, posixpath.dirname(document_path) or "."
             ),
-            "body": (
-                get_table_body(component) if component.kind == "table" else []
-            ),
+            # So what shows it can tell it changed since
+            "sha1": get_sha1(component.path),
             "provenance": (
                 get_provenance(component.path, _NOUNS[component.kind], [])
-                if show and component.provenance
+                if wanted
                 else None
             ),
         }
     value_records: dict[str, dict] = {}
     for value in values:
         key = get_value_key(value)
+        wanted_values = [
+            v
+            for v in values
+            if get_value_key(v) == key and v.provenance and show
+        ]
         if key not in value_records:
             value_records[key] = {
+                "sha1": get_sha1(value.path),
                 "provenance": (
-                    get_value_provenance(value)
-                    if show and value.provenance
-                    else None
-                )
+                    get_value_provenance(value) if wanted_values else None
+                ),
             }
     return {"components": records, "values": value_records}
 
@@ -2545,8 +2757,10 @@ def write_provenance(
                     os.path.abspath(wdir or "."), repo.working_dir
                 )
                 git_info["prefix"] = Path(prefix).as_posix()
-                git_info["tracked"] = set(repo.git.ls_files().splitlines())
-                git_info["head"] = repo.head.commit.hexsha
+                # Unquoted, e.g., a path that isn't ASCII
+                git_info["tracked"] = set(repo.git.ls_files("-z").split("\0"))
+                git_info["repo"] = repo
+                git_info["pushed"] = {}
             except Exception:
                 git_info["remote"] = None
         if not git_info["remote"]:
@@ -2556,9 +2770,26 @@ def write_provenance(
         )
         if repo_path not in git_info["tracked"]:
             return None
-        return calkit.git.get_web_file_url(
-            git_info["remote"], commit_sha or git_info["head"], repo_path
-        )
+        # At a commit the host has, as far as this clone knows, i.e., one
+        # a remote-tracking branch has, or else none
+        for sha in (commit_sha, "HEAD"):
+            if sha is None:
+                continue
+            if sha not in git_info["pushed"]:
+                try:
+                    repo = git_info["repo"]
+                    full_sha = repo.commit(sha).hexsha
+                    on_remote = bool(
+                        repo.git.branch("-r", "--contains", full_sha).strip()
+                    )
+                except Exception:
+                    full_sha, on_remote = None, False
+                git_info["pushed"][sha] = full_sha if on_remote else None
+            if git_info["pushed"][sha]:
+                return calkit.git.get_web_file_url(
+                    git_info["remote"], git_info["pushed"][sha], repo_path
+                )
+        return None
 
     def check_reference_value(key: str, name: str) -> tuple[bool, str | None]:
         # Against a PDF of the reference already on this machine
@@ -2608,14 +2839,37 @@ def write_provenance(
         with open(get_full_path(path), "rb") as f:
             return f.read()
 
-    def open_text(path: str) -> IO[str]:
-        # Without a byte order mark, and with what isn't UTF-8 replaced
-        return open(
-            get_full_path(path),
-            encoding="utf-8-sig",
-            errors="replace",
-            newline="",
+    def get_stage_runs() -> dict:
+        # As recorded, and for stages run by a pipeline that's still going,
+        # e.g., this document's, from its log, since runs are recorded when
+        # it's done
+        from calkit.cli.main.core import (
+            RUN_INFO_ENV_VAR,
+            _stage_run_info_from_log_content,
         )
+
+        stage_runs = calkit.core.read_stage_runs(wdir=wdir)
+        try:
+            run_info = json.loads(os.environ.get(RUN_INFO_ENV_VAR) or "{}")
+            with open(run_info["log_path"], encoding="utf-8") as f:
+                log_content = f.read()
+        except (OSError, KeyError, TypeError, ValueError):
+            return stage_runs
+        lock_stages = (read_yaml("dvc.lock").get("stages")) or {}
+        system = calkit.core.get_machine_properties()
+        for name, info in _stage_run_info_from_log_content(
+            log_content
+        ).items():
+            if name not in lock_stages or not info.get("start_time"):
+                continue
+            stage_runs[name] = {
+                "start_time": info["start_time"],
+                "git_rev": run_info.get("git_rev"),
+                "git_dirty": run_info.get("git_dirty"),
+                "system": {k: system.get(k) for k in ("os", "machine")},
+                "dvc_lock_hash": calkit.dvc.stage_lock_hash(lock_stages[name]),
+            }
+        return stage_runs
 
     dvc_stages: dict[str, Any] = {}
     git_info: dict[str, Any] = {}
@@ -2629,7 +2883,7 @@ def write_provenance(
         ck_info=ck_info,
         dvc_yaml=read_yaml("dvc.yaml"),
         dvc_lock=read_yaml("dvc.lock"),
-        stage_runs=calkit.core.read_stage_runs(wdir=wdir),
+        stage_runs=get_stage_runs(),
         get_stage_status=get_status,
         is_file=lambda p: os.path.isfile(get_full_path(p)),
         is_dir=lambda p: os.path.isdir(get_full_path(p)),
@@ -2639,7 +2893,6 @@ def write_provenance(
             else []
         ),
         read_bytes=read_bytes,
-        open_text=open_text,
     )
     # So what shows it can tell the document changed since
     with open(get_full_path(document_path), "rb") as f:

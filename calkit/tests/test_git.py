@@ -807,6 +807,11 @@ def test_get_web_file_url() -> None:
             "https://gitlab.com/group/proj",
             "https://gitlab.com/group/proj/-/blob/abc123/scripts/a%20b.py",
         ),
+        (
+            "http://gitlab.lab.internal/group/proj.git",
+            "http://gitlab.lab.internal/group/proj/-/blob/abc123/"
+            "scripts/a%20b.py",
+        ),
         ("https://bitbucket.org/org/proj.git", None),
         ("/home/me/repos/proj.git", None),
         ("../proj", None),

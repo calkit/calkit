@@ -4,14 +4,28 @@
 -- {{< ckvalue results/metrics.json key .2f >}}, read from the results file
 -- each time the document renders.
 
-local function read_file(fpath)
-  local f = io.open(fpath, "r")
+local function read_file(fpath, mode)
+  local f = io.open(fpath, mode or "r")
   if f == nil then
     return nil
   end
   local content = f:read("a")
   f:close()
   return content
+end
+
+-- A path as Python's posixpath.normpath writes it, so it's looked up as
+-- Calkit recorded it, e.g., results/fit.json for ./results/fit.json
+local function normpath(path)
+  local parts = {}
+  for part in (path:gsub("\\", "/")):gmatch("[^/]+") do
+    if part == ".." and #parts > 0 and parts[#parts] ~= ".." then
+      table.remove(parts)
+    elseif part ~= "." then
+      table.insert(parts, part)
+    end
+  end
+  return #parts > 0 and table.concat(parts, "/") or "."
 end
 
 -- The Calkit project's folder, which paths are relative to
@@ -59,16 +73,31 @@ local function is_outdated(data)
   if outdated == nil then
     outdated = false
     local input = quarto.doc.input_file
-    local f = io.open(input, "rb")
     local notebook = input:lower():match("%.ipynb$")
-    if data and data.source_sha1 and f ~= nil and not notebook then
-      outdated = pandoc.utils.sha1(f:read("a")) ~= data.source_sha1
-    end
-    if f ~= nil then
-      f:close()
+    local content = read_file(input, "rb")
+    if data and data.source_sha1 and content ~= nil and not notebook then
+      outdated = pandoc.utils.sha1(content) ~= data.source_sha1
     end
   end
   return outdated
+end
+
+-- What changed since Calkit recorded it, e.g., a figure made again by
+-- hand, or the document, which the view then says it's from before, or
+-- nil if nothing did
+local function get_changed(data, path, sha1)
+  if sha1 then
+    local content = read_file(
+      pandoc.path.join({find_project_dir(), path}), "rb"
+    )
+    if content == nil or pandoc.utils.sha1(content) ~= sha1 then
+      return path
+    end
+  end
+  if is_outdated(data) then
+    return "this document"
+  end
+  return nil
 end
 
 local inlines, blocks
@@ -150,9 +179,9 @@ local function escape(value)
     :gsub('"', "&quot;"))
 end
 
--- How a view looks, and drawing its graph with Quarto's own Mermaid when
--- it's opened, since Mermaid can't measure text while it's hidden
-local ASSETS = [[
+-- How a view looks; its graph is drawn by provenance.js when it's opened,
+-- loading Mermaid then, since it can't measure text while it's hidden
+local STYLE = [[
 <style>
 details.ck-provenance{margin:-.25rem 0 1rem;font-size:.85em;
   color:var(--bs-secondary-color,#6c757d)}
@@ -165,31 +194,23 @@ details.ck-provenance:not(.ck-ok)>summary,
 details.ck-provenance.ck-outdated>summary{color:#b35900;font-weight:600}
 details.ck-provenance[open]{border-left:2px solid #dee2e6;
   padding-left:.75rem}
+.ck-value{cursor:pointer;border-bottom:1px dotted currentColor}
 button.ck-value{all:unset;cursor:pointer;
   border-bottom:1px dotted currentColor}
 button.ck-value:focus-visible{outline:2px solid #0d6efd;outline-offset:2px}
-button.ck-value:not(.ck-ok),button.ck-value.ck-outdated{
-  border-bottom-color:#b35900}
-.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em}
+.ck-value:not(.ck-ok),.ck-value.ck-outdated{border-bottom-color:#b35900}
+.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em;
+  vertical-align:super}
 .ck-popover{max-width:min(48rem,92vw);max-height:80vh;overflow:auto;
   padding:1rem;border:1px solid #dee2e6;border-radius:.375rem;
   font-size:.9em}
 .ck-popover table{border-collapse:collapse;margin-bottom:1rem}
 .ck-popover th,.ck-popover td{padding:.2rem .6rem;text-align:left;
   border-bottom:1px solid #dee2e6}
+.ck-provenance svg,.ck-popover svg{--mermaid-label-fg-color:inherit;
+  --mermaid-node-fg-color:#6c757d}
+.ck-provenance svg .nodeLabel,.ck-popover svg .nodeLabel{color:inherit}
 </style>
-<script>
-document.addEventListener("toggle", async (event) => {
-  const el = event.target;
-  if (!(el.open || event.newState === "open") || !window.mermaid) return;
-  for (const pre of el.querySelectorAll("pre.ck-mermaid:not([data-drawn])")) {
-    pre.dataset.drawn = "true";
-    const id = "ck-mermaid-" + Math.random().toString(36).slice(2);
-    const { svg } = await window.mermaid.render(id, pre.textContent);
-    pre.innerHTML = svg;
-  }
-}, true);
-</script>
 ]]
 local assets_ready = false
 local function add_assets()
@@ -197,18 +218,22 @@ local function add_assets()
     return
   end
   local share = os.getenv("QUARTO_SHARE_PATH")
+  local resources = {}
   if share then
-    local function asset(name)
-      return pandoc.path.join({share, "formats", "html", "mermaid", name})
-    end
-    -- The same files, under the same name, as Quarto's own diagrams
-    quarto.doc.add_html_dependency({
-      name = "quarto-diagram",
-      scripts = {asset("mermaid.min.js"), asset("mermaid-init.js")},
-      stylesheets = {asset("mermaid.css")},
+    -- Copied beside provenance.js, but only loaded when a view opens
+    table.insert(resources, {
+      name = "mermaid.min.js",
+      path = pandoc.path.join({
+        share, "formats", "html", "mermaid", "mermaid.min.js",
+      }),
     })
   end
-  quarto.doc.include_text("in-header", ASSETS)
+  quarto.doc.add_html_dependency({
+    name = "calkit-provenance",
+    scripts = {quarto.utils.resolve_path("provenance.js")},
+    resources = resources,
+  })
+  quarto.doc.include_text("in-header", STYLE)
   assets_ready = true
 end
 
@@ -247,27 +272,30 @@ local function to_html(content)
   return (pandoc.write(pandoc.Pandoc(content), "html"):gsub("%s+$", ""))
 end
 
-local function get_classes(base, provenance, data)
+local function get_classes(base, provenance, changed)
   return base .. " ck-" .. (provenance.state or "ok")
-    .. (is_outdated(data) and " ck-outdated" or "")
+    .. (changed and " ck-outdated" or "")
 end
 
 -- The line shown while it's collapsed, which says what's wrong
-local function get_summary(provenance, data)
+local function get_summary(provenance, changed)
+  if changed and (provenance.state or "ok") == "ok" then
+    return words("⚠️ Recorded before " .. changed .. " changed")
+  end
   local out = inlines(provenance.summary)
-  if is_outdated(data) then
-    out:extend(words(" · recorded before this document changed"))
+  if changed then
+    out:extend(words(" · recorded before " .. changed .. " changed"))
   end
   return out
 end
 
--- How it came to be, under a note if the document changed since
-local function get_view(provenance, data)
+-- How it came to be, under a note if what it's about changed since
+local function get_view(provenance, changed)
   local out = pandoc.Blocks({})
-  if is_outdated(data) then
+  if changed then
     out:insert(pandoc.Para(words(
-      "The document changed since this was recorded; render it with "
-        .. "Calkit to update it."
+      "Recorded before " .. changed .. " changed; render the document "
+        .. "with Calkit to update this."
     )))
   end
   out:extend(blocks(provenance.view))
@@ -275,7 +303,7 @@ local function get_view(provenance, data)
 end
 
 local n_popovers = 0
-local function with_provenance(text, key, kwargs)
+local function with_provenance(text, key, path, kwargs)
   local out = pandoc.Inlines({pandoc.Str(text)})
   local flag = pandoc.utils.stringify(kwargs.provenance or ""):lower()
   if flag == "false" or flag == "no" or flag == "0" or flag == "off"
@@ -289,34 +317,48 @@ local function with_provenance(text, key, kwargs)
   end
   add_assets()
   local provenance = record.provenance
+  local changed = get_changed(data, path, record.sha1)
   n_popovers = n_popovers + 1
   local id = "ck-value-" .. n_popovers
-  local summary = get_summary(provenance, data)
-  local label = "Where " .. text .. " came from: "
-    .. pandoc.utils.stringify(summary)
-  local warn = provenance.state ~= "ok" or is_outdated(data)
-  local content = pandoc.Blocks({pandoc.Para(summary)})
-  content:extend(get_view(provenance, data))
+  local summary = get_summary(provenance, changed)
+  local warn = provenance.state ~= "ok" or changed ~= nil
+  local label = "Where " .. text .. " came from"
+  if warn then
+    label = label .. ": " .. pandoc.utils.stringify(summary)
+  end
+  -- Headed by what it is, e.g., its key in a file, which names it
+  local view = get_view(provenance, changed)
+  local content = pandoc.Blocks({})
+  if #view > 0 then
+    content:insert(pandoc.Div({view[1]}, pandoc.Attr(id .. "-title", {}, {})))
+  end
+  content:insert(pandoc.Para(summary))
+  for index = 2, #view do
+    content:insert(view[index])
+  end
   quarto.doc.include_text(
     "after-body",
-    '<div id="' .. id .. '" popover class="ck-popover">'
-      .. to_html(content) .. "</div>"
+    '<div id="' .. id .. '" popover class="ck-popover" role="dialog" '
+      .. 'aria-labelledby="' .. id .. '-title">' .. to_html(content)
+      .. "</div>"
   )
-  return pandoc.Inlines({
-    pandoc.RawInline(
-      "html",
-      '<button type="button" class="'
-        .. get_classes("ck-value", provenance, data)
-        .. '" popovertarget="' .. id .. '" aria-label="' .. escape(label)
-        .. '" title="' .. escape(pandoc.utils.stringify(summary)) .. '">'
-    ),
-    pandoc.Str(text),
-    pandoc.RawInline(
-      "html",
-      (warn and '<sup class="ck-flag" aria-hidden="true">⚠</sup>' or "")
-        .. "</button>"
-    ),
-  })
+  local inner = pandoc.Inlines({pandoc.Str(text)})
+  if warn then
+    inner:insert(pandoc.Span(
+      {pandoc.Str("⚠")},
+      pandoc.Attr("", {"ck-flag"}, {{"aria-hidden", "true"}})
+    ))
+  end
+  return pandoc.Inlines({pandoc.Span(inner, pandoc.Attr(
+    "",
+    {"ck-value", "ck-" .. (provenance.state or "ok"),
+      changed and "ck-outdated" or nil},
+    {
+      {"data-ck-popover", id},
+      {"data-ck-label", label},
+      {"title", pandoc.utils.stringify(summary)},
+    }
+  ))})
 end
 
 -- A number as YAML writes it, which Pandoc's metadata gives as text
@@ -684,10 +726,10 @@ local function get_results_path(source, kind)
   end
   -- A notebook stands for the values the pipeline saves from its cells
   if path:lower():match("%.ipynb$") then
-    path = ".calkit/notebooks/outputs/" .. (path:gsub("^%./", ""))
-      .. "/values.json"
+    path = ".calkit/notebooks/outputs/" .. normpath(path) .. "/values.json"
   end
-  return path
+  -- As Calkit records it, e.g., without a leading ./
+  return normpath(path)
 end
 
 -- A dotted key, e.g., fit.coeffs.0, with numbers indexing lists from 0
@@ -867,7 +909,7 @@ return {
       )
       return pandoc.Str("??")
     end
-    return with_provenance(text, path .. ":" .. key, kwargs)
+    return with_provenance(text, path .. ":" .. key, path, kwargs)
   end,
   -- A value quoted from a reference: its citation key, its name, and
   -- optionally a format, from the file Calkit writes them all to
@@ -892,7 +934,8 @@ return {
     local file = key:gsub("[^A-Za-z0-9_%.~%-]", function(c)
       return string.format("%%%02X", string.byte(c))
     end)
-    local data = load_data(".calkit/reference-values/" .. file .. ".json")
+    local values_path = ".calkit/reference-values/" .. file .. ".json"
+    local data = load_data(values_path)
     local value = nil
     if type(data) == "table" then
       value = data[name]
@@ -910,6 +953,8 @@ return {
       )
       return pandoc.Str("??")
     end
-    return with_provenance(text, "ref:" .. key .. ":" .. name, kwargs)
+    return with_provenance(
+      text, "ref:" .. key .. ":" .. name, values_path, kwargs
+    )
   end,
 }

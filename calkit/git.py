@@ -982,6 +982,9 @@ def get_web_file_url(
 
     remote_url = remote_url.strip()
     m = _SCP_REMOTE_RE.match(remote_url)
+    # Over HTTPS, unless the remote is plain HTTP, e.g., a host on a
+    # private network
+    scheme = "https"
     if m is not None and "/" not in m.group("host"):
         host, repo_path = m.group("host"), m.group("path")
     else:
@@ -989,12 +992,14 @@ def get_web_file_url(
         if parts.scheme not in ("https", "http", "ssh", "git"):
             return None
         host, repo_path = parts.hostname or "", parts.path
+        if parts.scheme == "http":
+            scheme = "http"
     repo_path = repo_path.strip("/").removesuffix(".git")
     if not host or not repo_path or not commit_sha:
         return None
     file_path = quote(Path(path).as_posix().lstrip("/"))
     if "github" in host.lower():
-        return f"https://{host}/{repo_path}/blob/{commit_sha}/{file_path}"
+        return f"{scheme}://{host}/{repo_path}/blob/{commit_sha}/{file_path}"
     if "gitlab" in host.lower():
-        return f"https://{host}/{repo_path}/-/blob/{commit_sha}/{file_path}"
+        return f"{scheme}://{host}/{repo_path}/-/blob/{commit_sha}/{file_path}"
     return None

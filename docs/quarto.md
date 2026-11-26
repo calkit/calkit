@@ -164,9 +164,10 @@ Each run's fit.
 
 Paths are relative to the project, as for `ckvalue`.
 `ckfigure` shows an image as a numbered figure,
-with Quarto's image options, e.g., `width`.
+with Quarto's figure options and classes, e.g., `width`, `fig-pos`, or
+`.lightbox`.
 `cktable` shows a CSV or TSV file as a numbered table,
-up to `rows` rows (25 by default).
+up to `rows` rows (25 by default), read from the file as it renders.
 `ckinclude` includes a Markdown file's content,
 and shows any other file by its path.
 Each is an input to the document's stage, whether or not it's shown,
@@ -202,7 +203,10 @@ so it's seen without opening it.
 A value reads as normal text, with a dotted underline, and a ⚠ after it
 when it's out of date;
 selecting it, with a mouse or the keyboard, opens the same view in a
-popover.
+popover, except in a heading, a link, or the document's title, where it's
+only text.
+This changes how values shown with `ckvalue` and `ckrefval` look in HTML
+in documents that already use them.
 
 <!-- TODO: needs human review -->
 
@@ -213,7 +217,8 @@ script or command, when and where it last ran if that's recorded,
 every file it reads, with where each came from and whether it changed,
 and what it makes on the way.
 A file in Git links to it on GitHub or GitLab, at the commit the stage
-last ran at, if the project's `git_repo_url` or `origin` remote is on one,
+last ran at, or else the current one, as long as a remote-tracking branch
+has it, if the project's `git_repo_url` or `origin` remote is on one,
 a file the document shows links to it there,
 and a file DVC stores is shown with its hash.
 A value quoted from a reference shows what `calkit.yaml` records for it,
@@ -241,17 +246,22 @@ What each view says is worked out each time the stage renders the
 document, from `calkit.yaml`, `.calkit/stage-runs.json`,
 and whether each stage is up to date as `calkit status` would say,
 and written to `.calkit/local/provenance`,
-which isn't kept in Git, for the extension to read.
+which isn't kept in Git, for the extension to read,
+with the SHA-1 of each file shown and of the document.
 The document's own outputs aren't checked,
 since it can't say whether what's being rendered is up to date,
-and a stage's last run isn't shown until it's recorded,
-which happens when the pipeline finishes.
-Rendering with Quarto directly, e.g., with `quarto preview`,
-shows what was recorded the last time Calkit rendered the document,
-saying so if a `.qmd` document has changed since,
+and a stage that ran earlier in the same `calkit run` is shown as having
+run then, from the run's log, before its run is recorded.
+Rendering with Quarto directly, e.g., with `quarto preview` or
+`quarto publish`, shows what was recorded the last time Calkit rendered
+the document, saying so, while collapsed, if a file it shows or a `.qmd`
+document has changed since, e.g.,
+"Recorded before data/clean.csv changed",
 and a document Calkit hasn't rendered on this machine says nothing is
-recorded, with each table shown only by its path, keeping its caption and
-label.
+recorded, still showing its figures and tables.
+A view's graph is drawn with Quarto's Mermaid, loaded when the view is
+first opened, so a document with everything embedded, e.g., with
+`embed-resources`, shows the graph's source instead.
 `quarto preview` also doesn't notice when a script or data file changes,
 since it only watches the document's own files,
 so a view can say a figure is up to date when it isn't anymore

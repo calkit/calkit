@@ -7,14 +7,28 @@
 -- turns it into Pandoc's AST. It has to run at pre-ast, so Quarto numbers
 -- figures and tables after.
 
-local function read_file(fpath)
-  local f = io.open(fpath, "r")
+local function read_file(fpath, mode)
+  local f = io.open(fpath, mode or "r")
   if f == nil then
     return nil
   end
   local content = f:read("a")
   f:close()
   return content
+end
+
+-- A path as Python's posixpath.normpath writes it, so it's looked up as
+-- Calkit recorded it, e.g., results/fit.json for ./results/fit.json
+local function normpath(path)
+  local parts = {}
+  for part in (path:gsub("\\", "/")):gmatch("[^/]+") do
+    if part == ".." and #parts > 0 and parts[#parts] ~= ".." then
+      table.remove(parts)
+    elseif part ~= "." then
+      table.insert(parts, part)
+    end
+  end
+  return #parts > 0 and table.concat(parts, "/") or "."
 end
 
 -- The Calkit project's folder, which paths are relative to
@@ -62,16 +76,31 @@ local function is_outdated(data)
   if outdated == nil then
     outdated = false
     local input = quarto.doc.input_file
-    local f = io.open(input, "rb")
     local notebook = input:lower():match("%.ipynb$")
-    if data and data.source_sha1 and f ~= nil and not notebook then
-      outdated = pandoc.utils.sha1(f:read("a")) ~= data.source_sha1
-    end
-    if f ~= nil then
-      f:close()
+    local content = read_file(input, "rb")
+    if data and data.source_sha1 and content ~= nil and not notebook then
+      outdated = pandoc.utils.sha1(content) ~= data.source_sha1
     end
   end
   return outdated
+end
+
+-- What changed since Calkit recorded it, e.g., a figure made again by
+-- hand, or the document, which the view then says it's from before, or
+-- nil if nothing did
+local function get_changed(data, path, sha1)
+  if sha1 then
+    local content = read_file(
+      pandoc.path.join({find_project_dir(), path}), "rb"
+    )
+    if content == nil or pandoc.utils.sha1(content) ~= sha1 then
+      return path
+    end
+  end
+  if is_outdated(data) then
+    return "this document"
+  end
+  return nil
 end
 
 local inlines, blocks
@@ -153,9 +182,9 @@ local function escape(value)
     :gsub('"', "&quot;"))
 end
 
--- How a view looks, and drawing its graph with Quarto's own Mermaid when
--- it's opened, since Mermaid can't measure text while it's hidden
-local ASSETS = [[
+-- How a view looks; its graph is drawn by provenance.js when it's opened,
+-- loading Mermaid then, since it can't measure text while it's hidden
+local STYLE = [[
 <style>
 details.ck-provenance{margin:-.25rem 0 1rem;font-size:.85em;
   color:var(--bs-secondary-color,#6c757d)}
@@ -168,31 +197,23 @@ details.ck-provenance:not(.ck-ok)>summary,
 details.ck-provenance.ck-outdated>summary{color:#b35900;font-weight:600}
 details.ck-provenance[open]{border-left:2px solid #dee2e6;
   padding-left:.75rem}
+.ck-value{cursor:pointer;border-bottom:1px dotted currentColor}
 button.ck-value{all:unset;cursor:pointer;
   border-bottom:1px dotted currentColor}
 button.ck-value:focus-visible{outline:2px solid #0d6efd;outline-offset:2px}
-button.ck-value:not(.ck-ok),button.ck-value.ck-outdated{
-  border-bottom-color:#b35900}
-.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em}
+.ck-value:not(.ck-ok),.ck-value.ck-outdated{border-bottom-color:#b35900}
+.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em;
+  vertical-align:super}
 .ck-popover{max-width:min(48rem,92vw);max-height:80vh;overflow:auto;
   padding:1rem;border:1px solid #dee2e6;border-radius:.375rem;
   font-size:.9em}
 .ck-popover table{border-collapse:collapse;margin-bottom:1rem}
 .ck-popover th,.ck-popover td{padding:.2rem .6rem;text-align:left;
   border-bottom:1px solid #dee2e6}
+.ck-provenance svg,.ck-popover svg{--mermaid-label-fg-color:inherit;
+  --mermaid-node-fg-color:#6c757d}
+.ck-provenance svg .nodeLabel,.ck-popover svg .nodeLabel{color:inherit}
 </style>
-<script>
-document.addEventListener("toggle", async (event) => {
-  const el = event.target;
-  if (!(el.open || event.newState === "open") || !window.mermaid) return;
-  for (const pre of el.querySelectorAll("pre.ck-mermaid:not([data-drawn])")) {
-    pre.dataset.drawn = "true";
-    const id = "ck-mermaid-" + Math.random().toString(36).slice(2);
-    const { svg } = await window.mermaid.render(id, pre.textContent);
-    pre.innerHTML = svg;
-  }
-}, true);
-</script>
 ]]
 local assets_ready = false
 local function add_assets()
@@ -200,18 +221,22 @@ local function add_assets()
     return
   end
   local share = os.getenv("QUARTO_SHARE_PATH")
+  local resources = {}
   if share then
-    local function asset(name)
-      return pandoc.path.join({share, "formats", "html", "mermaid", name})
-    end
-    -- The same files, under the same name, as Quarto's own diagrams
-    quarto.doc.add_html_dependency({
-      name = "quarto-diagram",
-      scripts = {asset("mermaid.min.js"), asset("mermaid-init.js")},
-      stylesheets = {asset("mermaid.css")},
+    -- Copied beside provenance.js, but only loaded when a view opens
+    table.insert(resources, {
+      name = "mermaid.min.js",
+      path = pandoc.path.join({
+        share, "formats", "html", "mermaid", "mermaid.min.js",
+      }),
     })
   end
-  quarto.doc.include_text("in-header", ASSETS)
+  quarto.doc.add_html_dependency({
+    name = "calkit-provenance",
+    scripts = {quarto.utils.resolve_path("provenance.js")},
+    resources = resources,
+  })
+  quarto.doc.include_text("in-header", STYLE)
   assets_ready = true
 end
 
@@ -250,27 +275,30 @@ local function to_html(content)
   return (pandoc.write(pandoc.Pandoc(content), "html"):gsub("%s+$", ""))
 end
 
-local function get_classes(base, provenance, data)
+local function get_classes(base, provenance, changed)
   return base .. " ck-" .. (provenance.state or "ok")
-    .. (is_outdated(data) and " ck-outdated" or "")
+    .. (changed and " ck-outdated" or "")
 end
 
 -- The line shown while it's collapsed, which says what's wrong
-local function get_summary(provenance, data)
+local function get_summary(provenance, changed)
+  if changed and (provenance.state or "ok") == "ok" then
+    return words("⚠️ Recorded before " .. changed .. " changed")
+  end
   local out = inlines(provenance.summary)
-  if is_outdated(data) then
-    out:extend(words(" · recorded before this document changed"))
+  if changed then
+    out:extend(words(" · recorded before " .. changed .. " changed"))
   end
   return out
 end
 
--- How it came to be, under a note if the document changed since
-local function get_view(provenance, data)
+-- How it came to be, under a note if what it's about changed since
+local function get_view(provenance, changed)
   local out = pandoc.Blocks({})
-  if is_outdated(data) then
+  if changed then
     out:insert(pandoc.Para(words(
-      "The document changed since this was recorded; render it with "
-        .. "Calkit to update it."
+      "Recorded before " .. changed .. " changed; render the document "
+        .. "with Calkit to update this."
     )))
   end
   out:extend(blocks(provenance.view))
@@ -279,28 +307,38 @@ end
 
 local KINDS = {ckfigure = "figure", cktable = "table", ckinclude = "include"}
 local MARKDOWN_EXTS = {[".md"] = true, [".qmd"] = true}
+local TABLE_READERS = {[".csv"] = "csv", [".tsv"] = "tsv"}
+-- What a component takes for itself rather than passing to its figure
+local OWN_ATTRIBUTES = {src = true, rows = true, provenance = true}
 
--- A file's path relative to the document, as an image's is read, when
+local function is_off(value)
+  value = (value or ""):lower()
+  return value == "false" or value == "no" or value == "0" or value == "off"
+end
+
+-- The file's path relative to the document, as an image's is read, when
 -- nothing's recorded to say it
-local function get_url(src)
-  local project_dir = find_project_dir()
+local function get_url(path)
   return pandoc.path.make_relative(
-    pandoc.path.join({project_dir, src}),
+    pandoc.path.join({find_project_dir(), path}),
     pandoc.path.directory(quarto.doc.input_file),
     true
   )
 end
 
+-- An image with the div's figure options and classes, e.g., fig-pos or
+-- .lightbox, as Quarto reads them on one
 local function get_image(el, url)
   local attributes = {}
-  for _, key in ipairs({"width", "height", "fig-align", "fig-alt"}) do
-    if el.attributes[key] then
-      table.insert(attributes, {key, el.attributes[key]})
+  for key, value in pairs(el.attributes) do
+    if not OWN_ATTRIBUTES[key] and key ~= "alt" then
+      table.insert(attributes, {key, value})
     end
   end
+  table.sort(attributes, function(a, b) return a[1] < b[1] end)
   local alt = el.attributes.alt and words(el.attributes.alt)
     or pandoc.Inlines({})
-  return pandoc.Image(alt, url, "", pandoc.Attr("", {}, attributes))
+  return pandoc.Image(alt, url, "", pandoc.Attr("", el.classes, attributes))
 end
 
 -- A Quarto figure, numbered and cross-referenced by the div's id, with its
@@ -316,31 +354,102 @@ local function get_figure(el, content)
   })
 end
 
-local function is_off(value)
-  value = (value or ""):lower()
-  return value == "false" or value == "no" or value == "0" or value == "off"
+-- Text with any byte that isn't part of UTF-8 replaced, which Pandoc
+-- reads only
+local function to_utf8(text)
+  if utf8.len(text) then
+    return text
+  end
+  local out, i = {}, 1
+  while i <= #text do
+    local byte = text:byte(i)
+    local n = byte >= 0xF0 and 4 or byte >= 0xE0 and 3
+      or byte >= 0xC0 and 2 or 1
+    local piece = text:sub(i, i + n - 1)
+    if utf8.len(piece) == 1 then
+      table.insert(out, piece)
+      i = i + n
+    else
+      table.insert(out, "\239\191\189")
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
+-- A CSV or TSV file's rows, read when the document renders, so they're
+-- what the file has now, up to as many as it says
+local function get_table(path, rows)
+  local _, ext = pandoc.path.split_extension(path)
+  local reader = TABLE_READERS[ext:lower()] or "csv"
+  local text = read_file(pandoc.path.join({find_project_dir(), path}), "rb")
+  if text == nil then
+    return pandoc.Blocks({pandoc.Para({
+      pandoc.Emph(words("Can't read " .. path)),
+    })})
+  end
+  -- Without a byte order mark, and with what isn't UTF-8 replaced
+  text = to_utf8((text:gsub("^\239\187\191", "")))
+  local ok, doc = pcall(pandoc.read, text, reader)
+  if not ok or #doc.blocks == 0 or doc.blocks[1].t ~= "Table" then
+    return pandoc.Blocks({pandoc.Para({
+      pandoc.Emph(words("Can't read " .. path)),
+    })})
+  end
+  local tbl = doc.blocks[1]
+  local limit = tonumber(rows) or 25
+  local bodies = tbl.bodies
+  local body = bodies[1] and bodies[1].body or {}
+  local n_rows = #body
+  if n_rows > limit then
+    -- Set back whole, since what's read from the table is a copy
+    while #body > limit do
+      table.remove(body)
+    end
+    bodies[1].body = body
+    tbl.bodies = bodies
+  end
+  local out = pandoc.Blocks({tbl})
+  if n_rows > limit then
+    out:insert(pandoc.Para({pandoc.Emph(words(
+      (limit == 1 and "First row of " or "First " .. limit .. " rows of ")
+        .. path
+    ))}))
+  end
+  return out
 end
 
 -- Collapsed under it in HTML, saying what's wrong while it is, and only
 -- that, in a line, in other formats
-local function get_provenance(provenance, data)
+local function get_provenance(provenance, changed, path)
   if quarto.doc.is_format("html:js") then
     add_assets()
-    local classes = get_classes("ck-provenance", provenance, data)
+    local summary = get_summary(provenance, changed)
+    local classes = get_classes("ck-provenance", provenance, changed)
     local out = pandoc.Blocks({
       pandoc.RawBlock(
         "html",
-        '<details class="' .. classes .. '"><summary>'
-          .. to_html({pandoc.Plain(get_summary(provenance, data))})
-          .. "</summary>"
+        '<details class="' .. classes .. '"><summary aria-label="'
+          .. escape("Where " .. path .. " came from: "
+            .. pandoc.utils.stringify(summary))
+          .. '">' .. to_html({pandoc.Plain(summary)}) .. "</summary>"
       ),
     })
-    out:extend(get_view(provenance, data))
+    out:extend(get_view(provenance, changed))
     out:insert(pandoc.RawBlock("html", "</details>"))
     return out
   end
-  if provenance.line then
-    return pandoc.Blocks({pandoc.Para({pandoc.Emph(inlines(provenance.line))})})
+  local line = provenance.line and inlines(provenance.line) or nil
+  if changed then
+    line = line or pandoc.Inlines({})
+    if #line > 0 then
+      line:insert(pandoc.Str(";"))
+      line:insert(pandoc.Space())
+    end
+    line:extend(words("provenance recorded before " .. changed .. " changed"))
+  end
+  if line then
+    return pandoc.Blocks({pandoc.Para({pandoc.Emph(line)})})
   end
   return pandoc.Blocks({})
 end
@@ -368,36 +477,35 @@ end
 
 local function component_div(el, kind)
   local src = el.attributes.src or ""
+  local path = normpath(src:gsub("^/+", ""))
   local data = load_records()
   local record = data and (data.components or {})[src] or nil
-  local url = record and record.url or get_url(src)
+  local url = record and record.url or get_url(path)
   local out = pandoc.Blocks({})
   if kind == "figure" then
     out:extend(get_figure(
       el, pandoc.Blocks({pandoc.Plain({get_image(el, url)})})
     ))
   elseif kind == "table" then
-    local content = record and blocks(record.body) or pandoc.Blocks({
-      -- Only its name, keeping its id and caption, so references resolve
-      pandoc.utils.from_simple_table(pandoc.SimpleTable(
-        {}, {pandoc.AlignDefault}, {0}, {},
-        {{{pandoc.Plain({pandoc.Code(src)})}}}
-      )),
-    })
-    for index, item in ipairs(content) do
-      -- The id and caption go on the table, not a note after it
-      if index == 1 and item.t == "Table" then
-        item.attr = pandoc.Attr(el.identifier, {}, {})
-        if #el.content > 0 then
-          item.caption = {long = el.content}
-        end
+    local content = get_table(path, el.attributes.rows)
+    if el.identifier ~= "" or #el.content > 0 then
+      -- Quarto's own form of a table with a caption, which it numbers
+      local caption = pandoc.utils.blocks_to_inlines(el.content)
+      local float = pandoc.Blocks({content[1]})
+      if #caption > 0 then
+        float:insert(pandoc.Para(caption))
       end
-      out:insert(item)
+      out:insert(pandoc.Div(float, pandoc.Attr(el.identifier, {}, {})))
+      for index = 2, #content do
+        out:insert(content[index])
+      end
+    else
+      out:extend(content)
     end
   else
-    local _, ext = pandoc.path.split_extension(src)
+    local _, ext = pandoc.path.split_extension(path)
     local text = MARKDOWN_EXTS[ext:lower()]
-      and read_file(pandoc.path.join({find_project_dir(), src})) or nil
+      and read_file(pandoc.path.join({find_project_dir(), path})) or nil
     local content = text and pandoc.read(text, "markdown").blocks
       or pandoc.Blocks({pandoc.Para({pandoc.Code(src)})})
     content:extend(el.content)
@@ -407,9 +515,16 @@ local function component_div(el, kind)
     return out
   end
   if record == nil then
+    if data then
+      quarto.log.warning(
+        "Calkit recorded no provenance for " .. src .. "; is it in a "
+          .. "place 'calkit quarto render' doesn't look, e.g., an include?"
+      )
+    end
     out:extend(unrecorded())
   elseif record.provenance then
-    out:extend(get_provenance(record.provenance, data))
+    local changed = get_changed(data, path, record.sha1)
+    out:extend(get_provenance(record.provenance, changed, path))
   end
   return out
 end
@@ -417,6 +532,7 @@ end
 local function handle(el)
   for name, kind in pairs(KINDS) do
     if el.classes:includes(name) then
+      el.classes = el.classes:filter(function(c) return c ~= name end)
       return component_div(el, kind)
     end
   end

@@ -1630,3 +1630,29 @@ def test_update_license(tmp_dir):
     )
     assert res.returncode != 0
     assert "--copyright-holder" in res.stderr
+
+
+def test_update_license_outside_git_repo(tmp_dir):
+    # Writing the license doesn't need Git; only the commit does, so outside
+    # a repo the command still succeeds and says the commit was skipped
+    res = subprocess.run(
+        ["calkit", "update", "license", "-c", "Some Person"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    with open("LICENSE") as f:
+        assert f"Copyright (c) {calkit.utcnow().year} Some Person" in (
+            f.read()
+        )
+    assert "Not in a Git repository" in res.stdout
+    # --no-commit needs no Git at all, so there's nothing to warn about
+    os.remove("LICENSE")
+    res = subprocess.run(
+        ["calkit", "update", "license", "-c", "Some Person", "--no-commit"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    assert os.path.isfile("LICENSE")
+    assert "Warning" not in res.stdout

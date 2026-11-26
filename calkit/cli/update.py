@@ -109,10 +109,17 @@ def update_license(
                 year=calkit.utcnow().year, copyright_holder=copyright_holder
             )
         )
-    repo = calkit.git.get_repo()
-    repo.git.add("LICENSE")
-    if not no_commit and repo.git.diff(["--staged", "--", "LICENSE"]):
-        repo.git.commit(["LICENSE", "-m", "Update license"])
+    try:
+        repo = calkit.git.get_repo()
+    except calkit.git.InvalidGitRepositoryError:
+        # Writing the license doesn't need Git; only the commit does
+        repo = None
+    if repo is not None:
+        repo.git.add("LICENSE")
+        if not no_commit and repo.git.diff(["--staged", "--", "LICENSE"]):
+            repo.git.commit(["LICENSE", "-m", "Update license"])
+    elif not no_commit:
+        warn("Not in a Git repository; wrote LICENSE but skipped the commit.")
 
 
 @update_app.command(name="release")

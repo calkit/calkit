@@ -80,7 +80,8 @@ Paths are relative to the project.
 `ckfigure` shows an image as a numbered figure, with `figure`'s options,
 e.g., `width`, `cktable` a CSV or TSV file as a numbered table,
 up to `:rows:` rows (25 by default),
-and `ckinclude` a Markdown file's content, or any other file by its path.
+and `ckinclude` a Markdown file's content, with its images found
+relative to it, or any other file by its path.
 `:name:` works as `:label:` does, and options can be lines or a YAML
 block.
 
@@ -108,8 +109,17 @@ including results files, and a notebook's saved values, e.g.,
 That's checked when the stage runs,
 so a stage set up before an input was missing is caught the next time it
 runs.
-Directives and roles in a file a document `{include}`s count for the
-document.
+Directives and roles in a file a document `{include}`s,
+or shows with `ckinclude`, count for the document,
+with an `{include}` inside an included file read relative to that file,
+as MyST reads it, and those files are inputs too.
+Roles aren't read in inline code, comments, or files included with
+`:literal: true`, and are in a directive's argument, e.g., an
+admonition's title.
+The documents read are the ones MyST builds:
+those `myst.yml`'s `toc` lists, or without one, every Markdown file and
+notebook in its folder, except in `_build` and hidden folders,
+either way leaving out what its `exclude` patterns match.
 
 ## Showing where they came from
 
@@ -124,9 +134,11 @@ then each of them, with its kind, environment, script or command,
 last run, every input, and what it makes on the way,
 with links to files on GitHub or GitLab and to components shown in the
 document.
-A value is followed by a small mark, or a ⚠ when it's out of date,
-linking to where it came from, which MyST shows when the mark's hovered,
-in a collapsed section at the end of the document.
+A value is followed by a small † mark, or a ! when it's out of date,
+which names where it came from when it's hovered and links to that
+value's view, collapsed, in a block at the end of the page,
+which MyST also previews when the mark's hovered.
+The marks are plain characters so every export can show them.
 `:provenance: false`, or `provenance=false` in a role, turns it off for
 one, and `show_provenance: false` in `calkit.yaml` for the whole project.
 What's shown is worked out the same way it is for Quarto.
@@ -146,6 +158,17 @@ project:
 Keep the plugin in Git, as with Quarto's extension,
 since without it MyST builds the site anyway,
 without what the directives and roles show.
+It isn't checked to be among the build stage's inputs,
+since it's written by the build itself.
+Calkit also writes `_extensions/calkit/myst.css`, which quiets how
+book-theme shows the collapsed sections, if `myst.yml` lists it:
+
+```yaml
+site:
+  options:
+    style: _extensions/calkit/myst.css
+```
+
 Each time it builds, it works out where everything came from,
 and the values, and writes them to `.calkit/local/provenance`,
 which isn't kept in Git, for the plugin to read.
@@ -154,14 +177,25 @@ The document's own outputs, i.e., those of the stage that runs
 since it can't say whether what's being built is up to date.
 Building with MyST directly, e.g., with `myst start`,
 shows what was recorded the last time Calkit built the project,
-saying so if a document has changed since;
-a document Calkit hasn't built on this machine says nothing is recorded,
-with each table shown only by its path, keeping its label,
+saying so while collapsed if a document or a file it shows has changed
+since, e.g., "Recorded before data/clean.csv changed".
+A table's rows are read from its file as it's built,
+so they're always current,
+but a value is shown as Calkit last read and formatted it,
+with a ! when its file has changed since,
+since MyST doesn't read results files, and formatting them as Quarto and
+LaTeX do would take reimplementing Python's formatting in the plugin.
+A document Calkit hasn't built on this machine says nothing is recorded,
 and shows `??` for its values.
 `myst start` also doesn't notice when a script or data file changes,
 so a view can say a figure is up to date when it isn't anymore
 until the project is built again.
 MyST doesn't tell its plugins which format it's building,
 so other formats get the same collapsed sections:
-its Word export leaves them out, reporting each as a node it can't show,
-and its other exports haven't been checked yet.
+its Word and LaTeX exports leave components' sections out,
+reporting each as a node they can't show,
+and include the values' views at the end, as boxes,
+with emoji, e.g., ✅, that `pdflatex` may not typeset.
+Its PDF and Typst exports haven't been checked yet.
+`myst build --strict` reports the links in the views as unresolved,
+and a link to a file at a commit that hasn't been pushed isn't made.

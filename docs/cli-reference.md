@@ -4803,7 +4803,7 @@ Work with MyST.
 
 Build the MyST project in this folder, i.e., where its myst.yml is, in an environment.
 
-What its documents' 'ckprovenance' directives say about where their figures and tables came from is worked out first, from the pipeline as it stands, and the MyST plugin that shows them is written. MyST has to come from the environment, so every machine builds with the same version, unless the project lists 'myst' as a requirement or the environment is `_system`, i.e., this machine.
+The values its documents show with the 'ckvalue' and 'ckrefval' roles, and where they and the figures, tables, and files they show with the 'ckfigure', 'cktable', and 'ckinclude' directives came from, are worked out first, from the pipeline as it stands, and the MyST plugin that shows them is written. MyST has to come from the environment, so every machine builds with the same version, unless the project lists 'myst' as a requirement or the environment is `_system`, i.e., this machine.
 
 Usage:
 

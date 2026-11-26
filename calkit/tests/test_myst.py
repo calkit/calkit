@@ -39,7 +39,7 @@ def test_directives(tmp_path: Path) -> None:
         ),
         "site/pages/index.md": text,
     }
-    components, roles = calkit.myst.extract_document(
+    components, roles, included = calkit.myst.extract_document(
         text,
         "site/pages/index.md",
         read_text=parts.get,
@@ -110,29 +110,85 @@ def test_directives(tmp_path: Path) -> None:
             3,
         ),
     ]
+    assert included == ["site/pages/part.md"]
+    # Roles aren't read in inline code, comments, or what's included
+    # literally, but are in a directive's argument, and include nested in
+    # what's included is relative to the file including it, as is Markdown
+    # a ckinclude shows
+    text = (
+        "Code ``{ckvalue}`results/x.json key` `` and `plain`.\n"
+        "% {ckvalue}`results/comment.json k`\n"
+        "<!-- {ckvalue}`results/html.json k`\nstill a comment -->\n"
+        ":::{admonition} Slope is {ckvalue}`results/fit.json b`\n:::\n"
+        ":::{include} notes.md\n:literal: true\n:::\n"
+        ":::{include} parts/a.md\n:::\n"
+        ":::{ckinclude} notes/n.md\n:::\n"
+    )
+    parts = {
+        "site/parts/a.md": ":::{include} b.md\n:::\n",
+        "site/parts/b.md": "B {ckvalue}`results/fit.json c`\n",
+        "site/notes.md": "{ckvalue}`results/literal.json k`\n",
+        "notes/n.md": "N {ckvalue}`results/fit.json d`\n",
+    }
+    found, found_roles, included = calkit.myst.extract_document(
+        text, "site/index.md", read_text=parts.get
+    )
+    assert [args for _, args, _ in found_roles] == [
+        "results/fit.json b",
+        "results/fit.json c",
+        "results/fit.json d",
+    ]
+    assert included == ["site/parts/a.md", "site/parts/b.md", "notes/n.md"]
+    assert [(c.kind, c.path) for c in found] == [("include", "notes/n.md")]
     # A mistake in one names its line
     with pytest.raises(MarkdownParseError, match="names no key") as e:
         calkit.myst.extract_document("\n{ckvalue}`a.json`\n", "site/index.md")
     assert e.value.line == 2
-    # Documents are found in the project's folder, but not what's built or
-    # installed there
+    # Documents are found as MyST finds them without a toc: in the
+    # project's folder, but not what's built or installed there
     (tmp_path / "site" / "pages").mkdir(parents=True)
+    (tmp_path / "site" / "_parts").mkdir(parents=True)
     (tmp_path / "site" / "_build" / "site").mkdir(parents=True)
     (tmp_path / "site" / "node_modules").mkdir()
+    (tmp_path / "site" / ".hidden").mkdir()
     for name in [
         "index.md",
         "pages/a.ipynb",
         "pages/b.md",
+        "pages/draft.md",
+        "_parts/part.md",
         "notes.txt",
         "_build/site/c.md",
         "node_modules/d.md",
+        ".hidden/e.md",
     ]:
         (tmp_path / "site" / name).write_text("")
+    assert calkit.myst.find_documents("site", wdir=str(tmp_path)) == [
+        "site/index.md",
+        "site/_parts/part.md",
+        "site/pages/a.ipynb",
+        "site/pages/b.md",
+        "site/pages/draft.md",
+    ]
+    # Without what it excludes, or else as its toc lists them
+    (tmp_path / "site" / "myst.yml").write_text(
+        "project:\n  exclude:\n    - pages/draft.md\n    - _parts\n"
+    )
     assert calkit.myst.find_documents("site", wdir=str(tmp_path)) == [
         "site/index.md",
         "site/pages/a.ipynb",
         "site/pages/b.md",
     ]
+    (tmp_path / "site" / "myst.yml").write_text(
+        "project:\n  toc:\n    - file: index.md\n    - title: Pages\n"
+        "      children:\n        - pattern: pages/*.md\n"
+        "  exclude: [pages/draft.md]\n"
+    )
+    assert calkit.myst.find_documents("site", wdir=str(tmp_path)) == [
+        "site/index.md",
+        "site/pages/b.md",
+    ]
+    (tmp_path / "site" / "myst.yml").unlink()
     # The plugin has to be listed in myst.yml, which says how otherwise
     for config, ok in [
         (None, False),
@@ -162,17 +218,21 @@ def test_directives(tmp_path: Path) -> None:
             "results/fit.json fit.slope .2f": {
                 "text": "0.12",
                 "key": "results/fit.json:fit.slope",
+                "path": "results/fit.json",
                 "provenance": True,
             },
             "fit.ipynb k_25 provenance=false": {
                 "text": "0.031",
                 "key": ".calkit/notebooks/outputs/fit.ipynb/values.json:k_25",
+                "path": ".calkit/notebooks/outputs/fit.ipynb/values.json",
                 "provenance": False,
             },
         }
     }
     plugin_path = tmp_path / "site" / calkit.myst.PLUGIN_PATH
     assert plugin_path.read_text() == calkit.myst.PLUGIN_JS
+    css_path = tmp_path / "site" / calkit.myst.PLUGIN_CSS_PATH
+    assert css_path.read_text() == calkit.myst.PLUGIN_CSS
     # The stage that builds it runs 'calkit myst build' in its folder
     ck_info = {
         "pipeline": {

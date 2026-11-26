@@ -58,9 +58,11 @@ def build(
     """Build the MyST project in this folder, i.e., where its myst.yml is,
     in an environment.
 
-    What its documents' 'ckprovenance' directives say about where their
-    figures and tables came from is worked out first, from the pipeline as
-    it stands, and the MyST plugin that shows them is written.
+    The values its documents show with the 'ckvalue' and 'ckrefval' roles,
+    and where they and the figures, tables, and files they show with the
+    'ckfigure', 'cktable', and 'ckinclude' directives came from, are worked
+    out first, from the pipeline as it stands, and the MyST plugin that
+    shows them is written.
     MyST has to come from the environment, so every machine builds with
     the same version, unless the project lists 'myst' as a requirement or
     the environment is `_system`, i.e., this machine.
@@ -125,7 +127,7 @@ def build(
             text = calkit.quarto.read_document_text(
                 os.path.join(project_dir, document)
             )
-            components, roles = (
+            components, roles, included = (
                 calkit.myst.extract_document(
                     text,
                     document,
@@ -135,10 +137,10 @@ def build(
                     results=results_by_name(ck_info),
                 )
                 if text is not None
-                else ([], [])
+                else ([], [], [])
             )
             if components or roles:
-                found.append((document, components, roles))
+                found.append((document, components, roles, included))
                 continue
             record_path = os.path.join(
                 project_dir, calkit.quarto.get_provenance_path(document)
@@ -155,13 +157,15 @@ def build(
         # rebuild when that changes
         if found and stage is not None:
             unlisted = calkit.myst.get_unlisted_paths(
-                [c.path for _, components, _ in found for c in components]
+                [c.path for _, components, _, _ in found for c in components]
                 + [
                     v.path
-                    for _, _, roles in found
+                    for _, _, roles, _ in found
                     for _, _, v in roles
                     if not v.ref
-                ],
+                ]
+                # And what they include, which changes them too
+                + [p for _, _, _, included in found for p in included],
                 stage,
                 wdir=project_dir,
             )
@@ -175,11 +179,11 @@ def build(
                         posixpath.relpath(p, stage_wdir) for p in unlisted
                     )
                 )
-        if any(v.ref for _, _, roles in found for _, _, v in roles):
+        if any(v.ref for _, _, roles, _ in found for _, _, v in roles):
             from calkit.references.values import write_values_file
 
             write_values_file(ck_info, wdir=project_dir)
-        for document, components, roles in found:
+        for document, components, roles, _ in found:
             values = [v for _, _, v in roles]
             texts = calkit.quarto.check_values(
                 values, document, wdir=project_dir

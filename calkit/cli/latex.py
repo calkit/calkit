@@ -835,6 +835,8 @@ def build(
     If a Calkit environment is not specified, latexmk will be run in the
     system environment if available. If not available, a TeX Live Docker
     container will be used.
+
+    Also available as `calkit doc build`.
     """
     import time
 
@@ -1304,6 +1306,8 @@ def diff(
     A revision's DVC-tracked inputs, e.g., figures and tables a pipeline
     generates, are fetched as they were at that revision, so each side of
     the comparison shows its own.
+
+    Also available as `calkit doc diff`.
     """
     import calkit.resources
 
@@ -2387,6 +2391,8 @@ def to_docx(
     like the PDF, else TeX4ht and LibreOffice. Then records inside the file
     which source line each paragraph came from and the text as sent, so
     ``merge-docx`` can bring edits and comments back.
+
+    Also available as `calkit doc to-docx`, which takes the .tex file.
     """
     import datetime
     import sys
@@ -4215,6 +4221,8 @@ def merge_docx(
     a warning: deal with them in Word and merge again. Comments become
     comment blocks above the paragraph; threads resolved in Word are
     marked resolved.
+
+    Also available as `calkit doc merge-docx`.
     """
     import dataclasses
     import datetime

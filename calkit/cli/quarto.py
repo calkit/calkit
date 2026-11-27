@@ -78,6 +78,8 @@ def render(
     The values the document shows with the 'ckvalue' shortcode are checked
     first, and the Quarto extension that reads them from their results
     files is written.
+
+    Also available as `calkit doc build`.
     """
     import calkit
     import calkit.environments

@@ -57,6 +57,7 @@ from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.doc import doc_app
 from calkit.cli.export import export_app
 from calkit.cli.fix import (
     OursOpt,
@@ -114,6 +115,11 @@ app.add_typer(
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
+app.add_typer(
+    doc_app,
+    name="doc|document",
+    help="Work with documents: LaTeX, Quarto, Word, and PowerPoint.",
+)
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(quarto_app, name="quarto", help="Work with Quarto.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")

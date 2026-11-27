@@ -50,6 +50,7 @@
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
+| [`doc\|document`](#command-group-doc-document)   | Work with documents: LaTeX, Quarto, Word, and PowerPoint.                                                    |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`quarto`](#command-group-quarto)                | Work with Quarto.                                                                                            |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
@@ -3094,6 +3095,8 @@ Options:
 
 Convert a Word document to PDF.
 
+Also available as `calkit doc build`.
+
 Usage:
 
 ```text
@@ -3298,6 +3301,8 @@ Options:
 #### `calkit export pptx`
 
 Export slides from a PowerPoint file to PDF or PNG.
+
+`calkit doc build` exports a whole deck to a PDF with this.
 
 Usage:
 
@@ -4465,6 +4470,101 @@ Usage:
 calkit fix line-endings
 ```
 
+<a id="command-group-doc-document"></a>
+
+### `calkit doc|document`
+
+Work with documents: LaTeX, Quarto, Word, and PowerPoint.
+
+| Command                                             | Description                                          |
+| --------------------------------------------------- | ---------------------------------------------------- |
+| [`build`](#subcommand-doc-document-build)           | Build a document with its tool.                      |
+| [`diff`](#subcommand-doc-document-diff)             | Build a PDF showing what changed in a document.      |
+| [`to-docx`](#subcommand-doc-document-to-docx)       | Export a Word copy of a document for review.         |
+| [`merge-docx`](#subcommand-doc-document-merge-docx) | Merge a reviewed Word document back into its source. |
+
+<a id="subcommand-doc-document-build"></a>
+
+#### `calkit doc|document build`
+
+Build a document with its tool.
+
+A .tex file is built with `calkit latex build`, a Quarto document or notebook with `calkit quarto render`, a Word document with `calkit office word-to-pdf`, and a PowerPoint deck to a PDF beside it with `calkit export pptx`.
+
+Options after the path are that command's, e.g., `-e` in `calkit doc build paper.tex -e tex`, and `calkit doc build paper.tex --help` lists them.
+
+Usage:
+
+```text
+calkit doc|document build PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description    |
+| -------- | ---- | -------- | ------- | -------------- |
+| `path`   | str  | yes      |         | Document path. |
+
+<a id="subcommand-doc-document-diff"></a>
+
+#### `calkit doc|document diff`
+
+Build a PDF showing what changed in a document.
+
+A .tex file is compared with `calkit latex diff`, and options after the path are its own.
+
+Usage:
+
+```text
+calkit doc|document diff PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description    |
+| -------- | ---- | -------- | ------- | -------------- |
+| `path`   | str  | yes      |         | Document path. |
+
+<a id="subcommand-doc-document-to-docx"></a>
+
+#### `calkit doc|document to-docx`
+
+Export a Word copy of a document for review.
+
+A .tex file is exported from its compiled PDF with `calkit latex to-docx`, and options after the path are its own.
+
+Usage:
+
+```text
+calkit doc|document to-docx PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description    |
+| -------- | ---- | -------- | ------- | -------------- |
+| `path`   | str  | yes      |         | Document path. |
+
+<a id="subcommand-doc-document-merge-docx"></a>
+
+#### `calkit doc|document merge-docx`
+
+Merge a reviewed Word document back into its source.
+
+The source is the one it was exported from with `calkit doc to-docx`. A .tex source is merged with `calkit latex merge-docx`, and options after the path are its own.
+
+Usage:
+
+```text
+calkit doc|document merge-docx PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `path`   | str  | yes      |         | Reviewed .docx to merge. |
+
 <a id="command-group-latex-tex"></a>
 
 ### `calkit latex|tex`
@@ -4614,6 +4714,8 @@ Build a PDF of a LaTeX document with latexmk.
 
 If a Calkit environment is not specified, latexmk will be run in the system environment if available. If not available, a TeX Live Docker container will be used.
 
+Also available as `calkit doc build`.
+
 Usage:
 
 ```text
@@ -4654,6 +4756,8 @@ Marks up one revision of a document against another with latexdiff, so additions
 With the default `--to`, the newer side is the working tree, so the marked-up document is built with the current figures and bibliography and what's marked is what changed in the text.
 
 A revision's DVC-tracked inputs, e.g., figures and tables a pipeline generates, are fetched as they were at that revision, so each side of the comparison shows its own.
+
+Also available as `calkit doc diff`.
 
 Usage:
 
@@ -4696,6 +4800,8 @@ Export a Word copy of a LaTeX document for review.
 
 Uses Word's own PDF import where Word is installed, so the copy looks like the PDF, else TeX4ht and LibreOffice. Then records inside the file which source line each paragraph came from and the text as sent, so `merge-docx` can bring edits and comments back.
 
+Also available as `calkit doc to-docx`, which takes the .tex file.
+
 Usage:
 
 ```text
@@ -4726,6 +4832,8 @@ Options:
 Merge a reviewed Word document back into the LaTeX source.
 
 Accepted changes are applied. Tracked changes not yet accepted or rejected, and edits that no longer fit the source, are left alone with a warning: deal with them in Word and merge again. Comments become comment blocks above the paragraph; threads resolved in Word are marked resolved.
+
+Also available as `calkit doc merge-docx`.
 
 Usage:
 
@@ -4763,6 +4871,8 @@ Work with Quarto.
 Render a Quarto document in an environment.
 
 Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. The values the document shows with the 'ckvalue' shortcode are checked first, and the Quarto extension that reads them from their results files is written.
+
+Also available as `calkit doc build`.
 
 Usage:
 

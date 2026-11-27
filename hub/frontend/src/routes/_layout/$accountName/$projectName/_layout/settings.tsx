@@ -2,11 +2,11 @@ import {
   Box,
   Button,
   Checkbox,
+  Flex,
   FormControl,
   FormErrorMessage,
   FormHelperText,
   FormLabel,
-  HStack,
   Heading,
   Input,
   Modal,
@@ -606,8 +606,10 @@ function ProjectSettings() {
             </Text>
           )}
           {isOwner && (
-            <HStack mt={4} maxW="xl">
+            <Flex mt={4} gap={2} wrap="wrap">
               <Select
+                w="auto"
+                minW="2xs"
                 value={selected}
                 onChange={(e) => setSelected(e.target.value)}
                 isDisabled={accountStorageQuery.isPending}
@@ -638,7 +640,7 @@ function ProjectSettings() {
                 isLoading={connectMutation.isPending}
                 isDisabled={hfConnected === undefined}
               >
-                New Hugging Face bucket
+                Use Hugging Face bucket
               </Button>
               <Button
                 flexShrink={0}
@@ -666,7 +668,7 @@ function ProjectSettings() {
               >
                 Use S3 bucket
               </Button>
-            </HStack>
+            </Flex>
           )}
         </>
       )}

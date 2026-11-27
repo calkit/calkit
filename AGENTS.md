@@ -23,6 +23,11 @@ if applicable.
 
 See `CONTRIBUTING.md` for tool usage, style guidelines, etc.
 
+<!-- TODO: needs human review -->
+
+Read `docs/dev/principles.md` before designing a feature;
+it says what belongs in the project and why.
+
 To run tests, use `uv run pytest`.
 
 To sync the docs and format all the code, run `make format`.

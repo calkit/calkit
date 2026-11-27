@@ -6,6 +6,30 @@
 
 <!-- TODO: needs human review -->
 
+## For people, with agents as helpers
+
+A project is a place where people do research together,
+and agents are helpers in it, not its audience.
+Anyone involved should be able to tap in:
+
+- **To contribute,**
+  from the tools they already use,
+  e.g., a PI commenting in the browser,
+  a coauthor editing in Word or Overleaf,
+  or a student running a stage on a cluster,
+  without needing to learn Git.
+- **To get value out,**
+  by following a result back until they understand it,
+  reusing it with its context,
+  or picking the project up for the next question.
+
+Being able to see how results were made is there so people can understand,
+steer, and judge the work.
+Agents can take over drudgery and help people understand,
+but judgment stays with people.
+Research made by agents only for other agents would leave people out of
+their own work.
+
 ## Everything travels with the project
 
 A project's parts are coupled:
@@ -68,9 +92,15 @@ Separating coupled parts reduces what people see at once,
 not what they have to keep in sync.
 The coupling moves into people's heads and manual transfers,
 which is where outputs go stale.
-So focus comes from views, not distance,
+So focus comes from views, not distance.
+Subprojects are the main way to get it:
+a paper, a study, or a set of decisions can be its own subproject,
 e.g., a paper as a subproject of the software it reports on,
-with views and CI that only show the part someone's working on.
+worked on, run, and reviewed on its own,
+with views and CI that only show that part,
+so neither people nor agents need the whole project in mind at once.
+Subprojects have to be cheap to create and use,
+or people will reach for separate repos instead.
 
 Some separations are real, though,
 and those parts live in separate projects that stay connected:

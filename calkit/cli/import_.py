@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import fnmatch
+import hashlib
 import os
+import re
 from copy import deepcopy
 from typing import Annotated
 
@@ -604,6 +606,9 @@ def import_from_zenodo(
 
     from calkit.dvc import run_dvc_command
 
+    # A trailing slash, e.g., from tab completion, would put the .dvc file
+    # inside the folder rather than beside it
+    dest_dir = dest_dir.rstrip("/\\")
     # Ensure destination directory either doesn't exist or is empty
     if os.path.isdir(dest_dir):
         if os.listdir(dest_dir):
@@ -613,20 +618,20 @@ def import_from_zenodo(
             "Invalid kind; must be one of 'figure', 'dataset', or "
             "'publication'"
         )
-    # Fetch information about the record
-    # First, extract the record ID from the src
-    if "zenodo.org/record/" in src:
-        try:
-            record_id = int(src.split("zenodo.org/record/")[1].split("/")[0])
-        except Exception:
-            raise_error("Could not parse Zenodo record ID from URL")
-    elif "10.5281/zenodo." in src:
-        try:
-            record_id = int(src.split("10.5281/zenodo.")[1])
-        except Exception:
-            raise_error("Could not parse Zenodo record ID from DOI")
-    else:
-        raise_error("Source must be a Zenodo URL or DOI")
+    if storage is not None:
+        storage = storage.lower()
+        if storage not in ["git", "dvc"]:
+            raise_error("Invalid storage option; must be 'git' or 'dvc'")
+    # Read the record ID out of the DOI the source names, since Zenodo's
+    # version DOI is its record ID
+    try:
+        doi = calkit.provenance.source_from_location(src).get("doi", "")
+    except ValueError:
+        doi = ""
+    doi_match = re.fullmatch(r"10\.5281/zenodo\.(\d+)", doi, flags=re.I)
+    if doi_match is None:
+        raise_error("Source must be a Zenodo record URL or DOI")
+    record_id = int(doi_match.group(1))
     typer.echo(f"Fetching info for Zenodo record {record_id}")
     try:
         record = calkit.invenio.get(
@@ -634,13 +639,10 @@ def import_from_zenodo(
         )
     except Exception as e:
         raise_error(f"Could not fetch record info from Zenodo: {e}")
-    # Get download URLs
-    download_urls = calkit.invenio.get_download_urls(
-        record_id, service="zenodo", auth=False
-    )
-    # Filter download URLs
-    filtered_urls = {}
-    for fname, url in download_urls.items():
+    # Filter files
+    files = []
+    for file in record.get("files") or []:
+        fname = file["key"]
         if name_like:
             if not any(
                 fnmatch.fnmatch(fname, pattern) for pattern in name_like
@@ -651,50 +653,52 @@ def import_from_zenodo(
                 fnmatch.fnmatch(fname, pattern) for pattern in name_not_like
             ):
                 continue
-        filtered_urls[fname] = url
-    if not filtered_urls:
+        files.append(file)
+    if not files:
         raise_error("No files matched the specified name filters")
-    # Download files
-    for fname, url in filtered_urls.items():
+    # Download files, checking each against the MD5 Zenodo lists for it
+    for file in files:
+        fname = file["key"]
+        url = file["links"]["self"]
         out_path = os.path.join(dest_dir, fname)  # fname may include subdirs
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         typer.echo(f"Downloading {fname} to {out_path}")
-        resp = requests.get(url, stream=True)
+        md5 = hashlib.md5()
         try:
+            resp = requests.get(
+                url, stream=True, timeout=calkit.invenio.get_timeout()
+            )
             resp.raise_for_status()
-        except Exception as e:
+            with open(out_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    md5.update(chunk)
+            checksum = f"md5:{md5.hexdigest()}"
+            if file.get("checksum") not in [None, checksum]:
+                raise ValueError(
+                    f"MD5 mismatch: expected {file['checksum']}, "
+                    f"got {checksum}"
+                )
+        except (requests.RequestException, ValueError) as e:
+            if os.path.exists(out_path):
+                os.remove(out_path)
             raise_error(f"Failed to download {fname} from {url}: {e}")
-        with open(out_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
     # Decide if this should be stored in Git or DVC
-    repo = calkit.git.get_repo()
-    commit_paths = []
     if storage is None:
-        if calkit.get_size(dest_dir) > calkit.DVC_SIZE_THRESH_BYTES:
-            result = run_dvc_command(["add"])
-            if result != 0:
-                raise_error("Failed to DVC add")
-            # Git add the .dvc file
-            dvc_file = dest_dir + ".dvc"
-            repo.git.add(dvc_file)
-            commit_paths.append(dvc_file)
-        else:
-            repo.git.add(dest_dir)
-            commit_paths.append(dest_dir)
-    elif storage.lower() == "dvc":
-        result = run_dvc_command(["add", dest_dir])
-        if result != 0:
+        too_big = calkit.get_size(dest_dir) > calkit.DVC_SIZE_THRESH_BYTES
+        storage = "dvc" if too_big else "git"
+    repo = calkit.git.get_repo()
+    if storage == "dvc":
+        if run_dvc_command(["add", dest_dir]) != 0:
             raise_error("Failed to DVC add")
-        # Git add the .dvc file
-        dvc_file = dest_dir + ".dvc"
-        repo.git.add(dvc_file)
-        commit_paths.append(dvc_file)
-    elif storage.lower() == "git":
-        repo.git.add(dest_dir)
-        commit_paths.append(dest_dir)
+        # DVC ignores the folder in its parent's .gitignore
+        commit_paths = [
+            dest_dir + ".dvc",
+            os.path.join(os.path.dirname(dest_dir), ".gitignore"),
+        ]
     else:
-        raise_error("Invalid storage option; must be 'git' or 'dvc'")
+        commit_paths = [dest_dir]
+    repo.git.add(commit_paths)
     # Determine if we should put this in one of the calkit.yaml categories
     if kind is not None:
         ck_info = calkit.load_calkit_info()
@@ -729,7 +733,11 @@ def import_from_zenodo(
         dest_dir,
         {
             "from": "zenodo",
-            "record_id": record_id,
+            # The version fetched, since a concept ID resolves to the latest
+            # one, and the API it came from, since some environments use
+            # Zenodo's sandbox
+            "record_id": record.get("id", record_id),
+            "api_url": calkit.invenio.get_base_url(service="zenodo"),
             "src": src,
             "fetched": calkit.utcnow().isoformat(),
             "kind": kind,
@@ -743,7 +751,7 @@ def import_from_zenodo(
     if not no_commit:
         repo = calkit.git.get_repo()
         repo.git.add(commit_paths)
-        if repo.git.diff(commit_paths + ["--staged"]):
+        if repo.git.diff(["--staged", "--"] + commit_paths):
             repo.git.commit(
                 commit_paths
                 + ["-m", f"Import {src} from Zenodo to {dest_dir}"]

@@ -1862,7 +1862,8 @@ def test_status_with_edited_env_spec(tmp_dir):
         return status
 
     def append(fpath: str, text: str) -> None:
-        with open(fpath, "a") as f:
+        # As written, since Git checks it out with LF, which DVC hashes
+        with open(fpath, "a", newline="") as f:
             f.write(text)
 
     subprocess.check_call(["calkit", "init"])

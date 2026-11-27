@@ -135,7 +135,8 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
     "machine-id": "A stable identifier for the machine itself, read from "
     "the platform and recorded as a Calkit-specific hash, e.g., "
     "'sha256:3f1c...', so the platform's own ID isn't published. A lock "
-    "written before IDs were hashed keeps the raw one until relocked. Pins "
+    "written before IDs were hashed keeps the raw one until relocked, "
+    "which 'relock: auto' does the next time it's checked there. Pins "
     "results to one specific machine, and unlike 'hostname' survives "
     "renaming it. Declaring a 'machine_id' on the environment says where "
     "to run, not that results depend on it, so lock this to also keep "
@@ -1890,7 +1891,8 @@ def write_system_env_lock(
     the file doesn't have is added from a machine matching the rest, as
     adding a dependency keeps the versions already locked, and otherwise
     waits for one, since this machine's value would describe no one machine.
-    With 'relock: auto', they're kept only while this machine matches them.
+    With 'relock: auto', they're kept only while this machine matches them,
+    and a raw machine ID is rewritten as its hash.
 
     A non-default ``shell`` is recorded alongside the machine properties.
     It isn't a property of the machine, but it feeds the same question: a
@@ -1930,8 +1932,11 @@ def write_system_env_lock(
         matches = all(
             lock_value(p, v) == lock_data[p] for p, v in kept.items()
         )
-        # Kept as written where it still matches, e.g., a raw machine ID
-        # from before they were hashed, so stages don't rerun for nothing
+        # Kept as written where it still matches, so stages don't rerun for
+        # nothing, except that a lock following the machine takes the hash
+        # over a raw machine ID from before they were hashed
+        if auto:
+            kept.pop("machine-id", None)
         if matches:
             lock_data = lock_data | kept
         elif not auto:

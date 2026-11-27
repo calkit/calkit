@@ -1781,11 +1781,29 @@ def test_machine_id_is_reported_and_lockable(tmp_dir: str) -> None:
         with open(lock_fpath, "w") as f:
             json.dump({"machine-id": "ABC123"}, f)
         assert not envs.system_env_lock_mismatch(env_name="laptop", env=env)
-        for e in (env, env | {"relock": "auto"}):
-            envs.write_system_env_lock(env_name="laptop", env=e)
-            assert envs.read_system_env_lock("laptop", e) == {
-                "machine-id": "ABC123"
-            }
+        envs.write_system_env_lock(env_name="laptop", env=env)
+        assert envs.read_system_env_lock("laptop", env) == {
+            "machine-id": "ABC123"
+        }
+        # unless it follows the machine, which takes the hash, leaving
+        # anything else that matches as written
+        auto = {"kind": "system", "lock": ["machine-id", "memory-gb"]} | {
+            "relock": "auto"
+        }
+        auto_fpath = envs.get_env_lock_fpath(env=auto, env_name="auto")
+        assert auto_fpath is not None
+        os.makedirs(os.path.dirname(auto_fpath), exist_ok=True)
+        with open(auto_fpath, "w") as f:
+            json.dump({"machine-id": "ABC123", "memory-gb": 15.49}, f)
+        envs.write_system_env_lock(
+            env_name="auto",
+            env=auto,
+            system_info={"machine_id_hash": hashed, "memory_gb": 15.4921},
+        )
+        assert envs.read_system_env_lock("auto", auto) == {
+            "machine-id": hashed,
+            "memory-gb": 15.49,
+        }
         envs.write_system_env_lock(env_name="laptop", env=env, relock=True)
         assert envs.read_system_env_lock("laptop", env) == {
             "machine-id": hashed

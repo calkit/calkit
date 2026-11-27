@@ -48,9 +48,13 @@ A run record or lock written before Calkit hashed machine IDs
 keeps the raw ID until it's rewritten,
 so each release archived from the project publishes it until then.
 A stage's entry is rewritten when that stage runs again,
-e.g., with `calkit run --force`,
-and a lock when it's relocked with `calkit update env -n NAME --lock`,
-which reruns the stages that depend on it.
+e.g., with `calkit run --force`.
+A lock with `relock: auto` is rewritten with the hash
+the next time it's checked, e.g., by `calkit run`,
+and one with the default, `relock: manual`,
+when it's relocked with `calkit update env -n NAME --lock`.
+Either way the lock file changes,
+so the stages that depend on it rerun once.
 The project's Git history keeps the earlier values regardless.
 
 If the `--log` option is specified,

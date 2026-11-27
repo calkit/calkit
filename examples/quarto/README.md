@@ -26,6 +26,10 @@ calkit run
 Change the damping ratio in `scripts/simulate.jl` and run again:
 the notebook and report render again with the new values.
 
+The shortcode's extension is kept in Git, in `_extensions/calkit/`,
+and reads values from the results files,
+so `quarto render report.qmd` gives the same report without Calkit.
+
 <!-- TODO: needs human review -->
 
 In `report.html`, look under Figure 2 and Table 1 for a collapsed
@@ -40,6 +44,3 @@ selecting it shows the same for the value.
 Edit `scripts/simulate.jl` and render the report with
 `calkit quarto render -e quarto report.qmd`, without running the
 pipeline, to see them say they're out of date while collapsed.
-The shortcode's extension is kept in Git, in `_extensions/calkit/`,
-and reads values from the results files,
-so `quarto render report.qmd` gives the same report without Calkit.

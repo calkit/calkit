@@ -9,6 +9,8 @@ import {
 } from "@chakra-ui/react"
 import type { FieldErrors, UseFormRegister } from "react-hook-form"
 
+import { maskedText, noAutofill } from "../../lib/autofill"
+
 export interface S3ConnectionForm {
   name: string
   endpoint_url: string
@@ -23,14 +25,6 @@ export const emptyS3Connection: S3ConnectionForm = {
   region: "",
   access_key_id: "",
   secret_access_key: "",
-}
-
-// Keeps browsers and password managers from filling in keys
-const noAutofill = {
-  autoComplete: "off",
-  "data-form-type": "other",
-  "data-1p-ignore": true,
-  "data-lpignore": "true",
 }
 
 interface S3ConnectionFieldsProps<T extends S3ConnectionForm> {
@@ -68,7 +62,7 @@ function S3ConnectionFields<T extends S3ConnectionForm>({
         {errs.name && <FormErrorMessage>{errs.name.message}</FormErrorMessage>}
       </FormControl>
       <FormControl mt={4} isInvalid={!!errs.endpoint_url}>
-        <FormLabel htmlFor="s3-endpoint">Endpoint URL</FormLabel>
+        <FormLabel htmlFor="s3-endpoint">Endpoint</FormLabel>
         <Input
           id="s3-endpoint"
           placeholder="https://mghp.osn.xsede.org"
@@ -86,7 +80,8 @@ function S3ConnectionFields<T extends S3ConnectionForm>({
         )}
       </FormControl>
       <FormControl mt={4}>
-        <FormLabel htmlFor="s3-region">Region</FormLabel>
+        {/* Split so Dashlane doesn't take it for an address */}
+        <FormLabel htmlFor="s3-region">Regi{"\u200b"}on</FormLabel>
         <Input
           id="s3-region"
           placeholder="Optional"
@@ -95,7 +90,7 @@ function S3ConnectionFields<T extends S3ConnectionForm>({
         />
       </FormControl>
       <FormControl mt={4} isInvalid={!!errs.access_key_id}>
-        <FormLabel htmlFor="s3-key-id">Access key ID</FormLabel>
+        <FormLabel htmlFor="s3-key-id">Access key</FormLabel>
         <Input
           id="s3-key-id"
           {...noAutofill}
@@ -109,9 +104,8 @@ function S3ConnectionFields<T extends S3ConnectionForm>({
         <FormLabel htmlFor="s3-secret">Secret access key</FormLabel>
         <Input
           id="s3-secret"
-          type="password"
+          sx={maskedText}
           {...noAutofill}
-          autoComplete="new-password"
           {...reg("secret_access_key", {
             required: "Secret access key required",
           })}

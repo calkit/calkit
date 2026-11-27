@@ -43,6 +43,7 @@ import {
   ReleasesService,
 } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import { noAutofill } from "../../lib/autofill"
 import { handleError } from "../../lib/errors"
 import {
   releasePagePath,
@@ -201,15 +202,6 @@ const NewRelease = ({
       ),
     onError: (err: AxiosError) => handleError(err, showToast),
   })
-  // Per-field opt-out for password managers (Dashlane especially keeps trying
-  // to autofill even with a form-level opt-out), spread onto each text input.
-  const noAutofill = {
-    autoComplete: "off",
-    "data-form-type": "other",
-    "data-1p-ignore": true,
-    "data-lpignore": "true",
-  } as const
-
   const invalidate = () =>
     queryClient.invalidateQueries({
       queryKey: ["projects", ownerName, projectName, "releases"],

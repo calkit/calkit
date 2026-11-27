@@ -53,8 +53,10 @@ jobs:
       # Only the data stages and what depends on them run, so the pull
       # request holds nothing but data. The superuser token only reaches the
       # stage that needs it, not the others, which read what anyone can put
-      # on GitHub or run Docker images, nor DVC, which logs in through OIDC.
+      # on GitHub or run Docker images, nor DVC, which logs in through OIDC
+      # in the run action, whose token the last step pushes with.
       - name: Run the data stages
+        id: run
         uses: ./actions/run
         env:
           # For the gh CLI, which stages search GitHub with
@@ -77,6 +79,8 @@ jobs:
       - name: Propose the results to main
         env:
           GH_TOKEN: ${{ github.token }}
+          # For pushing to the ck:// remote, from the action's OIDC login
+          CALKIT_TOKEN: ${{ steps.run.outputs.calkit_token }}
           RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}

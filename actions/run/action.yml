@@ -34,7 +34,13 @@ inputs:
       "packages: write" permission.
     required: false
     default: "true"
-outputs: {}
+outputs:
+  calkit_token:
+    description: >-
+      Calkit token obtained via GitHub OIDC, for later steps that pull, push,
+      or reach the hub, e.g., 'calkit push' when 'save' is false. Empty if
+      'dvc_token' was provided or no token was obtained.
+    value: ${{ steps.get-calkit-token.outputs.calkit-token }}
 runs:
   using: composite
   steps:

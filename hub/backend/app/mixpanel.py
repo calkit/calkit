@@ -356,6 +356,17 @@ def user_created_project_storage(
     )
 
 
+def user_connected_s3(user: User, endpoint_host: str, replaced: bool) -> None:
+    """``endpoint_host`` is where the storage is, e.g., an OSN pod, or
+    ``aws`` for AWS itself.
+    """
+    track(
+        user,
+        "Connected S3",
+        add_event_info=dict(endpoint_host=endpoint_host, replaced=replaced),
+    )
+
+
 def user_changed_project_storage(
     user: User,
     owner_name: str,

@@ -5,8 +5,10 @@ from __future__ import annotations
 import base64
 import fnmatch
 import hashlib
+import ntpath
 import os
 import re
+import shutil
 from copy import deepcopy
 from typing import Annotated
 
@@ -608,7 +610,10 @@ def import_from_zenodo(
 
     # A trailing slash, e.g., from tab completion, would put the .dvc file
     # inside the folder rather than beside it
-    dest_dir = dest_dir.rstrip("/\\")
+    dest_dir = dest_dir.rstrip("/\\") or dest_dir
+    problem = calkit.provenance.check_project_path(dest_dir)
+    if problem:
+        raise_error(problem[0].upper() + problem[1:])
     # Ensure destination directory either doesn't exist or is empty
     if os.path.isdir(dest_dir):
         if os.listdir(dest_dir):
@@ -653,36 +658,53 @@ def import_from_zenodo(
                 fnmatch.fnmatch(fname, pattern) for pattern in name_not_like
             ):
                 continue
+        # A name with a drive or a '..' would be written outside dest_dir
+        parts = fname.replace("\\", "/").split("/")
+        if ntpath.splitdrive(fname)[0] or any(
+            part in ["", ".", ".."] for part in parts
+        ):
+            raise_error(f"Unsafe file name in record: {fname}")
         files.append(file)
     if not files:
-        raise_error("No files matched the specified name filters")
-    # Download files, checking each against the MD5 Zenodo lists for it
-    for file in files:
-        fname = file["key"]
-        url = file["links"]["self"]
-        out_path = os.path.join(dest_dir, fname)  # fname may include subdirs
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        typer.echo(f"Downloading {fname} to {out_path}")
-        md5 = hashlib.md5()
-        try:
-            resp = requests.get(
-                url, stream=True, timeout=calkit.invenio.get_timeout()
-            )
-            resp.raise_for_status()
-            with open(out_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    md5.update(chunk)
+        if name_like or name_not_like:
+            raise_error("No files matched the specified name filters")
+        raise_error("Record has no public files")
+    # Download files, checking each against the MD5 Zenodo lists for it.
+    # On any failure, leave dest_dir as it was, so the import can be run
+    # again.
+    dest_existed = os.path.isdir(dest_dir)
+    try:
+        for file in files:
+            fname = file["key"]
+            url = file["links"]["self"]
+            out_path = os.path.join(dest_dir, fname)  # May include subdirs
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            typer.echo(f"Downloading {fname} to {out_path}")
+            md5 = hashlib.md5()
+            try:
+                with requests.get(
+                    url, stream=True, timeout=calkit.invenio.get_timeout()
+                ) as resp:
+                    resp.raise_for_status()
+                    with open(out_path, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                            md5.update(chunk)
+            except requests.RequestException as e:
+                raise_error(f"Failed to download {fname} from {url}: {e}")
+            expected = file.get("checksum") or ""
             checksum = f"md5:{md5.hexdigest()}"
-            if file.get("checksum") not in [None, checksum]:
-                raise ValueError(
-                    f"MD5 mismatch: expected {file['checksum']}, "
+            if expected.startswith("md5:") and expected != checksum:
+                raise_error(
+                    f"MD5 mismatch for {fname}: expected {expected}, "
                     f"got {checksum}"
                 )
-        except (requests.RequestException, ValueError) as e:
-            if os.path.exists(out_path):
-                os.remove(out_path)
-            raise_error(f"Failed to download {fname} from {url}: {e}")
+    except BaseException:
+        # BaseException, so Ctrl-C cleans up too
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        if dest_existed:
+            os.makedirs(dest_dir, exist_ok=True)
+        raise
     # Decide if this should be stored in Git or DVC
     if storage is None:
         too_big = calkit.get_size(dest_dir) > calkit.DVC_SIZE_THRESH_BYTES
@@ -698,7 +720,6 @@ def import_from_zenodo(
         ]
     else:
         commit_paths = [dest_dir]
-    repo.git.add(commit_paths)
     # Determine if we should put this in one of the calkit.yaml categories
     if kind is not None:
         ck_info = calkit.load_calkit_info()
@@ -747,10 +768,9 @@ def import_from_zenodo(
         },
     )
     commit_paths.append(imports_fpath)
-    # Commit if desired
+    # Stage everything either way, and commit if desired
+    repo.git.add(commit_paths)
     if not no_commit:
-        repo = calkit.git.get_repo()
-        repo.git.add(commit_paths)
         if repo.git.diff(["--staged", "--"] + commit_paths):
             repo.git.commit(
                 commit_paths

@@ -69,6 +69,8 @@ def test_source_from_location():
         "doi:10.5281/zenodo.18038227",
         "https://doi.org/10.5281/zenodo.18038227",
         "https://dx.doi.org/10.5281/zenodo.18038227",
+        "https://www.doi.org/10.5281/zenodo.18038227",
+        "doi: 10.5281/zenodo.18038227",
     ]:
         assert source_from_location(written) == {
             "doi": "10.5281/zenodo.18038227"
@@ -209,8 +211,16 @@ def test_zenodo_record_urls_are_read_as_dois():
         "http://zenodo.org/records/18038227",
         "https://www.zenodo.org/records/18038227",
         "https://zenodo.org/records/18038227/files/data.csv",
+        "https://zenodo.org/records/18038227?preview=1",
+        "zenodo.org/record/18038227",
+        # Links to all versions, which redirect to the latest
+        "https://zenodo.org/doi/10.5281/zenodo.18038227",
     ]:
         assert source_from_location(url) == doi, url
+    # A record ID is all digits
+    assert source_from_location("https://zenodo.org/records/123abc") == {
+        "url": "https://zenodo.org/records/123abc"
+    }
     # Written as a DOI it already worked, and still does
     assert source_from_location("https://doi.org/10.5281/zenodo.18038227") == (
         doi

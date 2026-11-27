@@ -1163,13 +1163,31 @@ def source_from_location(
             source["git_ref"] = ref
         return source
     stripped = re.sub(
-        r"^(https?://(dx\.)?doi\.org/|doi:)", "", location.strip(), flags=re.I
+        r"^(https?://((dx|www)\.)?doi\.org/|doi:\s*)",
+        "",
+        location.strip(),
+        flags=re.I,
     )
     if re.fullmatch(r"10\.\d{4,9}/\S+", stripped):
         # Recognized rather than downloaded: a DOI resolves to a landing
         # page, so treating it as a plain URL would save the HTML and call
         # it the data. 'fetch' says what to use instead.
         return {"doi": stripped}
+    # A link to a Zenodo record is that record, not a file. Read as the
+    # DOI it stands for, since the two name the same thing and a record
+    # is a landing page: downloading it would save the HTML and call it
+    # the data, which is the mistake the DOI branch above exists to
+    # prevent. Zenodo's version DOI is its record ID, which is how
+    # 'calkit import zenodo' reads one in the other direction. Its /doi/
+    # links, to all versions of a record, carry the DOI already.
+    record_match = re.match(
+        r"^(https?://)?(www\.)?zenodo\.org/(records?/|doi/10\.5281/zenodo\.)"
+        r"(?P<id>\d+)(?![\w.])",
+        location.strip(),
+        flags=re.I,
+    )
+    if record_match is not None:
+        return {"doi": f"10.5281/zenodo.{record_match.group('id')}"}
     hub_source = _project_source_from_hub_url(location, ref=ref)
     if hub_source is not None:
         return hub_source
@@ -1177,19 +1195,6 @@ def source_from_location(
         git_source = _git_source_from_url(location, ref=ref)
         if git_source is not None:
             return git_source
-        # A link to a Zenodo record is that record, not a file. Read as the
-        # DOI it stands for, since the two name the same thing and a record
-        # is a landing page: downloading it would save the HTML and call it
-        # the data, which is the mistake the DOI branch above exists to
-        # prevent. Zenodo's version DOI is its record ID, which is how
-        # 'calkit import zenodo' reads one in the other direction.
-        record_match = re.match(
-            r"^https?://(www\.)?zenodo\.org/records?/(?P<id>\d+)",
-            location,
-            flags=re.I,
-        )
-        if record_match is not None:
-            return {"doi": f"10.5281/zenodo.{record_match.group('id')}"}
         return {"url": location}
     ssh_source = _git_source_from_ssh_url(location, ref=ref)
     if ssh_source is not None:

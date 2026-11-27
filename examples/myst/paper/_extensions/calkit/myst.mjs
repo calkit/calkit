@@ -390,7 +390,8 @@ function makeValueRole(name) {
         ckValue: role.key,
         children: [{
           type: "abbreviation",
-          title: `Where ${role.text} came from: ${summary}`,
+          // And what's wrong, if anything
+          title: `Where ${role.text} came from` + (warn ? `: ${summary}` : ""),
           children: [{
             type: "superscript",
             children: [text(warn ? WARNING_MARK : MARK)],

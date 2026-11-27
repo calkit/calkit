@@ -130,8 +130,10 @@ def test_values(tmp_path, monkeypatch):
     (tmp_path / "pub").mkdir()
     calkit.quarto.write_components("pub/index.ipynb")
     ext = tmp_path / "pub" / "_extensions" / "calkit"
-    assert (ext / "calkit.lua").read_text() == calkit.quarto.SHORTCODE_LUA
-    assert "calkit.lua" in (ext / "_extension.yml").read_text()
+    assert (ext / "calkit.lua").read_text(
+        encoding="utf-8"
+    ) == calkit.quarto.SHORTCODE_LUA
+    assert "calkit.lua" in (ext / "_extension.yml").read_text(encoding="utf-8")
     assert not (tmp_path / "pub" / "_calkit").exists()
     mtime = (ext / "calkit.lua").stat().st_mtime_ns
     calkit.quarto.write_components("pub/index.ipynb")
@@ -268,7 +270,12 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
     subprocess.check_call(
         ["quarto", "render", "doc.qmd", "--to", "plain"], cwd="docs"
     )
-    got = (tmp_path / "docs" / "doc.txt").read_text().strip().split("\n\n")
+    got = (
+        (tmp_path / "docs" / "doc.txt")
+        .read_text(encoding="utf-8")
+        .strip()
+        .split("\n\n")
+    )
     assert [line.split(": ", 1)[1].strip() for line in got[:-1]] == expected
     # A value that can't be read shows as missing
     assert got[-1].strip() == "Gone: ??"
@@ -353,7 +360,8 @@ def test_refval_shortcode(tmp_path, monkeypatch):
         "B {{< ckrefval liu.2025 label >}} "
         "C {{< ckrefval liu.2025 nope >}} "
         "D {{< ckrefval liu.2025 key=noise-sigma format=.1f >}} "
-        "E {{< ckrefval smith:2020/b+é n >}}\n"
+        "E {{< ckrefval smith:2020/b+é n >}}\n",
+        encoding="utf-8",
     )
     calkit.quarto.write_components("index.qmd", wdir=str(tmp_path))
     subprocess.check_call(
@@ -361,7 +369,7 @@ def test_refval_shortcode(tmp_path, monkeypatch):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    out = (tmp_path / "index.md").read_text()
+    out = (tmp_path / "index.md").read_text(encoding="utf-8")
     assert "A 0.10 B α C ?? D 0.1 E 7" in out
 
 
@@ -937,7 +945,9 @@ def test_stage_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         record_path = calkit.quarto.write_provenance(
             components, "doc.qmd", {}, wdir=str(tmp_path)
         )
-        record = json.loads((tmp_path / record_path).read_text())
+        record = json.loads(
+            (tmp_path / record_path).read_text(encoding="utf-8")
+        )
         provenance = record["components"]["out.txt"]["provenance"]
         assert provenance["summary"][0]["value"] == summary
     assert os.getcwd() == str(tmp_path / "sub")
@@ -1020,11 +1030,13 @@ def test_provenance_filter(tmp_path: Path) -> None:
             ["calkit", "quarto", "render", "-e", "_system", *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=tmp_path,
         )
 
     def read_html() -> str:
-        html = (tmp_path / "report.html").read_text()
+        html = (tmp_path / "report.html").read_text(encoding="utf-8")
         return html.replace("\xa0", " ").replace("&nbsp;", " ")
 
     def get_summaries(html: str) -> list[tuple[str, str]]:
@@ -1253,7 +1265,11 @@ def test_provenance_filter(tmp_path: Path) -> None:
     # Other formats show the value, and nothing while it's up to date
     res = render("report.qmd", "--to", "gfm", "--", "-o", "report.md")
     assert res.returncode == 0, res.stdout + res.stderr
-    md = (tmp_path / "report.md").read_text().replace("\xa0", " ")
+    md = (
+        (tmp_path / "report.md")
+        .read_text(encoding="utf-8")
+        .replace("\xa0", " ")
+    )
     assert "The slope is 0.123, k is 0.031, sigma is 0.1" in md
     assert "Provenance" not in md and "out of date" not in md
     assert "| p   | q   |" in md
@@ -1273,7 +1289,11 @@ def test_provenance_filter(tmp_path: Path) -> None:
     assert [c for c, _, _ in get_values(html)][1] == "ck-stale"
     assert '0.123<span class="ck-flag" aria-hidden="true">⚠</span>' in html
     res = render("report.qmd", "--to", "gfm", "--", "-o", "report.md")
-    md = (tmp_path / "report.md").read_text().replace("\xa0", " ")
+    md = (
+        (tmp_path / "report.md")
+        .read_text(encoding="utf-8")
+        .replace("\xa0", " ")
+    )
     assert "*Figure out of date: waiting on data/clean.csv*" in md
     # Rendered without Calkit after a file it shows changed, it shows the
     # file as it is, saying it changed since
@@ -1289,7 +1309,7 @@ def test_provenance_filter(tmp_path: Path) -> None:
     assert "<td>7</td>" in html
     # Rendered without Calkit after the document changed, it says so
     record_path = tmp_path / calkit.quarto.get_provenance_path("report.qmd")
-    record = json.loads(record_path.read_text())
+    record = json.loads(record_path.read_text(encoding="utf-8"))
     assert (
         record["source_sha1"]
         == hashlib.sha1((tmp_path / "report.qmd").read_bytes()).hexdigest()

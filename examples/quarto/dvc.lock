@@ -25,16 +25,24 @@ stages:
     deps:
     - path: .calkit/notebooks/cleaned/analysis.ipynb
       hash: md5
-      md5: 68a5d8b5c5dd0e6f8f1b1cd438cacfda
-      size: 3194
+      md5: 913167198c14dddecb9499644e5f2a77
+      size: 3940
     - path: data/sim.csv
       hash: md5
       md5: 05a12e0f23928d3253961d6ed3a6c3af
       size: 93347
+    - path: figures/energy.svg
+      hash: md5
+      md5: fa114ace1a148eee93b7e388765fe3e0
+      size: 36322
     - path: pixi.lock
       hash: md5
       md5: b2b3871188338fb16716c7950472ff6a
       size: 357380
+    - path: results/energy.json
+      hash: md5
+      md5: 0ec8fc78ef1bef581a1b104d0ed76bba
+      size: 42
     - path: results/sim.json
       hash: md5
       md5: df42206b92f58bee9822430cf38f0769
@@ -42,8 +50,8 @@ stages:
     outs:
     - path: analysis.html
       hash: md5
-      md5: 9ce91fb238448bf99938479262237d7e
-      size: 1286902
+      md5: df46bf3f922c5710bde50bdf860bdb57
+      size: 4102416
     - path: figures/peaks.svg
       hash: md5
       md5: 75507941e5eb876589ec9df1f1786fb0
@@ -61,12 +69,12 @@ stages:
     deps:
     - path: analysis.html
       hash: md5
-      md5: 9ce91fb238448bf99938479262237d7e
-      size: 1286902
+      md5: df46bf3f922c5710bde50bdf860bdb57
+      size: 4102416
     - path: analysis.ipynb
       hash: md5
-      md5: c3de2ada7c4daa91df57e3b177c843e5
-      size: 78771
+      md5: 79aa513e2562a32a974fdd896ebde0d6
+      size: 79291
     - path: data/sim.csv
       hash: md5
       md5: 05a12e0f23928d3253961d6ed3a6c3af
@@ -98,5 +106,33 @@ stages:
     outs:
     - path: report.html
       hash: md5
-      md5: 33dd99eb69dd910a578d88f7bcb2858f
-      size: 4263290
+      md5: 2f58fec915ba8252f4ddcd6bbbd9771e
+      size: 4270807
+  energy:
+    cmd: calkit xenv -n quarto --no-check -- python scripts/energy.py
+    deps:
+    - path: data/sim.csv
+      hash: md5
+      md5: 05a12e0f23928d3253961d6ed3a6c3af
+      size: 93347
+    - path: pixi.lock
+      hash: md5
+      md5: b2b3871188338fb16716c7950472ff6a
+      size: 357380
+    - path: results/sim.json
+      hash: md5
+      md5: df42206b92f58bee9822430cf38f0769
+      size: 81
+    - path: scripts/energy.py
+      hash: md5
+      md5: 1395b1d14598ad070005f6453e22bab8
+      size: 1006
+    outs:
+    - path: figures/energy.svg
+      hash: md5
+      md5: fa114ace1a148eee93b7e388765fe3e0
+      size: 36322
+    - path: results/energy.json
+      hash: md5
+      md5: 0ec8fc78ef1bef581a1b104d0ed76bba
+      size: 42

@@ -562,6 +562,27 @@ def test_quartostage(tmp_path):
     (tmp_path / "report" / "report.qmd").write_text("No values.\n")
     s.preprocess(str(tmp_path), lambda p: False, write_files=True)
     assert s.dvc_deps == ["report.qmd"]
+    # A notebook's components are in its Markdown cells, not its code
+    nb = {
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "source": ['::: {.ckfigure src="figures/plot.svg"}\n', ":::"],
+            },
+            {
+                "cell_type": "code",
+                "source": '"::: {.ckfigure src=data/n.json}"',
+            },
+        ]
+    }
+    (tmp_path / "nb.ipynb").write_text(json.dumps(nb))
+    nb_stage = QuartoStage(
+        name="nb", environment="analysis", target_path="nb.ipynb"
+    )
+    nb_stage.preprocess(
+        str(tmp_path), lambda p: p == "data/n.json", write_files=True
+    )
+    assert nb_stage.dvc_deps == ["nb.ipynb", "figures/plot.svg"]
     # The notebooks it embeds cells' outputs from are inputs too, and one
     # another stage executes makes it wait for that stage through one of
     # its outputs, since the notebook itself isn't one

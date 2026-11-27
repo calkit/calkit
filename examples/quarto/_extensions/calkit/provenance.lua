@@ -195,8 +195,8 @@ details.ck-provenance>summary::before{content:"\25B8  "}
 details.ck-provenance[open]>summary::before{content:"\25BE  "}
 details.ck-provenance:not(.ck-ok)>summary,
 details.ck-provenance.ck-outdated>summary{color:#b35900;font-weight:600}
-details.ck-provenance[open]{border-left:2px solid #dee2e6;
-  padding-left:.75rem}
+details.ck-provenance[open]{
+  border-left:2px solid var(--bs-border-color,#dee2e6);padding-left:.75rem}
 .ck-value{cursor:pointer;border-bottom:1px dotted currentColor}
 button.ck-value{all:unset;cursor:pointer;
   border-bottom:1px dotted currentColor}
@@ -205,14 +205,18 @@ button.ck-value:focus-visible{outline:2px solid #0d6efd;outline-offset:2px}
 .ck-flag{color:#b35900;font-size:.7em;margin-left:.1em;
   vertical-align:super}
 .ck-popover{max-width:min(48rem,92vw);max-height:80vh;overflow:auto;
-  padding:1rem;border:1px solid #dee2e6;border-radius:.375rem;
-  font-size:.9em}
+  padding:1rem;border:1px solid var(--bs-border-color,#dee2e6);
+  border-radius:.375rem;font-size:.9em;
+  background:var(--bs-body-bg,Canvas);color:var(--bs-body-color,CanvasText)}
 .ck-popover table{border-collapse:collapse;margin-bottom:1rem}
 .ck-popover th,.ck-popover td{padding:.2rem .6rem;text-align:left;
-  border-bottom:1px solid #dee2e6}
-.ck-provenance svg,.ck-popover svg{--mermaid-label-fg-color:inherit;
-  --mermaid-node-fg-color:#6c757d}
-.ck-provenance svg .nodeLabel,.ck-popover svg .nodeLabel{color:inherit}
+  border-bottom:1px solid var(--bs-border-color,#dee2e6)}
+.ck-provenance svg .nodeLabel,.ck-popover svg .nodeLabel{color:#1f1f1f}
+.ck-provenance svg .flowchart-link,.ck-popover svg .flowchart-link{
+  stroke:var(--bs-secondary-color,#6c757d)!important}
+.ck-provenance svg marker path,.ck-popover svg marker path{
+  fill:var(--bs-secondary-color,#6c757d)!important;
+  stroke:var(--bs-secondary-color,#6c757d)!important}
 </style>
 ]]
 local assets_ready = false

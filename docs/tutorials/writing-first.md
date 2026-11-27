@@ -109,11 +109,15 @@ calkit check repro
 calkit check questions
 ```
 
+<!-- TODO: needs human review -->
+
 `check repro` reads the manuscript back and reports any number in it that
 the pipeline already computes --- which catches a hole closed by typing
-rather than by building. Those are the one thing it fails on, so it is
-worth running in CI. It summarizes; run `calkit check repro -c retyped`
-to see them, and `-c numbers` for the weaker list of result-like numbers
+rather than by building. It also fails if the pipeline is out of date,
+`dvc.lock` doesn't match the recorded runs, a citation doesn't resolve,
+or an answer's evidence has changed, so it is worth running in CI.
+It summarizes; run `calkit check repro -c retyped` to see the typed
+numbers, and `-c numbers` for the weaker list of result-like numbers
 with nothing recorded behind them, most of which will not be results and
 none of which fail the check.
 `check questions` tells you whether each answer still follows from its

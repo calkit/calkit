@@ -11640,6 +11640,13 @@ export const ReproCheckSchema = {
       title: "N Presentations No Import Or Stage",
       default: 0,
     },
+    artifacts_no_provenance: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Artifacts No Provenance",
+    },
     misc_needing_provenance: {
       items: {
         type: "string",
@@ -11692,6 +11699,11 @@ export const ReproCheckSchema = {
       type: "integer",
       title: "N Dvc Remotes",
     },
+    stores_in_dvc: {
+      type: "boolean",
+      title: "Stores In Dvc",
+      default: false,
+    },
     retyped_values: {
       items: {
         additionalProperties: true,
@@ -11729,6 +11741,143 @@ export const ReproCheckSchema = {
       type: "array",
       title: "Refvals Unchecked",
     },
+    n_documents: {
+      type: "integer",
+      title: "N Documents",
+      default: 0,
+    },
+    n_shown: {
+      type: "integer",
+      title: "N Shown",
+      default: 0,
+    },
+    n_scripts_scanned: {
+      type: "integer",
+      title: "N Scripts Scanned",
+      default: 0,
+    },
+    stale_stages: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Stages",
+    },
+    pipeline_errors: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Pipeline Errors",
+    },
+    stage_run_problems: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Run Problems",
+    },
+    storage_problems: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Storage Problems",
+    },
+    n_citations: {
+      type: "integer",
+      title: "N Citations",
+      default: 0,
+    },
+    citation_problems: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Citation Problems",
+    },
+    citations_unconfirmed: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Citations Unconfirmed",
+    },
+    n_answered: {
+      type: "integer",
+      title: "N Answered",
+      default: 0,
+    },
+    question_problems: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Question Problems",
+    },
+    changed_evidence: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Changed Evidence",
+    },
     recommendation: {
       anyOf: [
         {
@@ -11739,7 +11888,24 @@ export const ReproCheckSchema = {
         },
       ],
       title: "Recommendation",
-      description: "Formulate a recommendation for the project.",
+      description:
+        "Formulate a recommendation for the project: the first problem,\nor the first advice if there are none.",
+      readOnly: true,
+    },
+    summary: {
+      items: {
+        $ref: "#/components/schemas/SummaryLine",
+      },
+      type: "array",
+      title: "Summary",
+      description:
+        "A line per check with something to check, then advice, which\ndoesn't decide whether the project passes.",
+      readOnly: true,
+    },
+    passed: {
+      type: "boolean",
+      title: "Passed",
+      description: "Whether no check found a problem; advice doesn't count.",
       readOnly: true,
     },
     n_datasets_with_import_or_stage: {
@@ -11814,6 +11980,8 @@ export const ReproCheckSchema = {
     "n_publications_no_import_or_stage",
     "n_dvc_remotes",
     "recommendation",
+    "summary",
+    "passed",
     "n_datasets_with_import_or_stage",
     "n_figures_with_import_or_stage",
     "n_publications_with_import_or_stage",
@@ -12866,6 +13034,52 @@ export const SubscriptionUpdateSchema = {
   type: "object",
   required: ["plan_name", "period"],
   title: "SubscriptionUpdate",
+} as const
+
+export const SummaryLineSchema = {
+  properties: {
+    text: {
+      type: "string",
+      title: "Text",
+    },
+    value: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value",
+    },
+    ok: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ok",
+    },
+    category: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Category",
+    },
+  },
+  type: "object",
+  required: ["text"],
+  title: "SummaryLine",
+  description: "One line of a check's summary.",
 } as const
 
 export const TOTPCodeSchema = {
@@ -15399,6 +15613,13 @@ export const ReproCheckWritableSchema = {
       title: "N Presentations No Import Or Stage",
       default: 0,
     },
+    artifacts_no_provenance: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Artifacts No Provenance",
+    },
     misc_needing_provenance: {
       items: {
         type: "string",
@@ -15451,6 +15672,11 @@ export const ReproCheckWritableSchema = {
       type: "integer",
       title: "N Dvc Remotes",
     },
+    stores_in_dvc: {
+      type: "boolean",
+      title: "Stores In Dvc",
+      default: false,
+    },
     retyped_values: {
       items: {
         additionalProperties: true,
@@ -15487,6 +15713,143 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Refvals Unchecked",
+    },
+    n_documents: {
+      type: "integer",
+      title: "N Documents",
+      default: 0,
+    },
+    n_shown: {
+      type: "integer",
+      title: "N Shown",
+      default: 0,
+    },
+    n_scripts_scanned: {
+      type: "integer",
+      title: "N Scripts Scanned",
+      default: 0,
+    },
+    stale_stages: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Stages",
+    },
+    pipeline_errors: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Pipeline Errors",
+    },
+    stage_run_problems: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Run Problems",
+    },
+    storage_problems: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Storage Problems",
+    },
+    n_citations: {
+      type: "integer",
+      title: "N Citations",
+      default: 0,
+    },
+    citation_problems: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Citation Problems",
+    },
+    citations_unconfirmed: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Citations Unconfirmed",
+    },
+    n_answered: {
+      type: "integer",
+      title: "N Answered",
+      default: 0,
+    },
+    question_problems: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Question Problems",
+    },
+    changed_evidence: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Changed Evidence",
     },
   },
   type: "object",

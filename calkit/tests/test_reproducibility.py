@@ -24,7 +24,10 @@ def test_check_reproducibility(tmp_dir):
     assert res.is_git_repo
     assert not res.is_dvc_repo
     assert not res.has_readme
-    assert "no README.md" in res.recommendation  # type: ignore
+    # A missing pipeline is a problem and a missing README advice, so the
+    # pipeline comes first
+    assert "no DVC pipeline" in res.recommendation  # type: ignore
+    assert not res.passed
     run_dvc_command(["init"])
     res = check_reproducibility()
     assert res.is_dvc_repo
@@ -88,7 +91,11 @@ def test_check_reproducibility(tmp_dir):
     assert res.n_presentations == 1
     assert res.n_presentations_no_import_or_stage == 0
     assert res.n_presentations_with_import_or_stage == 1
-    assert "Misc with provenance recorded" in res.to_pretty()
+    # A hand-written misc file is its own record, so one with nothing
+    # recorded is advice
+    assert "Other misc artifacts with no provenance recorded: 1" in (
+        res.to_pretty()
+    )
     assert "Tables with provenance recorded" in res.to_pretty()
     # What's shown is followed back to its sources: a figure or table with
     # nothing behind it is a gap, while one whose stage isn't compiled yet
@@ -194,25 +201,32 @@ def test_check_reproducibility(tmp_dir):
     subprocess.check_call(["git", "rm", "-q", "--cached", "py/tool.py"])
     assert "lacking provenance: 2" in res.to_pretty()
     # Both make it into the recommendation once the basics are in place,
-    # scripts first, since an unrun script is a gap in the pipeline itself
+    # problems first: a file nobody makes by hand with nothing recorded is
+    # one, while an unrun script is only advice
     good = res.model_dump(exclude={"recommendation"}) | {
         "n_dvc_remotes": 1,
         "has_pipeline": True,
         "stages_without_env": [],
     }
     rec = ReproCheck.model_validate(good).recommendation
-    assert "2 scripts (explore.R, scripts/orphan.py)" in rec  # type: ignore
-    rec = ReproCheck.model_validate(
-        good | {"scripts_not_in_pipeline": []}
-    ).recommendation
     assert "2 misc artifacts (plot.png, slides.PPTX)" in rec  # type: ignore
-    good |= {"scripts_not_in_pipeline": [], "misc_needing_provenance": []}
+    good |= {"misc_needing_provenance": []}
     rec = ReproCheck.model_validate(good).recommendation
     assert "e.g., origin not defined for mystery.png" in rec  # type: ignore
     rec = ReproCheck.model_validate(
         good | {"provenance_gaps": []}
     ).recommendation
     assert "datasets with no provenance" in rec  # type: ignore
+    rec = ReproCheck.model_validate(
+        good
+        | {
+            "provenance_gaps": [],
+            "n_datasets_no_import_or_stage": 0,
+            "n_figures_no_import_or_stage": 0,
+            "n_tables_no_import_or_stage": 0,
+        }
+    ).recommendation
+    assert "2 scripts (explore.R, scripts/orphan.py)" in rec  # type: ignore
     # What a LaTeX document shows is followed too, whether cited with
     # \\ckfigure or included plainly, and a plain include is fine wherever
     # the pipeline made the file, e.g., copied in by a map-paths stage or
@@ -347,6 +361,106 @@ def test_check_reproducibility(tmp_dir):
         good | {"paths_outside_project": res.paths_outside_project}
     ).recommendation
     assert "4 files outside the project" in rec  # type: ignore
+
+
+def test_repro_check_summary() -> None:
+    # As written before the summary existed, e.g., cached by the hub
+    base = {
+        "has_pipeline": True,
+        "has_readme": True,
+        "instructions_in_readme": True,
+        "is_dvc_repo": True,
+        "is_git_repo": True,
+        "has_calkit_info": True,
+        "has_dev_container": False,
+        "n_environments": 1,
+        "n_stages": 1,
+        "stages_with_env": ["a"],
+        "stages_without_env": [],
+        "n_datasets": 0,
+        "n_datasets_no_import_or_stage": 0,
+        "n_figures": 0,
+        "n_figures_no_import_or_stage": 0,
+        "n_publications": 0,
+        "n_publications_no_import_or_stage": 0,
+        "n_dvc_remotes": 0,
+    }
+    check = ReproCheck.model_validate(base)
+    # Nothing declared or read, so only what was checked is shown passing,
+    # and advice doesn't fail it
+    assert [line.text for line in check.summary if line.ok is not None] == [
+        "Is a Git repo",
+        "Has pipeline",
+    ]
+    assert [line.text for line in check.summary if line.ok is None] == [
+        "No dev container spec"
+    ]
+    assert check.passed
+    assert "Passed" in check.to_pretty()
+    # A remote is only advised for what's stored with DVC
+    assert "remote" not in check.to_pretty()
+    assert "dev container" in check.recommendation  # type: ignore
+    check = ReproCheck.model_validate(base | {"stores_in_dvc": True})
+    assert check.passed
+    assert (
+        "No DVC remote, though files are stored with DVC\n"
+        in (check.to_pretty().split("Advice:")[1])
+    )
+    assert "no DVC remote" in check.recommendation  # type: ignore
+    # A script no stage runs is advice, since it's often tooling, e.g., a
+    # site's build script, and what it made would be caught on its own
+    check = ReproCheck.model_validate(
+        base | {"scripts_not_in_pipeline": ["_build.py"]}
+    )
+    assert check.passed
+    assert (
+        "Scripts not run by any pipeline stage: 1 [-c scripts]\n"
+        in (check.to_pretty().split("Advice:")[1])
+    )
+    # Each problem fails it, under its category
+    for field, category in [
+        ("pipeline_errors", "pipeline-errors"),
+        ("stale_stages", "stale"),
+        ("stage_run_problems", "stage-runs"),
+        ("storage_problems", "storage"),
+        ("citation_problems", "citations"),
+        ("question_problems", "questions"),
+    ]:
+        check = ReproCheck.model_validate(base | {field: ["x"]})
+        assert not check.passed
+        dumped = json.loads(check.model_dump_json())
+        assert not dumped["passed"]
+        assert [
+            line["category"]
+            for line in dumped["summary"]
+            if line["ok"] is False
+        ] == [category]
+        assert check.details(category) == ["x"]
+        assert f"[-c {category}]" in check.to_pretty()
+        assert "Failed: 1 problem\n" in check.to_pretty()
+        assert check.recommendation and "x" in check.recommendation
+        # Checked with nothing wrong, it passes, with nothing to list
+        check = ReproCheck.model_validate(base | {field: []})
+        assert check.passed
+        if field != "pipeline_errors":
+            assert ": 0 " in check.to_pretty()
+        assert f"[-c {category}]" not in check.to_pretty()
+    # Declared artifacts are counted, and the ones with nothing recorded
+    # are listed
+    check = ReproCheck.model_validate(
+        base
+        | {
+            "n_figures": 2,
+            "n_figures_no_import_or_stage": 1,
+            "artifacts_no_provenance": ["figures: a.png"],
+        }
+    )
+    assert not check.passed
+    assert (
+        "Figures with provenance recorded (stage, import, or attribution): 1/2"
+    ) in check.to_pretty()
+    assert "[-c artifacts]" in check.to_pretty()
+    assert "Datasets with provenance" not in check.to_pretty()
 
 
 def test_check_call():
@@ -663,9 +777,12 @@ def test_check_reproducibility_markdown_numbers(tmp_dir):
         ("index.ipynb", 0, 3, "0.97"),
         ("summary.md", None, 1, "4.5%"),
     ]
-    out = subprocess.check_output(
+    # Its pipeline has never run, which fails the check, but the numbers
+    # are listed all the same
+    out = subprocess.run(
         ["calkit", "check", "repro", "-c", "numbers"],
+        capture_output=True,
         text=True,
         env=os.environ | {"COLUMNS": "200"},
-    )
+    ).stdout
     assert "index.ipynb cell 1, 3:" in out

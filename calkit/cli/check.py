@@ -334,24 +334,34 @@ def check_repro(
         typer.Option(
             "--offline",
             help="Don't download open-access copies of references to check "
-            "values quoted from them, or the Calkit Cloud's Zotero PDFs.",
+            "values quoted from them, or the Calkit Cloud's Zotero PDFs, and "
+            "look citations up only in the cache.",
         ),
     ] = False,
 ) -> None:
     """Check the reproducibility of a project.
+
+    Checks that the pipeline is up to date, as 'calkit status' says,
+    without checking environments; that dvc.lock matches the recorded runs,
+    as 'calkit check stage-runs' does; that paths are stored where
+    declared; that what the project declares and its documents show has
+    provenance; that documents read values from the pipeline rather than
+    typing them; that documents' citations resolve, as 'calkit check
+    references' does; and that answers' evidence holds, as 'calkit check
+    questions' does.
 
     Values quoted from references with \\ckrefval are checked against the
     references' PDFs, from a file the collection names, Zotero, or an
     open-access copy downloaded into .calkit/local, which isn't stored in
     the project. So are numbers typed into a sentence citing a reference.
 
-    Reports one line per check. Where a line counts something, ask for
-    that category to see what it counted, e.g., 'calkit check repro -c
-    retyped' for values in a manuscript the pipeline already computes.
+    Reports one line per check with something to check, then advice. Where
+    a line counts something, ask for that category to see what it counted,
+    e.g., 'calkit check repro -c retyped' for values in a manuscript the
+    pipeline already computes.
 
-    Exits with an error when the project types out a value its own
-    pipeline computes, which is a defect rather than a matter of taste.
-    Everything else here is advice and does not affect the exit code.
+    Exits with an error if any check finds a problem. Advice doesn't affect
+    the exit code.
     """
     from calkit.reproducibility import DETAIL_CATEGORIES, check_reproducibility
 
@@ -362,11 +372,11 @@ def check_repro(
                 f"Invalid category: {category}. Valid categories are: {valid}"
             )
     res = check_reproducibility(
-        wdir=wdir, log_func=typer.echo, offline=offline
+        wdir=wdir, log_func=typer.echo, offline=offline, audit=True
     )
     if as_json:
         calkit.echo(res.model_dump_json(indent=2))
-        if res.retyped_values:
+        if not res.passed:
             raise typer.Exit(1)
         return
     if not categories:
@@ -378,9 +388,10 @@ def check_repro(
         if res.categories_with_detail:
             calkit.echo(
                 "Add the '-c' shown beside a line above to see what it "
-                "counted, e.g., 'calkit check repro -c retyped'."
+                "counted, e.g., 'calkit check repro -c "
+                f"{res.categories_with_detail[0]}'."
             )
-        if res.retyped_values:
+        if not res.passed:
             raise typer.Exit(1)
         return
     for category in categories:
@@ -402,7 +413,7 @@ def check_repro(
             calkit.echo(f"{category} ({len(items)}):")
             for item in items:
                 calkit.echo(f"  {item}")
-    if res.retyped_values:
+    if not res.passed:
         raise typer.Exit(1)
 
 
@@ -1092,8 +1103,7 @@ def check_environments(
                 if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
                     if verbose:
                         typer.echo(
-                            f"Skipping check for {env['kind']} env "
-                            f"'{env_name}'"
+                            f"Skipping check for {env['kind']} env '{env_name}'"
                         )
                     continue
                 qualified = calkit.qualify_with_project(wdir, env_name)
@@ -1706,10 +1716,7 @@ def check_venv(
     )
 
     def pip_install_and_freeze(reqs_arg: str) -> None:
-        check_cmd = (
-            f"{activate_cmd} && {pip_cmd} install {pip_install_args} "
-            f"{reqs_arg}"
-        )
+        check_cmd = f"{activate_cmd} && {pip_cmd} install {pip_install_args} {reqs_arg}"
         if not lock_is_current:
             check_cmd += f" && {pip_freeze_cmd} > {lock_fpath}"
         check_cmd += " && deactivate"
@@ -2109,108 +2116,10 @@ def check_stage_runs() -> None:
     written by anyone. Like DVC, it ignores the entries of stages no longer
     in the pipeline.
     """
-    from dvc.parsing import DataResolver
-
-    # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
-    # subproject's, against the record kept beside its dvc.lock: any other
-    # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
-    # a wrapper stage, which doesn't record its stages.
     try:
-        listed = subprocess.check_output(
-            [
-                "git",
-                "ls-files",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-                "--",
-                "*/dvc.yaml",
-            ],
-            text=True,
-        ).splitlines()
-    except (OSError, subprocess.CalledProcessError):
-        listed = []
-    lock_dirs: list[str | None] = [None]
-    for path in sorted(listed):
-        parts = path.split("/")[:-1]
-        if not os.path.isfile(path) or any(
-            os.path.isdir(os.path.join(*parts[:i], ".dvc"))
-            for i in range(1, len(parts) + 1)
-        ):
-            continue
-        lock_dirs.append("/".join(parts))
-    stage_runs: dict[str | None, dict] = {}
-    for lock_dir in lock_dirs:
-        try:
-            stage_runs[lock_dir] = calkit.read_stage_runs(lock_dir)
-        except json.JSONDecodeError as e:
-            fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
-            raise_error(f"Can't read {fpath}: {e}")
-    # This project's records of other pipelines' stages, under the names
-    # they have here, from before they were kept beside their own dvc.lock
-    parent_runs = {
-        k.replace("\\", "/"): v for k, v in stage_runs[None].items()
-    }
-    # DVC keeps the dvc.lock entry of a stage removed from dvc.yaml, and
-    # ignores it, so these are skipped, named as DVC resolves them, e.g.,
-    # each foreach item. Nothing is skipped beside a dvc.yaml DVC can't read.
-    removed: dict[str | None, set[str]] = {}
-    try:
-        dvc_repo = calkit.dvc.get_dvc_repo()
-    except Exception:
-        dvc_repo = None
-    for lock_dir in lock_dirs if dvc_repo is not None else []:
-        try:
-            fpath = os.path.join(lock_dir or ".", "dvc.yaml")
-            with open(fpath, encoding="utf-8") as f:
-                dvc_yaml = calkit.core._load_yaml_readonly(f)
-            resolver = DataResolver(
-                dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
-            )
-            removed[lock_dir] = {
-                name
-                for name in calkit.dvc.read_lock_stages(lock_dir)
-                if not resolver.has_key(name)
-            }
-        except Exception:
-            continue
-    if dvc_repo is not None:
-        dvc_repo.close()
-    problems = []
-    for lock_dir in lock_dirs:
-        lock_stages = calkit.dvc.read_lock_stages(lock_dir)
-        # DVC writes a frozen stage's entry whenever it verifies the stage's
-        # outputs rather than running it, so there's no run to match
-        try:
-            frozen = calkit.pipeline.frozen_stage_base_names(wdir=lock_dir)
-        except Exception:
-            frozen = set()
-        for lock_name, locked in sorted(lock_stages.items()):
-            if not isinstance(locked, dict) or lock_name in removed.get(
-                lock_dir, set()
-            ):
-                continue
-            if lock_name.split("@")[0] in frozen:
-                continue
-            name = (
-                lock_name
-                if lock_dir is None
-                else f"{lock_dir}/dvc.yaml:{lock_name}"
-            )
-            # Either record matching will do, since a stage may have been
-            # run from both directories before they were kept together
-            candidates = [stage_runs[lock_dir].get(lock_name)]
-            if lock_dir is not None:
-                candidates.append(parent_runs.get(name))
-            records = [r for r in candidates if isinstance(r, dict)]
-            lock_hash = calkit.dvc.stage_lock_hash(locked)
-            if not records:
-                problems.append(f"Stage '{name}' has no recorded run")
-            elif all(r.get("dvc_lock_hash") != lock_hash for r in records):
-                problems.append(
-                    f"Stage '{name}' has changed in dvc.lock since its last "
-                    "recorded run"
-                )
+        problems = calkit.pipeline.get_stage_run_problems()
+    except ValueError as e:
+        raise_error(str(e))
     for problem in problems:
         typer.echo(problem)
     if problems:

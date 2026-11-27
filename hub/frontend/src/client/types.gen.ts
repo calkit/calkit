@@ -6665,6 +6665,10 @@ export type ReproCheck = {
    */
   n_presentations_no_import_or_stage?: number
   /**
+   * Artifacts No Provenance
+   */
+  artifacts_no_provenance?: Array<string>
+  /**
    * Misc Needing Provenance
    */
   misc_needing_provenance?: Array<string>
@@ -6692,6 +6696,10 @@ export type ReproCheck = {
    * N Dvc Remotes
    */
   n_dvc_remotes: number
+  /**
+   * Stores In Dvc
+   */
+  stores_in_dvc?: boolean
   /**
    * Retyped Values
    */
@@ -6721,11 +6729,77 @@ export type ReproCheck = {
     [key: string]: unknown
   }>
   /**
+   * N Documents
+   */
+  n_documents?: number
+  /**
+   * N Shown
+   */
+  n_shown?: number
+  /**
+   * N Scripts Scanned
+   */
+  n_scripts_scanned?: number
+  /**
+   * Stale Stages
+   */
+  stale_stages?: Array<string> | null
+  /**
+   * Pipeline Errors
+   */
+  pipeline_errors?: Array<string> | null
+  /**
+   * Stage Run Problems
+   */
+  stage_run_problems?: Array<string> | null
+  /**
+   * Storage Problems
+   */
+  storage_problems?: Array<string> | null
+  /**
+   * N Citations
+   */
+  n_citations?: number
+  /**
+   * Citation Problems
+   */
+  citation_problems?: Array<string> | null
+  /**
+   * Citations Unconfirmed
+   */
+  citations_unconfirmed?: Array<string> | null
+  /**
+   * N Answered
+   */
+  n_answered?: number
+  /**
+   * Question Problems
+   */
+  question_problems?: Array<string> | null
+  /**
+   * Changed Evidence
+   */
+  changed_evidence?: Array<string> | null
+  /**
    * Recommendation
    *
-   * Formulate a recommendation for the project.
+   * Formulate a recommendation for the project: the first problem,
+   * or the first advice if there are none.
    */
   readonly recommendation: string | null
+  /**
+   * Summary
+   *
+   * A line per check with something to check, then advice, which
+   * doesn't decide whether the project passes.
+   */
+  readonly summary: Array<SummaryLine>
+  /**
+   * Passed
+   *
+   * Whether no check found a problem; advice doesn't count.
+   */
+  readonly passed: boolean
   /**
    * N Datasets With Import Or Stage
    */
@@ -7387,6 +7461,30 @@ export type SubscriptionUpdate = {
    * Discount Code
    */
   discount_code?: string | null
+}
+
+/**
+ * SummaryLine
+ *
+ * One line of a check's summary.
+ */
+export type SummaryLine = {
+  /**
+   * Text
+   */
+  text: string
+  /**
+   * Value
+   */
+  value?: string | null
+  /**
+   * Ok
+   */
+  ok?: boolean | null
+  /**
+   * Category
+   */
+  category?: string | null
 }
 
 /**
@@ -8846,6 +8944,10 @@ export type ReproCheckWritable = {
    */
   n_presentations_no_import_or_stage?: number
   /**
+   * Artifacts No Provenance
+   */
+  artifacts_no_provenance?: Array<string>
+  /**
    * Misc Needing Provenance
    */
   misc_needing_provenance?: Array<string>
@@ -8874,6 +8976,10 @@ export type ReproCheckWritable = {
    */
   n_dvc_remotes: number
   /**
+   * Stores In Dvc
+   */
+  stores_in_dvc?: boolean
+  /**
    * Retyped Values
    */
   retyped_values?: Array<{
@@ -8901,6 +9007,58 @@ export type ReproCheckWritable = {
   refvals_unchecked?: Array<{
     [key: string]: unknown
   }>
+  /**
+   * N Documents
+   */
+  n_documents?: number
+  /**
+   * N Shown
+   */
+  n_shown?: number
+  /**
+   * N Scripts Scanned
+   */
+  n_scripts_scanned?: number
+  /**
+   * Stale Stages
+   */
+  stale_stages?: Array<string> | null
+  /**
+   * Pipeline Errors
+   */
+  pipeline_errors?: Array<string> | null
+  /**
+   * Stage Run Problems
+   */
+  stage_run_problems?: Array<string> | null
+  /**
+   * Storage Problems
+   */
+  storage_problems?: Array<string> | null
+  /**
+   * N Citations
+   */
+  n_citations?: number
+  /**
+   * Citation Problems
+   */
+  citation_problems?: Array<string> | null
+  /**
+   * Citations Unconfirmed
+   */
+  citations_unconfirmed?: Array<string> | null
+  /**
+   * N Answered
+   */
+  n_answered?: number
+  /**
+   * Question Problems
+   */
+  question_problems?: Array<string> | null
+  /**
+   * Changed Evidence
+   */
+  changed_evidence?: Array<string> | null
 }
 
 /**

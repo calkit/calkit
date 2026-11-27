@@ -8,17 +8,21 @@ description: Check whether a project is fully traceable, and fix what isn't,
 
 # Check and fix reproducibility
 
-`calkit check repro` reports what a static reading of the project can
-establish: whether there is a pipeline, whether stages run in declared
-environments, whether artifacts have provenance, and whether any number in
-a manuscript is one nobody can trace.
+<!-- TODO: needs human review -->
+
+`calkit check repro` audits the project: whether there is a pipeline and
+it is up to date, whether `dvc.lock` matches the recorded runs, whether
+artifacts have provenance, whether any number in a manuscript is one
+nobody can trace, whether citations resolve, and whether answers' evidence
+holds. It separates problems, which fail it, from advice, which doesn't.
 
 ## Division of labor
 
 Deterministic, done by `calkit check repro --json` --- never re-derive by
 hand:
 
-- whether the project is a Git and DVC repo with a remote and a pipeline;
+- whether the project is a Git and DVC repo with a pipeline, and a remote
+  if anything is stored with DVC;
 - which stages run outside a declared environment;
 - which artifacts have no `stage`, `imported_from`, or `created_by`;
 - which scripts no stage refers to;
@@ -38,12 +42,15 @@ Judgment, done here:
 
 ## Procedure
 
+<!-- TODO: needs human review -->
+
 1. Run `calkit check repro --json` and read the report. The plain output
    is a summary, each countable line naming the `-c` that opens it;
-   `--json` carries every finding. The command exits non-zero only for
-   `retyped_values`, a value the project's own pipeline computes and the
-   document typed anyway; everything else is advice and leaves the exit
-   code alone. Read the findings, not the exit code.
+   `--json` carries every finding, with the summary's lines in `summary`,
+   each with `ok` true or false for a check and null for advice. The
+   command exits non-zero, and `passed` is false, when any check finds a
+   problem; advice, e.g., scripts no stage runs, leaves it alone. Read the
+   findings, not only the exit code.
 
 2. **Pipeline and environment findings** come first: a value can't be made
    traceable until there is a pipeline to make it. See the

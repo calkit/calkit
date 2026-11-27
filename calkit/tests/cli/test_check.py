@@ -1444,6 +1444,7 @@ def _project() -> None:
     with open("main.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n"
+            "\\usepackage{calkit}\n"
             "\\begin{document}\n"
             "\\input{results}\n"
             "A value read from the pipeline: \\result[DragCoefficient].\n"
@@ -1462,8 +1463,12 @@ def test_check_repro_literals(tmp_dir):
     result = subprocess.run(
         ["calkit", "check", "repro"], capture_output=True, text=True
     )
-    # A retyped value is the one finding that fails the check
+    # A retyped value fails the check
     assert result.returncode == 1
+    assert (
+        "Values typed out rather than read from the pipeline: 1 "
+        in (result.stdout.split("Advice:")[0])
+    )
     # 0.42 is computed by the pipeline and typed into the document anyway:
     # right today, wrong the next time that stage runs. That is the copy
     # and paste worth catching, and it counts against the project.
@@ -1472,8 +1477,10 @@ def test_check_repro_literals(tmp_dir):
     )
     # 3.14 has nothing behind it, which is worth a look but is not a
     # defect: most numbers in a paper are not results
-    assert "Numbers with nothing recorded behind them: 1" in result.stdout
-    assert "worth a look" in result.stdout
+    assert (
+        "Numbers with nothing recorded behind them: 1"
+        in (result.stdout.split("Advice:")[1])
+    )
     # The summary stays a summary and points at the findings
     assert "3.14" not in result.stdout
     assert "0.42" not in result.stdout
@@ -1485,7 +1492,7 @@ def test_check_repro_literals(tmp_dir):
     )
     assert "[-c retyped]" in result.stdout
     assert "[-c numbers]" in result.stdout
-    assert "calkit check repro -c retyped" in result.stdout
+    assert "calkit check repro -c " in result.stdout
     out = subprocess.run(
         ["calkit", "check", "repro", "-c", "retyped"],
         capture_output=True,
@@ -1493,7 +1500,7 @@ def test_check_repro_literals(tmp_dir):
     ).stdout
     assert "0.42" in out
     assert "results.json:DragCoefficient" in out
-    assert "main.tex:5" in out
+    assert "main.tex:6" in out
     numbers = subprocess.run(
         ["calkit", "check", "repro", "-c", "numbers"],
         capture_output=True,
@@ -1598,6 +1605,156 @@ def test_check_repro_literals(tmp_dir):
         "3.14",
         "0.6194",
     ]
+
+
+def test_check_repro_audit(tmp_dir: str) -> None:
+    def check_repro(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "check", "repro", "--offline", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    def get_report() -> tuple[int, dict]:
+        res = check_repro("--json")
+        return res.returncode, json.loads(res.stdout)
+
+    def get_lines(report: dict) -> dict[str, dict]:
+        return {line["text"]: line for line in report["summary"]}
+
+    def write_ck_info() -> None:
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+
+    subprocess.check_call(["calkit", "init"])
+    with open("README.md", "w") as f:
+        f.write("Run `calkit run`.\n")
+    ck_info: dict = {
+        "pipeline": {
+            "stages": {
+                "a": {
+                    "kind": "shell-command",
+                    "command": "echo '{\"n\": 1}' > a.json",
+                    "environment": "_system",
+                    "outputs": [{"path": "a.json", "storage": "git"}],
+                }
+            }
+        }
+    }
+    write_ck_info()
+    subprocess.check_call(["calkit", "run"])
+    code, report = get_report()
+    assert code == 0
+    assert report["passed"]
+    lines = get_lines(report)
+    assert lines["Pipeline stages out of date"]["ok"]
+    assert lines["Stages in dvc.lock not matching a recorded run"]["ok"]
+    # Nothing is declared, so nothing claims to pass for it, and everything
+    # is in Git, so no remote is asked for
+    assert not any("provenance" in text for text in lines)
+    assert not any("remote" in text for text in lines)
+    # Advice has no verdict, and doesn't fail the check
+    assert lines["No dev container spec"]["ok"] is None
+    out = check_repro().stdout
+    assert "0/0" not in out
+    assert "Passed" in out
+    assert out.index("Checks:") < out.index("Advice:")
+    # A stale stage fails it, and its category says what changed
+    ck_info["pipeline"]["stages"]["a"]["command"] = (
+        "echo '{\"n\": 2}' > a.json"
+    )
+    write_ck_info()
+    code, report = get_report()
+    assert code == 1
+    assert not report["passed"]
+    assert report["stale_stages"] == ["a: command modified"]
+    res = check_repro()
+    assert res.returncode == 1
+    assert "Pipeline stages out of date: 1" in res.stdout
+    assert "[-c stale]" in res.stdout
+    assert "Failed: 1 problem" in res.stdout
+    res = check_repro("-c", "stale")
+    assert res.returncode == 1
+    assert "a: command modified" in res.stdout
+    # So does a dvc.lock entry no run made
+    subprocess.check_call(["calkit", "run"])
+    with open("a.json", "w") as f:
+        f.write('{"n": 3}\n')
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "a"])
+    code, report = get_report()
+    assert code == 1
+    assert report["stale_stages"] == []
+    assert report["stage_run_problems"] == [
+        "Stage 'a' has changed in dvc.lock since its last recorded run"
+    ]
+    subprocess.check_call(["calkit", "run", "--force"])
+    # An output stored with DVC needs a remote to reach anyone else, which
+    # is advice
+    ck_info["pipeline"]["stages"]["b"] = {
+        "kind": "shell-command",
+        "command": "echo b > b.txt",
+        "environment": "_system",
+        "outputs": ["b.txt"],
+    }
+    write_ck_info()
+    subprocess.check_call(["calkit", "run"])
+    code, report = get_report()
+    assert code == 0
+    assert report["stores_in_dvc"]
+    remote = "No DVC remote, though files are stored with DVC"
+    assert get_lines(report)[remote]["ok"] is None
+    # A citation defined in no bibliography fails, while one that can't be
+    # looked up offline is only reported
+    with open("references.bib", "w") as f:
+        f.write("@article{real2020, title={A Real Paper}, year={2020}}\n")
+    with open("paper.md", "w") as f:
+        f.write("As shown before [@real2020], and since [@ghost2021].\n")
+    ck_info["references"] = [{"path": "references.bib"}]
+    ck_info["publications"] = [
+        {
+            "path": "paper.md",
+            "title": "Paper",
+            "kind": "report",
+            "created_by": {"email": "me@example.com"},
+        }
+    ]
+    write_ck_info()
+    code, report = get_report()
+    assert code == 1
+    assert report["citation_problems"] == [
+        "paper.md: ghost2021 (missing-from-bib)"
+    ]
+    assert report["citations_unconfirmed"] == [
+        "paper.md: real2020 (unchecked)"
+    ]
+    out = check_repro().stdout
+    assert "Citations that resolve to nothing or a different work: 1" in out
+    assert "Publications with provenance recorded" in out
+    with open("paper.md", "w") as f:
+        f.write("As shown before [@real2020].\n")
+    # An answer whose evidence the pipeline would rebuild fails too
+    ck_info["questions"] = [
+        {
+            "question": "What is n?",
+            "answer": "It is {v}.",
+            "evidence": [
+                {"kind": "value", "path": "a.json", "key": "n", "name": "v"}
+            ],
+        }
+    ]
+    write_ck_info()
+    code, report = get_report()
+    assert code == 0, report["summary"]
+    assert report["question_problems"] == []
+    ck_info["pipeline"]["stages"]["a"]["command"] = (
+        "echo '{\"n\": 4}' > a.json"
+    )
+    write_ck_info()
+    code, report = get_report()
+    assert code == 1
+    assert report["question_problems"] == ["1. [stale] What is n?"]
+    res = check_repro("-c", "questions")
+    assert "1. [stale] What is n?" in res.stdout
 
 
 def test_check_questions(tmp_dir):

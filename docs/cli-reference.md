@@ -3972,11 +3972,13 @@ Check things.
 
 Check the reproducibility of a project.
 
+Checks that the pipeline is up to date, as 'calkit status' says, without checking environments; that dvc.lock matches the recorded runs, as 'calkit check stage-runs' does; that paths are stored where declared; that what the project declares and its documents show has provenance; that documents read values from the pipeline rather than typing them; that documents' citations resolve, as 'calkit check references' does; and that answers' evidence holds, as 'calkit check questions' does.
+
 Values quoted from references with \ckrefval are checked against the references' PDFs, from a file the collection names, Zotero, or an open-access copy downloaded into .calkit/local, which isn't stored in the project. So are numbers typed into a sentence citing a reference.
 
-Reports one line per check. Where a line counts something, ask for that category to see what it counted, e.g., 'calkit check repro -c retyped' for values in a manuscript the pipeline already computes.
+Reports one line per check with something to check, then advice. Where a line counts something, ask for that category to see what it counted, e.g., 'calkit check repro -c retyped' for values in a manuscript the pipeline already computes.
 
-Exits with an error when the project types out a value its own pipeline computes, which is a defect rather than a matter of taste. Everything else here is advice and does not affect the exit code.
+Exits with an error if any check finds a problem. Advice doesn't affect the exit code.
 
 Usage:
 
@@ -3986,12 +3988,12 @@ calkit check repro [OPTIONS]
 
 Options:
 
-| Option             | Type      | Required | Default | Description                                                                                                          |
-| ------------------ | --------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `--wdir`           | str       | no       | .       | Project working directory.                                                                                           |
-| `--category`, `-c` | list[str] | no       |         | Show the findings behind one summary line instead of the summary. Can be specified multiple times.                   |
-| `--json`           | boolean   | no       | False   | Output result as JSON.                                                                                               |
-| `--offline`        | boolean   | no       | False   | Don't download open-access copies of references to check values quoted from them, or the Calkit Cloud's Zotero PDFs. |
+| Option             | Type      | Required | Default | Description                                                                                                                                                   |
+| ------------------ | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--wdir`           | str       | no       | .       | Project working directory.                                                                                                                                    |
+| `--category`, `-c` | list[str] | no       |         | Show the findings behind one summary line instead of the summary. Can be specified multiple times.                                                            |
+| `--json`           | boolean   | no       | False   | Output result as JSON.                                                                                                                                        |
+| `--offline`        | boolean   | no       | False   | Don't download open-access copies of references to check values quoted from them, or the Calkit Cloud's Zotero PDFs, and look citations up only in the cache. |
 
 <a id="subcommand-check-environment"></a>
 

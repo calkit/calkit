@@ -142,6 +142,9 @@ The marks are plain characters so every export can show them.
 `:provenance: false`, or `provenance=false` in a role, turns it off for
 one, and `show_provenance: false` in `calkit.yaml` for the whole project.
 What's shown is worked out the same way it is for Quarto.
+See [`examples/myst`](https://github.com/calkit/calkit/tree/main/examples/myst)
+for a site that shows a figure, table, and values this way,
+from three stages in Python.
 
 <!-- TODO: needs human review -->
 

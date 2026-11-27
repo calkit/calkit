@@ -1,0 +1,91 @@
+schema: '2.0'
+stages:
+  generate:
+    cmd: calkit xenv -n py --no-check -- python scripts/generate.py
+    deps:
+    - path: pixi.lock
+      hash: md5
+      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
+      size: 168010
+    - path: scripts/generate.py
+      hash: md5
+      md5: 1b715c5c59118f22a2e9606c62bba2f4
+      size: 404
+    outs:
+    - path: data/decay.csv
+      hash: md5
+      md5: 225310231da9d1ec50a6b429d83f1785
+      size: 579
+  fit:
+    cmd: calkit xenv -n py --no-check -- python scripts/fit.py
+    deps:
+    - path: data/decay.csv
+      hash: md5
+      md5: 225310231da9d1ec50a6b429d83f1785
+      size: 579
+    - path: pixi.lock
+      hash: md5
+      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
+      size: 168010
+    - path: scripts/fit.py
+      hash: md5
+      md5: 667fa5df56d260291de2bf9cef43dd1c
+      size: 559
+    outs:
+    - path: results/fit.json
+      hash: md5
+      md5: 5d4d1d64736943844e105dc8524cef90
+      size: 120
+  plot:
+    cmd: calkit xenv -n py --no-check -- python scripts/plot.py
+    deps:
+    - path: data/decay.csv
+      hash: md5
+      md5: 225310231da9d1ec50a6b429d83f1785
+      size: 579
+    - path: pixi.lock
+      hash: md5
+      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
+      size: 168010
+    - path: results/fit.json
+      hash: md5
+      md5: 5d4d1d64736943844e105dc8524cef90
+      size: 120
+    - path: scripts/plot.py
+      hash: md5
+      md5: 790d7720b585f02e0f01b53457c13fdc
+      size: 701
+    outs:
+    - path: figures/fit.svg
+      hash: md5
+      md5: 3bec6190558a3ec3626e2c7d3d41c283
+      size: 23951
+  paper:
+    cmd: calkit myst build -e py -- --site --ci
+    deps:
+    - path: ../data/decay.csv
+      hash: md5
+      md5: 225310231da9d1ec50a6b429d83f1785
+      size: 579
+    - path: ../figures/fit.svg
+      hash: md5
+      md5: 3bec6190558a3ec3626e2c7d3d41c283
+      size: 23951
+    - path: ../results/fit.json
+      hash: md5
+      md5: 5d4d1d64736943844e105dc8524cef90
+      size: 120
+    - path: index.md
+      hash: md5
+      md5: 72b7845609c20c890750915db30bfbf3
+      size: 448
+    - path: myst.yml
+      hash: md5
+      md5: e20b9c58dd5a390e05470d9923f964b6
+      size: 235
+    outs:
+    - path: _build/site
+      hash: md5
+      md5: d0b858654db396e10a4b1afc06359976.dir
+      size: 74761
+      nfiles: 9

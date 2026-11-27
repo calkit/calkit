@@ -1,0 +1,12 @@
+[workspace]
+name = "example-myst"
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "osx-64", "linux-64", "win-64"]
+
+[dependencies]
+python = "3.13.*"
+numpy = "*"
+matplotlib-base = "*"
+# MyST, and the Node.js it runs on, so the site builds the same anywhere
+mystmd = "*"
+nodejs = "*"

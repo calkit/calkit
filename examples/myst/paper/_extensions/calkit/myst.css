@@ -1,0 +1,14 @@
+/* Written by Calkit; changes are overwritten by 'calkit myst build'. */
+details.ck-provenance, .ck-provenance.myst-dropdown {
+  border: none !important;
+  box-shadow: none !important;
+  background: none !important;
+  font-size: 0.85em;
+}
+details.ck-provenance > summary,
+.ck-provenance.myst-dropdown > summary {
+  background: none !important;
+  padding: 0.1rem 0 !important;
+  opacity: 0.75;
+  font-weight: normal;
+}

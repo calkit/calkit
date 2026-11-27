@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json
+owner: calkit
+name: example-myst
+title: MyST example
+description: >-
+  Measurements fit in Python and shown in a MyST site, with where each
+  figure, table, and value came from.
+
+requirements:
+  - pixi
+
+environments:
+  py:
+    kind: pixi
+    path: pixi.toml
+    description: Python for the analysis, and MyST for the site.
+
+pipeline:
+  stages:
+    generate:
+      kind: python-script
+      script_path: scripts/generate.py
+      environment: py
+      outputs:
+        - path: data/decay.csv
+          storage: git
+    fit:
+      kind: python-script
+      script_path: scripts/fit.py
+      environment: py
+      inputs: [data/decay.csv]
+      outputs:
+        - path: results/fit.json
+          storage: git
+    plot:
+      kind: python-script
+      script_path: scripts/plot.py
+      environment: py
+      inputs: [data/decay.csv, results/fit.json]
+      outputs:
+        - path: figures/fit.svg
+          storage: git
+    paper:
+      kind: command
+      wdir: paper
+      command: calkit myst build -e py -- --site --ci
+      environment: _system
+      inputs:
+        - index.md
+        - myst.yml
+        - ../figures/fit.svg
+        - ../data/decay.csv
+        - ../results/fit.json
+      outputs:
+        - _build/site

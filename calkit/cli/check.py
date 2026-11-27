@@ -348,7 +348,14 @@ def check_repro(
     provenance; that documents read values from the pipeline rather than
     typing them; that documents' citations resolve, as 'calkit check
     references' does; and that answers' evidence holds, as 'calkit check
-    questions' does.
+    questions' does. A stage only out of date because files it reads or
+    writes are stored elsewhere and not here, e.g., in a fresh clone before
+    'calkit pull', is reported as advice.
+
+    The project's own files are left alone. Files stages read that are kept
+    out of Git, e.g., cleaned notebooks or calkit.sty, are written, as
+    'calkit status' writes them, so a fresh clone isn't out of date for
+    want of them.
 
     Values quoted from references with \\ckrefval are checked against the
     references' PDFs, from a file the collection names, Zotero, or an
@@ -363,6 +370,9 @@ def check_repro(
     Exits with an error if any check finds a problem. Advice doesn't affect
     the exit code.
     """
+    import contextlib
+    import sys
+
     from calkit.reproducibility import DETAIL_CATEGORIES, check_reproducibility
 
     valid = list(DETAIL_CATEGORIES)
@@ -371,9 +381,11 @@ def check_repro(
             raise_error(
                 f"Invalid category: {category}. Valid categories are: {valid}"
             )
-    res = check_reproducibility(
-        wdir=wdir, log_func=typer.echo, offline=offline, audit=True
-    )
+    # Warnings go to stderr with JSON, to keep stdout parseable
+    with contextlib.redirect_stdout(sys.stderr if as_json else sys.stdout):
+        res = check_reproducibility(
+            wdir=wdir, log_func=typer.echo, offline=offline, audit=True
+        )
     if as_json:
         calkit.echo(res.model_dump_json(indent=2))
         if not res.passed:
@@ -1103,7 +1115,8 @@ def check_environments(
                 if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
                     if verbose:
                         typer.echo(
-                            f"Skipping check for {env['kind']} env '{env_name}'"
+                            f"Skipping check for {env['kind']} env "
+                            f"'{env_name}'"
                         )
                     continue
                 qualified = calkit.qualify_with_project(wdir, env_name)
@@ -1716,7 +1729,10 @@ def check_venv(
     )
 
     def pip_install_and_freeze(reqs_arg: str) -> None:
-        check_cmd = f"{activate_cmd} && {pip_cmd} install {pip_install_args} {reqs_arg}"
+        check_cmd = (
+            f"{activate_cmd} && {pip_cmd} install {pip_install_args} "
+            f"{reqs_arg}"
+        )
         if not lock_is_current:
             check_cmd += f" && {pip_freeze_cmd} > {lock_fpath}"
         check_cmd += " && deactivate"
@@ -2117,9 +2133,10 @@ def check_stage_runs() -> None:
     in the pipeline.
     """
     try:
-        problems = calkit.pipeline.get_stage_run_problems()
+        found = calkit.pipeline.get_stage_run_problems()
     except ValueError as e:
         raise_error(str(e))
+    problems = found["changed"] + found["unrecorded"]
     for problem in problems:
         typer.echo(problem)
     if problems:

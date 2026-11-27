@@ -6669,6 +6669,10 @@ export type ReproCheck = {
    */
   artifacts_no_provenance?: Array<string>
   /**
+   * Misc No Provenance
+   */
+  misc_no_provenance?: Array<string>
+  /**
    * Misc Needing Provenance
    */
   misc_needing_provenance?: Array<string>
@@ -6692,6 +6696,10 @@ export type ReproCheck = {
    * Eol Unpinned
    */
   eol_unpinned?: Array<string>
+  /**
+   * Eol Rewritten
+   */
+  eol_rewritten?: Array<string>
   /**
    * N Dvc Remotes
    */
@@ -6737,25 +6745,41 @@ export type ReproCheck = {
    */
   n_shown?: number
   /**
-   * N Scripts Scanned
+   * Audited
    */
-  n_scripts_scanned?: number
+  audited?: boolean
   /**
    * Stale Stages
    */
   stale_stages?: Array<string> | null
   /**
+   * Absent Stages
+   */
+  absent_stages?: Array<string> | null
+  /**
    * Pipeline Errors
    */
   pipeline_errors?: Array<string> | null
+  /**
+   * Uncompiled Stages
+   */
+  uncompiled_stages?: Array<string> | null
   /**
    * Stage Run Problems
    */
   stage_run_problems?: Array<string> | null
   /**
+   * Stage Runs Unrecorded
+   */
+  stage_runs_unrecorded?: Array<string> | null
+  /**
    * Storage Problems
    */
   storage_problems?: Array<string> | null
+  /**
+   * Storage Fixable
+   */
+  storage_fixable?: boolean
   /**
    * N Citations
    */
@@ -6781,6 +6805,10 @@ export type ReproCheck = {
    */
   changed_evidence?: Array<string> | null
   /**
+   * Not Checked
+   */
+  not_checked?: Array<string> | null
+  /**
    * Recommendation
    *
    * Formulate a recommendation for the project: the first problem,
@@ -6797,9 +6825,11 @@ export type ReproCheck = {
   /**
    * Passed
    *
-   * Whether no check found a problem; advice doesn't count.
+   * Whether no check found a problem; advice doesn't count. None if
+   * the checks needing the working tree weren't run, so nothing is
+   * claimed for them.
    */
-  readonly passed: boolean
+  readonly passed: boolean | null
   /**
    * N Datasets With Import Or Stage
    */
@@ -8948,6 +8978,10 @@ export type ReproCheckWritable = {
    */
   artifacts_no_provenance?: Array<string>
   /**
+   * Misc No Provenance
+   */
+  misc_no_provenance?: Array<string>
+  /**
    * Misc Needing Provenance
    */
   misc_needing_provenance?: Array<string>
@@ -8971,6 +9005,10 @@ export type ReproCheckWritable = {
    * Eol Unpinned
    */
   eol_unpinned?: Array<string>
+  /**
+   * Eol Rewritten
+   */
+  eol_rewritten?: Array<string>
   /**
    * N Dvc Remotes
    */
@@ -9016,25 +9054,41 @@ export type ReproCheckWritable = {
    */
   n_shown?: number
   /**
-   * N Scripts Scanned
+   * Audited
    */
-  n_scripts_scanned?: number
+  audited?: boolean
   /**
    * Stale Stages
    */
   stale_stages?: Array<string> | null
   /**
+   * Absent Stages
+   */
+  absent_stages?: Array<string> | null
+  /**
    * Pipeline Errors
    */
   pipeline_errors?: Array<string> | null
+  /**
+   * Uncompiled Stages
+   */
+  uncompiled_stages?: Array<string> | null
   /**
    * Stage Run Problems
    */
   stage_run_problems?: Array<string> | null
   /**
+   * Stage Runs Unrecorded
+   */
+  stage_runs_unrecorded?: Array<string> | null
+  /**
    * Storage Problems
    */
   storage_problems?: Array<string> | null
+  /**
+   * Storage Fixable
+   */
+  storage_fixable?: boolean
   /**
    * N Citations
    */
@@ -9059,6 +9113,10 @@ export type ReproCheckWritable = {
    * Changed Evidence
    */
   changed_evidence?: Array<string> | null
+  /**
+   * Not Checked
+   */
+  not_checked?: Array<string> | null
 }
 
 /**

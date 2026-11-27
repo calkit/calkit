@@ -1466,15 +1466,18 @@ def get_gated_stages(
     return gated, errors
 
 
-def get_stage_run_problems() -> list[str]:
+def get_stage_run_problems(wdir: str | None = None) -> dict[str, list[str]]:
     """Stages in ``dvc.lock`` that don't match the recorded run that made
-    them, from the current directory.
+    them.
 
     A stage's entry in .calkit/stage-runs.json records a checksum of its
-    dvc.lock entry after it ran, so one that disagrees got its dvc.lock
-    entry some other way, e.g., 'dvc commit' after an output was edited, an
-    edit or merge of dvc.lock, or running it outside Calkit. Like DVC, this
-    ignores the entries of stages no longer in the pipeline.
+    dvc.lock entry after it ran, so one that disagrees, under ``changed``,
+    got its dvc.lock entry some other way, e.g., 'dvc commit' after an
+    output was edited, an edit or merge of dvc.lock, or running it outside
+    Calkit. Under ``unrecorded`` are those with no record to compare, e.g.,
+    run with DVC alone, or recorded by a Calkit older than the checksum.
+    Like DVC, this ignores the entries of stages no longer in the pipeline,
+    and frozen stages, whose entries DVC writes without running them.
 
     Raises ``ValueError`` if a record of runs can't be read.
     """
@@ -1483,107 +1486,165 @@ def get_stage_run_problems() -> list[str]:
 
     from dvc.parsing import DataResolver
 
-    # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
-    # subproject's, against the record kept beside its dvc.lock: any other
-    # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
-    # a wrapper stage, which doesn't record its stages.
+    prev_wdir = os.getcwd()
+    if wdir is not None:
+        os.chdir(wdir)
     try:
-        listed = subprocess.check_output(
-            [
-                "git",
-                "ls-files",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-                "--",
-                "*/dvc.yaml",
-            ],
-            text=True,
-        ).splitlines()
-    except (OSError, subprocess.CalledProcessError):
-        listed = []
-    lock_dirs: list[str | None] = [None]
-    for path in sorted(listed):
-        parts = path.split("/")[:-1]
-        if not os.path.isfile(path) or any(
-            os.path.isdir(os.path.join(*parts[:i], ".dvc"))
-            for i in range(1, len(parts) + 1)
-        ):
-            continue
-        lock_dirs.append("/".join(parts))
-    stage_runs: dict[str | None, dict] = {}
-    for lock_dir in lock_dirs:
+        # Every pipeline 'calkit run' runs with this one is checked too,
+        # e.g., a subproject's, against the record kept beside its
+        # dvc.lock: any other dvc.yaml in this DVC repo. One inside a DVC
+        # repo of its own is run by a wrapper stage, which doesn't record
+        # its stages.
         try:
-            stage_runs[lock_dir] = calkit.read_stage_runs(lock_dir)
-        except json.JSONDecodeError as e:
-            fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
-            raise ValueError(f"Can't read {fpath}: {e}")
-    # This project's records of other pipelines' stages, under the names
-    # they have here, from before they were kept beside their own dvc.lock
-    parent_runs = {
-        k.replace("\\", "/"): v for k, v in stage_runs[None].items()
-    }
-    # DVC keeps the dvc.lock entry of a stage removed from dvc.yaml, and
-    # ignores it, so these are skipped, named as DVC resolves them, e.g.,
-    # each foreach item. Nothing is skipped beside a dvc.yaml DVC can't read.
-    removed: dict[str | None, set[str]] = {}
-    try:
-        dvc_repo = calkit.dvc.get_dvc_repo()
-    except Exception:
-        dvc_repo = None
-    for lock_dir in lock_dirs if dvc_repo is not None else []:
-        try:
-            fpath = os.path.join(lock_dir or ".", "dvc.yaml")
-            with open(fpath, encoding="utf-8") as f:
-                dvc_yaml = calkit.core._load_yaml_readonly(f)
-            resolver = DataResolver(
-                dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
-            )
-            removed[lock_dir] = {
-                name
-                for name in calkit.dvc.read_lock_stages(lock_dir)
-                if not resolver.has_key(name)
-            }
-        except Exception:
-            continue
-    if dvc_repo is not None:
-        dvc_repo.close()
-    problems = []
-    for lock_dir in lock_dirs:
-        lock_stages = calkit.dvc.read_lock_stages(lock_dir)
-        # DVC writes a frozen stage's entry whenever it verifies the stage's
-        # outputs rather than running it, so there's no run to match
-        try:
-            frozen = frozen_stage_base_names(wdir=lock_dir)
-        except Exception:
-            frozen = set()
-        for lock_name, locked in sorted(lock_stages.items()):
-            if not isinstance(locked, dict) or lock_name in removed.get(
-                lock_dir, set()
+            listed = subprocess.check_output(
+                [
+                    "git",
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                    "--",
+                    "*/dvc.yaml",
+                ],
+                text=True,
+            ).splitlines()
+        except (OSError, subprocess.CalledProcessError):
+            listed = []
+        lock_dirs: list[str | None] = [None]
+        for path in sorted(listed):
+            parts = path.split("/")[:-1]
+            if not os.path.isfile(path) or any(
+                os.path.isdir(os.path.join(*parts[:i], ".dvc"))
+                for i in range(1, len(parts) + 1)
             ):
                 continue
-            if lock_name.split("@")[0] in frozen:
+            lock_dirs.append("/".join(parts))
+        stage_runs: dict[str | None, dict] = {}
+        for lock_dir in lock_dirs:
+            try:
+                stage_runs[lock_dir] = calkit.read_stage_runs(lock_dir)
+            except json.JSONDecodeError as e:
+                fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
+                raise ValueError(f"Can't read {fpath}: {e}")
+        # This project's records of other pipelines' stages, under the
+        # names they have here, from before they were kept beside their own
+        # dvc.lock
+        parent_runs = {
+            k.replace("\\", "/"): v for k, v in stage_runs[None].items()
+        }
+        # DVC keeps the dvc.lock entry of a stage removed from dvc.yaml, and
+        # ignores it, so these are skipped, named as DVC resolves them,
+        # e.g., each foreach item. Nothing is skipped beside a dvc.yaml DVC
+        # can't read.
+        removed: dict[str | None, set[str]] = {}
+        # Frozen in calkit.yaml, or in dvc.yaml for a pipeline written there
+        frozen: dict[str | None, set[str]] = {}
+        try:
+            dvc_repo = calkit.dvc.get_dvc_repo()
+        except Exception:
+            dvc_repo = None
+        for lock_dir in lock_dirs:
+            try:
+                frozen[lock_dir] = frozen_stage_base_names(wdir=lock_dir)
+            except Exception:
+                frozen[lock_dir] = set()
+            try:
+                fpath = os.path.join(lock_dir or ".", "dvc.yaml")
+                with open(fpath, encoding="utf-8") as f:
+                    dvc_yaml = calkit.core._load_yaml_readonly(f)
+            except Exception:
                 continue
-            name = (
-                lock_name
-                if lock_dir is None
-                else f"{lock_dir}/dvc.yaml:{lock_name}"
-            )
-            # Either record matching will do, since a stage may have been
-            # run from both directories before they were kept together
-            candidates = [stage_runs[lock_dir].get(lock_name)]
-            if lock_dir is not None:
-                candidates.append(parent_runs.get(name))
-            records = [r for r in candidates if isinstance(r, dict)]
-            lock_hash = calkit.dvc.stage_lock_hash(locked)
-            if not records:
-                problems.append(f"Stage '{name}' has no recorded run")
-            elif all(r.get("dvc_lock_hash") != lock_hash for r in records):
-                problems.append(
-                    f"Stage '{name}' has changed in dvc.lock since its last "
-                    "recorded run"
+            dvc_stages = (dvc_yaml or {}).get("stages") or {}
+            frozen[lock_dir] |= {
+                name
+                for name, stage in dvc_stages.items()
+                if isinstance(stage, dict)
+                and _coerce_bool((stage.get("do") or stage).get("frozen"))
+            }
+            if dvc_repo is None:
+                continue
+            try:
+                resolver = DataResolver(
+                    dvc_repo, os.path.abspath(lock_dir or "."), dvc_yaml
                 )
-    return problems
+                removed[lock_dir] = {
+                    name
+                    for name in calkit.dvc.read_lock_stages(lock_dir)
+                    if not resolver.has_key(name)
+                }
+            except Exception:
+                continue
+        if dvc_repo is not None:
+            dvc_repo.close()
+        problems: dict[str, list[str]] = {"changed": [], "unrecorded": []}
+        for lock_dir in lock_dirs:
+            lock_stages = calkit.dvc.read_lock_stages(lock_dir)
+            for lock_name, locked in sorted(lock_stages.items()):
+                if not isinstance(locked, dict) or lock_name in removed.get(
+                    lock_dir, set()
+                ):
+                    continue
+                if lock_name.split("@")[0] in frozen[lock_dir]:
+                    continue
+                name = (
+                    lock_name
+                    if lock_dir is None
+                    else f"{lock_dir}/dvc.yaml:{lock_name}"
+                )
+                # Either record matching will do, since a stage may have
+                # been run from both directories before they were kept
+                # together
+                candidates = [stage_runs[lock_dir].get(lock_name)]
+                if lock_dir is not None:
+                    candidates.append(parent_runs.get(name))
+                hashes = [
+                    r["dvc_lock_hash"]
+                    for r in candidates
+                    if isinstance(r, dict) and r.get("dvc_lock_hash")
+                ]
+                if not hashes:
+                    problems["unrecorded"].append(
+                        f"Stage '{name}' has no recorded run"
+                    )
+                elif calkit.dvc.stage_lock_hash(locked) not in hashes:
+                    problems["changed"].append(
+                        f"Stage '{name}' has changed in dvc.lock since its "
+                        "last recorded run"
+                    )
+        return problems
+    finally:
+        os.chdir(prev_wdir)
+
+
+def describe_stale_stage(stage: "StaleStage", locked: bool = True) -> str:
+    """What made a stage out of date, briefly, e.g., ``never run``,
+    ``command modified``, or ``data/raw.csv missing``.
+
+    ``locked`` is whether ``dvc.lock`` has an entry for it, i.e., whether it
+    has ever run. Paths are relative to the current directory.
+    """
+    if not locked:
+        return "never run"
+    changes = []
+    if stage.modified_command:
+        changes.append("command modified")
+    for path in stage.modified_inputs:
+        change = f"{path} {'modified' if os.path.exists(path) else 'missing'}"
+        # DVC hashes a directory as a whole, so an ignored file in it can
+        # change it without anything showing in Git
+        ignored = stage.ignored_files_in_inputs.get(path)
+        if ignored:
+            change += f" (contains Git-ignored files: {', '.join(ignored)})"
+        changes.append(change)
+    changes += [f"{path} modified" for path in stage.modified_outputs]
+    # Outputs are only the cause when nothing upstream of them changed
+    if not changes:
+        for path in stage.stale_outputs:
+            exists = os.path.exists(path)
+            changes.append(f"{path} {'not in cache' if exists else 'missing'}")
+    if stage.cannot_run_here:
+        changes.append(f"can't run here: {stage.cannot_run_here}")
+    return ", ".join(changes) or "out of date"
 
 
 def get_status(
@@ -3162,6 +3223,36 @@ def _warn_on_system_env(stage_name: str, stage) -> None:
     )
 
 
+def get_uncompiled_stage_names(
+    dvc_stages: dict, wdir: str | None = None
+) -> list[str]:
+    """Stages whose entry in ``dvc.yaml`` isn't what ``to_dvc`` compiled,
+    as ``dvc_stages``, including generated stages it no longer compiles,
+    so the pipeline DVC runs isn't the one calkit.yaml declares.
+    """
+    import json
+
+    def normalize(value: object) -> object:
+        return json.loads(json.dumps(value, default=str))
+
+    on_disk = (calkit.dvc.read_pipeline(wdir=wdir or ".") or {}).get(
+        "stages"
+    ) or {}
+    names = [
+        name
+        for name, stage in dvc_stages.items()
+        if normalize(on_disk.get(name))
+        != normalize(_name_table_items(stage)[0])
+    ]
+    for name, stage in on_disk.items():
+        if name in dvc_stages or not isinstance(stage, dict):
+            continue
+        desc = stage.get("desc") or (stage.get("do") or {}).get("desc") or ""
+        if str(desc).startswith("Automatically generated"):
+            names.append(name)
+    return names
+
+
 def to_dvc(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -3170,6 +3261,7 @@ def to_dvc(
     manage_gitignore: bool = True,
     for_run: bool = False,
     preprocess_stages: bool = False,
+    edit_sources: bool = True,
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline.
 
@@ -3187,8 +3279,10 @@ def to_dvc(
 
     ``preprocess_stages`` lets stages write files they read that aren't
     kept in the project, which they depend on, for compiling before the
-    pipeline is run or checked. Off otherwise, so compiling has no side
-    effects for, e.g., the hub committing an edit.
+    pipeline is run or checked, even without ``write``. Off otherwise, so
+    compiling has no side effects for, e.g., the hub committing an edit.
+    Without ``edit_sources``, preprocessing leaves the project's own files
+    alone, e.g., a LaTeX document missing ``\\usepackage{calkit}``.
     """
     import calkit.dvc.zip
     import calkit.latex
@@ -3320,6 +3414,7 @@ def to_dvc(
             manage_gitignore=manage_gitignore,
             for_run=for_run,
             preprocess_stages=preprocess_stages,
+            edit_sources=edit_sources,
         )
         if not sp_is_isolated:
             continue
@@ -3564,8 +3659,12 @@ def to_dvc(
         write_values_file(ck_info, wdir=wdir)
     # Stages that work out what they depend on from the project, which only
     # the pipeline knows the location of
-    pipeline.preprocess_stages(wdir, write_files=preprocess_stages)
-    if write:
+    pipeline.preprocess_stages(
+        wdir, write_files=preprocess_stages, edit_sources=edit_sources
+    )
+    # What stages read that isn't kept in the project is written whenever
+    # it's preprocessed too, so a check sees what a run would
+    if write or preprocess_stages:
         # The resolved setup commands each stage runs, written beside the
         # pipeline so the compiled command can name a path instead of
         # carrying shell-quoted text, which no single quoting survives on
@@ -3580,7 +3679,7 @@ def to_dvc(
         # calkit.yaml and rewritten by every compile, which is to say by
         # every 'calkit run' and 'calkit status' -- the same reason a
         # cleaned notebook isn't committed either.
-        if manage_gitignore and setup_files:
+        if write and manage_gitignore and setup_files:
             _write_managed_gitignore_block(
                 os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
                 marker="calkit stage setup",
@@ -3591,7 +3690,8 @@ def to_dvc(
         command_files = [
             path
             for stage in pipeline.stages.values()
-            if isinstance(stage, ShellCommandStage)
+            if write
+            and isinstance(stage, ShellCommandStage)
             and (path := stage.write_command_file(wdir=wdir)) is not None
         ]
         # Hashes of this machine's values, so like the setup files they are
@@ -3611,7 +3711,7 @@ def to_dvc(
             )
             is not None
         ]
-        if manage_gitignore and env_var_files:
+        if write and manage_gitignore and env_var_files:
             _write_managed_gitignore_block(
                 os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
                 marker="calkit stage env vars",
@@ -3625,16 +3725,20 @@ def to_dvc(
                     i.write_period_file(wdir=wdir)
         # The window and last full day of each date-range period, so an item
         # goes out of date daily while its period is open. Only when
-        # preprocessing, since these can be committed.
-        if preprocess_stages:
+        # preprocessing and writing, since these can be committed.
+        if write and preprocess_stages:
             pipeline.write_date_range_state(wdir=wdir)
         # Remove files left by stages that were renamed, deleted, or no
         # longer need one, since the command files are committed
-        for gen_dir, kept in [
-            ("stage-setup", setup_files),
-            ("stage-commands", command_files),
-            ("env-vars", env_var_files),
-        ]:
+        for gen_dir, kept in (
+            [
+                ("stage-setup", setup_files),
+                ("stage-commands", command_files),
+                ("env-vars", env_var_files),
+            ]
+            if write
+            else []
+        ):
             gen_dpath = os.path.join(wdir or ".", ".calkit", gen_dir)
             if not os.path.isdir(gen_dpath):
                 continue
@@ -3647,12 +3751,16 @@ def to_dvc(
         # environment that locks under .calkit has nothing whose hash a
         # line-ending rewrite could change, and shouldn't get a
         # .gitattributes it never needed.
-        if manage_gitignore and (
-            command_files
-            or any(
-                Path(p).as_posix().startswith(".calkit/env-locks/")
-                for paths in env_lock_fpaths.values()
-                for p in paths
+        if (
+            write
+            and manage_gitignore
+            and (
+                command_files
+                or any(
+                    Path(p).as_posix().startswith(".calkit/env-locks/")
+                    for paths in env_lock_fpaths.values()
+                    for p in paths
+                )
             )
         ):
             _ensure_calkit_gitattributes(wdir=wdir)

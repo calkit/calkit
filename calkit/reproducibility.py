@@ -100,6 +100,7 @@ _SCRIPT_DIRS_IGNORED = {
 DETAIL_CATEGORIES = {
     "stale": "stale_stages",
     "pipeline-errors": "pipeline_errors",
+    "uncompiled": "uncompiled_stages",
     "stage-runs": "stage_run_problems",
     "storage": "storage_problems",
     "retyped": "retyped_values",
@@ -108,10 +109,15 @@ DETAIL_CATEGORIES = {
     "outside": "paths_outside_project",
     "environments": "stages_without_env",
     "artifacts": "artifacts_no_provenance",
+    "misc": "misc_no_provenance",
     "provenance": "misc_needing_provenance",
     "gaps": "provenance_gaps",
     "imports": "unchecked_imports",
     "line-endings": "eol_unpinned",
+    "rewritten-line-endings": "eol_rewritten",
+    "not-present": "absent_stages",
+    "unrecorded-runs": "stage_runs_unrecorded",
+    "not-checked": "not_checked",
     "refvals": "refval_problems",
     "unchecked-refvals": "refvals_unchecked",
     "citations": "citation_problems",
@@ -159,8 +165,11 @@ class ReproCheck(BaseModel):
     n_tables_no_import_or_stage: int = 0
     n_presentations: int = 0
     n_presentations_no_import_or_stage: int = 0
-    # Declared artifacts with no provenance, as '<type>: <path>'
+    # Declared artifacts with no provenance, as '<type>: <path>', other than
+    # misc ones, and those misc ones, which can be their own record, e.g., a
+    # hand-written config
     artifacts_no_provenance: list[str] = Field(default_factory=list)
+    misc_no_provenance: list[str] = Field(default_factory=list)
     # Paths of misc artifacts with no provenance whose file type is one
     # nobody makes by hand, so something should be recorded for them
     misc_needing_provenance: list[str] = []
@@ -183,6 +192,9 @@ class ReproCheck(BaseModel):
     # doesn't pin, so a Windows checkout hashes them differently from
     # everyone else's and its stages read as out of date there
     eol_unpinned: list[str] = []
+    # Those this checkout has rewritten, e.g., with CRLF on Windows, which
+    # makes the stages reading them read as out of date here
+    eol_rewritten: list[str] = Field(default_factory=list)
     n_dvc_remotes: int
     # Whether anything is stored with DVC, which needs a remote to reach
     # anyone else
@@ -204,21 +216,31 @@ class ReproCheck(BaseModel):
     #: Values quoted from references with no PDF to check them against
     refvals_unchecked: list[dict] = Field(default_factory=list)
     # How much some checks had to go on, so one with nothing to check isn't
-    # shown passing: documents read, figures, tables, and results followed
-    # back, and pipeline scripts and notebooks read for paths
+    # shown passing: documents read, and figures, tables, and results
+    # followed back
     n_documents: int = 0
     n_shown: int = 0
-    n_scripts_scanned: int = 0
-    # The rest are checked only with the working tree, e.g., by the CLI,
-    # and are None where they weren't, or there was nothing to check.
+    # Whether the checks that need the working tree and DVC were run, e.g.,
+    # by the CLI. The rest are None where they weren't, or there was
+    # nothing to check.
+    audited: bool = False
     # Stages out of date, with what changed
     stale_stages: list[str] | None = None
+    # Stages only out of date here because what they read or write is
+    # stored elsewhere and not here, e.g., in a fresh clone not pulled yet
+    absent_stages: list[str] | None = None
     # Why the pipeline's status couldn't be had
     pipeline_errors: list[str] | None = None
+    # Stages whose dvc.yaml entry isn't compiled from calkit.yaml
+    uncompiled_stages: list[str] | None = None
     # Stages whose dvc.lock entry doesn't match the run that made them
     stage_run_problems: list[str] | None = None
-    # Paths tracked where they aren't declared to be stored
+    # Stages with no run recorded to compare, e.g., run with DVC alone
+    stage_runs_unrecorded: list[str] | None = None
+    # Paths tracked where they aren't declared to be stored, and whether
+    # 'calkit check storage --fix' can fix them all
     storage_problems: list[str] | None = None
+    storage_fixable: bool = False
     n_citations: int = 0
     # Citations defined in no bibliography, with a DOI nobody registered,
     # or whose entry describes a different work than its identifier
@@ -231,6 +253,9 @@ class ReproCheck(BaseModel):
     question_problems: list[str] | None = None
     # Answers whose evidence changed after they were last edited
     changed_evidence: list[str] | None = None
+    # Checks that couldn't run, e.g., while another process holds DVC's
+    # lock, with why
+    not_checked: list[str] | None = None
     # TODO: Check calkit remotes are authenticated
 
     @computed_field  # type: ignore[prop-decorator]
@@ -241,22 +266,22 @@ class ReproCheck(BaseModel):
         # Problems first
         if not self.is_git_repo:
             return "Since this is not a Git repo, run `git init` next."
-        if not self.has_pipeline:
-            return (
-                "There is no DVC pipeline. "
-                "Add some stages with `dvc stage add`."
-            )
         if self.pipeline_errors:
             return (
                 "The pipeline's status couldn't be checked: "
                 f"{self.pipeline_errors[0]}"
             )
+        if self.uncompiled_stages:
+            return (
+                "dvc.yaml isn't compiled from calkit.yaml, e.g., for stage "
+                f"'{self.uncompiled_stages[0]}'. Run `calkit run` and commit "
+                "dvc.yaml and the results."
+            )
         if self.stale_stages:
             return (
                 "Pipeline stages are out of date, e.g., "
                 f"{self.stale_stages[0]}. Run `calkit run` and "
-                "commit the results, or `calkit pull` for outputs only "
-                "missing here."
+                "commit the results."
             )
         if self.stage_run_problems:
             return (
@@ -265,18 +290,14 @@ class ReproCheck(BaseModel):
                 "`calkit run --force <stage>` records them."
             )
         if self.storage_problems:
+            fix = (
+                "Run `calkit check storage --fix` to fix them."
+                if self.storage_fixable
+                else "`calkit check storage` says how to fix them."
+            )
             return (
                 "Paths aren't stored where they're declared to be, e.g.: "
-                f"{self.storage_problems[0]} Run `calkit check storage "
-                "--fix` to fix them."
-            )
-        if self.paths_outside_project:
-            return (
-                f"There are {len(self.paths_outside_project)} files outside "
-                "the project that pipeline scripts use, e.g., "
-                f"{self.paths_outside_project[0]}. They only exist on one "
-                "machine, so the pipeline can't run anywhere else. Move them "
-                "into the project and use paths relative to it."
+                f"{self.storage_problems[0]} {fix}"
             )
         # These are a subset of the misc artifacts flagged below, but the
         # more pointed finding comes first: a PNG with nothing recorded
@@ -335,7 +356,22 @@ class ReproCheck(BaseModel):
                 f"{self.question_problems[0]}. `calkit check questions` "
                 "says what changed."
             )
-        # Then advice
+        # Then advice, first what makes stages read as out of date here
+        if self.eol_rewritten:
+            return (
+                f"This checkout rewrote the line endings of "
+                f"{len(self.eol_rewritten)} files the pipeline hashes, e.g., "
+                f"{self.eol_rewritten[0]}, so the stages reading them read "
+                f"as out of date here. To pin them, {calkit.EOL_FIX}."
+            )
+        if self.absent_stages:
+            return (
+                "Some stages' inputs or outputs are stored elsewhere and "
+                f"not here, e.g., {self.absent_stages[0]}, so they couldn't "
+                "be checked. Run `calkit pull` to get them."
+            )
+        if self.not_checked:
+            return f"Not checked: {self.not_checked[0]}."
         if not self.has_readme:
             return (
                 "There is no README.md file. "
@@ -356,6 +392,11 @@ class ReproCheck(BaseModel):
                 "share them. Run `calkit config remote` or `dvc remote add` "
                 "next."
             )
+        if not self.has_pipeline:
+            return (
+                "There is no DVC pipeline. "
+                "Add some stages with `dvc stage add`."
+            )
         if not self.has_calkit_info:
             return (
                 "There is no `calkit.yaml` file. "
@@ -374,6 +415,14 @@ class ReproCheck(BaseModel):
                 "executed outside a defined environment. "
                 "Define the environment for those next."
             )
+        if self.paths_outside_project:
+            return (
+                f"There are {len(self.paths_outside_project)} files outside "
+                "the project that pipeline scripts use, e.g., "
+                f"{self.paths_outside_project[0]}. They only exist on one "
+                "machine, so the pipeline can't run anywhere else. Move them "
+                "into the project and use paths relative to it."
+            )
         if self.n_scripts_not_in_pipeline > 0:
             return (
                 f"There are {self.n_scripts_not_in_pipeline} scripts "
@@ -382,9 +431,15 @@ class ReproCheck(BaseModel):
                 "can't be reproduced with `calkit run`. Add stages for "
                 "them, or remove them if they're no longer used."
             )
-        if self.n_misc_no_import_or_stage:
+        if self.misc_no_provenance:
             return provenance_text.format(
-                self.n_misc_no_import_or_stage, "misc"
+                len(self.misc_no_provenance), "misc artifacts"
+            )
+        if self.stage_runs_unrecorded:
+            return (
+                "Stages have no recorded run to check dvc.lock against, "
+                f"e.g., {self.stage_runs_unrecorded[0]}. Running them with "
+                "`calkit run --force <stage>` records them."
             )
         if self.eol_unpinned:
             return (
@@ -425,12 +480,19 @@ class ReproCheck(BaseModel):
 
         # Problems: what's wrong or untraceable now
         add("Is a Git repo", ok=self.is_git_repo)
-        add("Has pipeline", ok=self.has_pipeline)
         if self.pipeline_errors:
             add("Pipeline status", "unavailable", False, "pipeline-errors")
         elif self.stale_stages is not None:
             n = len(self.stale_stages)
             add("Pipeline stages out of date", n, n == 0, "stale")
+        if self.uncompiled_stages is not None:
+            n = len(self.uncompiled_stages)
+            add(
+                "Stages in dvc.yaml not compiled from calkit.yaml",
+                n,
+                n == 0,
+                "uncompiled",
+            )
         if self.stage_run_problems is not None:
             n = len(self.stage_run_problems)
             add(
@@ -442,14 +504,6 @@ class ReproCheck(BaseModel):
         if self.storage_problems is not None:
             n = len(self.storage_problems)
             add("Paths not stored where declared", n, n == 0, "storage")
-        if self.n_scripts_scanned or self.paths_outside_project:
-            n = len(self.paths_outside_project)
-            add(
-                "Files outside the project used by pipeline scripts",
-                n,
-                n == 0,
-                "outside",
-            )
         # Misc is left to the lines after, since a hand-written misc file
         # is its own record
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
@@ -512,7 +566,26 @@ class ReproCheck(BaseModel):
                 n == 0,
                 "questions",
             )
-        # Advice: what would make it easier to reproduce, or is worth a look
+        # Advice: what would make it easier to reproduce, or is worth a look,
+        # first what couldn't be checked here
+        if self.eol_rewritten:
+            add(
+                "Pipeline files with line endings rewritten in this checkout",
+                len(self.eol_rewritten),
+                category="rewritten-line-endings",
+            )
+        if self.absent_stages:
+            add(
+                "Stages whose files aren't here; run `calkit pull`",
+                len(self.absent_stages),
+                category="not-present",
+            )
+        if self.not_checked:
+            add(
+                "Checks that couldn't run",
+                len(self.not_checked),
+                category="not-checked",
+            )
         if not self.has_readme:
             add("No README.md")
         elif not self.instructions_in_readme:
@@ -521,6 +594,8 @@ class ReproCheck(BaseModel):
             add("DVC not initialized")
         if self.stores_in_dvc and not self.n_dvc_remotes:
             add("No DVC remote, though files are stored with DVC")
+        if not self.has_pipeline:
+            add("No pipeline")
         if not self.has_calkit_info:
             add("No calkit.yaml")
         if self.has_pipeline and not self.n_environments:
@@ -531,20 +606,29 @@ class ReproCheck(BaseModel):
                 self.n_stages_without_env,
                 category="environments",
             )
+        if self.paths_outside_project:
+            add(
+                "Files outside the project used by pipeline scripts",
+                len(self.paths_outside_project),
+                category="outside",
+            )
+        if self.stage_runs_unrecorded:
+            add(
+                "Stages in dvc.lock with no recorded run",
+                len(self.stage_runs_unrecorded),
+                category="unrecorded-runs",
+            )
         if self.scripts_not_in_pipeline:
             add(
                 "Scripts not run by any pipeline stage",
                 self.n_scripts_not_in_pipeline,
                 category="scripts",
             )
-        n_misc = (
-            self.n_misc_no_import_or_stage - self.n_misc_needing_provenance
-        )
-        if n_misc > 0:
+        if self.misc_no_provenance:
             add(
                 "Other misc artifacts with no provenance recorded",
-                n_misc,
-                category="artifacts",
+                len(self.misc_no_provenance),
+                category="misc",
             )
         if self.eol_unpinned:
             add(
@@ -588,8 +672,12 @@ class ReproCheck(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def passed(self) -> bool:
-        """Whether no check found a problem; advice doesn't count."""
+    def passed(self) -> bool | None:
+        """Whether no check found a problem; advice doesn't count. None if
+        the checks needing the working tree weren't run, so nothing is
+        claimed for them."""
+        if not self.audited:
+            return None
         return not self.problems
 
     @property
@@ -675,10 +763,10 @@ class ReproCheck(BaseModel):
         if advice:
             txt += "\nAdvice:\n" + format_lines(advice)
         n_problems = len(self.problems)
-        if n_problems:
+        if self.passed is False:
             s = "" if n_problems == 1 else "s"
             txt += f"\nFailed: {n_problems} problem{s}\n"
-        else:
+        elif self.passed:
             txt += "\nPassed\n"
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"
@@ -690,8 +778,13 @@ class ReproCheck(BaseModel):
 
     @property
     def categories_with_detail(self) -> list[str]:
-        """Categories that have something to show, in reporting order."""
-        return [c for c in DETAIL_CATEGORIES if self.details(c)]
+        """Categories that have something to show, the problems' first."""
+        failing = [line.category for line in self.problems if line.category]
+        return [
+            c
+            for c in dict.fromkeys(failing + list(DETAIL_CATEGORIES))
+            if c and self.details(c)
+        ]
 
 
 def _strings_in(obj: object) -> list[str]:
@@ -1568,43 +1661,9 @@ def check_reproducibility(
         detect_python_script_io,
     )
 
-    def describe_stale(name: str, stage: "calkit.pipeline.StaleStage") -> str:
-        # What made a stage out of date, briefly
-        changes = []
-        if stage.modified_command:
-            changes.append("command modified")
-        changes += [f"{p} modified" for p in stage.modified_inputs]
-        changes += [f"{p} modified" for p in stage.modified_outputs]
-        # Outputs are only the cause when nothing upstream of them changed
-        if not changes:
-            for path in stage.stale_outputs:
-                exists = os.path.exists(path)
-                changes.append(
-                    f"{path} {'not in cache' if exists else 'missing'}"
-                )
-        if stage.cannot_run_here:
-            changes.append(f"can't run here: {stage.cannot_run_here}")
-        return f"{name}: {', '.join(changes) or 'out of date'}"
-
     res: dict = dict()
     if log_func is None:
         log_func = print
-    # Compiling the pipeline writes the dvc.yaml read below, so its status
-    # comes first. Environments aren't checked, since that can build them.
-    status = None
-    if audit:
-        from calkit.dvc.zip import sync_all as sync_zips
-
-        with calkit.in_project(wdir):
-            try:
-                sync_zips(direction="to-zip")
-                status = calkit.pipeline.get_status(
-                    check_environments=False,
-                    with_storage_problems=True,
-                    quiet_environment_checks=True,
-                )
-            except Exception as e:
-                res["pipeline_errors"] = [f"{e.__class__.__name__}: {e}"]
     try:
         calkit.git.get_repo(wdir)
         res["is_git_repo"] = True
@@ -1641,10 +1700,12 @@ def check_reproducibility(
         res[f"n_{artifact_type}"] = len(artifacts)
         missing = [a for a in artifacts if not has_provenance(a)]
         res[f"n_{artifact_type}_no_import_or_stage"] = len(missing)
-        res["artifacts_no_provenance"] += [
-            f"{artifact_type}: {a.get('path') or a.get('title')}"
-            for a in missing
-        ]
+        # Misc ones are listed below, apart from the rest
+        if artifact_type != "misc":
+            res["artifacts_no_provenance"] += [
+                f"{artifact_type}: {a.get('path') or a.get('title')}"
+                for a in missing
+            ]
     res["misc_needing_provenance"] = [
         a["path"]
         for a in ck_info.get("misc", [])
@@ -1652,6 +1713,12 @@ def check_reproducibility(
         and not has_provenance(a)
         and posixpath.splitext(a["path"])[1].lower()
         in MISC_EXTENSIONS_NEEDING_PROVENANCE
+    ]
+    res["misc_no_provenance"] = [
+        str(a.get("path") or a.get("title"))
+        for a in ck_info.get("misc", [])
+        if not has_provenance(a)
+        and a.get("path") not in res["misc_needing_provenance"]
     ]
     # Followed back from what a reader sees, declared or shown by a LaTeX
     # document the pipeline builds
@@ -1686,7 +1753,6 @@ def check_reproducibility(
     # Read or written by the pipeline's Python scripts and notebooks, which
     # are the languages detection reports these for
     outside = []
-    res["n_scripts_scanned"] = 0
     for stage in (
         (ck_info.get("pipeline", {}) or {}).get("stages", {}).values()
     ):
@@ -1708,7 +1774,6 @@ def check_reproducibility(
             )
         else:
             continue
-        res["n_scripts_scanned"] += 1
         outside += [
             f"{script} reads {p}" for p in io.get("external_inputs", [])
         ]
@@ -1716,11 +1781,9 @@ def check_reproducibility(
             f"{script} writes {p}" for p in io.get("external_outputs", [])
         ]
     res["paths_outside_project"] = list(dict.fromkeys(outside))
-    res["eol_unpinned"] = (
-        [f.path for f in calkit.check_pipeline_eol(wdir=wdir) if f.at_risk]
-        if res["is_git_repo"]
-        else []
-    )
+    eol = calkit.check_pipeline_eol(wdir=wdir) if res["is_git_repo"] else []
+    res["eol_unpinned"] = [f.path for f in eol if f.at_risk]
+    res["eol_rewritten"] = [f.path for f in eol if f.rewritten]
     res["n_environments"] = len(ck_info.get("environments", {}))
     # Check for stages not run with environments
     stages = pipeline.get("stages", {})
@@ -1801,40 +1864,171 @@ def check_reproducibility(
             pass
     if not audit:
         return ReproCheck.model_validate(res)
-    from calkit.pipeline import frozen_tainted_stage_names
+    import copy
+
+    import dvc.repo
+    from dvc.lock import LockError
+
+    from calkit.dvc.zip import sync_all as sync_zips
+    from calkit.pipeline import (
+        describe_stale_stage,
+        frozen_tainted_stage_names,
+        get_stage_run_problems,
+        get_status,
+        get_uncompiled_stage_names,
+        to_dvc,
+    )
     from calkit.questions import check_questions
     from calkit.references import check_references
 
+    def is_lock_held() -> bool:
+        # Another DVC process, e.g., a run, holds the lock status needs
+        try:
+            repo = calkit.dvc.get_dvc_repo()
+        except Exception:
+            return False
+        try:
+            with dvc.repo.lock_repo(repo):
+                return False
+        except LockError:
+            return True
+        finally:
+            repo.close()
+
+    def is_explained_here(stage: calkit.pipeline.StaleStage) -> bool:
+        # Out of date only by what isn't in this checkout as it is
+        # elsewhere: files stored outside Git that aren't here, e.g., in a
+        # fresh clone before 'calkit pull', or ones whose line endings this
+        # checkout rewrote
+        if stage.modified_command or stage.modified_outputs:
+            return False
+        paths = stage.modified_inputs + stage.stale_outputs
+        missing = [p for p in paths if not os.path.exists(p)]
+        rewritten = [p for p in stage.modified_inputs if p in eol_rewritten]
+        present_inputs = [
+            p for p in stage.modified_inputs if os.path.exists(p)
+        ]
+        if not paths or len(rewritten) < len(present_inputs):
+            return False
+        if not missing:
+            return True
+        try:
+            ignored = calkit.git.get_repo().ignored(*missing)
+        except Exception:
+            return False
+        return len(ignored) == len(missing)
+
+    res["audited"] = True
+    res["not_checked"] = []
+    eol_rewritten = set(res["eol_rewritten"])
+    status = None
     with calkit.in_project(wdir):
+        # Compiled to compare with dvc.yaml rather than written over it,
+        # and without editing the project's files. What stages read that's
+        # kept out of Git is still written, e.g., calkit.sty or cleaned
+        # notebooks, so a fresh clone isn't out of date for want of it.
+        try:
+            sync_zips(direction="to-zip")
+            if (ck_info.get("pipeline") or {}).get("stages") or ck_info.get(
+                "subprojects"
+            ):
+                compiled = to_dvc(
+                    ck_info=copy.deepcopy(ck_info),
+                    write=False,
+                    manage_gitignore=False,
+                    preprocess_stages=True,
+                    edit_sources=False,
+                )
+                res["uncompiled_stages"] = get_uncompiled_stage_names(compiled)
+            if is_lock_held():
+                res["not_checked"].append(
+                    "Pipeline status and answers: another DVC process holds "
+                    "the lock, e.g., a run; check again when it finishes"
+                )
+            else:
+                status = get_status(
+                    check_environments=False,
+                    compile_to_dvc=False,
+                    with_storage_problems=True,
+                    quiet_environment_checks=True,
+                )
+        except Exception as e:
+            res["pipeline_errors"] = [f"{e.__class__.__name__}: {e}"]
+        stale_names: set[str] | None = None
         if status is not None and status.errors:
             res["pipeline_errors"] = status.errors
         elif status is not None and status.has_pipeline:
-            res["stale_stages"] = [
-                describe_stale(name, status.stale_stages[name])
-                for name in status.stale_stage_names
-            ]
+            res["stale_stages"] = []
+            res["absent_stages"] = []
+            stale_names = set()
+            lock_stages: dict[str, dict] = {}
+            for name in status.stale_stage_names:
+                stage = status.stale_stages[name]
+                lock_wdir, bare_name = ".", name
+                if stage.is_subproject and ":" in name:
+                    lock_wdir, bare_name = name.split(":", 1)
+                dvc_stage = stages.get(bare_name.split("@")[0]) or {}
+                # One DVC reruns every time, e.g., with always_changed in
+                # dvc.yaml, isn't out of date for doing so
+                if (
+                    lock_wdir == "."
+                    and isinstance(dvc_stage, dict)
+                    and (dvc_stage.get("do") or dvc_stage).get(
+                        "always_changed"
+                    )
+                    and not stage.modified_command
+                    and not stage.modified_inputs
+                    and not stage.modified_outputs
+                    and not stage.stale_outputs
+                ):
+                    continue
+                if lock_wdir not in lock_stages:
+                    lock_stages[lock_wdir] = calkit.dvc.read_lock_stages(
+                        wdir=lock_wdir
+                    )
+                locked = name.endswith(" (subproject)") or (
+                    bare_name in lock_stages[lock_wdir]
+                )
+                where = f"{name}: {describe_stale_stage(stage, locked)}"
+                if not locked or not is_explained_here(stage):
+                    res["stale_stages"].append(where)
+                    stale_names.add(name.split("@")[0])
+                # The line-ending advice covers one whose inputs are only
+                # rewritten
+                elif not (
+                    stage.modified_inputs
+                    and set(stage.modified_inputs) <= eol_rewritten
+                    and all(os.path.exists(p) for p in stage.stale_outputs)
+                ):
+                    res["absent_stages"].append(where)
         # Large files are only advice, which 'calkit check storage' gives
         if status is not None and status.storage_problems is not None:
-            res["storage_problems"] = [
-                p["message"]
-                for p in status.storage_problems
-                if p["kind"] != "large"
+            storage = [
+                p for p in status.storage_problems if p["kind"] != "large"
             ]
+            res["storage_problems"] = [p["message"] for p in storage]
+            res["storage_fixable"] = all(
+                p["kind"] != "stage-output-in-dvc-dir" for p in storage
+            )
         if os.path.isfile("dvc.lock"):
             try:
-                res["stage_run_problems"] = (
-                    calkit.pipeline.get_stage_run_problems()
+                runs = get_stage_run_problems()
+                res["stage_run_problems"] = runs["changed"]
+                res["stage_runs_unrecorded"] = runs["unrecorded"]
+            except Exception as e:
+                res["not_checked"].append(
+                    f"Run records: {e.__class__.__name__}: {e}"
                 )
-            except ValueError as e:
-                res["stage_run_problems"] = [str(e)]
         # Citations, which the reference check reads from LaTeX and Markdown
         citation_problems = []
         unconfirmed = []
         for path in documents:
             try:
                 checked_refs = check_references(path, offline=offline)
-            except (OSError, ValueError) as e:
-                citation_problems.append(f"{path}: {e}")
+            except Exception as e:
+                res["not_checked"].append(
+                    f"Citations in {path}: {e.__class__.__name__}: {e}"
+                )
                 continue
             res["n_citations"] = res.get("n_citations", 0) + (
                 checked_refs.n_cited
@@ -1845,38 +2039,46 @@ def check_reproducibility(
                     citation_problems.append(where)
                 else:
                     unconfirmed.append(where)
-        if res.get("n_citations") or citation_problems:
+        if res.get("n_citations"):
             res["citation_problems"] = citation_problems
             res["citations_unconfirmed"] = unconfirmed
         # Answers, reusing the pipeline's status for which stages are stale
-        stale_names = None
-        frozen_names = None
         if status is not None and not status.errors:
-            stale_names = {n.split("@")[0] for n in status.stale_stage_names}
             try:
                 frozen_names = frozen_tainted_stage_names(ck_info=ck_info)
             except Exception:
                 frozen_names = set()
-        questions = check_questions(
-            ck_info=ck_info,
-            stale_stages=stale_names,
-            frozen_stages=frozen_names,
-        )
-        if questions.answered:
-            res["n_answered"] = len(questions.answered)
-            res["question_problems"] = []
-            res["changed_evidence"] = []
-            for q in questions.questions:
-                where = f"{q.project}: " if q.project else ""
-                if q.status in ("missing", "stale", "error") or "stale" in (
-                    q.verification_status,
-                    q.validation_status,
-                ):
-                    res["question_problems"].append(
-                        f"{where}{q.index}. [{q.status}] {q.question}"
-                    )
-                if any(ev.status == "changed" for ev in q.evidence):
-                    res["changed_evidence"].append(
-                        f"{where}{q.index}. {q.question}"
-                    )
+            try:
+                questions = check_questions(
+                    ck_info=ck_info,
+                    stale_stages=stale_names or set(),
+                    frozen_stages=frozen_names,
+                )
+            except Exception as e:
+                res["not_checked"].append(
+                    f"Answers: {e.__class__.__name__}: {e}"
+                )
+                questions = None
+            if questions is not None and questions.answered:
+                res["n_answered"] = len(questions.answered)
+                failing = {
+                    id(q)
+                    for q in questions.missing
+                    + questions.errors
+                    + questions.stale
+                    + questions.stale_verifications
+                    + questions.stale_validations
+                }
+                res["question_problems"] = [
+                    f"{f'{q.project}: ' if q.project else ''}{q.index}. "
+                    f"[{q.status}] {q.question}"
+                    for q in questions.questions
+                    if id(q) in failing
+                ]
+                res["changed_evidence"] = [
+                    f"{f'{q.project}: ' if q.project else ''}{q.index}. "
+                    f"{q.question}"
+                    for q in questions.questions
+                    if any(ev.status == "changed" for ev in q.evidence)
+                ]
     return ReproCheck.model_validate(res)

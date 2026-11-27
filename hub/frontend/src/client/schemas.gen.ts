@@ -11647,6 +11647,13 @@ export const ReproCheckSchema = {
       type: "array",
       title: "Artifacts No Provenance",
     },
+    misc_no_provenance: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Misc No Provenance",
+    },
     misc_needing_provenance: {
       items: {
         type: "string",
@@ -11694,6 +11701,13 @@ export const ReproCheckSchema = {
       type: "array",
       title: "Eol Unpinned",
       default: [],
+    },
+    eol_rewritten: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Eol Rewritten",
     },
     n_dvc_remotes: {
       type: "integer",
@@ -11751,10 +11765,10 @@ export const ReproCheckSchema = {
       title: "N Shown",
       default: 0,
     },
-    n_scripts_scanned: {
-      type: "integer",
-      title: "N Scripts Scanned",
-      default: 0,
+    audited: {
+      type: "boolean",
+      title: "Audited",
+      default: false,
     },
     stale_stages: {
       anyOf: [
@@ -11770,6 +11784,20 @@ export const ReproCheckSchema = {
       ],
       title: "Stale Stages",
     },
+    absent_stages: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Absent Stages",
+    },
     pipeline_errors: {
       anyOf: [
         {
@@ -11783,6 +11811,20 @@ export const ReproCheckSchema = {
         },
       ],
       title: "Pipeline Errors",
+    },
+    uncompiled_stages: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Uncompiled Stages",
     },
     stage_run_problems: {
       anyOf: [
@@ -11798,6 +11840,20 @@ export const ReproCheckSchema = {
       ],
       title: "Stage Run Problems",
     },
+    stage_runs_unrecorded: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Runs Unrecorded",
+    },
     storage_problems: {
       anyOf: [
         {
@@ -11811,6 +11867,11 @@ export const ReproCheckSchema = {
         },
       ],
       title: "Storage Problems",
+    },
+    storage_fixable: {
+      type: "boolean",
+      title: "Storage Fixable",
+      default: false,
     },
     n_citations: {
       type: "integer",
@@ -11878,6 +11939,20 @@ export const ReproCheckSchema = {
       ],
       title: "Changed Evidence",
     },
+    not_checked: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Not Checked",
+    },
     recommendation: {
       anyOf: [
         {
@@ -11903,9 +11978,17 @@ export const ReproCheckSchema = {
       readOnly: true,
     },
     passed: {
-      type: "boolean",
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Passed",
-      description: "Whether no check found a problem; advice doesn't count.",
+      description:
+        "Whether no check found a problem; advice doesn't count. None if\nthe checks needing the working tree weren't run, so nothing is\nclaimed for them.",
       readOnly: true,
     },
     n_datasets_with_import_or_stage: {
@@ -15620,6 +15703,13 @@ export const ReproCheckWritableSchema = {
       type: "array",
       title: "Artifacts No Provenance",
     },
+    misc_no_provenance: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Misc No Provenance",
+    },
     misc_needing_provenance: {
       items: {
         type: "string",
@@ -15667,6 +15757,13 @@ export const ReproCheckWritableSchema = {
       type: "array",
       title: "Eol Unpinned",
       default: [],
+    },
+    eol_rewritten: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Eol Rewritten",
     },
     n_dvc_remotes: {
       type: "integer",
@@ -15724,10 +15821,10 @@ export const ReproCheckWritableSchema = {
       title: "N Shown",
       default: 0,
     },
-    n_scripts_scanned: {
-      type: "integer",
-      title: "N Scripts Scanned",
-      default: 0,
+    audited: {
+      type: "boolean",
+      title: "Audited",
+      default: false,
     },
     stale_stages: {
       anyOf: [
@@ -15743,6 +15840,20 @@ export const ReproCheckWritableSchema = {
       ],
       title: "Stale Stages",
     },
+    absent_stages: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Absent Stages",
+    },
     pipeline_errors: {
       anyOf: [
         {
@@ -15756,6 +15867,20 @@ export const ReproCheckWritableSchema = {
         },
       ],
       title: "Pipeline Errors",
+    },
+    uncompiled_stages: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Uncompiled Stages",
     },
     stage_run_problems: {
       anyOf: [
@@ -15771,6 +15896,20 @@ export const ReproCheckWritableSchema = {
       ],
       title: "Stage Run Problems",
     },
+    stage_runs_unrecorded: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Runs Unrecorded",
+    },
     storage_problems: {
       anyOf: [
         {
@@ -15784,6 +15923,11 @@ export const ReproCheckWritableSchema = {
         },
       ],
       title: "Storage Problems",
+    },
+    storage_fixable: {
+      type: "boolean",
+      title: "Storage Fixable",
+      default: false,
     },
     n_citations: {
       type: "integer",
@@ -15850,6 +15994,20 @@ export const ReproCheckWritableSchema = {
         },
       ],
       title: "Changed Evidence",
+    },
+    not_checked: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Not Checked",
     },
   },
   type: "object",

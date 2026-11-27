@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 
+import pytest
+
 import calkit
 from calkit.dvc import run_dvc_command
 from calkit.reproducibility import (
@@ -24,10 +26,7 @@ def test_check_reproducibility(tmp_dir):
     assert res.is_git_repo
     assert not res.is_dvc_repo
     assert not res.has_readme
-    # A missing pipeline is a problem and a missing README advice, so the
-    # pipeline comes first
-    assert "no DVC pipeline" in res.recommendation  # type: ignore
-    assert not res.passed
+    assert "no README.md" in res.recommendation  # type: ignore
     run_dvc_command(["init"])
     res = check_reproducibility()
     assert res.is_dvc_repo
@@ -301,9 +300,6 @@ def test_check_reproducibility(tmp_dir):
     # write only exist on one machine, which is found from anywhere, e.g.,
     # by the hub, which doesn't run from the project
     assert res.paths_outside_project == []
-    assert "outside the project used by pipeline scripts: 0" in (
-        res.to_pretty()
-    )
     ck_info["pipeline"]["stages"]["fit"] = {
         "kind": "python-script",
         "script_path": "scripts/fit.py",
@@ -357,8 +353,16 @@ def test_check_reproducibility(tmp_dir):
         res.to_pretty()
     )
     assert "outside" in res.categories_with_detail
+    # Read from the code, so they're advice, after any problem
     rec = ReproCheck.model_validate(
-        good | {"paths_outside_project": res.paths_outside_project}
+        good
+        | {
+            "paths_outside_project": res.paths_outside_project,
+            "provenance_gaps": [],
+            "n_datasets_no_import_or_stage": 0,
+            "n_figures_no_import_or_stage": 0,
+            "n_tables_no_import_or_stage": 0,
+        }
     ).recommendation
     assert "4 files outside the project" in rec  # type: ignore
 
@@ -385,12 +389,16 @@ def test_repro_check_summary() -> None:
         "n_publications_no_import_or_stage": 0,
         "n_dvc_remotes": 0,
     }
+    # Without the checks that need the working tree, nothing is claimed
     check = ReproCheck.model_validate(base)
+    assert check.passed is None
+    assert "Passed" not in check.to_pretty()
+    audited = base | {"audited": True}
+    check = ReproCheck.model_validate(audited)
     # Nothing declared or read, so only what was checked is shown passing,
     # and advice doesn't fail it
     assert [line.text for line in check.summary if line.ok is not None] == [
-        "Is a Git repo",
-        "Has pipeline",
+        "Is a Git repo"
     ]
     assert [line.text for line in check.summary if line.ok is None] == [
         "No dev container spec"
@@ -400,33 +408,51 @@ def test_repro_check_summary() -> None:
     # A remote is only advised for what's stored with DVC
     assert "remote" not in check.to_pretty()
     assert "dev container" in check.recommendation  # type: ignore
-    check = ReproCheck.model_validate(base | {"stores_in_dvc": True})
+    check = ReproCheck.model_validate(audited | {"stores_in_dvc": True})
     assert check.passed
     assert (
         "No DVC remote, though files are stored with DVC\n"
         in (check.to_pretty().split("Advice:")[1])
     )
     assert "no DVC remote" in check.recommendation  # type: ignore
-    # A script no stage runs is advice, since it's often tooling, e.g., a
-    # site's build script, and what it made would be caught on its own
-    check = ReproCheck.model_validate(
-        base | {"scripts_not_in_pipeline": ["_build.py"]}
-    )
+    # A project with no pipeline, e.g., of data, isn't failed for it
+    check = ReproCheck.model_validate(audited | {"has_pipeline": False})
     assert check.passed
-    assert (
-        "Scripts not run by any pipeline stage: 1 [-c scripts]\n"
-        in (check.to_pretty().split("Advice:")[1])
-    )
+    assert "  No pipeline\n" in check.to_pretty().split("Advice:")[1]
+    # What's guessed or doesn't make anything wrong is advice: a script no
+    # stage runs is often tooling, e.g., a site's build script, and what it
+    # made would be caught on its own; a path outside the project is read
+    # from the code, e.g., a system font; and a stage with nothing recorded
+    # may have been run with DVC alone
+    for field, category in [
+        ("scripts_not_in_pipeline", "scripts"),
+        ("paths_outside_project", "outside"),
+        ("stage_runs_unrecorded", "unrecorded-runs"),
+        ("absent_stages", "not-present"),
+        ("misc_no_provenance", "misc"),
+        ("not_checked", "not-checked"),
+        ("eol_rewritten", "rewritten-line-endings"),
+    ]:
+        check = ReproCheck.model_validate(audited | {field: ["x"]})
+        assert check.passed, field
+        assert (
+            f": 1 [-c {category}]\n" in (check.to_pretty().split("Advice:")[1])
+        )
+    # Line endings this checkout rewrote are fixed by pinning them, not by
+    # rerunning what they made stale
+    check = ReproCheck.model_validate(audited | {"eol_rewritten": ["a.py"]})
+    assert "calkit fix line-endings" in check.recommendation  # type: ignore
     # Each problem fails it, under its category
     for field, category in [
         ("pipeline_errors", "pipeline-errors"),
         ("stale_stages", "stale"),
+        ("uncompiled_stages", "uncompiled"),
         ("stage_run_problems", "stage-runs"),
         ("storage_problems", "storage"),
         ("citation_problems", "citations"),
         ("question_problems", "questions"),
     ]:
-        check = ReproCheck.model_validate(base | {field: ["x"]})
+        check = ReproCheck.model_validate(audited | {field: ["x"]})
         assert not check.passed
         dumped = json.loads(check.model_dump_json())
         assert not dumped["passed"]
@@ -439,16 +465,28 @@ def test_repro_check_summary() -> None:
         assert f"[-c {category}]" in check.to_pretty()
         assert "Failed: 1 problem\n" in check.to_pretty()
         assert check.recommendation and "x" in check.recommendation
+        # The usage hint names a problem before any advice
+        check = ReproCheck.model_validate(
+            audited | {field: ["x"], "scripts_not_in_pipeline": ["s.py"]}
+        )
+        assert check.categories_with_detail[0] == category
         # Checked with nothing wrong, it passes, with nothing to list
-        check = ReproCheck.model_validate(base | {field: []})
+        check = ReproCheck.model_validate(audited | {field: []})
         assert check.passed
         if field != "pipeline_errors":
             assert ": 0 " in check.to_pretty()
         assert f"[-c {category}]" not in check.to_pretty()
+    # Storage is only fixed with --fix where that fixes it
+    check = ReproCheck.model_validate(
+        audited | {"storage_problems": ["x."], "storage_fixable": True}
+    )
+    assert "--fix" in check.recommendation  # type: ignore
+    check = ReproCheck.model_validate(audited | {"storage_problems": ["x."]})
+    assert "--fix" not in check.recommendation  # type: ignore
     # Declared artifacts are counted, and the ones with nothing recorded
     # are listed
     check = ReproCheck.model_validate(
-        base
+        audited
         | {
             "n_figures": 2,
             "n_figures_no_import_or_stage": 1,
@@ -461,6 +499,37 @@ def test_repro_check_summary() -> None:
     ) in check.to_pretty()
     assert "[-c artifacts]" in check.to_pretty()
     assert "Datasets with provenance" not in check.to_pretty()
+
+
+def test_check_reproducibility_without_audit(
+    tmp_dir: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: object, **kwargs: object) -> None:
+        raise AssertionError("DVC work without audit")
+
+    # The hub's check, of the files alone, asks DVC nothing and claims
+    # nothing it didn't check
+    for name in ["get_status", "get_stage_run_problems", "to_dvc"]:
+        monkeypatch.setattr(calkit.pipeline, name, fail)
+    subprocess.check_call(["calkit", "init"])
+    res = check_reproducibility()
+    assert res.passed is None
+    assert not res.audited
+    for field in [
+        "stale_stages",
+        "absent_stages",
+        "pipeline_errors",
+        "uncompiled_stages",
+        "stage_run_problems",
+        "stage_runs_unrecorded",
+        "storage_problems",
+        "citation_problems",
+        "citations_unconfirmed",
+        "question_problems",
+        "changed_evidence",
+        "not_checked",
+    ]:
+        assert getattr(res, field) is None, field
 
 
 def test_check_call():

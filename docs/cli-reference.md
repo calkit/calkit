@@ -3972,7 +3972,9 @@ Check things.
 
 Check the reproducibility of a project.
 
-Checks that the pipeline is up to date, as 'calkit status' says, without checking environments; that dvc.lock matches the recorded runs, as 'calkit check stage-runs' does; that paths are stored where declared; that what the project declares and its documents show has provenance; that documents read values from the pipeline rather than typing them; that documents' citations resolve, as 'calkit check references' does; and that answers' evidence holds, as 'calkit check questions' does.
+Checks that the pipeline is up to date, as 'calkit status' says, without checking environments; that dvc.lock matches the recorded runs, as 'calkit check stage-runs' does; that paths are stored where declared; that what the project declares and its documents show has provenance; that documents read values from the pipeline rather than typing them; that documents' citations resolve, as 'calkit check references' does; and that answers' evidence holds, as 'calkit check questions' does. A stage only out of date because files it reads or writes are stored elsewhere and not here, e.g., in a fresh clone before 'calkit pull', is reported as advice.
+
+The project's own files are left alone. Files stages read that are kept out of Git, e.g., cleaned notebooks or calkit.sty, are written, as 'calkit status' writes them, so a fresh clone isn't out of date for want of them.
 
 Values quoted from references with \ckrefval are checked against the references' PDFs, from a file the collection names, Zotero, or an open-access copy downloaded into .calkit/local, which isn't stored in the project. So are numbers typed into a sentence citing a reference.
 

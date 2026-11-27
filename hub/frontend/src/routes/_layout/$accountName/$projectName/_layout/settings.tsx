@@ -1,11 +1,9 @@
 import {
   Box,
   Button,
-  Checkbox,
   Flex,
   FormControl,
   FormErrorMessage,
-  FormHelperText,
   FormLabel,
   Heading,
   Input,
@@ -235,14 +233,12 @@ interface UseS3BucketForm extends S3ConnectionForm {
   // An existing connection's name, or empty for new keys
   connection: string
   url: string
-  dedicated: boolean
 }
 
 const emptyS3Bucket: UseS3BucketForm = {
   ...emptyS3Connection,
   connection: "",
   url: "",
-  dedicated: false,
 }
 
 // New keys can be added here too, so a bucket takes one step
@@ -288,9 +284,9 @@ const UseS3Bucket = ({
   const mutation = useMutation({
     mutationFn: async (data: UseS3BucketForm) => {
       if (!data.connection) {
-        await UsersService.putUserS3Connection({
-          name: data.label,
-          s3ConnectionPut: {
+        await UsersService.postUserS3Connection({
+          s3ConnectionPost: {
+            name: data.label,
             endpoint_url: data.endpoint_url || null,
             region: data.region || null,
             access_key_id: data.access_key_id,
@@ -309,19 +305,13 @@ const UseS3Bucket = ({
         projectS3BucketPost: {
           connection: data.connection || data.label,
           url: data.url,
-          dedicated: data.dedicated,
         },
       }).then((response) => response.data)
     },
-    onSuccess: (data, variables) => {
-      mixpanel.track("Used S3 bucket", {
-        new_connection: !variables.connection,
-        dedicated: variables.dedicated,
-        read_only: data.added.read_only,
-      })
+    onSuccess: (data) => {
       showToast(
         "Success!",
-        data.added.read_only ? "Read-only bucket added." : "Storage updated.",
+        data.read_only ? "Read-only bucket added." : "Storage updated.",
         "success",
       )
       onClose()
@@ -402,12 +392,6 @@ const UseS3Bucket = ({
                 {errors.url && (
                   <FormErrorMessage>{errors.url.message}</FormErrorMessage>
                 )}
-              </FormControl>
-              <FormControl mt={4}>
-                <Checkbox {...register("dedicated")}>
-                  Only this project's files
-                </Checkbox>
-                <FormHelperText>E.g., an existing DVC remote</FormHelperText>
               </FormControl>
             </>
           )}

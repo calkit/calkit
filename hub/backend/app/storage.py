@@ -4,7 +4,6 @@ import ipaddress
 import json
 import logging
 import os
-import re
 import shutil
 import socket
 import time
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from sqlmodel import Session
 
-    from app.models import Project, StorageResource, UserExternalCredential
+    from app.models import Project, StorageResource
 
 # Multipart/chunked upload configuration
 MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024  # 64 MB
@@ -396,69 +395,36 @@ _box_folder_ids: cachetools.TTLCache[str, dict[str, str]] = (
 )
 
 
-class S3EndpointError(ValueError):
-    """An S3 endpoint the hub won't connect to, e.g., one on a private
-    network, which would let users reach the hub's own services.
-    """
+def check_s3_endpoint_url(endpoint_url: str) -> None:
+    """Refuse an S3 endpoint URL that isn't HTTPS, or has more than a host.
+    Locally, HTTP is allowed, e.g., for the dev MinIO.
 
-
-def check_s3_endpoint_url(endpoint_url: str, resolve: bool = True) -> None:
-    """Refuse an S3 endpoint URL that isn't HTTPS or, with ``resolve``,
-    resolves to an address that isn't public. Locally, HTTP and any address
-    are allowed, e.g., the dev MinIO.
-
-    Resolving here is only for a clear error when keys are saved, since a
-    host can resolve differently later; ``make_public_socket`` is what
-    keeps connections off private networks.
+    ``make_public_socket`` is what keeps connections off private networks.
     """
     from urllib.parse import urlparse
 
     try:
         parsed = urlparse(endpoint_url)
-        hostname = parsed.hostname
-        port = parsed.port
+        # Reading the port raises if it isn't a number
+        hostname, _ = parsed.hostname, parsed.port
     except ValueError:
-        raise S3EndpointError("Invalid endpoint URL")
-    local = settings.ENVIRONMENT == "local"
-    schemes = ("http", "https") if local else ("https",)
+        raise ValueError("Invalid endpoint URL")
+    schemes = (
+        ("http", "https") if settings.ENVIRONMENT == "local" else ("https",)
+    )
     if parsed.scheme not in schemes or not hostname:
-        raise S3EndpointError("Endpoint URL must start with https://")
+        raise ValueError("Endpoint URL must start with https://")
     if parsed.path not in ("", "/") or parsed.query or parsed.username:
-        raise S3EndpointError("Endpoint URL must only have a host")
-    if local or not resolve:
-        return
-    try:
-        infos = socket.getaddrinfo(
-            hostname, port or 443, proto=socket.IPPROTO_TCP
-        )
-    except (socket.gaierror, UnicodeError):
-        raise S3EndpointError(f"Can't resolve {hostname}")
-    for info in infos:
-        if not address_is_public(str(info[4][0])):
-            raise S3EndpointError(f"{hostname} isn't public")
-
-
-# IPv6 prefixes that carry an IPv4 address, e.g., for NAT64, so a private
-# one could be reached through them
-EMBEDDED_IPV4_NETWORKS = [
-    ipaddress.ip_network(n)
-    for n in ("64:ff9b::/96", "64:ff9b:1::/48", "::/96")
-]
+        raise ValueError("Endpoint URL must only have a host")
 
 
 def address_is_public(address: str) -> bool:
-    """Whether an IP address is on the public internet, including any IPv4
-    address embedded in an IPv6 one.
+    """Whether an IP address is on the public internet, including an IPv4
+    address mapped into an IPv6 one.
     """
     ip = ipaddress.ip_address(address)
-    if not ip.is_global:
-        return False
-    if isinstance(ip, ipaddress.IPv6Address):
-        if ip.ipv4_mapped or ip.sixtofour or ip.teredo:
-            return False
-        if any(ip in network for network in EMBEDDED_IPV4_NETWORKS):
-            return False
-    return True
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return ip.is_global and (mapped is None or mapped.is_global)
 
 
 def make_public_socket(addr_info: Any) -> socket.socket:
@@ -484,8 +450,6 @@ def get_s3_fs(
 
     No endpoint means AWS itself.
     """
-    if endpoint_url:
-        check_s3_endpoint_url(endpoint_url, resolve=False)
     client_kwargs: dict[str, Any] = {}
     if region:
         client_kwargs["region_name"] = region
@@ -530,16 +494,6 @@ def get_s3_bucket_region(fs: s3fs.S3FileSystem, bucket: str) -> str | None:
     return str(region) if region else None
 
 
-def get_s3_credential_keys(
-    credential: "UserExternalCredential",
-) -> tuple[str, str]:
-    """Get the access key ID and secret of an S3 credential."""
-    from app.security import decrypt_secret
-
-    keys = json.loads(decrypt_secret(credential.secret_payload))
-    return str(keys["access_key_id"]), str(keys["secret_access_key"])
-
-
 def get_internal_storage() -> ProjectStorage:
     """Get the hub's own object storage."""
     return ProjectStorage(
@@ -576,22 +530,19 @@ def get_resource_storage(
             token=token,
         )
     if resource.kind == "s3-bucket":
-        from fastapi import HTTPException
+        from app.security import decrypt_secret
 
+        # Removed along with its storage, so always there
         credential = resource.credential
-        if credential is None:
-            raise HTTPException(401, "S3 connection removed")
+        assert credential is not None
         metadata = credential.metadata_json or {}
-        access_key_id, secret_access_key = get_s3_credential_keys(credential)
-        try:
-            fs = get_s3_fs(
-                access_key_id,
-                secret_access_key,
-                endpoint_url=metadata.get("endpoint_url"),
-                region=resource.region or metadata.get("region"),
-            )
-        except S3EndpointError as e:
-            raise HTTPException(400, str(e))
+        keys = json.loads(decrypt_secret(credential.secret_payload))
+        fs = get_s3_fs(
+            keys["access_key_id"],
+            keys["secret_access_key"],
+            endpoint_url=metadata.get("endpoint_url"),
+            region=resource.region or metadata.get("region"),
+        )
         return ProjectStorage(
             backend="s3",
             fs=fs,
@@ -661,28 +612,6 @@ def get_project_storage_locations(
     return storage_locations + [internal]
 
 
-# Where DVC 2 kept objects, i.e., at the remote's root by hash, which DVC 3
-# still reads for outputs tracked before it
-DVC_2_OBJECT_PATH_RE = re.compile(r"^[0-9a-f]{2}(/[0-9a-f]{30,}(\.dir)?)?$")
-
-
-def path_is_accessible(storage: ProjectStorage, path: str) -> bool:
-    """Whether a project's path can be read from, or written to, a storage.
-
-    A dedicated S3 bucket or prefix, e.g., an existing DVC remote, may hold
-    other files, so only DVC's objects are reached in it, rather than letting
-    everyone who can read the project read the whole bucket, or everyone
-    who can write to it overwrite the rest.
-    """
-    if storage.backend == "s3" and storage.is_dedicated:
-        return (
-            path == "files"
-            or path.startswith("files/")
-            or DVC_2_OBJECT_PATH_RE.match(path) is not None
-        )
-    return True
-
-
 def get_project_storage(
     session: "Session", project: "Project"
 ) -> ProjectStorage:
@@ -711,8 +640,6 @@ def find_project_object(
         storage_locations = get_project_storage_locations(session, project)
     owner_name = project.owner_account_name
     for storage in storage_locations:
-        if not path_is_accessible(storage, path):
-            continue
         fpath = storage.make_project_path(owner_name, project.name, path)
         if storage.fs.exists(fpath):
             return storage, fpath
@@ -845,14 +772,9 @@ def get_project_object_sizes(
         found = target.fs.find(base, detail=True)
     except FileNotFoundError:
         return {}
-    sizes = {
+    return {
         fpath.removeprefix(f"{base}/"): int(info["size"])
         for fpath, info in found.items()
-    }
-    return {
-        path: size
-        for path, size in sizes.items()
-        if path_is_accessible(target, path)
     }
 
 
@@ -900,8 +822,10 @@ def copy_resource_to_internal(
         ).items():
             if copied.get(path) == size:
                 continue
-            # This can outlast a token, so get a current one for each object
-            source = get_resource_storage(session, resource)
+            # This can outlast a token, so get a current one for each object,
+            # though S3's keys don't expire
+            if resource.kind != "s3-bucket":
+                source = get_resource_storage(session, resource)
             dest = internal.make_project_path(owner_name, project_name, path)
             # Uploaded once complete, so a failed read can't leave part of it
             with tempfile.NamedTemporaryFile() as tmp:

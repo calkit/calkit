@@ -256,11 +256,7 @@ def post_project_fs_op(
     )
     # New objects go to the first storage, and reads fall back through the
     # rest, since objects aren't moved when a project switches storage
-    storage_locations = [
-        st
-        for st in storage.get_project_storage_locations(session, project)
-        if operation == "put" or storage.path_is_accessible(st, path)
-    ]
+    storage_locations = storage.get_project_storage_locations(session, project)
     backend = storage_locations[0].backend
     for st in storage_locations:
         if (
@@ -437,8 +433,6 @@ def post_project_fs_op(
             ),
         )
     target = storage.get_project_storage(session, project)
-    if not storage.path_is_accessible(target, path):
-        raise HTTPException(403, "Only DVC objects can be written here")
     backend = target.backend
     full_path = target.make_project_path(owner_name, project_name, path)
     # We are doing a PUT if we've made it this far
@@ -580,19 +574,14 @@ def post_project_fs_batch_op(
     """Endpoint for batch file system operations for multiple paths."""
 
     def get_result(path: str) -> FsOpBatchResult:
-        # Use the first storage that has the path, or the first overall that
-        # it can be read from
-        found = next(
-            st
-            for st in storage_locations
-            if storage.path_is_accessible(st, path)
+        # Use the first storage that has the path, or the first overall
+        found = storage_locations[0]
+        full_path = storage_locations[0].make_project_path(
+            owner_name, project_name, path
         )
-        full_path = found.make_project_path(owner_name, project_name, path)
         # What HF said about the path, if it's in HF storage
         hf_info = None
         for i, st in enumerate(storage_locations):
-            if not storage.path_is_accessible(st, path):
-                continue
             candidate = st.make_project_path(owner_name, project_name, path)
             if i in hf_infos:
                 hf_info = hf_infos[i].get(

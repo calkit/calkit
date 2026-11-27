@@ -12,7 +12,6 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { AxiosError } from "axios"
-import mixpanel from "mixpanel-browser"
 import { useEffect } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
@@ -65,19 +64,25 @@ const S3ConnectionModal = ({
     )
   }, [isOpen, connection, reset])
   const mutation = useMutation({
-    mutationFn: (data: S3ConnectionForm) =>
-      UsersService.putUserS3Connection({
-        name: data.label,
-        s3ConnectionPut: {
-          endpoint_url: data.endpoint_url || null,
-          region: data.region || null,
-          access_key_id: data.access_key_id,
-          secret_access_key: data.secret_access_key,
-          replace: !!connection,
-        },
-      }).then((response) => response.data),
+    mutationFn: (data: S3ConnectionForm) => {
+      const keys = {
+        endpoint_url: data.endpoint_url || null,
+        region: data.region || null,
+        access_key_id: data.access_key_id,
+        secret_access_key: data.secret_access_key,
+      }
+      return (
+        connection
+          ? UsersService.putUserS3Connection({
+              name: connection.name,
+              s3ConnectionPut: keys,
+            })
+          : UsersService.postUserS3Connection({
+              s3ConnectionPost: { ...keys, name: data.label },
+            })
+      ).then((response) => response.data)
+    },
     onSuccess: () => {
-      mixpanel.track("Saved S3 connection", { replaced: !!connection })
       showToast("Success!", "S3 keys saved.", "success")
       onClose()
     },

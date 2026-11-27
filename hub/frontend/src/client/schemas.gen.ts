@@ -8516,43 +8516,10 @@ export const ProjectS3BucketPostSchema = {
       type: "string",
       title: "Url",
     },
-    dedicated: {
-      type: "boolean",
-      title: "Dedicated",
-      default: false,
-    },
   },
   type: "object",
   required: ["connection", "url"],
   title: "ProjectS3BucketPost",
-} as const
-
-export const ProjectS3BucketSettingsSchema = {
-  properties: {
-    dvc: {
-      anyOf: [
-        {
-          $ref: "#/components/schemas/StorageResourcePublic",
-        },
-        {
-          type: "null",
-        },
-      ],
-    },
-    previous: {
-      items: {
-        $ref: "#/components/schemas/StorageResourcePublic",
-      },
-      type: "array",
-      title: "Previous",
-    },
-    added: {
-      $ref: "#/components/schemas/StorageResourcePublic",
-    },
-  },
-  type: "object",
-  required: ["dvc", "previous", "added"],
-  title: "ProjectS3BucketSettings",
 } as const
 
 export const ProjectStatsSchema = {
@@ -11920,6 +11887,54 @@ export const ResultSchema = {
   title: "Result",
 } as const
 
+export const S3ConnectionPostSchema = {
+  properties: {
+    endpoint_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Endpoint Url",
+    },
+    region: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Region",
+    },
+    access_key_id: {
+      type: "string",
+      maxLength: 255,
+      minLength: 1,
+      title: "Access Key Id",
+    },
+    secret_access_key: {
+      type: "string",
+      maxLength: 1024,
+      minLength: 1,
+      title: "Secret Access Key",
+    },
+    name: {
+      type: "string",
+      pattern: "^[a-z0-9][a-z0-9-]{1,63}$",
+      title: "Name",
+    },
+  },
+  type: "object",
+  required: ["access_key_id", "secret_access_key", "name"],
+  title: "S3ConnectionPost",
+} as const
+
 export const S3ConnectionPublicSchema = {
   properties: {
     name: {
@@ -11952,14 +11967,9 @@ export const S3ConnectionPublicSchema = {
       type: "string",
       title: "Access Key Id",
     },
-    updated: {
-      type: "string",
-      format: "date-time",
-      title: "Updated",
-    },
   },
   type: "object",
-  required: ["name", "endpoint_url", "region", "access_key_id", "updated"],
+  required: ["name", "endpoint_url", "region", "access_key_id"],
   title: "S3ConnectionPublic",
 } as const
 
@@ -11999,11 +12009,6 @@ export const S3ConnectionPutSchema = {
       maxLength: 1024,
       minLength: 1,
       title: "Secret Access Key",
-    },
-    replace: {
-      type: "boolean",
-      title: "Replace",
-      default: false,
     },
   },
   type: "object",
@@ -12703,17 +12708,6 @@ export const StorageResourcePublicSchema = {
       title: "Read Only",
       default: false,
     },
-    connection: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Connection",
-    },
     created: {
       type: "string",
       format: "date-time",
@@ -12772,7 +12766,7 @@ export const StorageTransferStatusSchema = {
       ],
       title: "Provider",
     },
-    label: {
+    connection: {
       anyOf: [
         {
           type: "string",
@@ -12781,7 +12775,7 @@ export const StorageTransferStatusSchema = {
           type: "null",
         },
       ],
-      title: "Label",
+      title: "Connection",
     },
   },
   type: "object",

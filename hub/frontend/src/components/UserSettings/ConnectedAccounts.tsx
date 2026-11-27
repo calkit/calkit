@@ -97,7 +97,7 @@ function ConnectedAccounts() {
     queryFn: () =>
       StorageService.getUserServiceStorage({
         provider: storageProvider as "huggingface" | "box" | "s3",
-        label: s3Label,
+        connection: s3Label,
       }).then((response) => response.data),
     enabled: storageProvider !== undefined,
   })
@@ -132,12 +132,22 @@ function ConnectedAccounts() {
   }, [transferStatus, queryClient])
   const [storageAction, setStorageAction] = useState<StorageAction>("transfer")
   const disconnectStorageServiceMutation = useMutation({
-    mutationFn: () =>
-      UsersService.deleteUserExternalCredential({
-        provider: storageProvider as string,
-        storage_action: serviceStorageQuery.data?.length ? storageAction : null,
-        label: s3Label,
-      }).then((response) => response.data),
+    mutationFn: () => {
+      const storage_action = serviceStorageQuery.data?.length
+        ? storageAction
+        : null
+      return (
+        s3Label
+          ? UsersService.deleteUserS3Connection({
+              name: s3Label,
+              storage_action,
+            })
+          : UsersService.deleteUserExternalCredential({
+              provider: storageProvider as string,
+              storage_action,
+            })
+      ).then((response) => response.data)
+    },
     onSuccess: (data) => {
       mixpanel.track("Disconnected account", {
         provider: storageProvider,
@@ -589,55 +599,53 @@ function ConnectedAccounts() {
           <HStack mt={4} align="baseline">
             <Text>S3:</Text>
             <Stack spacing={1}>
-              {s3ConnectionsQuery.data?.map((c) => (
-                <HStack key={c.name}>
-                  <Text>{c.name}</Text>
-                  <Text color="ui.dim">
-                    {c.endpoint_url
-                      ? c.endpoint_url.replace(/^https?:\/\//, "")
-                      : `AWS${c.region ? ` ${c.region}` : ""}`}
-                  </Text>
-                  <IconButton
-                    aria-label={`Replace keys for ${c.name}`}
-                    icon={<MdEdit />}
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setS3Connection(c.name)}
-                    p={-1}
-                    mr={-3}
-                  />
-                  <IconButton
-                    aria-label={`Remove ${c.name}`}
-                    icon={<FaTrash />}
-                    size="xs"
-                    variant="ghost"
-                    colorScheme="red"
-                    onClick={() => setDisconnect(`s3:${c.name}`)}
-                    isDisabled={
-                      transferQuery.data?.provider === "s3" &&
-                      transferQuery.data.label === c.name &&
-                      transferQuery.data.status === "running"
-                    }
-                  />
-                  {transferQuery.data?.provider === "s3" &&
-                    transferQuery.data.label === c.name &&
-                    transferQuery.data.status === "running" && (
+              {s3ConnectionsQuery.data?.map((c) => {
+                // Its transfer to Calkit Hub storage, if any
+                const transfer =
+                  transferQuery.data?.provider === "s3" &&
+                  transferQuery.data.connection === c.name
+                    ? transferQuery.data
+                    : undefined
+                return (
+                  <HStack key={c.name}>
+                    <Text>{c.name}</Text>
+                    <Text color="ui.dim">
+                      {c.endpoint_url
+                        ? c.endpoint_url.replace(/^https?:\/\//, "")
+                        : `AWS${c.region ? ` ${c.region}` : ""}`}
+                    </Text>
+                    <IconButton
+                      aria-label={`Replace keys for ${c.name}`}
+                      icon={<MdEdit />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setS3Connection(c.name)}
+                      p={-1}
+                      mr={-3}
+                    />
+                    <IconButton
+                      aria-label={`Remove ${c.name}`}
+                      icon={<FaTrash />}
+                      size="xs"
+                      variant="ghost"
+                      colorScheme="red"
+                      onClick={() => setDisconnect(`s3:${c.name}`)}
+                      isDisabled={transfer?.status === "running"}
+                    />
+                    {transfer?.status === "running" && (
                       <Text color="ui.dim">
                         Transferring to Calkit Hub storage
                       </Text>
                     )}
-                  {transferQuery.data?.provider === "s3" &&
-                    transferQuery.data.label === c.name &&
-                    transferQuery.data.status === "failed" && (
+                    {transfer?.status === "failed" && (
                       <Text color="ui.danger">
                         Transfer failed
-                        {transferQuery.data.error
-                          ? `: ${transferQuery.data.error}`
-                          : ""}
+                        {transfer.error ? `: ${transfer.error}` : ""}
                       </Text>
                     )}
-                </HStack>
-              ))}
+                  </HStack>
+                )
+              })}
               <Button
                 variant="primary"
                 size="xs"

@@ -100,7 +100,7 @@ e.g., the Open Storage Network (OSN), hold DVC objects.
 | Dropbox, OneDrive, Google Drive       | namespace folder, e.g., `Calkit/` | Their narrower OAuth scopes are limited to a folder like this                           |
 
 A service may offer the other kind as an option,
-e.g., a dedicated S3 bucket or prefix, such as an existing DVC remote.
+e.g., a dedicated S3 bucket when the credential can create one.
 HF is the exception,
 and its buckets are always dedicated.
 A Xet read token covers a whole bucket,
@@ -184,19 +184,13 @@ S3 has no OAuth, so users paste access keys.
 Keys reach one endpoint, e.g., an OSN pod or AWS,
 and a user can save several sets, each under a name.
 A project selects a set of keys and a bucket with an optional prefix,
-which is a namespace unless it's marked as dedicated,
-e.g., an existing DVC remote holding objects at its root.
+which is a namespace.
 The hub signs URLs with the keys,
 so clients transfer directly with the bucket.
 Writing a file in the project's folder shows whether the keys can write,
 since its `.calkit-project` file may already be there;
 storage they can only read is added to the project's previous storage,
 so it's read from but never written to.
-A dedicated bucket or prefix may hold other files,
-so only DVC's objects, under `files/` or, from DVC 2, at its root,
-are read from or written to it,
-rather than everyone who can read the project reading the whole bucket,
-or everyone who can write to it overwriting the rest.
 The hub only reaches endpoints on the public internet,
 checking each connection's address as it's made,
 since it would otherwise make requests into its own network for users.

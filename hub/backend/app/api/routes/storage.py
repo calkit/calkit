@@ -42,8 +42,6 @@ class StorageResourcePublic(BaseModel):
     dedicated: bool
     # Whether it's only read from, e.g., an S3 bucket with read-only keys
     read_only: bool = False
-    # For S3, the name of the connection, i.e., the keys, that reaches it
-    connection: str | None = None
     created: datetime
     connected_by: str
 
@@ -56,11 +54,6 @@ def to_public(resource: StorageResource) -> StorageResourcePublic:
         bucket=resource.bucket,
         dedicated=resource.project_id is not None,
         read_only=resource.read_only,
-        connection=(
-            resource.credential.label
-            if resource.credential is not None
-            else None
-        ),
         created=resource.created,
         connected_by=resource.credential_user.account.name,
     )
@@ -166,17 +159,17 @@ class CredentialStoragePublic(BaseModel):
     projects: list[str]
 
 
-@router.get("/user/{provider}/storage")
+@router.get("/user/storage/{provider}")
 def get_user_service_storage(
     provider: Literal["huggingface", "box", "s3"],
     session: SessionDep,
     current_user: CurrentUser,
-    label: str = "default",
+    connection: str = "default",
 ) -> list[CredentialStoragePublic]:
     """Get the storage reached with the current user's account on a service,
     e.g., HF, which disconnecting it would make unreachable.
 
-    For S3, ``label`` is the name of the connection.
+    For S3, ``connection`` is the name of the connection.
     """
     return [
         CredentialStoragePublic(
@@ -191,7 +184,7 @@ def get_user_service_storage(
             ],
         )
         for r in storage.get_credential_resources(
-            session, current_user.id, provider=provider, label=label
+            session, current_user.id, provider=provider, label=connection
         )
     ]
 
@@ -203,7 +196,7 @@ class StorageTransferStatus(BaseModel):
     # Where it's from, e.g., "huggingface"
     provider: str | None = None
     # For S3, the connection's name
-    label: str | None = None
+    connection: str | None = None
 
 
 @router.get("/user/storage-transfer")
@@ -213,14 +206,11 @@ def get_user_storage_transfer(
     """Get the status of moving the storage reached with one of the current
     user's accounts on a service to the hub's own storage.
     """
-    status, error, provider, label = app.tasks.get_storage_transfer_status(
-        current_user.id
+    status, error, provider, connection = (
+        app.tasks.get_storage_transfer_status(current_user.id)
     )
     return StorageTransferStatus(
-        status=status,
-        error=error,
-        provider=provider,
-        label=label if provider == "s3" else None,
+        status=status, error=error, provider=provider, connection=connection
     )
 
 
@@ -270,23 +260,19 @@ def set_project_storage(
         and resource.kind in ("box-folder", "s3-bucket")
         and not resource.read_only
     ):
-        service_name = "Box" if resource.kind == "box-folder" else "S3"
+        service_name = storage.STORAGE_PROVIDER_NAMES[
+            storage.STORAGE_KIND_PROVIDERS[resource.kind]
+        ]
         try:
             storage.claim_project_folder(
-                storage.get_resource_storage(session, resource),
-                project,
-                # A dedicated bucket may already be the project's DVC remote
-                adopt=resource.project_id is not None,
+                storage.get_resource_storage(session, resource), project
             )
         except storage.FolderTakenError as e:
-            fix = (
-                "rename or move it in Box"
-                if resource.kind == "box-folder"
-                else "move it in S3"
+            raise HTTPException(
+                409, f"{e}; move it in {service_name}, then try again"
             )
-            raise HTTPException(409, f"{e}; {fix}, then try again")
         except PermissionError:
-            raise HTTPException(403, f"Can't write to {resource.bucket}")
+            raise HTTPException(422, f"Keys can't write to {resource.bucket}")
         except HTTPException:
             raise
         except Exception:
@@ -427,9 +413,7 @@ def put_project_storage(
             resource.credential_user_id,
             storage.STORAGE_KIND_PROVIDERS.get(resource.kind, ""),
             label=(
-                resource.credential.label
-                if resource.credential is not None
-                else "default"
+                resource.credential.label if resource.credential else "default"
             ),
         ):
             raise HTTPException(
@@ -452,7 +436,7 @@ def put_project_storage(
 BOX_FOLDER_NAME = "Calkit"
 
 
-@router.post("/projects/{owner_name}/{project_name}/storage/box-folder")
+@router.post("/projects/{owner_name}/{project_name}/storage/box-folders")
 def post_project_box_folder(
     owner_name: str,
     project_name: str,
@@ -548,7 +532,7 @@ def post_project_box_folder(
     return get_project_storage_settings(project)
 
 
-@router.post("/projects/{owner_name}/{project_name}/storage/hf-bucket")
+@router.post("/projects/{owner_name}/{project_name}/storage/hf-buckets")
 def post_project_hf_bucket(
     owner_name: str,
     project_name: str,
@@ -631,38 +615,28 @@ S3_URL_RE = re.compile(
 )
 
 
-class ProjectS3BucketSettings(ProjectStorageSettings):
-    # The storage the bucket is, which is read-only if the keys can only
-    # read it
-    added: StorageResourcePublic
-
-
 class ProjectS3BucketPost(BaseModel):
     # The name of the current user's S3 connection, i.e., keys, to use
     connection: str
     # The bucket and an optional prefix in it, e.g., ``s3://bucket/prefix``
     url: str
-    # Whether it holds only this project, e.g., an existing DVC remote,
-    # rather than each of the owner's projects in its own folder
-    dedicated: bool = False
 
 
-@router.post("/projects/{owner_name}/{project_name}/storage/s3-bucket")
+@router.post("/projects/{owner_name}/{project_name}/storage/s3-buckets")
 def post_project_s3_bucket(
     owner_name: str,
     project_name: str,
     req: ProjectS3BucketPost,
     session: SessionDep,
     current_user: CurrentUser,
-) -> ProjectS3BucketSettings:
+) -> StorageResourcePublic:
     """Send a project's new DVC objects to an S3 bucket, reached with one of
     the current user's S3 connections.
 
-    Unless it's dedicated to the project, the bucket, or the prefix in it,
-    is shared by the owner account's projects, each in an
-    ``{owner}/{project}`` folder, so it's kept as storage they can select.
-    If the keys can only read it, the project reads from it but new objects
-    keep going where they did.
+    The bucket, or the prefix in it, is shared by the owner account's
+    projects, each in an ``{owner}/{project}`` folder, so it's kept as
+    storage they can select. If the keys can only read it, the project reads
+    from it but new objects keep going where they did.
     """
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -697,105 +671,66 @@ def post_project_s3_bucket(
     resource = session.exec(
         select(StorageResource).where(
             StorageResource.owner_account_id == account.id,
-            StorageResource.kind == "s3-bucket",
             StorageResource.credential_id == credential.id,
             StorageResource.bucket == bucket,
-            StorageResource.project_id
-            == (project.id if req.dedicated else None),
         )
     ).first()
     created = resource is None
-    if resource is not None and resource.read_only:
-        # The keys may have been replaced with ones that can write, and then
-        # the folder is claimed along with the project's storage
-        try:
-            writable = storage.folder_is_writable(
-                storage.get_resource_storage(session, resource), project
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.info(f"Failed to write to S3 bucket {bucket}: {e}")
-            raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
-        if writable:
-            resource.read_only = False
-            session.add(resource)
     if resource is None:
-        metadata = credential.metadata_json or {}
-        endpoint_url = metadata.get("endpoint_url")
-        access_key_id, secret_access_key = storage.get_s3_credential_keys(
-            credential
-        )
-        try:
-            fs = storage.get_s3_fs(
-                access_key_id,
-                secret_access_key,
-                endpoint_url=endpoint_url,
-                region=metadata.get("region"),
-            )
-            # AWS signs for the bucket's own region, and other storage for
-            # the connection's, so it can change with the keys
-            region = None
-            if not endpoint_url:
-                region = storage.get_s3_bucket_region(fs, bucket_name)
-        except storage.S3EndpointError as e:
-            raise HTTPException(400, str(e))
-        except Exception as e:
-            logger.info(f"Failed to reach S3 bucket {bucket_name}: {e}")
-            raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
         resource = StorageResource(
             owner_account_id=account.id,
-            project_id=project.id if req.dedicated else None,
             kind="s3-bucket",
             bucket=bucket,
             credential_user_id=current_user.id,
             credential_id=credential.id,
-            region=region,
         )
         resource.credential_user = current_user
         resource.credential = credential
-        target = storage.get_resource_storage(session, resource)
-        try:
-            target.fs.ls(target.data_prefix)
-        except FileNotFoundError:
-            pass
-        except PermissionError:
-            raise HTTPException(403, f"Keys can't read '{bucket}'")
-        except Exception as e:
-            logger.info(f"Failed to list S3 bucket {bucket}: {e}")
-            raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
-        # Storage the keys can write is claimed along with the project's
-        # storage, but read-only storage isn't, since nothing goes there
-        try:
-            resource.read_only = not storage.folder_is_writable(
-                target, project
+    target = storage.get_resource_storage(session, resource)
+    try:
+        target.fs.ls(target.data_prefix)
+    except FileNotFoundError:
+        # A new prefix has nothing in it yet
+        pass
+    except PermissionError:
+        raise HTTPException(422, f"Keys can't read '{bucket}'")
+    except Exception as e:
+        logger.info(f"Failed to list S3 bucket {bucket}: {e}")
+        raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
+    # Checked each time, since the connection's keys can be replaced, and
+    # storage the keys can write is claimed along with the project's
+    try:
+        resource.read_only = not storage.folder_is_writable(target, project)
+        # AWS signs for the bucket's own region, and other storage for the
+        # connection's, so it can change with the keys
+        if created and not target.fs.endpoint_url:
+            resource.region = storage.get_s3_bucket_region(
+                target.fs, bucket_name
             )
-        except FileNotFoundError:
-            raise HTTPException(404, f"Bucket '{bucket_name}' not found")
-        except Exception as e:
-            logger.info(f"Failed to write to S3 bucket {bucket}: {e}")
-            raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
-        if not req.dedicated:
-            taken = set(
-                session.exec(
-                    select(StorageResource.name).where(
-                        StorageResource.owner_account_id == account.id
-                    )
-                ).all()
-            )
-            base = (
-                re.sub(r"[^a-z0-9-]+", "-", bucket_name.lower())[:56].strip(
-                    "-"
+    except FileNotFoundError:
+        raise HTTPException(404, f"Bucket '{bucket_name}' not found")
+    except Exception as e:
+        logger.info(f"Failed to write to S3 bucket {bucket}: {e}")
+        raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
+    if created:
+        taken = set(
+            session.exec(
+                select(StorageResource.name).where(
+                    StorageResource.owner_account_id == account.id
                 )
-                or "s3"
-            )
-            name = base
-            n = 2
-            while name in taken:
-                name = f"{base}-{n}"
-                n += 1
-            resource.name = name
-        session.add(resource)
+            ).all()
+        )
+        base = (
+            re.sub(r"[^a-z0-9-]+", "-", bucket_name.lower())[:56].strip("-")
+            or "s3"
+        )
+        name = base
+        n = 2
+        while name in taken:
+            name = f"{base}-{n}"
+            n += 1
+        resource.name = name
+    session.add(resource)
     from_kind = (
         project.dvc_storage.kind if project.dvc_storage is not None else "hub"
     )
@@ -817,7 +752,4 @@ def post_project_s3_bucket(
             from_kind=from_kind,
             to_kind="s3-bucket",
         )
-    return ProjectS3BucketSettings(
-        **get_project_storage_settings(project).model_dump(),
-        added=to_public(resource),
-    )
+    return to_public(resource)

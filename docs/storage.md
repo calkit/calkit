@@ -192,15 +192,9 @@ so you can use them for other projects without pasting them again,
 and replace or remove them under connected accounts in your
 [hub account settings](https://calkit.io/settings).
 
-By default,
-each project gets its own folder in the bucket,
+Each project gets its own folder in the bucket,
 under the project's owner and name,
 so many projects can share one bucket.
-If the bucket or prefix should hold only this project's files,
-e.g., because it's already the project's DVC remote,
-check "Only this project's files."
-Calkit only reads and writes DVC's files there,
-so anything else in the bucket stays private and unchanged.
 
 If the keys can only read the bucket,
 Calkit reads files from it but sends new files where they went before.

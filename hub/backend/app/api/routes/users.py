@@ -2,7 +2,6 @@
 
 import json
 import logging
-import re
 import secrets
 import urllib.parse
 import uuid
@@ -12,10 +11,10 @@ from typing import Annotated, Any, Literal, Sequence
 import requests
 import sqlalchemy
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, StringConstraints
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import selectinload
-from sqlmodel import Field, col, func, or_, select
+from sqlmodel import Field, Session, col, func, or_, select
 
 import app.projects
 import app.storage
@@ -1540,7 +1539,6 @@ class S3ConnectionPublic(BaseModel):
     endpoint_url: str | None
     region: str | None
     access_key_id: str
-    updated: datetime
 
 
 class S3ConnectionPut(BaseModel):
@@ -1548,9 +1546,13 @@ class S3ConnectionPut(BaseModel):
     region: str | None = Field(default=None, max_length=64)
     access_key_id: str = Field(min_length=1, max_length=255)
     secret_access_key: str = Field(min_length=1, max_length=1024)
-    # Whether to replace the keys of a connection with this name, rather
-    # than refuse
-    replace: bool = False
+
+
+S3_CONNECTION_NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{1,63}$"
+
+
+class S3ConnectionPost(S3ConnectionPut):
+    name: Annotated[str, StringConstraints(pattern=S3_CONNECTION_NAME_PATTERN)]
 
 
 def to_s3_connection_public(
@@ -1562,7 +1564,6 @@ def to_s3_connection_public(
         endpoint_url=metadata.get("endpoint_url"),
         region=metadata.get("region"),
         access_key_id=credential.provider_account_id or "",
-        updated=credential.updated,
     )
 
 
@@ -1582,63 +1583,53 @@ def get_user_s3_connections(
     return [to_s3_connection_public(c) for c in credentials]
 
 
-S3_CONNECTION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
-
-
-@router.put("/user/s3-connections/{name}")
-def put_user_s3_connection(
-    name: str,
-    req: S3ConnectionPut,
-    session: SessionDep,
-    current_user: CurrentUser,
+def save_s3_connection(
+    session: Session, user: User, name: str, req: S3ConnectionPut
 ) -> S3ConnectionPublic:
-    """Save keys for S3 or S3-compatible storage, e.g., OSN, as a named
-    connection, or, with ``replace``, replace a connection's keys.
+    """Save keys for S3 or S3-compatible storage as a named connection,
+    replacing its keys if it exists.
 
     Storage using a connection is found at its endpoint, so that can't
     change while there is any.
     """
-    if not S3_CONNECTION_NAME_RE.match(name):
-        raise HTTPException(
-            422, "Name must be lowercase letters, numbers, and dashes"
-        )
     endpoint_url = (req.endpoint_url or "").strip().rstrip("/") or None
-    region = (req.region or "").strip() or None
     if endpoint_url is not None:
         try:
             app.storage.check_s3_endpoint_url(endpoint_url)
-        except app.storage.S3EndpointError as e:
+        except ValueError as e:
             raise HTTPException(422, str(e))
     existing = users.get_external_credential(
-        session=session, user=current_user, provider="s3", label=name
+        session=session, user=user, provider="s3", label=name
     )
-    if existing is not None and not req.replace:
-        raise HTTPException(409, f"Keys named '{name}' already saved")
     if (
         existing is not None
         and (existing.metadata_json or {}).get("endpoint_url") != endpoint_url
         and app.storage.get_credential_resources(
-            session, current_user.id, provider="s3", label=name
+            session, user.id, provider="s3", label=name
         )
     ):
         raise HTTPException(409, "Storage uses this connection's endpoint")
+    access_key_id = req.access_key_id.strip()
     credential = users.save_external_credential(
         session=session,
-        user=current_user,
+        user=user,
         provider="s3",
         secret_payload=json.dumps(
             {
-                "access_key_id": req.access_key_id.strip(),
+                "access_key_id": access_key_id,
                 "secret_access_key": req.secret_access_key.strip(),
             }
         ),
         credential_type="access-key",
         label=name,
-        provider_account_id=req.access_key_id.strip(),
-        metadata_json={"endpoint_url": endpoint_url, "region": region},
+        provider_account_id=access_key_id,
+        metadata_json={
+            "endpoint_url": endpoint_url,
+            "region": (req.region or "").strip() or None,
+        },
     )
     mixpanel.user_connected_s3(
-        current_user,
+        user,
         endpoint_host=(
             str(urllib.parse.urlparse(endpoint_url).hostname)
             if endpoint_url
@@ -1649,37 +1640,54 @@ def put_user_s3_connection(
     return to_s3_connection_public(credential)
 
 
-@router.delete("/user/external-credentials/{provider}")
-def delete_user_external_credential(
+@router.post("/user/s3-connections")
+def post_user_s3_connection(
+    req: S3ConnectionPost, session: SessionDep, current_user: CurrentUser
+) -> S3ConnectionPublic:
+    """Save keys for S3 or S3-compatible storage, e.g., OSN, as a new named
+    connection.
+    """
+    if users.get_external_credential(
+        session=session, user=current_user, provider="s3", label=req.name
+    ):
+        raise HTTPException(409, f"Keys named '{req.name}' already saved")
+    return save_s3_connection(session, current_user, req.name, req)
+
+
+@router.put("/user/s3-connections/{name}")
+def put_user_s3_connection(
+    name: str,
+    req: S3ConnectionPut,
     session: SessionDep,
     current_user: CurrentUser,
+) -> S3ConnectionPublic:
+    """Replace the keys of an S3 connection."""
+    if not users.get_external_credential(
+        session=session, user=current_user, provider="s3", label=name
+    ):
+        raise HTTPException(404, f"S3 connection '{name}' not found")
+    return save_s3_connection(session, current_user, name, req)
+
+
+def disconnect_account(
+    session: Session,
+    user: User,
     provider: str,
-    storage_action: Literal["transfer", "orphan"] | None = None,
+    storage_action: Literal["transfer", "orphan"] | None,
     label: str = "default",
 ) -> Message:
-    """Disconnect an external account by deleting its credential.
-
-    Storage reached with the account, e.g., HF buckets, would become
-    unreachable, so if there is any, ``storage_action`` says what to do with
-    it: ``transfer`` its objects to the hub's own storage first, which
-    happens on the worker, with the account disconnected once it's done,
-    or ``orphan`` them, i.e., leave them where they are, out of reach of
-    their projects. Nothing is deleted from the service either way.
+    """Disconnect an external account by deleting its credential, doing
+    ``storage_action`` with any storage it reaches.
 
     For S3, ``label`` is the name of the connection.
     """
-    if provider == "github":
-        raise HTTPException(
-            403, "Cannot disconnect GitHub as it is your login method"
-        )
     resources = app.storage.get_credential_resources(
-        session, current_user.id, provider=provider, label=label
+        session, user.id, provider=provider, label=label
     )
     service_name = app.storage.STORAGE_PROVIDER_NAMES.get(provider)
     if (
         service_name is not None
-        and app.tasks.get_storage_transfer_status(current_user.id)[0]
-        == "running"
+        and app.tasks.get_storage_transfer_status(user.id)[0] == "running"
     ):
         raise HTTPException(
             409, "Transfer to Calkit Hub storage already running"
@@ -1691,7 +1699,7 @@ def delete_user_external_credential(
     if resources:
         assert storage_action is not None
         mixpanel.user_disconnected_with_storage(
-            current_user,
+            user,
             provider,
             storage_action,
             n_storage=len(resources),
@@ -1728,7 +1736,7 @@ def delete_user_external_credential(
         # copying its objects, with reads falling back to the service until
         # then
         if not app.tasks.enqueue_storage_transfer(
-            str(current_user.id), provider, label=label
+            str(user.id), provider, label=label
         ):
             raise HTTPException(503, "Transfers unavailable")
         return Message(
@@ -1738,23 +1746,20 @@ def delete_user_external_credential(
     for resource in resources:
         session.delete(resource)
     credential = users.get_external_credential(
-        session=session,
-        user=current_user,
-        provider=provider,
-        label=label,
+        session=session, user=user, provider=provider, label=label
     )
     if credential:
         if provider == "box":
             users.revoke_box_token(credential)
         session.delete(credential)
     # Also delete legacy tokens if they exist
-    if provider == "zenodo" and current_user.zenodo_token:
-        session.delete(current_user.zenodo_token)
+    if provider == "zenodo" and user.zenodo_token:
+        session.delete(user.zenodo_token)
     elif provider == "overleaf":
-        if current_user.overleaf_token:
-            session.delete(current_user.overleaf_token)
+        if user.overleaf_token:
+            session.delete(user.overleaf_token)
         overleaf_session = users.get_overleaf_session_credential(
-            session=session, user=current_user
+            session=session, user=user
         )
         if overleaf_session:
             session.delete(overleaf_session)
@@ -1762,6 +1767,50 @@ def delete_user_external_credential(
     if provider == "s3":
         return Message(message=f"S3 connection {label} removed")
     return Message(message=f"{provider.capitalize()} account disconnected")
+
+
+@router.delete("/user/s3-connections/{name}")
+def delete_user_s3_connection(
+    name: str,
+    session: SessionDep,
+    current_user: CurrentUser,
+    storage_action: Literal["transfer", "orphan"] | None = None,
+) -> Message:
+    """Remove an S3 connection, doing ``storage_action`` with any storage it
+    reaches, as when disconnecting an account.
+    """
+    if not users.get_external_credential(
+        session=session, user=current_user, provider="s3", label=name
+    ):
+        raise HTTPException(404, f"S3 connection '{name}' not found")
+    return disconnect_account(
+        session, current_user, "s3", storage_action, label=name
+    )
+
+
+@router.delete("/user/external-credentials/{provider}")
+def delete_user_external_credential(
+    session: SessionDep,
+    current_user: CurrentUser,
+    provider: str,
+    storage_action: Literal["transfer", "orphan"] | None = None,
+) -> Message:
+    """Disconnect an external account by deleting its credential.
+
+    Storage reached with the account, e.g., HF buckets, would become
+    unreachable, so if there is any, ``storage_action`` says what to do with
+    it: ``transfer`` its objects to the hub's own storage first, which
+    happens on the worker, with the account disconnected once it's done,
+    or ``orphan`` them, i.e., leave them where they are, out of reach of
+    their projects. Nothing is deleted from the service either way.
+    """
+    if provider == "github":
+        raise HTTPException(
+            403, "Cannot disconnect GitHub as it is your login method"
+        )
+    if provider == "s3":
+        raise HTTPException(404, "Remove S3 connections by name")
+    return disconnect_account(session, current_user, provider, storage_action)
 
 
 @router.get("/user/storage")

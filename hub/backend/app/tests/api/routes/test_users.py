@@ -2589,19 +2589,19 @@ def test_s3_connections(client: TestClient, db: Session) -> None:
     }
     url = "/user/s3-connections"
     assert client.get(url, headers=headers).json() == []
-    for name in ("Bad_Name", "x", "has space"):
-        response = client.put(f"{url}/{name}", headers=headers, json=keys)
-        assert response.status_code in (404, 422), name
-    response = client.put(
-        f"{url}/osn",
-        headers=headers,
-        json=keys | {"endpoint_url": "https://host:abc"},
-    )
-    assert response.status_code == 422
+    for body in (
+        keys | {"name": "Bad_Name"},
+        keys | {"name": "x"},
+        keys | {"name": "osn", "endpoint_url": "https://host:abc"},
+    ):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == 422, body
+    # Only saved connections can have their keys replaced
     response = client.put(f"{url}/osn", headers=headers, json=keys)
+    assert response.status_code == 404
+    response = client.post(url, headers=headers, json=keys | {"name": "osn"})
     assert response.status_code == 200
-    # Keys under a name already saved are only replaced when asked to
-    response = client.put(f"{url}/osn", headers=headers, json=keys)
+    response = client.post(url, headers=headers, json=keys | {"name": "osn"})
     assert response.status_code == 409
     listed = client.get(url, headers=headers).json()
     assert [
@@ -2629,32 +2629,33 @@ def test_s3_connections(client: TestClient, db: Session) -> None:
     response = client.put(
         f"{url}/osn",
         headers=headers,
-        json=keys | {"endpoint_url": "http://elsewhere:9000", "replace": True},
+        json=keys | {"endpoint_url": "http://elsewhere:9000"},
     )
     assert response.status_code == 409
     response = client.put(
-        f"{url}/osn",
-        headers=headers,
-        json=keys | {"access_key_id": "new-id", "replace": True},
+        f"{url}/osn", headers=headers, json=keys | {"access_key_id": "new-id"}
     )
     assert response.status_code == 200
     assert response.json()["access_key_id"] == "new-id"
     db.expire_all()
     assert db.get(StorageResource, resource_id) is not None
     # Removing it needs a choice for its storage, which is only its own
-    disconnect = "/user/external-credentials/s3"
     response = client.get(
-        "/user/s3/storage", headers=headers, params={"label": "other"}
+        "/user/storage/s3", headers=headers, params={"connection": "other"}
     )
     assert response.json() == []
-    response = client.delete(
-        disconnect, headers=headers, params={"label": "osn"}
+    response = client.get(
+        "/user/storage/s3", headers=headers, params={"connection": "osn"}
     )
+    assert [r["id"] for r in response.json()] == [str(resource_id)]
+    # It's removed by name, not as the account's only S3 credential
+    response = client.delete("/user/external-credentials/s3", headers=headers)
+    assert response.status_code == 404
+    assert client.delete(f"{url}/nope", headers=headers).status_code == 404
+    response = client.delete(f"{url}/osn", headers=headers)
     assert response.status_code == 409
     response = client.delete(
-        disconnect,
-        headers=headers,
-        params={"label": "osn", "storage_action": "orphan"},
+        f"{url}/osn", headers=headers, params={"storage_action": "orphan"}
     )
     assert response.status_code == 200
     assert client.get(url, headers=headers).json() == []

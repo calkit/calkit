@@ -190,6 +190,7 @@ def test_copy_resource_to_internal() -> None:
             raise PermissionError("expired token")
 
     expired = dataclasses.replace(shared, fs=ExpiredFs())
+    hf_resource = SimpleNamespace(kind="hf-bucket")
     with (
         patch.object(
             storage, "get_resource_storage", return_value=shared
@@ -208,11 +209,11 @@ def test_copy_resource_to_internal() -> None:
                 patch.object(shared.fs, "open", return_value=source_file),
                 pytest.raises(OSError),
             ):
-                storage.copy_resource_to_internal(None, None)  # type: ignore[arg-type]
+                storage.copy_resource_to_internal(None, hf_resource)  # type: ignore[arg-type]
             assert internal.fs.cat(partial) == b"t"
         # Each object gets a current token
         get_storage.side_effect = [expired, expired, shared]
-        assert storage.copy_resource_to_internal(None, None) == 1  # type: ignore[arg-type]
+        assert storage.copy_resource_to_internal(None, hf_resource) == 1  # type: ignore[arg-type]
         get_storage.side_effect = None
     for project in projects:
         assert (
@@ -613,51 +614,30 @@ def test_s3_storage(db: Session) -> None:
         credential_user_id=user.id,
         credential_id=credentials["lab"].id,
     )
-    dedicated = StorageResource(
+    other = StorageResource(
         owner_account_id=user.account.id,
-        project_id=project.id,
+        name="other",
         kind="s3-bucket",
-        bucket=f"{bucket_name}/dvc",
+        bucket=bucket_name,
         credential_user_id=user.id,
         credential_id=credentials["other"].id,
     )
     db.add(namespace)
-    db.add(dedicated)
+    db.add(other)
     db.commit()
     # Each connection reaches only its own storage
-    for label, resource in (("lab", namespace), ("other", dedicated)):
+    for label, resource in (("lab", namespace), ("other", other)):
         assert storage.get_credential_resources(
             db, user.id, provider="s3", label=label
         ) == [resource]
-    # Projects in a shared bucket each get a folder, and a dedicated one
-    # holds the project's objects at its root, e.g., an existing DVC remote
+    # Projects in a shared bucket, or a prefix in it, each get a folder
     target = storage.get_resource_storage(db, namespace)
     assert target.backend == "s3"
     assert target.data_prefix == f"s3://{bucket_name}/calkit"
     assert target.make_project_path(owner, project.name, "files") == (
         f"s3://{bucket_name}/calkit/{owner}/{project.name}/files"
     )
-    remote = storage.get_resource_storage(db, dedicated)
-    assert remote.make_project_path(owner, project.name, "files") == (
-        f"s3://{bucket_name}/dvc/files"
-    )
     path = "files/md5/ab/cdef"
-    remote.fs.pipe_file(
-        remote.make_project_path(owner, project.name, path), b"x"
-    )
-    with pytest.raises(storage.FolderTakenError):
-        storage.claim_project_folder(remote, project)
-    storage.claim_project_folder(remote, project, adopt=True)
-    # Only DVC's objects in it are copied, including ones from DVC 2 at its
-    # root, not anything else in the bucket
-    dvc_2_path = f"ab/{'c' * 30}"
-    for other_path in (dvc_2_path, "secret.csv"):
-        remote.fs.pipe_file(
-            remote.make_project_path(owner, project.name, other_path), b"x"
-        )
-    assert set(
-        storage.get_project_object_sizes(remote, owner, project.name)
-    ) == {path, dvc_2_path}
     # Whether keys can write is found by writing, since a folder already
     # marked as the project's isn't written to again
     storage.claim_project_folder(target, project)
@@ -674,11 +654,11 @@ def test_s3_storage(db: Session) -> None:
     )
     assert target.fs.cat_file(marker) == str(project.id).encode()
     # Another project with its name, e.g., after it's deleted, can't have it
-    other = SimpleNamespace(
+    renamed = SimpleNamespace(
         owner_account_name=owner, name=project.name, id=uuid.uuid4()
     )
     with pytest.raises(storage.FolderTakenError):
-        storage.claim_project_folder(target, other)  # type: ignore[arg-type]
+        storage.claim_project_folder(target, renamed)  # type: ignore[arg-type]
     # Clients get presigned URLs, signed with the connection's keys
     fpath = target.make_project_path(owner, project.name, path)
     url = target.fs.sign(fpath, expiration=60, client_method="put_object")
@@ -712,48 +692,28 @@ def test_s3_storage(db: Session) -> None:
             str(user.id), "s3", label="other"
         )
     sleep.assert_called_once_with(storage.UPLOAD_URL_EXPIRES + 60)
-    # Endpoints off the internet are refused outside local development
+    # Endpoints must be plain HTTPS hosts outside local development
     for bad in ("minio", "https://host:abc", "https://[::1"):
-        with pytest.raises(storage.S3EndpointError):
+        with pytest.raises(ValueError):
             storage.check_s3_endpoint_url(bad)
     with patch("app.config.settings.ENVIRONMENT", "production"):
         for bad in ("http://example.com", "https://example.com/path"):
-            with pytest.raises(storage.S3EndpointError):
+            with pytest.raises(ValueError):
                 storage.check_s3_endpoint_url(bad)
-        for address in ("10.0.0.1", "127.0.0.1", "169.254.169.254"):
-            with (
-                patch(
-                    "socket.getaddrinfo",
-                    return_value=[(None, None, None, "", (address, 443))],
-                ),
-                pytest.raises(storage.S3EndpointError),
-            ):
-                storage.check_s3_endpoint_url("https://s3.example.org")
-        with patch(
-            "socket.getaddrinfo",
-            return_value=[(None, None, None, "", ("8.8.8.8", 443))],
-        ):
-            storage.check_s3_endpoint_url("https://s3.example.org")
-        with (
-            patch("socket.getaddrinfo", side_effect=socket.gaierror),
-            pytest.raises(storage.S3EndpointError),
-        ):
-            storage.check_s3_endpoint_url("https://nope.invalid")
-        # And each connection is checked as it's made, e.g., after a
-        # redirect or the host resolving differently
+        storage.check_s3_endpoint_url("https://s3.example.org")
+        # And each connection is refused unless it's to a public address,
+        # e.g., after a redirect or the host resolving differently
         guarded = storage.get_s3_fs("key", "secret", "https://s3.example.org")
         assert guarded.config_kwargs["connector_args"] == {
             "socket_factory": storage.make_public_socket
         }
-    # Including private IPv4 addresses inside IPv6 ones, e.g., for NAT64
+    # Including private IPv4 addresses mapped into IPv6 ones
     for address in (
         "127.0.0.1",
         "10.1.2.3",
         "169.254.169.254",
         "::1",
         "::ffff:10.0.0.1",
-        "64:ff9b::a00:1",
-        "2002:a00:1::1",
     ):
         family = socket.AF_INET6 if ":" in address else socket.AF_INET
         with pytest.raises(OSError):

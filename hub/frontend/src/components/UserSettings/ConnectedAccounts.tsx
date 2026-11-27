@@ -34,6 +34,7 @@ import LoadingSpinner from "../Common/LoadingSpinner"
 import type { AxiosError } from "axios"
 import { StorageService, type TokenPut, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import { startBoxAuth } from "../../lib/box"
 import { appName } from "../../lib/core"
 import { handleError } from "../../lib/errors"
 import { startGitHubOAuth } from "../../lib/github"
@@ -42,7 +43,6 @@ import {
   getGoogleAuthUrl,
   getGoogleRedirectUri,
 } from "../../lib/google"
-import { startBoxAuth } from "../../lib/box"
 import { startHuggingFaceAuth } from "../../lib/huggingface"
 import { getStorageLabel, getStorageUrl } from "../../lib/storage"
 import {
@@ -50,6 +50,7 @@ import {
   getZenodoRedirectUri,
   zenodoAuthStateParam,
 } from "../../lib/zenodo"
+import S3ConnectionModal from "./S3ConnectionModal"
 import UpdateOverleafToken from "./UpdateOverleafToken"
 
 type StorageAction = "transfer" | "orphan"
@@ -57,6 +58,7 @@ type StorageAction = "transfer" | "orphan"
 const STORAGE_SERVICES: Record<string, string> = {
   huggingface: "Hugging Face",
   box: "Box",
+  s3: "S3",
 }
 
 function ConnectedAccounts() {
@@ -64,22 +66,50 @@ function ConnectedAccounts() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const { disconnect } = useSearch({ from: "/_layout/settings" })
+  const { disconnect, add_s3_keys, s3_connection } = useSearch({
+    from: "/_layout/settings",
+  })
   const navigate = useNavigate({ from: "/settings" })
   const setDisconnect = (provider: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, disconnect: provider }) })
+  const setS3Connection = (name: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, s3_connection: name }) })
+  const closeS3Keys = () =>
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        add_s3_keys: undefined,
+        s3_connection: undefined,
+      }),
+    })
+  // An S3 connection is disconnected by name, e.g., "s3:osn"
+  const [disconnectProvider, s3Label] = disconnect?.startsWith("s3:")
+    ? ["s3", disconnect.slice(3)]
+    : [disconnect, undefined]
   // A service whose storage disconnecting would strand, e.g., Hugging Face
   const storageProvider =
-    disconnect && disconnect in STORAGE_SERVICES ? disconnect : undefined
+    disconnectProvider && disconnectProvider in STORAGE_SERVICES
+      ? disconnectProvider
+      : undefined
   const serviceName = storageProvider ? STORAGE_SERVICES[storageProvider] : ""
   const serviceStorageQuery = useQuery({
-    queryKey: ["user", storageProvider, "storage"],
+    queryKey: ["user", storageProvider, "storage", s3Label],
     queryFn: () =>
       StorageService.getUserServiceStorage({
-        provider: storageProvider as "huggingface" | "box",
+        provider: storageProvider as "huggingface" | "box" | "s3",
+        connection: s3Label,
       }).then((response) => response.data),
     enabled: storageProvider !== undefined,
   })
+  const s3ConnectionsQuery = useQuery({
+    queryKey: ["user", "s3-connections"],
+    queryFn: () =>
+      UsersService.getUserS3Connections().then((response) => response.data),
+  })
+  // Opened only once found, so it can't show as an empty form to add keys
+  const replacedS3Connection = s3ConnectionsQuery.data?.find(
+    (c) => c.name === s3_connection,
+  )
   // A transfer to Calkit Hub storage runs on the server, so it's checked
   // until it's done
   const transferQuery = useQuery({
@@ -102,11 +132,22 @@ function ConnectedAccounts() {
   }, [transferStatus, queryClient])
   const [storageAction, setStorageAction] = useState<StorageAction>("transfer")
   const disconnectStorageServiceMutation = useMutation({
-    mutationFn: () =>
-      UsersService.deleteUserExternalCredential({
-        provider: storageProvider as string,
-        storage_action: serviceStorageQuery.data?.length ? storageAction : null,
-      }).then((response) => response.data),
+    mutationFn: () => {
+      const storage_action = serviceStorageQuery.data?.length
+        ? storageAction
+        : null
+      return (
+        s3Label
+          ? UsersService.deleteUserS3Connection({
+              name: s3Label,
+              storage_action,
+            })
+          : UsersService.deleteUserExternalCredential({
+              provider: storageProvider as string,
+              storage_action,
+            })
+      ).then((response) => response.data)
+    },
     onSuccess: (data) => {
       mixpanel.track("Disconnected account", {
         provider: storageProvider,
@@ -128,6 +169,7 @@ function ConnectedAccounts() {
       queryClient.invalidateQueries({
         queryKey: ["user", "storage-transfer"],
       })
+      queryClient.invalidateQueries({ queryKey: ["user", "s3-connections"] })
     },
   })
   const [isEditingOverleaf, setIsEditingOverleaf] = useState(false)
@@ -554,6 +596,75 @@ function ConnectedAccounts() {
               </Button>
             )}
           </HStack>
+          <HStack mt={4} align="baseline">
+            <Text>S3:</Text>
+            <Stack spacing={1}>
+              {s3ConnectionsQuery.data?.map((c) => {
+                // Its transfer to Calkit Hub storage, if any
+                const transfer =
+                  transferQuery.data?.provider === "s3" &&
+                  transferQuery.data.connection === c.name
+                    ? transferQuery.data
+                    : undefined
+                return (
+                  <HStack key={c.name}>
+                    <Text>{c.name}</Text>
+                    <Text color="ui.dim">
+                      {c.endpoint_url
+                        ? c.endpoint_url.replace(/^https?:\/\//, "")
+                        : `AWS${c.region ? ` ${c.region}` : ""}`}
+                    </Text>
+                    <IconButton
+                      aria-label={`Replace keys for ${c.name}`}
+                      icon={<MdEdit />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setS3Connection(c.name)}
+                      p={-1}
+                      mr={-3}
+                    />
+                    <IconButton
+                      aria-label={`Remove ${c.name}`}
+                      icon={<FaTrash />}
+                      size="xs"
+                      variant="ghost"
+                      colorScheme="red"
+                      onClick={() => setDisconnect(`s3:${c.name}`)}
+                      isDisabled={transfer?.status === "running"}
+                    />
+                    {transfer?.status === "running" && (
+                      <Text color="ui.dim">
+                        Transferring to Calkit Hub storage
+                      </Text>
+                    )}
+                    {transfer?.status === "failed" && (
+                      <Text color="ui.danger">
+                        Transfer failed
+                        {transfer.error ? `: ${transfer.error}` : ""}
+                      </Text>
+                    )}
+                  </HStack>
+                )
+              })}
+              <Button
+                variant="primary"
+                size="xs"
+                alignSelf="start"
+                onClick={() =>
+                  navigate({
+                    search: (prev) => ({ ...prev, add_s3_keys: true }),
+                  })
+                }
+              >
+                Add keys
+              </Button>
+            </Stack>
+          </HStack>
+          <S3ConnectionModal
+            isOpen={!!add_s3_keys || replacedS3Connection !== undefined}
+            onClose={closeS3Keys}
+            connection={replacedS3Connection}
+          />
           <UpdateOverleafToken
             isOpen={overleafTokenModal.isOpen}
             onClose={overleafTokenModal.onClose}
@@ -567,20 +678,30 @@ function ConnectedAccounts() {
           >
             <ModalOverlay />
             <ModalContent>
-              <ModalHeader>Disconnect {serviceName}</ModalHeader>
+              <ModalHeader>
+                {s3Label
+                  ? `Remove S3 connection ${s3Label}`
+                  : `Disconnect ${serviceName}`}
+              </ModalHeader>
               <ModalCloseButton />
               <ModalBody>
                 {serviceStorageQuery.isPending ? (
                   <SkeletonText noOfLines={3} />
                 ) : serviceStorageQuery.data?.length ? (
                   <>
-                    <Text>Storage using this account:</Text>
+                    <Text>
+                      Storage using this {s3Label ? "connection" : "account"}:
+                    </Text>
                     <UnorderedList mt={2}>
                       {serviceStorageQuery.data.map((r) => (
                         <ListItem key={r.id}>
-                          <Link href={getStorageUrl(r)} isExternal>
-                            {getStorageLabel(r)}
-                          </Link>
+                          {getStorageUrl(r) ? (
+                            <Link href={getStorageUrl(r)} isExternal>
+                              {getStorageLabel(r)}
+                            </Link>
+                          ) : (
+                            getStorageLabel(r)
+                          )}
                           {r.projects.length > 0 &&
                             ` (${r.projects.join(", ")})`}
                         </ListItem>
@@ -608,7 +729,9 @@ function ConnectedAccounts() {
                     </Text>
                   </>
                 ) : (
-                  <Text>No storage uses this account.</Text>
+                  <Text>
+                    No storage uses this {s3Label ? "connection" : "account"}.
+                  </Text>
                 )}
               </ModalBody>
               <ModalFooter gap={3}>
@@ -618,7 +741,7 @@ function ConnectedAccounts() {
                   isLoading={disconnectStorageServiceMutation.isPending}
                   isDisabled={serviceStorageQuery.isPending}
                 >
-                  Disconnect
+                  {s3Label ? "Remove" : "Disconnect"}
                 </Button>
                 <Button onClick={() => setDisconnect(undefined)}>Cancel</Button>
               </ModalFooter>

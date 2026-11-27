@@ -21,12 +21,15 @@ jobs:
   run:
     name: run
     # A fork's branch can't be pushed to with this repo's token, and
-    # Dependabot's runs get a read-only one and no OIDC token to log in with
+    # Dependabot's runs get a read-only one and no OIDC token to log in with.
+    # update-data.yml's pull request already ran what its data feeds, and its
+    # bot actor has no Calkit account to log in as.
     if: >-
       github.event_name == 'workflow_dispatch'
       || (
         github.event.pull_request.head.repo.full_name == github.repository
         && github.actor != 'dependabot[bot]'
+        && github.head_ref != 'data-update'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 60

@@ -278,6 +278,19 @@ def test_describe_storage():
             "Calkit Hub storage"
         ) in result.output
         assert "account hub storage used: 3.00 GB of 10 GB" in result.output
+        # S3 storage is shown by its URL, and read-only storage says so
+        responses["/projects/someone/proj/storage"] = {
+            "dvc": {"kind": "s3-bucket", "bucket": "lab/calkit"},
+            "previous": [
+                {"kind": "s3-bucket", "bucket": "shared", "read_only": True}
+            ],
+        }
+        result = runner.invoke(app, ["describe", "storage"])
+        assert "dvc storage: S3 bucket s3://lab/calkit" in result.output
+        assert (
+            "dvc also read from: S3 bucket s3://shared (read-only), "
+            "Calkit Hub storage"
+        ) in result.output
         # Someone who doesn't manage the account only sees the project's,
         # a project on the hub's own storage reads from nothing else, and a
         # remote elsewhere is shown as its URL, without credentials

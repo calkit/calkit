@@ -108,8 +108,8 @@ account or organization.
 
 <!-- TODO: needs human review -->
 
-DVC has no Hugging Face remote of its own,
-but a DVC project can use one through Calkit:
+A DVC project can use a Hugging Face bucket through Calkit,
+so collaborators don't need HF keys of their own:
 
 1. [Install Calkit](installation.md) and log in with `calkit hub login`.
 2. In the project, run `calkit init`,
@@ -125,8 +125,20 @@ but a DVC project can use one through Calkit:
    run `dvc pull -r {old remote}` first.
 
 From then on, use `calkit push` and `calkit pull`.
-A separately installed `dvc` can't reach the hub,
-so `dvc push` and `dvc pull` may not work.
+A separately installed `dvc` can't use the hub remote,
+and stops with an error in a project whose hub remote starts with `ck://`,
+as new ones do,
+so run DVC commands with `calkit dvc` instead, e.g., `calkit dvc status`.
+
+<!-- TODO: needs human review -->
+
+HF buckets also have an
+[S3-compatible API](https://huggingface.co/docs/hub/storage-buckets-s3),
+so DVC can use one as an S3 remote with your own keys,
+e.g., to leave Calkit
+(see [Using DVC without Calkit](#using-dvc-without-calkit)).
+Through Calkit there's less to set up,
+and collaborators and CI don't need the bucket's keys.
 
 ## Box
 
@@ -247,6 +259,98 @@ so you're never locked in to Calkit.
 To get them without Calkit,
 download them into the project's DVC cache
 with the storage service's own tools and your own login.
+
+### Using DVC without Calkit
+
+<!-- TODO: needs human review -->
+
+DVC can also use a project's S3 or HF bucket as a remote of its own,
+since the files in it are laid out like any other DVC remote.
+This takes more setup than going through Calkit,
+and everyone using the remote needs keys,
+but it works alongside Calkit or as a way to leave it.
+In an S3 bucket,
+a project's files are under its owner and name in lowercase,
+e.g., `s3://my-bucket/calkit/my-org/my-project`
+for a project using `s3://my-bucket/calkit`.
+In an HF bucket Calkit created,
+they're at the root of the bucket.
+
+To keep the keys out of the project,
+put them in a profile in `~/.aws/credentials`:
+
+```ini
+[my-bucket]
+aws_access_key_id = {access key ID}
+aws_secret_access_key = {secret access key}
+```
+
+Then add the bucket as a remote in the project,
+leaving out `endpointurl` for AWS.
+While the project has the hub remote,
+use `calkit dvc` rather than a separately installed `dvc`:
+
+```sh
+calkit dvc remote add my-bucket s3://my-bucket/calkit/my-org/my-project
+calkit dvc remote modify my-bucket endpointurl https://s3.example.org
+calkit dvc remote modify my-bucket profile my-bucket
+```
+
+For an HF bucket,
+use HF's S3 gateway,
+with keys made from an HF access token
+by selecting "Generate S3 credentials" next to it in your
+[HF token settings](https://huggingface.co/settings/tokens).
+The keys can read, or read and write,
+whatever the token can.
+The endpoint has the bucket's HF username or organization in it,
+and the remote URL has only the bucket's name:
+
+```sh
+calkit dvc remote add hf-bucket s3://my-project
+calkit dvc remote modify hf-bucket endpointurl https://my-org.s3.hf.co
+calkit dvc remote modify hf-bucket region us-east-1
+calkit dvc remote modify hf-bucket profile hf
+```
+
+The gateway only takes path-style requests,
+and can't read the checksums recent versions of DVC's S3 client send by
+default,
+so set both for the profile in `~/.aws/config`,
+along with its keys in `~/.aws/credentials` under `[hf]`:
+
+```ini
+[profile hf]
+s3 =
+    addressing_style = path
+request_checksum_calculation = when_required
+response_checksum_validation = when_required
+```
+
+Then `calkit dvc push -r {remote}` and `calkit dvc pull -r {remote}`
+send and get files with the bucket directly.
+While it's the project's storage on the hub,
+Calkit finds files in the same folder,
+so files pushed with DVC can be pulled with Calkit, and the other way
+around.
+Keep the hub as the default remote,
+so `calkit push` and `calkit pull` keep working for collaborators without
+keys.
+
+To leave Calkit for plain DVC,
+run `calkit pull`,
+then `calkit dvc push -r {remote}`
+to copy the files this version of the project uses into the bucket,
+since files pushed before the project used it stay where they were
+(see [Changing where files are stored](#changing-where-files-are-stored)).
+Then make the bucket the default remote and remove the hub's,
+named `calkit`,
+after which `dvc` works on its own:
+
+```sh
+calkit dvc remote default {remote}
+calkit dvc remote remove calkit
+```
 
 ## Public archival
 

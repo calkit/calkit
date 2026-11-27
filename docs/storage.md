@@ -12,7 +12,7 @@ goes to the Calkit Hub (calkit.io).
 <!-- TODO: needs human review -->
 
 Those larger files can also go somewhere else,
-e.g., a Hugging Face bucket or Box.
+e.g., a Hugging Face bucket, Box, or an S3 bucket.
 
 <!-- TODO: needs human review -->
 
@@ -54,7 +54,7 @@ To use your own:
 2. In the project's settings on the hub,
    select where its large files should go,
    create a new Hugging Face bucket,
-   or click "Use Box."
+   or click "Use Box" or "Use S3 bucket."
 
 To see where a project's files are stored
 and how much Calkit Hub storage it's using,
@@ -170,6 +170,57 @@ but Calkit only uses the `Calkit` folder,
 and collaborators only get access to their project's folder,
 for an hour at a time.
 
+## S3
+
+<!-- TODO: needs human review -->
+
+Any storage that works with S3 can hold a project's files,
+e.g., Amazon S3, the
+[Open Storage Network (OSN)](https://openstoragenetwork.github.io),
+Cloudflare R2, Wasabi, or MinIO.
+Usage is billed by the provider and doesn't count against your Calkit plan.
+
+To use a bucket,
+go to the project's settings on the hub and click "Use S3 bucket."
+Paste in the bucket's endpoint URL, leaving it blank for AWS,
+and an access key ID and secret access key,
+then enter the bucket, e.g., `s3://my-bucket` or `s3://my-bucket/calkit`.
+For OSN,
+these are on your allocation's page in the OSN portal.
+Calkit saves the keys under a name,
+so you can use them for other projects without pasting them again,
+and replace or remove them under connected accounts in your
+[hub account settings](https://calkit.io/settings).
+
+Each project gets its own folder in the bucket,
+under the project's owner and name,
+so many projects can share one bucket.
+
+If the keys can only read the bucket,
+Calkit reads files from it but sends new files where they went before.
+This is how to share data in a bucket you don't control,
+e.g., with read-only keys from a data provider,
+without giving the keys to anyone.
+
+Files go directly between your machine and the bucket,
+using links Calkit signs with your keys.
+Collaborators never see the secret key.
+
+To show the contents of files stored with DVC on calkit.io,
+e.g., tables,
+the bucket has to allow requests from calkit.io in its CORS rules,
+e.g., with the AWS CLI:
+
+```sh
+aws s3api put-bucket-cors --bucket my-bucket --cors-configuration \
+  '{"CORSRules": [{"AllowedOrigins": ["https://calkit.io"], "AllowedMethods": ["GET"]}]}'
+```
+
+For storage other than AWS, add `--endpoint-url` with its endpoint.
+Without the rule, pushing and pulling still work.
+Disconnecting keys works like it does for Hugging Face,
+and your files stay in the bucket either way.
+
 ## Changing where files are stored
 
 <!-- TODO: needs human review -->
@@ -185,7 +236,7 @@ When deleting a project,
 you can choose to delete its files from Calkit Hub storage too.
 Calkit never deletes anything from storage you've connected,
 so if you no longer need a project's bucket or folder,
-delete it on HF or Box.
+delete it on HF, Box, or your S3 provider.
 
 ## Using your storage without Calkit
 
@@ -211,8 +262,6 @@ to hydrate the DVC cache and make checking them out seamless.
 
 - Google Drive
 - OneDrive
-- S3 and storage that works with it,
-  e.g., Amazon S3, Cloudflare R2, Wasabi, or MinIO
 - Connecting AWS without creating access keys
 - Connecting an existing HF bucket to a project with a token limited to it
 - Choosing storage per path, e.g., one dataset on HF and the rest on

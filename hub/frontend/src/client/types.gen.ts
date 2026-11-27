@@ -4933,6 +4933,20 @@ export type ProjectPushEventPost = {
 }
 
 /**
+ * ProjectS3BucketPost
+ */
+export type ProjectS3BucketPost = {
+  /**
+   * Connection
+   */
+  connection: string
+  /**
+   * Url
+   */
+  url: string
+}
+
+/**
  * ProjectStats
  */
 export type ProjectStats = {
@@ -6782,6 +6796,76 @@ export type Result = {
 }
 
 /**
+ * S3ConnectionPost
+ */
+export type S3ConnectionPost = {
+  /**
+   * Endpoint Url
+   */
+  endpoint_url?: string | null
+  /**
+   * Region
+   */
+  region?: string | null
+  /**
+   * Access Key Id
+   */
+  access_key_id: string
+  /**
+   * Secret Access Key
+   */
+  secret_access_key: string
+  /**
+   * Name
+   */
+  name: string
+}
+
+/**
+ * S3ConnectionPublic
+ */
+export type S3ConnectionPublic = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Endpoint Url
+   */
+  endpoint_url: string | null
+  /**
+   * Region
+   */
+  region: string | null
+  /**
+   * Access Key Id
+   */
+  access_key_id: string
+}
+
+/**
+ * S3ConnectionPut
+ */
+export type S3ConnectionPut = {
+  /**
+   * Endpoint Url
+   */
+  endpoint_url?: string | null
+  /**
+   * Region
+   */
+  region?: string | null
+  /**
+   * Access Key Id
+   */
+  access_key_id: string
+  /**
+   * Secret Access Key
+   */
+  secret_access_key: string
+}
+
+/**
  * ScriptData
  *
  * Data a script reads from outside the project, and its place in it.
@@ -7208,6 +7292,10 @@ export type StorageResourcePublic = {
    */
   dedicated: boolean
   /**
+   * Read Only
+   */
+  read_only?: boolean
+  /**
    * Created
    */
   created: string
@@ -7233,6 +7321,10 @@ export type StorageTransferStatus = {
    * Provider
    */
   provider?: string | null
+  /**
+   * Connection
+   */
+  connection?: string | null
 }
 
 /**
@@ -10501,6 +10593,121 @@ export type PostUserZoteroAuthResponses = {
 
 export type PostUserZoteroAuthResponse =
   PostUserZoteroAuthResponses[keyof PostUserZoteroAuthResponses]
+
+export type GetUserS3ConnectionsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/s3-connections"
+}
+
+export type GetUserS3ConnectionsResponses = {
+  /**
+   * Response Users-Get User S3 Connections
+   *
+   * Successful Response
+   */
+  200: Array<S3ConnectionPublic>
+}
+
+export type GetUserS3ConnectionsResponse =
+  GetUserS3ConnectionsResponses[keyof GetUserS3ConnectionsResponses]
+
+export type PostUserS3ConnectionData = {
+  body: S3ConnectionPost
+  path?: never
+  query?: never
+  url: "/user/s3-connections"
+}
+
+export type PostUserS3ConnectionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserS3ConnectionError =
+  PostUserS3ConnectionErrors[keyof PostUserS3ConnectionErrors]
+
+export type PostUserS3ConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: S3ConnectionPublic
+}
+
+export type PostUserS3ConnectionResponse =
+  PostUserS3ConnectionResponses[keyof PostUserS3ConnectionResponses]
+
+export type DeleteUserS3ConnectionData = {
+  body?: never
+  path: {
+    /**
+     * Name
+     */
+    name: string
+  }
+  query?: {
+    /**
+     * Storage Action
+     */
+    storage_action?: "transfer" | "orphan" | null
+  }
+  url: "/user/s3-connections/{name}"
+}
+
+export type DeleteUserS3ConnectionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteUserS3ConnectionError =
+  DeleteUserS3ConnectionErrors[keyof DeleteUserS3ConnectionErrors]
+
+export type DeleteUserS3ConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteUserS3ConnectionResponse =
+  DeleteUserS3ConnectionResponses[keyof DeleteUserS3ConnectionResponses]
+
+export type PutUserS3ConnectionData = {
+  body: S3ConnectionPut
+  path: {
+    /**
+     * Name
+     */
+    name: string
+  }
+  query?: never
+  url: "/user/s3-connections/{name}"
+}
+
+export type PutUserS3ConnectionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserS3ConnectionError =
+  PutUserS3ConnectionErrors[keyof PutUserS3ConnectionErrors]
+
+export type PutUserS3ConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: S3ConnectionPublic
+}
+
+export type PutUserS3ConnectionResponse =
+  PutUserS3ConnectionResponses[keyof PutUserS3ConnectionResponses]
 
 export type DeleteUserExternalCredentialData = {
   body?: never
@@ -17773,10 +17980,15 @@ export type GetUserServiceStorageData = {
     /**
      * Provider
      */
-    provider: "huggingface" | "box"
+    provider: "huggingface" | "box" | "s3"
   }
-  query?: never
-  url: "/user/{provider}/storage"
+  query?: {
+    /**
+     * Connection
+     */
+    connection?: string
+  }
+  url: "/user/storage/{provider}"
 }
 
 export type GetUserServiceStorageErrors = {
@@ -17939,7 +18151,7 @@ export type PostProjectBoxFolderData = {
     project_name: string
   }
   query?: never
-  url: "/projects/{owner_name}/{project_name}/storage/box-folder"
+  url: "/projects/{owner_name}/{project_name}/storage/box-folders"
 }
 
 export type PostProjectBoxFolderErrors = {
@@ -17975,7 +18187,7 @@ export type PostProjectHfBucketData = {
     project_name: string
   }
   query?: never
-  url: "/projects/{owner_name}/{project_name}/storage/hf-bucket"
+  url: "/projects/{owner_name}/{project_name}/storage/hf-buckets"
 }
 
 export type PostProjectHfBucketErrors = {
@@ -17997,6 +18209,42 @@ export type PostProjectHfBucketResponses = {
 
 export type PostProjectHfBucketResponse =
   PostProjectHfBucketResponses[keyof PostProjectHfBucketResponses]
+
+export type PostProjectS3BucketData = {
+  body: ProjectS3BucketPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/storage/s3-buckets"
+}
+
+export type PostProjectS3BucketErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectS3BucketError =
+  PostProjectS3BucketErrors[keyof PostProjectS3BucketErrors]
+
+export type PostProjectS3BucketResponses = {
+  /**
+   * Successful Response
+   */
+  200: StorageResourcePublic
+}
+
+export type PostProjectS3BucketResponse =
+  PostProjectS3BucketResponses[keyof PostProjectS3BucketResponses]
 
 export type GetMachinesData = {
   body?: never

@@ -154,6 +154,8 @@ def test_render_as_stage(
                         "target_path": "index.qmd",
                         "to": "html",
                         "args": ["--execute"],
+                        # So Quarto needn't be installed here
+                        "requirements": ["quarto"],
                     },
                 }
             },

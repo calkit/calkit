@@ -7,6 +7,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+import click
 import pytest
 from typer.testing import CliRunner
 
@@ -121,9 +122,11 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ]:
         result = CliRunner().invoke(app, args)
         assert result.exit_code == 0, (args, result.output)
-        assert expected_text in result.output, args
+        # Rich styles option names in parts where it detects CI
+        output = click.unstyle(result.output)
+        assert expected_text in output, args
         # Not pointing to itself
-        assert "calkit doc build`" not in result.output, args
+        assert "calkit doc build`" not in output, args
     # Types without a build yet, or unknown, say so
     Path("notes.md").write_text("Hi\n")
     os.makedirs("site")
@@ -139,7 +142,7 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ]:
         result = CliRunner().invoke(app, args)
         assert result.exit_code != 0, args
-        assert expected_text in result.output, args
+        assert expected_text in click.unstyle(result.output), args
 
 
 def test_build_as_stage(
@@ -153,6 +156,8 @@ def test_build_as_stage(
     calkit.save_calkit_info(
         {
             "name": "test",
+            # So Quarto needn't be installed here
+            "requirements": ["quarto"],
             "environments": {"tex": {"kind": "texlive"}},
             "pipeline": {
                 "stages": {
@@ -360,7 +365,8 @@ def test_review_commands(
         (["tex", "merge-docx", "tex.docx"], "Source main.tex does not exist"),
     ]:
         result = CliRunner().invoke(app, args)
-        assert expected_text in result.output, (args, result.output)
+        output = click.unstyle(result.output)
+        assert expected_text in output, (args, output)
         assert (result.exit_code == 0) == ("--help" in args), args
     # Help reads no files, so it's there whatever state they're in
     Path("calkit.yaml").write_text("pipeline: [\n")
@@ -370,5 +376,6 @@ def test_review_commands(
     ]:
         result = CliRunner().invoke(app, args)
         assert result.exit_code == 0, (args, result.output)
-        assert expected_text in result.output, args
-        assert "calkit doc " not in result.output.replace("calkit doc to", "")
+        output = click.unstyle(result.output)
+        assert expected_text in output, args
+        assert "calkit doc " not in output.replace("calkit doc to", "")

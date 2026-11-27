@@ -216,9 +216,11 @@ def build(
         for _, s in found:
             if not isinstance(s, QuartoStage):
                 continue
-            doc_path = os.path.relpath(
-                os.path.join(project_dir, s.wdir or "", s.target_path)
-            )
+            doc_path = Path(
+                os.path.relpath(
+                    os.path.join(project_dir, s.wdir or "", s.target_path)
+                )
+            ).as_posix()
             _run(ctx, "build", doc_path, [doc_path, "--as-stage"] + args)
         return
     # Otherwise as its stage, if one builds it and nothing says otherwise
@@ -292,11 +294,13 @@ def to_docx(
         pdf_path = Path(path).with_suffix(".pdf").as_posix()
         stages = [s for _, s in found if isinstance(s, LatexStage)]
         if project_dir is not None and stages:
-            pdf_path = os.path.relpath(
-                os.path.join(
-                    project_dir, stages[0].wdir or "", stages[0].pdf_path
+            pdf_path = Path(
+                os.path.relpath(
+                    os.path.join(
+                        project_dir, stages[0].wdir or "", stages[0].pdf_path
+                    )
                 )
-            )
+            ).as_posix()
         args = [pdf_path, "--source", path] + args
     else:
         args = [path] + args

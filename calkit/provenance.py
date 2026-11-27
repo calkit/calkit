@@ -2264,9 +2264,10 @@ def get_provenance_chain(
     ``stage_runs``, i.e., ``.calkit/stage-runs.json``, if that recorded the
     outputs ``dvc.lock`` has, what it ``makes`` on the way to the path, and
     each input, with whether it's modified, and the stage that makes it, or
-    else where it came from and what in it nothing accounts for. ``waiting_on`` names inputs that are missing or out of
-    date, however far back. The other arguments are as
-    ``get_path_provenance`` takes them.
+    else where it came from and what in it nothing accounts for.
+    ``waiting_on`` names inputs that are missing or out of date, however
+    far back. The other arguments are as ``get_path_provenance`` takes
+    them.
     """
     import calkit.dvc
     import calkit.environments

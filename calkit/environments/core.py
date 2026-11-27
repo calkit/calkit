@@ -2049,6 +2049,32 @@ def read_env_spec_hash(lock_fpath: str, wdir: str | None = None) -> str | None:
     return None
 
 
+def spec_changed_since_lock(
+    env_name: str, env: dict, wdir: str | None = None
+) -> bool:
+    """Whether an env's spec changed since its lock was resolved from it.
+
+    Read from the hash recorded when it was locked, which is committed, so
+    this is known on any machine without checking the env. Only conda and
+    venv envs record one; a lock with no record isn't taken as changed.
+    """
+    kind = env.get("kind")
+    if kind not in ("conda", "venv", "uv-venv") or not env.get("path"):
+        return False
+    lock_fpath = get_env_lock_fpath(env=env, env_name=env_name)
+    recorded = read_env_spec_hash(str(lock_fpath), wdir=wdir)
+    if recorded is None:
+        return False
+    spec_fpath = os.path.join(wdir or "", os.path.expandvars(env["path"]))
+    # As the env's check hashes it
+    python = env.get("python") if kind != "conda" else None
+    try:
+        return env_spec_hash(spec_fpath, python=python) != recorded
+    except (OSError, ValueError, yaml.YAMLError):
+        # E.g., deleted, so no longer what it was locked from
+        return True
+
+
 def write_env_spec_hash(
     lock_fpath: str, spec_hash: str, wdir: str | None = None
 ) -> None:
@@ -2558,7 +2584,8 @@ def get_cached_env_states(
 
     Checking an environment can build it, which runs whatever its spec says,
     so this only reads the record of the last check: when it was, whether it
-    passed, and whether the spec, lock file, or prefix has changed since.
+    passed, and whether the spec, lock file, or prefix has changed since,
+    or the spec since it was locked, which is known without that record.
     """
     names, ck_info, _ = get_pipeline_env_names(
         ck_info=ck_info, wdir=wdir, targets=targets
@@ -2571,11 +2598,13 @@ def get_cached_env_states(
             continue
         with get_cache_db() as db:
             cached = db.get(make_cache_key(env_name=env_name, wdir=wdir))
+        # Known without a check here, e.g., in CI
+        spec_changed = spec_changed_since_lock(env_name, env, wdir=wdir)
         if cached is None:
             states[env_name] = {
                 "checked_at": None,
                 "success": None,
-                "changed": None,
+                "changed": True if spec_changed else None,
             }
             continue
         checked_at = cached.get("checked_at")
@@ -2587,7 +2616,8 @@ def get_cached_env_states(
             "success": cached.get("success", False),
             # Whether anything it was checked against has changed since,
             # e.g., its spec or lock file
-            "changed": not up_to_date if cached.get("success") else None,
+            "changed": spec_changed
+            or (not up_to_date if cached.get("success") else None),
         }
     return states
 

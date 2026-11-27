@@ -1155,18 +1155,33 @@ class StorageResource(SQLModel, table=True):
     )
     # Only namespace storage has a name, which projects select it by
     name: str | None = Field(default=None, min_length=2, max_length=64)
-    # "hf-bucket" or "box-folder"
+    # "hf-bucket", "box-folder", or "s3-bucket"
     kind: str = Field(max_length=32)
     # For HF buckets, the bucket ID, i.e., ``{namespace}/{bucket_name}``,
-    # and for Box, the ID of the ``Calkit`` folder
+    # for Box, the ID of the ``Calkit`` folder, and for S3, the bucket and
+    # any prefix in it, e.g., ``{bucket}/{prefix}``
     bucket: str = Field(max_length=255)
     credential_user_id: uuid.UUID = Field(
         foreign_key="user.id", ondelete="CASCADE"
     )
+    # For services a user can connect more than once, e.g., S3 with
+    # different keys, which of their credentials reaches it
+    credential_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="userexternalcredential.id",
+        index=True,
+        ondelete="CASCADE",
+    )
+    # E.g., an S3 bucket's region, which presigned URLs are signed for
+    region: str | None = Field(default=None, max_length=64)
+    # Read-only storage is only read from, never written to, e.g., an S3
+    # bucket shared with read-only keys
+    read_only: bool = Field(default=False)
     created: datetime = Field(default_factory=utcnow)
     # Relationships
     owner_account: Account = Relationship()
     credential_user: User = Relationship()
+    credential: UserExternalCredential | None = Relationship()
 
 
 class ProjectStorageHistory(SQLModel, table=True):

@@ -10,7 +10,10 @@ import pytest
 
 import calkit
 from calkit.models.core import ProjectInfo, Question
-from calkit.pipeline import frozen_tainted_stage_names
+from calkit.pipeline import (
+    frozen_tainted_stage_names,
+    get_downstream_stage_names,
+)
 from calkit.questions import (
     QuestionsStatus,
     check_question,
@@ -820,6 +823,68 @@ def test_check_questions_frozen_subproject(tmp_dir):
     )
     assert isinstance(rendered, dict)
     assert rendered["answer"] == "2."
+
+
+def test_check_questions_upstream_of_evidence(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("n.txt", "w") as f:
+        f.write("2\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "clean": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "cp n.txt clean.txt",
+                "inputs": ["n.txt"],
+                "outputs": [{"path": "clean.txt", "storage": "git"}],
+            },
+            "fit": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": 'echo "{\\"v\\": $(cat clean.txt)}" > result.json',
+                "inputs": ["clean.txt"],
+                "outputs": [{"path": "result.json", "storage": "git"}],
+            },
+            "unrelated": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo 1 > other.txt",
+                "outputs": [{"path": "other.txt", "storage": "git"}],
+            },
+        }
+    }
+    ck_info["questions"] = [
+        {
+            "question": "How big?",
+            "answer": "{v}.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "result.json",
+                    "key": "v",
+                    "name": "v",
+                }
+            ],
+        }
+    ]
+    _write_yaml(ck_info)
+    subprocess.check_call(["calkit", "run"])
+    assert [q.status for q in check_questions(wdir=".").questions] == ["ok"]
+    # Only the stage whose input changed is out of date to DVC, but the
+    # evidence is built from its output, so running the pipeline rebuilds it
+    with open("n.txt", "w") as f:
+        f.write("3\n")
+    assert get_downstream_stage_names({"clean"}) == {"clean", "fit"}
+    status = check_questions(wdir=".")
+    assert [q.status for q in status.questions] == ["stale"]
+    assert "stage 'fit' is out of date" in (
+        status.questions[0].evidence[0].message or ""
+    )
+    assert not status.ok
+    # Nothing downstream, or no pipeline record, leaves the names as given
+    assert get_downstream_stage_names({"unrelated"}) == {"unrelated"}
+    assert get_downstream_stage_names({"clean"}, wdir="nowhere") == {"clean"}
 
 
 def test_sign_offs_and_stages(tmp_dir):

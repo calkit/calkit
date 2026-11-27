@@ -953,7 +953,10 @@ def get_status(
         # rather than asking DVC a second time
         questions_status = None
         if "questions" in categories and ck_info.get("questions"):
-            from calkit.pipeline import frozen_tainted_stage_names
+            from calkit.pipeline import (
+                frozen_tainted_stage_names,
+                get_downstream_stage_names,
+            )
             from calkit.questions import check_questions
 
             stale_stages = None
@@ -967,9 +970,13 @@ def get_status(
                 and not pipeline_status.errors
                 and not pipeline_status.failed_environment_checks
             ):
-                stale_stages = {
-                    n.split("@")[0] for n in pipeline_status.stale_stage_names
-                }
+                # What reads an out-of-date stage's outputs is rebuilt with it
+                stale_stages = get_downstream_stage_names(
+                    {
+                        n.split("@")[0]
+                        for n in pipeline_status.stale_stage_names
+                    }
+                )
                 try:
                     frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
                 except Exception:

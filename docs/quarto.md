@@ -225,6 +225,9 @@ A value quoted from a reference shows what `calkit.yaml` records for it,
 e.g., its page, and whether it matched the reference's PDF,
 if there's one on the machine that rendered it,
 rather than a pipeline.
+See [`examples/quarto`](https://github.com/calkit/calkit/tree/main/examples/quarto)
+for a report that shows a notebook's figure and table this way,
+made from a Julia simulation.
 
 <!-- TODO: needs human review -->
 

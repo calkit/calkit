@@ -42,6 +42,10 @@ pipeline:
         - analysis.html
         - path: results/fit.json
           storage: git
+        - path: results/peaks.csv
+          storage: git
+        - path: figures/peaks.svg
+          storage: git
     report:
       kind: quarto
       target_path: report.qmd

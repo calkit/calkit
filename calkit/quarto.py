@@ -263,19 +263,24 @@ local function add_assets()
     return
   end
   local share = os.getenv("QUARTO_SHARE_PATH")
-  local resources = {}
+  local scripts, resources = {}, {}
   if share then
-    -- Copied beside provenance.js, but only loaded when a view opens
-    table.insert(resources, {
-      name = "mermaid.min.js",
-      path = pandoc.path.join({
-        share, "formats", "html", "mermaid", "mermaid.min.js",
-      }),
+    local mermaid_path = pandoc.path.join({
+      share, "formats", "html", "mermaid", "mermaid.min.js",
     })
+    local data = load_records()
+    if data and data.embeds_resources then
+      -- Loaded with the page, which can't load anything later
+      table.insert(scripts, mermaid_path)
+    else
+      -- Copied beside provenance.js, but only loaded when a view opens
+      table.insert(resources, {name = "mermaid.min.js", path = mermaid_path})
+    end
   end
+  table.insert(scripts, quarto.utils.resolve_path("provenance.js"))
   quarto.doc.add_html_dependency({
     name = "calkit-provenance",
-    scripts = {quarto.utils.resolve_path("provenance.js")},
+    scripts = scripts,
     resources = resources,
   })
   quarto.doc.include_text("in-header", STYLE)
@@ -2897,6 +2902,9 @@ def write_provenance(
     # So what shows it can tell the document changed since
     with open(get_full_path(document_path), "rb") as f:
         records["source_sha1"] = hashlib.sha1(f.read()).hexdigest()
+    # So a graph can be drawn in a page that can't load anything later
+    text = read_document_text(get_full_path(document_path)) or ""
+    records["embeds_resources"] = embeds_resources(text, document_path, wdir)
     calkit.core.ensure_local_dir(wdir)
     rel_path = get_provenance_path(document_path)
     fpath = get_full_path(rel_path)
@@ -2905,6 +2913,74 @@ def write_provenance(
         fpath, json.dumps(records, indent=2, ensure_ascii=False) + "\n"
     )
     return rel_path
+
+
+def get_metadata(
+    text: str, document_path: str, wdir: str | None = None
+) -> list[dict]:
+    """The metadata Quarto reads for a document, as written, nearest last:
+    its Quarto project's ``_quarto.yml``, its folders' ``_metadata.yml``,
+    and its front matter.
+    """
+    import io
+
+    import calkit
+
+    def load(content: str) -> dict:
+        try:
+            data = calkit.core._load_yaml_readonly(io.StringIO(content))
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    document_path = posixpath.normpath(Path(document_path).as_posix())
+    found: list[dict] = []
+    quarto_dir = get_quarto_dir(document_path, wdir)
+    folder = posixpath.dirname(document_path)
+    names = ["_metadata.yml", "_metadata.yaml"]
+    while True:
+        if folder == quarto_dir:
+            names += ["_quarto.yml", "_quarto.yaml"]
+        for name in names:
+            fpath = os.path.join(wdir or "", folder, name)
+            if os.path.isfile(fpath):
+                with open(fpath, encoding="utf-8") as f:
+                    found.insert(0, load(f.read()))
+        if folder in ("", ".", quarto_dir):
+            break
+        folder = posixpath.dirname(folder)
+    m = re.match(r"\s*---\s*\n(.*?)\n---\s*(\n|$)", text, flags=re.DOTALL)
+    if m is not None:
+        found.append(load(m.group(1)))
+    return found
+
+
+def get_format_options(meta: dict, to: str | None = None) -> list[dict]:
+    """A document's metadata, and its options for the format ``to``, e.g.,
+    ``html``, or for every format without one."""
+    found = [meta]
+    formats = meta.get("format")
+    to_base = re.split(r"[+-]", to)[0] if to else None
+    for name, fmt in (formats if isinstance(formats, dict) else {}).items():
+        # E.g., html for an html+raw or an html with extensions
+        base = re.split(r"[+-]", str(name))[0]
+        if isinstance(fmt, dict) and (to_base is None or base == to_base):
+            found.append(fmt)
+    return found
+
+
+def embeds_resources(
+    text: str, document_path: str, wdir: str | None = None
+) -> bool:
+    """Whether a document's HTML has everything it loads embedded, e.g.,
+    with ``embed-resources``, so nothing can be loaded later."""
+    embeds = False
+    for meta in get_metadata(text, document_path, wdir):
+        for options in get_format_options(meta, "html"):
+            for key in ("embed-resources", "self-contained"):
+                if key in options:
+                    embeds = options[key] is True
+    return embeds
 
 
 def get_filter_problem(
@@ -2923,50 +2999,11 @@ def get_filter_problem(
     Filters listed for a format count for that format, i.e., ``to``, e.g.,
     ``html``, or for any without one.
     """
-    import io
-
-    import calkit
-
-    def load(content: str) -> dict:
-        try:
-            data = calkit.core._load_yaml_readonly(io.StringIO(content))
-        except Exception:
-            return {}
-        return data if isinstance(data, dict) else {}
-
-    def get_filters(meta: dict) -> list:
-        found = list(meta.get("filters") or [])
-        formats = meta.get("format")
-        for name, fmt in (
-            formats if isinstance(formats, dict) else {}
-        ).items():
-            # E.g., html for an html+raw or an html with extensions
-            base = re.split(r"[+-]", str(name))[0]
-            if isinstance(fmt, dict) and (to is None or base == to_base):
-                found += list(fmt.get("filters") or [])
-        return found
-
-    to_base = re.split(r"[+-]", to)[0] if to else None
-
     document_path = posixpath.normpath(Path(document_path).as_posix())
     filters = []
-    m = re.match(r"\s*---\s*\n(.*?)\n---\s*(\n|$)", text, flags=re.DOTALL)
-    if m is not None:
-        filters += get_filters(load(m.group(1)))
-    quarto_dir = get_quarto_dir(document_path, wdir)
-    folder = posixpath.dirname(document_path)
-    names = ["_metadata.yml", "_metadata.yaml"]
-    while True:
-        if folder == quarto_dir:
-            names += ["_quarto.yml", "_quarto.yaml"]
-        for name in names:
-            fpath = os.path.join(wdir or "", folder, name)
-            if os.path.isfile(fpath):
-                with open(fpath, encoding="utf-8") as f:
-                    filters += get_filters(load(f.read()))
-        if folder in ("", ".", quarto_dir):
-            break
-        folder = posixpath.dirname(folder)
+    for meta in get_metadata(text, document_path, wdir):
+        for options in get_format_options(meta, to):
+            filters += list(options.get("filters") or [])
     entries = [
         f
         for f in filters

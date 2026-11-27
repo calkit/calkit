@@ -1,5 +1,9 @@
 project:
   type: default
+# Shows figures, tables, and values with where they came from
+filters:
+  - at: pre-ast
+    path: calkit
 format:
   html:
     embed-resources: true

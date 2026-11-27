@@ -942,6 +942,24 @@ def test_stage_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_filter_problem(tmp_path: Path) -> None:
+    # Whether a document embeds what its HTML loads is read the way Quarto
+    # reads it, the nearest setting winning
+    (tmp_path / "_quarto.yml").write_text(
+        "format:\n  html:\n    embed-resources: true\n"
+    )
+    for text, embeds in [
+        ("Text\n", True),
+        ("---\nembed-resources: false\n---\n", False),
+        ("---\nformat:\n  html:\n    self-contained: false\n---\n", False),
+    ]:
+        assert (
+            calkit.quarto.embeds_resources(text, "doc.qmd", wdir=str(tmp_path))
+            == embeds
+        ), text
+    (tmp_path / "_quarto.yml").unlink()
+    assert not calkit.quarto.embeds_resources(
+        "Text\n", "doc.qmd", wdir=str(tmp_path)
+    )
     listed = (
         "---\ntitle: T\nfilters:\n  - at: pre-ast\n    path: calkit\n---\n"
     )

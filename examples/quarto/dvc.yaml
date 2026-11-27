@@ -25,6 +25,12 @@ stages:
       - results/fit.json:
           cache: false
           persist: false
+      - results/peaks.csv:
+          cache: false
+          persist: false
+      - figures/peaks.svg:
+          cache: false
+          persist: false
     desc: Automatically generated from the 'analysis' stage in calkit.yaml.
       Changes made here will be overwritten.
   report:
@@ -33,6 +39,8 @@ stages:
       - report.qmd
       - data/sim.csv
       - pixi.lock
+      - figures/peaks.svg
+      - results/peaks.csv
       - results/sim.json
       - results/fit.json
       - analysis.ipynb

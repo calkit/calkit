@@ -221,19 +221,24 @@ local function add_assets()
     return
   end
   local share = os.getenv("QUARTO_SHARE_PATH")
-  local resources = {}
+  local scripts, resources = {}, {}
   if share then
-    -- Copied beside provenance.js, but only loaded when a view opens
-    table.insert(resources, {
-      name = "mermaid.min.js",
-      path = pandoc.path.join({
-        share, "formats", "html", "mermaid", "mermaid.min.js",
-      }),
+    local mermaid_path = pandoc.path.join({
+      share, "formats", "html", "mermaid", "mermaid.min.js",
     })
+    local data = load_records()
+    if data and data.embeds_resources then
+      -- Loaded with the page, which can't load anything later
+      table.insert(scripts, mermaid_path)
+    else
+      -- Copied beside provenance.js, but only loaded when a view opens
+      table.insert(resources, {name = "mermaid.min.js", path = mermaid_path})
+    end
   end
+  table.insert(scripts, quarto.utils.resolve_path("provenance.js"))
   quarto.doc.add_html_dependency({
     name = "calkit-provenance",
-    scripts = {quarto.utils.resolve_path("provenance.js")},
+    scripts = scripts,
     resources = resources,
   })
   quarto.doc.include_text("in-header", STYLE)

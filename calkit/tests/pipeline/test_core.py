@@ -5951,3 +5951,58 @@ def test_to_dvc_warns_on_system_env(tmp_dir, capsys):
     assert warned == ["plot", "fit", "explore"]
     assert "calkit new uv-env" in err
     assert "calkit new renv" in err
+
+
+def test_get_summary(tmp_path):
+    from calkit.pipeline import get_summary
+
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.check_call(["calkit", "init"], cwd=project)
+    # Declared out of name order, which is the order they're listed in
+    stages = {
+        "make-b": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo b > b.txt",
+            "outputs": ["b.txt"],
+        },
+        "make-a": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo a > a.txt",
+            "outputs": ["a.txt"],
+        },
+        # Run once per value, each recorded as its own run
+        "make-each": {
+            "kind": "command",
+            "environment": "_system",
+            "command": "echo {n} > {n}.txt",
+            "iterate_over": [{"arg_name": "n", "values": ["x", "y"]}],
+            "outputs": ["{n}.txt"],
+        },
+    }
+    with open(project / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    cwd = os.getcwd()
+    res = get_summary(str(project))
+    assert os.getcwd() == cwd
+    assert res["ck_stages"] == ["make-b", "make-a", "make-each"]
+    assert res["status"] == "stale"
+    assert res["stage_statuses"]["make-b"]["status"] == "not-run"
+    assert res["dvc_stages"]["make-a"]["cmd"].endswith("echo a > a.txt")
+    assert res["dvc_stages"]["make-a"]["outs"] == ["a.txt"]
+    subprocess.check_call(["calkit", "run"], cwd=project)
+    res = get_summary(str(project))
+    assert res["status"] == "up-to-date"
+    assert {s["status"] for s in res["stage_statuses"].values()} == {
+        "up-to-date"
+    }
+    # A changed command makes it stale, and says so
+    stages["make-a"]["command"] = "echo A > a.txt"
+    with open(project / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    status = get_summary(str(project))["stage_statuses"]
+    assert status["make-a"]["status"] == "stale"
+    assert status["make-a"]["modified_command"]
+    assert status["make-b"]["status"] == "up-to-date"

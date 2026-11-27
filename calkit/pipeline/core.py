@@ -2339,6 +2339,106 @@ def get_live_lock_stages(lock_stages: dict, yaml_stages: dict) -> dict:
     return live
 
 
+def get_stage_status(stale: list, has_run: bool) -> dict:
+    """A stage's status, as the hub gives it, from DVC's stale entries for
+    it, i.e., one per iteration that's out of date.
+    """
+    if not has_run:
+        state = "not-run"
+    elif not stale:
+        state = "up-to-date"
+    elif all(s.always_run for s in stale):
+        state = "always-run"
+    else:
+        state = "stale"
+    return {
+        "status": state,
+        "modified_command": any(s.modified_command for s in stale),
+        "modified_inputs": list(
+            dict.fromkeys(p for s in stale for p in s.modified_inputs)
+        ),
+        "modified_outputs": list(
+            dict.fromkeys(p for s in stale for p in s.modified_outputs)
+        ),
+        "missing_outputs": list(
+            dict.fromkeys(p for s in stale for p in s.stale_outputs)
+        ),
+    }
+
+
+def get_summary(wdir: str) -> dict:
+    """A checkout's pipeline as the hub summarizes one: the stages in
+    calkit.yaml's order, each one's status here, and the compiled DVC
+    stages, with what each runs, reads, and makes.
+
+    Environments aren't checked, since that can build them, which a look
+    at the pipeline shouldn't do.
+    """
+    import calkit.dvc
+
+    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    ck_stages = list((ck_info.get("pipeline") or {}).get("stages") or {})
+    prev_wdir = os.getcwd()
+    try:
+        os.chdir(wdir)
+        status = get_status(
+            ck_info=ck_info,
+            check_environments=False,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+            quiet_environment_checks=True,
+        )
+        dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
+        lock_stages = calkit.dvc.read_lock_stages()
+        frozen_bases = frozen_tainted_stage_names(ck_info=ck_info, wdir=".")
+    finally:
+        os.chdir(prev_wdir)
+    stage_statuses = {}
+    # One run per iteration is recorded as 'name@item', so each is counted
+    # toward its stage
+    locked_bases = {n.split("@")[0] for n in lock_stages}
+    for name in ck_stages:
+        stale = [
+            s
+            for key, s in status.stale_stages.items()
+            if key.split("@")[0] == name
+        ]
+        stage_statuses[name] = get_stage_status(
+            stale, has_run=name in locked_bases
+        )
+    # Keyed as the hub keys them, i.e., by each current entry in dvc.lock,
+    # with stages never run under their own names
+    live_lock_stages = get_live_lock_stages(
+        lock_stages,
+        {n: s for n, s in dvc_stages.items() if isinstance(s, dict)},
+    )
+    lock_stage_statuses = {
+        name: get_stage_status([], has_run=False)
+        for name in dvc_stages
+        if not name.startswith("_") and name not in locked_bases
+    }
+    for name in live_lock_stages:
+        stale_stage = status.stale_stages.get(name)
+        lock_stage_statuses[name] = get_stage_status(
+            [stale_stage] if stale_stage is not None else [], has_run=True
+        )
+    return {
+        "ck_stages": ck_stages,
+        "stage_statuses": stage_statuses,
+        "lock_stage_statuses": lock_stage_statuses,
+        "frozen": sorted(
+            n for n in live_lock_stages if n.split("@")[0] in frozen_bases
+        ),
+        "status": "stale" if status.is_stale else "up-to-date",
+        "error": "; ".join(status.errors) or None,
+        "dvc_stages": {
+            name: stage
+            for name, stage in dvc_stages.items()
+            if isinstance(stage, dict)
+        },
+    }
+
+
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any.
 

@@ -389,3 +389,70 @@ def test_show_question(tmp_dir):
         )
         assert result.returncode != 0
         assert message in result.stdout + result.stderr
+
+
+def test_show_provenance(tmp_dir):
+    def show(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "show", "provenance", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    subprocess.check_call(["calkit", "init"])
+    with open("data.csv", "w") as f:
+        f.write("x\n1\n")
+    # The same in Windows' shell as in others
+    py = f'"{sys.executable}" -c'
+    stages = {
+        "clean": {
+            "kind": "command",
+            "environment": "_system",
+            "command": (
+                f"{py} \"open('clean.csv', 'w').write(open('data.csv')"
+                '.read())"'
+            ),
+            "inputs": ["data.csv"],
+            "outputs": ["clean.csv"],
+        },
+        "summarize": {
+            "kind": "command",
+            "environment": "_system",
+            "command": (
+                f'{py} "import json; '
+                "json.dump({'n': 1}, open('results.json', 'w'))\""
+            ),
+            "inputs": ["clean.csv"],
+            "outputs": ["results.json"],
+        },
+    }
+    with open("calkit.yaml", "a") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    subprocess.check_call(["calkit", "run"])
+    # The value, that it's current, and each stage behind it, nearest first,
+    # down to the data nothing records the origin of
+    res = show("results.json", "--key", "n")
+    assert res.returncode == 0, res.stderr
+    out = res.stdout
+    assert out.startswith("results.json\nn = 1\nUp to date\n")
+    assert out.index("Stage summarize") < out.index("Stage clean")
+    assert "Makes: clean.csv" in out
+    assert "Inputs:\n    clean.csv: from stage clean" in out
+    assert "data.csv: origin not defined" in out
+    assert "Last run: " in out
+    # Complete for agents, with nothing else on stdout
+    chain = json.loads(show("results.json", "-k", "n", "--json").stdout)
+    assert chain["value"] == 1 and chain["up_to_date"] is True
+    assert [s["name"] for s in chain["stages"]] == ["summarize", "clean"]
+    assert chain["stages"][1]["last_run"]["git_rev"]
+    # A change upstream says what changed, and what's waiting on it
+    with open("data.csv", "w") as f:
+        f.write("x\n2\n")
+    out = show("results.json").stdout
+    assert "Out of date: waiting on clean.csv" in out
+    assert "  Out of date: data.csv modified" in out
+    assert "data.csv: origin not defined; modified" in out
+    # Something that isn't there, and nothing makes, is an error
+    res = show("typo.json")
+    assert res.returncode != 0
+    assert "no stage makes it" in res.stderr

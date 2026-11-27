@@ -12,6 +12,21 @@ names the command that ran, the inputs it read, and the environment it ran
 in, and `calkit run` records what actually happened in `dvc.lock`. Nothing
 further is needed, and nothing should be written twice.
 
+<!-- TODO: needs human review -->
+
+To answer "How did you calculate it?" for a figure, table, results file, or
+one value in it, ask the project:
+
+```sh
+calkit show provenance results/fit.json --key rmse
+```
+
+It says whether the value is up to date, and if not, why, then shows the
+stage that makes it, with its source or command, environment, last run, and
+inputs, and does the same for each stage upstream, down to the data it
+started from and anything whose origin isn't defined.
+Add `--json` for all of it in a form a coding agent can read.
+
 The gap is everything that arrives some other way:
 
 - data somebody measured or typed in

@@ -1074,61 +1074,6 @@ def test_get_pdf_chunk(tmp_path, monkeypatch):
         assert "whole number" in reply["error"]
 
 
-def test_get_pipeline(tmp_path):
-    from calkit.browser_link import get_pipeline
-
-    project = tmp_path / "project"
-    project.mkdir()
-    subprocess.check_call(["calkit", "init"], cwd=project)
-    # Declared out of name order, which is the order they're listed in
-    stages = {
-        "make-b": {
-            "kind": "command",
-            "environment": "_system",
-            "command": "echo b > b.txt",
-            "outputs": ["b.txt"],
-        },
-        "make-a": {
-            "kind": "command",
-            "environment": "_system",
-            "command": "echo a > a.txt",
-            "outputs": ["a.txt"],
-        },
-        # Run once per value, each recorded as its own run
-        "make-each": {
-            "kind": "command",
-            "environment": "_system",
-            "command": "echo {n} > {n}.txt",
-            "iterate_over": [{"arg_name": "n", "values": ["x", "y"]}],
-            "outputs": ["{n}.txt"],
-        },
-    }
-    with open(project / "calkit.yaml", "w") as f:
-        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
-    cwd = os.getcwd()
-    res = get_pipeline(str(project))
-    assert os.getcwd() == cwd
-    assert res["ck_stages"] == ["make-b", "make-a", "make-each"]
-    assert res["status"] == "stale"
-    assert res["stage_statuses"]["make-b"]["status"] == "not-run"
-    assert res["dvc_stages"]["make-a"]["cmd"].endswith("echo a > a.txt")
-    assert res["dvc_stages"]["make-a"]["outs"] == ["a.txt"]
-    subprocess.check_call(["calkit", "run"], cwd=project)
-    res = get_pipeline(str(project))
-    assert res["status"] == "up-to-date"
-    assert {s["status"] for s in res["stage_statuses"].values()} == {
-        "up-to-date"
-    }
-    # A changed command makes it stale, and says so
-    stages["make-a"]["command"] = "echo A > a.txt"
-    with open(project / "calkit.yaml", "w") as f:
-        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
-    status = get_pipeline(str(project))["stage_statuses"]
-    assert status["make-a"]["status"] == "stale"
-    assert status["make-a"]["modified_command"]
-    assert status["make-b"]["status"] == "up-to-date"
-
-
 def test_get_provenance(tmp_path, monkeypatch):
     from calkit.browser_link import get_provenance
 
@@ -1183,13 +1128,13 @@ def test_get_provenance(tmp_path, monkeypatch):
     subprocess.check_call(["calkit", "run"], cwd=project)
     # The pipeline's status is checked once for several asked for together
     checks = []
-    real_get_status = calkit.pipeline.get_status
+    real_get_status = calkit.pipeline.core.get_status
 
     def get_status(*args, **kwargs):
         checks.append(1)
         return real_get_status(*args, **kwargs)
 
-    monkeypatch.setattr(calkit.pipeline, "get_status", get_status)
+    monkeypatch.setattr(calkit.pipeline.core, "get_status", get_status)
     for path in ["results.png", "results.pdf"]:
         assert not get_provenance(str(project), path)["exists"]
     assert len(checks) == 1

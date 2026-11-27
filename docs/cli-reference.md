@@ -2628,12 +2628,13 @@ Options:
 
 Show Calkit objects.
 
-| Command                                      | Description                                                           |
-| -------------------------------------------- | --------------------------------------------------------------------- |
-| [`question\|q`](#subcommand-show-question-q) | Show a question in full as Markdown, with its evidence and sign-offs. |
-| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps.                                 |
-| [`table\|tbl`](#subcommand-show-table-tbl)   | Show a table, or part of one.                                         |
-| [`result\|res`](#subcommand-show-result-res) | Show a result's keys and values.                                      |
+| Command                                                | Description                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------- |
+| [`question\|q`](#subcommand-show-question-q)           | Show a question in full as Markdown, with its evidence and sign-offs. |
+| [`latex-diff`](#subcommand-show-latex-diff)            | Open a LaTeX diff the pipeline keeps.                                 |
+| [`table\|tbl`](#subcommand-show-table-tbl)             | Show a table, or part of one.                                         |
+| [`result\|res`](#subcommand-show-result-res)           | Show a result's keys and values.                                      |
+| [`provenance\|prov`](#subcommand-show-provenance-prov) | Show how a file or value was made, back to where its data came from.  |
 
 <a id="subcommand-show-question-q"></a>
 
@@ -2752,6 +2753,33 @@ Options:
 | `--status`, `-s` | boolean   | no       | False   | Also say whether the result is up to date.                                                                                      |
 | `--vscode`       | boolean   | no       | False   | Open the result in VS Code instead of printing it.                                                                              |
 | `--json`         | boolean   | no       | False   | Output result as JSON.                                                                                                          |
+
+<a id="subcommand-show-provenance-prov"></a>
+
+#### `calkit show provenance|prov`
+
+Show how a file or value was made, back to where its data came from.
+
+This answers "How did you calculate it?" from the project rather than from memory: whether it's up to date, and if not, why; the stage that makes it, with its source or command, environment, and last run; and its inputs. Then the same for each stage upstream, nearest first, down to raw data, imports, and anything whose origin isn't defined.
+
+Usage:
+
+```text
+calkit show provenance|prov [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                         |
+| -------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `path`   | str  | yes      |         | Path to what to trace, e.g., a figure, table, results file, or notebook whose saved value to trace. |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                                                                                     |
+| ------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--key`, `-k` | str     | no       |         | Trace one value in a results file, dotted as a question's evidence writes it, e.g., `fit.rmse`, or one a notebook's cells save. |
+| `--json`      | boolean | no       | False   | Output result as JSON.                                                                                                          |
 
 <a id="command-group-describe-desc"></a>
 

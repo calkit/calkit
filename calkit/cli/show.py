@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -618,3 +619,223 @@ def show_result(
     for item in result["items"]:
         rendered.add_row(escape(item["key"]), escape(item["value"]))
     Console().print(rendered)
+
+
+@show_app.command(name="provenance|prov")
+def show_provenance(
+    path: Annotated[
+        str,
+        typer.Argument(
+            help="Path to what to trace, e.g., a figure, table, results "
+            "file, or notebook whose saved value to trace."
+        ),
+    ],
+    key: Annotated[
+        str | None,
+        typer.Option(
+            "--key",
+            "-k",
+            help="Trace one value in a results file, dotted as a "
+            "question's evidence writes it, e.g., `fit.rmse`, or one a "
+            "notebook's cells save.",
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """Show how a file or value was made, back to where its data came from.
+
+    This answers "How did you calculate it?" from the project rather than
+    from memory: whether it's up to date, and if not, why; the stage that
+    makes it, with its source or command, environment, and last run; and
+    its inputs. Then the same for each stage upstream, nearest first, down
+    to raw data, imports, and anything whose origin isn't defined.
+    """
+    import posixpath
+
+    import calkit
+    import calkit.pipeline
+    import calkit.provenance
+
+    def describe_input(inp: dict) -> str:
+        notes = []
+        if inp["stage"] is not None:
+            notes.append(f"from stage {inp['stage']}")
+            if inp["copied_from"]:
+                notes.append(
+                    f"copied from {inp['copied_from']} by stage "
+                    f"{inp['copy_stage']}"
+                )
+        elif inp["origin"]:
+            url = inp["origin_url"]
+            notes.append(
+                inp["origin"]
+                + (f" ({url})" if url and url not in inp["origin"] else "")
+            )
+        for gap in inp["gaps"]:
+            what = (
+                "imported from somewhere that can't be checked"
+                if gap["unchecked"]
+                else "origin not defined"
+            )
+            notes.append(
+                what
+                + (f" for {gap['path']}" if gap["path"] != inp["path"] else "")
+            )
+        if not inp["exists"]:
+            notes.append("missing")
+        elif inp["modified"]:
+            notes.append("modified")
+        return str(inp["path"]) + (": " + "; ".join(notes) if notes else "")
+
+    def get_stage_state(stage: dict) -> str | None:
+        # What's wrong with a stage, if anything, in its own words
+        status = stage["status"] or {}
+        if status.get("status") == "not-run":
+            return f"Out of date: stage {stage['name']} not run"
+        if status.get("status") == "stale":
+            reasons = [f"{p} modified" for p in status["modified_inputs"]]
+            if status.get("modified_command"):
+                reasons.append("command modified")
+            reasons += [
+                f"{p} modified outside pipeline"
+                for p in status.get("modified_outputs") or []
+            ]
+            return "Out of date" + (
+                ": " + ", ".join(reasons) if reasons else ""
+            )
+        if stage["waiting_on"]:
+            return "Out of date: waiting on " + ", ".join(stage["waiting_on"])
+        if stage["frozen"]:
+            return "Out of date: frozen with modified inputs"
+        return None
+
+    def get_last_run_text(run: dict) -> str:
+        system = run.get("system") or {}
+        agent = run.get("agent")
+        if isinstance(agent, dict):
+            agent = agent.get("name")
+        parts = [
+            str(run.get("start_time") or "")[:16].replace("T", " "),
+            " ".join(
+                str(system[k]) for k in ("os", "machine") if system.get(k)
+            ),
+            f"after commit {run['git_rev'][:7]}" if run.get("git_rev") else "",
+            f"by {agent}" if agent else "",
+        ]
+        return ", ".join(p for p in parts if p)
+
+    def get_environment_text(env: dict) -> str:
+        if env["name"] == "_system":
+            return "_system, i.e., none"
+        details = ", ".join(e for e in (env["kind"], env["path"]) if e)
+        text = str(env["name"]) + (f" ({details})" if details else "")
+        if env["lock_path"]:
+            text += f", locked in {env['lock_path']}"
+        return text
+
+    # Relative to the project, as the pipeline names paths
+    rel_path = posixpath.normpath(
+        Path(os.path.relpath(path) if os.path.isabs(path) else path).as_posix()
+    )
+    if rel_path == ".." or rel_path.startswith("../"):
+        raise_error(f"{path} isn't in this project")
+    if not os.path.isfile("calkit.yaml"):
+        raise_error("Run this from a Calkit project's top folder")
+    try:
+        stage_runs = calkit.read_stage_runs()
+    except ValueError:
+        warn(
+            "Couldn't read .calkit/stage-runs.json, so last runs aren't shown; "
+            "see 'calkit check stage-runs'",
+            err=json_output,
+        )
+        stage_runs = {}
+    try:
+        pipeline = calkit.pipeline.get_summary(".")
+    except Exception as e:
+        raise_error(f"Failed to determine pipeline status: {e}")
+    chain = calkit.provenance.get_provenance_chain(
+        rel_path,
+        key=key,
+        stage_runs=stage_runs,
+        **calkit.provenance.get_checkout_args(".", pipeline),
+    )
+    if not chain["exists"] and chain["stage"] is None:
+        raise_error(f"{rel_path} isn't in the project, and no stage makes it")
+    if json_output:
+        echo_json(chain)
+        return
+    lines = [
+        chain["path"]
+        if chain["path"] == rel_path
+        else f"{rel_path} (saved in {chain['path']})"
+    ]
+    if key is not None:
+        lines.append(
+            f"{key}: {chain['value_error']}"
+            if chain["value_error"]
+            else f"{key} = {json.dumps(chain['value'])}"
+        )
+    if chain["copied_from"]:
+        lines.append(
+            f"Copied from {chain['copied_from']} by stage {chain['copy_stage']}"
+        )
+    if chain["up_to_date"]:
+        lines.append("Up to date")
+    elif chain["up_to_date"] is False:
+        state = (
+            get_stage_state(chain["stages"][0])
+            if chain["stage"] is not None
+            else None
+        )
+        if state is None and chain["stale_reason"] and chain["copy_stage"]:
+            state = f"Out of date: stage {chain['copy_stage']} out of date"
+        lines.append(
+            state or ("Out of date" if chain["exists"] else "Missing")
+        )
+    if chain["stage"] is None:
+        if chain["origin"]:
+            url = chain["origin_url"]
+            lines.append(
+                chain["origin"]
+                + (f" ({url})" if url and url not in chain["origin"] else "")
+            )
+        lines += [
+            (
+                "Imported from somewhere that can't be checked: "
+                if g["unchecked"]
+                else "Origin not defined: "
+            )
+            + g["path"]
+            for g in chain["gaps"]
+        ]
+        if not chain["origin"] and not chain["gaps"]:
+            lines.append("No stage makes it")
+    typer.echo("\n".join(lines))
+    for stage in chain["stages"]:
+        lines = [
+            typer.style(f"Stage {stage['name']}", bold=True)
+            + (f" ({stage['kind']})" if stage["kind"] else "")
+        ]
+        lines.append("  Makes: " + ", ".join(stage["makes"]))
+        if stage["source"]:
+            lines.append(f"  Source: {stage['source']}")
+        if stage["command"]:
+            lines.append(f"  Command: {stage['command']}")
+        if stage["message"]:
+            lines.append(f"  Step: {stage['message']}")
+        for env in stage["environments"]:
+            lines.append("  Environment: " + get_environment_text(env))
+        if stage["last_run"]:
+            lines.append("  Last run: " + get_last_run_text(stage["last_run"]))
+        elif (stage["status"] or {}).get("status") != "not-run":
+            lines.append("  Last run: not recorded")
+        # The path's own stage's state is the one said first
+        state = get_stage_state(stage) if stage["depth"] else None
+        if state:
+            lines.append(f"  {state}")
+        lines.append("  Inputs:" if stage["inputs"] else "  Inputs: none")
+        lines += [f"    {describe_input(inp)}" for inp in stage["inputs"]]
+        typer.echo("\n" + "\n".join(lines))

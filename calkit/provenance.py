@@ -1884,6 +1884,8 @@ def find_project_provenance_gaps(
 # A value bigger than this, e.g., a whole table exported as a key, is
 # described rather than sent
 MAX_VALUE_BYTES = 100_000
+# A results file bigger than this isn't read for a value, as on the hub
+MAX_VALUE_FILE_BYTES = 10 * 1024 * 1024
 RESULTS_EXTS = (".json", ".yaml", ".yml", ".toml")
 # The stage fields that name what someone edits to change its output
 SOURCE_FIELDS = ("script_path", "notebook_path", "target_path", "source_path")
@@ -2233,3 +2235,292 @@ def get_path_provenance(
             continue
         out["inputs"].append(dep)
     return out
+
+
+def get_provenance_chain(
+    path: str,
+    ck_info: dict,
+    dvc_yaml: dict,
+    dvc_lock: dict,
+    stage_statuses: dict[str, dict],
+    is_file: Callable[[str], bool],
+    is_dir: Callable[[str], bool],
+    listdir: Callable[[str], list[str]],
+    read_bytes: Callable[[str], bytes],
+    is_dvc_output: Callable[[str], bool] = lambda path: False,
+    key: str | None = None,
+    frozen: set[str] | None = None,
+    stage_runs: dict | None = None,
+) -> dict:
+    """``get_path_provenance``'s answer for a path, or one value in a
+    results file, with ``up_to_date``, counting stages however far back,
+    or None for something no stage makes, and ``stages``, the stages it's
+    made from, however far back, nearest first.
+
+    Each stage is listed once, at its fewest steps from the path, as
+    ``depth``, with its kind, what it runs, its environments and their
+    locks, its status, whether it's frozen with outdated inputs, its last
+    run from ``stage_runs``, i.e., ``.calkit/stage-runs.json``, if that
+    recorded the outputs ``dvc.lock`` has, what it ``makes`` on the way to
+    the path, and each input, with whether it's modified, and the stage
+    that makes it, or else where it came from and what in it nothing
+    accounts for. ``waiting_on`` names inputs that are missing or out of
+    date, however far back. The other arguments are as
+    ``get_path_provenance`` takes them.
+    """
+    import calkit.dvc
+    import calkit.environments
+
+    def get(p: str, key: str | None = None) -> dict:
+        return get_path_provenance(
+            p,
+            key=key,
+            ck_info=ck_info,
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            stage_statuses=stage_statuses,
+            frozen=frozen,
+            is_file=is_file,
+            is_dir=is_dir,
+            listdir=listdir,
+            read_bytes=read_bytes,
+            is_dvc_output=is_dvc_output,
+        )
+
+    def under(p: str, parent: str) -> bool:
+        return p == parent or p.startswith(parent.rstrip("/") + "/")
+
+    def get_environments(name: str) -> list[dict]:
+        ck_stage = ck_stages.get(name.split("@")[0])
+        env_name = (
+            ck_stage.get("environment") if isinstance(ck_stage, dict) else None
+        )
+        if not isinstance(env_name, str) or not env_name:
+            return []
+        out = []
+        for part in env_name.split(calkit.environments.COMPOSITE_ENV_SEP):
+            env = envs.get(part)
+            if not isinstance(env, dict):
+                env = {}
+            lock_path = (
+                calkit.environments.get_env_lock_fpath(env, part, for_dvc=True)
+                if env
+                else None
+            )
+            out.append(
+                {
+                    "name": part,
+                    "kind": env.get("kind"),
+                    "path": (
+                        env["path"]
+                        if isinstance(env.get("path"), str)
+                        else None
+                    ),
+                    "lock_path": (
+                        posixpath.normpath(lock_path) if lock_path else None
+                    ),
+                }
+            )
+        return out
+
+    def get_last_run(name: str) -> dict | None:
+        run = (stage_runs or {}).get(name)
+        lock_stage = lock_stages.get(name)
+        if (
+            isinstance(run, dict)
+            and isinstance(lock_stage, dict)
+            and run.get("dvc_lock_hash")
+            == calkit.dvc.stage_lock_hash(lock_stage)
+        ):
+            return run
+        return None
+
+    def get_waiting(name: str) -> list[str]:
+        if name not in waiting:
+            # Guarding against a cycle
+            waiting[name] = []
+            waiting[name] = [
+                inp["path"]
+                for inp in stages[name]["inputs"]
+                if inp["stage"] in stages
+                and inp["stage"] != name
+                and (
+                    not inp["exists"]
+                    or provs[inp["path"]]["stale_reason"] is not None
+                    or get_waiting(inp["stage"])
+                )
+            ]
+        return waiting[name]
+
+    lock_stages = dvc_lock.get("stages") or {}
+    ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    envs = ck_info.get("environments") or {}
+    target = get(path, key=key)
+    # Each input's provenance, by path, since stages share them
+    provs: dict[str, dict] = {}
+    stages: dict[str, dict] = {}
+    # One level at a time, so each stage is found at its fewest steps
+    level = [target]
+    depth = 0
+    while level:
+        next_level = []
+        for prov in level:
+            name = prov["stage"]
+            if name is None:
+                continue
+            made = prov["copied_from"] or prov["path"]
+            if name in stages:
+                if made not in stages[name]["makes"]:
+                    stages[name]["makes"].append(made)
+                continue
+            status = prov["stage_status"]
+            modified = [
+                posixpath.normpath(p)
+                for p in (status or {}).get("modified_inputs") or []
+            ]
+            stage: dict = {
+                "name": name,
+                "depth": depth,
+                "kind": prov["stage_kind"],
+                "app": prov["stage_app"],
+                "source": prov["source"],
+                "command": prov["command"],
+                "message": prov["message"],
+                "environments": get_environments(name),
+                "status": status,
+                "frozen": name in (frozen or set()),
+                "last_run": get_last_run(name),
+                "makes": [made],
+                "inputs": [],
+                "waiting_on": [],
+            }
+            stages[name] = stage
+            for p in prov["inputs"]:
+                if p not in provs:
+                    provs[p] = get(p)
+                inp = provs[p]
+                stage["inputs"].append(
+                    {
+                        "path": p,
+                        "exists": inp["exists"],
+                        "modified": any(
+                            under(p, m) or under(m, p) for m in modified
+                        ),
+                        "stage": inp["stage"],
+                        "copied_from": inp["copied_from"],
+                        "copy_stage": inp["copy_stage"],
+                        "origin": inp["origin"],
+                        "origin_url": inp["origin_url"],
+                        # What's in it, not further back through a stage
+                        "gaps": [
+                            {"path": g["path"], "unchecked": g["unchecked"]}
+                            for g in inp["gaps"]
+                            if not any(s["stage"] for s in g["steps"])
+                        ],
+                    }
+                )
+                next_level.append(inp)
+        level = next_level
+        depth += 1
+    waiting: dict[str, list[str]] = {}
+    for name, stage in stages.items():
+        stage["waiting_on"] = get_waiting(name)
+    up_to_date = None
+    if target["stage"] is not None or target["copy_stage"] is not None:
+        up_to_date = (
+            target["exists"]
+            and target["stale_reason"] is None
+            and not (
+                target["stage"] is not None
+                and stages[target["stage"]]["waiting_on"]
+            )
+        )
+    return target | {"up_to_date": up_to_date, "stages": list(stages.values())}
+
+
+def get_checkout_args(wdir: str, pipeline: dict) -> dict:
+    """What ``get_path_provenance`` and ``get_provenance_chain`` take, for
+    a checkout on this machine as it is, including what isn't saved yet,
+    given its pipeline as ``calkit.pipeline.get_summary`` summarizes it.
+
+    Nothing a symlink takes outside the checkout is read.
+    """
+    import json
+
+    import calkit
+    import calkit.dvc
+
+    def get_full_path(p: str) -> str | None:
+        # None for one a symlink takes outside the project
+        full_path = os.path.join(wdir, *p.split("/"))
+        real_path = os.path.realpath(full_path)
+        if real_path != root and not real_path.startswith(root + os.sep):
+            return None
+        return full_path
+
+    def read_bytes(p: str) -> bytes:
+        full_path = get_full_path(p)
+        if full_path is None:
+            raise ValueError(f"{p} isn't in the project")
+        if os.path.getsize(full_path) > MAX_VALUE_FILE_BYTES:
+            raise ValueError(f"{p} is too big to read")
+        with open(full_path, "rb") as f:
+            return f.read()
+
+    def listdir(p: str) -> list[str]:
+        full_path = get_full_path(p)
+        return os.listdir(full_path) if full_path is not None else []
+
+    def is_file(p: str) -> bool:
+        full_path = get_full_path(p)
+        return full_path is not None and os.path.isfile(full_path)
+
+    def is_dir(p: str) -> bool:
+        full_path = get_full_path(p)
+        return full_path is not None and os.path.isdir(full_path)
+
+    def get_dir_relpaths(md5: str) -> set[str] | None:
+        # What a folder output holds, from its manifest in the DVC cache, if
+        # it's there
+        manifest_path = os.path.join(
+            wdir, ".dvc", "cache", "files", "md5", md5[:2], md5[2:]
+        )
+        try:
+            with open(manifest_path) as f:
+                entries = json.load(f)
+            return {e["relpath"] for e in entries}
+        except Exception:
+            return None
+
+    def is_dvc_output(p: str) -> bool:
+        # E.g., a file in a folder a stage makes that isn't pulled here
+        for out in lock_outs:
+            out_path = out["path"].rstrip("/")
+            if not p.startswith(out_path + "/"):
+                continue
+            md5 = out.get("md5") or out.get("hash") or ""
+            relpaths = get_dir_relpaths(md5) if md5.endswith(".dir") else None
+            if relpaths is None or p[len(out_path) + 1 :] in relpaths:
+                return True
+        return False
+
+    root = os.path.realpath(wdir)
+    dvc_lock = {"stages": calkit.dvc.read_lock_stages(wdir=wdir)}
+    lock_outs = [
+        out
+        for stage in dvc_lock["stages"].values()
+        for out in (stage or {}).get("outs") or []
+        if isinstance(out, dict) and isinstance(out.get("path"), str)
+    ]
+    return {
+        "ck_info": calkit.load_calkit_info(wdir=wdir, read_only=True),
+        "dvc_yaml": {"stages": pipeline["dvc_stages"]},
+        "dvc_lock": dvc_lock,
+        "stage_statuses": pipeline["lock_stage_statuses"],
+        "frozen": set(pipeline["frozen"]),
+        "is_file": is_file,
+        "is_dir": is_dir,
+        "listdir": listdir,
+        "read_bytes": read_bytes,
+        "is_dvc_output": is_dvc_output,
+    }

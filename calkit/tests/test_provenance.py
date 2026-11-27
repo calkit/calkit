@@ -1385,6 +1385,199 @@ def test_get_path_provenance():
     assert not get("missing.png")["exists"]
 
 
+def test_get_provenance_chain():
+    import json
+
+    from calkit.dvc import stage_lock_hash
+    from calkit.provenance import get_provenance_chain
+
+    files = {
+        "scripts/clean.py": "",
+        "scripts/analyze.py": "",
+        "data/raw.csv": "",
+        "data/downloaded/a.csv": "",
+        "data/clean.csv": "",
+        "results/metrics.json": json.dumps({"fit": {"b": 1.2}}),
+        "figures/plot.png": "",
+        "paper/figures/plot.png": "",
+        "nbs/fit.ipynb": "{}",
+        ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json": json.dumps(
+            {"k": 0.25}
+        ),
+    }
+    ck_info = {
+        "environments": {
+            "py": {"kind": "uv", "path": "pyproject.toml"},
+            "tex": {"kind": "docker", "image": "texlive"},
+        },
+        "datasets": [
+            {"path": "data/downloaded", "imported_from": "https://x.org/d"},
+        ],
+        "pipeline": {
+            "stages": {
+                "clean": {
+                    "kind": "python-script",
+                    "script_path": "scripts/clean.py",
+                    "environment": "py",
+                },
+                "analyze": {
+                    "kind": "python-script",
+                    "script_path": "scripts/analyze.py",
+                    "environment": "py:tex",
+                },
+                "copy-figs": {
+                    "kind": "map-paths",
+                    "environment": "_system",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/plot.png",
+                            "dest": "paper/figures/plot.png",
+                        }
+                    ],
+                },
+                "fit": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "nbs/fit.ipynb",
+                    "environment": "py",
+                },
+            }
+        },
+    }
+    dvc_yaml = {
+        "stages": {
+            "clean": {
+                "cmd": "python scripts/clean.py",
+                "deps": ["scripts/clean.py", "uv.lock", "data/raw.csv"],
+                "outs": ["data/clean.csv"],
+            },
+            "analyze": {
+                "cmd": "python scripts/analyze.py",
+                "deps": [
+                    "scripts/analyze.py",
+                    "data/clean.csv",
+                    "data/downloaded",
+                ],
+                "outs": ["results/metrics.json", "figures/plot.png"],
+            },
+            "copy-figs": {
+                "cmd": "calkit map-paths",
+                "deps": ["figures/plot.png"],
+                "outs": ["paper/figures/plot.png"],
+            },
+            "fit": {
+                "cmd": "calkit nb execute nbs/fit.ipynb",
+                "deps": ["data/clean.csv"],
+                "outs": [
+                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+                ],
+            },
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            name: {
+                "cmd": stage["cmd"],
+                "deps": [{"path": d, "md5": "1"} for d in stage["deps"]],
+                "outs": [{"path": o, "md5": "2"} for o in stage["outs"]],
+            }
+            for name, stage in dvc_yaml["stages"].items()
+        }
+    }
+    up_to_date = {"status": "up-to-date", "modified_inputs": []}
+    run = {
+        "start_time": "2026-11-20T16:33:05",
+        "git_rev": "a8248fa0eb",
+        "dvc_lock_hash": stage_lock_hash(dvc_lock["stages"]["clean"]),
+        "agent": {"name": "Claude Code"},
+    }
+
+    def get(
+        path: str,
+        key: str | None = None,
+        statuses: dict | None = None,
+        frozen: set[str] | None = None,
+    ) -> dict:
+        return get_provenance_chain(
+            path,
+            key=key,
+            ck_info=ck_info,
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            stage_statuses={name: up_to_date for name in dvc_yaml["stages"]}
+            | (statuses or {}),
+            frozen=frozen,
+            # A record for outputs dvc.lock no longer has is no last run
+            stage_runs={"clean": run, "analyze": run},
+            is_file=lambda p: p in files,
+            is_dir=lambda p: p == "data/downloaded",
+            listdir=lambda p: ["a.csv"] if p == "data/downloaded" else [],
+            read_bytes=lambda p: files[p].encode(),
+        )
+
+    # The path's own provenance, then each stage behind it, nearest first,
+    # with its environments, last run, and what each input came from
+    chain = get("results/metrics.json", key="fit.b")
+    assert chain["value"] == 1.2 and chain["stage"] == "analyze"
+    assert chain["up_to_date"] is True
+    assert [(s["name"], s["depth"]) for s in chain["stages"]] == [
+        ("analyze", 0),
+        ("clean", 1),
+    ]
+    analyze, clean = chain["stages"]
+    assert analyze["source"] == "scripts/analyze.py"
+    assert [e["name"] for e in analyze["environments"]] == ["py", "tex"]
+    assert analyze["environments"][0]["lock_path"] == "uv.lock"
+    assert analyze["environments"][1]["lock_path"] == (".calkit/env-locks/tex")
+    assert analyze["last_run"] is None and clean["last_run"] == run
+    assert analyze["makes"] == ["results/metrics.json"]
+    assert clean["makes"] == ["data/clean.csv"]
+    inputs = {i["path"]: i for i in analyze["inputs"]}
+    assert list(inputs) == ["data/clean.csv", "data/downloaded"]
+    assert inputs["data/clean.csv"]["stage"] == "clean"
+    assert inputs["data/downloaded"]["origin_url"] == "https://x.org/d"
+    assert inputs["data/downloaded"]["gaps"] == []
+    # Raw data nothing records the origin of is said where it's read
+    assert clean["inputs"] == [
+        {
+            "path": "data/raw.csv",
+            "exists": True,
+            "modified": False,
+            "stage": None,
+            "copied_from": None,
+            "copy_stage": None,
+            "origin": None,
+            "origin_url": None,
+            "gaps": [{"path": "data/raw.csv", "unchecked": False}],
+        }
+    ]
+    assert [g["path"] for g in chain["gaps"]] == ["data/raw.csv"]
+    # A stage out of date upstream leaves everything after it waiting, and
+    # says which of its inputs changed
+    stale = {"clean": {"status": "stale", "modified_inputs": ["data/raw.csv"]}}
+    chain = get("paper/figures/plot.png", statuses=stale)
+    assert chain["up_to_date"] is False
+    assert chain["copied_from"] == "figures/plot.png"
+    analyze, clean = chain["stages"]
+    assert analyze["makes"] == ["figures/plot.png"]
+    assert analyze["waiting_on"] == ["data/clean.csv"]
+    assert clean["waiting_on"] == []
+    assert clean["inputs"][0]["modified"]
+    # So does a frozen one with outdated inputs
+    chain = get("results/metrics.json", frozen={"clean", "analyze"})
+    assert chain["up_to_date"] is False
+    assert chain["stages"][0]["waiting_on"] == ["data/clean.csv"]
+    assert chain["stages"][1]["frozen"]
+    # A value cited from a notebook, from the stage that saves it
+    chain = get("nbs/fit.ipynb", key="k")
+    assert chain["value"] == 0.25
+    assert [s["name"] for s in chain["stages"]] == ["fit", "clean"]
+    # Something no stage makes has no stages, and no say on being current
+    chain = get("data/downloaded/a.csv")
+    assert chain["stages"] == [] and chain["up_to_date"] is None
+    assert chain["origin"] == "Imported from https://x.org/d"
+
+
 def test_add_origin_and_add_creator():
     import copy
 

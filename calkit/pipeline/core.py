@@ -1649,17 +1649,18 @@ def get_status(
         from dvc.exceptions import NotDvcRepoError
         from dvc.lock import LockError
 
-        # A spec edited since its env was locked leaves the lock as it was
-        # until the env is checked, so DVC can't see it, but the stages
-        # using the env are stale all the same
+        # Without checking an env, a spec edited since it was locked leaves
+        # the lock as it was, so DVC can't see it, but the stages using the
+        # env are stale all the same; a check relocks it, which DVC sees
         changed_specs: dict[str, str] = {}
-        for env_name, env in environments.items():
-            if calkit.environments.spec_changed_since_lock(env_name, env):
+        for env_name, state in result.get("environment_states", {}).items():
+            env = environments.get(env_name)
+            if state.get("spec_changed") and env is not None:
                 lock_path = calkit.environments.get_env_lock_fpath(
                     env=env, env_name=env_name, for_dvc=True
                 )
                 changed_specs[Path(str(lock_path)).as_posix()] = Path(
-                    env["path"]
+                    os.path.expandvars(env["path"])
                 ).as_posix()
         dvc_repo = None
         try:

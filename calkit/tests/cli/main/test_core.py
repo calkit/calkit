@@ -1912,6 +1912,7 @@ def test_status_with_edited_env_spec(tmp_dir):
     stage = status["stale_stages"]["write"]
     assert stage["modified_inputs"] == ["requirements.txt"]
     assert stage["stale_outputs"] == ["out.txt"]
+    assert status["environment_states"]["py"]["spec_changed"]
     assert status["environment_states"]["py"]["changed"]
     # Checking the env relocks it, which DVC sees instead
     append("requirements.txt", "idna\n")
@@ -1920,6 +1921,16 @@ def test_status_with_edited_env_spec(tmp_dir):
     assert status["stale_stages"]["write"]["modified_inputs"] == [
         ".calkit/env-locks/py"
     ]
+    subprocess.check_call(["calkit", "run"])
+    assert not get_pipeline_status("--no-env-check")["is_stale"]
+    assert not get_pipeline_status()["is_stale"]
+    # A spec hash that doesn't match a consistent spec and lock, e.g., after
+    # a merge took the other side's, isn't taken as checked, so running
+    # fixes what status reports
+    subprocess.check_call(
+        ["git", "checkout", "HEAD", "--", ".calkit/env-spec-hashes.json"]
+    )
+    assert get_pipeline_status("--no-env-check")["is_stale"]
     subprocess.check_call(["calkit", "run"])
     assert not get_pipeline_status("--no-env-check")["is_stale"]
     assert not get_pipeline_status()["is_stale"]

@@ -2322,6 +2322,57 @@ def test_get_status(tmp_dir):
     assert not status.failed_environment_checks
 
 
+def test_get_status_with_edited_env_spec(tmp_dir, monkeypatch):
+    import calkit.environments as envs
+
+    def get_spec_paths(**kwargs) -> dict[str, list[str]]:
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, check_environments=False, **kwargs
+        )
+        return {
+            name: [p for p in stage.modified_inputs if p.endswith(".yml")]
+            for name, stage in status.stale_stages.items()
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    # A spec path is reported as the check reads it
+    monkeypatch.setenv("SPECS", "specs")
+    os.makedirs("specs")
+    ck_info: dict = {"environments": {}, "pipeline": {"stages": {}}}
+    for env_name in ["a", "b"]:
+        env = {"kind": "conda", "path": f"$SPECS/{env_name}.yml"}
+        ck_info["environments"][env_name] = env
+        with open(os.path.join("specs", f"{env_name}.yml"), "w") as f:
+            f.write("dependencies:\n  - python\n")
+        lock_fpath = str(get_env_lock_fpath(env=env, env_name=env_name))
+        os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+        with open(lock_fpath, "w") as f:
+            f.write("locked\n")
+        envs.write_env_spec_hash(
+            lock_fpath, envs.env_spec_hash(f"specs/{env_name}.yml")
+        )
+    for stage_name, env_name, frozen in [
+        ("uses-a", "a", False),
+        ("uses-b", "b", False),
+        ("frozen-on-a", "a", True),
+    ]:
+        ck_info["pipeline"]["stages"][stage_name] = {
+            "kind": "command",
+            "command": f"echo {stage_name}",
+            "environment": env_name,
+            "frozen": frozen,
+        }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert get_spec_paths() == {"uses-a": [], "uses-b": []}
+    # Only the stages using an edited env are stale for it, and not one
+    # that's frozen, or not asked about
+    with open(os.path.join("specs", "a.yml"), "a") as f:
+        f.write("  - scipy\n")
+    assert get_spec_paths() == {"uses-a": ["specs/a.yml"], "uses-b": []}
+    assert get_spec_paths(targets=["uses-b"]) == {"uses-b": []}
+
+
 def test_get_status_excludes_frozen_stage(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {

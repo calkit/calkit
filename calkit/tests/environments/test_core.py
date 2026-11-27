@@ -2168,6 +2168,7 @@ def test_get_cached_env_states(tmp_dir):
         "checked_at": None,
         "success": None,
         "changed": None,
+        "spec_changed": False,
     }
     # Checked and unchanged, which is reported without checking again
     calkit.environments.save_cache(env_name="py", env=env, success=True)
@@ -2199,6 +2200,27 @@ def test_get_cached_env_states(tmp_dir):
     )
     assert set(status.environment_states) == {"py", "other"}
     assert status.environment_checks == {}
+    # A spec changed since it was locked is known without a check record,
+    # and a check record doesn't make it current, e.g., after a merge took
+    # the other side's spec hashes
+    with open(lock, "w") as f:
+        f.write("locked\n")
+    calkit.environments.write_env_spec_hash(
+        lock, calkit.environments.env_spec_hash("environment.yml")
+    )
+    calkit.environments.save_cache(env_name="py", env=env, success=True)
+    with mock.patch("calkit.cli.check.check_environment") as check:
+        calkit.environments.check_all_in_pipeline(ck_info=ck_info)
+    assert mock.call("py", verbose=False) not in check.call_args_list
+    with open("environment.yml", "w") as f:
+        f.write("dependencies:\n  - python\n  - scipy\n")
+    calkit.environments.save_cache(env_name="py", env=env, success=True)
+    states = calkit.environments.get_cached_env_states()
+    assert states["py"]["spec_changed"] and states["py"]["changed"]
+    assert not states["other"]["spec_changed"]
+    with mock.patch("calkit.cli.check.check_environment") as check:
+        calkit.environments.check_all_in_pipeline(ck_info=ck_info)
+    assert mock.call("py", verbose=False) in check.call_args_list
 
 
 def test_env_spec_hashes(tmp_dir):
@@ -2308,7 +2330,11 @@ def test_spec_changed_since_lock(tmp_dir):
     assert not envs.spec_changed_since_lock("main", conda)
     write("env.yml", "dependencies:\n  - python\n")
     assert envs.spec_changed_since_lock("main", conda)
-    # Nor is it what it was locked from once it's gone
+    # Nor is it what it was locked from once it's gone, or once it's YAML
+    # that can't be hashed, which is a change rather than an error
+    for text in ["- python\n- scipy\n", "name: 2024-01-01\n"]:
+        write("env.yml", text)
+        assert envs.spec_changed_since_lock("main", conda)
     os.remove("env.yml")
     assert envs.spec_changed_since_lock("main", conda)
     # A venv's Python is part of its spec, as its check hashes it

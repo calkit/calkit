@@ -2070,8 +2070,9 @@ def spec_changed_since_lock(
     python = env.get("python") if kind != "conda" else None
     try:
         return env_spec_hash(spec_fpath, python=python) != recorded
-    except (OSError, ValueError, yaml.YAMLError):
-        # E.g., deleted, so no longer what it was locked from
+    except Exception:
+        # E.g., deleted, or YAML that isn't a mapping, so no longer what it
+        # was locked from, and status mustn't fail over it
         return True
 
 
@@ -2584,8 +2585,9 @@ def get_cached_env_states(
 
     Checking an environment can build it, which runs whatever its spec says,
     so this only reads the record of the last check: when it was, whether it
-    passed, and whether the spec, lock file, or prefix has changed since,
-    or the spec since it was locked, which is known without that record.
+    passed, and whether the spec, lock file, or prefix has changed since.
+    Whether the spec changed since it was locked is known without that
+    record, so it's under ``spec_changed`` too.
     """
     names, ck_info, _ = get_pipeline_env_names(
         ck_info=ck_info, wdir=wdir, targets=targets
@@ -2605,6 +2607,7 @@ def get_cached_env_states(
                 "checked_at": None,
                 "success": None,
                 "changed": True if spec_changed else None,
+                "spec_changed": spec_changed,
             }
             continue
         checked_at = cached.get("checked_at")
@@ -2618,6 +2621,7 @@ def get_cached_env_states(
             # e.g., its spec or lock file
             "changed": spec_changed
             or (not up_to_date if cached.get("success") else None),
+            "spec_changed": spec_changed,
         }
     return states
 
@@ -2721,8 +2725,13 @@ def check_all_in_pipeline(
         if env.get("kind") in KINDS_NO_CHECK:
             continue
         if not force:
-            up_to_date = cacheable(env) and check_cache(
-                env_name=env_name, env=env, wdir=wdir
+            # Not up to date if what it was locked from says otherwise, e.g.,
+            # after a merge took the other side's spec hashes, which status
+            # would then report as stale
+            up_to_date = (
+                cacheable(env)
+                and check_cache(env_name=env_name, env=env, wdir=wdir)
+                and not spec_changed_since_lock(env_name, env, wdir=wdir)
             )
             if up_to_date:
                 res[env_name] = {"success": True, "cached": True}

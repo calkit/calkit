@@ -260,3 +260,64 @@ def test_describe_storage():
         assert "also read from" not in result.output
         assert "hub storage used: 1.50 GB" in result.output
         assert "account hub storage used" not in result.output
+
+
+def test_describe_artifact(kit_project, tmp_path):
+    import calkit.kits
+
+    runner = CliRunner()
+    kit_path = str(tmp_path / "fig.png")
+    calkit.kits.write_copy(
+        "figures/fig.png", kit_path, up_to_date=True, max_size=1000
+    )
+    # A file with a kit is described by it, from anywhere, and the
+    # subcommand name can be left out
+    for args in [["describe", kit_path], ["describe", "artifact", kit_path]]:
+        res = runner.invoke(app, args)
+        assert res.exit_code == 0, res.stdout
+        assert "figures/fig.png from kit-test at" in res.stdout
+        assert "https://github.com/someone/kit-test.git" in res.stdout
+        assert "Made by stage: make" in res.stdout
+        assert "Unchanged since kit was made" in res.stdout
+        assert "origin not defined for data/raw.csv" in res.stdout
+        assert "  - data/raw.csv" in res.stdout
+        assert "    scripts/make.py" in res.stdout
+    res = runner.invoke(app, ["describe", kit_path, "--json"])
+    assert res.exit_code == 0, res.stdout
+    info = json.loads(res.stdout)
+    assert info["artifact_unchanged"] is True
+    assert info["matches_pipeline"] is True
+    assert info["kit"]["artifact"]["stage"] == "make"
+    assert info["kit"]["provenance_gaps"][0]["path"] == "data/raw.csv"
+    # A file in the project is described as part of it
+    res = runner.invoke(app, ["describe", "figures/fig.png"])
+    assert res.exit_code == 0, res.stdout
+    assert "figures/fig.png: not declared in calkit.yaml" in res.stdout
+    assert "Made by stage: make" in res.stdout
+    assert "Up to date" in res.stdout
+    assert "origin not defined for data/raw.csv" in res.stdout
+    assert "calkit new kit figures/fig.png" in res.stdout
+    # Defining the input's origin and declaring the figure fills the gaps
+    ck_info = calkit.load_calkit_info()
+    ck_info["figures"] = [{"path": "figures/fig.png", "title": "Squares"}]
+    ck_info["datasets"] = [
+        {"path": "data/raw.csv", "imported_from": {"url": "https://x.org/a"}}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = runner.invoke(app, ["describe", "figures/fig.png", "--json"])
+    assert res.exit_code == 0, res.stdout
+    info = json.loads(res.stdout)
+    assert info["kind"] == "figures"
+    assert info["title"] == "Squares"
+    assert info["provenance_gaps"] == []
+    res = runner.invoke(app, ["describe", "data/raw.csv"])
+    assert "data/raw.csv: dataset" in res.stdout
+    assert "Imported from:" in res.stdout
+    assert "Provenance defined for all inputs" in res.stdout
+    # Subcommands still win, and missing files are errors
+    res = runner.invoke(app, ["describe", "system"])
+    assert res.exit_code == 0, res.stdout
+    res = runner.invoke(app, ["describe", "nope.png"])
+    assert res.exit_code != 0
+    assert "doesn't exist" in res.stdout + str(res.stderr)

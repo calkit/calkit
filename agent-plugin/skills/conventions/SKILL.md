@@ -274,6 +274,9 @@ DVC handles:
 | `calkit list questions`         | List questions with what each has and lacks             |
 | `calkit show question <n>`      | Show a question with its answer rendered from evidence  |
 | `calkit check questions`        | Check answers against current evidence                  |
+| `calkit describe <file>`        | What made a file, whether it's reproducible             |
+| `calkit new kit <file>`         | Copy of a figure or document with a kit embedded        |
+| `calkit expand <file>`          | Expand a file's kit into a project                      |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 
@@ -364,3 +367,16 @@ inputs and process definition.
 Imported artifacts should have attribution.
 Primary artifacts should have attestation, including AI-generated content,
 though the human is considered the author and AI is noted with a `with_ai` field.
+
+## Sharing figures and documents
+
+When a figure, PDF, SVG, or HTML page is going to a person, e.g., pasted into
+a chat or emailed, offer to share a copy made with `calkit new kit <file>`
+rather than the bare file.
+The copy carries a kit: the stages, scripts, environments, and small data
+that make it, so the recipient can run `calkit describe` on it to see how it
+was made and `calkit expand` to get a runnable project.
+Ask before making one from a private project, since everything in the kit
+goes with the file; `calkit describe <copy>` lists what's in it.
+When given a file from someone else, run `calkit describe` on it before
+reasoning about where it came from.

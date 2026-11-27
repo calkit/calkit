@@ -2842,3 +2842,88 @@ def test_new_comment(tmp_dir):
             capture_output=True,
         )
         assert res.returncode != 0, args
+
+
+def test_new_kit(kit_project):
+    # Written beside where it's run, leaving the original alone
+    res = runner.invoke(app, ["new", "kit", "figures/fig.png"])
+    assert res.exit_code == 0, res.stdout
+    assert "Wrote fig.kit.png with kit" in res.stdout
+    kit = calkit.kits.read("fig.kit.png")
+    assert kit is not None
+    assert kit.manifest.source.up_to_date
+    assert calkit.kits.read("figures/fig.png") is None
+    # Data that doesn't fit is left out and reported
+    res = runner.invoke(
+        app,
+        [
+            "new",
+            "kit",
+            "figures/fig.pdf",
+            "-o",
+            "small.pdf",
+            "--max-size",
+            "1KB",
+        ],
+    )
+    assert res.exit_code == 0, res.stdout
+    assert "Left out 4 files" in res.stdout
+    res = runner.invoke(
+        app, ["new", "kit", "figures/fig.pdf", "--max-size", "big"]
+    )
+    assert res.exit_code != 0
+    assert "Invalid size" in res.stdout + str(res.stderr)
+    # An out-of-date pipeline needs --force, and the kit says so
+    with open("data/raw.csv", "a") as f:
+        f.write("1,1\n")
+    res = runner.invoke(app, ["new", "kit", "figures/fig.png", "-o", "a.png"])
+    assert res.exit_code != 0
+    assert "Out of date: make" in res.stdout + str(res.stderr)
+    res = runner.invoke(
+        app, ["new", "kit", "figures/fig.png", "-o", "a.png", "--force"]
+    )
+    assert res.exit_code == 0, res.stdout
+    kit = calkit.kits.read("a.png")
+    assert kit is not None
+    assert not kit.manifest.source.up_to_date
+    assert "Uncommitted changes" in res.stdout + str(res.stderr)
+    subprocess.check_call(["dvc", "checkout", "-q", "--force", "data/raw.csv"])
+    # Only what a stage makes can carry a kit
+    res = runner.invoke(app, ["new", "kit", "scripts/make.py"])
+    assert res.exit_code != 0
+    assert "No pipeline stage makes" in res.stdout + str(res.stderr)
+    # A release can carry one too, but not of the whole project, and not
+    # with --pipeline as well
+    res = runner.invoke(
+        app,
+        [
+            "new",
+            "release",
+            "-n",
+            "v1",
+            "--internal",
+            "--no-push",
+            "--kit",
+            "figures/fig.svg",
+        ],
+    )
+    assert res.exit_code == 0, res.stdout
+    stored = [
+        os.path.join(".calkit/releases/v1", f)
+        for f in os.listdir(".calkit/releases/v1")
+        if f.endswith(".svg")
+    ]
+    assert len(stored) == 1
+    kit = calkit.kits.read(stored[0])
+    assert kit is not None
+    assert kit.artifact_unchanged
+    for args in [
+        ["--kit", "."],
+        ["--kit", "--pipeline", "figures/fig.svg"],
+        ["--kit", "data/raw.csv"],
+    ]:
+        res = runner.invoke(
+            app,
+            ["new", "release", "-n", "v2", "--internal", "--no-push", *args],
+        )
+        assert res.exit_code != 0

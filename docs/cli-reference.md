@@ -34,6 +34,7 @@
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
 | [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                      |
+| [`expand`](#top-command-expand)                  | Expand the kit embedded in a file into a project.                                                            |
 | [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.                                                 |
 | [`config`](#command-group-config)                | Configure Calkit.                                                                                            |
 | [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                  |
@@ -41,7 +42,7 @@
 | [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
 | [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
 | [`show`](#command-group-show)                    | Show Calkit objects.                                                                                         |
-| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
+| [`describe\|desc`](#command-group-describe-desc) | Describe things, or a file with 'calkit describe PATH'.                                                      |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`open`](#command-group-open)                    | Open things.                                                                                                 |
@@ -700,6 +701,27 @@ Options:
 | `--dir-to-dir-replace` | list[str] | no       |         | Copy directory to another directory and replace it, e.g., --dir-to-dir-replace 'figures->paper/figures'.                                                      |
 | `--dir-to-dir-merge`   | list[str] | no       |         | Merge directory into another directory. This is useful for merging contents of one directory into another, e.g., --dir-to-dir-merge 'figures->paper/figures'. |
 
+<a id="top-command-expand"></a>
+
+### `calkit expand`
+
+Expand the kit embedded in a file into a project.
+
+The project holds what makes the file, committed to a new Git repo with the original project's remote as 'upstream'.
+
+Usage:
+
+```text
+calkit expand PATH [DEST-DIR]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------- |
+| `path`     | str  | yes      |         | Path of a file with a kit.                                 |
+| `dest_dir` | str  | no       |         | Directory for the project; defaults to the project's name. |
+
 <a id="top-command-xr"></a>
 
 ### `calkit xr`
@@ -918,6 +940,7 @@ Create a new Calkit object.
 | [`latex-stage`](#subcommand-new-create-latex-stage)                       | Add a stage to the pipeline that compiles a LaTeX document.                                       |
 | [`jupyter-notebook-stage`](#subcommand-new-create-jupyter-notebook-stage) | Add a stage to the pipeline that runs a Jupyter notebook.                                         |
 | [`release`](#subcommand-new-create-release)                               | Create a new release.                                                                             |
+| [`kit`](#subcommand-new-create-kit)                                       | Write a copy of a figure or document with a kit embedded.                                         |
 | [`workspace`](#subcommand-new-create-workspace)                           | Create another workspace for this project, e.g., to work on a change without disturbing this one. |
 
 <a id="subcommand-new-create-project"></a>
@@ -1836,6 +1859,7 @@ Options:
 | `--description`, `--desc` | str       | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                                 |
 | `--date`                  | str       | no       |         | Release date. Will default to today.                                                                                                                                                                  |
 | `--pipeline`              | boolean   | no       | False   | Include everything needed to reproduce the released path, i.e., the pipeline, its lock file, and the stages, inputs, and environments the path depends on. Stages unrelated to the path are left out. |
+| `--kit`                   | boolean   | no       | False   | Embed a kit in the released file (what makes it, so it can be expanded into a project); see 'calkit new kit'.                                                                                         |
 | `--no-docker-images`      | boolean   | no       | False   | Do not archive the project's Docker images in the release.                                                                                                                                            |
 | `--dry-run`               | boolean   | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                                           |
 | `--no-commit`             | boolean   | no       | False   | Do not commit changes to Git repo.                                                                                                                                                                    |
@@ -1846,6 +1870,35 @@ Options:
 | `--draft`                 | boolean   | no       | False   | Create draft record with reserved DOI but do not publish.                                                                                                                                             |
 | `--license`               | list[str] | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                              |
 | `--verbose`, `-v`         | boolean   | no       | False   | Print verbose output.                                                                                                                                                                                 |
+
+<a id="subcommand-new-create-kit"></a>
+
+#### `calkit new|create kit`
+
+Write a copy of a figure or document with a kit embedded.
+
+The kit holds what makes the file (stages, scripts, environments, and data that fits) so anyone with the copy can inspect it with 'calkit describe' and expand it into a project with 'calkit expand'. Works with PNG, PDF, SVG, and HTML files.
+
+Usage:
+
+```text
+calkit new|create kit [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                            |
+| -------- | ---- | -------- | ------- | -------------------------------------- |
+| `path`   | str  | yes      |         | Path of a figure or document to share. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                                |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--output`, `-o` | str     | no       |         | Where to write the copy; defaults to NAME.kit.EXT here.                                                                                    |
+| `--max-size`     | str     | no       |         | Largest the kit may grow, e.g., 500KB or 20MB; data that doesn't fit is left out. Defaults to the file's size or 1MB, whichever is bigger. |
+| `--no-data`      | boolean | no       | False   | Leave out all data, so the kit holds only the recipe.                                                                                      |
+| `--force`, `-f`  | boolean | no       | False   | Make the kit even if the pipeline is out of date.                                                                                          |
 
 <a id="subcommand-new-create-workspace"></a>
 
@@ -2757,7 +2810,7 @@ Options:
 
 ### `calkit describe|desc`
 
-Describe things.
+Describe things, or a file with 'calkit describe PATH'.
 
 | Command                                                             | Description                                                        |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------ |
@@ -2767,6 +2820,7 @@ Describe things.
 | [`subprojects`](#subcommand-describe-desc-subprojects)              | Describe subprojects, including nested ones.                       |
 | [`storage`](#subcommand-describe-desc-storage)                      | Describe project's Git and DVC storage.                            |
 | [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
+| [`artifact`](#subcommand-describe-desc-artifact)                    | Describe a file, what made it, and whether it's reproducible.      |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2880,9 +2934,36 @@ calkit describe|desc schema [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default | Description                                               |
-| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
-| `--output`, `-o` | str  | no       |         | Path at which to write the schema instead of printing it. |
+| Option           | Type    | Required | Default | Description                                               |
+| ---------------- | ------- | -------- | ------- | --------------------------------------------------------- |
+| `--output`, `-o` | str     | no       |         | Path at which to write the schema instead of printing it. |
+| `--kit`          | boolean | no       | False   | Print the schema for kit manifests instead.               |
+
+<a id="subcommand-describe-desc-artifact"></a>
+
+#### `calkit describe|desc artifact`
+
+Describe a file, what made it, and whether it's reproducible.
+
+Says what kind of artifact it is, which stage makes it, whether that's up to date, and which inputs have no recorded origin. Reads the kit embedded in it, if it has one, so this works for a file shared from another project; otherwise, describes it as part of this project. 'calkit describe PATH' is short for this.
+
+Usage:
+
+```text
+calkit describe|desc artifact [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description     |
+| -------- | ---- | -------- | ------- | --------------- |
+| `path`   | str  | yes      |         | Path of a file. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description    |
+| -------- | ------- | -------- | ------- | -------------- |
+| `--json` | boolean | no       | False   | Print as JSON. |
 
 <a id="command-group-import"></a>
 

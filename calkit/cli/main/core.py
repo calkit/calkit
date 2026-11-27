@@ -97,7 +97,11 @@ app.add_typer(
 )
 app.add_typer(list_app, name="list|ls", help="List Calkit objects.")
 app.add_typer(show_app, name="show", help="Show Calkit objects.")
-app.add_typer(describe_app, name="describe|desc", help="Describe things.")
+app.add_typer(
+    describe_app,
+    name="describe|desc",
+    help="Describe things, or a file with 'calkit describe PATH'.",
+)
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(open_app, name="open", help="Open things.")

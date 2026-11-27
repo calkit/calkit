@@ -251,6 +251,11 @@ those are checked first, before anything is archived.
     The pipeline must be up-to-date before releasing,
     since the release records the state that produced the artifact.
 
+<!-- TODO: needs human review -->
+
+To release the artifact as a single file that carries what makes it,
+use `--kit` instead, which embeds a [kit](kits.md) in the released copy.
+
 ## Releasing to CaltechDATA
 
 [CaltechDATA](https://data.caltech.edu/)

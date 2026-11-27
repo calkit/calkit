@@ -6,6 +6,7 @@ https://github.com/citation-file-format/citation-file-format
 
 import gzip
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -868,6 +869,14 @@ def prune_for_stage(
             except ValueError:
                 # Outside the repo, so it can't go in the archive anyway
                 pass
+    # Pointer files for what was added with DVC, and the .gitignore files
+    # that keep DVC-tracked files out of Git, or a copy would commit them
+    for n in list(needed):
+        needed.add(n + ".dvc")
+        parent = posixpath.dirname(n)
+        while parent:
+            needed.add(posixpath.join(parent, ".gitignore"))
+            parent = posixpath.dirname(parent)
     # The cache is shared across the whole project, so keep only the objects
     # backing the files we're shipping; without them DVC can't restore the
     # outputs on the other end

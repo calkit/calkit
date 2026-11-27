@@ -46,6 +46,26 @@ class AliasGroup(TyperGroup):
         return default_name
 
 
+class DefaultCommandGroup(AliasGroup):
+    """AliasGroup that runs ``default_command`` when the first argument
+    isn't one of its commands, e.g., so ``calkit describe PATH`` describes a
+    path. Subclasses set ``default_command``.
+    """
+
+    default_command = ""
+
+    def resolve_command(
+        self, ctx: Any, args: list[str]
+    ) -> tuple[str | None, Any, list[str]]:
+        if (
+            args
+            and not args[0].startswith("-")
+            and self.get_command(ctx, args[0]) is None
+        ):
+            args = [self.default_command, *args]
+        return super().resolve_command(ctx, args)
+
+
 class OptionalValueCommand(TyperCommand):
     """TyperCommand allowing certain options to be passed without a value.
 

@@ -105,3 +105,85 @@ def texlive_user_home(tmp_path_factory: pytest.TempPathFactory) -> str:
     except requests.RequestException as e:
         pytest.skip(f"TeX Live's archive can't be reached: {e}")
     return home
+
+
+KIT_PROJECT_SCRIPT = """\
+import os
+
+import pypdfium2 as pdfium
+from PIL import Image
+
+os.makedirs("figures", exist_ok=True)
+rows = open("data/raw.csv").read().splitlines()[1:]
+Image.new("RGB", (64, len(rows) % 64 + 1), "red").save("figures/fig.png")
+pdf = pdfium.PdfDocument.new()
+pdf.new_page(200, 100)
+pdf.save("figures/fig.pdf")
+pdf.close()
+with open("figures/fig.svg", "w") as f:
+    f.write('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>\\n')
+with open("figures/page.html", "w") as f:
+    f.write("<!DOCTYPE html><html><body><p>Hi</p></body></html>\\n")
+"""
+
+
+@pytest.fixture
+def kit_project(tmp_dir) -> None:
+    """A committed project whose one stage makes a PNG, PDF, SVG, and HTML
+    page from a DVC-tracked CSV, for testing kits.
+    """
+    import sys
+
+    import calkit
+
+    os.makedirs("scripts")
+    os.makedirs("data")
+    with open("scripts/make.py", "w") as f:
+        f.write(KIT_PROJECT_SCRIPT)
+    with open("data/raw.csv", "w") as f:
+        f.write("x,y\n" + "".join(f"{i},{i * i}\n" for i in range(5000)))
+    outputs = [
+        "figures/fig.png",
+        "figures/fig.pdf",
+        "figures/fig.svg",
+        "figures/page.html",
+    ]
+    ck_info = {
+        "name": "kit-test",
+        "title": "Kit test",
+        "pipeline": {
+            "stages": {
+                "make": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": f"{sys.executable} scripts/make.py",
+                    "inputs": ["scripts/make.py", "data/raw.csv"],
+                    "outputs": outputs,
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    for cmd in [
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@test.com"],
+        ["git", "config", "user.name", "Test"],
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://user:token@github.com/someone/kit-test.git",
+        ],
+        ["dvc", "init", "-q"],
+        ["dvc", "config", "core.analytics", "false"],
+        ["git", "add", "calkit.yaml", "scripts", ".dvc", ".dvcignore"],
+        ["git", "commit", "-qm", "init"],
+        [sys.executable, "-m", "calkit", "add", "--to", "dvc", "data/raw.csv"],
+        ["git", "commit", "-qm", "Add data"],
+        [sys.executable, "-m", "calkit", "run"],
+        ["git", "add", "."],
+        ["git", "commit", "-qm", "Run"],
+    ]:
+        subprocess.check_call(cmd)

@@ -167,6 +167,7 @@ def test_to_dvc():
                     "script_path": "something/my-cool-script.py",
                     "outputs": [
                         "my-output.out",
+                        {"path": "my-output.csv", "storage": "git"},
                     ],
                 },
                 "process-data": {
@@ -176,6 +177,8 @@ def test_to_dvc():
                     "inputs": [
                         {"from_stage_outputs": "get-data"},
                         "something.else.txt",
+                        # Also named directly, so it's already a dep
+                        "my-output.csv",
                     ],
                 },
             }
@@ -183,8 +186,10 @@ def test_to_dvc():
     }
     dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     print(dvc_stages)
-    assert "my-output.out" in dvc_stages["process-data"]["deps"]
-    assert "something.else.txt" in dvc_stages["process-data"]["deps"]
+    deps = dvc_stages["process-data"]["deps"]
+    assert "my-output.out" in deps
+    assert "something.else.txt" in deps
+    assert deps.count("my-output.csv") == 1
     # Test a complex pipeline with iterations and parameters
     ck_info = {
         "environments": envs,

@@ -134,7 +134,7 @@ const UNTIMED_REQUESTS = new Set([
 const READY_TIMEOUT_MS = 20 * 1000
 
 // One browser connection to a machine through the relay, opened while
-// the machine is online. See docs/dev/hub-link-protocol.md for the
+// the machine is online. See docs/dev/hub/linked-machines.md for the
 // messages.
 export class MachineConnection {
   machineId: string

@@ -5,7 +5,7 @@ meet in memory. It has no database and trusts only relay tokens the API
 signed, so the only setting it needs is ``RELAY_SECRET_KEY``, which can't
 sign logins. It lives outside the ``app`` package because importing that
 loads the API's settings, which require all of its secrets. See
-docs/dev/hub-link-protocol.md.
+docs/dev/hub/linked-machines.md.
 """
 
 import asyncio

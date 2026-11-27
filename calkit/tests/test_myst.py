@@ -213,7 +213,7 @@ def test_directives(tmp_path: Path) -> None:
     record_path = tmp_path / "record.json"
     record_path.write_text(json.dumps({"values": {}}))
     calkit.myst.add_role_values(str(record_path), roles[:2], ["0.12", "0.031"])
-    assert json.loads(record_path.read_text())["roles"] == {
+    assert json.loads(record_path.read_text(encoding="utf-8"))["roles"] == {
         "ckvalue": {
             "results/fit.json fit.slope .2f": {
                 "text": "0.12",
@@ -230,9 +230,9 @@ def test_directives(tmp_path: Path) -> None:
         }
     }
     plugin_path = tmp_path / "site" / calkit.myst.PLUGIN_PATH
-    assert plugin_path.read_text() == calkit.myst.PLUGIN_JS
+    assert plugin_path.read_text(encoding="utf-8") == calkit.myst.PLUGIN_JS
     css_path = tmp_path / "site" / calkit.myst.PLUGIN_CSS_PATH
-    assert css_path.read_text() == calkit.myst.PLUGIN_CSS
+    assert css_path.read_text(encoding="utf-8") == calkit.myst.PLUGIN_CSS
     # The stage that builds it runs 'calkit myst build' in its folder
     ck_info = {
         "pipeline": {

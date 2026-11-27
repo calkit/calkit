@@ -22,11 +22,15 @@ def test_build(tmp_path: Path) -> None:
             ["calkit", "myst", "build", *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=tmp_path / "site",
         )
 
     def read_export(name: str = "index.md") -> str:
-        with open(tmp_path / "site" / "_build" / "exports" / name) as f:
+        with open(
+            tmp_path / "site" / "_build" / "exports" / name, encoding="utf-8"
+        ) as f:
             return f.read().replace("\xa0", " ")
 
     def get_summaries(text: str) -> list[str]:
@@ -195,7 +199,12 @@ def test_build(tmp_path: Path) -> None:
         ["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=tmp_path
     )
     res = subprocess.run(
-        ["calkit", "run"], capture_output=True, text=True, cwd=tmp_path
+        ["calkit", "run"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=tmp_path,
     )
     assert res.returncode != 0
     assert "add to its inputs: ../results/fit.json" in res.stdout + res.stderr
@@ -246,7 +255,7 @@ def test_build(tmp_path: Path) -> None:
     assert page2_ids and page2_ids[0] != marks[0][3]
     # What's included, however deep, counts
     record_path = tmp_path / calkit.quarto.get_provenance_path("site/index.md")
-    record = json.loads(record_path.read_text())
+    record = json.loads(record_path.read_text(encoding="utf-8"))
     assert "results/fit.json fit.slope .4f" in record["roles"]["ckvalue"]
     # Expanded, it's how it came to be, with a graph of only what it's
     # made from, and links to the repo's host and the document
@@ -304,7 +313,7 @@ def test_build(tmp_path: Path) -> None:
     )
     # With nothing recorded, it says so, still numbering and referring to
     # the table, and values can't be shown, since MyST doesn't read them
-    record = json.loads(record_path.read_text())
+    record = json.loads(record_path.read_text(encoding="utf-8"))
     assert set(record["roles"]) == {"ckvalue", "ckrefval"}
     record_path.unlink()
     subprocess.check_call(

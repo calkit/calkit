@@ -63,3 +63,51 @@ Every part is reached from the project,
 e.g., a file by its path in the project wherever it's stored,
 and stays usable without Calkit,
 e.g., as a plain DVC remote.
+
+Separating coupled parts reduces what people see at once,
+not what they have to keep in sync.
+The coupling moves into people's heads and manual transfers,
+which is where outputs go stale.
+So focus comes from views, not distance,
+e.g., a paper as a subproject of the software it reports on,
+with views and CI that only show the part someone's working on.
+
+Some separations are real, though,
+and those parts live in separate projects that stay connected:
+
+- **Visibility:**
+  a paper often stays private until submission while its software is public.
+- **Access:**
+  coauthors may edit the paper but shouldn't push to the software.
+- **Lifecycle:**
+  paper drafts shouldn't mix with the software's release history.
+
+A connected project pins the other at exact commits
+and imports its outputs with where they came from,
+so staleness shows across projects as it does within one.
+
+## Integration by default
+
+People do the best they can with the tools they have.
+They pick the best place for code, the best writing tool,
+and the best pipeline runner,
+and connecting them comes last,
+so it's done by hand, if at all.
+Calkit has to make integration so painless that it happens by default:
+
+- **People keep their tools.**
+  Calkit connects the code host, writing tool, and runner people already
+  use, from inside them,
+  e.g., the browser extension on Overleaf or the GitHub Action,
+  rather than asking anyone to switch.
+- **Integration is a side effect of what people already do.**
+  Saving, pushing, and running record what was made and where it came
+  from, with no separate step to import or promote it.
+  Capturing is cheap by default,
+  and what's cited, e.g., by an answer or an accepted change,
+  is what's kept.
+- **Extra steps are counted.**
+  A feature should add no steps over working by hand,
+  after a one-time setup.
+  When something has to be asked,
+  it's asked once, when the answer pays off.

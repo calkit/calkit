@@ -186,7 +186,7 @@ stages:
     outs:
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: f7e4f256e65d5787172f3d4b6b1adbc5
+      md5: c3fffd650e85066f203af6facbbdf99f
       size: 125528
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
@@ -206,7 +206,7 @@ stages:
       size: 173888
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: f7e4f256e65d5787172f3d4b6b1adbc5
+      md5: c3fffd650e85066f203af6facbbdf99f
       size: 125528
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5

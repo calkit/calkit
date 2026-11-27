@@ -54,3 +54,6 @@ To avoid both,
 connect the storage to the project on the hub instead,
 e.g., a Hugging Face bucket, Box, or an S3 bucket
 (see [Storage](../storage.md)).
+Showing files from an S3 bucket on the hub
+also takes a CORS rule on the bucket
+(see [S3](../storage.md#s3)).

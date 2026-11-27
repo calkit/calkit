@@ -207,7 +207,7 @@ Two other requests do not involve your data:
 - Artifacts are downloaded from the object storage your hub uses (Amazon S3
   or Google Cloud Storage), or from the storage the project's owner
   connected, e.g., a Hugging Face bucket, Box, or an S3 bucket, using a
-  short-lived signed link the hub issued.
+  short-lived signed link the hub provided.
 
 ### Calkit on your computer
 

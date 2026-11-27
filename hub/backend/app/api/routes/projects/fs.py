@@ -261,6 +261,7 @@ def post_project_fs_op(
     for st in storage_locations:
         if (
             st.backend in ("s3", "gcs")
+            and st.resource is None
             and settings.ENVIRONMENT == "local"
             and not st.fs.exists(st.data_prefix)
         ):
@@ -459,7 +460,7 @@ def post_project_fs_op(
     elif target.backend == "box":
         try:
             box_access = storage.get_box_access(target, project, "upload")
-        except storage.BoxFolderTakenError as e:
+        except storage.FolderTakenError as e:
             raise HTTPException(409, str(e))
         except Exception:
             logger.exception(f"Failed to get Box access for {path}")
@@ -474,7 +475,7 @@ def post_project_fs_op(
                 fs=target.fs,
                 fpath=full_path,
                 upload_size_bytes=content_length,
-                expires=900,
+                expires=storage.UPLOAD_URL_EXPIRES,
                 content_type=content_type,
             )
         except Exception:
@@ -516,7 +517,7 @@ def post_project_fs_op(
             url = get_object_url(
                 fpath=full_path,
                 fname=None,
-                expires=900,
+                expires=storage.UPLOAD_URL_EXPIRES,
                 fs=target.fs,
                 method="put",
             )
@@ -746,6 +747,7 @@ def post_project_fs_batch_op(
     for st in storage_locations:
         if (
             st.backend in ("s3", "gcs")
+            and st.resource is None
             and settings.ENVIRONMENT == "local"
             and not st.fs.exists(st.data_prefix)
         ):

@@ -50,6 +50,11 @@ jobs:
               - "!.github/workflows/test-latex-image.yml"
               - "!.github/workflows/publish-latex-image.yml"
               - "!.github/workflows/test-assistant.yml"
+              # The repo's own pipeline results, e.g., the daily data PR's
+              - "!data/**"
+              - "!results/**"
+              - "!dvc.lock"
+              - "!.calkit/stage-runs.json"
             # The JupyterLab extension depends on the core Python package,
             # so run its tests for any change outside the other subprojects
             jlab:
@@ -69,6 +74,11 @@ jobs:
               - "!.github/workflows/test-latex-image.yml"
               - "!.github/workflows/publish-latex-image.yml"
               - "!.github/workflows/test-assistant.yml"
+              # The repo's own pipeline results, e.g., the daily data PR's
+              - "!data/**"
+              - "!results/**"
+              - "!dvc.lock"
+              - "!.calkit/stage-runs.json"
             vscode:
               - "vscode-ext/**"
             browser:

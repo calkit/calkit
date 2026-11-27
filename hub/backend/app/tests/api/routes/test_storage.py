@@ -90,7 +90,7 @@ def test_storage_resources_and_project_storage(
     assert [r["name"] for r in response.json()["previous"]] == ["hf"]
     # A bucket of its own, made with the owner's HF account, public like the
     # project, which other users can't make
-    bucket_url = f"{project_url}/hf-bucket"
+    bucket_url = f"{project_url}/hf-buckets"
     bucket = {"bucket": f"someone/{project.name}"}
     response = client.post(bucket_url, headers=other_headers, json=bucket)
     assert response.status_code in (403, 404)
@@ -182,7 +182,7 @@ def test_storage_resources_and_project_storage(
         assert response.json() == {"project_used_gb": 0.25, "account": None}
     # What disconnecting HF would affect: everything connected with it, and
     # the projects that have used each
-    response = client.get("/user/huggingface/storage", headers=owner_headers)
+    response = client.get("/user/storage/huggingface", headers=owner_headers)
     assert response.status_code == 200
     by_bucket = {r["bucket"]: r for r in response.json()}
     assert set(by_bucket) == {"someone/calkit", bucket["bucket"]}
@@ -190,21 +190,27 @@ def test_storage_resources_and_project_storage(
     assert by_bucket[bucket["bucket"]]["projects"] == [
         f"{account_name}/{project.name}"
     ]
-    response = client.get("/user/huggingface/storage", headers=other_headers)
+    response = client.get("/user/storage/huggingface", headers=other_headers)
     assert response.json() == []
     # While it's being transferred to the hub's own storage, it can't be
     # selected again, and no more can be made with that HF account
     response = client.get("/user/storage-transfer", headers=owner_headers)
-    assert response.json() == {"status": None, "error": None, "provider": None}
+    assert response.json() == {
+        "status": None,
+        "error": None,
+        "provider": None,
+        "connection": None,
+    }
     with patch(
         "app.tasks.get_storage_transfer_status",
-        return_value=("running", None, "huggingface"),
+        return_value=("running", None, "huggingface", "default"),
     ):
         response = client.get("/user/storage-transfer", headers=owner_headers)
         assert response.json() == {
             "status": "running",
             "error": None,
             "provider": "huggingface",
+            "connection": "default",
         }
         response = client.put(
             project_url, headers=owner_headers, json={"dvc_storage_id": hf_id}
@@ -235,7 +241,7 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
     )
     db.add(project)
     db.commit()
-    url = f"/projects/{user.account.name}/{project.name}/storage/box-folder"
+    url = f"/projects/{user.account.name}/{project.name}/storage/box-folders"
     # Box has to be connected
     assert client.post(url, headers=headers).status_code == 401
     users.save_external_credential(
@@ -268,8 +274,8 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
     with (
         patch("calkit.box.BoxFileSystem.get_folder_id", return_value="123"),
         patch(
-            "app.api.routes.storage.storage.claim_box_project_folder",
-            side_effect=storage.BoxFolderTakenError("Calkit/a/b"),
+            "app.api.routes.storage.storage.claim_project_folder",
+            side_effect=storage.FolderTakenError("Calkit/a/b"),
         ),
     ):
         response = client.post(url, headers=headers)
@@ -281,10 +287,7 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
         patch(
             "calkit.box.BoxFileSystem.get_folder_id", return_value="123"
         ) as get_folder_id,
-        patch(
-            "app.api.routes.storage.storage.claim_box_project_folder",
-            return_value="456",
-        ) as claim,
+        patch("app.api.routes.storage.storage.claim_project_folder") as claim,
     ):
         response = client.post(url, headers=headers)
         assert response.status_code == 200
@@ -306,12 +309,162 @@ def test_project_box_folder(client: TestClient, db: Session) -> None:
     ).json()
     assert dvc["id"] in [r["id"] for r in listed]
     # It's what disconnecting Box would strand, not HF
-    response = client.get("/user/box/storage", headers=headers)
+    response = client.get("/user/storage/box", headers=headers)
     assert [
         (r["kind"], r["bucket"], r["projects"]) for r in response.json()
     ] == [("box-folder", "123", [f"{user.account.name}/{project.name}"])]
-    response = client.get("/user/huggingface/storage", headers=headers)
+    response = client.get("/user/storage/huggingface", headers=headers)
     assert [r["kind"] for r in response.json()] == ["hf-bucket"]
     assert (
-        client.get("/user/zenodo/storage", headers=headers).status_code == 422
+        client.get("/user/storage/zenodo", headers=headers).status_code == 422
     )
+
+
+def test_project_s3_bucket(client: TestClient, db: Session) -> None:
+    from app.config import settings
+
+    email = random_email()
+    headers = authentication_token_from_email(
+        client=client, email=email, db=db
+    )
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    projects = []
+    for _ in range(3):
+        project = Project(
+            name=f"s3-{uuid.uuid4().hex[:8]}",
+            title="S3 project",
+            git_repo_url="https://github.com/someone/s3",
+            owner_account_id=user.account.id,
+            owner_account=user.account,
+        )
+        db.add(project)
+        projects.append(project)
+    db.commit()
+    owner = user.account.name
+    # The dev MinIO stands in for someone's S3-compatible storage, e.g., OSN
+    endpoint_url = settings.OBJECT_STORAGE_ENDPOINT_URL
+    bucket_name = f"s3-route-{uuid.uuid4().hex[:8]}"
+    storage.get_s3_fs(
+        str(settings.OBJECT_STORAGE_KEY),
+        str(settings.OBJECT_STORAGE_SECRET),
+        endpoint_url=endpoint_url,
+    ).mkdir(bucket_name)
+    response = client.post(
+        "/user/s3-connections",
+        headers=headers,
+        json={
+            "name": "osn",
+            "endpoint_url": endpoint_url,
+            "access_key_id": settings.OBJECT_STORAGE_KEY,
+            "secret_access_key": settings.OBJECT_STORAGE_SECRET,
+        },
+    )
+    assert response.status_code == 200
+    url = f"/projects/{owner}/{projects[0].name}/storage/s3-buckets"
+    for body, status_code in (
+        ({"connection": "nope", "url": f"s3://{bucket_name}"}, 404),
+        ({"connection": "osn", "url": "s3://a"}, 422),
+        ({"connection": "osn", "url": f"s3://{bucket_name}/../x"}, 422),
+        ({"connection": "osn", "url": "s3://no-such-bucket-here/x"}, 404),
+        ({"connection": "osn", "url": f"s3://{bucket_name}/{'x' * 300}"}, 422),
+    ):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == status_code, response.text
+    # Projects share a bucket, each in its own folder
+    body = {"connection": "osn", "url": f"s3://{bucket_name}/calkit/"}
+    response = client.post(url, headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    added = response.json()
+    assert added["kind"] == "s3-bucket"
+    assert added["bucket"] == f"{bucket_name}/calkit"
+    assert added["name"] == bucket_name
+    assert not added["dedicated"] and not added["read_only"]
+    response = client.get(
+        f"/projects/{owner}/{projects[0].name}/storage", headers=headers
+    )
+    assert response.json()["dvc"] == added
+    second = f"/projects/{owner}/{projects[1].name}/storage/s3-buckets"
+    response = client.post(second, headers=headers, json=body)
+    assert response.json()["id"] == added["id"]
+    resource = db.get(StorageResource, uuid.UUID(added["id"]))
+    assert resource is not None
+    # Other storage signs for the connection's region, which can change
+    assert resource.region is None
+    target = storage.get_resource_storage(db, resource)
+    for project in projects[:2]:
+        marker = target.make_project_path(
+            owner, project.name, storage.PROJECT_FILE
+        )
+        assert target.fs.cat_file(marker) == str(project.id).encode()
+    # Keys that can only read make a source to read from, with new objects
+    # going where they did
+    third = f"/projects/{owner}/{projects[2].name}/storage"
+    shared = {"connection": "osn", "url": f"s3://{bucket_name}/shared"}
+    with patch(
+        "app.api.routes.storage.storage.folder_is_writable",
+        return_value=False,
+    ):
+        response = client.post(
+            f"{third}/s3-buckets", headers=headers, json=shared
+        )
+    assert response.status_code == 200, response.text
+    read_only = response.json()
+    assert read_only["read_only"]
+    response = client.get(third, headers=headers)
+    assert response.json()["dvc"] is None
+    assert response.json()["previous"] == [read_only]
+    response = client.put(
+        third, headers=headers, json={"dvc_storage_id": read_only["id"]}
+    )
+    assert response.status_code == 409
+    # Once the keys can write, adding the bucket again makes it writable
+    response = client.post(f"{third}/s3-buckets", headers=headers, json=shared)
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == read_only["id"]
+    assert not response.json()["read_only"]
+    assert (
+        client.get(third, headers=headers).json()["dvc"]["id"]
+        == (read_only["id"])
+    )
+    # It's checked each time, so keys replaced with ones that can only read
+    # make it read-only again, though the folder is already marked as the
+    # project's and claiming it writes nothing
+    with patch(
+        "app.api.routes.storage.storage.folder_is_writable",
+        return_value=False,
+    ):
+        response = client.post(
+            f"{third}/s3-buckets", headers=headers, json=shared
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["read_only"]
+        # Read-only keys can add a folder of files written outside Calkit,
+        # which has no record of its project
+        target.fs.pipe_file(
+            f"{bucket_name}/provider/{owner}/{projects[2].name}/files/md5/ab/c",
+            b"x",
+        )
+        response = client.post(
+            f"{third}/s3-buckets",
+            headers=headers,
+            json={"connection": "osn", "url": f"s3://{bucket_name}/provider"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["read_only"]
+    # While one connection's storage is being transferred, it can't be
+    # used, but another connection's can
+    with patch(
+        "app.tasks.get_storage_transfer_status",
+        return_value=("running", None, "s3", "osn"),
+    ):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == 409
+        response = client.get("/user/storage-transfer", headers=headers)
+        assert response.json()["connection"] == "osn"
+    with patch(
+        "app.tasks.get_storage_transfer_status",
+        return_value=("running", None, "s3", "aws"),
+    ):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == 200

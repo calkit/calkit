@@ -9,14 +9,14 @@ that produced them, for fast iteration and full transparency.**
 
 ## By the numbers
 
-- **<!-- ckvalue results/traction.json hub_project_owners -->37<!-- /ckvalue -->**
+- **<!-- ckvalue results/traction.json hub_project_owners -->38<!-- /ckvalue -->**
   researchers and groups with projects on [calkit.io](https://calkit.io)
 - **<!-- ckvalue results/traction.json papers_shipped -->5<!-- /ckvalue -->**
   reproducible publications shipped
-- **<!-- ckvalue results/traction.json releases_per_week_last_90_days -->8.7<!-- /ckvalue -->**
+- **<!-- ckvalue results/traction.json releases_per_week_last_90_days -->8.9<!-- /ckvalue -->**
   releases per week
 
-as of <!-- ckvalue results/traction.json date -->2026-11-22<!-- /ckvalue -->
+as of <!-- ckvalue results/traction.json date -->2026-11-27<!-- /ckvalue -->
 
 ## The problem
 

@@ -78,6 +78,8 @@ import type {
   DeleteUserOnboardingFlagErrors,
   DeleteUserOnboardingFlagResponses,
   DeleteUserResponses,
+  DeleteUserS3ConnectionErrors,
+  DeleteUserS3ConnectionResponses,
   DeleteUserTokenErrors,
   DeleteUserTokenResponses,
   DeleteUserTotpErrors,
@@ -277,6 +279,7 @@ import type {
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
+  GetUserS3ConnectionsResponses,
   GetUserServiceStorageErrors,
   GetUserServiceStorageResponses,
   GetUserStorageByIdErrors,
@@ -462,6 +465,8 @@ import type {
   PostProjectReleaseErrors,
   PostProjectReleaseResponses,
   PostProjectResponses,
+  PostProjectS3BucketErrors,
+  PostProjectS3BucketResponses,
   PostProjectStageFromScriptOrNotebookErrors,
   PostProjectStageFromScriptOrNotebookResponses,
   PostProjectStatusErrors,
@@ -493,6 +498,8 @@ import type {
   PostUserHuggingfaceAuthResponses,
   PostUserHuggingfaceAuthStartErrors,
   PostUserHuggingfaceAuthStartResponses,
+  PostUserS3ConnectionErrors,
+  PostUserS3ConnectionResponses,
   PostUserSessionsEndOthersResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
@@ -515,6 +522,7 @@ import type {
   ProjectPatch,
   ProjectPost,
   ProjectPushEventPost,
+  ProjectS3BucketPost,
   ProjectStatusPost,
   ProjectStoragePut,
   PutOrgSubscriptionErrors,
@@ -543,6 +551,8 @@ import type {
   PutUserOverleafSessionResponses,
   PutUserOverleafTokenErrors,
   PutUserOverleafTokenResponses,
+  PutUserS3ConnectionErrors,
+  PutUserS3ConnectionResponses,
   PutUserSubscriptionAdminErrors,
   PutUserSubscriptionAdminResponses,
   PutUserSubscriptionErrors,
@@ -578,6 +588,8 @@ import type {
   ResetPasswordResponses,
   ResolveReleaseCommentErrors,
   ResolveReleaseCommentResponses,
+  S3ConnectionPost,
+  S3ConnectionPut,
   SearchProjectRefsErrors,
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
@@ -2507,6 +2519,150 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/zotero-auth",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User S3 Connections
+   *
+   * Get the current user's S3 connections, without their secrets.
+   */
+  public static getUserS3Connections<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserS3ConnectionsResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserS3ConnectionsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/s3-connections",
+      ...options,
+    })
+  }
+
+  /**
+   * Post User S3 Connection
+   *
+   * Save keys for S3 or S3-compatible storage, e.g., OSN, as a new named
+   * connection.
+   */
+  public static postUserS3Connection<ThrowOnError extends boolean = true>(
+    parameters: {
+      s3ConnectionPost: S3ConnectionPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserS3ConnectionResponses,
+    PostUserS3ConnectionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "s3ConnectionPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserS3ConnectionResponses,
+      PostUserS3ConnectionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/s3-connections",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete User S3 Connection
+   *
+   * Remove an S3 connection, doing ``storage_action`` with any storage it
+   * reaches, as when disconnecting an account.
+   */
+  public static deleteUserS3Connection<ThrowOnError extends boolean = true>(
+    parameters: {
+      name: string
+      storage_action?: "transfer" | "orphan" | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteUserS3ConnectionResponses,
+    DeleteUserS3ConnectionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "storage_action" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteUserS3ConnectionResponses,
+      DeleteUserS3ConnectionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/s3-connections/{name}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Put User S3 Connection
+   *
+   * Replace the keys of an S3 connection.
+   */
+  public static putUserS3Connection<ThrowOnError extends boolean = true>(
+    parameters: {
+      name: string
+      s3ConnectionPut: S3ConnectionPut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserS3ConnectionResponses,
+    PutUserS3ConnectionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { key: "s3ConnectionPut", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutUserS3ConnectionResponses,
+      PutUserS3ConnectionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/s3-connections/{name}",
       ...options,
       ...params,
       headers: {
@@ -10634,10 +10790,13 @@ export class StorageService {
    *
    * Get the storage reached with the current user's account on a service,
    * e.g., HF, which disconnecting it would make unreachable.
+   *
+   * For S3, ``connection`` is the name of the connection.
    */
   public static getUserServiceStorage<ThrowOnError extends boolean = true>(
     parameters: {
-      provider: "huggingface" | "box"
+      provider: "huggingface" | "box" | "s3"
+      connection?: string
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -10647,7 +10806,14 @@ export class StorageService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "provider" }] }],
+      [
+        {
+          args: [
+            { in: "path", key: "provider" },
+            { in: "query", key: "connection" },
+          ],
+        },
+      ],
     )
     return (options?.client ?? client).get<
       GetUserServiceStorageResponses,
@@ -10656,7 +10822,7 @@ export class StorageService {
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/user/{provider}/storage",
+      url: "/user/storage/{provider}",
       ...options,
       ...params,
     })
@@ -10853,7 +11019,7 @@ export class StorageService {
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/storage/box-folder",
+      url: "/projects/{owner_name}/{project_name}/storage/box-folders",
       ...options,
       ...params,
     })
@@ -10899,7 +11065,60 @@ export class StorageService {
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/storage/hf-bucket",
+      url: "/projects/{owner_name}/{project_name}/storage/hf-buckets",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project S3 Bucket
+   *
+   * Send a project's new DVC objects to an S3 bucket, reached with one of
+   * the current user's S3 connections.
+   *
+   * The bucket, or the prefix in it, is shared by the owner account's
+   * projects, each in an ``{owner}/{project}`` folder, so it's kept as
+   * storage they can select. If the keys can only read it, the project reads
+   * from it but new objects keep going where they did.
+   */
+  public static postProjectS3Bucket<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      projectS3BucketPost: ProjectS3BucketPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectS3BucketResponses,
+    PostProjectS3BucketErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "projectS3BucketPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectS3BucketResponses,
+      PostProjectS3BucketErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/storage/s3-buckets",
       ...options,
       ...params,
       headers: {

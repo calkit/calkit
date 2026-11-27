@@ -229,11 +229,13 @@ def test_build(tmp_path: Path) -> None:
     views = re.findall(
         r"^:{3,}\{(note|warning)\} (.*)\n:class: (.*)$", text, re.M
     )
-    assert views[0][0] == "note" and views[0][2] == "dropdown ck-provenance"
+    assert views[0][0] == "note"
+    assert views[0][2] == "dropdown ck-provenance ck-ok"
     assert views[0][1].startswith(
         "`fit.slope` in [`results/fit.json`](https://github.com/example/proj/"
     )
-    assert views[0][1].endswith(": Provenance")
+    # Titled by only what it is while all's well
+    assert views[0][1].endswith(")")
     assert "`k_25`, saved from a cell of" in views[1][1]
     assert "**Stage** `fit` (jupyter-notebook)" in text
     assert "`sigma`, quoted from reference `liu2025`" in views[2][1]
@@ -282,6 +284,13 @@ def test_build(tmp_path: Path) -> None:
         r"The slope is 0\.123\[\{abbr\}``\{sup\}`!` \(Where 0\.123 came "
         r"from: [^)]*recorded before results/fit\.json changed\)",
         text,
+    )
+    assert re.search(
+        r"^:{3,}\{warning\} `fit\.slope` in .*: ⚠️ Out of date: .* "
+        r"recorded before results/fit\.json changed\n"
+        r":class: dropdown ck-provenance$",
+        text,
+        re.M,
     )
     # Built without Calkit after the document changed, it says so
     with open(tmp_path / "site" / "index.md", "a") as f:

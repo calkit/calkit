@@ -176,10 +176,10 @@ function getView(provenance, changed) {
 }
 
 // Collapsed, saying what's wrong while it is
-function getDetails(summary, view) {
+function getDetails(summary, view, ok = false) {
   return {
     type: "details",
-    class: "ck-provenance",
+    class: "ck-provenance" + (ok ? " ck-ok" : ""),
     children: [{ type: "summary", children: summary }, ...view],
   };
 }
@@ -387,6 +387,7 @@ function makeComponent(name, kind, options) {
         out.push(getDetails(
           getSummary(record.provenance, changed),
           getView(record.provenance, changed),
+          record.provenance.state === "ok" && !changed,
         ));
       }
       return out;
@@ -485,19 +486,20 @@ const valueViews = {
         { ...provenance, view: provenance.view.filter((n) => n !== intro) },
         changed,
       );
+      const ok = provenance.state === "ok" && !changed;
       return {
         type: "admonition",
-        kind: provenance.state === "ok" && !changed ? "note" : "warning",
-        class: "dropdown ck-provenance",
+        kind: ok ? "note" : "warning",
+        class: "dropdown ck-provenance" + (ok ? " ck-ok" : ""),
         identifier: getValueId(projectDir, docPath, key),
         label: getValueId(projectDir, docPath, key),
         children: [
           {
             type: "admonitionTitle",
+            // What it is, and only what's wrong, if anything
             children: [
               ...(intro ? intro.children : []),
-              text(": "),
-              ...getSummary(provenance, changed),
+              ...(ok ? [] : [text(": "), ...getSummary(provenance, changed)]),
             ],
           },
           ...view,
@@ -892,18 +894,57 @@ def add_role_values(
 # Quiets what the plugin shows, for book-theme, which loads it if
 # myst.yml lists it under site.options.style
 PLUGIN_CSS = """/* Written by Calkit; changes are overwritten by 'calkit myst build'. */
-details.ck-provenance, .ck-provenance.myst-dropdown {
+/* Where something came from, collapsed under it as a small, muted line,
+   as in Quarto, saying what's wrong in a warning color while collapsed */
+details.ck-provenance {
   border: none !important;
   box-shadow: none !important;
   background: none !important;
-  font-size: 0.85em;
+  margin: -0.25rem 0 1rem !important;
+  border-radius: 0 !important;
 }
-details.ck-provenance > summary,
-.ck-provenance.myst-dropdown > summary {
+details.ck-provenance > summary {
+  display: inline-block !important;
+  min-height: 0 !important;
+  padding: 0 !important;
   background: none !important;
-  padding: 0.1rem 0 !important;
-  opacity: 0.75;
-  font-weight: normal;
+  box-shadow: none !important;
+  list-style: none;
+  font-size: 0.85rem !important;
+  font-weight: normal !important;
+  color: inherit;
+  opacity: 0.7;
+}
+details.ck-provenance > summary::-webkit-details-marker {
+  display: none;
+}
+details.ck-provenance > summary::before {
+  content: "\\25B8\\00a0";
+}
+details.ck-provenance[open] > summary::before {
+  content: "\\25BE\\00a0";
+}
+details.ck-provenance > summary > *,
+details.ck-provenance > summary > * > * {
+  display: inline !important;
+  color: inherit !important;
+}
+details.ck-provenance > summary svg {
+  display: none !important;
+}
+details.ck-provenance:not(.ck-ok) > summary {
+  opacity: 1;
+  color: #b35900;
+  font-weight: 600 !important;
+}
+.dark details.ck-provenance:not(.ck-ok) > summary {
+  color: #f0a04b;
+}
+details.ck-provenance[open] > .details-body {
+  border-left: 2px solid rgba(128, 128, 128, 0.35);
+  margin: 0.25rem 0 0 0.2rem;
+  padding: 0 0 0 0.75rem !important;
+  font-size: 0.9rem;
 }
 """
 PLUGIN_CSS_PATH = "_extensions/calkit/myst.css"

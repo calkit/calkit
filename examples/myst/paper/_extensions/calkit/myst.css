@@ -1,14 +1,51 @@
 /* Written by Calkit; changes are overwritten by 'calkit myst build'. */
-details.ck-provenance, .ck-provenance.myst-dropdown {
+/* Where something came from, collapsed under it as a small, muted line,
+   as in Quarto, saying what's wrong in a warning color while collapsed */
+details.ck-provenance {
   border: none !important;
   box-shadow: none !important;
   background: none !important;
-  font-size: 0.85em;
+  margin: -0.25rem 0 1rem !important;
+  border-radius: 0 !important;
 }
-details.ck-provenance > summary,
-.ck-provenance.myst-dropdown > summary {
+details.ck-provenance > summary {
+  display: inline-block !important;
+  min-height: 0 !important;
+  padding: 0 !important;
   background: none !important;
-  padding: 0.1rem 0 !important;
-  opacity: 0.75;
-  font-weight: normal;
+  box-shadow: none !important;
+  list-style: none;
+  font-size: 0.85rem !important;
+  font-weight: normal !important;
+  opacity: 0.7;
+}
+details.ck-provenance > summary::-webkit-details-marker {
+  display: none;
+}
+details.ck-provenance > summary::before {
+  content: "\25B8\00a0";
+}
+details.ck-provenance[open] > summary::before {
+  content: "\25BE\00a0";
+}
+details.ck-provenance > summary > *,
+details.ck-provenance > summary > * > * {
+  display: inline !important;
+  color: inherit !important;
+}
+details.ck-provenance > summary svg {
+  display: none !important;
+}
+details.ck-provenance:not(.ck-ok) > summary {
+  opacity: 1;
+  color: #b35900;
+  font-weight: 600 !important;
+}
+.dark details.ck-provenance:not(.ck-ok) > summary {
+  color: #f0a04b;
+}
+details.ck-provenance[open] > .details-body {
+  border-left: 2px solid rgba(128, 128, 128, 0.35);
+  margin: 0.25rem 0 0 0.2rem;
+  padding: 0 0 0 0.75rem !important;
 }

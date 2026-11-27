@@ -163,8 +163,9 @@ since without it MyST builds the site anyway,
 without what the directives and roles show.
 It isn't checked to be among the build stage's inputs,
 since it's written by the build itself.
-Calkit also writes `_extensions/calkit/myst.css`, which quiets how
-book-theme shows the collapsed sections, if `myst.yml` lists it:
+Calkit also writes `_extensions/calkit/myst.css`, which makes
+book-theme show each collapsed section as a small, muted line, as in
+Quarto, keeping what's wrong in a warning color, if `myst.yml` lists it:
 
 ```yaml
 site:

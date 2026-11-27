@@ -129,10 +129,10 @@ function getView(provenance, changed) {
 }
 
 // Collapsed, saying what's wrong while it is
-function getDetails(summary, view) {
+function getDetails(summary, view, ok = false) {
   return {
     type: "details",
-    class: "ck-provenance",
+    class: "ck-provenance" + (ok ? " ck-ok" : ""),
     children: [{ type: "summary", children: summary }, ...view],
   };
 }
@@ -340,6 +340,7 @@ function makeComponent(name, kind, options) {
         out.push(getDetails(
           getSummary(record.provenance, changed),
           getView(record.provenance, changed),
+          record.provenance.state === "ok" && !changed,
         ));
       }
       return out;
@@ -438,19 +439,20 @@ const valueViews = {
         { ...provenance, view: provenance.view.filter((n) => n !== intro) },
         changed,
       );
+      const ok = provenance.state === "ok" && !changed;
       return {
         type: "admonition",
-        kind: provenance.state === "ok" && !changed ? "note" : "warning",
-        class: "dropdown ck-provenance",
+        kind: ok ? "note" : "warning",
+        class: "dropdown ck-provenance" + (ok ? " ck-ok" : ""),
         identifier: getValueId(projectDir, docPath, key),
         label: getValueId(projectDir, docPath, key),
         children: [
           {
             type: "admonitionTitle",
+            // What it is, and only what's wrong, if anything
             children: [
               ...(intro ? intro.children : []),
-              text(": "),
-              ...getSummary(provenance, changed),
+              ...(ok ? [] : [text(": "), ...getSummary(provenance, changed)]),
             ],
           },
           ...view,

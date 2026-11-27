@@ -1,0 +1,19 @@
+{
+    "RepoDigests": [
+        "sha256:b8e5eb812240cbc1f10212684d94848a18aea9202d7649fb7bf167b76526cf38"
+    ],
+    "Architecture": "amd64",
+    "Os": "linux",
+    "RootFS": {
+        "Type": "layers",
+        "Layers": [
+            "sha256:a70f6272827f64e1427d048ced77491aab5d64ab95725e56920802ff391197d7",
+            "sha256:7abe7db51c784de2ae95d38f39896ed964f57ecb61de3f459ad211d0df193227",
+            "sha256:b1e548036857f7066358a002aa5c6ce0dc7d4acc6936607d43e8acf342f29c63"
+        ]
+    },
+    "DockerfileMD5": null,
+    "DepsMD5s": {},
+    "Image": "ghcr.io/calkit/libreoffice:0.1.0",
+    "Platform": "linux/amd64"
+}

@@ -8506,6 +8506,22 @@ export const ProjectPushEventPostSchema = {
     "A push that happened somewhere else.\n\nWhat was pushed and where, recorded for reference: the hub works out the\ncurrent state from the repo itself, so none of this is trusted as input,\nbut it is what makes a log line worth reading.",
 } as const
 
+export const ProjectS3BucketPostSchema = {
+  properties: {
+    connection: {
+      type: "string",
+      title: "Connection",
+    },
+    url: {
+      type: "string",
+      title: "Url",
+    },
+  },
+  type: "object",
+  required: ["connection", "url"],
+  title: "ProjectS3BucketPost",
+} as const
+
 export const ProjectStatsSchema = {
   properties: {
     total: {
@@ -11871,6 +11887,135 @@ export const ResultSchema = {
   title: "Result",
 } as const
 
+export const S3ConnectionPostSchema = {
+  properties: {
+    endpoint_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Endpoint Url",
+    },
+    region: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Region",
+    },
+    access_key_id: {
+      type: "string",
+      maxLength: 255,
+      minLength: 1,
+      title: "Access Key Id",
+    },
+    secret_access_key: {
+      type: "string",
+      maxLength: 1024,
+      minLength: 1,
+      title: "Secret Access Key",
+    },
+    name: {
+      type: "string",
+      pattern: "^[a-z0-9][a-z0-9-]{1,63}$",
+      title: "Name",
+    },
+  },
+  type: "object",
+  required: ["access_key_id", "secret_access_key", "name"],
+  title: "S3ConnectionPost",
+} as const
+
+export const S3ConnectionPublicSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    endpoint_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Endpoint Url",
+    },
+    region: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Region",
+    },
+    access_key_id: {
+      type: "string",
+      title: "Access Key Id",
+    },
+  },
+  type: "object",
+  required: ["name", "endpoint_url", "region", "access_key_id"],
+  title: "S3ConnectionPublic",
+} as const
+
+export const S3ConnectionPutSchema = {
+  properties: {
+    endpoint_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Endpoint Url",
+    },
+    region: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Region",
+    },
+    access_key_id: {
+      type: "string",
+      maxLength: 255,
+      minLength: 1,
+      title: "Access Key Id",
+    },
+    secret_access_key: {
+      type: "string",
+      maxLength: 1024,
+      minLength: 1,
+      title: "Secret Access Key",
+    },
+  },
+  type: "object",
+  required: ["access_key_id", "secret_access_key"],
+  title: "S3ConnectionPut",
+} as const
+
 export const ScriptDataSchema = {
   properties: {
     external: {
@@ -12558,6 +12703,11 @@ export const StorageResourcePublicSchema = {
       type: "boolean",
       title: "Dedicated",
     },
+    read_only: {
+      type: "boolean",
+      title: "Read Only",
+      default: false,
+    },
     created: {
       type: "string",
       format: "date-time",
@@ -12615,6 +12765,17 @@ export const StorageTransferStatusSchema = {
         },
       ],
       title: "Provider",
+    },
+    connection: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connection",
     },
   },
   type: "object",

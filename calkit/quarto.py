@@ -2199,9 +2199,9 @@ def get_provenance_records(
                 if out in on_path or any(under(p, out) for p in on_path):
                     lines.append(f"  {stage_id} --> {get_id(out)}")
         lines += [
-            "  classDef ok fill:#e6f4ea,stroke:#1e8e3e",
-            "  classDef stale fill:#fce8e6,stroke:#d93025",
-            "  classDef waiting fill:#fef7e0,stroke:#f9ab00",
+            "  classDef ok fill:#e6f4ea,stroke:#1e8e3e,color:#1f1f1f",
+            "  classDef stale fill:#fce8e6,stroke:#d93025,color:#1f1f1f",
+            "  classDef waiting fill:#fef7e0,stroke:#f9ab00,color:#1f1f1f",
             "  classDef target stroke-width:3px",
         ]
         return {"type": "mermaid", "value": "\n".join(lines)}

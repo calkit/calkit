@@ -9,33 +9,43 @@ The pages in this section cover each tool:
 [round trip through Word](../tutorials/latex-word.md),
 [Quarto](../quarto.md),
 and [Office](../tutorials/office.md).
-This page covers what they share.
+This page covers what they share, and where they differ.
 
 ## Citing project components
 
 <!-- TODO: needs human review -->
 
-Each format cites figures, tables, and values by their path in the project
-with the same `ck*` vocabulary, e.g., `\ckvalue` in
-[LaTeX](../latex.md#including-project-components),
+LaTeX, Quarto, and Markdown documents cite values from results files by
+their path in the project with the same `ckvalue` vocabulary:
+`\ckvalue` in [LaTeX](../latex.md#including-project-components),
 the `ckvalue` shortcode in [Quarto](../quarto.md#values-from-the-pipeline),
-and value markers in [Markdown](../pipeline/markdown.md#values).
+and value markers in [Markdown](../pipeline/markdown.md#values),
+with `ckrefval` for values quoted from references.
+LaTeX also includes figures, tables, and other LaTeX by path with
+`\ckfigure`, `\cktable`, and `\ckinclude`.
 
 ## Dependencies
 
 <!-- TODO: needs human review -->
 
-A document's stage depends on what it cites, found by reading it,
+A LaTeX or Quarto document's stage depends on what it cites,
+found by reading it,
 so `calkit run` builds it after the stages that produce those,
 and again whenever one changes.
+A Word document's stage depends on the document and the inputs declared
+for it.
 
 ## Environments
 
 <!-- TODO: needs human review -->
 
-Documents build in the project's [environments](../environments.md),
-e.g., a TeX Live environment for LaTeX, or one providing Quarto,
+LaTeX and Quarto documents build in the project's
+[environments](../environments.md),
+e.g., a TeX Live environment, or one providing Quarto,
 so every machine builds them the same way.
+Word documents are converted with Word on this machine.
+PowerPoint decks are exported with LibreOffice or PowerPoint,
+from this machine by default, or LibreOffice in a Docker environment.
 
 ## Checks
 
@@ -54,14 +64,19 @@ that look like results but have nothing recorded behind them.
 command, passing it the options after the path:
 
 ```sh
-calkit doc build paper/main.tex -e tex
+calkit doc build paper/main.tex
 calkit doc diff paper/main.tex --from main
 calkit doc to-docx paper/main.tex
 calkit doc merge-docx paper/main-for-review.docx
 ```
 
-`calkit doc build` builds LaTeX, Quarto documents and notebooks,
-Word documents, and PowerPoint decks, as a PDF.
-The others work with LaTeX for now.
+`calkit doc build` builds a LaTeX document, Word document, or PowerPoint
+deck as a PDF, and renders a Quarto document or notebook to the format
+its metadata names.
+A document a pipeline stage builds is built as that stage does,
+in its environment and with its options,
+and a Quarto project folder, e.g., `calkit doc build .`,
+builds the documents its stages render.
+The other commands work with LaTeX for now.
 See the [CLI reference](../cli-reference.md) for each tool's own commands,
 e.g., `calkit latex build`, and their options.

@@ -68,7 +68,7 @@ nav:
           - overleaf.md
           - Collaborating through Word: tutorials/latex-word.md
       - quarto.md
-      - Office (Word, LibreOffice, PowerPoint): tutorials/office.md
+      - Office (Word and Excel): tutorials/office.md
   - Browser extension: browser-ext/index.md
   - Subprojects: subprojects.md
   - Examples: examples.md

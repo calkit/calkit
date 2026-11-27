@@ -1,0 +1,65 @@
+name: research
+title: Research
+description: >-
+  Studies of claims about Calkit as a product, e.g., how it compares with
+  other tools, run in rounds that add to the record rather than replace it.
+
+questions:
+  - question: >-
+      How long does it take an agent to audit a claim in an agent-made
+      analysis built with Calkit, ASTRA, or OpenResearch?
+    answer:
+      if n_found == n_arms and min_runs == 1: >-
+        Round 1 doesn't separate the tools. With one run per tool, all
+        {n_arms} agent auditors found the bug planted in the analysis, in
+        {min_s:.0f} to {max_s:.0f} s (Calkit {calkit_s:.0f} s, ASTRA
+        {astra_s:.0f} s, OpenResearch {orx_s:.0f} s), and all from the same
+        giveaway: the report says participants with missing SES were
+        excluded, yet its sample is everyone enrolled.
+      else: >-
+        Not settled; see results/audit-speed.md for every run.
+    evidence:
+      - kind: result
+        path: results/audit-speed.json
+        values:
+          n_arms: rounds.1.n_arms
+          n_found: rounds.1.n_found_bug
+          min_runs: rounds.1.min_runs_per_arm
+          min_s: rounds.1.seconds.min
+          max_s: rounds.1.seconds.max
+          calkit_s: rounds.1.arms.calkit.seconds.0
+          astra_s: rounds.1.arms.astra.seconds.0
+          orx_s: rounds.1.arms.openresearch.seconds.0
+      - kind: table
+        path: results/audit-speed.md
+
+environments:
+  main:
+    kind: uv
+    path: pyproject.toml
+    description: Python alone, for summarizing results.
+
+pipeline:
+  stages:
+    summarize-audit-speed:
+      kind: python-script
+      script_path: scripts/summarize-audit-speed.py
+      environment: main
+      description: >-
+        Tabulate every round of the audit-speed study, so a new round only
+        adds its results file.
+      inputs:
+        - audit-speed/rounds
+      outputs:
+        - path: results/audit-speed.json
+          storage: git
+        - path: results/audit-speed.md
+          storage: git
+
+tables:
+  - path: results/audit-speed.md
+    title: Audit speed by tool
+    description: >-
+      Each agent audit of a claim in the audit-speed study, by round and
+      tool: whether it found the planted bug, and how long it took.
+    stage: summarize-audit-speed

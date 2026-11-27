@@ -1,0 +1,83 @@
+# ASTRA Analysis Specification
+
+version: "0.0.14"
+name: "Intervention effect on outcome scores"
+description: >-
+  Does a randomized intervention raise outcome scores, and how do scores
+  differ by socioeconomic status (SES)? A synthetic survey of 300
+  participants is generated, cleaned, and analyzed with an OLS model of
+  outcome on condition and SES category (reference: low SES). The codebook
+  for the raw data is codebook.md.
+
+inputs: []
+
+outputs:
+  - id: participants_raw
+    type: data
+    format: csv
+    description: >-
+      Synthetic participant survey export (seed 20261127, N = 300): condition,
+      age, SES code, and outcome score, coded as in codebook.md.
+    recipe:
+      command: python src/generate_data.py --seed 20261127 --n 300 --out {output}
+
+  - id: participants_clean
+    type: data
+    format: csv
+    description: >-
+      Analysis dataset: eligible ages, SES mapped from codes to categories,
+      and a treatment indicator.
+    inputs: [participants_raw]
+    decisions: [missing_ses]
+    recipe:
+      command: >-
+        python src/clean_data.py --raw {inputs.participants_raw}
+        --out {output} --missing-ses {decisions.missing_ses}
+
+  - id: model_results
+    type: metric
+    format: json
+    description: >-
+      OLS fit of outcome on treatment and SES category: sample size,
+      coefficients, 95% confidence intervals, p-values, R², and descriptive
+      means.
+    inputs: [participants_clean]
+    recipe:
+      command: python src/fit_model.py --clean {inputs.participants_clean} --out {output}
+
+  - id: outcome_by_ses
+    type: figure
+    format: png
+    description: Mean outcome score by SES category and condition, with 95% CIs.
+    inputs: [participants_clean]
+    recipe:
+      command: python src/make_figure.py --clean {inputs.participants_clean} --out {output}
+
+  - id: report
+    type: report
+    format: md
+    description: Short study report with the headline numeric results and Figure 1.
+    inputs: [model_results, outcome_by_ses]
+    decisions: [missing_ses]
+    recipe:
+      command: >-
+        python src/write_report.py --results {inputs.model_results}
+        --template report_template.md --figure outcome_by_ses.png
+        --out {output} --missing-ses {decisions.missing_ses}
+
+decisions:
+  missing_ses:
+    label: "Missing SES handling"
+    rationale: >-
+      Some participants did not report SES. Excluding them gives a
+      complete-case analysis; keeping them as their own category retains the
+      sample but adds a category with no substantive meaning. Either could
+      change the SES and treatment estimates if nonresponse is related to the
+      outcome.
+    tags: [preprocessing]
+    default: drop
+    options:
+      drop:
+        label: "Exclude participants with missing SES"
+      category:
+        label: "Analyze missing SES as its own category"

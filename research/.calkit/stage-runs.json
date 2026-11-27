@@ -1,0 +1,21 @@
+{
+  "summarize-audit-speed": {
+    "start_time": "2026-11-27T19:15:55.133000",
+    "end_time": "2026-11-27T19:15:55.591000",
+    "environment": "main",
+    "git_rev": "337ed0e7f07bb6f0c69390f13d5a5de57bdc38f5",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:92fe08688b15ab98e8b5105c776e8f440474aac15e751f16e1b49ea603010a9c",
+    "calkit_version": "0.53.2.dev11+g337ed0e7f.d20261127",
+    "calkit_git_rev": "337ed0e7f07bb6f0c69390f13d5a5de57bdc38f5",
+    "system": {
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.2.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
+    }
+  }
+}

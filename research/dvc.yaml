@@ -1,0 +1,18 @@
+stages:
+  summarize-audit-speed:
+    cmd: calkit xenv -n main --no-check -- python
+      scripts/summarize-audit-speed.py
+    deps:
+      - scripts/summarize-audit-speed.py
+      - audit-speed/rounds
+      - uv.lock
+      - .python-version
+    outs:
+      - results/audit-speed.json:
+          cache: false
+          persist: false
+      - results/audit-speed.md:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'summarize-audit-speed' stage in
+      calkit.yaml. Changes made here will be overwritten.

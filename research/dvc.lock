@@ -1,0 +1,32 @@
+schema: '2.0'
+stages:
+  summarize-audit-speed:
+    cmd: calkit xenv -n main --no-check -- python 
+      scripts/summarize-audit-speed.py
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: audit-speed/rounds
+      hash: md5
+      md5: 7f3c4a76df0e36b6746de646a91fc890.dir
+      size: 3223
+      nfiles: 1
+    - path: scripts/summarize-audit-speed.py
+      hash: md5
+      md5: 9dacb2b4d42b8f6e5c943d73e66e4f35
+      size: 2224
+    - path: uv.lock
+      hash: md5
+      md5: 6c402f04979b22d8c65c29b5785cce5b
+      size: 128
+    outs:
+    - path: results/audit-speed.json
+      hash: md5
+      md5: 73e461f47508821d2307956e3db20835
+      size: 1031
+    - path: results/audit-speed.md
+      hash: md5
+      md5: 408a337a91291b69a982cbef4e8e2b8f
+      size: 389

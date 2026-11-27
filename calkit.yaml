@@ -380,6 +380,11 @@ subprojects:
   - path: decisions
     description: >-
       Evidence behind decisions made in developing Calkit, frozen once run.
+  - path: research
+    description: >-
+      Studies of claims about Calkit as a product, e.g., how it compares with
+      other tools, which, unlike decisions, are added to round by round
+      rather than frozen.
 releases:
   one-pager-2026-v1:
     kind: publication

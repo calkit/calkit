@@ -1,0 +1,10 @@
+<signal name="treatment_effect" label="Treatment effect" unit="points" digits="2" better="higher" />
+<signal name="treatment_p" label="Treatment p" digits="3" better="lower" />
+<signal name="ses_high_vs_low" label="High vs. low SES" unit="points" digits="2" />
+<signal name="ses_high_p" label="SES p" digits="3" />
+<signal name="n_analyzed" label="N analyzed" digits="0" />
+<signal name="r_squared" label="R²" digits="3" better="higher" />
+<view headline="treatment_effect">
+  <stats of="treatment_effect ses_high_vs_low n_analyzed r_squared" />
+  <text>Treatment effect **{treatment_effect}** points; high vs. low SES **{ses_high_vs_low}** points; N = {n_analyzed}.</text>
+</view>

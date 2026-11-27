@@ -1,0 +1,7 @@
+# Baseline Universe
+
+id: baseline
+description: "Default configuration"
+
+decisions:
+  missing_ses: drop

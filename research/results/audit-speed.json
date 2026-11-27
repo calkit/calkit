@@ -1,0 +1,42 @@
+{
+  "rounds": {
+    "1": {
+      "date": "2026-11-27",
+      "n_arms": 3,
+      "n_runs": 3,
+      "min_runs_per_arm": 1,
+      "n_found_bug": 3,
+      "seconds": {
+        "min": 67.7,
+        "max": 110.1
+      },
+      "arms": {
+        "calkit": {
+          "found_bug": [
+            true
+          ],
+          "seconds": [
+            110.1
+          ]
+        },
+        "astra": {
+          "found_bug": [
+            true
+          ],
+          "seconds": [
+            67.7
+          ]
+        },
+        "openresearch": {
+          "found_bug": [
+            true
+          ],
+          "seconds": [
+            95.2
+          ]
+        }
+      },
+      "conclusion": "All three agent auditors found the bug from the same giveaway (the report says missing SES was excluded next to N = 300), so this round doesn't discriminate between tools. One run per arm. No tool caught the logic error itself; all three made getting from claim to code fast, and every auditor wanted row counts in and out of each step."
+    }
+  }
+}

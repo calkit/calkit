@@ -259,7 +259,7 @@ def post_project_fs_op(
     storage_locations = [
         st
         for st in storage.get_project_storage_locations(session, project)
-        if operation == "put" or storage.path_is_readable(st, path)
+        if operation == "put" or storage.path_is_accessible(st, path)
     ]
     backend = storage_locations[0].backend
     for st in storage_locations:
@@ -437,6 +437,8 @@ def post_project_fs_op(
             ),
         )
     target = storage.get_project_storage(session, project)
+    if not storage.path_is_accessible(target, path):
+        raise HTTPException(403, "Only DVC objects can be written here")
     backend = target.backend
     full_path = target.make_project_path(owner_name, project_name, path)
     # We are doing a PUT if we've made it this far
@@ -479,7 +481,7 @@ def post_project_fs_op(
                 fs=target.fs,
                 fpath=full_path,
                 upload_size_bytes=content_length,
-                expires=900,
+                expires=storage.UPLOAD_URL_EXPIRES,
                 content_type=content_type,
             )
         except Exception:
@@ -521,7 +523,7 @@ def post_project_fs_op(
             url = get_object_url(
                 fpath=full_path,
                 fname=None,
-                expires=900,
+                expires=storage.UPLOAD_URL_EXPIRES,
                 fs=target.fs,
                 method="put",
             )
@@ -583,13 +585,13 @@ def post_project_fs_batch_op(
         found = next(
             st
             for st in storage_locations
-            if storage.path_is_readable(st, path)
+            if storage.path_is_accessible(st, path)
         )
         full_path = found.make_project_path(owner_name, project_name, path)
         # What HF said about the path, if it's in HF storage
         hf_info = None
         for i, st in enumerate(storage_locations):
-            if not storage.path_is_readable(st, path):
+            if not storage.path_is_accessible(st, path):
                 continue
             candidate = st.make_project_path(owner_name, project_name, path)
             if i in hf_infos:

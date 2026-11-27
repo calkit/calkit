@@ -199,8 +199,8 @@ so many projects can share one bucket.
 If the bucket or prefix should hold only this project's files,
 e.g., because it's already the project's DVC remote,
 check "Only this project's files."
-Calkit only reads DVC's files from it,
-so anything else in the bucket stays private.
+Calkit only reads and writes DVC's files there,
+so anything else in the bucket stays private and unchanged.
 
 If the keys can only read the bucket,
 Calkit reads files from it but sends new files where they went before.

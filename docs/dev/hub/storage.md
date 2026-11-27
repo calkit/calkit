@@ -4,6 +4,8 @@
 !!! note
     This document was written by Anthropic's Claude Code.
 
+<!-- TODO: needs human review -->
+
 Where the Calkit Hub keeps projects' files,
 why it works this way,
 and where it's probably headed.
@@ -54,6 +56,8 @@ So:
   since storage carries their names.
 
 ## Where we are
+
+<!-- TODO: needs human review -->
 
 The hub's own storage, HF buckets, Box, and S3 and S3-compatible storage,
 e.g., the Open Storage Network (OSN), hold DVC objects.
@@ -184,13 +188,15 @@ which is a namespace unless it's marked as dedicated,
 e.g., an existing DVC remote holding objects at its root.
 The hub signs URLs with the keys,
 so clients transfer directly with the bucket.
-Writing a project's `.calkit-project` file shows whether the keys can
-write;
+Writing a file in the project's folder shows whether the keys can write,
+since its `.calkit-project` file may already be there;
 storage they can only read is added to the project's previous storage,
 so it's read from but never written to.
 A dedicated bucket or prefix may hold other files,
-so only DVC's objects, under `files/`, are read from it,
-rather than everyone who can read the project reading the whole bucket.
+so only DVC's objects, under `files/` or, from DVC 2, at its root,
+are read from or written to it,
+rather than everyone who can read the project reading the whole bucket,
+or everyone who can write to it overwriting the rest.
 The hub only reaches endpoints on the public internet,
 checking each connection's address as it's made,
 since it would otherwise make requests into its own network for users.

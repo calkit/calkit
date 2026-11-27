@@ -4,6 +4,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import time
@@ -36,6 +37,8 @@ MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024  # 64 MB
 MULTIPART_PART_SIZE_BYTES = 16 * 1024 * 1024  # 16 MB
 CHUNKED_CHUNK_SIZE_BYTES = 16 * 1024 * 1024  # 16 MB
 S3_MAX_PARTS = 10000  # S3 multipart upload limit
+# How long presigned upload URLs last, in seconds
+UPLOAD_URL_EXPIRES = 900
 # Project DVC data is one kind of object this hub stores, kept under
 # its own folder within the storage root so other kinds can be added
 # alongside it without touching every deployment's config
@@ -658,15 +661,25 @@ def get_project_storage_locations(
     return storage_locations + [internal]
 
 
-def path_is_readable(storage: ProjectStorage, path: str) -> bool:
-    """Whether a project's path can be read from a storage.
+# Where DVC 2 kept objects, i.e., at the remote's root by hash, which DVC 3
+# still reads for outputs tracked before it
+DVC_2_OBJECT_PATH_RE = re.compile(r"^[0-9a-f]{2}(/[0-9a-f]{30,}(\.dir)?)?$")
+
+
+def path_is_accessible(storage: ProjectStorage, path: str) -> bool:
+    """Whether a project's path can be read from, or written to, a storage.
 
     A dedicated S3 bucket or prefix, e.g., an existing DVC remote, may hold
-    other files, so only DVC's objects are read from it, rather than letting
-    everyone who can read the project read the whole bucket.
+    other files, so only DVC's objects are reached in it, rather than letting
+    everyone who can read the project read the whole bucket, or everyone
+    who can write to it overwrite the rest.
     """
     if storage.backend == "s3" and storage.is_dedicated:
-        return path == "files" or path.startswith("files/")
+        return (
+            path == "files"
+            or path.startswith("files/")
+            or DVC_2_OBJECT_PATH_RE.match(path) is not None
+        )
     return True
 
 
@@ -698,7 +711,7 @@ def find_project_object(
         storage_locations = get_project_storage_locations(session, project)
     owner_name = project.owner_account_name
     for storage in storage_locations:
-        if not path_is_readable(storage, path):
+        if not path_is_accessible(storage, path):
             continue
         fpath = storage.make_project_path(owner_name, project.name, path)
         if storage.fs.exists(fpath):
@@ -832,9 +845,14 @@ def get_project_object_sizes(
         found = target.fs.find(base, detail=True)
     except FileNotFoundError:
         return {}
-    return {
+    sizes = {
         fpath.removeprefix(f"{base}/"): int(info["size"])
         for fpath, info in found.items()
+    }
+    return {
+        path: size
+        for path, size in sizes.items()
+        if path_is_accessible(target, path)
     }
 
 
@@ -942,11 +960,15 @@ def transfer_storage_and_disconnect(
                             project.dvc_storage = None
                             project.dvc_storage_id = None
                             session.add(project)
-                    session.commit()
-                    # Clients keep uploading to Box with access they
-                    # already have, until they ask again
-                    if resource.kind == "box-folder":
-                        time.sleep(BOX_UPLOAD_ACCESS_REUSE_SECONDS + 60)
+                session.commit()
+                # Clients keep uploading with access they already have, e.g.,
+                # presigned URLs, until it expires or they ask again
+                kinds = {r.kind for r in resources if not r.read_only}
+                if "s3-bucket" in kinds:
+                    time.sleep(UPLOAD_URL_EXPIRES + 60)
+                elif "box-folder" in kinds:
+                    time.sleep(BOX_UPLOAD_ACCESS_REUSE_SECONDS + 60)
+                for resource in resources:
                     n_copied = copy_resource_to_internal(session, resource)
                     logger.info(
                         f"Copied {n_copied} objects from {resource.bucket} "
@@ -1040,6 +1062,27 @@ def claim_project_folder(
         raise FolderTakenError(path)
     else:
         fs.pipe_file(marker, project_id.encode())
+
+
+def folder_is_writable(storage: ProjectStorage, project: "Project") -> bool:
+    """Whether a project's folder in storage can be written to, found by
+    writing and removing a file there.
+
+    Claiming the folder isn't enough to tell, since it writes nothing once
+    the folder is marked as the project's.
+    """
+    path = storage.make_project_path(project.owner_account_name, project.name)
+    probe = f"{path}/.calkit-write-check"
+    try:
+        storage.fs.pipe_file(probe, b"")
+    except PermissionError:
+        return False
+    # Keys may be able to write without deleting, which DVC never needs
+    try:
+        storage.fs.rm_file(probe)
+    except Exception as e:
+        logger.info(f"Failed to remove {probe}: {e}")
+    return True
 
 
 def get_box_access(

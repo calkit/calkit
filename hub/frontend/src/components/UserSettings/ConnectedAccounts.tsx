@@ -106,6 +106,10 @@ function ConnectedAccounts() {
     queryFn: () =>
       UsersService.getUserS3Connections().then((response) => response.data),
   })
+  // Opened only once found, so it can't show as an empty form to add keys
+  const replacedS3Connection = s3ConnectionsQuery.data?.find(
+    (c) => c.name === s3_connection,
+  )
   // A transfer to Calkit Hub storage runs on the server, so it's checked
   // until it's done
   const transferQuery = useQuery({
@@ -649,11 +653,9 @@ function ConnectedAccounts() {
             </Stack>
           </HStack>
           <S3ConnectionModal
-            isOpen={!!add_s3_keys || s3_connection !== undefined}
+            isOpen={!!add_s3_keys || replacedS3Connection !== undefined}
             onClose={closeS3Keys}
-            connection={s3ConnectionsQuery.data?.find(
-              (c) => c.name === s3_connection,
-            )}
+            connection={replacedS3Connection}
           />
           <UpdateOverleafToken
             isOpen={overleafTokenModal.isOpen}

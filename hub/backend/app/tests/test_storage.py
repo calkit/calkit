@@ -648,7 +648,27 @@ def test_s3_storage(db: Session) -> None:
     with pytest.raises(storage.FolderTakenError):
         storage.claim_project_folder(remote, project)
     storage.claim_project_folder(remote, project, adopt=True)
+    # Only DVC's objects in it are copied, including ones from DVC 2 at its
+    # root, not anything else in the bucket
+    dvc_2_path = f"ab/{'c' * 30}"
+    for other_path in (dvc_2_path, "secret.csv"):
+        remote.fs.pipe_file(
+            remote.make_project_path(owner, project.name, other_path), b"x"
+        )
+    assert set(
+        storage.get_project_object_sizes(remote, owner, project.name)
+    ) == {path, dvc_2_path}
+    # Whether keys can write is found by writing, since a folder already
+    # marked as the project's isn't written to again
     storage.claim_project_folder(target, project)
+    assert storage.folder_is_writable(target, project)
+    assert target.fs.ls(target.make_project_path(owner, project.name)) == [
+        target.fs._strip_protocol(
+            target.make_project_path(owner, project.name, storage.PROJECT_FILE)
+        )
+    ]
+    with patch.object(target.fs, "pipe_file", side_effect=PermissionError):
+        assert not storage.folder_is_writable(target, project)
     marker = target.make_project_path(
         owner, project.name, storage.PROJECT_FILE
     )
@@ -682,6 +702,16 @@ def test_s3_storage(db: Session) -> None:
     db.commit()
     db.expire_all()
     assert db.get(StorageResource, resource_id) is None
+    # Transferring S3 storage waits until upload URLs already given expire
+    with (
+        patch.object(storage, "copy_resource_to_internal", return_value=0),
+        patch("app.mixpanel.user_transferred_storage"),
+        patch("time.sleep") as sleep,
+    ):
+        storage.transfer_storage_and_disconnect(
+            str(user.id), "s3", label="other"
+        )
+    sleep.assert_called_once_with(storage.UPLOAD_URL_EXPIRES + 60)
     # Endpoints off the internet are refused outside local development
     for bad in ("minio", "https://host:abc", "https://[::1"):
         with pytest.raises(storage.S3EndpointError):

@@ -706,24 +706,20 @@ def post_project_s3_bucket(
     ).first()
     created = resource is None
     if resource is not None and resource.read_only:
-        # The keys may have been replaced with ones that can write
+        # The keys may have been replaced with ones that can write, and then
+        # the folder is claimed along with the project's storage
         try:
-            storage.claim_project_folder(
-                storage.get_resource_storage(session, resource),
-                project,
-                adopt=req.dedicated,
+            writable = storage.folder_is_writable(
+                storage.get_resource_storage(session, resource), project
             )
-            resource.read_only = False
-            session.add(resource)
-        except PermissionError:
-            pass
-        except storage.FolderTakenError as e:
-            raise HTTPException(409, f"{e}; move it in S3, then try again")
         except HTTPException:
             raise
         except Exception as e:
             logger.info(f"Failed to write to S3 bucket {bucket}: {e}")
             raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
+        if writable:
+            resource.read_only = False
+            session.add(resource)
     if resource is None:
         metadata = credential.metadata_json or {}
         endpoint_url = metadata.get("endpoint_url")
@@ -759,8 +755,6 @@ def post_project_s3_bucket(
         resource.credential_user = current_user
         resource.credential = credential
         target = storage.get_resource_storage(session, resource)
-        # Writing the project's record in its folder shows whether the keys
-        # can write, and keeps another project from using the folder
         try:
             target.fs.ls(target.data_prefix)
         except FileNotFoundError:
@@ -770,12 +764,12 @@ def post_project_s3_bucket(
         except Exception as e:
             logger.info(f"Failed to list S3 bucket {bucket}: {e}")
             raise HTTPException(502, f"Couldn't reach bucket '{bucket_name}'")
+        # Storage the keys can write is claimed along with the project's
+        # storage, but read-only storage isn't, since nothing goes there
         try:
-            storage.claim_project_folder(target, project, adopt=req.dedicated)
-        except storage.FolderTakenError as e:
-            raise HTTPException(409, f"{e}; move it in S3, then try again")
-        except PermissionError:
-            resource.read_only = True
+            resource.read_only = not storage.folder_is_writable(
+                target, project
+            )
         except FileNotFoundError:
             raise HTTPException(404, f"Bucket '{bucket_name}' not found")
         except Exception as e:

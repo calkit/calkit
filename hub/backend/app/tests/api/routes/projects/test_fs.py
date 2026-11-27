@@ -720,7 +720,10 @@ def test_dedicated_s3_storage_only_reads_dvc_objects(
         backend="s3", fs=MemoryFileSystem(), data_prefix=f"/{uuid.uuid4()}"
     )
     dvc_path = "files/md5/ab/cdef"
-    remote.fs.pipe(remote.make_project_path(OWNER, PROJECT, dvc_path), b"x")
+    # DVC 2 kept objects at the remote's root
+    dvc_2_path = f"ab/{'c' * 30}"
+    for path in (dvc_path, dvc_2_path):
+        remote.fs.pipe(remote.make_project_path(OWNER, PROJECT, path), b"x")
     remote.fs.pipe(
         remote.make_project_path(OWNER, PROJECT, "secret.csv"), b"s"
     )
@@ -738,11 +741,19 @@ def test_dedicated_s3_storage_only_reads_dvc_objects(
             return_value=[remote, internal],
         ),
         patch(
+            "app.api.routes.projects.fs.storage.get_project_storage",
+            return_value=remote,
+        ),
+        patch(
             "app.api.routes.projects.fs.get_object_url",
             return_value="https://signed",
         ),
     ):
-        for path, exists in ((dvc_path, True), ("secret.csv", False)):
+        for path, exists in (
+            (dvc_path, True),
+            (dvc_2_path, True),
+            ("secret.csv", False),
+        ):
             response = client.post(
                 FS_OPS_URL, json={"operation": "exists", "path": path}
             )
@@ -771,3 +782,13 @@ def test_dedicated_s3_storage_only_reads_dvc_objects(
         assert results[dvc_path]["info"]["size"] == 1
         assert results["secret.csv"]["info"] is None
         assert results["secret.csv"].get("content_base64") is None
+        # Writers can't overwrite the rest of the bucket either
+        for path, status_code in (
+            (dvc_path, 200),
+            ("secret.csv", 403),
+            (".calkit-project", 403),
+        ):
+            response = client.post(
+                FS_OPS_URL, json={"operation": "put", "path": path}
+            )
+            assert response.status_code == status_code, response.text

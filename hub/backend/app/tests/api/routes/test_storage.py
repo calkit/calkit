@@ -403,8 +403,8 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
         "dedicated": True,
     }
     with patch(
-        "app.api.routes.storage.storage.claim_project_folder",
-        side_effect=PermissionError,
+        "app.api.routes.storage.storage.folder_is_writable",
+        return_value=False,
     ):
         response = client.post(third, headers=headers, json=shared)
     assert response.status_code == 200, response.text
@@ -423,6 +423,44 @@ def test_project_s3_bucket(client: TestClient, db: Session) -> None:
     assert response.status_code == 200, response.text
     assert response.json()["dvc"]["id"] == read_only["id"]
     assert not response.json()["dvc"]["read_only"]
+    # Other keys that can only read stay read-only, even though the folder
+    # is already marked as the project's, so nothing is written to claim it
+    response = client.put(
+        "/user/s3-connections/osn-read",
+        headers=headers,
+        json={
+            "endpoint_url": endpoint_url,
+            "access_key_id": settings.OBJECT_STORAGE_KEY,
+            "secret_access_key": settings.OBJECT_STORAGE_SECRET,
+        },
+    )
+    assert response.status_code == 200
+    with patch(
+        "app.api.routes.storage.storage.folder_is_writable",
+        return_value=False,
+    ):
+        response = client.post(
+            third, headers=headers, json=shared | {"connection": "osn-read"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["added"]["read_only"]
+        assert response.json()["dvc"]["id"] == read_only["id"]
+        # Read-only keys can add a folder of files written outside Calkit,
+        # which has no record of its project
+        target.fs.pipe_file(
+            f"{bucket_name}/provider/{owner}/{projects[2].name}/files/md5/ab/c",
+            b"x",
+        )
+        response = client.post(
+            third,
+            headers=headers,
+            json={
+                "connection": "osn-read",
+                "url": f"s3://{bucket_name}/provider",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["added"]["read_only"]
     # While one connection's storage is being transferred, it can't be
     # used, but another connection's can
     with patch(

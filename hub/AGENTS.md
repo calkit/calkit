@@ -214,6 +214,35 @@ divergence from that baseline noise.
 - Docker frontend build: `docker compose build frontend`
 - Backend tests: `make test-backend`
 
+### Keeping password managers out of forms
+
+<!-- TODO: needs human review -->
+
+Password managers fill fields they think hold personal information,
+so only a person's own name, email, and password should be filled.
+Every other text input, e.g., a connection name, a region, or an API key,
+needs to be kept out of autofill:
+
+- Spread `noAutofill` from `frontend/src/lib/autofill.ts` onto each input.
+  It sets `autoComplete="off"` and the opt-outs for 1Password, LastPass,
+  Bitwarden, and Dashlane (`data-form-type="other"`).
+  A form-level opt-out isn't enough.
+- Dashlane ignores its own opt-out when it's confident about a field,
+  and decides from the label's text and the input's `name` and id.
+  Words like "region", "URL", and "ID" mark fields as an address,
+  a website, or a username, and "name" can too,
+  so a form field holding something's name shouldn't be called `name`.
+  Reword the label, e.g., "Endpoint" rather than "Endpoint URL",
+  or, when the word is the right one, split it with a zero-width space,
+  e.g., `Regi{"\u200b"}on`.
+- Don't use `type="password"` for anything but the user's password.
+  Any password field makes the whole form look like a login or sign-up,
+  so the other fields get filled with a username and name.
+  Mask secrets with `sx={maskedText}` from the same module instead.
+- Check what Dashlane made of a form in the browser's dev tools:
+  it marks inputs it has read with `data-dashlane-classification`,
+  which should be `other`.
+
 ## Misc rules
 
 - No blank lines in functions. This only covers blank lines we write, not ones
@@ -222,10 +251,8 @@ divergence from that baseline noise.
 - API endpoint functions should start with their REST verbs,
   e.g., `post_something` or `get_something`.
 - Search inputs should always be clearable.
-- Disable browser and password manager autocomplete on most form fields,
-  e.g., with `autoComplete="off"`, `data-form-type="other"`, and
-  `data-lpignore="true"`, since they usually don't hold personal information.
-  Leave it on for genuine personal fields, e.g., login email and password.
+- Disable browser and password manager autofill on form fields;
+  see [Keeping password managers out of forms](#keeping-password-managers-out-of-forms).
 - Changes to the UI state, e.g., a selected tab or a modal open,
   should typically be part of query params so a link will show a similar state.
 - Tooltips should always have the same hover delay site-wide.

@@ -129,6 +129,13 @@ environments:
     kind: docker
     image: ghcr.io/calkit/latex:0.1.6
     description: Calkit's TeX Live image via Docker.
+  libreoffice:
+    kind: docker
+    image: ghcr.io/calkit/libreoffice:0.1.0
+    # Its arm64 build draws equations a few pixels differently, so a figure
+    # made on a Mac would differ from one made on GitHub
+    platform: linux/amd64
+    description: Calkit's LibreOffice image via Docker.
 
 pipeline:
   stages:
@@ -158,14 +165,29 @@ pipeline:
         - results/latex-word-round-trip/rebuilt.pdf
         - path: results/latex-word-round-trip.json
           storage: git
+    latex-word-round-trip-docx-pdf:
+      kind: shell-command
+      environment: libreoffice
+      shell: sh
+      description: >-
+        Lay out the Word copy with one LibreOffice release and set of fonts,
+        so the figure shows it the same wherever the pipeline runs.
+      command: >-
+        soffice -env:UserInstallation=file:///tmp/calkit-libreoffice
+        --headless --convert-to pdf
+        --outdir results/latex-word-round-trip
+        results/latex-word-round-trip/review.docx
+      inputs:
+        - results/latex-word-round-trip/review.docx
+      outputs:
+        - results/latex-word-round-trip/review.pdf
     latex-word-round-trip-figure:
       kind: python-script
       script_path: scripts/plot-latex-word-round-trip.py
       environment: dev
       inputs:
-        - calkit/docx.py
         - results/latex-word-round-trip/original.pdf
-        - results/latex-word-round-trip/review.docx
+        - results/latex-word-round-trip/review.pdf
         - results/latex-word-round-trip/rebuilt.pdf
       outputs:
         - path: docs/img/latex-word-round-trip.png

@@ -8,6 +8,7 @@ interface ConnectedStorage {
 const STORAGE_SERVICE_NAMES: Record<string, string> = {
   "box-folder": "Box",
   "hf-bucket": "Hugging Face",
+  "s3-bucket": "S3",
 }
 
 export const getStorageServiceName = (kind: string): string =>
@@ -18,7 +19,10 @@ export const getStorageServiceName = (kind: string): string =>
 export const getStorageLabel = (r: ConnectedStorage): string =>
   r.kind === "box-folder" ? "Calkit folder" : r.bucket
 
-export const getStorageUrl = (r: ConnectedStorage): string =>
+// S3-compatible storage has no web page in common
+export const getStorageUrl = (r: ConnectedStorage): string | undefined =>
   r.kind === "box-folder"
     ? `https://app.box.com/folder/${r.bucket}`
-    : `https://huggingface.co/buckets/${r.bucket}`
+    : r.kind === "hf-bucket"
+      ? `https://huggingface.co/buckets/${r.bucket}`
+      : undefined

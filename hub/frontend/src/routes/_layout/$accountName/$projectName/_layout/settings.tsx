@@ -39,6 +39,7 @@ import S3ConnectionFields, {
 } from "../../../../../components/Common/S3ConnectionFields"
 import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
+import { noAutofill } from "../../../../../lib/autofill"
 import { startBoxAuth } from "../../../../../lib/box"
 import { handleError } from "../../../../../lib/errors"
 import { startHuggingFaceAuth } from "../../../../../lib/huggingface"
@@ -388,10 +389,7 @@ const UseS3Bucket = ({
                 <Input
                   id="s3-url"
                   placeholder="s3://bucket/prefix"
-                  autoComplete="off"
-                  data-form-type="other"
-                  data-1p-ignore
-                  data-lpignore="true"
+                  {...noAutofill}
                   {...register("url", {
                     required: "Bucket required",
                     pattern: {

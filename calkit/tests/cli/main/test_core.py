@@ -1866,6 +1866,8 @@ def test_status_with_edited_env_spec(tmp_dir):
             f.write(text)
 
     subprocess.check_call(["calkit", "init"])
+    # As a project does, so a clone on Windows hashes its outputs the same
+    append(".gitattributes", "* text=auto eol=lf\n")
     ck_info = {
         "environments": {
             "py": {"kind": "uv-venv", "path": "requirements.txt"},
@@ -1892,7 +1894,7 @@ def test_status_with_edited_env_spec(tmp_dir):
     clone_path = os.path.abspath(os.path.join("..", "clone"))
     subprocess.check_call(["git", "clone", "-q", ".", clone_path])
     status = get_pipeline_status("--no-env-check", cwd=clone_path)
-    assert not status["is_stale"]
+    assert not status["is_stale"], status["stale_stages"]
     assert status["environment_states"]["py"]["changed"] is None
     # A comment isn't a change
     append(os.path.join(clone_path, "requirements.txt"), "# Still nothing\n")

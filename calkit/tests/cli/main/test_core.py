@@ -1866,8 +1866,10 @@ def test_status_with_edited_env_spec(tmp_dir):
             f.write(text)
 
     subprocess.check_call(["calkit", "init"])
-    # As a project does, so a clone on Windows hashes its outputs the same
+    # As a project does, so a clone on Windows hashes its files the same,
+    # and what the stage writes is LF on every platform too
     append(".gitattributes", "* text=auto eol=lf\n")
+    append("write.py", "open('out.txt', 'wb').write(b'hi\\n')\n")
     ck_info = {
         "environments": {
             "py": {"kind": "uv-venv", "path": "requirements.txt"},
@@ -1875,8 +1877,8 @@ def test_status_with_edited_env_spec(tmp_dir):
         "pipeline": {
             "stages": {
                 "write": {
-                    "kind": "command",
-                    "command": "echo hi > out.txt",
+                    "kind": "python-script",
+                    "script_path": "write.py",
                     "environment": "py",
                     "outputs": [{"path": "out.txt", "storage": "git"}],
                 }

@@ -79,9 +79,8 @@ jobs:
       - name: Propose the results to main
         env:
           GH_TOKEN: ${{ github.token }}
-          # For the DVC push, from the run action's OIDC login
+          # For the DVC push to the ck:// remote, from the run action's OIDC login
           CALKIT_TOKEN: ${{ steps.run.outputs.calkit_token }}
-          CALKIT_DVC_TOKEN: ${{ steps.run.outputs.calkit_token }}
           RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}

@@ -190,6 +190,7 @@ def test_copy_resource_to_internal() -> None:
             raise PermissionError("expired token")
 
     expired = dataclasses.replace(shared, fs=ExpiredFs())
+    hf_resource = SimpleNamespace(kind="hf-bucket")
     with (
         patch.object(
             storage, "get_resource_storage", return_value=shared
@@ -208,11 +209,11 @@ def test_copy_resource_to_internal() -> None:
                 patch.object(shared.fs, "open", return_value=source_file),
                 pytest.raises(OSError),
             ):
-                storage.copy_resource_to_internal(None, None)  # type: ignore[arg-type]
+                storage.copy_resource_to_internal(None, hf_resource)  # type: ignore[arg-type]
             assert internal.fs.cat(partial) == b"t"
         # Each object gets a current token
         get_storage.side_effect = [expired, expired, shared]
-        assert storage.copy_resource_to_internal(None, None) == 1  # type: ignore[arg-type]
+        assert storage.copy_resource_to_internal(None, hf_resource) == 1  # type: ignore[arg-type]
         get_storage.side_effect = None
     for project in projects:
         assert (
@@ -501,7 +502,7 @@ def test_box_storage(db: Session) -> None:
         storage.get_box_access(target, project, "upload")
         assert "item_upload" in downscopes[2]["scope"]
         marker = target.make_project_path(
-            owner, project.name, storage.BOX_PROJECT_FILE
+            owner, project.name, storage.PROJECT_FILE
         )
         assert target.fs.cat_file(marker) == str(project.id).encode()
 
@@ -512,11 +513,9 @@ def test_box_storage(db: Session) -> None:
 
         # Another project with its name, e.g., after it's deleted, can't
         # have it
-        with pytest.raises(storage.BoxFolderTakenError):
-            storage.claim_box_project_folder(
-                target, make_project(project.name)
-            )
-        with pytest.raises(storage.BoxFolderTakenError):
+        with pytest.raises(storage.FolderTakenError):
+            storage.claim_project_folder(target, make_project(project.name))
+        with pytest.raises(storage.FolderTakenError):
             storage.get_box_access(
                 target, make_project(project.name), "upload"
             )
@@ -526,10 +525,10 @@ def test_box_storage(db: Session) -> None:
         target.fs.pipe_file(
             target.make_project_path(owner, "unclaimed", path), b"old"
         )
-        with pytest.raises(storage.BoxFolderTakenError):
-            storage.claim_box_project_folder(target, unclaimed)
-        storage.claim_box_project_folder(target, unclaimed, adopt=True)
-        storage.claim_box_project_folder(target, unclaimed)
+        with pytest.raises(storage.FolderTakenError):
+            storage.claim_project_folder(target, unclaimed)
+        storage.claim_project_folder(target, unclaimed, adopt=True)
+        storage.claim_project_folder(target, unclaimed)
         # Uploads to a project with no folder yet make it
         new = make_project("new")
         new_path = target.make_project_path(owner, "new")
@@ -556,3 +555,178 @@ def test_box_storage(db: Session) -> None:
         # And nothing is ever deleted from it
         with pytest.raises(PermissionError):
             target.fs.rm(fpath)
+
+
+def test_s3_storage(db: Session) -> None:
+    import socket
+    import uuid
+
+    import requests
+
+    from app import users
+    from app.config import settings
+    from app.models import Project, StorageResource
+    from app.tests import create_random_user
+
+    # The dev MinIO stands in for someone's S3-compatible storage
+    endpoint_url = settings.OBJECT_STORAGE_ENDPOINT_URL
+    assert endpoint_url
+    bucket_name = f"s3-test-{uuid.uuid4().hex[:8]}"
+    fs = storage.get_s3_fs(
+        str(settings.OBJECT_STORAGE_KEY),
+        str(settings.OBJECT_STORAGE_SECRET),
+        endpoint_url=endpoint_url,
+    )
+    assert fs.client_kwargs == {}
+    fs.mkdir(bucket_name)
+    user = create_random_user(db)
+    credentials = {}
+    for label in ("lab", "other"):
+        credentials[label] = users.save_external_credential(
+            session=db,
+            user=user,
+            provider="s3",
+            secret_payload=json.dumps(
+                {
+                    "access_key_id": settings.OBJECT_STORAGE_KEY,
+                    "secret_access_key": settings.OBJECT_STORAGE_SECRET,
+                }
+            ),
+            credential_type="access-key",
+            label=label,
+            metadata_json={"endpoint_url": endpoint_url, "region": None},
+        )
+    project = Project(
+        name=f"s3-{uuid.uuid4().hex[:8]}",
+        title="S3 project",
+        git_repo_url="https://github.com/someone/s3",
+        owner_account_id=user.account.id,
+        owner_account=user.account,
+    )
+    db.add(project)
+    db.commit()
+    owner = user.account.name
+    namespace = StorageResource(
+        owner_account_id=user.account.id,
+        name="lab",
+        kind="s3-bucket",
+        bucket=f"{bucket_name}/calkit",
+        credential_user_id=user.id,
+        credential_id=credentials["lab"].id,
+    )
+    other = StorageResource(
+        owner_account_id=user.account.id,
+        name="other",
+        kind="s3-bucket",
+        bucket=bucket_name,
+        credential_user_id=user.id,
+        credential_id=credentials["other"].id,
+    )
+    db.add(namespace)
+    db.add(other)
+    db.commit()
+    # Each connection reaches only its own storage
+    for label, resource in (("lab", namespace), ("other", other)):
+        assert storage.get_credential_resources(
+            db, user.id, provider="s3", label=label
+        ) == [resource]
+    # Projects in a shared bucket, or a prefix in it, each get a folder
+    target = storage.get_resource_storage(db, namespace)
+    assert target.backend == "s3"
+    assert target.data_prefix == f"s3://{bucket_name}/calkit"
+    assert target.make_project_path(owner, project.name, "files") == (
+        f"s3://{bucket_name}/calkit/{owner}/{project.name}/files"
+    )
+    path = "files/md5/ab/cdef"
+    # Whether keys can write is found by writing, since a folder already
+    # marked as the project's isn't written to again
+    storage.claim_project_folder(target, project)
+    assert storage.folder_is_writable(target, project)
+    assert target.fs.ls(target.make_project_path(owner, project.name)) == [
+        target.fs._strip_protocol(
+            target.make_project_path(owner, project.name, storage.PROJECT_FILE)
+        )
+    ]
+    with patch.object(target.fs, "pipe_file", side_effect=PermissionError):
+        assert not storage.folder_is_writable(target, project)
+    marker = target.make_project_path(
+        owner, project.name, storage.PROJECT_FILE
+    )
+    assert target.fs.cat_file(marker) == str(project.id).encode()
+    # Another project with its name, e.g., after it's deleted, can't have it
+    renamed = SimpleNamespace(
+        owner_account_name=owner, name=project.name, id=uuid.uuid4()
+    )
+    with pytest.raises(storage.FolderTakenError):
+        storage.claim_project_folder(target, renamed)  # type: ignore[arg-type]
+    # Clients get presigned URLs, signed with the connection's keys
+    fpath = target.make_project_path(owner, project.name, path)
+    url = target.fs.sign(fpath, expiration=60, client_method="put_object")
+    assert requests.put(url, data=b"hello", timeout=10).ok
+    assert target.fs.cat_file(fpath) == b"hello"
+    upload = storage.get_multipart_upload_info(
+        target.fs, fpath, upload_size_bytes=100
+    )
+    assert len(upload["part_urls"]) == 1
+    target.fs.call_s3(
+        "abort_multipart_upload",
+        Bucket=bucket_name,
+        Key=upload["key"],
+        UploadId=upload["upload_id"],
+    )
+    # Only HF buckets follow their project's visibility
+    assert storage.set_project_bucket_visibility(db, project, True) == 0
+    # Removing a connection removes its storage
+    resource_id = namespace.id
+    db.delete(credentials["lab"])
+    db.commit()
+    db.expire_all()
+    assert db.get(StorageResource, resource_id) is None
+    # Transferring S3 storage waits until upload URLs already given expire
+    with (
+        patch.object(storage, "copy_resource_to_internal", return_value=0),
+        patch("app.mixpanel.user_transferred_storage"),
+        patch("time.sleep") as sleep,
+    ):
+        storage.transfer_storage_and_disconnect(
+            str(user.id), "s3", label="other"
+        )
+    sleep.assert_called_once_with(storage.UPLOAD_URL_EXPIRES + 60)
+    # Endpoints must be plain HTTPS hosts outside local development
+    for bad in ("minio", "https://host:abc", "https://[::1"):
+        with pytest.raises(ValueError):
+            storage.check_s3_endpoint_url(bad)
+    with patch("app.config.settings.ENVIRONMENT", "production"):
+        for bad in ("http://example.com", "https://example.com/path"):
+            with pytest.raises(ValueError):
+                storage.check_s3_endpoint_url(bad)
+        storage.check_s3_endpoint_url("https://s3.example.org")
+        # And each connection is refused unless it's to a public address,
+        # e.g., after a redirect or the host resolving differently
+        guarded = storage.get_s3_fs("key", "secret", "https://s3.example.org")
+        assert guarded.config_kwargs["connector_args"] == {
+            "socket_factory": storage.make_public_socket
+        }
+    # Including private IPv4 addresses mapped into IPv6 ones
+    for address in (
+        "127.0.0.1",
+        "10.1.2.3",
+        "169.254.169.254",
+        "::1",
+        "::ffff:10.0.0.1",
+    ):
+        family = socket.AF_INET6 if ":" in address else socket.AF_INET
+        with pytest.raises(OSError):
+            storage.make_public_socket(
+                (family, socket.SOCK_STREAM, 6, "", (address, 443))
+            )
+    assert storage.address_is_public("2606:4700:4700::1111")
+    sock = storage.make_public_socket(
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+    )
+    sock.close()
+    # Compatible storage is addressed by path, and AWS by its default
+    assert fs.config_kwargs["s3"] == {"addressing_style": "path"}
+    aws = storage.get_s3_fs("key", "secret", region="eu-west-1")
+    assert "s3" not in aws.config_kwargs
+    assert aws.client_kwargs == {"region_name": "eu-west-1"}

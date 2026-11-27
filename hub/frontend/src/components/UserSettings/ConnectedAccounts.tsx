@@ -586,7 +586,7 @@ function ConnectedAccounts() {
               </Button>
             )}
           </HStack>
-          <HStack mt={4} align="start">
+          <HStack mt={4} align="baseline">
             <Text>S3:</Text>
             <Stack spacing={1}>
               {s3ConnectionsQuery.data?.map((c) => (

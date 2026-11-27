@@ -228,9 +228,10 @@ needs to be kept out of autofill:
   Bitwarden, and Dashlane (`data-form-type="other"`).
   A form-level opt-out isn't enough.
 - Dashlane ignores its own opt-out when it's confident about a field,
-  and decides from the label's text.
+  and decides from the label's text and the input's `name` and id.
   Words like "region", "URL", and "ID" mark fields as an address,
-  a website, or a username, and "name" can too.
+  a website, or a username, and "name" can too,
+  so a form field holding something's name shouldn't be called `name`.
   Reword the label, e.g., "Endpoint" rather than "Endpoint URL",
   or, when the word is the right one, split it with a zero-width space,
   e.g., `Regi{"\u200b"}on`.

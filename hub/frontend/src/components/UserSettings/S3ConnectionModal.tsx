@@ -56,7 +56,7 @@ const S3ConnectionModal = ({
       connection
         ? {
             ...emptyS3Connection,
-            name: connection.name,
+            label: connection.name,
             endpoint_url: connection.endpoint_url ?? "",
             region: connection.region ?? "",
             access_key_id: connection.access_key_id,
@@ -67,7 +67,7 @@ const S3ConnectionModal = ({
   const mutation = useMutation({
     mutationFn: (data: S3ConnectionForm) =>
       UsersService.putUserS3Connection({
-        name: data.name,
+        name: data.label,
         s3ConnectionPut: {
           endpoint_url: data.endpoint_url || null,
           region: data.region || null,

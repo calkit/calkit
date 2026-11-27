@@ -289,7 +289,7 @@ const UseS3Bucket = ({
     mutationFn: async (data: UseS3BucketForm) => {
       if (!data.connection) {
         await UsersService.putUserS3Connection({
-          name: data.name,
+          name: data.label,
           s3ConnectionPut: {
             endpoint_url: data.endpoint_url || null,
             region: data.region || null,
@@ -301,13 +301,13 @@ const UseS3Bucket = ({
         await queryClient.invalidateQueries({
           queryKey: ["user", "s3-connections"],
         })
-        setValue("connection", data.name)
+        setValue("connection", data.label)
       }
       return StorageService.postProjectS3Bucket({
         owner_name: accountName,
         project_name: projectName,
         projectS3BucketPost: {
-          connection: data.connection || data.name,
+          connection: data.connection || data.label,
           url: data.url,
           dedicated: data.dedicated,
         },

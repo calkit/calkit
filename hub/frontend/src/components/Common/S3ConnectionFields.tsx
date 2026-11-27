@@ -12,7 +12,9 @@ import type { FieldErrors, UseFormRegister } from "react-hook-form"
 import { maskedText, noAutofill } from "../../lib/autofill"
 
 export interface S3ConnectionForm {
-  name: string
+  // The connection's name, kept out of the field's name so Dashlane doesn't
+  // take it for a person's
+  label: string
   endpoint_url: string
   region: string
   access_key_id: string
@@ -20,7 +22,7 @@ export interface S3ConnectionForm {
 }
 
 export const emptyS3Connection: S3ConnectionForm = {
-  name: "",
+  label: "",
   endpoint_url: "",
   region: "",
   access_key_id: "",
@@ -44,14 +46,14 @@ function S3ConnectionFields<T extends S3ConnectionForm>({
   const errs = errors as FieldErrors<S3ConnectionForm>
   return (
     <>
-      <FormControl isInvalid={!!errs.name}>
-        <FormLabel htmlFor="s3-name">Connection name</FormLabel>
+      <FormControl isInvalid={!!errs.label}>
+        <FormLabel htmlFor="s3-label">Connection name</FormLabel>
         <Input
-          id="s3-name"
+          id="s3-label"
           placeholder="osn"
           isReadOnly={nameReadOnly}
           {...noAutofill}
-          {...reg("name", {
+          {...reg("label", {
             required: "Name required",
             pattern: {
               value: /^[a-z0-9][a-z0-9-]{1,63}$/,
@@ -59,7 +61,9 @@ function S3ConnectionFields<T extends S3ConnectionForm>({
             },
           })}
         />
-        {errs.name && <FormErrorMessage>{errs.name.message}</FormErrorMessage>}
+        {errs.label && (
+          <FormErrorMessage>{errs.label.message}</FormErrorMessage>
+        )}
       </FormControl>
       <FormControl mt={4} isInvalid={!!errs.endpoint_url}>
         <FormLabel htmlFor="s3-endpoint">Endpoint</FormLabel>

@@ -1920,9 +1920,23 @@ def check_reproducibility(
 
     res["audited"] = True
     res["not_checked"] = []
-    eol_rewritten = set(res["eol_rewritten"])
     status = None
     with calkit.in_project(wdir):
+        # Rewritten by the checkout alone, not edited too, which Git, which
+        # compares them as it stores them, would say had changed
+        eol_rewritten = set(res["eol_rewritten"])
+        if eol_rewritten:
+            try:
+                eol_rewritten -= set(
+                    calkit.core._run_git_on_paths(
+                        ["diff", "--name-only", "--relative"],
+                        sorted(eol_rewritten),
+                    )
+                    .decode()
+                    .splitlines()
+                )
+            except Exception:
+                eol_rewritten = set()
         # Compiled to compare with dvc.yaml rather than written over it,
         # and without editing the project's files. What stages read that's
         # kept out of Git is still written, e.g., calkit.sty or cleaned

@@ -1698,6 +1698,21 @@ def test_check_repro_audit(tmp_dir: str) -> None:
     assert "0/0" not in out
     assert "Passed" in out
     assert out.index("Checks:") < out.index("Advice:")
+    # An input only rewritten with CRLF, as Git for Windows can check one
+    # out, is advice, but one edited too is out of date
+    with open("in.txt", "wb") as f:
+        f.write(b"1\r\n")
+    code, report = get_report()
+    assert code == 0, report["summary"]
+    assert report["eol_rewritten"] == ["in.txt"]
+    assert "calkit fix line-endings" in report["recommendation"]
+    with open("in.txt", "wb") as f:
+        f.write(b"5\r\n")
+    code, report = get_report()
+    assert code == 1
+    assert report["stale_stages"] == ["a: in.txt modified"]
+    with open("in.txt", "w") as f:
+        f.write("1\n")
     # A stage changed in calkit.yaml but not compiled fails it
     ck_info["pipeline"]["stages"]["a"]["command"] = (
         "echo '{\"n\": 2}' > a.json"

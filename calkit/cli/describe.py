@@ -166,6 +166,9 @@ def describe_storage(
             return f"Hugging Face bucket {resource['bucket']}"
         if resource.get("kind") == "box-folder":
             return f"Box, connected by {resource['connected_by']}"
+        if resource.get("kind") == "s3-bucket":
+            read_only = " (read-only)" if resource.get("read_only") else ""
+            return f"S3 bucket s3://{resource['bucket']}{read_only}"
         return str(resource["bucket"])
 
     def get_git_storage_name(url: str | None) -> str | None:

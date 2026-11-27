@@ -213,9 +213,14 @@ const Delete = ({
                       {connectedStorage.map((r, i) => (
                         <React.Fragment key={r.id}>
                           {i > 0 && ", "}
-                          <Link href={getStorageUrl(r)} isExternal>
-                            {getStorageServiceName(r.kind)} {getStorageLabel(r)}
-                          </Link>
+                          {getStorageUrl(r) ? (
+                            <Link href={getStorageUrl(r)} isExternal>
+                              {getStorageServiceName(r.kind)}{" "}
+                              {getStorageLabel(r)}
+                            </Link>
+                          ) : (
+                            `${getStorageServiceName(r.kind)} ${getStorageLabel(r)}`
+                          )}
                         </React.Fragment>
                       ))}
                     </Text>

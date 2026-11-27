@@ -2403,13 +2403,13 @@ def test_disconnect_huggingface_with_storage(
                 url, headers=headers, params={"storage_action": "transfer"}
             )
         assert response.status_code == 200
-        q.assert_called_once_with(str(user.id), "huggingface")
+        q.assert_called_once_with(str(user.id), "huggingface", label="default")
     assert is_connected()
     assert db.get(StorageResource, resource_id) is not None
     # One at a time
     with patch(
         "app.tasks.get_storage_transfer_status",
-        return_value=("running", None, "huggingface"),
+        return_value=("running", None, "huggingface", "default"),
     ):
         response = client.delete(
             url, headers=headers, params={"storage_action": "transfer"}
@@ -2571,3 +2571,93 @@ def test_connect_box(client: TestClient, db: Session) -> None:
     )
     assert login("7") == 409
     assert login("8") == 200
+
+
+def test_s3_connections(client: TestClient, db: Session) -> None:
+    from app.models import StorageResource
+
+    email = random_email()
+    headers = authentication_token_from_email(
+        client=client, email=email, db=db
+    )
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    keys = {
+        "endpoint_url": "http://minio:9000/",
+        "access_key_id": "key-id",
+        "secret_access_key": "secret",
+    }
+    url = "/user/s3-connections"
+    assert client.get(url, headers=headers).json() == []
+    for body in (
+        keys | {"name": "Bad_Name"},
+        keys | {"name": "x"},
+        keys | {"name": "osn", "endpoint_url": "https://host:abc"},
+    ):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == 422, body
+    # Only saved connections can have their keys replaced
+    response = client.put(f"{url}/osn", headers=headers, json=keys)
+    assert response.status_code == 404
+    response = client.post(url, headers=headers, json=keys | {"name": "osn"})
+    assert response.status_code == 200
+    response = client.post(url, headers=headers, json=keys | {"name": "osn"})
+    assert response.status_code == 409
+    listed = client.get(url, headers=headers).json()
+    assert [
+        (c["name"], c["endpoint_url"], c["access_key_id"]) for c in listed
+    ] == [("osn", "http://minio:9000", "key-id")]
+    # Secrets never go back out
+    assert "secret" not in str(listed)
+    # Storage is found at its connection's endpoint, so that can't change
+    # under it, but the keys can
+    credential = users.get_external_credential(
+        session=db, user=user, provider="s3", label="osn"
+    )
+    assert credential is not None
+    resource = StorageResource(
+        owner_account_id=user.account.id,
+        name="osn",
+        kind="s3-bucket",
+        bucket="bucket",
+        credential_user_id=user.id,
+        credential_id=credential.id,
+    )
+    db.add(resource)
+    db.commit()
+    resource_id = resource.id
+    response = client.put(
+        f"{url}/osn",
+        headers=headers,
+        json=keys | {"endpoint_url": "http://elsewhere:9000"},
+    )
+    assert response.status_code == 409
+    response = client.put(
+        f"{url}/osn", headers=headers, json=keys | {"access_key_id": "new-id"}
+    )
+    assert response.status_code == 200
+    assert response.json()["access_key_id"] == "new-id"
+    db.expire_all()
+    assert db.get(StorageResource, resource_id) is not None
+    # Removing it needs a choice for its storage, which is only its own
+    response = client.get(
+        "/user/storage/s3", headers=headers, params={"connection": "other"}
+    )
+    assert response.json() == []
+    response = client.get(
+        "/user/storage/s3", headers=headers, params={"connection": "osn"}
+    )
+    assert [r["id"] for r in response.json()] == [str(resource_id)]
+    # It's removed by name, not as the account's only S3 credential
+    response = client.delete("/user/external-credentials/s3", headers=headers)
+    assert response.status_code == 404
+    assert client.delete(f"{url}/nope", headers=headers).status_code == 404
+    response = client.delete(f"{url}/osn", headers=headers)
+    assert response.status_code == 409
+    response = client.delete(
+        f"{url}/osn", headers=headers, params={"storage_action": "orphan"}
+    )
+    assert response.status_code == 200
+    assert client.get(url, headers=headers).json() == []
+    db.expire_all()
+    assert db.get(StorageResource, resource_id) is None

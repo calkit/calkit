@@ -1731,7 +1731,9 @@ def test_check_repro_audit(tmp_dir: str) -> None:
     assert code == 1
     assert report["stale_stages"] == ["a: in.txt modified"]
     res = check_repro()
-    assert "Pipeline stages out of date: 1 ❌ [-c stale]" in res.stdout
+    # Without the mark, which a Windows console can't encode
+    assert "Pipeline stages out of date: 1 " in res.stdout
+    assert "[-c stale]" in res.stdout
     assert "Failed: 1 problem" in res.stdout
     assert "calkit check repro -c stale" in res.stdout
     res = check_repro("-c", "stale")

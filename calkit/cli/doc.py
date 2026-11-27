@@ -35,6 +35,19 @@ _FOLDER_TOOLS = {
     "_quarto.yaml": "Quarto project",
     "myst.yml": "MyST",
 }
+# Options a tool's command takes that its stage sets, so given one, the
+# document is built as told rather than as its stage
+_STAGE_OPTIONS = {
+    "LaTeX": [
+        "-e",
+        "--env",
+        "-r",
+        "--latexmk-rc",
+        "--output-dir",
+        "--aux-dir",
+    ],
+    "Quarto": ["-e", "--environment", "--to"],
+}
 
 
 class _ToolArgsCommand(TyperCommand):
@@ -50,10 +63,8 @@ class _ToolArgsCommand(TyperCommand):
             return super().parse_args(ctx, args)
         if args[0].startswith("-"):
             ctx.fail(f"Put document path before {args[0]}")
-        super().parse_args(ctx, args[:1])
-        rest = args[1:]
-        ctx.args = rest
-        return rest
+        # Everything after a '--' is positional, even another '--'
+        return super().parse_args(ctx, [args[0], "--", *args[1:]])
 
 
 def _get_tool(path: str) -> str | None:
@@ -64,6 +75,20 @@ def _get_tool(path: str) -> str | None:
                 return tool
         return None
     return _SUFFIX_TOOLS.get(Path(path).suffix.lower())
+
+
+def _get_options(args: list[str]) -> list[str]:
+    """Get the options in a tool's arguments, i.e., those before any '--'."""
+    return args[: args.index("--")] if "--" in args else args
+
+
+def _wants_help(args: list[str]) -> bool:
+    return any(a in ("-h", "--help") for a in _get_options(args))
+
+
+def _check_exists(path: str) -> None:
+    if not os.path.exists(path):
+        raise_error(f"{path} doesn't exist")
 
 
 def _run(
@@ -119,41 +144,34 @@ def _run(
         pretty_exceptions_short=app.pretty_exceptions_short,
         rich_markup_mode=app.rich_markup_mode,
     )
+    # Its help says it's also this one, which here goes without saying
+    command.help = "\n\n".join(
+        p
+        for p in (command.help or "").split("\n\n")
+        if "`calkit doc " not in p
+    )
     with command.make_context(
         ctx.info_name, args, parent=ctx.parent
     ) as sub_ctx:
         command.invoke(sub_ctx)
 
 
-def _get_pdf_path(tex_path: str, ck_info: dict) -> str:
-    """Get the path of the PDF a .tex file builds.
-
-    That's where the pipeline's LaTeX stage for it writes it, or else
-    beside it.
-    """
-    from calkit.models.pipeline import LatexStage
-
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    for name, stage in stages.items():
-        if not isinstance(stage, dict) or stage.get("kind") != "latex":
-            continue
-        try:
-            s = LatexStage.model_validate(stage | {"name": name})
-        except ValueError:
-            continue
-        wdir = s.wdir or ""
-        if os.path.normpath(os.path.join(wdir, s.target_path)) == (
-            os.path.normpath(tex_path)
-        ):
-            return Path(os.path.join(wdir, s.pdf_path)).as_posix()
-    return Path(tex_path).with_suffix(".pdf").as_posix()
-
-
 PathArg = Annotated[str, typer.Argument(help="Document path.")]
+ToolArgs = Annotated[
+    list[str] | None,
+    typer.Argument(
+        help="Options and arguments for the tool's command, e.g., "
+        "`calkit latex build`, which `calkit doc <command> PATH --help` "
+        "lists.",
+        show_default=False,
+    ),
+]
 
 
 @doc_app.command(name="build", cls=_ToolArgsCommand)
-def build(ctx: typer.Context, path: PathArg) -> None:
+def build(
+    ctx: typer.Context, path: PathArg, tool_args: ToolArgs = None
+) -> None:
     """Build a document with its tool.
 
     A .tex file is built with `calkit latex build`, a Quarto document or
@@ -161,43 +179,127 @@ def build(ctx: typer.Context, path: PathArg) -> None:
     `calkit office word-to-pdf`, and a PowerPoint deck to a PDF beside it
     with `calkit export pptx`.
 
-    Options after the path are that command's, e.g., `-e` in
+    A document a pipeline stage builds is built as that stage does, i.e.,
+    in its environment and with its options, unless options for those are
+    given, and a Quarto project folder builds each document a stage renders
+    in it.
+
+    Options after the path are the tool's command's, e.g., `-e` in
     `calkit doc build paper.tex -e tex`, and
     `calkit doc build paper.tex --help` lists them.
     """
-    args = list(ctx.args)
+    import calkit.pipeline
+    from calkit.models.pipeline import QuartoStage
+
+    def sets_stage_option(arg: str) -> bool:
+        return any(
+            arg == o
+            or arg.startswith(o + "=")
+            or (len(o) == 2 and arg.startswith(o))
+            for o in _STAGE_OPTIONS.get(tool or "", [])
+        )
+
+    args = list(tool_args or [])
+    tool = _get_tool(path)
+    if _wants_help(args):
+        tool = "Quarto" if tool == "Quarto project" else tool
+        _run(ctx, "build", path, [path] + args, tool=tool)
+        return
+    _check_exists(path)
+    # A Quarto project is the documents its stages render
+    if tool == "Quarto project":
+        project_dir, _, found = calkit.pipeline.find_document_stages(
+            path, kinds=["quarto"], inside=True
+        )
+        if project_dir is None or not found:
+            raise_error(f"No quarto stage renders a document in {path}")
+        for _, s in found:
+            if not isinstance(s, QuartoStage):
+                continue
+            doc_path = os.path.relpath(
+                os.path.join(project_dir, s.wdir or "", s.target_path)
+            )
+            _run(ctx, "build", doc_path, [doc_path, "--as-stage"] + args)
+        return
+    # Otherwise as its stage, if one builds it and nothing says otherwise
+    options = _get_options(args)
+    if (
+        tool in _STAGE_OPTIONS
+        and "--as-stage" not in options
+        and not any(sets_stage_option(a) for a in options)
+    ):
+        _, _, found = calkit.pipeline.find_document_stages(path)
+        kinds = [s.kind for _, s in found]
+        if "latex" in kinds or "quarto" in kinds:
+            args = ["--as-stage"] + args
+        elif "jupyter-notebook" in kinds:
+            name = found[0][0]
+            raise_error(
+                f"Stage '{name}' executes {path} rather than rendering it; "
+                f"run it with 'calkit run {name}'"
+            )
     # A whole deck is the document; exporting slides as figures is up to
     # 'calkit export pptx' itself
-    if _get_tool(path) == "PowerPoint" and not any(
-        a.startswith(("-o", "--output")) for a in args
+    if tool == "PowerPoint" and not any(
+        a.startswith(("-o", "--output")) for a in options
     ):
         args += ["-o", Path(path).with_suffix(".pdf").as_posix()]
     _run(ctx, "build", path, [path] + args)
 
 
 @doc_app.command(name="diff", cls=_ToolArgsCommand)
-def diff(ctx: typer.Context, path: PathArg) -> None:
+def diff(
+    ctx: typer.Context, path: PathArg, tool_args: ToolArgs = None
+) -> None:
     """Build a PDF showing what changed in a document.
 
     A .tex file is compared with `calkit latex diff`, and options after the
     path are its own.
     """
-    _run(ctx, "diff", path, [path] + ctx.args)
+    args = list(tool_args or [])
+    if not _wants_help(args):
+        _check_exists(path)
+    _run(ctx, "diff", path, [path] + args)
 
 
 @doc_app.command(name="to-docx", cls=_ToolArgsCommand)
-def to_docx(ctx: typer.Context, path: PathArg) -> None:
+def to_docx(
+    ctx: typer.Context, path: PathArg, tool_args: ToolArgs = None
+) -> None:
     """Export a Word copy of a document for review.
 
-    A .tex file is exported from its compiled PDF with
-    `calkit latex to-docx`, and options after the path are its own.
+    A .tex file is exported from the PDF it builds, which its pipeline
+    stage, if any, makes sure is current, with `calkit latex to-docx`, and
+    options after the path are its own. A PDF built from LaTeX can be given
+    instead.
     """
-    import calkit
+    import calkit.pipeline
+    from calkit.models.pipeline import LatexStage
 
-    args = [path] + ctx.args
+    args = list(tool_args or [])
+    # The PDF needn't exist yet, since its stage makes it
+    if Path(path).suffix.lower() == ".pdf":
+        _run(ctx, "to-docx", path, [path] + args, tool="LaTeX")
+        return
+    if _wants_help(args):
+        _run(ctx, "to-docx", path, [path] + args)
+        return
+    _check_exists(path)
     if _get_tool(path) == "LaTeX":
-        pdf_path = _get_pdf_path(path, calkit.load_calkit_info())
-        args = [pdf_path, "--source", path] + ctx.args
+        project_dir, _, found = calkit.pipeline.find_document_stages(
+            path, kinds=["latex"]
+        )
+        pdf_path = Path(path).with_suffix(".pdf").as_posix()
+        stages = [s for _, s in found if isinstance(s, LatexStage)]
+        if project_dir is not None and stages:
+            pdf_path = os.path.relpath(
+                os.path.join(
+                    project_dir, stages[0].wdir or "", stages[0].pdf_path
+                )
+            )
+        args = [pdf_path, "--source", path] + args
+    else:
+        args = [path] + args
     _run(ctx, "to-docx", path, args)
 
 
@@ -205,6 +307,7 @@ def to_docx(ctx: typer.Context, path: PathArg) -> None:
 def merge_docx(
     ctx: typer.Context,
     path: Annotated[str, typer.Argument(help="Reviewed .docx to merge.")],
+    tool_args: ToolArgs = None,
 ) -> None:
     """Merge a reviewed Word document back into its source.
 
@@ -216,10 +319,13 @@ def merge_docx(
 
     import calkit.docx
 
+    args = list(tool_args or [])
+    if _wants_help(args):
+        _run(ctx, "merge-docx", path, [path] + args, tool="LaTeX")
+        return
     if Path(path).suffix.lower() != ".docx":
         raise_error(f"Expected reviewed .docx, got {path}")
-    if not os.path.isfile(path):
-        raise_error(f"{path} doesn't exist")
+    _check_exists(path)
     # The tool is the source's, which the export recorded in the file
     source = None
     try:
@@ -233,6 +339,6 @@ def merge_docx(
         ctx,
         "merge-docx",
         source or path,
-        [path] + ctx.args,
+        [path] + args,
         tool=None if source else "LaTeX",
     )

@@ -871,6 +871,7 @@ def build(
 
         from calkit.environments import texlive as env_texlive
         from calkit.models.pipeline import LatexStage
+        from calkit.pipeline import find_document_stages
 
         if any(
             v is not None
@@ -881,30 +882,13 @@ def build(
                 "the stage"
             )
         doc_path = os.path.realpath(tex_file)
-        project_dir = os.path.dirname(doc_path)
-        while not os.path.isfile(os.path.join(project_dir, "calkit.yaml")):
-            parent = os.path.dirname(project_dir)
-            if parent == project_dir:
-                raise_error(f"{tex_file} isn't in a Calkit project")
-            project_dir = parent
-        ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
-        matches = []
-        for name, stage in (
-            (ck_info.get("pipeline") or {}).get("stages") or {}
-        ).items():
-            if not isinstance(stage, dict) or stage.get("kind") != "latex":
-                continue
-            try:
-                s = LatexStage.model_validate(stage | {"name": name})
-            except ValueError:
-                continue
-            stage_doc_path = os.path.join(
-                project_dir, s.wdir or "", s.target_path
-            )
-            if os.path.normcase(
-                os.path.realpath(stage_doc_path)
-            ) == os.path.normcase(doc_path):
-                matches.append(s)
+        found_dir, ck_info, found = find_document_stages(
+            tex_file, kinds=["latex"]
+        )
+        if found_dir is None:
+            raise_error(f"{tex_file} isn't in a Calkit project")
+        project_dir = found_dir
+        matches = [s for _, s in found if isinstance(s, LatexStage)]
         if matches:
             s = matches[0]
             if len(matches) > 1:
@@ -2805,17 +2789,27 @@ def to_docx(
                 block_of[q] = blk
         return block_of, rebuilt
 
-    ck_info = calkit.load_calkit_info()
+    # The stage that builds the PDF, which for a latex stage is implied by
+    # its target rather than listed as an output
+    project_dir, ck_info, found = calkit.pipeline.find_document_stages(
+        pdf_path, kinds=["latex"]
+    )
+    stage_name: str | None = None
+    if project_dir is not None and found:
+        stage_name, latex_stage = found[0]
+        if source is None and isinstance(latex_stage, LatexStage):
+            source = os.path.relpath(
+                os.path.join(
+                    project_dir,
+                    latex_stage.wdir or "",
+                    latex_stage.target_path,
+                )
+            )
+    else:
+        project_dir = None
+        ck_info = calkit.load_calkit_info()
+        stage_name = calkit.pipeline.get_stage_for_output(pdf_path, ck_info)
     stages = ck_info.get("pipeline", {}).get("stages", {})
-    stage_name = calkit.pipeline.get_stage_for_output(pdf_path, ck_info)
-    # A latex stage's PDF is implied by its target, not listed as an output
-    if stage_name is None:
-        for name, stage in stages.items():
-            if isinstance(stage, dict) and stage.get("kind") == "latex":
-                pdf = LatexStage.model_validate(stage).pdf_path
-                if pdf == Path(pdf_path).as_posix():
-                    stage_name = name
-                    break
     if source is None and stage_name is not None:
         source = stages[stage_name].get("target_path")
     if source is None:
@@ -2826,7 +2820,9 @@ def to_docx(
     if stage_name is not None:
         typer.echo(f"Running stage {stage_name} to make sure the PDF is fresh")
         subprocess.run(
-            [sys.executable, "-m", "calkit", "run", stage_name], check=True
+            [sys.executable, "-m", "calkit", "run", stage_name],
+            check=True,
+            cwd=project_dir,
         )
     if not os.path.isfile(pdf_path):
         raise_error(f"{pdf_path} does not exist")

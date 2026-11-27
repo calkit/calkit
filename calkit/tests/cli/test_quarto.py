@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -131,3 +132,68 @@ def test_render(tmp_path, monkeypatch):
         "render",
         "index.qmd",
     ]
+
+
+def test_render_as_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app
+
+    monkeypatch.chdir(tmp_path)
+    calkit.save_calkit_info(
+        {
+            "name": "test",
+            "pipeline": {
+                "stages": {
+                    "pub": {
+                        "kind": "quarto",
+                        "environment": "_system",
+                        "wdir": "pub",
+                        "target_path": "index.qmd",
+                        "to": "html",
+                        "args": ["--execute"],
+                    },
+                }
+            },
+        }
+    )
+    os.makedirs("pub")
+    Path("pub/index.qmd").write_text("Hi\n")
+    Path("other.qmd").write_text("Hi\n")
+    calls: list[tuple[list[str], str]] = []
+    monkeypatch.setattr(
+        subprocess,
+        "check_call",
+        lambda cmd, **kwargs: calls.append((cmd[1:], os.getcwd())),
+    )
+    # Rendered as the stage is, from its working directory, wherever it's
+    # run from, with extra arguments after the stage's
+    for cwd, args in [
+        (".", ["pub/index.qmd", "--as-stage"]),
+        ("pub", ["index.qmd", "--as-stage", "--", "--no-cache"]),
+    ]:
+        monkeypatch.chdir(tmp_path / cwd)
+        calls.clear()
+        result = CliRunner().invoke(app, ["quarto", "render", *args])
+        assert result.exit_code == 0, result.output
+        cmd, ran_in = calls[0]
+        assert cmd == ["render", "index.qmd", "--to", "html", "--execute"] + (
+            ["--no-cache"] if "--no-cache" in args else []
+        )
+        assert os.path.samefile(ran_in, tmp_path / "pub")
+        assert os.path.samefile(os.getcwd(), tmp_path / cwd)
+    # The stage says how, and there has to be one
+    monkeypatch.chdir(tmp_path)
+    for args, expected in [
+        (["pub/index.qmd", "--as-stage", "-e", "py"], "from the stage"),
+        (["other.qmd", "--as-stage"], "No quarto stage renders other.qmd"),
+        (
+            [str(tmp_path.parent / "x.qmd"), "--as-stage"],
+            "isn't in a Calkit project",
+        ),
+    ]:
+        result = CliRunner().invoke(app, ["quarto", "render", *args])
+        assert result.exit_code != 0, args
+        assert expected in result.output, (args, result.output)

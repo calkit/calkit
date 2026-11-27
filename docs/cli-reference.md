@@ -4491,19 +4491,22 @@ Build a document with its tool.
 
 A .tex file is built with `calkit latex build`, a Quarto document or notebook with `calkit quarto render`, a Word document with `calkit office word-to-pdf`, and a PowerPoint deck to a PDF beside it with `calkit export pptx`.
 
-Options after the path are that command's, e.g., `-e` in `calkit doc build paper.tex -e tex`, and `calkit doc build paper.tex --help` lists them.
+A document a pipeline stage builds is built as that stage does, i.e., in its environment and with its options, unless options for those are given, and a Quarto project folder builds each document a stage renders in it.
+
+Options after the path are the tool's command's, e.g., `-e` in `calkit doc build paper.tex -e tex`, and `calkit doc build paper.tex --help` lists them.
 
 Usage:
 
 ```text
-calkit doc|document build PATH
+calkit doc|document build PATH [TOOL-ARGS...]
 ```
 
 Arguments:
 
-| Argument | Type | Required | Default | Description    |
-| -------- | ---- | -------- | ------- | -------------- |
-| `path`   | str  | yes      |         | Document path. |
+| Argument    | Type      | Required | Default | Description                                                                                                               |
+| ----------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `path`      | str       | yes      |         | Document path.                                                                                                            |
+| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit latex build`, which `calkit doc <command> PATH --help` lists. |
 
 <a id="subcommand-doc-document-diff"></a>
 
@@ -4516,14 +4519,15 @@ A .tex file is compared with `calkit latex diff`, and options after the path are
 Usage:
 
 ```text
-calkit doc|document diff PATH
+calkit doc|document diff PATH [TOOL-ARGS...]
 ```
 
 Arguments:
 
-| Argument | Type | Required | Default | Description    |
-| -------- | ---- | -------- | ------- | -------------- |
-| `path`   | str  | yes      |         | Document path. |
+| Argument    | Type      | Required | Default | Description                                                                                                               |
+| ----------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `path`      | str       | yes      |         | Document path.                                                                                                            |
+| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit latex build`, which `calkit doc <command> PATH --help` lists. |
 
 <a id="subcommand-doc-document-to-docx"></a>
 
@@ -4531,19 +4535,20 @@ Arguments:
 
 Export a Word copy of a document for review.
 
-A .tex file is exported from its compiled PDF with `calkit latex to-docx`, and options after the path are its own.
+A .tex file is exported from the PDF it builds, which its pipeline stage, if any, makes sure is current, with `calkit latex to-docx`, and options after the path are its own. A PDF built from LaTeX can be given instead.
 
 Usage:
 
 ```text
-calkit doc|document to-docx PATH
+calkit doc|document to-docx PATH [TOOL-ARGS...]
 ```
 
 Arguments:
 
-| Argument | Type | Required | Default | Description    |
-| -------- | ---- | -------- | ------- | -------------- |
-| `path`   | str  | yes      |         | Document path. |
+| Argument    | Type      | Required | Default | Description                                                                                                               |
+| ----------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `path`      | str       | yes      |         | Document path.                                                                                                            |
+| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit latex build`, which `calkit doc <command> PATH --help` lists. |
 
 <a id="subcommand-doc-document-merge-docx"></a>
 
@@ -4556,14 +4561,15 @@ The source is the one it was exported from with `calkit doc to-docx`. A .tex sou
 Usage:
 
 ```text
-calkit doc|document merge-docx PATH
+calkit doc|document merge-docx PATH [TOOL-ARGS...]
 ```
 
 Arguments:
 
-| Argument | Type | Required | Default | Description              |
-| -------- | ---- | -------- | ------- | ------------------------ |
-| `path`   | str  | yes      |         | Reviewed .docx to merge. |
+| Argument    | Type      | Required | Default | Description                                                                                                               |
+| ----------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `path`      | str       | yes      |         | Reviewed .docx to merge.                                                                                                  |
+| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit latex build`, which `calkit doc <command> PATH --help` lists. |
 
 <a id="command-group-latex-tex"></a>
 
@@ -4889,12 +4895,13 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                   |
-| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto, or `_system` for Quarto installed on this machine. There's no default. |
-| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.         |
-| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                     |
-| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                        |
+| Option                   | Type    | Required | Default | Description                                                                                                                                                        |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto, or `_system` for Quarto installed on this machine. There's no default.                                      |
+| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.                                              |
+| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                                                          |
+| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                                                             |
+| `--as-stage`             | boolean | no       | False   | Render as the pipeline's quarto stage for the document does (its environment, format, arguments, and working directory). Extra arguments are added to the stage's. |
 
 <a id="command-group-overleaf-ol"></a>
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import typer
 from typing_extensions import Annotated
 
-from calkit.cli.core import raise_error
+from calkit.cli.core import raise_error, warn
 
 # Runs a command in a directory, finding it on PATH as a shell would, e.g.,
 # a 'quarto.cmd' on Windows
@@ -69,6 +69,17 @@ def render(
             help="Don't check the environment is valid before rendering.",
         ),
     ] = False,
+    as_stage: Annotated[
+        bool,
+        typer.Option(
+            "--as-stage",
+            help=(
+                "Render as the pipeline's quarto stage for the document does "
+                "(its environment, format, arguments, and working directory). "
+                "Extra arguments are added to the stage's."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Render a Quarto document in an environment.
 
@@ -87,6 +98,45 @@ def render(
     from calkit.cli.main.core import run_in_env
     from calkit.markdown import MarkdownParseError, results_by_name
 
+    if as_stage:
+        import calkit.pipeline
+        from calkit.models.pipeline import QuartoStage
+
+        if environment is not None or to is not None:
+            raise_error(
+                "--as-stage takes the environment and format from the stage"
+            )
+        stage_dir, _, found = calkit.pipeline.find_document_stages(
+            target_path, kinds=["quarto"]
+        )
+        if stage_dir is None:
+            raise_error(f"{target_path} isn't in a Calkit project")
+        matches = [s for _, s in found if isinstance(s, QuartoStage)]
+        if not matches:
+            raise_error(f"No quarto stage renders {target_path}")
+        s = matches[0]
+        if len(matches) > 1:
+            others = ", ".join(f"'{m.name}'" for m in matches[1:])
+            warn(
+                f"Stages '{s.name}' and {others} all render {target_path}; "
+                f"rendering it as '{s.name}'"
+            )
+        wdir = os.getcwd()
+        os.chdir(os.path.join(stage_dir, s.wdir or ""))
+        try:
+            render(
+                target_path=s.target_path,
+                quarto_args=s.args + (quarto_args or []),
+                environment=s.inner_environment,
+                allow_machine_quarto=(
+                    allow_machine_quarto or s.allows_machine_quarto
+                ),
+                to=s.to,
+                no_check=no_check,
+            )
+        finally:
+            os.chdir(wdir)
+        return
     # The project is wherever calkit.yaml is above the document, since a
     # stage renders from its working directory
     doc_path = os.path.abspath(target_path)

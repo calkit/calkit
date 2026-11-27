@@ -5951,3 +5951,75 @@ def test_to_dvc_warns_on_system_env(tmp_dir, capsys):
     assert warned == ["plot", "fit", "explore"]
     assert "calkit new uv-env" in err
     assert "calkit new renv" in err
+
+
+def test_find_document_stages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from calkit.pipeline import find_document_stages
+
+    monkeypatch.chdir(tmp_path)
+    calkit.save_calkit_info(
+        {
+            "pipeline": {
+                "stages": {
+                    "paper": {
+                        "kind": "latex",
+                        "environment": "tex",
+                        "target_path": "paper/main.tex",
+                        "output_dir": "build",
+                    },
+                    "thesis": {
+                        "kind": "latex",
+                        "environment": "tex",
+                        "wdir": "thesis",
+                        "target_path": "main.tex",
+                    },
+                    "pub": {
+                        "kind": "quarto",
+                        "environment": "py",
+                        "target_path": "site/index.qmd",
+                    },
+                    "nb": {
+                        "kind": "jupyter-notebook",
+                        "environment": "py",
+                        "notebook_path": "nb.ipynb",
+                    },
+                    "plot": {
+                        "kind": "python-script",
+                        "environment": "py",
+                        "script_path": "plot.py",
+                    },
+                }
+            }
+        }
+    )
+    for d in ["paper", "thesis", "site", "elsewhere"]:
+        os.makedirs(d)
+    # A document or a latex stage's PDF, from anywhere in the project,
+    # under the stage's wdir
+    for cwd, path, kinds, inside, expected in [
+        (".", "paper/main.tex", None, False, ["paper"]),
+        ("paper", "main.tex", None, False, ["paper"]),
+        ("paper", "../build/main.pdf", None, False, ["paper"]),
+        (".", "thesis/main.tex", None, False, ["thesis"]),
+        ("thesis", "main.pdf", None, False, ["thesis"]),
+        (".", "main.tex", None, False, []),
+        (".", "nb.ipynb", None, False, ["nb"]),
+        (".", "nb.ipynb", ["quarto"], False, []),
+        ("site", ".", ["quarto"], True, ["pub"]),
+        (".", ".", ["quarto", "latex"], True, ["paper", "thesis", "pub"]),
+        (".", "plot.py", None, False, []),
+    ]:
+        monkeypatch.chdir(os.path.join(tmp_path, cwd))
+        project_dir, ck_info, found = find_document_stages(
+            path, **({"kinds": kinds} if kinds else {}), inside=inside
+        )
+        assert project_dir is not None
+        assert os.path.samefile(project_dir, tmp_path), (cwd, path)
+        assert "pipeline" in ck_info
+        assert [name for name, _ in found] == expected, (cwd, path)
+    # Outside a project there's none
+    monkeypatch.chdir(tmp_path)
+    os.remove("calkit.yaml")
+    assert find_document_stages("paper/main.tex") == (None, {}, [])

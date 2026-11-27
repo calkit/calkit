@@ -5,7 +5,7 @@ import os
 import posixpath
 import re
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -2337,6 +2337,65 @@ def get_live_lock_stages(lock_stages: dict, yaml_stages: dict) -> dict:
             continue
         live[stage_name] = lock_stage
     return live
+
+
+def find_document_stages(
+    path: str,
+    kinds: Collection[str] = ("latex", "quarto", "jupyter-notebook"),
+    inside: bool = False,
+) -> tuple[str | None, dict, list[tuple[str, Stage]]]:
+    """Find the project a document is in and the stages that build it.
+
+    A stage builds a document if it's the stage's source, e.g., a latex
+    stage's ``target_path``, under its ``wdir``, or for a latex stage, the
+    PDF it writes. With ``inside``, ``path`` is a folder, and a stage builds
+    it if its source is in it. Paths are compared as real paths, so ``path``
+    can be relative to anywhere in the project, and the project is the
+    nearest folder at or above it with a ``calkit.yaml``.
+
+    Returns the project folder, or ``None`` outside one, its info, and each
+    stage's name and model, in the order they're defined.
+    """
+    from calkit.models.pipeline import JupyterNotebookStage, QuartoStage
+
+    models: dict[str, tuple[type[Stage], str]] = {
+        "latex": (LatexStage, "target_path"),
+        "quarto": (QuartoStage, "target_path"),
+        "jupyter-notebook": (JupyterNotebookStage, "notebook_path"),
+    }
+    real_path = os.path.realpath(path)
+    target = os.path.normcase(real_path)
+    project_dir = real_path if inside else os.path.dirname(real_path)
+    while not os.path.isfile(os.path.join(project_dir, "calkit.yaml")):
+        parent = os.path.dirname(project_dir)
+        if parent == project_dir:
+            return None, {}, []
+        project_dir = parent
+    ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    found: list[tuple[str, Stage]] = []
+    for name, stage in stages.items() if isinstance(stages, dict) else []:
+        kind = stage.get("kind") if isinstance(stage, dict) else None
+        if kind not in kinds or kind not in models:
+            continue
+        model, field = models[kind]
+        try:
+            s = model.model_validate(stage | {"name": name})
+        except ValueError:
+            continue
+        paths = [getattr(s, field)]
+        if isinstance(s, LatexStage):
+            paths.append(s.pdf_path)
+        for p in paths:
+            built = os.path.normcase(
+                os.path.realpath(os.path.join(project_dir, s.wdir or "", p))
+            )
+            if built == target or (
+                inside and built.startswith(target.rstrip(os.sep) + os.sep)
+            ):
+                found.append((name, s))
+                break
+    return project_dir, ck_info, found
 
 
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:

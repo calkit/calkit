@@ -86,6 +86,6 @@ stages:
     outs:
     - path: _build/site
       hash: md5
-      md5: d0b858654db396e10a4b1afc06359976.dir
-      size: 74761
+      md5: be5c52a5a2cf3b02c0870a68c2a01434.dir
+      size: 74698
       nfiles: 9

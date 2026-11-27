@@ -17,6 +17,7 @@ details.ck-provenance > summary {
   list-style: none;
   font-size: 0.85rem !important;
   font-weight: normal !important;
+  color: inherit;
   opacity: 0.7;
 }
 details.ck-provenance > summary::-webkit-details-marker {
@@ -48,4 +49,5 @@ details.ck-provenance[open] > .details-body {
   border-left: 2px solid rgba(128, 128, 128, 0.35);
   margin: 0.25rem 0 0 0.2rem;
   padding: 0 0 0 0.75rem !important;
+  font-size: 0.9rem;
 }

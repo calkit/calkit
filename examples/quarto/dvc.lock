@@ -25,8 +25,8 @@ stages:
     deps:
     - path: .calkit/notebooks/cleaned/analysis.ipynb
       hash: md5
-      md5: 1b9392ffd55e78adfa00a34eb2ea3c0b
-      size: 3067
+      md5: 68a5d8b5c5dd0e6f8f1b1cd438cacfda
+      size: 3194
     - path: data/sim.csv
       hash: md5
       md5: 05a12e0f23928d3253961d6ed3a6c3af
@@ -42,11 +42,11 @@ stages:
     outs:
     - path: analysis.html
       hash: md5
-      md5: 3b6c7b101b73871373d7376410073bf5
-      size: 1286529
+      md5: 9ce91fb238448bf99938479262237d7e
+      size: 1286902
     - path: figures/peaks.svg
       hash: md5
-      md5: d45c91bb062f96448af3a300f95fbcfc
+      md5: 75507941e5eb876589ec9df1f1786fb0
       size: 23426
     - path: results/fit.json
       hash: md5
@@ -61,19 +61,19 @@ stages:
     deps:
     - path: analysis.html
       hash: md5
-      md5: 3b6c7b101b73871373d7376410073bf5
-      size: 1286529
+      md5: 9ce91fb238448bf99938479262237d7e
+      size: 1286902
     - path: analysis.ipynb
       hash: md5
-      md5: 50bf74b20ff11eeebfdcabc12da9142a
-      size: 78652
+      md5: c3de2ada7c4daa91df57e3b177c843e5
+      size: 78771
     - path: data/sim.csv
       hash: md5
       md5: 05a12e0f23928d3253961d6ed3a6c3af
       size: 93347
     - path: figures/peaks.svg
       hash: md5
-      md5: d45c91bb062f96448af3a300f95fbcfc
+      md5: 75507941e5eb876589ec9df1f1786fb0
       size: 23426
     - path: pixi.lock
       hash: md5
@@ -98,5 +98,5 @@ stages:
     outs:
     - path: report.html
       hash: md5
-      md5: 4065537646d55fc9cbff65d93dabee9c
-      size: 4263080
+      md5: 33dd99eb69dd910a578d88f7bcb2858f
+      size: 4263290

@@ -216,14 +216,14 @@ def test_build(tmp_path: Path) -> None:
     # except one with it turned off
     assert get_summaries(text) == ["Provenance", "Provenance"]
     marks = re.findall(
-        r"(\d\.\d+)\[\{abbr\}``\{sup\}`(.)` \(Where [\d.]+ came from: "
-        r"([^)]*)\)``\]\(#(ck-value-\w+)\)",
+        r"(\d\.\d+)\[\{abbr\}``\{sup\}`(.)` \(Where [\d.]+ came from"
+        r"(?:: ([^)]*))?\)``\]\(#(ck-value-\w+)\)",
         text,
     )
     assert [(v, m, s) for v, m, s, _ in marks] == [
-        ("0.123", "†", "Provenance"),
-        ("0.031", "†", "Provenance"),
-        ("0.1", "†", "Provenance"),
+        ("0.123", "†", ""),
+        ("0.031", "†", ""),
+        ("0.1", "†", ""),
     ]
     assert "and not shown, 0.1;" in text
     views = re.findall(

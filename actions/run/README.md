@@ -93,9 +93,9 @@ branch cache if the current branch cache doesn't exist yet.
 
 <!-- TODO: needs human review -->
 
-Environments the pipeline uses are cached too, unless `cache_envs` is set to
-`false`, so a run whose environments haven't changed restores them instead
-of building them.
+Environments the pipeline uses can be cached too, with `cache_envs: true`,
+so a run whose environments haven't changed restores them instead of
+building them.
 Conda, pixi, uv, uv-venv, and venv environments are cached;
 other kinds, e.g., Docker and Julia, are built as before.
 The cache key comes from `calkit describe env-cache`, and changes when any
@@ -110,10 +110,14 @@ An environment built from an older lock can keep packages the new one
 dropped, which would hide a dependency a fresh build doesn't have.
 When there's no cache, the environments are built and saved before any stage
 runs, so nothing a stage installs into one at run time is saved with it.
-Caches count toward the repository's
+It's off by default, since it only pays off when building the environments
+is slow, e.g., conda environments with large pip packages like PyTorch.
+Restoring a small uv environment saves only seconds.
+Caches also count toward the repository's
 [10 GB limit](https://docs.github.com/en/actions/reference/dependency-caching-reference#usage-limits-and-eviction-policy),
-past which GitHub evicts the least recently used, so a project with large
-environments that change often may want to turn this off.
+shared with, e.g., the DVC and uv caches, past which GitHub evicts the least
+recently used, so an environment cache can be gone before the next run
+uses it.
 
 ## System dependencies
 

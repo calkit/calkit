@@ -87,11 +87,17 @@ for all available options.
 
 ## Caching environments
 
-The action caches the environments the pipeline uses, e.g., conda
+The action can cache the environments the pipeline uses, e.g., conda
 environments and virtual environments, keyed by their spec and lock files,
 so a run whose environments haven't changed restores them instead of
 building them.
 After a lock changes, they're built from scratch, then cached again.
+This is off by default, and turned on with `cache_envs: "true"`.
+It only pays off when building the environments is slow, e.g., conda
+environments with large pip packages like PyTorch, and the cache shares the
+repository's
+[10 GB of cache storage](https://docs.github.com/en/actions/reference/dependency-caching-reference#usage-limits-and-eviction-policy)
+with others, e.g., for DVC and uv, so it can be evicted before it's used.
 `calkit describe env-cache` shows what's cached and the key.
 This makes it cheap to use the project's own environment in other
 workflows, e.g., to render a website with the version of Quarto the
@@ -127,6 +133,7 @@ jobs:
         uses: calkit/calkit/actions/run@main
         with:
           save: "false"
+          cache_envs: "true"
       - name: Render site
         run: calkit xenv -n main -- quarto render
       - uses: actions/upload-pages-artifact@v3
@@ -135,7 +142,3 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@v4
 ```
-
-Set `cache_envs: "false"` to turn this off, e.g., if large environments that
-change often would use up the repository's
-[cache storage](https://docs.github.com/en/actions/reference/dependency-caching-reference#usage-limits-and-eviction-policy).

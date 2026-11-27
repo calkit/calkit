@@ -71,6 +71,8 @@ jobs:
         with:
           # Its Docker environments only pull public images
           login_ghcr: "false"
+          # So the action's environment caching is exercised
+          cache_envs: "true"
           # Those update-data.yml runs, which the Makefile's pr target skips
           # too; what depends on them still runs, from their last results
           run_args: >-

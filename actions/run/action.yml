@@ -27,9 +27,11 @@ inputs:
       Whether to cache the environments the pipeline uses, e.g., conda
       environments and virtual environments, keyed by what they're built
       from, so a run whose environments haven't changed restores them
-      instead of building them.
+      instead of building them. Off by default, since it only pays off when
+      building them is slow, and the cache counts toward the repository's
+      Actions cache limit.
     required: false
-    default: "true"
+    default: "false"
   run_args:
     description: Arguments passed to calkit run command.
     required: false

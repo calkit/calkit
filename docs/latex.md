@@ -21,6 +21,12 @@ Without `--env`, `latexmk` is called directly
 if it's installed on the system, and in Calkit's TinyTeX/TeXlive
 container if it isn't.
 
+<!-- TODO: needs human review -->
+
+`calkit doc build paper/main.tex --env tex` does the same,
+picking the tool from the path, as described in
+[documents and presentations](documents/index.md).
+
 ## Adding a document to the pipeline
 
 If your project involves more than just writing,

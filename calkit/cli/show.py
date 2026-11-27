@@ -747,8 +747,8 @@ def show_provenance(
         stage_runs = calkit.read_stage_runs()
     except ValueError:
         warn(
-            "Couldn't read .calkit/stage-runs.json, so last runs aren't shown; "
-            "see 'calkit check stage-runs'",
+            "Couldn't read .calkit/stage-runs.json, so last runs aren't "
+            "shown; see 'calkit check stage-runs'",
             err=json_output,
         )
         stage_runs = {}
@@ -780,7 +780,8 @@ def show_provenance(
         )
     if chain["copied_from"]:
         lines.append(
-            f"Copied from {chain['copied_from']} by stage {chain['copy_stage']}"
+            f"Copied from {chain['copied_from']} by stage "
+            f"{chain['copy_stage']}"
         )
     if chain["up_to_date"]:
         lines.append("Up to date")

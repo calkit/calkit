@@ -392,6 +392,10 @@ def test_show_question(tmp_dir):
 
 
 def test_show_provenance(tmp_dir):
+    import dvc.repo
+
+    import calkit.dvc
+
     def show(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["calkit", "show", "provenance", *args],
@@ -399,12 +403,18 @@ def test_show_provenance(tmp_dir):
             text=True,
         )
 
+    def write_stages() -> None:
+        ck_info = calkit.load_calkit_info()
+        ck_info["pipeline"] = {"stages": stages}
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+
     subprocess.check_call(["calkit", "init"])
     with open("data.csv", "w") as f:
         f.write("x\n1\n")
     # The same in Windows' shell as in others
     py = f'"{sys.executable}" -c'
-    stages = {
+    stages: dict = {
         "clean": {
             "kind": "command",
             "environment": "_system",
@@ -425,9 +435,15 @@ def test_show_provenance(tmp_dir):
             "inputs": ["clean.csv"],
             "outputs": ["results.json"],
         },
+        "each": {
+            "kind": "command",
+            "environment": "_system",
+            "command": f"{py} \"open('{{n}}.txt', 'w').write('{{n}}')\"",
+            "iterate_over": [{"arg_name": "n", "values": ["x", "y"]}],
+            "outputs": ["{n}.txt"],
+        },
     }
-    with open("calkit.yaml", "a") as f:
-        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    write_stages()
     subprocess.check_call(["calkit", "run"])
     # The value, that it's current, and each stage behind it, nearest first,
     # down to the data nothing records the origin of
@@ -439,19 +455,77 @@ def test_show_provenance(tmp_dir):
     assert "Makes: clean.csv" in out
     assert "Inputs:\n    clean.csv: from stage clean" in out
     assert "data.csv: origin not defined" in out
-    assert "Last run: " in out
+    assert " UTC, " in out
     # Complete for agents, with nothing else on stdout
     chain = json.loads(show("results.json", "-k", "n", "--json").stdout)
     assert chain["value"] == 1 and chain["up_to_date"] is True
+    assert chain["status_error"] is None
     assert [s["name"] for s in chain["stages"]] == ["summarize", "clean"]
     assert chain["stages"][1]["last_run"]["git_rev"]
-    # A change upstream says what changed, and what's waiting on it
+    # A key that isn't there is an error naming those that are
+    res = show("results.json", "--key", "nope")
+    assert res.returncode != 0
+    assert "No key 'nope' in results.json; it has n" in res.stderr
+    # An iteration's command is as it ran
+    out = show("x.txt").stdout
+    assert "Stage each@x (command)" in out
+    assert "write('x')" in out and "{n}" not in out
+    # What a stage's source is, or reads it, rather than what makes it
+    out = show("data.csv").stdout
+    assert "Read by stage clean" in out
+    # Whether it's up to date isn't said if it can't be checked, e.g., while
+    # another process holds DVC's lock
     with open("data.csv", "w") as f:
         f.write("x\n2\n")
+    dvc_repo = calkit.dvc.get_dvc_repo()
+    try:
+        with dvc.repo.lock_repo(dvc_repo):
+            res = show("results.json")
+            chain = json.loads(show("results.json", "--json").stdout)
+    finally:
+        dvc_repo.close()
+    assert "Couldn't check whether it's up to date" in res.stderr
+    assert "Status unknown" in res.stdout and "Up to date" not in res.stdout
+    assert chain["up_to_date"] is None and chain["status_error"]
+    # A change upstream says what changed, and what's waiting on it
     out = show("results.json").stdout
-    assert "Out of date: waiting on clean.csv" in out
+    assert "\nOut of date: waiting on clean.csv\n" in out
     assert "  Out of date: data.csv modified" in out
     assert "data.csv: origin not defined; modified" in out
+    # Something read now that wasn't when it last ran is new, not modified,
+    # and the stage making it is followed
+    stages["summarize"]["inputs"].append("x.txt")
+    write_stages()
+    out = show("results.json").stdout
+    assert "Out of date: x.txt new since last run" in out
+    assert "x.txt: from stage each@x; new since last run" in out
+    assert "Stage each@x" in out
+    stages["summarize"]["inputs"].remove("x.txt")
+    # A frozen stage whose inputs changed says what did, and that running
+    # the pipeline won't remake it, and so does what's made after it
+    stages["clean"]["frozen"] = True
+    write_stages()
+    out = show("results.json").stdout
+    assert (
+        "\nOut of date: made from outputs of frozen stage clean, which "
+        "`calkit run` won't remake without --force\n"
+    ) in out
+    assert (
+        "  Frozen: inputs changed since its outputs were made (data.csv); "
+        "only `calkit run clean --force` remakes them"
+    ) in out
+    assert "waiting on" not in out
+    chain = json.loads(show("results.json", "--json").stdout)
+    summarize, clean = chain["stages"]
+    assert summarize["after_frozen"] == ["clean"] and not summarize["frozen"]
+    assert clean["frozen"] and clean["frozen_changes"] == ["data.csv"]
+    del stages["clean"]["frozen"]
+    write_stages()
+    subprocess.check_call(["calkit", "run"])
+    # An output that isn't here may only need pulling
+    os.remove("clean.csv")
+    out = show("clean.csv").stdout
+    assert "Missing: clean.csv; `calkit pull` may be all it needs" in out
     # Something that isn't there, and nothing makes, is an error
     res = show("typo.json")
     assert res.returncode != 0

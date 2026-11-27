@@ -12,6 +12,19 @@ names the command that ran, the inputs it read, and the environment it ran
 in, and `calkit run` records what actually happened in `dvc.lock`. Nothing
 further is needed, and nothing should be written twice.
 
+The gap is everything that arrives some other way:
+
+- data somebody measured or typed in
+- a file downloaded from a website or an archive
+- a photograph of the apparatus
+- a diagram drawn by hand, or by a generative AI tool
+- a script or config a colleague sent over
+
+These sit at the bottom of the chain. Every automated check above them
+passes, because there is nothing to check, and that is exactly what makes
+them easy to overlook: the project looks fully reproducible right up until
+someone asks where the raw numbers came from.
+
 <!-- TODO: needs human review -->
 
 To answer "How did you calculate it?" for a figure, table, results file, or
@@ -26,19 +39,6 @@ stage that makes it, with its source or command, environment, last run, and
 inputs, and does the same for each stage upstream, down to the data it
 started from and anything whose origin isn't defined.
 Add `--json` for all of it in a form a coding agent can read.
-
-The gap is everything that arrives some other way:
-
-- data somebody measured or typed in
-- a file downloaded from a website or an archive
-- a photograph of the apparatus
-- a diagram drawn by hand, or by a generative AI tool
-- a script or config a colleague sent over
-
-These sit at the bottom of the chain. Every automated check above them
-passes, because there is nothing to check, and that is exactly what makes
-them easy to overlook: the project looks fully reproducible right up until
-someone asks where the raw numbers came from.
 
 ## Data
 

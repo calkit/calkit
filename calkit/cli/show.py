@@ -657,6 +657,7 @@ def show_provenance(
     import calkit
     import calkit.pipeline
     import calkit.provenance
+    import calkit.results
 
     def describe_input(inp: dict) -> str:
         notes = []
@@ -683,41 +684,89 @@ def show_provenance(
                 what
                 + (f" for {gap['path']}" if gap["path"] != inp["path"] else "")
             )
-        if not inp["exists"]:
+        if inp["removed"]:
+            notes.append("no longer an input")
+        elif inp["new"]:
+            notes.append("new since last run")
+        elif not inp["exists"]:
             notes.append("missing")
+        elif not inp["on_disk"]:
+            notes.append("not pulled")
         elif inp["modified"]:
             notes.append("modified")
         return str(inp["path"]) + (": " + "; ".join(notes) if notes else "")
 
-    def get_stage_state(stage: dict) -> str | None:
+    def get_stage_state(stage: dict) -> list[str]:
         # What's wrong with a stage, if anything, in its own words
-        status = stage["status"] or {}
+        status = stage["status"]
+        if status is None:
+            return []
+        name = stage["name"]
+        lines = []
+        if stage["frozen_changes"] is not None:
+            changed = ", ".join(stage["frozen_changes"])
+            lines.append(
+                "Frozen: inputs changed since its outputs were made"
+                + (f" ({changed})" if changed else "")
+                + f"; only `calkit run {name.split('@')[0]} --force` "
+                "remakes them"
+            )
         if status.get("status") == "not-run":
-            return f"Out of date: stage {stage['name']} not run"
-        if status.get("status") == "stale":
-            reasons = [f"{p} modified" for p in status["modified_inputs"]]
+            lines.append(f"Out of date: stage {name} not run")
+        elif status.get("status") == "stale":
+            new = {i["path"] for i in stage["inputs"] if i["new"]}
+            reasons = [
+                f"{p} new since last run" if p in new else f"{p} modified"
+                for p in status.get("modified_inputs") or []
+            ]
             if status.get("modified_command"):
                 reasons.append("command modified")
             reasons += [
                 f"{p} modified outside pipeline"
                 for p in status.get("modified_outputs") or []
             ]
-            return "Out of date" + (
-                ": " + ", ".join(reasons) if reasons else ""
-            )
+            if reasons:
+                lines.append("Out of date: " + ", ".join(reasons))
+            if stage["missing"]:
+                lines.append(
+                    "Missing: "
+                    + ", ".join(stage["missing"])
+                    + (
+                        ""
+                        if reasons
+                        else "; `calkit pull` may be all it needs"
+                    )
+                )
+            if not reasons and not stage["missing"]:
+                lines.append("Out of date")
         if stage["waiting_on"]:
-            return "Out of date: waiting on " + ", ".join(stage["waiting_on"])
-        if stage["frozen"]:
-            return "Out of date: frozen with modified inputs"
-        return None
+            lines.append(
+                "Out of date: waiting on " + ", ".join(stage["waiting_on"])
+            )
+        if stage["after_frozen"]:
+            lines.append(
+                "Out of date: made from outputs of frozen stage"
+                + ("s " if len(stage["after_frozen"]) > 1 else " ")
+                + ", ".join(stage["after_frozen"])
+                + ", which `calkit run` won't remake without --force"
+            )
+        return lines
 
-    def get_last_run_text(run: dict) -> str:
+    def get_last_run_text(stage: dict) -> str | None:
+        run = stage["last_run"]
+        if run is None:
+            if (stage["status"] or {}).get("status") == "not-run":
+                return None
+            if stage["frozen"]:
+                return "not recorded; frozen, so `calkit run` skips it"
+            return "not recorded"
         system = run.get("system") or {}
         agent = run.get("agent")
         if isinstance(agent, dict):
             agent = agent.get("name")
+        start = str(run.get("start_time") or "")[:16].replace("T", " ")
         parts = [
-            str(run.get("start_time") or "")[:16].replace("T", " "),
+            f"{start} UTC" if start else "",
             " ".join(
                 str(system[k]) for k in ("os", "machine") if system.get(k)
             ),
@@ -728,23 +777,32 @@ def show_provenance(
 
     def get_environment_text(env: dict) -> str:
         if env["name"] == "_system":
-            return "_system, i.e., none"
+            return "_system, i.e., this machine as is"
         details = ", ".join(e for e in (env["kind"], env["path"]) if e)
         text = str(env["name"]) + (f" ({details})" if details else "")
         if env["lock_path"]:
             text += f", locked in {env['lock_path']}"
         return text
 
-    # Relative to the project, as the pipeline names paths
-    rel_path = posixpath.normpath(
-        Path(os.path.relpath(path) if os.path.isabs(path) else path).as_posix()
-    )
+    # The project is the nearest folder up with a calkit.yaml, and paths are
+    # relative to it, as the pipeline names them
+    root = os.getcwd()
+    while not os.path.isfile(os.path.join(root, "calkit.yaml")):
+        if os.path.dirname(root) == root:
+            raise_error("Not in a Calkit project")
+        root = os.path.dirname(root)
+    try:
+        rel_path = Path(
+            os.path.relpath(os.path.abspath(path), root)
+        ).as_posix()
+    except ValueError:
+        # E.g., on another drive
+        raise_error(f"{path} isn't in this project")
+    rel_path = posixpath.normpath(rel_path)
     if rel_path == ".." or rel_path.startswith("../"):
         raise_error(f"{path} isn't in this project")
-    if not os.path.isfile("calkit.yaml"):
-        raise_error("Run this from a Calkit project's top folder")
     try:
-        stage_runs = calkit.read_stage_runs()
+        stage_runs = calkit.read_stage_runs(root)
     except ValueError:
         warn(
             "Couldn't read .calkit/stage-runs.json, so last runs aren't "
@@ -753,19 +811,40 @@ def show_provenance(
         )
         stage_runs = {}
     try:
-        pipeline = calkit.pipeline.get_summary(".")
+        pipeline = calkit.pipeline.get_summary(root)
     except Exception as e:
         raise_error(f"Failed to determine pipeline status: {e}")
+    args = calkit.provenance.get_checkout_args(root, pipeline)
+    frozen_changes = pipeline.get("frozen_changes")
+    # Statuses read while that failed would all say up to date
+    if pipeline["error"]:
+        warn(
+            f"Couldn't check whether it's up to date: {pipeline['error']}",
+            err=True,
+        )
+        args |= {"stage_statuses": {}, "frozen": set()}
+        frozen_changes = None
     chain = calkit.provenance.get_provenance_chain(
         rel_path,
         key=key,
         stage_runs=stage_runs,
-        **calkit.provenance.get_checkout_args(".", pipeline),
+        frozen_changes=frozen_changes,
+        **args,
     )
-    if not chain["exists"] and chain["stage"] is None:
+    if not chain["exists"] and chain["stage"] is None and not chain["origin"]:
         raise_error(f"{rel_path} isn't in the project, and no stage makes it")
+    if key is not None and chain["value_error"] and chain["on_disk"]:
+        # Saying which keys there are, as 'calkit show result' does
+        try:
+            calkit.results.read_result(
+                os.path.relpath(os.path.join(root, chain["path"])),
+                keys=[key],
+            )
+        except Exception as e:
+            raise_error(str(e))
+        raise_error(chain["value_error"])
     if json_output:
-        echo_json(chain)
+        echo_json(chain | {"status_error": pipeline["error"]})
         return
     lines = [
         chain["path"]
@@ -783,19 +862,16 @@ def show_provenance(
             f"Copied from {chain['copied_from']} by stage "
             f"{chain['copy_stage']}"
         )
+    own = chain["stages"][0] if chain["stage"] is not None else None
     if chain["up_to_date"]:
         lines.append("Up to date")
     elif chain["up_to_date"] is False:
-        state = (
-            get_stage_state(chain["stages"][0])
-            if chain["stage"] is not None
-            else None
-        )
-        if state is None and chain["stale_reason"] and chain["copy_stage"]:
-            state = f"Out of date: stage {chain['copy_stage']} out of date"
-        lines.append(
-            state or ("Out of date" if chain["exists"] else "Missing")
-        )
+        state = get_stage_state(own) if own is not None else []
+        if not state and chain["stale_reason"] and chain["copy_stage"]:
+            state = [f"Out of date: stage {chain['copy_stage']} out of date"]
+        lines += state or ["Out of date" if chain["exists"] else "Missing"]
+    elif own is not None or chain["copy_stage"]:
+        lines.append("Status unknown")
     if chain["stage"] is None:
         if chain["origin"]:
             url = chain["origin_url"]
@@ -812,7 +888,20 @@ def show_provenance(
             + g["path"]
             for g in chain["gaps"]
         ]
-        if not chain["origin"] and not chain["gaps"]:
+        if chain["source_of"]:
+            lines.append("Source of stage " + ", ".join(chain["source_of"]))
+        readers = [
+            s for s in chain["input_to_stages"] if s not in chain["source_of"]
+        ]
+        if readers:
+            lines.append("Read by stage " + ", ".join(readers))
+        if not (
+            chain["origin"]
+            or chain["gaps"]
+            or chain["source_of"]
+            or readers
+            or chain["copy_stage"]
+        ):
             lines.append("No stage makes it")
     typer.echo("\n".join(lines))
     for stage in chain["stages"]:
@@ -823,20 +912,24 @@ def show_provenance(
         lines.append("  Makes: " + ", ".join(stage["makes"]))
         if stage["source"]:
             lines.append(f"  Source: {stage['source']}")
-        if stage["command"]:
-            lines.append(f"  Command: {stage['command']}")
+        command = stage["command"]
+        # An iteration's, with its values filled in
+        if "@" in stage["name"] and stage["lock_command"]:
+            command = stage["lock_command"]
+            if isinstance(command, list):
+                command = " && ".join(command)
+        if command:
+            lines.append(f"  Command: {command}")
         if stage["message"]:
             lines.append(f"  Step: {stage['message']}")
         for env in stage["environments"]:
             lines.append("  Environment: " + get_environment_text(env))
-        if stage["last_run"]:
-            lines.append("  Last run: " + get_last_run_text(stage["last_run"]))
-        elif (stage["status"] or {}).get("status") != "not-run":
-            lines.append("  Last run: not recorded")
+        last_run = get_last_run_text(stage)
+        if last_run:
+            lines.append(f"  Last run: {last_run}")
         # The path's own stage's state is the one said first
-        state = get_stage_state(stage) if stage["depth"] else None
-        if state:
-            lines.append(f"  {state}")
+        if stage["depth"]:
+            lines += [f"  {line}" for line in get_stage_state(stage)]
         lines.append("  Inputs:" if stage["inputs"] else "  Inputs: none")
         lines += [f"    {describe_input(inp)}" for inp in stage["inputs"]]
         typer.echo("\n" + "\n".join(lines))

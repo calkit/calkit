@@ -369,5 +369,5 @@ though the human is considered the author and AI is noted with a `with_ai` field
 
 When asked "How did you calculate it?" about a result, figure, table, or
 value, run `calkit show provenance <path>` (with `--key <key>` for one value,
-and `--json` for every field) and answer from what it prints, not from
-memory or by reading the scripts.
+and `--json` for every field) and start from what it prints, not from
+memory, then read the source it names for the method.

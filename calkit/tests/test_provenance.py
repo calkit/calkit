@@ -1398,6 +1398,7 @@ def test_get_provenance_chain():
         "data/downloaded/a.csv": "",
         "data/clean.csv": "",
         "results/metrics.json": json.dumps({"fit": {"b": 1.2}}),
+        "results/fit.json": "{}",
         "figures/plot.png": "",
         "paper/figures/plot.png": "",
         "nbs/fit.ipynb": "{}",
@@ -1469,7 +1470,8 @@ def test_get_provenance_chain():
                 "cmd": "calkit nb execute nbs/fit.ipynb",
                 "deps": ["data/clean.csv"],
                 "outs": [
-                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
+                    ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json",
+                    "results/fit.json",
                 ],
             },
         }
@@ -1497,19 +1499,26 @@ def test_get_provenance_chain():
         key: str | None = None,
         statuses: dict | None = None,
         frozen: set[str] | None = None,
+        frozen_changes: dict | None = None,
+        yaml: dict | None = None,
+        gone: tuple[str, ...] = (),
     ) -> dict:
         return get_provenance_chain(
             path,
             key=key,
             ck_info=ck_info,
-            dvc_yaml=dvc_yaml,
+            dvc_yaml=yaml or dvc_yaml,
             dvc_lock=dvc_lock,
-            stage_statuses={name: up_to_date for name in dvc_yaml["stages"]}
-            | (statuses or {}),
+            stage_statuses=(
+                {name: up_to_date for name in dvc_yaml["stages"]}
+                if statuses is None
+                else statuses
+            ),
             frozen=frozen,
+            frozen_changes=frozen_changes,
             # A record for outputs dvc.lock no longer has is no last run
             stage_runs={"clean": run, "analyze": run},
-            is_file=lambda p: p in files,
+            is_file=lambda p: p in files and p not in gone,
             is_dir=lambda p: p == "data/downloaded",
             listdir=lambda p: ["a.csv"] if p == "data/downloaded" else [],
             read_bytes=lambda p: files[p].encode(),
@@ -1519,13 +1528,14 @@ def test_get_provenance_chain():
     # with its environments, last run, and what each input came from
     chain = get("results/metrics.json", key="fit.b")
     assert chain["value"] == 1.2 and chain["stage"] == "analyze"
-    assert chain["up_to_date"] is True
+    assert chain["up_to_date"] is True and chain["on_disk"]
     assert [(s["name"], s["depth"]) for s in chain["stages"]] == [
         ("analyze", 0),
         ("clean", 1),
     ]
     analyze, clean = chain["stages"]
     assert analyze["source"] == "scripts/analyze.py"
+    assert analyze["lock_command"] == "python scripts/analyze.py"
     assert [e["name"] for e in analyze["environments"]] == ["py", "tex"]
     assert analyze["environments"][0]["lock_path"] == "uv.lock"
     assert analyze["environments"][1]["lock_path"] == (".calkit/env-locks/tex")
@@ -1542,6 +1552,9 @@ def test_get_provenance_chain():
         {
             "path": "data/raw.csv",
             "exists": True,
+            "on_disk": True,
+            "new": False,
+            "removed": False,
             "modified": False,
             "stage": None,
             "copied_from": None,
@@ -1554,8 +1567,12 @@ def test_get_provenance_chain():
     assert [g["path"] for g in chain["gaps"]] == ["data/raw.csv"]
     # A stage out of date upstream leaves everything after it waiting, and
     # says which of its inputs changed
-    stale = {"clean": {"status": "stale", "modified_inputs": ["data/raw.csv"]}}
-    chain = get("paper/figures/plot.png", statuses=stale)
+    stale = {"status": "stale", "modified_inputs": ["data/raw.csv"]}
+    chain = get(
+        "paper/figures/plot.png",
+        statuses={n: up_to_date for n in dvc_yaml["stages"]}
+        | {"clean": stale},
+    )
     assert chain["up_to_date"] is False
     assert chain["copied_from"] == "figures/plot.png"
     analyze, clean = chain["stages"]
@@ -1563,19 +1580,117 @@ def test_get_provenance_chain():
     assert analyze["waiting_on"] == ["data/clean.csv"]
     assert clean["waiting_on"] == []
     assert clean["inputs"][0]["modified"]
-    # So does a frozen one with outdated inputs
-    chain = get("results/metrics.json", frozen={"clean", "analyze"})
+    # A frozen one with outdated inputs isn't waited on, since running the
+    # pipeline won't remake it, and says what changed if that's known
+    ck_info["pipeline"]["stages"]["clean"]["frozen"] = True
+    chain = get(
+        "results/metrics.json",
+        frozen={"clean", "analyze"},
+        frozen_changes={"clean": ["data/raw.csv"]},
+    )
+    analyze, clean = chain["stages"]
     assert chain["up_to_date"] is False
-    assert chain["stages"][0]["waiting_on"] == ["data/clean.csv"]
-    assert chain["stages"][1]["frozen"]
+    assert analyze["waiting_on"] == [] and analyze["after_frozen"] == ["clean"]
+    assert not analyze["frozen"] and analyze["frozen_changes"] is None
+    assert clean["frozen"] and clean["frozen_changes"] == ["data/raw.csv"]
+    chain = get("results/metrics.json", frozen={"clean", "analyze"})
+    assert chain["stages"][1]["frozen_changes"] == []
+    # One that's current is as current as if it weren't frozen
+    chain = get("results/metrics.json", frozen_changes={})
+    assert chain["up_to_date"] is True
+    assert chain["stages"][1]["frozen_changes"] is None
+    del ck_info["pipeline"]["stages"]["clean"]["frozen"]
+    # What a stage reads now that it didn't when it last ran is listed, and
+    # followed, and what it no longer reads is said
+    yaml = {
+        "stages": dvc_yaml["stages"]
+        | {
+            "analyze": dvc_yaml["stages"]["analyze"]
+            | {
+                "deps": [
+                    "scripts/analyze.py",
+                    "data/clean.csv",
+                    "results/fit.json",
+                ]
+            }
+        }
+    }
+    chain = get("results/metrics.json", yaml=yaml)
+    assert [s["name"] for s in chain["stages"]] == ["analyze", "clean", "fit"]
+    inputs = {i["path"]: i for i in chain["stages"][0]["inputs"]}
+    assert inputs["data/downloaded"]["removed"]
+    new = inputs["results/fit.json"]
+    assert new["new"] and new["stage"] == "fit"
+    # An output that isn't here, e.g., not pulled, is said to be missing
+    chain = get("results/metrics.json", gone=("data/clean.csv",))
+    analyze, clean = chain["stages"]
+    assert clean["missing"] == ["data/clean.csv"]
+    assert analyze["inputs"][0]["exists"]
+    assert not analyze["inputs"][0]["on_disk"]
+    # Without statuses, whether it's up to date isn't known
+    assert get("results/metrics.json", statuses={})["up_to_date"] is None
     # A value cited from a notebook, from the stage that saves it
     chain = get("nbs/fit.ipynb", key="k")
     assert chain["value"] == 0.25
     assert [s["name"] for s in chain["stages"]] == ["fit", "clean"]
-    # Something no stage makes has no stages, and no say on being current
+    # Something no stage makes has no stages, and no say on being current,
+    # but says what reads it, or uses it as its source
     chain = get("data/downloaded/a.csv")
     assert chain["stages"] == [] and chain["up_to_date"] is None
     assert chain["origin"] == "Imported from https://x.org/d"
+    assert chain["input_to_stages"] == ["analyze"]
+    assert get("scripts/clean.py")["source_of"] == ["clean"]
+
+
+def test_get_checkout_args(tmp_path):
+    import json
+    import os
+    import sys
+
+    from calkit.provenance import get_checkout_args
+
+    project = tmp_path / "project"
+    (project / "data").mkdir(parents=True)
+    (project / "data" / "a.json").write_text('{"n": 1}')
+    # A folder a stage makes, and one a .dvc file tracks, neither pulled,
+    # with what each holds in the DVC cache
+    manifest = [{"relpath": "x.csv", "md5": "1"}]
+    cache = project / ".dvc" / "cache" / "files" / "md5" / "ab"
+    cache.mkdir(parents=True)
+    (cache / "cdef.dir").write_text(json.dumps(manifest))
+    (project / "data" / "imp.dvc").write_text(
+        "outs:\n- md5: abcdef.dir\n  path: imp\n"
+    )
+    (project / "dvc.lock").write_text(
+        "schema: '2.0'\nstages:\n  make:\n    cmd: make\n    outs:\n"
+        "    - path: figs\n      md5: abcdef.dir\n"
+    )
+    (project / "calkit.yaml").write_text("name: proj\n")
+    pipeline = {
+        "dvc_stages": {"make": {"cmd": "make", "outs": ["figs"]}},
+        "lock_stage_statuses": {"make": {"status": "up-to-date"}},
+        "frozen": ["make"],
+    }
+    args = get_checkout_args(str(project), pipeline)
+    assert args["ck_info"]["name"] == "proj"
+    assert args["dvc_yaml"] == {"stages": pipeline["dvc_stages"]}
+    assert list(args["dvc_lock"]["stages"]) == ["make"]
+    assert args["stage_statuses"] == pipeline["lock_stage_statuses"]
+    assert args["frozen"] == {"make"}
+    assert args["is_file"]("data/a.json") and args["is_dir"]("data")
+    assert set(args["listdir"]("data")) == {"a.json", "imp.dvc"}
+    assert args["read_bytes"]("data/a.json") == b'{"n": 1}'
+    for path in ["figs/x.csv", "data/imp/x.csv"]:
+        assert args["is_dvc_output"](path)
+    for path in ["figs/typo.csv", "data/imp/typo.csv", "data/b.csv"]:
+        assert not args["is_dvc_output"](path)
+    # Nothing a symlink takes outside the project is read
+    if sys.platform != "win32":
+        (tmp_path / "secret.json").write_text("{}")
+        os.symlink(tmp_path / "secret.json", project / "link.json")
+        assert not args["is_file"]("link.json")
+        with pytest.raises(ValueError, match="isn't in the project"):
+            args["read_bytes"]("link.json")
 
 
 def test_add_origin_and_add_creator():

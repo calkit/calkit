@@ -2250,10 +2250,13 @@ def get_provenance_records(
                 )
             ]
             nodes = [make_text("Last run " + ", ".join(p for p in parts if p))]
+            # Runs come before the commit that records them, so the commit
+            # they ran after is said, whether or not the tree was clean
             if commit_sha:
-                nodes += [make_text(", commit "), make_code(commit_sha[:7])]
-                if run.get("git_dirty"):
-                    nodes.append(make_text(" with uncommitted changes"))
+                nodes += [
+                    make_text(", after commit "),
+                    make_code(commit_sha[:7]),
+                ]
             blocks.append(make_paragraph(*nodes))
         elif name in lock_stages:
             blocks.append(

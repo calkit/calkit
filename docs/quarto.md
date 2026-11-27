@@ -162,6 +162,7 @@ Each run's fit.
 
 <!-- TODO: needs human review -->
 
+A notebook a Quarto stage renders can use them in its Markdown cells too.
 Paths are relative to the project, as for `ckvalue`.
 `ckfigure` shows an image as a numbered figure,
 with Quarto's figure options and classes, e.g., `width`, `fig-pos`, or
@@ -214,6 +215,7 @@ Opened, the view shows how it came to be:
 a graph of the stages it's made from, however far back, and nothing else,
 then each of those stages, upstream first, with its kind, environment,
 script or command, when and where it last ran if that's recorded,
+and the commit it ran after,
 every file it reads, with where each came from and whether it changed,
 and what it makes on the way.
 A file in Git links to it on GitHub or GitLab, at the commit the stage
@@ -226,8 +228,8 @@ e.g., its page, and whether it matched the reference's PDF,
 if there's one on the machine that rendered it,
 rather than a pipeline.
 See [`examples/quarto`](https://github.com/calkit/calkit/tree/main/examples/quarto)
-for a report that shows a notebook's figure and table this way,
-made from a Julia simulation.
+for a notebook and a report that show figures, tables, and values this
+way, made from a Julia simulation.
 
 <!-- TODO: needs human review -->
 

@@ -517,7 +517,8 @@ def test_provenance_records(tmp_path: Path) -> None:
         "plot": {
             "start_time": "2026-11-20T10:00:00",
             "git_rev": "abcdef123456",
-            "git_dirty": False,
+            # Run before committing, as usual, which isn't a warning
+            "git_dirty": True,
             "system": {"os": "Linux", "machine": "x86_64"},
             "dvc_lock_hash": calkit.dvc.stage_lock_hash(lock_stages["plot"]),
         },
@@ -626,7 +627,8 @@ def test_provenance_records(tmp_path: Path) -> None:
         "Runs scripts/plot.py<https://host.example/abcdef123456/scripts/plot.py>\n"
         in view
     )
-    assert "Last run 2026-11-20, Linux x86_64, commit abcdef1\n" in view
+    assert "Last run 2026-11-20, Linux x86_64, after commit abcdef1\n" in view
+    assert "uncommitted" not in view
     assert (
         "data/raw.csv<https://host.example/HEAD/data/raw.csv>Created by Jane Doe"
         "✅ unchanged\n" in view

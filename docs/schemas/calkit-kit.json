@@ -205,7 +205,7 @@
   },
   "$id": "https://docs.calkit.org/schemas/calkit-kit.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "The calkit-kit.json at the root of a calkit, the ZIP embedded in an artifact holding what made it. See https://docs.calkit.org/calkits",
+  "description": "The calkit-kit.json at the root of a calkit, the ZIP embedded in an artifact holding what made it. See https://docs.calkit.org/kits",
   "properties": {
     "$schema": {
       "default": "https://docs.calkit.org/schemas/calkit-kit.json",

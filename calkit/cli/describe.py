@@ -375,7 +375,7 @@ def describe_artifact(
             typer.echo(f"  {mark} {f.path} ({f.size:,} bytes)")
         if left_out:
             typer.echo(
-                "  (- left out; pull or remake after 'calkit kit expand')"
+                "  (- left out; pull or remake after 'calkit kit unbundle')"
             )
         return
     # Otherwise it has to be part of this project
@@ -448,5 +448,5 @@ def describe_artifact(
         typer.echo("Provenance defined for all inputs")
     if stage is not None:
         typer.echo(
-            f"No calkit; to share with one: calkit kit create {rel_path}"
+            f"No calkit; to share with one: calkit kit bundle {rel_path}"
         )

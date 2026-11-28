@@ -99,7 +99,7 @@ def test_embed_extract():
         calkit.kits.get_format(b"x,y\n", "data.csv")
 
 
-def test_build_read_expand(kit_project, tmp_path):
+def test_build_read_unbundle(kit_project, tmp_path):
     # Project state that shouldn't travel with a calkit
     os.makedirs(".calkit/overleaf")
     with open(".calkit/overleaf/info.json", "w") as f:
@@ -199,10 +199,10 @@ def test_build_read_expand(kit_project, tmp_path):
     assert calkit.kits.read("data/raw.csv") is None
     with pytest.raises(ValueError, match="No pipeline stage"):
         calkit.kits.build("scripts/make.py", up_to_date=True)
-    # Expanding makes a committed project that's up to date, linked to the
+    # Unbundling makes a committed project that's up to date, linked to the
     # original, with what DVC tracks in its cache
-    dest_dir = tmp_path / "expanded"
-    kit = calkit.kits.expand(png_path, str(dest_dir))
+    dest_dir = tmp_path / "unbundled"
+    kit = calkit.kits.unbundle(png_path, str(dest_dir))
     with open(dest_dir / "figures/fig.png", "rb") as f:
         assert f.read() == original
     assert (dest_dir / "data/raw.csv").is_file()
@@ -220,13 +220,13 @@ def test_build_read_expand(kit_project, tmp_path):
     )
     assert json.loads(status) == {}
     with pytest.raises(ValueError, match="isn't empty"):
-        calkit.kits.expand(png_path, str(dest_dir))
+        calkit.kits.unbundle(png_path, str(dest_dir))
     # Inputs left out are missing until pulled, but outputs aren't inputs
     small_path = str(tmp_path / "small.png")
     calkit.kits.write_copy(
         "figures/fig.png", small_path, up_to_date=True, max_size=1000
     )
-    small_kit = calkit.kits.expand(small_path, str(tmp_path / "small"))
+    small_kit = calkit.kits.unbundle(small_path, str(tmp_path / "small"))
     missing = calkit.kits.get_missing_inputs(
         small_kit, str(tmp_path / "small")
     )
@@ -245,7 +245,7 @@ def test_build_read_expand(kit_project, tmp_path):
     with open(evil_path, "wb") as f:
         f.write(evil)
     with pytest.raises(ValueError, match="unsafe path"):
-        calkit.kits.expand(evil_path, str(tmp_path / "evil"))
+        calkit.kits.unbundle(evil_path, str(tmp_path / "evil"))
     assert not (tmp_path / "evil.txt").exists()
     # Environment specs Calkit keeps in .calkit go along, and data kept in
     # Git obeys the size limit and leaving out data, as data in DVC does
@@ -396,7 +396,7 @@ def test_untrusted_calkits(tmp_path):
         files = {"run.py": b"print(1)\n", evil_path: b"#!/bin/sh\ntouch x\n"}
         dest = tmp_path / "dest"
         with pytest.raises(calkit.kits.KitError, match="unsafe path"):
-            calkit.kits.expand(write_png(files), str(dest))
+            calkit.kits.unbundle(write_png(files), str(dest))
         assert not dest.exists()
     # Disallowed .dvc/config settings and unsafe Git remotes are refused
     for bad_cfg in [
@@ -406,7 +406,9 @@ def test_untrusted_calkits(tmp_path):
     ]:
         dest = tmp_path / "dest-cfg"
         with pytest.raises(calkit.kits.KitError, match="disallowed settings"):
-            calkit.kits.expand(write_png({".dvc/config": bad_cfg}), str(dest))
+            calkit.kits.unbundle(
+                write_png({".dvc/config": bad_cfg}), str(dest)
+            )
         assert not dest.exists()
     for bad_remotes, match in [
         ({"bad name": "https://example.com/a.git"}, "unsafe remote name"),
@@ -417,7 +419,7 @@ def test_untrusted_calkits(tmp_path):
         bad_manifest["source"]["git_remotes"] = bad_remotes
         dest = tmp_path / "dest-remote"
         with pytest.raises(calkit.kits.KitError, match=match):
-            calkit.kits.expand(
+            calkit.kits.unbundle(
                 write_png({"run.py": b"print(1)\n"}, bad_manifest), str(dest)
             )
         assert not dest.exists()
@@ -441,10 +443,10 @@ def test_untrusted_calkits(tmp_path):
         (write_png({}, manifest, "c.png"), "missing files"),
     ]:
         with pytest.raises(calkit.kits.KitError, match=match):
-            calkit.kits.expand(path, str(tmp_path / "dest"))
-    # A valid one expands, without its name choosing where
+            calkit.kits.unbundle(path, str(tmp_path / "dest"))
+    # A valid one unbundles, without its name choosing where
     good = write_png(files)
-    calkit.kits.expand(good, str(tmp_path / "good"))
+    calkit.kits.unbundle(good, str(tmp_path / "good"))
     assert (tmp_path / "good/run.py").read_bytes() == b"print(1)\n"
     # A newer format, a missing manifest, or a chunk that isn't a ZIP can't
     # be read, but a broken PNG just has no calkit

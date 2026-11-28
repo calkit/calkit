@@ -299,7 +299,7 @@ def test_describe_artifact(kit_project, tmp_path):
     assert "Made by stage: make" in res.stdout
     assert "Up to date" in res.stdout
     assert "origin not defined for data/raw.csv" in res.stdout
-    assert "calkit kit create figures/fig.png" in res.stdout
+    assert "calkit kit bundle figures/fig.png" in res.stdout
     # Defining the input's origin and declaring the figure fills the gaps
     ck_info = calkit.load_calkit_info()
     ck_info["figures"] = [{"path": "figures/fig.png", "title": "Squares"}]

@@ -275,11 +275,11 @@ DVC handles:
 | `calkit show question <n>`      | Show a question with its answer rendered from evidence  |
 | `calkit check questions`        | Check answers against current evidence                  |
 | `calkit describe <file>`        | What made a file, whether it's reproducible             |
-| `calkit kit create <file>`      | Copy of a figure or document with a calkit embedded     |
-| `calkit kit expand <file>`      | Expand a file's calkit into a project                   |
-| `calkit kit run <file>`         | Expand, rerun, and check the file comes out the same    |
+| `calkit kit bundle <file>`      | Copy of a figure or document with a calkit embedded     |
+| `calkit kit unbundle <file>`    | Unbundle a file's calkit into a project                 |
+| `calkit kit run <file>`         | Unbundle, rerun, and check the file comes out the same  |
 | `calkit kit open <file>`        | Open a calkit's project in an editor, or `--hub`        |
-| `calkit kit list`               | List calkits created from this project                  |
+| `calkit kit list`               | List calkits bundled from this project                  |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 
@@ -376,13 +376,13 @@ though the human is considered the author and AI is noted with a `with_ai` field
 <!-- TODO: needs human review -->
 
 When a figure, PDF, SVG, or HTML page is going to a person, e.g., pasted into
-a chat or emailed, offer to share a copy made with `calkit kit create <file>`
+a chat or emailed, offer to share a copy made with `calkit kit bundle <file>`
 rather than the bare file.
 The copy carries a calkit: the stages, scripts, environments, and small data
 that make it, so the recipient can run `calkit describe` on it to see how it
-was made, `calkit kit expand` to get a project, and `calkit kit run` to check
+was made, `calkit kit unbundle` to get a project, and `calkit kit run` to check
 it reproduces.
-Ask before creating one from a private project, since everything in the
+Ask before bundling one from a private project, since everything in the
 calkit goes with the file; `calkit describe <copy>` lists what's in it.
 When given a file from someone else, run `calkit describe` on it before
 reasoning about where it came from.

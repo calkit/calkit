@@ -5,7 +5,7 @@ A calkit, short for calculation kit, is a ZIP holding a manifest,
 ``calkit-kit.json``, a ``README.md`` saying what it is, and the project files
 that make one artifact, under ``project/``. It's embedded in a copy of the
 artifact, so wherever the file goes, what made it goes with it. See
-https://docs.calkit.org/calkits for the format.
+https://docs.calkit.org/kits for the format.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ MANIFEST_NAME = "calkit-kit.json"
 README_NAME = "README.md"
 PROJECT_DIR = "project/"
 MEDIA_TYPE = "application/vnd.calkit+zip"
-DOCS_URL = "https://docs.calkit.org/calkits"
+DOCS_URL = "https://docs.calkit.org/kits"
 SCHEMA_URL = "https://docs.calkit.org/schemas/calkit-kit.json"
 SCHEMA_REPO_PATH = "docs/schemas/calkit-kit.json"
 # A calkit may grow its artifact to this size, or double it if that's
@@ -42,10 +42,10 @@ SCHEMA_REPO_PATH = "docs/schemas/calkit-kit.json"
 DEFAULT_MAX_SIZE = 1_000_000
 # A fixed timestamp keeps a calkit's bytes the same for the same project state
 ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
-# What reading or expanding a calkit from someone else may unpack, so a ZIP
+# What reading or unbundling a calkit from someone else may unpack, so a ZIP
 # bomb can't fill the disk or memory
 MAX_MANIFEST_SIZE = 10_000_000
-MAX_EXPANDED_SIZE = 2_000_000_000
+MAX_UNBUNDLED_SIZE = 2_000_000_000
 MAX_COMPRESSION_RATIO = 1000
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Ancillary, private, and unsafe to copy, so an editor that changes the image
@@ -69,7 +69,7 @@ MARKUP_BLOCKS = {
     "svg": (
         b'<metadata id="calkit">'
         + MARKUP_COMMENT
-        + b'<calkit xmlns="https://docs.calkit.org/calkits" version="1" '
+        + b'<calkit xmlns="https://docs.calkit.org/kits" version="1" '
         b'encoding="base64">',
         b"</calkit></metadata>",
         b"</svg>",
@@ -625,9 +625,9 @@ def make_readme(manifest: Manifest) -> str:
         "`project/` holds the files.\n\n"
         "With Calkit (https://calkit.org) installed:\n\n"
         "```sh\n"
-        f"calkit describe {name}    # What made it, and whether it changed\n"
-        f"calkit kit expand {name}  # Unpack it into a project\n"
-        f"calkit kit run {name}     # Unpack it, rerun it, and compare\n"
+        f"calkit describe {name}      # What made it, and whether it changed\n"
+        f"calkit kit unbundle {name}  # Unpack it into a project\n"
+        f"calkit kit run {name}       # Unpack it, rerun it, and compare\n"
         "```\n\n"
         f"See {DOCS_URL}\n"
     )
@@ -861,19 +861,16 @@ def build(
             actual_md5 = hashlib.md5(artifact_data).hexdigest()
         elif p in included:
             actual_md5 = hashlib.md5(included[p]).hexdigest()
-        elif os.path.isfile(p):
+        else:
+            # Hashing data left out could take long, and the pipeline status
+            # check already caught changed inputs and outputs
             recorded_size = dvc_entry.get("size")
-            if recorded_size is not None and os.path.getsize(p) != int(
-                recorded_size
+            if (
+                os.path.isfile(p)
+                and recorded_size is not None
+                and os.path.getsize(p) != int(recorded_size)
             ):
                 uncommitted.add(p)
-                continue
-            digest = hashlib.md5()
-            with open(p, "rb") as f:
-                for chunk in iter(lambda: f.read(1 << 20), b""):
-                    digest.update(chunk)
-            actual_md5 = digest.hexdigest()
-        else:
             continue
         if actual_md5 != recorded_md5:
             uncommitted.add(p)
@@ -1033,15 +1030,15 @@ def read(path: str) -> EmbeddedKit | None:
     return EmbeddedKit(kit=kit, artifact=artifact, manifest=read_manifest(kit))
 
 
-def expand(path: str, dest_dir: str) -> EmbeddedKit:
-    """Expand the calkit embedded in a file into a new project in
+def unbundle(path: str, dest_dir: str) -> EmbeddedKit:
+    """Unbundle the calkit embedded in a file into a new project in
     ``dest_dir``, with the artifact in place and everything committed.
 
     The calkit may come from anyone, so it's checked before anything is
     written: every file must be one its manifest lists as included, with
     the same SHA-256, at a path that stays in the project and out of its
     Git and DVC internals, and it must not unpack to more than
-    ``MAX_EXPANDED_SIZE``. The source project's remotes are added as Git
+    ``MAX_UNBUNDLED_SIZE``. The source project's remotes are added as Git
     remotes prefixed with ``upstream``, so its history can be fetched.
     """
     import configparser
@@ -1084,7 +1081,7 @@ def expand(path: str, dest_dir: str) -> EmbeddedKit:
             if rel_path in files:
                 raise KitError(f"Calkit has {rel_path} twice")
             max_entry = min(
-                MAX_EXPANDED_SIZE - total_size,
+                MAX_UNBUNDLED_SIZE - total_size,
                 max(
                     1_000_000,
                     MAX_COMPRESSION_RATIO * max(info.compress_size, 1),
@@ -1163,7 +1160,7 @@ def expand(path: str, dest_dir: str) -> EmbeddedKit:
         remote_name = "upstream" if name == "origin" else f"upstream-{name}"
         repo.create_remote(remote_name, url)
     repo.git.add("--all")
-    message = f"Expand calkit from {os.path.basename(path)}"
+    message = f"Unbundle calkit from {os.path.basename(path)}"
     if manifest.source.commit_sha:
         message += f" ({manifest.source.commit_sha[:7]})"
     try:
@@ -1175,7 +1172,7 @@ def expand(path: str, dest_dir: str) -> EmbeddedKit:
 
 
 def get_missing_inputs(kit: EmbeddedKit, root: str) -> list[str]:
-    """Get the files an expanded calkit's stages read that aren't there,
+    """Get the files an unbundled calkit's stages read that aren't there,
     i.e., inputs left out of it and not yet pulled.
     """
     stage_io = get_stage_io(

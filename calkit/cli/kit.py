@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from calkit.cli import AliasGroup, raise_error, warn
+
+if TYPE_CHECKING:
+    import calkit.kits
 
 kit_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -18,26 +21,52 @@ def get_n_files_text(n_files: int) -> str:
     return f"{n_files} file" + "s" * (n_files != 1)
 
 
-def get_default_dest_dir(path: str) -> str:
-    """Get where a file's calkit expands by default: a folder named after
-    the project it came from.
-    """
+def read_kit(path: str) -> calkit.kits.EmbeddedKit:
+    """Read the calkit embedded in a file, or exit if it has none."""
     import calkit.kits
 
+    if not os.path.isfile(path):
+        raise_error(f"{path} doesn't exist")
     try:
         kit = calkit.kits.read(path)
     except ValueError as e:
         raise_error(f"Can't read calkit: {e}")
     if kit is None:
         raise_error(f"{path} has no calkit")
+    return kit
+
+
+def get_dest_dir_name(path: str, kit: calkit.kits.EmbeddedKit) -> str:
+    """Get the name of the folder a file's calkit unbundles into by default:
+    the name of the project it came from.
+    """
     # The name comes from whoever made the calkit, so it only names a folder
     # here
     name = re.sub(r"[^A-Za-z0-9._-]", "-", kit.manifest.source.name or "")
     return name.strip(".-") or os.path.splitext(os.path.basename(path))[0]
 
 
-@kit_app.command(name="create")
-def create(
+def get_kit_dir_path(path: str, kit: calkit.kits.EmbeddedKit) -> str:
+    """Get where 'calkit kit run' and 'calkit kit open' unbundle a calkit by
+    default, so they reuse it rather than litter wherever the file was
+    downloaded.
+
+    Named for the calkit's hash, since the same calkit always unbundles to
+    the same files.
+    """
+    import hashlib
+
+    kit_sha256 = hashlib.sha256(kit.kit).hexdigest()
+    return os.path.join(
+        os.path.expanduser("~"),
+        "calkit",
+        "kits",
+        f"{get_dest_dir_name(path, kit)}-{kit_sha256[:7]}",
+    )
+
+
+@kit_app.command(name="bundle")
+def bundle(
     path: Annotated[
         str, typer.Argument(help="Path of a figure or document to share.")
     ],
@@ -73,7 +102,7 @@ def create(
             "--force",
             "-f",
             help=(
-                "Create it even if the pipeline is out of date or there are "
+                "Bundle it even if the pipeline is out of date or there are "
                 "uncommitted changes, which leave it unrecorded."
             ),
         ),
@@ -98,7 +127,7 @@ def create(
 
     The calkit holds what makes the file (stages, scripts, environments, and
     data that fits) so anyone with the copy can see what made it with
-    'calkit describe', and expand or rerun it with 'calkit kit expand' or
+    'calkit describe', and unbundle or rerun it with 'calkit kit unbundle' or
     'calkit kit run'. Works with PNG, PDF, SVG, and HTML files.
 
     It's recorded as a Git tag at the commit it came from, which is pushed,
@@ -176,7 +205,7 @@ def create(
         typer.echo(
             f"Left out {get_n_files_text(len(left_out))} "
             f"({sum(f.size for f in left_out) / 1e6:.1f} MB); "
-            "an expanded copy can pull or remake them"
+            "an unbundled copy can pull or remake them"
         )
     if manifest.source.uncommitted_paths:
         warn(
@@ -212,32 +241,34 @@ def create(
         typer.echo(f"Copied {output} to clipboard")
 
 
-@kit_app.command(name="expand")
-def expand(
+@kit_app.command(name="unbundle")
+def unbundle(
     path: Annotated[str, typer.Argument(help="Path of a file with a calkit.")],
     dest_dir: Annotated[
         str | None,
         typer.Argument(
-            help="Directory for the project; defaults to the project's name."
+            help=(
+                "Directory for the project; defaults to the project's name, "
+                "here."
+            )
         ),
     ] = None,
 ) -> None:
-    """Expand the calkit embedded in a file into a project.
+    """Unbundle the calkit embedded in a file into a project.
 
     The project holds what makes the file, committed to a new Git repo with
     the original project's remote as 'upstream'.
     """
     import calkit.kits
 
-    if not os.path.isfile(path):
-        raise_error(f"{path} doesn't exist")
+    kit = read_kit(path)
     if dest_dir is None:
-        dest_dir = get_default_dest_dir(path)
+        dest_dir = get_dest_dir_name(path, kit)
     try:
-        kit = calkit.kits.expand(path, dest_dir)
+        kit = calkit.kits.unbundle(path, dest_dir)
     except ValueError as e:
         raise_error(str(e))
-    typer.echo(f"Expanded into {dest_dir}")
+    typer.echo(f"Unbundled into {dest_dir}")
     if not kit.artifact_unchanged:
         warn(
             f"{kit.manifest.artifact.path} was modified since calkit was "
@@ -258,7 +289,10 @@ def run(
     dest_dir: Annotated[
         str | None,
         typer.Argument(
-            help="Directory for the project; defaults to the project's name."
+            help=(
+                "Directory to unbundle it into; defaults to "
+                "~/calkit/kits/NAME-HASH, reused if there."
+            )
         ),
     ] = None,
     yes: Annotated[
@@ -268,7 +302,7 @@ def run(
         ),
     ] = False,
 ) -> None:
-    """Expand the calkit embedded in a file, rerun its pipeline, and check
+    """Unbundle the calkit embedded in a file, rerun its pipeline, and check
     the file comes out the same.
 
     Inputs left out of the calkit are pulled from the original project's
@@ -284,15 +318,20 @@ def run(
     import calkit.pipeline
     from calkit.core import is_tty
 
-    if not os.path.isfile(path):
-        raise_error(f"{path} doesn't exist")
+    kit = read_kit(path)
+    # Only reuse the folder named for this calkit, since a pipeline run in
+    # any other could be someone's own project
+    reuse = dest_dir is None
     if dest_dir is None:
-        dest_dir = get_default_dest_dir(path)
-    try:
-        kit = calkit.kits.expand(path, dest_dir)
-    except ValueError as e:
-        raise_error(str(e))
-    typer.echo(f"Expanded into {dest_dir}")
+        dest_dir = get_kit_dir_path(path, kit)
+    if reuse and os.path.isfile(os.path.join(dest_dir, "calkit.yaml")):
+        typer.echo(f"Using calkit unbundled in {dest_dir}")
+    else:
+        try:
+            kit = calkit.kits.unbundle(path, dest_dir)
+        except ValueError as e:
+            raise_error(str(e))
+        typer.echo(f"Unbundled into {dest_dir}")
     if not kit.artifact_unchanged:
         warn(
             f"{kit.manifest.artifact.path} was modified since calkit was "
@@ -352,7 +391,7 @@ def run(
             raise_error(
                 "Missing inputs: "
                 + ", ".join(missing)
-                + "; pull them, or create calkit with a larger --max-size"
+                + "; pull them, or bundle calkit with a larger --max-size"
             )
     typer.echo("Rerunning pipeline")
     res = subprocess.run(
@@ -363,11 +402,15 @@ def run(
     artifact_path = os.path.join(dest_dir, kit.manifest.artifact.path)
     with open(artifact_path, "rb") as f:
         sha256 = hashlib.sha256(f.read()).hexdigest()
-    expected_sha256 = hashlib.sha256(kit.artifact).hexdigest()
-    if sha256 != expected_sha256 or sha256 != kit.manifest.artifact.sha256:
+    if sha256 != kit.manifest.artifact.sha256:
         raise_error(
             f"Reran, but {kit.manifest.artifact.path} differs from the "
             "shared file"
+        )
+    if not kit.artifact_unchanged:
+        raise_error(
+            f"Reproduced {kit.manifest.artifact.path} as calkit was created, "
+            f"but {path} was modified since"
         )
     typer.echo(f"Reproduced {kit.manifest.artifact.path}: identical")
 
@@ -379,8 +422,8 @@ def open_(
         str | None,
         typer.Argument(
             help=(
-                "Directory to expand it into, if it isn't already; defaults "
-                "to the project's name."
+                "Directory to unbundle it into, if it isn't already; "
+                "defaults to ~/calkit/kits/NAME-HASH."
             )
         ),
     ] = None,
@@ -402,21 +445,14 @@ def open_(
 ) -> None:
     """Open the project a file's calkit came from.
 
-    Expands the calkit, unless that's been done already, and opens it in
+    Unbundles the calkit, unless that's been done already, and opens it in
     the default editor, or with '--hub', opens the original project on the
     hub at the commit the calkit came from.
     """
     import calkit.kits
     from calkit.cli.open_ import open_project
 
-    if not os.path.isfile(path):
-        raise_error(f"{path} doesn't exist")
-    try:
-        kit = calkit.kits.read(path)
-    except ValueError as e:
-        raise_error(f"Can't read calkit: {e}")
-    if kit is None:
-        raise_error(f"{path} has no calkit")
+    kit = read_kit(path)
     if hub:
         url = calkit.kits.get_hub_file_url(kit.manifest)
         if url is None:
@@ -425,13 +461,13 @@ def open_(
         typer.launch(url)
         return
     if dest_dir is None:
-        dest_dir = get_default_dest_dir(path)
+        dest_dir = get_kit_dir_path(path, kit)
     if not os.path.isfile(os.path.join(dest_dir, "calkit.yaml")):
         try:
-            calkit.kits.expand(path, dest_dir)
+            calkit.kits.unbundle(path, dest_dir)
         except ValueError as e:
             raise_error(str(e))
-        typer.echo(f"Expanded into {dest_dir}")
+        typer.echo(f"Unbundled into {dest_dir}")
     open_project(
         project=os.path.basename(os.path.abspath(dest_dir)),
         file_path=kit.manifest.artifact.path,
@@ -448,9 +484,9 @@ def list_(
         bool, typer.Option("--json", help="Print as JSON.")
     ] = False,
 ) -> None:
-    """List the calkits created from this project, newest first.
+    """List the calkits bundled from this project, newest first.
 
-    Read from the tags 'calkit kit create' records, so fetch tags first,
+    Read from the tags 'calkit kit bundle' records, so fetch tags first,
     e.g., with 'git fetch --tags', to see those others created.
     """
     import calkit.kits

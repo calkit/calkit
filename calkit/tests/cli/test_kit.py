@@ -23,7 +23,7 @@ def test_create(kit_project, monkeypatch, tmp_path):
     subprocess.check_call(["git", "remote", "set-url", "origin", str(remote)])
     head_sha = git.Repo().head.commit.hexsha
     # Written beside where it's run, leaving the original alone
-    res = runner.invoke(app, ["kit", "create", "figures/fig.png"])
+    res = runner.invoke(app, ["kit", "bundle", "figures/fig.png"])
     assert res.exit_code == 0, res.stdout
     assert "Wrote fig.calkit.png (calkit:" in res.stdout
     kit = calkit.kits.read("fig.calkit.png")
@@ -50,7 +50,7 @@ def test_create(kit_project, monkeypatch, tmp_path):
     assert f"figures/fig.png at {head_sha[:7]}" in res.stdout
     assert tag_name in res.stdout
     res = runner.invoke(
-        app, ["kit", "create", "figures/fig.svg", "--no-record"]
+        app, ["kit", "bundle", "figures/fig.svg", "--no-record"]
     )
     assert res.exit_code == 0, res.stdout
     assert len(calkit.kits.get_records()) == 1
@@ -69,7 +69,7 @@ def test_create(kit_project, monkeypatch, tmp_path):
     with open("notes.md", "w") as f:
         f.write("Notes\n")
     subprocess.check_call(["git", "add", "notes.md"])
-    res = runner.invoke(app, ["kit", "create", "figures/fig.svg"])
+    res = runner.invoke(app, ["kit", "bundle", "figures/fig.svg"])
     assert res.exit_code == 0, res.stdout
     assert "Recorded as tag kit/figures/fig.svg/" in res.stdout
     kit = calkit.kits.read("fig.calkit.svg")
@@ -77,7 +77,7 @@ def test_create(kit_project, monkeypatch, tmp_path):
     assert kit.manifest.source.uncommitted_paths == []
     with open(".dvcignore", "a") as f:
         f.write("# changed\n")
-    res = runner.invoke(app, ["kit", "create", "figures/fig.svg"])
+    res = runner.invoke(app, ["kit", "bundle", "figures/fig.svg"])
     assert res.exit_code != 0
     assert "Uncommitted changes: .dvcignore" in res.stdout + str(res.stderr)
     subprocess.check_call(
@@ -89,7 +89,7 @@ def test_create(kit_project, monkeypatch, tmp_path):
         app,
         [
             "kit",
-            "create",
+            "bundle",
             "figures/fig.pdf",
             "-o",
             "small.pdf",
@@ -100,14 +100,14 @@ def test_create(kit_project, monkeypatch, tmp_path):
     assert res.exit_code == 0, res.stdout
     assert "Left out 4 files" in res.stdout
     res = runner.invoke(
-        app, ["kit", "create", "figures/fig.pdf", "--max-size", "big"]
+        app, ["kit", "bundle", "figures/fig.pdf", "--max-size", "big"]
     )
     assert res.exit_code != 0
     assert "Invalid size" in res.stdout + str(res.stderr)
     # An out-of-date pipeline needs --force, and the calkit says so
     with open("data/raw.csv", "a") as f:
         f.write("1,1\n")
-    args = ["kit", "create", "figures/fig.png", "-o", "a.png"]
+    args = ["kit", "bundle", "figures/fig.png", "-o", "a.png"]
     res = runner.invoke(app, args)
     assert res.exit_code != 0
     assert "Out of date: make" in res.stdout + str(res.stderr)
@@ -131,7 +131,7 @@ def test_create(kit_project, monkeypatch, tmp_path):
         "calkit.kits.copy_to_clipboard", lambda path: copied.append(path)
     )
     res = runner.invoke(
-        app, ["kit", "create", "figures/fig.svg", "--to-clipboard"]
+        app, ["kit", "bundle", "figures/fig.svg", "--to-clipboard"]
     )
     assert res.exit_code == 0, res.stdout
     assert "Couldn't record" not in res.stdout + str(res.stderr)
@@ -143,7 +143,7 @@ def test_create(kit_project, monkeypatch, tmp_path):
     with open("figures/fig.png", "ab") as f:
         f.write(b"x")
     res = runner.invoke(
-        app, ["kit", "create", "figures/fig.png", "-o", "mod.png", "--force"]
+        app, ["kit", "bundle", "figures/fig.png", "-o", "mod.png", "--force"]
     )
     assert res.exit_code == 0, res.stdout
     mod_kit = calkit.kits.read("mod.png")
@@ -154,12 +154,12 @@ def test_create(kit_project, monkeypatch, tmp_path):
         ["dvc", "checkout", "-q", "--force", "figures/fig.png"]
     )
     # Only what a stage makes can carry a calkit
-    res = runner.invoke(app, ["kit", "create", "scripts/make.py"])
+    res = runner.invoke(app, ["kit", "bundle", "scripts/make.py"])
     assert res.exit_code != 0
     assert "No pipeline stage makes" in res.stdout + str(res.stderr)
 
 
-def test_expand_run_open(kit_project, tmp_path, monkeypatch):
+def test_unbundle_run_open(kit_project, tmp_path, monkeypatch):
     kit_path = str(tmp_path / "fig.png")
     calkit.kits.write_copy("figures/fig.png", kit_path, up_to_date=True)
     small_path = str(tmp_path / "small.png")
@@ -167,7 +167,7 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
         "figures/fig.png", small_path, up_to_date=True, max_size=1000
     )
     # Inputs left out can be pulled from the project's DVC remote when
-    # rerunning, even though the expanded repo has no Git origin
+    # rerunning, even though the unbundled repo has no Git origin
     dvc_remote = tmp_path / "dvc-remote"
     dvc_remote.mkdir()
     subprocess.check_call(
@@ -179,22 +179,30 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
         "figures/fig.png", pullable_path, up_to_date=True, max_size=1000
     )
     os.chdir(tmp_path)
-    # Expanding defaults to the project's name, and says what's missing
-    res = runner.invoke(app, ["kit", "expand", small_path])
+    # Unbundling defaults to the project's name, and says what's missing
+    res = runner.invoke(app, ["kit", "unbundle", small_path])
     assert res.exit_code == 0, res.stdout
-    assert "Expanded into kit-test" in res.stdout
+    assert "Unbundled into kit-test" in res.stdout
     assert "Left out of calkit: 4 files" in res.stdout
     assert os.path.isfile("kit-test/figures/fig.png")
     assert os.path.isfile("kit-test/scripts/make.py")
     assert not os.path.exists("kit-test/data/raw.csv")
-    res = runner.invoke(app, ["kit", "expand", small_path])
+    res = runner.invoke(app, ["kit", "unbundle", small_path])
     assert res.exit_code != 0
     assert "isn't empty" in res.stdout + str(res.stderr)
-    res = runner.invoke(app, ["kit", "expand", "kit-test/scripts/make.py"])
+    res = runner.invoke(app, ["kit", "unbundle", "kit-test/scripts/make.py"])
     assert res.exit_code != 0
     assert "has no calkit" in res.stdout + str(res.stderr)
-    # Opening opens the expanded project in an editor, or the original on
-    # the hub at the commit it came from
+    # Opening opens the unbundled project in an editor, or the original on
+    # the hub at the commit it came from, unbundling it into a folder for
+    # that calkit rather than here
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    kit_sha256 = hashlib.sha256(calkit.kits.read(small_path).kit).hexdigest()
+    small_kit_dir = str(
+        home / "calkit" / "kits" / f"kit-test-{kit_sha256[:7]}"
+    )
     opened = []
     monkeypatch.setattr(
         "calkit.cli.open_.open_project",
@@ -202,7 +210,11 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
     )
     res = runner.invoke(app, ["kit", "open", small_path])
     assert res.exit_code == 0, res.stdout
-    assert opened[-1]["checkout"] == "kit-test"
+    assert opened[-1]["checkout"] == small_kit_dir
+    assert os.path.isfile(os.path.join(small_kit_dir, "calkit.yaml"))
+    res = runner.invoke(app, ["kit", "open", small_path])
+    assert res.exit_code == 0, res.stdout
+    assert "Unbundled" not in res.stdout
     assert opened[-1]["file_path"] == "figures/fig.png"
     launched = []
     monkeypatch.setattr(
@@ -218,6 +230,15 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
     res = runner.invoke(app, ["kit", "run", kit_path, "rerun", "--yes"])
     assert res.exit_code == 0, res.stdout
     assert "Reproduced figures/fig.png: identical" in res.stdout
+    # By default, it reuses the folder for that calkit, but not one given
+    for _ in range(2):
+        res = runner.invoke(app, ["kit", "run", kit_path, "--yes"])
+        assert res.exit_code == 0, res.stdout
+        assert "Reproduced figures/fig.png: identical" in res.stdout
+    assert "Using calkit unbundled in" in res.stdout
+    res = runner.invoke(app, ["kit", "run", kit_path, "rerun", "--yes"])
+    assert res.exit_code != 0
+    assert "isn't empty" in res.stdout + str(res.stderr)
     # Without --yes on a non-TTY, it previews stages and stops before pulling
     res = runner.invoke(app, ["kit", "run", pullable_path, "no-yes"])
     assert res.exit_code != 0
@@ -235,8 +256,8 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
     )
     assert res.exit_code != 0
     assert "Missing inputs: data/raw.csv" in res.stdout + str(res.stderr)
-    # Tampering with the shared artifact's bytes is caught on rerun even if
-    # the calkit itself still matches the pipeline
+    # Tampering with the shared artifact's bytes is caught on rerun, though
+    # the pipeline reproduces what the calkit was created from
     with open(kit_path, "rb") as f:
         kit_bytes = f.read()
     with open("tampered.png", "wb") as f:
@@ -245,7 +266,7 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
         app, ["kit", "run", "tampered.png", "rerun-tampered", "--yes"]
     )
     assert res.exit_code != 0
-    assert "differs from the shared file" in res.stdout + str(res.stderr)
+    assert "tampered.png was modified since" in res.stdout + str(res.stderr)
     # A file that comes out different from the shared one is reported
     kit = calkit.kits.read(kit_path)
     assert kit is not None
@@ -267,5 +288,5 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
     res = runner.invoke(app, ["kit", "run", "changed.png", "--yes"])
     assert res.exit_code != 0
     # Its name, from whoever made it, only names a folder here
-    assert "Expanded into evil" in res.stdout
+    assert f"Unbundled into {home / 'calkit' / 'kits' / 'evil-'}" in res.stdout
     assert "differs from the shared file" in res.stdout + str(res.stderr)

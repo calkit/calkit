@@ -3855,7 +3855,7 @@ def new_release(
             "--kit",
             help=(
                 "Embed a calkit in the released file (what makes it, so it "
-                "can be expanded into a project); see 'calkit kit create'."
+                "can be unbundled into a project); see 'calkit kit bundle'."
             ),
         ),
     ] = False,

@@ -1,17 +1,18 @@
-# Calkits
+# Kits
 
 <!-- TODO: needs human review -->
 
-A calkit, short for calculation kit, is the part of a project that makes one
-figure or document, packed inside that file.
+A kit, short for embedded calkit (calculation kit),
+is the part of a project that makes one figure or document,
+packed inside that file.
 Someone you send a figure to on Slack, or a reader who downloads your paper,
 can see what made it, check the file hasn't changed since,
-and expand it into a project they can rerun.
+and unbundle it into a project they can rerun.
 
-## Creating one
+## Bundling one
 
 ```sh
-calkit kit create figures/plot.png
+calkit kit bundle figures/plot.png
 ```
 
 This writes `plot.calkit.png` in the current folder:
@@ -39,14 +40,14 @@ whichever is bigger.
 Use `--max-size` to change that, e.g., `--max-size 20MB`,
 or `--no-data` to leave out all data.
 Whatever is left out is still listed, with its hash,
-so an expanded copy can fetch it from the project's storage
+so an unbundled copy can fetch it from the project's storage
 or remake it by running the pipeline.
 
 The calkit's part of the pipeline must be up to date and committed,
 since a calkit records how the file was made.
 Changes elsewhere in the project, even to other stages in `calkit.yaml`,
 don't matter.
-Use `--force` to create one anyway;
+Use `--force` to bundle one anyway;
 the calkit says it was out of date and lists uncommitted changes,
 and one with uncommitted changes isn't recorded.
 
@@ -80,13 +81,13 @@ Add `--json` for tools.
 saying what kind of artifact it is, which stage makes it,
 whether that's up to date, and where its inputs came from.
 
-## Expanding and rerunning one
+## Unbundling and rerunning one
 
 ```sh
-calkit kit expand plot.calkit.png
+calkit kit unbundle plot.calkit.png
 ```
 
-This creates a project folder named after the original project,
+This creates a project folder here, named after the original project,
 with the figure in place, committed to a new Git repo.
 The original project's Git remote is added as `upstream`,
 so its full history can be fetched with `git fetch upstream`.
@@ -97,16 +98,19 @@ access to the original project's storage, and `calkit run` remakes outputs.
 calkit kit run plot.calkit.png
 ```
 
-This expands the calkit, pulls inputs left out of it,
-lists the commands its stages run and asks before running them,
+This unbundles the calkit into `~/calkit/kits/`,
+in a folder named after the project and the calkit's hash,
+unless that's been done already.
+It lists the commands its stages run and asks before running them,
+pulls inputs left out of the calkit,
 reruns every stage, and checks the figure comes out identical.
 
 ```sh
 calkit kit open plot.calkit.png
 ```
 
-This expands the calkit, unless that's been done already,
-and opens the project in your editor.
+This opens the project in that same folder in your editor,
+unbundling the calkit first if needed.
 With `--hub`, it opens the original project on the hub instead,
 at the commit the calkit came from.
 
@@ -114,7 +118,7 @@ at the commit the calkit came from.
 !!! warning
 
     A calkit's pipeline is code.
-    Look at what an expanded project runs before running it,
+    Look at what an unbundled project runs before running it,
     as you would with any project you clone.
 
 ## Format

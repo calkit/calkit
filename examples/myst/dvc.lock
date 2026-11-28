@@ -5,8 +5,8 @@ stages:
     deps:
     - path: pixi.lock
       hash: md5
-      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
-      size: 168010
+      md5: bf2a0533bbb9429646f3c10d5bca3aff
+      size: 169936
     - path: scripts/generate.py
       hash: md5
       md5: 1b715c5c59118f22a2e9606c62bba2f4
@@ -25,8 +25,8 @@ stages:
       size: 579
     - path: pixi.lock
       hash: md5
-      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
-      size: 168010
+      md5: bf2a0533bbb9429646f3c10d5bca3aff
+      size: 169936
     - path: scripts/fit.py
       hash: md5
       md5: 667fa5df56d260291de2bf9cef43dd1c
@@ -45,8 +45,8 @@ stages:
       size: 579
     - path: pixi.lock
       hash: md5
-      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
-      size: 168010
+      md5: bf2a0533bbb9429646f3c10d5bca3aff
+      size: 169936
     - path: results/fit.json
       hash: md5
       md5: 5d4d1d64736943844e105dc8524cef90
@@ -93,3 +93,68 @@ stages:
       md5: e78f90d0d0147823b9c2fe504e789687.dir
       size: 97574
       nfiles: 9
+  site:
+    cmd: calkit doc myst build -e py --no-check paper -- --html
+    deps:
+    - path: data/decay.csv
+      hash: md5
+      md5: 225310231da9d1ec50a6b429d83f1785
+      size: 579
+    - path: figures/fit.svg
+      hash: md5
+      md5: 3bec6190558a3ec3626e2c7d3d41c283
+      size: 23951
+    - path: paper/index.md
+      hash: md5
+      md5: 54e86740376e65e65787ca1ccfaf0a68
+      size: 643
+    - path: paper/myst.yml
+      hash: md5
+      md5: e20b9c58dd5a390e05470d9923f964b6
+      size: 235
+    - path: pixi.lock
+      hash: md5
+      md5: bf2a0533bbb9429646f3c10d5bca3aff
+      size: 169936
+    - path: results/fit.json
+      hash: md5
+      md5: 5d4d1d64736943844e105dc8524cef90
+      size: 120
+    outs:
+    - path: paper/_build/html
+      hash: md5
+      md5: 7dfca88318bc1a4bc3b238c10ded1549.dir
+      size: 19240390
+      nfiles: 570
+  pdf:
+    cmd: calkit doc myst build -e py --no-check paper/index.md -- --typst
+    deps:
+    - path: data/decay.csv
+      hash: md5
+      md5: 225310231da9d1ec50a6b429d83f1785
+      size: 579
+    - path: figures/fit.svg
+      hash: md5
+      md5: 3bec6190558a3ec3626e2c7d3d41c283
+      size: 23951
+    - path: paper/index.md
+      hash: md5
+      md5: 54e86740376e65e65787ca1ccfaf0a68
+      size: 643
+    - path: paper/myst.yml
+      hash: md5
+      md5: e20b9c58dd5a390e05470d9923f964b6
+      size: 235
+    - path: pixi.lock
+      hash: md5
+      md5: bf2a0533bbb9429646f3c10d5bca3aff
+      size: 169936
+    - path: results/fit.json
+      hash: md5
+      md5: 5d4d1d64736943844e105dc8524cef90
+      size: 120
+    outs:
+    - path: paper/paper.pdf
+      hash: md5
+      md5: be7c8a0f9d86d9fc48f290a729602456
+      size: 104825

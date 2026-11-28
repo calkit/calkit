@@ -10,3 +10,5 @@ matplotlib-base = "*"
 # MyST, and the Node.js it runs on, so the site builds the same anywhere
 mystmd = "*"
 nodejs = "*"
+# Typst, which MyST makes the PDF with
+typst = "*"

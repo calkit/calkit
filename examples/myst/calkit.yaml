@@ -40,7 +40,14 @@ pipeline:
       outputs:
         - path: figures/fit.svg
           storage: git
-    paper:
+    site:
       kind: myst
       target_path: paper
       environment: py
+      args: [--html]
+    pdf:
+      kind: myst
+      target_path: paper/index.md
+      environment: py
+      args: [--typst]
+      output_storage: git

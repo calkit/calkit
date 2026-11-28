@@ -35,8 +35,8 @@ stages:
           persist: false
     desc: Automatically generated from the 'plot' stage in calkit.yaml. Changes
       made here will be overwritten.
-  paper:
-    cmd: calkit doc myst build -e py --no-check paper
+  site:
+    cmd: calkit doc myst build -e py --no-check paper -- --html
     deps:
       - pixi.lock
       - paper/myst.yml
@@ -45,6 +45,20 @@ stages:
       - data/decay.csv
       - results/fit.json
     outs:
-      - paper/_build/site
-    desc: Automatically generated from the 'paper' stage in calkit.yaml. Changes
+      - paper/_build/html
+    desc: Automatically generated from the 'site' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  pdf:
+    cmd: calkit doc myst build -e py --no-check paper/index.md -- --typst
+    deps:
+      - pixi.lock
+      - paper/myst.yml
+      - paper/index.md
+      - figures/fit.svg
+      - data/decay.csv
+      - results/fit.json
+    outs:
+      - paper/paper.pdf:
+          cache: false
+    desc: Automatically generated from the 'pdf' stage in calkit.yaml. Changes
       made here will be overwritten.

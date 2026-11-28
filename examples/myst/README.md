@@ -15,20 +15,25 @@ from the stages before it, with where each came from:
    and the fitted rate, half-life, and number of points with the
    `ckvalue` role.
 
-Python and MyST both come from the Pixi environment in `pixi.toml`.
+Python, MyST, and Typst all come from the Pixi environment in
+`pixi.toml`.
 Run it with:
 
 ```sh
 calkit run
 ```
 
-The `paper` stage, a `myst` stage, builds the site,
-which works out where each figure, table, and value came from,
+Two `myst` stages build it:
+`site` builds a static website in `paper/_build/html`,
+and `pdf` builds `paper/paper.pdf` with Typst,
+as the export in `paper/index.md`'s front matter says,
+kept in Git.
+Building works out where each figure, table, and value came from,
 and writes the MyST plugin that shows them,
 in `paper/_extensions/calkit/`, kept in Git,
 which `paper/myst.yml` lists along with its stylesheet.
-To see the site, start MyST's preview server in `paper/`, in the
-project's environment:
+To preview the site as you edit it, start MyST's preview server in
+`paper/`, in the project's environment:
 
 ```sh
 make serve

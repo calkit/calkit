@@ -235,6 +235,9 @@ def test_build(tmp_path: Path) -> None:
         ("0.1", "†", ""),
     ]
     assert "and not shown, 0.1;" in text
+    # Each linking to its view, labeled in every export, e.g., Typst
+    for *_, view_id in marks:
+        assert f"({view_id})=" in text, view_id
     views = re.findall(
         r"^:{3,}\{(note|warning)\} (.*)\n:class: (.*)$", text, re.M
     )

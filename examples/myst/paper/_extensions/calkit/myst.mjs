@@ -443,12 +443,19 @@ const valueViews = {
         changed,
       );
       const ok = provenance.state === "ok" && !changed;
+      const id = getValueId(projectDir, docPath, key);
+      // Its mark links to its first paragraph, which every export labels,
+      // e.g., Typst, which doesn't label an admonition, or else to it
+      const first = view.findIndex((n) => n.type === "paragraph");
+      const target = { identifier: id, label: id };
+      if (first !== -1) {
+        view[first] = { ...view[first], ...target };
+      }
       return {
         type: "admonition",
         kind: ok ? "note" : "warning",
         class: "dropdown ck-provenance" + (ok ? " ck-ok" : ""),
-        identifier: getValueId(projectDir, docPath, key),
-        label: getValueId(projectDir, docPath, key),
+        ...(first === -1 ? target : {}),
         children: [
           {
             type: "admonitionTitle",

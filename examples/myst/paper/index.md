@@ -1,3 +1,14 @@
+---
+authors:
+  - name: Calkit
+abstract: |
+  Noisy measurements of an exponential decay, the rate fitted to them,
+  and where each came from.
+exports:
+  - format: typst
+    output: paper.pdf
+---
+
 # Exponential decay
 
 The measurements decay at a rate of {ckvalue}`results/fit.json rate .3f`

@@ -80,3 +80,9 @@ builds the documents its stages render.
 The other commands work with LaTeX for now.
 Tool-specific commands live under `calkit doc latex` and `calkit doc quarto`
 (see the [CLI reference](../cli-reference.md) for their options).
+
+<!-- TODO: needs human review -->
+
+To send a built document to someone along with what made it,
+bundle a [kit](../kits.md) into a copy of its PDF or HTML,
+e.g., `calkit kit bundle paper/main.pdf`.

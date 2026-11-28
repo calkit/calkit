@@ -552,8 +552,9 @@ def update_markdown(
     """Update the values Markdown files show, and check their imported images.
 
     Each value marker's text, e.g., the 0.29 in
-    '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is
-    rewritten from the JSON, YAML, or TOML results file and key it names.
+    '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', or the
+    same with its alias 'ckval', is rewritten from the JSON, YAML, or TOML
+    results file and key it names.
     A format written in brackets, 'ckvalue[.2f] ...', as LaTeX's \\ckvalue
     takes one, is moved after the key. Nothing else in the file changes. This is the update 'calkit run' makes after running
     the pipeline, for a project without one, e.g., one whose results are

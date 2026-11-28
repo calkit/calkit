@@ -335,7 +335,8 @@ def test_build_ck_components(tmp_dir):
             "\\usepackage{hyperref}\n"
             "\\begin{document}\n"
             "Error: \\ckvalue[.2f]{results/metrics.json}{rmse}.\n"
-            "Figures: \\ckvalue[.3g]{results/metrics.json}{rmse}.\n"
+            # Or with its shorter alias
+            "Figures: \\ckval[.3g]{results/metrics.json}{rmse}.\n"
             "Options: \\ckvalue[round-mode=places,round-precision=1]"
             "{results/metrics.json}{rmse}.\n"
             "Grouped: \\ckvalue[,d]{results/metrics.json}{big}.\n"
@@ -348,7 +349,7 @@ def test_build_ck_components(tmp_dir):
             "Unrecorded: \\ckrefval{liu2025}{nope}.\n"
             "Spaced: \\ckrefval[.1f]{ liu2025 }{ noise-sigma }.\n"
             "Colon: \\ckrefval{smith:2020}{n}.\n"
-            "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
+            "\\section{RMSE of \\ckval[.2f]{results/metrics.json}{rmse}}\n"
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/not-yet.png}\n"
             "\\ckinclude{results/count}\n"

@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 
+import pytest
+
 import calkit
 from calkit.dvc import run_dvc_command
 from calkit.reproducibility import (
@@ -14,6 +16,7 @@ from calkit.reproducibility import (
     find_scripts_not_in_pipeline,
     find_unattributed_numbers,
 )
+from calkit.results import VALUE_COMMANDS
 
 
 def test_check_reproducibility(tmp_dir):
@@ -373,7 +376,8 @@ def test_check_call():
     assert "yo" in out
 
 
-def test_find_retyped_values(tmp_dir):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_find_retyped_values(tmp_dir, command):
     def values(tex, project_values=None):
         return [
             (f["value"], f["line"], f["column"])
@@ -447,9 +451,11 @@ def test_find_retyped_values(tmp_dir):
     # Calkit's own commands are masked, whatever their paths and options
     assert (
         values(
-            r"\ckvalue[round-precision=0.42]{runs/0.42.json}{Cd}"
-            r" \cktable{tables/0.42} \ckinclude{text/0.42}"
-            "\n\\ckvalue [.2f] {runs/0.42.json}\n  {Cd} \\cktable {t/0.42}",
+            (
+                r"\ckvalue[round-precision=0.42]{runs/0.42.json}{Cd}"
+                r" \cktable{tables/0.42} \ckinclude{text/0.42}"
+                "\n\\ckvalue [.2f] {runs/0.42.json}\n  {Cd} \\cktable {t/0.42}"
+            ).replace("ckvalue", command),
             project,
         )
         == []
@@ -476,7 +482,7 @@ def test_find_retyped_values(tmp_dir):
         "paper/main.tex": (
             "\\documentclass{article}\n\\usepackage{calkit}\n"
             "\\begin{document}\n"
-            "Read: \\ckvalue[.2f]{results/drag.json}{Cd}.\n"
+            f"Read: \\{command}[.2f]{{results/drag.json}}{{Cd}}.\n"
             "Typed: 0.42 and 0.7321.\n"
             "Not typed: 1000 samples in 2019, run 12500.\n"
             "\\cktable{tables/summary}\n\\input{../gen/t2}\n"
@@ -564,7 +570,8 @@ def test_find_unattributed_numbers():
     assert values(tex, {"0.47": "results.json:Deficit"}) == [("0.52", 2, True)]
 
 
-def test_find_unattributed_numbers_markdown():
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_find_unattributed_numbers_markdown(command: str):
     def values(md):
         return [
             (f["value"], f["line"], f["cited"])
@@ -588,7 +595,10 @@ def test_find_unattributed_numbers_markdown():
         "```\n"
         "It drifts by 0.003 ± 0.001 per step.\n"
         "The RMS is <!-- ckvalue r.json rms .4f -->0.2933<!-- /ckvalue -->.\n"
-    )
+    ).replace("ckvalue", command)
+    # Closed with the other name, it's still a value
+    other = next(c for c in VALUE_COMMANDS if c != command)
+    md += f"Its SD is <!-- {command} r.json sd -->0.0412<!-- /{other} -->.\n"
     assert values(md) == [
         ("0.97", 4, False),
         ("12.5%", 4, False),

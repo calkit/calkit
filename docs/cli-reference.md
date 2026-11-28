@@ -3492,7 +3492,7 @@ Options:
 
 Update the values Markdown files show, and check their imported images.
 
-Each value marker's text, e.g., the 0.29 in '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is rewritten from the JSON, YAML, or TOML results file and key it names. A format written in brackets, 'ckvalue[.2f] ...', as LaTeX's \ckvalue takes one, is moved after the key. Nothing else in the file changes. This is the update 'calkit run' makes after running the pipeline, for a project without one, e.g., one whose results are imported.
+Each value marker's text, e.g., the 0.29 in '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', or the same with its alias 'ckval', is rewritten from the JSON, YAML, or TOML results file and key it names. A format written in brackets, 'ckvalue[.2f] ...', as LaTeX's \ckvalue takes one, is moved after the key. Nothing else in the file changes. This is the update 'calkit run' makes after running the pipeline, for a project without one, e.g., one whose results are imported.
 
 Each local image a file shows that calkit.yaml records as imported, including one written from the project root like /images/fig.png, is checked against what the import fetched: it should exist and not have been edited since. Images are only checked, never changed; 'calkit sync import' is what brings in a newer version.
 
@@ -4887,7 +4887,7 @@ calkit doc|document quarto COMMAND [ARGS]...
 
 Render a Quarto document in an environment.
 
-Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. If no environment or format is given and a pipeline `quarto` stage renders the document, its environment, format, arguments, and working directory are used. The values the document shows with the 'ckvalue' shortcode are checked first, and the Quarto extension that reads them from their results files is written.
+Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. If no environment or format is given and a pipeline `quarto` stage renders the document, its environment, format, arguments, and working directory are used. The values the document shows with the 'ckvalue' shortcode, or its alias 'ckval', are checked first, and the Quarto extension that reads them from their results files is written.
 
 Also available as `calkit doc build`.
 

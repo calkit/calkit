@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from calkit.results import VALUE_COMMAND_PATTERN
+
 # A Quarto extension, so documents use the shortcode without listing it,
 # written where Quarto looks for one: the Quarto project's folder, or the
 # document's without one
@@ -33,7 +35,9 @@ _YAML_MARKDOWN_RE = re.compile(r"[*\\<>`$^]|~~|\]\(|  |^\s|\s$")
 _FORMAT_FIELD_RE = re.compile(r"\{([^{}]*)\}")
 # A shortcode written {{</* ckvalue */>}} is Quarto's escaped form, shown
 # literally, so it doesn't match
-_SHORTCODE_RE = re.compile(r"\{\{<\s*ckvalue\s+(?P<args>.*?)\s*>\}\}")
+_SHORTCODE_RE = re.compile(
+    r"\{\{<\s*(?P<cmd>" + VALUE_COMMAND_PATTERN + r")\s+(?P<args>.*?)\s*>\}\}"
+)
 # {{< ckrefval key name format >}}, a value quoted from a reference
 _REFVAL_SHORTCODE_RE = re.compile(r"\{\{<\s*ckrefval\s+(?P<args>.*?)\s*>\}\}")
 # Quarto's own shortcode for a cell's output from another document, e.g.,
@@ -586,7 +590,7 @@ local function format_value(value, fmt)
   return ok and text or nil
 end
 
-return {
+local shortcodes = {
   ["ckvalue"] = function(args, kwargs)
     if project_dir == nil then
       project_dir = find_project_dir()
@@ -669,6 +673,9 @@ return {
     return pandoc.Str(text)
   end,
 }
+-- A shorter alias for ckvalue, as VALUE_COMMANDS in calkit/results.py lists
+shortcodes["ckval"] = shortcodes["ckvalue"]
+return shortcodes
 """
 
 
@@ -686,6 +693,8 @@ class QuartoValue:
     line: int = 0
     # For a value quoted from a reference, its citation key and name
     ref: tuple[str, str] | None = None
+    # The shortcode it's shown with, as written, for errors to name
+    command: str = "ckvalue"
 
 
 def read_document_text(path: str) -> str | None:
@@ -736,7 +745,9 @@ def extract_values(
     for i, line in enumerate(text.splitlines()):
         found = []
         for m in _SHORTCODE_RE.finditer(line):
-            got = _ckvalue_args(m.group("args"), path, i + 1)
+            got = _ckvalue_args(
+                m.group("args"), path, i + 1, command=m.group("cmd")
+            )
             found.append(
                 (
                     m.start(),
@@ -752,6 +763,7 @@ def extract_values(
                             kind=got["kind"],
                         ),
                         line=i + 1,
+                        command=m.group("cmd"),
                     ),
                 )
             )
@@ -775,6 +787,7 @@ def extract_values(
                         path=get_values_path(got["source"]),
                         line=i + 1,
                         ref=(got["source"], got["key"]),
+                        command="ckrefval",
                     ),
                 )
             )
@@ -838,7 +851,7 @@ def check_values(
                 or "}" in rest
             ):
                 raise MarkdownParseError(
-                    f"'ckvalue' can't format with '{fmt}' in a Quarto "
+                    f"'{value.command}' can't format with '{fmt}' in a Quarto "
                     "document; it takes a sign, a ',' or '_' separator, "
                     "and a precision and type, e.g., '.2f', ',d', '.1%', "
                     "or '{value:.1f} m/s'",

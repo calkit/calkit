@@ -9,6 +9,7 @@ from calkit.markdown import (
     parse_attrs,
     parse_markdown,
 )
+from calkit.results import VALUE_COMMANDS
 
 
 def test_parse_attrs():
@@ -1548,7 +1549,8 @@ def test_values(tmp_path, monkeypatch):
         set_values("<!-- ckvalue bad.toml n -->?<!-- /ckvalue -->\n", "x.md")
 
 
-def test_value_blocks_and_brackets(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_value_blocks_and_brackets(tmp_path, monkeypatch, command):
     from calkit.markdown import (
         MarkdownParseError,
         extract_values,
@@ -1572,7 +1574,7 @@ def test_value_blocks_and_brackets(tmp_path, monkeypatch):
         "<!-- ckvalue metrics f -->6<!-- /ckvalue -->\n\n"
         "<!-- /calkit values -->\n\n"
         "<!-- ckvalue other.json g -->7<!-- /ckvalue -->\n"
-    )
+    ).replace("ckvalue", command)
     assert [
         (v.key, v.path, v.format)
         for v in extract_values(text, "x.md", results=results)
@@ -1602,9 +1604,11 @@ def test_value_blocks_and_brackets(tmp_path, monkeypatch):
         assert e.value.line == line
     # A bracketed format, as LaTeX's \\ckvalue takes one, can't be read
     # as written, which is said with what to write instead...
-    bracketed = "<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n"
+    bracketed = (
+        "<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n"
+    ).replace("ckvalue", command)
     with pytest.raises(
-        MarkdownParseError, match="ckvalue results.json rms .4f"
+        MarkdownParseError, match=f"'{command} results.json rms .4f'"
     ):
         extract_values(bracketed, "x.md", results=results)
     # ...and updating values moves it after the key, as named if the
@@ -1621,6 +1625,9 @@ def test_value_blocks_and_brackets(tmp_path, monkeypatch):
             '<!-- ckvalue metrics rms "n={value}" -->0<!-- /ckvalue -->\n',
         ),
     ]:
+        written, healed = (
+            s.replace("ckvalue", command) for s in (written, healed)
+        )
         assert heal_markers(written) == (healed, 1)
         assert extract_values(healed, "x.md", results=results)
     # Markers in code are examples, inline or fenced, but backticks inside
@@ -1636,13 +1643,14 @@ def test_value_blocks_and_brackets(tmp_path, monkeypatch):
     # Updating values does it, and so does finding a PDF's inputs
     (tmp_path / "results.json").write_text('{"rms": 0.29331}')
     assert set_values(bracketed, "x.md", results=results) == (
-        "<!-- ckvalue metrics rms .4f -->0.2933<!-- /ckvalue -->\n",
+        f"<!-- {command} metrics rms .4f -->0.2933<!-- /{command} -->\n",
         True,
     )
     assert pdf_inputs(bracketed, "x.md", results=results) == ["results.json"]
 
 
-def test_compact_value_markers(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_compact_value_markers(tmp_path, monkeypatch, command):
     from calkit.markdown import (
         MarkdownParseError,
         extract_values,
@@ -1666,7 +1674,7 @@ def test_compact_value_markers(tmp_path, monkeypatch):
         "````md\n"
         "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->\n"
         "````\n"
-    )
+    ).replace("ckvalue", command)
     values = extract_values(text, "README.md", results=declared)
     # A name resolves to the declared path; a fenced marker is an example
     assert [(v.key, v.path, v.source, v.format, v.line) for v in values] == [
@@ -1680,19 +1688,37 @@ def test_compact_value_markers(tmp_path, monkeypatch):
         "The RMS is <!-- ckvalue results.json rms .4f -->0.2933"
         "<!-- /ckvalue --> over <!-- ckvalue metrics n -->401"
         "<!-- /ckvalue --> samples."
-    ) in new
-    assert "Nested: <!-- ckvalue metrics fit.coeffs.0 -->1.974" in new
-    assert "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->" in new
+    ).replace("ckvalue", command) in new
+    assert f"Nested: <!-- {command} metrics fit.coeffs.0 -->1.974" in new
+    assert (
+        "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->"
+    ).replace("ckvalue", command) in new
     assert set_values(new, "README.md", results=declared) == (new, False)
     # A notebook stands for the values its cells save
     values_path = tmp_path / ".calkit/notebooks/outputs/fit.ipynb/values.json"
     values_path.parent.mkdir(parents=True)
     values_path.write_text('{"k_25": 0.030912}')
-    nb_text = "k is <!-- ckvalue fit.ipynb k_25 .3f -->?<!-- /ckvalue -->\n"
+    nb_text = (
+        "k is <!-- ckvalue fit.ipynb k_25 .3f -->?<!-- /ckvalue -->\n"
+    ).replace("ckvalue", command)
     assert extract_values(nb_text, "README.md")[0].path == (
         ".calkit/notebooks/outputs/fit.ipynb/values.json"
     )
     assert "-->0.031<!--" in set_values(nb_text, "README.md")[0]
+    # A value's marker may close with either name, but a reference's can't
+    other = next(c for c in VALUE_COMMANDS if c != command)
+    mixed = f"N <!-- {command} metrics n -->?<!-- /{other} -->\n"
+    assert set_values(mixed, "README.md", results=declared)[0] == (
+        f"N <!-- {command} metrics n -->401<!-- /{other} -->\n"
+    )
+    assert not extract_values(
+        f"<!-- ckrefval a b -->x<!-- /{command} -->\n", "README.md"
+    )
+    # Errors name the command as written
+    with pytest.raises(MarkdownParseError, match=f"'{command}' takes at most"):
+        extract_values(
+            f"<!-- {command} a b c d -->x<!-- /{command} -->\n", "README.md"
+        )
 
     # Source, key and format read like a Python call: positional in that
     # order, or by name, or positional then keyword

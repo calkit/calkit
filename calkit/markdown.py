@@ -30,6 +30,8 @@ from typing import Any, Literal
 import ruamel.yaml
 from pydantic import BaseModel
 
+from calkit.results import VALUE_COMMAND_PATTERN
+
 DirectiveKind = Literal["stage", "environment", "output", "value", "values"]
 # ``output`` blocks are written to, never read: a stage's extracted script
 # must not include what that stage printed, or injecting output would make
@@ -2564,11 +2566,13 @@ _VALUES_END_RE = re.compile(r"<!--\s*/calkit values\s*-->")
 # file path or a declared result's name, given on every marker: with a short
 # name this is still fewer characters than the long form needs with a
 # 'calkit values' directive above it, so nothing has to be implied from
-# elsewhere in the document.
+# elsewhere in the document. A value's marker closes with either of its
+# names, e.g., ckval with /ckvalue, and a reference's with /ckrefval.
 _CKVALUE_RE = re.compile(
-    r"<!--\s*(?P<cmd>ckvalue|ckrefval)\b(?P<args>.*?)-->"
+    rf"<!--\s*(?P<cmd>(?P<vcmd>{VALUE_COMMAND_PATTERN})|ckrefval)\b"
+    r"(?P<args>.*?)-->"
     r"(?P<ctext>.*?)"
-    r"<!--\s*/(?P=cmd)\s*-->"
+    rf"<!--\s*/(?(vcmd){VALUE_COMMAND_PATTERN}|ckrefval)\s*-->"
 )
 # One argument of a compact marker: `key=value`, with the value optionally
 # quoted so a format can hold spaces, or a bare positional.
@@ -2672,20 +2676,25 @@ def _unquote(text: str) -> str:
 
 
 def _ckvalue_args(
-    args_text: str, path: str, line: int, block_source: str | None = None
+    args_text: str,
+    path: str,
+    line: int,
+    block_source: str | None = None,
+    command: str = "ckvalue",
 ) -> dict:
     """A compact marker's arguments, by the rules a Python call follows.
 
     Positional arguments fill source, key and format in that order, and may
     be given by name instead; a positional after a keyword, a slot filled
     twice, or a name that is not a parameter is an error rather than a
-    silently dropped argument.
+    silently dropped argument. Errors name ``command`` as written, e.g.,
+    ``ckval``.
     """
     if args_text.startswith("["):
         option = args_text[1:].split("]", 1)[0]
         raise MarkdownParseError(
-            "'ckvalue' takes its format after the key rather than in "
-            f"brackets as LaTeX's \\ckvalue does, e.g., 'ckvalue "
+            f"'{command}' takes its format after the key rather than in "
+            f"brackets as LaTeX's \\{command} does, e.g., '{command} "
             f"results.json rms {option or '.2f'}'",
             path=path,
             line=line,
@@ -2701,14 +2710,14 @@ def _ckvalue_args(
             slot = _CKVALUE_KEYWORDS.get(name)
             if slot is None:
                 raise MarkdownParseError(
-                    f"'ckvalue' got an unexpected argument '{name}'; it "
+                    f"'{command}' got an unexpected argument '{name}'; it "
                     "takes name or path, key, and format",
                     path=path,
                     line=line,
                 )
             if slot in got:
                 raise MarkdownParseError(
-                    f"'ckvalue' got multiple values for {slot}",
+                    f"'{command}' got multiple values for {slot}",
                     path=path,
                     line=line,
                 )
@@ -2718,14 +2727,14 @@ def _ckvalue_args(
         else:
             if seen_keyword:
                 raise MarkdownParseError(
-                    "'ckvalue' got a positional argument after a keyword "
+                    f"'{command}' got a positional argument after a keyword "
                     "one; positional arguments come first",
                     path=path,
                     line=line,
                 )
             if n_positional >= len(_CKVALUE_PARAMS):
                 raise MarkdownParseError(
-                    "'ckvalue' takes at most 3 arguments (a results file or "
+                    f"'{command}' takes at most 3 arguments (a results file or "
                     "result name, a key, and a format)",
                     path=path,
                     line=line,
@@ -2743,7 +2752,7 @@ def _ckvalue_args(
             kind = "path"
         else:
             raise MarkdownParseError(
-                "'ckvalue' names no results file; give one positionally or "
+                f"'{command}' names no results file; give one positionally or "
                 "as 'path=results.json' or 'name=metrics', or put it in a "
                 "'calkit values path=...' block",
                 path=path,
@@ -2751,7 +2760,7 @@ def _ckvalue_args(
             )
     if "key" not in got:
         raise MarkdownParseError(
-            f"'ckvalue {got['source']}' names no key; give one positionally "
+            f"'{command} {got['source']}' names no key; give one positionally "
             "or as 'key=rms'",
             path=path,
             line=line,
@@ -2910,7 +2919,11 @@ def extract_values(
                 continue
             if m.group("ctext") is not None:
                 got = _ckvalue_args(
-                    m.group("args"), path, i + 1, block_source=block_path
+                    m.group("args"),
+                    path,
+                    i + 1,
+                    block_source=block_path,
+                    command=m.group("cmd"),
                 )
                 values.append(
                     MarkdownValue(
@@ -2994,7 +3007,8 @@ def format_value(value: Any, fmt: str | None = None) -> str:
 # A compact marker with calkit.sty's bracketed option, e.g.,
 # ``ckvalue[.4f] metrics rms``, which reads naturally coming from LaTeX
 _BRACKET_CKVALUE_RE = re.compile(
-    r"<!--(?P<lead>\s*)(?P<bcmd>ckvalue|ckrefval)\[(?P<bformat>[^\]]*)\]"
+    rf"<!--(?P<lead>\s*)(?P<bcmd>{VALUE_COMMAND_PATTERN}|ckrefval)"
+    r"\[(?P<bformat>[^\]]*)\]"
     r"(?P<bargs>.*?)-->"
 )
 

@@ -32,6 +32,7 @@ from calkit.pipeline.core import (
     _status_target_matches,
     _warn_on_latexmkrc_out_dir_mismatch,
 )
+from calkit.results import VALUE_COMMANDS
 
 
 def test_stages_are_similar():
@@ -2006,7 +2007,8 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     assert repo.ignored("paper/main.nlo")
 
 
-def test_to_dvc_latex_component_deps(tmp_dir):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_to_dvc_latex_component_deps(tmp_dir, command):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper/sections")
     with open("paper/main.tex", "w") as f:
@@ -2019,8 +2021,8 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\ckfigure{figures/plot}\n"
             "\\ckfigure{figures/typo.png}\n"
             "\\ckfigure{figures/photo.png}\n"
-            "\\ckvalue{data/summary.json}{n}\n"
-            "\\ckvalue{../outside.json}{secret}\n"
+            f"\\{command}{{data/summary.json}}{{n}}\n"
+            f"\\{command}{{../outside.json}}{{secret}}\n"
             "\\includegraphics{figures/drawn}\n"
             "\\includegraphics{figures/exported.png}\n"
             "\\includegraphics{figures/rebuilt}\n"
@@ -2030,7 +2032,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\end{document}\n"
         )
     with open("paper/sections/results.tex", "w") as f:
-        f.write("\\ckvalue[.2f]{results/metrics.json}{rmse}\n")
+        f.write(f"\\{command}[.2f]{{results/metrics.json}}{{rmse}}\n")
     # Not UTF-8, which mustn't stop the pipeline compiling
     with open("paper/sections/latin.tex", "wb") as fb:
         fb.write("Caf\u00e9\n".encode("latin-1"))
@@ -2039,7 +2041,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         f.write(
             "\\documentclass{article}\n\\usepackage{calkit}\n"
             "\\begin{document}\n"
-            "\\ckvalue{results/other.json}{x}\n\\end{document}\n"
+            f"\\{command}{{results/other.json}}{{x}}\n\\end{{document}}\n"
         )
     # A figure no stage makes, and one included plainly, beside the paper
     os.makedirs("figures")

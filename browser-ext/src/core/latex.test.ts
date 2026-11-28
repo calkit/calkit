@@ -71,6 +71,8 @@ describe("citationAt", () => {
     };
     expect(citationAt(line, line.indexOf("\\ckvalue"))).toEqual(value);
     expect(citationAt(line, line.indexOf("fit.rmse"))).toEqual(value);
+    const alias = line.replace("\\ckvalue", "\\ckval");
+    expect(citationAt(alias, alias.indexOf("fit.rmse"))).toEqual(value);
     expect(citationAt(line, line.indexOf("figures/a.png"))).toEqual({
       kind: "figure",
       path: "figures/a.png",
@@ -463,6 +465,7 @@ describe("typedNumbersIn", () => {
     ).toEqual([]);
     expect(texts("\\vspace{0.5cm}\\hspace*{1.5em} \\ref{fig:1.2}")).toEqual([]);
     expect(texts("\\ckvalue[.2f]{results/fit.json}{k.0.5}")).toEqual([]);
+    expect(texts("\\ckval{results/fit.json}{k.0.5}")).toEqual([]);
     expect(texts("\\SI{0.48}{\\metre} and \\num{1.5}")).toEqual([]);
     expect(texts("0.25 % was 0.3 before")).toEqual(["0.25"]);
     // Text arguments still count

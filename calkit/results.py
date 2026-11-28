@@ -12,6 +12,12 @@ from typing import Any
 # Extensions whose keys can be read, which are the ones a question's
 # value evidence can cite
 EXTENSIONS = (".json", ".toml", ".yaml", ".yml")
+# What a document shows a result's value with, in LaTeX, Quarto, or a
+# Markdown stage: ckvalue, or its shorter alias, which Calkit reads but
+# doesn't write. calkit.sty and the Quarto extension define each.
+VALUE_COMMANDS = ("ckvalue", "ckval")
+# Those as a regex, longest first, so ckvalue isn't read as ckval
+VALUE_COMMAND_PATTERN = "(?:" + "|".join(VALUE_COMMANDS) + ")"
 
 
 def list_results(

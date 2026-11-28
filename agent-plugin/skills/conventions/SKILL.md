@@ -145,6 +145,11 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
 \cktable{tables/summary.tex}
 ```
 
+<!-- TODO: needs human review -->
+
+`\ckval` is a shorter alias for `\ckvalue`, and `ckval` works the same way
+in Quarto shortcodes and Markdown markers.
+
 The stage depends on everything included this way, so don't add
 `json-to-latex` or `map-paths` stages, or list those files in `inputs`.
 

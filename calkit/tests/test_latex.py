@@ -9,7 +9,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 import calkit.latex
+from calkit.results import VALUE_COMMANDS
 
 
 def test_set_content_id(tmp_dir):
@@ -103,7 +106,8 @@ def test_localize_synctex(tmp_dir):
     )
 
 
-def test_ck_components(tmp_dir):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_ck_components(tmp_dir, command):
     with open("calkit.yaml", "w") as f:
         f.write("name: test\n")
     os.makedirs("results")
@@ -121,22 +125,24 @@ def test_ck_components(tmp_dir):
         f.write("We ran 42 trials.\n")
     os.makedirs("paper/sections")
     with open("paper/sections/results.tex", "w") as f:
-        f.write("Error: \\ckvalue[.2f]{results/metrics.json}{rmse}.\n")
+        f.write(f"Error: \\{command}[.2f]{{results/metrics.json}}{{rmse}}.\n")
     with open("paper/main.tex", "w") as f:
         f.write(
-            "\\documentclass{article}\n"
-            "\\usepackage{calkit}\n"
-            "\\begin{document}\n"
-            "\\input{sections/results}\n"
-            "\\ckfigure[width=0.5\\textwidth]{figures/plot.png}\n"
-            "\\cktable{tables/summary.tex}\n"
-            "\\ckinclude{results/sentence}\n"
-            "Slope: \\ckvalue{results/metrics.json}{fit.slope},\n"
-            "runs: \\ckvalue{results/metrics.json}{n_runs}.\n"
-            "% \\ckfigure{figures/commented.png}\n"
-            "\\ckvalue{results/metrics.json}{nope}\n"
-            "\\ckfigure{figures/not-yet.png}\n"
-            "\\end{document}\n"
+            (
+                "\\documentclass{article}\n"
+                "\\usepackage{calkit}\n"
+                "\\begin{document}\n"
+                "\\input{sections/results}\n"
+                "\\ckfigure[width=0.5\\textwidth]{figures/plot.png}\n"
+                "\\cktable{tables/summary.tex}\n"
+                "\\ckinclude{results/sentence}\n"
+                "Slope: \\ckvalue{results/metrics.json}{fit.slope},\n"
+                "runs: \\ckvalue{results/metrics.json}{n_runs}.\n"
+                "% \\ckfigure{figures/commented.png}\n"
+                "\\ckvalue{results/metrics.json}{nope}\n"
+                "\\ckfigure{figures/not-yet.png}\n"
+                "\\end{document}\n"
+            ).replace("ckvalue", command)
         )
     # Inputs count, comments don't, and nothing repeats
     loads, components = calkit.latex.read_ck_usage("paper/main.tex")
@@ -527,10 +533,21 @@ def test_include_figure(tmp_dir):
     )
 
 
-def test_load_package(tmp_dir):
+def test_style_defines_value_commands() -> None:
+    import re
+
+    import calkit.resources
+
+    style = calkit.resources.read_text("latex", calkit.latex.STYLE_FNAME)
+    for command in VALUE_COMMANDS:
+        assert re.search(rf"\\newcommand\\{command}(?![A-Za-z])", style)
+
+
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_load_package(tmp_dir, command):
     os.makedirs("paper")
     with open("paper/sections.tex", "w") as f:
-        f.write("\\ckvalue{results.json}{rmse}\n")
+        f.write(f"\\{command}{{results.json}}{{rmse}}\n")
     # A command in a file it inputs needs the package too, and line endings
     # are kept
     with open("paper/main.tex", "w", newline="") as f:
@@ -563,7 +580,8 @@ def test_load_package(tmp_dir):
             assert f.read() == text
 
 
-def test_expand_ck_components(tmp_dir):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_expand_ck_components(tmp_dir, command):
     # A revision's data, apart from its sources, as for the working tree's
     # side of a diff
     os.makedirs("data/results")
@@ -580,16 +598,18 @@ def test_expand_ck_components(tmp_dir):
     os.makedirs("src/paper")
     with open("src/paper/main.tex", "w") as f:
         f.write(
-            "\\documentclass{article}\n"
-            "Error: \\ckvalue[.2f]{results/m.json}{rmse}.\n"
-            "Run: \\ckvalue{results/m.json}{label}.\n"
-            "\\ckfigure[width=1cm]{figures/plot}\n"
-            "\\ckfigure{figures/plot} {\\small (a) left}\n"
-            "\\cktable{tables/t}\n"
-            "\\ckinclude{tables/n.tex}\n"
-            "Split: \\ckvalue{results/m.json}\n  {rmse}.\n"
-            "Missing: \\ckvalue{results/m.json}{nope}.\n"
-            "% \\ckvalue{results/m.json}{rmse}\n"
+            (
+                "\\documentclass{article}\n"
+                "Error: \\ckvalue[.2f]{results/m.json}{rmse}.\n"
+                "Run: \\ckvalue{results/m.json}{label}.\n"
+                "\\ckfigure[width=1cm]{figures/plot}\n"
+                "\\ckfigure{figures/plot} {\\small (a) left}\n"
+                "\\cktable{tables/t}\n"
+                "\\ckinclude{tables/n.tex}\n"
+                "Split: \\ckvalue{results/m.json}\n  {rmse}.\n"
+                "Missing: \\ckvalue{results/m.json}{nope}.\n"
+                "% \\ckvalue{results/m.json}{rmse}\n"
+            ).replace("ckvalue", command)
         )
     calkit.latex.expand_ck_components("src", "data", "paper/main.tex")
     with open("src/paper/main.tex") as f:
@@ -608,8 +628,8 @@ def test_expand_ck_components(tmp_dir):
     assert "\\begin{tabular}{l}B\\end{tabular}" in text
     assert "We ran 42 trials." in text
     # What can't be found is left to print as ??, and comments alone
-    assert "\\ckvalue{results/m.json}{nope}" in text
-    assert "% \\ckvalue{results/m.json}{rmse}" in text
+    assert f"\\{command}{{results/m.json}}{{nope}}" in text
+    assert f"% \\{command}{{results/m.json}}{{rmse}}" in text
 
 
 def test_align_rendered_paragraphs() -> None:

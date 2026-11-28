@@ -2036,6 +2036,7 @@ class QuartoStage(Stage):
         import calkit
         import calkit.quarto
         from calkit.markdown import MarkdownParseError, results_by_name
+        from calkit.results import VALUE_COMMANDS
 
         def exists(p: str) -> bool:
             return os.path.isfile(os.path.join(project_dir or "", p))
@@ -2054,7 +2055,7 @@ class QuartoStage(Stage):
                 )
                 if exists(p) or is_output(p)
             ]
-        if "ckvalue" not in text and "ckrefval" not in text:
+        if not any(c in text for c in VALUE_COMMANDS + ("ckrefval",)):
             return
         try:
             ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)

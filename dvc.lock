@@ -170,8 +170,8 @@ stages:
       size: 5368
   latex-word-round-trip-docx-pdf:
     cmd: calkit xenv -n libreoffice --no-check -- sh -c "soffice 
-      -env:UserInstallation=file:///tmp/calkit-libreoffice --headless 
-      --convert-to pdf --outdir results/latex-word-round-trip 
+      -env:UserInstallation=file:///tmp/calkit-libreoffice --headless --convert-to
+      pdf --outdir results/latex-word-round-trip 
       results/latex-word-round-trip/review.docx"
     deps:
     - path: .calkit/env-locks/libreoffice
@@ -236,6 +236,91 @@ stages:
       hash: md5
       md5: 741d3a7ecfcbbae4da4db68348d37246
       size: 176490
+  latex-word-round-trip-figure:
+    cmd: uv run --locked --script scripts/plot-latex-word-round-trip.py
+    deps:
+    - path: results/latex-word-round-trip/original.pdf
+      hash: md5
+      md5: 6a04754199f6a394429ca0c07e4ecda6
+      size: 173896
+    - path: results/latex-word-round-trip/rebuilt.pdf
+      hash: md5
+      md5: 6a04754199f6a394429ca0c07e4ecda6
+      size: 173896
+    - path: results/latex-word-round-trip/review.pdf
+      hash: md5
+      md5: eb69efb3272abbc2c559116671059b7f
+      size: 125620
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/plot-latex-word-round-trip.py
+      hash: md5
+      md5: 4314072dd9e9c4697d5f183056463367
+      size: 1902
+    - path: scripts/plot-latex-word-round-trip.py.lock
+      hash: md5
+      md5: c81c945145853aa90f2cbae3c67a547a
+      size: 142338
+    outs:
+    - path: docs/img/latex-word-round-trip.png
+      hash: md5
+      md5: 23db3ce252dbfe1055eccee73d1e6a56
+      size: 258447
+  budget-2027:
+    cmd: uv run --locked --script scripts/budget.py --workshops=8 --attendees=25 
+      --supported=60 --indirect-rate=0
+    deps:
+    - path: docs/one-pager/2027-budget.csv
+      hash: md5
+      md5: 615371325329fb6e138f35e06443ea7d
+      size: 586
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/budget.py
+      hash: md5
+      md5: b8a643d65621034d13f1f6aed89e88f9
+      size: 2083
+    - path: scripts/budget.py.lock
+      hash: md5
+      md5: 00d7e6f27c6c357c4d2867838af5b4bb
+      size: 52
+    outs:
+    - path: results/2027-budget.json
+      hash: md5
+      md5: 35eeb271dbd0ac856631b17035062793
+      size: 2007
+  budget-2027-figure:
+    cmd: uv run --locked --script scripts/plot-budget.py
+    deps:
+    - path: docs/one-pager/texgyreheros-regular.otf
+      hash: md5
+      md5: 46896831ad260afebc87cd85a7ea159a
+      size: 133600
+    - path: results/2027-budget.json
+      hash: md5
+      md5: 35eeb271dbd0ac856631b17035062793
+      size: 2007
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/plot-budget.py
+      hash: md5
+      md5: 29d8ea305eae420024475b855f2e3e41
+      size: 1715
+    - path: scripts/plot-budget.py.lock
+      hash: md5
+      md5: 45731d708e81d1f18fba58353d24cbb1
+      size: 134826
+    outs:
+    - path: docs/img/2027-budget.png
+      hash: md5
+      md5: 82bcb90f669de1dab0f793ed24682a25
+      size: 45258
   research-flow:
     cmd: uv run --locked --script scripts/research-flow.py
     deps:
@@ -260,31 +345,6 @@ stages:
       hash: md5
       md5: ad60cc07e5c53f0803252e215ff43141
       size: 75297
-  budget-2027:
-    cmd: uv run --locked --script scripts/budget.py --workshops=8 --attendees=25
-      --supported=60 --indirect-rate=0
-    deps:
-    - path: docs/one-pager/2027-budget.csv
-      hash: md5
-      md5: 615371325329fb6e138f35e06443ea7d
-      size: 586
-    - path: scripts/.python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: scripts/budget.py
-      hash: md5
-      md5: b8a643d65621034d13f1f6aed89e88f9
-      size: 2083
-    - path: scripts/budget.py.lock
-      hash: md5
-      md5: 00d7e6f27c6c357c4d2867838af5b4bb
-      size: 52
-    outs:
-    - path: results/2027-budget.json
-      hash: md5
-      md5: 35eeb271dbd0ac856631b17035062793
-      size: 2007
   research-flow-figure:
     cmd: uv run --locked --script scripts/plot-research-flow.py
     deps:
@@ -317,34 +377,6 @@ stages:
       hash: md5
       md5: 6141101d8803251a8bdb41076253a7e9
       size: 340477
-  budget-2027-figure:
-    cmd: uv run --locked --script scripts/plot-budget.py
-    deps:
-    - path: docs/one-pager/texgyreheros-regular.otf
-      hash: md5
-      md5: 46896831ad260afebc87cd85a7ea159a
-      size: 133600
-    - path: results/2027-budget.json
-      hash: md5
-      md5: 35eeb271dbd0ac856631b17035062793
-      size: 2007
-    - path: scripts/.python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: scripts/plot-budget.py
-      hash: md5
-      md5: 29d8ea305eae420024475b855f2e3e41
-      size: 1715
-    - path: scripts/plot-budget.py.lock
-      hash: md5
-      md5: 45731d708e81d1f18fba58353d24cbb1
-      size: 134826
-    outs:
-    - path: docs/img/2027-budget.png
-      hash: md5
-      md5: 82bcb90f669de1dab0f793ed24682a25
-      size: 45258
   latex-image-readme/sizes:
     cmd: calkit xenv -n pipeline --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -355,8 +387,8 @@ stages:
       size: 1955
     - path: calkit/latex.py
       hash: md5
-      md5: 7215d35c9f1e2ce901058d328a8c7a41
-      size: 139495
+      md5: 1016922e0a6f82080ff03fd64b599549
+      size: 139688
     - path: scripts/.python-version
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
@@ -435,35 +467,3 @@ stages:
       hash: md5
       md5: 1f509d23548f197be23aa38ad742dfc5
       size: 36372
-  latex-word-round-trip-figure:
-    cmd: uv run --locked --script scripts/plot-latex-word-round-trip.py
-    deps:
-    - path: results/latex-word-round-trip/original.pdf
-      hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
-    - path: results/latex-word-round-trip/rebuilt.pdf
-      hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
-    - path: results/latex-word-round-trip/review.pdf
-      hash: md5
-      md5: eb69efb3272abbc2c559116671059b7f
-      size: 125620
-    - path: scripts/.python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: scripts/plot-latex-word-round-trip.py
-      hash: md5
-      md5: 4314072dd9e9c4697d5f183056463367
-      size: 1902
-    - path: scripts/plot-latex-word-round-trip.py.lock
-      hash: md5
-      md5: c81c945145853aa90f2cbae3c67a547a
-      size: 142338
-    outs:
-    - path: docs/img/latex-word-round-trip.png
-      hash: md5
-      md5: 23db3ce252dbfe1055eccee73d1e6a56
-      size: 258447

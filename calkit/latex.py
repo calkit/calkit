@@ -16,6 +16,7 @@ from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
 from calkit.core import LOCAL_DIR, OUTPUT_SOURCE_DATE_EPOCH, ensure_local_dir
+from calkit.results import VALUE_COMMAND_PATTERN
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -774,9 +775,11 @@ STYLE_FNAME = "calkit.sty"
 # What Calkit writes in _calkit itself, which no component can replace
 _CALKIT_OWN_FILES = (".gitignore", "README.md", VALUES_FNAME)
 # calkit.sty's commands, each with an optional [...] and its {...} args, of
-# which only \ckvalue has two, so a brace group after another is left alone
+# which only a value's has two, so a brace group after another is left alone.
+# A value matches the value group, and anything else the kind group.
 _CK_COMMAND_RE = re.compile(
-    r"\\ck(?P<kind>(?P<value>v)alue|figure|table|include)"
+    rf"\\(?:(?P<value>{VALUE_COMMAND_PATTERN})"
+    r"|ck(?P<kind>figure|table|include))"
     r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
     r"(?(value)\s*\{(?P<second>[^}]*)\})"
 )
@@ -877,7 +880,8 @@ def read_ck_usage(
         return False, []
     found: list[tuple[int, CkComponent]] = []
     for match in _CK_COMMAND_RE.finditer(text):
-        kind, option, first = match.group("kind", "option", "first")
+        option, first = match.group("option", "first")
+        kind = match.group("kind") or "value"
         option, second = option or "", match.group("second") or ""
         if "#" in first + second:
             continue
@@ -1534,9 +1538,8 @@ def expand_ck_components(
         return os.path.isfile(path) and _within_project(path, data_root)
 
     def replace(match: re.Match[str]) -> str:
-        kind, option, first, second = match.group(
-            "kind", "option", "first", "second"
-        )
+        option, first, second = match.group("option", "first", "second")
+        kind = match.group("kind") or "value"
         if "#" in first + (second or ""):
             return match.group(0)
         c = CkComponent(kind, first.strip(), (second or "").strip() or None)

@@ -167,6 +167,8 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
   file.
   Keys are separated by dots to reach into nested values, e.g., `fit.slope`.
   <!-- TODO: needs human review -->
+  `\ckval` is a shorter alias, e.g., `\ckval{results/metrics.json}{rmse}`.
+  <!-- TODO: needs human review -->
   For a value saved from a notebook cell, use the notebook's path,
   e.g., `\ckvalue[.3f]{fit-rates.ipynb}{k_25}`.
   See [saving values from cells](notebooks.md#saving-values-figures-and-tables-from-cells)

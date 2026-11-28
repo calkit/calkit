@@ -63,6 +63,72 @@ def frozen_stage_base_names(
     return names
 
 
+def get_downstream_stage_names(
+    stage_names: set[str], wdir: str | None = None
+) -> set[str]:
+    """Base names of stages, plus every stage downstream of them.
+
+    DVC only calls a stage out of date when its own inputs changed, so one
+    reading the outputs of an out-of-date stage looks current until that
+    stage reruns, though running the pipeline would rebuild it too.
+
+    Read from ``dvc.lock`` where there is one, since its deps and outs are
+    concrete, falling back to ``dvc.yaml``.
+    """
+    names = set(stage_names)
+    stages: dict = {}
+    for fname in ("dvc.lock", "dvc.yaml"):
+        fpath = os.path.join(wdir or ".", fname)
+        if os.path.isfile(fpath):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+            except Exception:
+                stages = {}
+            if stages:
+                break
+    if not stages:
+        return names
+
+    def _paths(stage: object, key: str) -> list[str]:
+        if not isinstance(stage, dict):
+            return []
+        out = []
+        for item in stage.get(key) or []:
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str):
+                out.append(path.rstrip("/"))
+        return out
+
+    producers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        for path in _paths(stage, "outs"):
+            producers.setdefault(path, set()).add(name.split("@")[0])
+    # A dep matches an out either way around the directory: a stage writing
+    # ``figures`` feeds one reading ``figures/x.png``, and one writing
+    # ``figures/x.png`` feeds one reading the whole ``figures`` directory.
+    consumers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        base = name.split("@")[0]
+        for dep in _paths(stage, "deps"):
+            for out, producer_names in producers.items():
+                if (
+                    out == dep
+                    or dep.startswith(out + "/")
+                    or out.startswith(dep + "/")
+                ):
+                    for producer in producer_names:
+                        if producer != base:
+                            consumers.setdefault(producer, set()).add(base)
+    queue = list(names)
+    while queue:
+        for consumer in consumers.get(queue.pop(), set()):
+            if consumer not in names:
+                names.add(consumer)
+                queue.append(consumer)
+    return names
+
+
 def frozen_tainted_stage_names(
     ck_info: dict | None = None, wdir: str | None = None
 ) -> set[str]:
@@ -111,57 +177,7 @@ def frozen_tainted_stage_names(
             dvc_repo.close()
     except Exception:
         pass
-    stages: dict = {}
-    for fname in ("dvc.lock", "dvc.yaml"):
-        fpath = os.path.join(wdir or ".", fname)
-        if os.path.isfile(fpath):
-            try:
-                with open(fpath, encoding="utf-8") as f:
-                    stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
-            except Exception:
-                stages = {}
-            if stages:
-                break
-    if not stages:
-        return tainted
-
-    def _paths(stage: object, key: str) -> list[str]:
-        if not isinstance(stage, dict):
-            return []
-        out = []
-        for item in stage.get(key) or []:
-            path = item.get("path") if isinstance(item, dict) else item
-            if isinstance(path, str):
-                out.append(path.rstrip("/"))
-        return out
-
-    producers: dict[str, set[str]] = {}
-    for name, stage in stages.items():
-        for path in _paths(stage, "outs"):
-            producers.setdefault(path, set()).add(name.split("@")[0])
-    # A dep matches an out either way around the directory: a stage writing
-    # ``figures`` feeds one reading ``figures/x.png``, and one writing
-    # ``figures/x.png`` feeds one reading the whole ``figures`` directory.
-    consumers: dict[str, set[str]] = {}
-    for name, stage in stages.items():
-        base = name.split("@")[0]
-        for dep in _paths(stage, "deps"):
-            for out, names in producers.items():
-                if (
-                    out == dep
-                    or dep.startswith(out + "/")
-                    or out.startswith(dep + "/")
-                ):
-                    for producer in names:
-                        if producer != base:
-                            consumers.setdefault(producer, set()).add(base)
-    queue = list(tainted)
-    while queue:
-        for consumer in consumers.get(queue.pop(), set()):
-            if consumer not in tainted:
-                tainted.add(consumer)
-                queue.append(consumer)
-    return tainted
+    return get_downstream_stage_names(tainted, wdir=wdir)
 
 
 class PipelineStatus(BaseModel):
@@ -4319,8 +4335,11 @@ def annotate_artifacts(
         if state.errors:
             raise RuntimeError("; ".join(state.errors))
         # Iterations are named 'stage@item', and an output is matched to
-        # its stage rather than to one iteration
-        stale = {n.split("@")[0] for n in state.stale_stage_names}
+        # its stage rather than to one iteration, and what reads an
+        # out-of-date stage's outputs is rebuilt with it
+        stale = get_downstream_stage_names(
+            {n.split("@")[0] for n in state.stale_stage_names}, wdir=wdir
+        )
     for artifact in artifacts:
         path = artifact.get("path") or ""
         artifact["exists"] = os.path.exists(os.path.join(root, path))

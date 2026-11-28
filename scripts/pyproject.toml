@@ -1,0 +1,17 @@
+[project]
+name = "calkit-pipeline"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "calkit-python",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.5",
+    "pypdfium2>=5.15.2",
+    "pyyaml>=6.0.4",
+    "requests>=2.34.2",
+    "simpy>=4.1.2",
+]
+
+# Calkit itself, from this repo, for the stages that use its Python API
+[tool.uv.sources]
+calkit-python = { path = "..", editable = true }

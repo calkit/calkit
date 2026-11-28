@@ -111,7 +111,7 @@ The sizes above are measured by this block,
 which runs in the pipeline at the root of this repo,
 against the image `calkit latex` uses by default:
 
-<!-- calkit stage name=sizes environment=dev
+<!-- calkit stage name=sizes environment=pipeline
      inputs=[calkit/latex.py]
      outputs=[{path: images/latex/sizes.json, storage: git}] -->
 

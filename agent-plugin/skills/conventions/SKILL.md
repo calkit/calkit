@@ -89,10 +89,6 @@ Example environment definitions:
 
 ```yaml
 environments:
-  py:
-    kind: uv
-    path: pyproject.toml
-
   tex:
     kind: texlive
     release: 2025
@@ -203,13 +199,6 @@ outputs rather than listing individual files:
 
 ```yaml
 stages:
-  collect-data:
-    kind: python-script
-    script_path: scripts/collect.py
-    environment: main
-    outputs:
-      - data/raw.csv
-
   process-data:
     kind: python-script
     script_path: scripts/process.py
@@ -241,62 +230,39 @@ stages:
       - models/{model}.pkl
 ```
 
-## Relationship to DVC
-
-Calkit compiles `calkit.yaml` into `dvc.yaml` when `calkit run` is called.
-Do not edit `dvc.yaml` directly—it is a generated file. The authoritative
-pipeline definition is always `calkit.yaml`.
-
-DVC handles:
-
-- Caching: stages that haven't changed since last run are skipped
-- Remote storage: large files pushed/pulled with `calkit push` / `calkit pull`
-- Dependency graph: run order is computed from declared inputs/outputs
-
 ## Key CLI commands
 
-| Command                         | What it does                                            |
-| ------------------------------- | ------------------------------------------------------- |
-| `calkit run`                    | Run the pipeline (skips unchanged stages)               |
-| `calkit run --force`            | Force re-run all stages                                 |
-| `calkit status`                 | Show which stages are stale                             |
-| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline       |
-| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                    |
-| `calkit shell -e <env>`         | Open an interactive shell with an environment activated |
-| `calkit push`                   | Push Git commits and DVC-tracked files to remotes       |
-| `calkit pull`                   | Pull latest code and data                               |
-| `calkit save`                   | Auto-add, commit, and push (Git + DVC)                  |
-| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)                  |
-| `calkit add <file>`             | Add a file to version control                           |
-| `calkit check env --name <env>` | Verify an environment matches its spec                  |
-| `calkit new`                    | Create new project objects (notebook, dataset, etc.)    |
-| `calkit new question "<text>"`  | Record a research question                              |
-| `calkit list questions`         | List questions with what each has and lacks             |
-| `calkit show question <n>`      | Show a question with its answer rendered from evidence  |
-| `calkit check questions`        | Check answers against current evidence                  |
+| Command                         | What it does                                           |
+| ------------------------------- | ------------------------------------------------------ |
+| `calkit run`                    | Run the pipeline (skips unchanged stages)              |
+| `calkit run --force`            | Force re-run all stages                                |
+| `calkit status`                 | Show which stages are stale                            |
+| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline      |
+| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                   |
+| `calkit push`                   | Push Git commits and DVC-tracked files to remotes      |
+| `calkit pull`                   | Pull latest code and data                              |
+| `calkit save`                   | Auto-add, commit, and push (Git + DVC)                 |
+| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)                 |
+| `calkit add <file>`             | Add a file to version control                          |
+| `calkit check env --name <env>` | Verify an environment matches its spec                 |
+| `calkit new`                    | Create new project objects (notebook, dataset, etc.)   |
+| `calkit new question "<text>"`  | Record a research question                             |
+| `calkit list questions`         | List questions with what each has and lacks            |
+| `calkit show question <n>`      | Show a question with its answer rendered from evidence |
+| `calkit check questions`        | Check answers against current evidence                 |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 
-`xr` ("execute and record") is the recommended way to add scripts and
-notebooks to the pipeline for the first time. It:
+<!-- TODO: needs human review -->
 
-1. Detects the stage kind from the file extension (`.py`, `.ipynb`, `.R`,
-   `.jl`, `.m`, `.sh`, `.tex`)
-2. Detects or creates the right environment
-3. Heuristically detects inputs and outputs from the script's file I/O calls
-4. Adds the stage to `calkit.yaml` and `dvc.yaml`
-5. Runs the stage
-
-```bash
-calkit xr scripts/run.py              # Python script
-calkit xr notebooks/analysis.ipynb    # Jupyter notebook
-calkit xr paper/paper.tex             # LaTeX document
-calkit xr scripts/run.R               # R script
-
-calkit xr scripts/run.py --input data/raw.csv --output results/out.csv
-calkit xr scripts/run.py --environment main
-calkit xr scripts/run.py --dry-run    # see what would happen without running
-```
+`xr` ("execute and record") is the recommended way to add a script
+(`.py`, `.R`, `.jl`, `.m`, `.sh`), notebook, or LaTeX document to the
+pipeline for the first time.
+It detects the stage kind, environment, inputs, and outputs, adds the stage
+to `calkit.yaml`, and runs it.
+Preview with `--dry-run`, and override what it detects with `--input`,
+`--output`, and `--environment`.
+The `add-pipeline-stage` skill covers it in detail.
 
 ## Questions and answers
 
@@ -319,12 +285,26 @@ Research in a Calkit project is organized around the `questions` list in
 
 See the Calkit docs on questions for the full evidence schema.
 
+<!-- TODO: needs human review -->
+
+## Checking results
+
+After running the pipeline, check that each stage's results are plausible
+before reporting the work done, including results the task didn't ask
+about.
+Compare the rows going into and out of each stage, e.g., rows lost or added
+by a merge or filter, and which groups they came from.
+Check that the analysis sample matches what the project's questions and
+the paper's or report's methods say it should be.
+Report anything that doesn't add up, and don't fix problems you weren't
+asked to fix unless they block the task, so the user can decide.
+
 ## Version control conventions
 
 - Source code and small outputs: tracked with Git
 - Large binary files, datasets, model weights: tracked with DVC
 - Lock files (`.calkit/env-locks/`): committed to Git, act as DVC dependencies
-- `dvc.yaml`: generated by Calkit—don't edit manually
+- `dvc.yaml`: generated from `calkit.yaml` by `calkit run`—don't edit it
 - `.calkit/`: Calkit's internal directory—commit its contents unless they
   are large generated files
 

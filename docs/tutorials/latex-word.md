@@ -48,7 +48,7 @@ Assuming we have an up-to-date compiled LaTeX document in our project at
 we can export a Word copy for review with:
 
 ```sh
-calkit latex to-docx paper/main.pdf
+calkit doc to-docx paper/main.pdf
 ```
 
 Calkit needs the LaTeX source as well as the PDF,
@@ -88,7 +88,7 @@ so be sure to accept them before merging.
 When you're done in Word, merge it back into LaTeX with:
 
 ```sh
-calkit latex merge-docx reviews/main-for-review-pi-comments.docx
+calkit doc merge-docx reviews/main-for-review-pi-comments.docx
 ```
 
 This command assumes we've saved the .docx we got back into a
@@ -140,7 +140,7 @@ and content won't be duplicated.
 
 It's okay to send the same copy out to multiple collaborators.
 Follow the same process, checking their markup in Word,
-then merging in with `calkit latex merge-docx`.
+then merging in with `calkit doc merge-docx`.
 
 ## Multiple rounds
 

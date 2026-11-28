@@ -47,6 +47,10 @@ from calkit.models.iteration import (
 )
 from calkit.models.requirements import RequirementType
 
+# Name for the environment of a Python script stage that names none, i.e.,
+# the one its script declares in inline metadata
+INLINE_ENVIRONMENT_NAME = "_inline"
+
 # What a stage's 'inputs' can list
 StageInput = (
     str | EnvVarInput | ScheduleInput | PathInput | InputsFromStageOutputs
@@ -148,6 +152,14 @@ def check_path_relative_and_child_of_cwd(s: str) -> str:
 RelativeChildPathString = Annotated[
     str, AfterValidator(check_path_relative_and_child_of_cwd)
 ]
+
+
+def compile_output_template(path: str) -> re.Pattern[str]:
+    """Compile an iterated stage's output template, e.g., ``plot-{n}.png``,
+    into a pattern matching what each iteration writes."""
+    return re.compile(
+        re.sub(r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)) + r"\Z"
+    )
 
 
 def _non_glob_prefix(path: str) -> str:
@@ -425,6 +437,14 @@ def _allow_null(schema: dict[str, Any]) -> None:
     for key in inner:
         schema.pop(key)
     schema["anyOf"] = [inner, {"type": "null"}]
+
+
+def _allow_null_without_default(schema: dict[str, Any]) -> None:
+    """Let a field's published schema accept null, without showing its
+    default, which is an internal name.
+    """
+    _allow_null(schema)
+    schema.pop("default", None)
 
 
 def _unique_paths(paths: list[str]) -> list[str]:
@@ -1163,17 +1183,78 @@ class PythonScriptStage(Stage):
         default=[],
         description="Arguments passed to the script, each item one argument.",
     )
+    environment: str = Field(
+        default=INLINE_ENVIRONMENT_NAME,
+        description=(
+            "Name of the environment in which to run this stage. Omit it to "
+            "run the script with uv in the environment its '# /// script' "
+            "block declares (PEP 723), locked in a '.lock' file beside it."
+        ),
+        json_schema_extra=_allow_null_without_default,
+    )
+
+    # The .python-version uv reads for a script's own environment, as seen
+    # from the stage's wdir, found when it's preprocessed
+    _python_version_path: str | None = PrivateAttr(default=None)
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def default_null_environment(cls, value: Any) -> Any:
+        return INLINE_ENVIRONMENT_NAME if value is None else value
+
+    @property
+    def uses_inline_environment(self) -> bool:
+        return self.environment == INLINE_ENVIRONMENT_NAME
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} python {self.script_path}"
+        if self.uses_inline_environment:
+            cmd = f"uv run --locked --script {self.script_path}"
+        else:
+            cmd = f"{self.xenv_cmd} python {self.script_path}"
         for arg in self.args:
             cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
     @property
     def dvc_deps(self) -> list[str]:
-        return [self.script_path] + super().dvc_deps
+        deps = [self.script_path]
+        if self.uses_inline_environment:
+            from calkit.environments.inline import get_lock_path
+
+            deps.append(get_lock_path(self.script_path))
+            if self._python_version_path is not None:
+                deps.append(self.path_from_wdir(self._python_version_path))
+        return deps + super().dvc_deps
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+        edit_sources: bool = True,
+    ) -> None:
+        """Find the ``.python-version`` uv picks the interpreter for a
+        script's own environment with, checking another stage doesn't make
+        the script, since then there'd be no lock for it until that ran.
+        """
+        from calkit.environments.inline import get_python_version_path
+
+        if not self.uses_inline_environment:
+            return
+        script_path = posixpath.normpath(
+            posixpath.join(self.wdir or "", self.script_path)
+        )
+        if is_output(script_path):
+            raise ValueError(
+                f"Stage '{self.name}' runs {script_path}, which another "
+                "stage makes, so it can't use the environment the script "
+                "declares; set the stage's environment"
+            )
+        self._python_version_path = get_python_version_path(
+            script_path, project_dir=project_dir or ""
+        )
 
 
 class MapPathsStage(Stage):
@@ -1900,6 +1981,22 @@ class QuartoStage(Stage):
         return self.target_path.endswith(".ipynb")
 
     @property
+    def allows_machine_quarto(self) -> bool:
+        """Whether Quarto from this machine is expected, as it is if the
+        stage requires it, or the project does, which
+        ``calkit quarto render`` reads itself.
+        """
+        import calkit.environments
+
+        requirements = [
+            r.model_dump(exclude_none=True) if isinstance(r, BaseModel) else r
+            for r in self.requirements
+        ]
+        return calkit.environments.is_app_required(
+            "quarto", {}, stage={"requirements": requirements}
+        )
+
+    @property
     def executes_notebook(self) -> bool:
         """Whether rendering executes the notebook, writing its outputs back
         into it. Execution enabled in its metadata instead isn't seen, so
@@ -1997,8 +2094,6 @@ class QuartoStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        import calkit.environments
-
         # Dispatched to a job scheduler or another machine as other stages
         # are, with 'calkit quarto render' taking the place of the inner
         # xenv; with no runtime to activate there, it renders as is
@@ -2012,15 +2107,7 @@ class QuartoStage(Stage):
         elif prefix:
             environment = "_system"
         args = ["-e", environment, "--no-check"]
-        # Quarto from the machine is expected if the stage requires it, as it
-        # is if the project does, which the command reads itself
-        requirements = [
-            r.model_dump(exclude_none=True) if isinstance(r, BaseModel) else r
-            for r in self.requirements
-        ]
-        if calkit.environments.is_app_required(
-            "quarto", {}, stage={"requirements": requirements}
-        ):
+        if self.allows_machine_quarto:
             args.append("--allow-machine-quarto")
         args.append(self.target_path)
         if self.to is not None:
@@ -3840,11 +3927,24 @@ class Pipeline(Model):
                         f"'pbs' environment, e.g., 'machine:{env_name}'"
                     )
                 continue
-            if env_name != "_system" and env_name not in environments:
+            if (
+                env_name not in ("_system", INLINE_ENVIRONMENT_NAME)
+                and env_name not in environments
+            ):
                 raise ValueError(
                     f"Stage '{stage.name}' has outer environment "
                     f"'{stage.outer_environment}' which is not defined in "
                     "environments"
+                )
+            if (
+                env_name == INLINE_ENVIRONMENT_NAME
+                and stage.scheduler is not None
+            ):
+                raise ValueError(
+                    f"Stage '{stage.name}' sets 'scheduler' options but runs "
+                    "in the environment its script declares, which nothing "
+                    "submits as a job; run it in a 'slurm' or 'pbs' "
+                    "environment"
                 )
             env = environments.get(stage.outer_environment, {})
             kind = env.get("kind")
@@ -3872,11 +3972,12 @@ class Pipeline(Model):
                 and kind not in ("system", "slurm", "pbs")
                 and not is_machine_switch
             ):
-                described = (
-                    "the built-in '_system' environment"
-                    if env_name == "_system"
-                    else f"environment '{env_name}' of kind '{kind}'"
-                )
+                if env_name == "_system":
+                    described = "the built-in '_system' environment"
+                elif env_name == INLINE_ENVIRONMENT_NAME:
+                    described = "the environment its script declares"
+                else:
+                    described = f"environment '{env_name}' of kind '{kind}'"
                 raise ValueError(
                     f"Stage '{stage.name}' sets 'setup' commands but runs "
                     f"in {described}, which has no setup step to run them "
@@ -4110,14 +4211,7 @@ class Pipeline(Model):
                     posixpath.join(stage.wdir or "", path)
                 )
                 if stage.iterate_over and "{" in path:
-                    patterns.append(
-                        re.compile(
-                            re.sub(
-                                r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)
-                            )
-                            + r"\Z"
-                        )
-                    )
+                    patterns.append(compile_output_template(path))
                 elif "${" not in path:
                     outputs.add(path)
 

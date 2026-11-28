@@ -684,6 +684,15 @@ def check_environment(
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
+    # A script that declares its own environment is named by its path
+    if env_name not in (envs or {}) and env_name.endswith(".py"):
+        from calkit.environments.inline import lock
+
+        if os.path.isfile(env_name):
+            try:
+                return lock(env_name, force=force, verbose=verbose)
+            except (ValueError, RuntimeError) as e:
+                raise_error(str(e))
     if not envs:
         raise_error("No environments defined in calkit.yaml")
     if isinstance(envs, list):
@@ -1092,11 +1101,34 @@ def check_environments(
 ) -> None:
     """Check that the project's environments are up to date.
 
-    Subprojects' environments are checked too, as 'calkit run' does.
+    Subprojects' environments are checked too, as 'calkit run' does, and so
+    are those that stages' scripts declare.
     """
+
+    def get_script_paths(info: dict) -> list[str]:
+        # Each item's, for an iterated stage that runs one script per item
+        from calkit.environments.inline import get_stage_script_path
+        from calkit.pipeline import get_stage_items
+
+        paths: list[str] = []
+        stages = (info.get("pipeline") or {}).get("stages") or {}
+        for name, stage in stages.items():
+            if not isinstance(stage, dict) or stage.get("frozen"):
+                continue
+            items = get_stage_items(name, stage, params=info.get("parameters"))
+            for item in items.values():
+                path = get_stage_script_path(item)
+                if path is not None and path not in paths:
+                    paths.append(path)
+        return paths
+
     ck_info = calkit.load_calkit_info()
     projects = list(calkit.iter_projects(ck_info=ck_info))
-    if not any(info.get("environments") for _, info in projects):
+    script_paths = {wdir: get_script_paths(info) for wdir, info in projects}
+    if not any(
+        info.get("environments") or script_paths[wdir]
+        for wdir, info in projects
+    ):
         typer.echo("No environments defined in calkit.yaml")
         return
     # Set any project-level environmental variables before checking
@@ -1107,11 +1139,14 @@ def check_environments(
         # A parent's variables apply to its subprojects even if it has no
         # environments of its own, as in 'calkit run'
         calkit.set_env_vars(ck_info=info, cli=True)
-        if not info.get("environments"):
+        if not info.get("environments") and not script_paths[wdir]:
             continue
         # check_environment reads the project it's in, so go there
         with calkit.in_project(wdir):
-            for env_name, env in info["environments"].items():
+            names = list(info.get("environments") or {})
+            names += [p for p in script_paths[wdir] if os.path.isfile(p)]
+            for env_name in names:
+                env = (info.get("environments") or {}).get(env_name) or {}
                 if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
                     if verbose:
                         typer.echo(
@@ -1941,12 +1976,17 @@ def check_project_requirements(
 ) -> None:
     """Check that this machine meets the project's requirements.
 
-    That's the project's own, and those of every stage and environment, so
-    this says whether the whole project can run here. Subprojects' are
+    That's the project's own, and those of every stage and environment,
+    including the app each environment is built with, e.g., Conda, so this
+    says whether the whole project can run here. Subprojects' are
     checked too. On a terminal, what's missing is offered, as by
     'calkit run'. Those of an environment on another machine are checked
-    there, by 'calkit run'.
+    there, by 'calkit run'. Docker isn't checked for Docker and MATLAB
+    environments, since 'calkit run' offers to install or start it.
     """
+    import contextlib
+    import io
+
     import calkit.environments as envs_mod
     import calkit.markdown
 
@@ -2008,7 +2048,9 @@ def check_project_requirements(
                 "This machine doesn't meet these requirements:\n"
                 + "\n".join(f"  {p}" for p in problems)
             )
-        status = calkit.pipeline.get_status()
+        # What it says is missing is checked and said below
+        with contextlib.redirect_stderr(io.StringIO()):
+            status = calkit.pipeline.get_status()
         if status.errors or status.failed_environment_checks:
             raise_error(
                 "Failed to determine which stages are out of date: "
@@ -2037,6 +2079,15 @@ def check_project_requirements(
             # environments that's another machine
             env_names: list[str] = []
             remote_env_by_stage: dict[str, str | None] = {}
+            # The app each environment a stage uses here is built with, as
+            # 'calkit run' finds it, and those a stage uses at all
+            implied: dict[str, str] = {}
+            used_by_stages: set[str] = set()
+            try:
+                project_requirements = calkit.get_requirements(info)
+            except ValueError:
+                # Said when the project's are checked
+                project_requirements = []
             for name, stage in stages.items():
                 qualified = calkit.qualify_with_project(wdir, name)
                 if not isinstance(stage, dict) or (
@@ -2057,6 +2108,12 @@ def check_project_requirements(
                 ]
                 remote_env_by_stage[name] = (
                     remote_env_names[0] if remote_env_names else None
+                )
+                used_by_stages.update(used)
+                implied |= envs_mod.get_implied_requirements(
+                    stage,
+                    [(n, envs_mod.get_env(n, envs) or {}) for n in used],
+                    project_requirements,
                 )
             # Without --stale, those no stage uses too, except a switch's
             # options it doesn't pick here, which nothing needs
@@ -2083,9 +2140,19 @@ def check_project_requirements(
                             "environment "
                             f"'{calkit.qualify_with_project(wdir, env_name)}'",
                         )
+            # A script's own environment too
+            env_names += [n for n in implied if n not in env_names]
             for env_name in env_names:
                 env = envs_mod.get_env(env_name, envs) or {}
-                if not env.get("requirements"):
+                requirements = list(env.get("requirements") or [])
+                if env_name in implied:
+                    requirements.append(implied[env_name])
+                elif env_name not in used_by_stages:
+                    # One no stage uses is checked as if one used it here
+                    requirements += envs_mod.get_implied_requirements(
+                        {}, [(env_name, env)], project_requirements
+                    ).values()
+                if not requirements:
                     continue
                 where = (
                     "environment "
@@ -2097,7 +2164,7 @@ def check_project_requirements(
                         "machine; 'calkit run' checks it there"
                     )
                     continue
-                check(where, requirements=env["requirements"])
+                check(where, requirements=requirements)
             for name, elsewhere in remote_env_by_stage.items():
                 stage_reqs = stages[name].get("requirements")
                 if not stage_reqs:

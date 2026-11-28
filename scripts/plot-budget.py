@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "matplotlib>=3.11.2",
+# ]
+# ///
 """Plot where the 2027 workshop tour's money goes, for the one-pager."""
 
 import json

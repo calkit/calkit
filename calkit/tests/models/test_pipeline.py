@@ -67,6 +67,92 @@ def test_pythonscriptstage():
     }
 
 
+def test_pythonscriptstage_inline_environment(tmp_dir):
+    # No environment, or a null one, runs the script's own with uv
+    for extra in [{}, {"environment": None}]:
+        s = PythonScriptStage.model_validate(
+            dict(
+                name="plot",
+                kind="python-script",
+                script_path="scripts/plot.py",
+                args=["--n 3", "a b"],
+                inputs=["data.csv"],
+            )
+            | extra
+        )
+        assert s.environment == "_inline"
+        assert "environment" not in s.to_ck_dict()
+        sd = s.to_dvc()
+        assert sd["cmd"] == (
+            'uv run --locked --script scripts/plot.py --n 3 "a b"'
+        )
+        assert sd["deps"] == [
+            "scripts/plot.py",
+            "scripts/plot.py.lock",
+            "data.csv",
+        ]
+    # The .python-version uv picks the interpreter with, nearest first, up
+    # to the project, as seen from the stage's wdir
+    os.makedirs("sub/scripts")
+    for pv_dirs, wdir, expected in [
+        ([], None, None),
+        ([""], None, ".python-version"),
+        ([""], "sub", "../.python-version"),
+        (["", "sub/scripts"], "sub", "scripts/.python-version"),
+    ]:
+        for d in pv_dirs:
+            with open(os.path.join(d, ".python-version"), "w") as f:
+                f.write("3.12\n")
+        s = PythonScriptStage(
+            name="plot", script_path="scripts/plot.py", wdir=wdir
+        )
+        s.preprocess(None, is_output=lambda p: False)
+        deps = s.to_dvc()["deps"]
+        assert (expected in deps) is (expected is not None)
+        assert len(deps) == 2 + (expected is not None)
+    # A script another stage makes has no lock until that runs
+    with pytest.raises(ValueError, match="which another stage makes"):
+        s.preprocess(None, is_output=lambda p: p == "sub/scripts/plot.py")
+    # Nothing runs setup commands for it
+    pipeline = Pipeline.model_validate(
+        dict(
+            stages=dict(
+                plot=dict(
+                    kind="python-script",
+                    script_path="scripts/plot.py",
+                    setup=["echo hi"],
+                )
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="the environment its script"):
+        pipeline.set_stage_scheduler_options(environments={})
+    # Nor submits it as a job
+    pipeline = Pipeline.model_validate(
+        dict(
+            stages=dict(
+                plot=dict(
+                    kind="python-script",
+                    script_path="scripts/plot.py",
+                    scheduler=dict(options=["--time=1:00"]),
+                )
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="'scheduler' options"):
+        pipeline.set_stage_scheduler_options(environments={})
+    # Null is allowed by the published schema, which doesn't show the
+    # internal default
+    schema = PythonScriptStage.model_json_schema()["properties"]["environment"]
+    assert {"type": "null"} in schema["anyOf"]
+    assert "default" not in schema
+    # An environment named is used as before
+    s = PythonScriptStage(
+        name="plot", script_path="scripts/plot.py", environment="py1"
+    )
+    assert s.to_dvc()["deps"] == ["scripts/plot.py"]
+
+
 def test_quote_arg():
     # One argument with a space is quoted for both cmd.exe and POSIX shells
     assert quote_arg("2026-06-09 12:00:00") == '"2026-06-09 12:00:00"'

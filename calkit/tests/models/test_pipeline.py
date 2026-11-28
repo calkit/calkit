@@ -67,6 +67,83 @@ def test_pythonscriptstage():
     }
 
 
+def test_pythonscriptstage_inline_environment(tmp_dir):
+    # No environment, or a null one, runs the script's own with uv
+    for extra in [{}, {"environment": None}]:
+        s = PythonScriptStage.model_validate(
+            dict(
+                name="plot",
+                kind="python-script",
+                script_path="scripts/plot.py",
+                args=["--n 3", "a b"],
+                inputs=["data.csv"],
+            )
+            | extra
+        )
+        assert s.environment == "_inline"
+        assert "environment" not in s.to_ck_dict()
+        sd = s.to_dvc()
+        assert sd["cmd"] == (
+            'uv run --locked --script scripts/plot.py --n 3 "a b"'
+        )
+        assert sd["deps"] == [
+            "scripts/plot.py",
+            "scripts/plot.py.lock",
+            "data.csv",
+        ]
+    # It must declare one, unless it isn't there yet
+    os.makedirs("scripts")
+    os.makedirs("sub/scripts")
+    s = PythonScriptStage(name="plot", script_path="scripts/plot.py")
+    s.preprocess(None, is_output=lambda p: False)
+    for wdir, project_dir in [(None, None), ("sub", None), (None, "sub")]:
+        script_dir = os.path.join(wdir or project_dir or "", "scripts")
+        with open(os.path.join(script_dir, "plot.py"), "w") as f:
+            f.write("import sys\n")
+        s = PythonScriptStage(name="plot", script_path="scripts/plot.py")
+        s.wdir = wdir
+        with pytest.raises(ValueError, match="'# /// script' block"):
+            s.preprocess(project_dir, is_output=lambda p: False)
+        with open(os.path.join(script_dir, "plot.py"), "w") as f:
+            f.write("# /// script\n# dependencies = []\n# ///\nimport sys\n")
+        s.preprocess(project_dir, is_output=lambda p: False)
+        os.remove(os.path.join(script_dir, "plot.py"))
+    # The .python-version uv picks the interpreter with, nearest first
+    with open("scripts/plot.py", "w") as f:
+        f.write("# /// script\n# dependencies = []\n# ///\n")
+    for pv_dirs, expected in [
+        ([], None),
+        ([""], ".python-version"),
+        (["", "scripts"], "scripts/.python-version"),
+    ]:
+        for d in pv_dirs:
+            with open(os.path.join(d, ".python-version"), "w") as f:
+                f.write("3.12\n")
+        s = PythonScriptStage(name="plot", script_path="scripts/plot.py")
+        s.preprocess(None, is_output=lambda p: False)
+        assert s._python_version_path == expected
+        assert (expected in s.dvc_deps) is (expected is not None)
+    # Nothing runs setup commands for it
+    pipeline = Pipeline.model_validate(
+        dict(
+            stages=dict(
+                plot=dict(
+                    kind="python-script",
+                    script_path="scripts/plot.py",
+                    setup=["echo hi"],
+                )
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="the environment its script"):
+        pipeline.set_stage_scheduler_options(environments={})
+    # An environment named is used as before
+    s = PythonScriptStage(
+        name="plot", script_path="scripts/plot.py", environment="py1"
+    )
+    assert s.to_dvc()["deps"] == ["scripts/plot.py"]
+
+
 def test_quote_arg():
     # One argument with a space is quoted for both cmd.exe and POSIX shells
     assert quote_arg("2026-06-09 12:00:00") == '"2026-06-09 12:00:00"'

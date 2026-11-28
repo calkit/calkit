@@ -661,6 +661,15 @@ def check_environment(
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
+    # A script that declares its own environment is named by its path
+    if env_name not in (envs or {}) and env_name.endswith(".py"):
+        from calkit.environments.inline import lock
+
+        if os.path.isfile(env_name):
+            try:
+                return lock(env_name, force=force, verbose=verbose)
+            except (ValueError, RuntimeError) as e:
+                raise_error(str(e))
     if not envs:
         raise_error("No environments defined in calkit.yaml")
     if isinstance(envs, list):

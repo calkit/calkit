@@ -140,9 +140,9 @@ environments:
     kind: uv
     path: scripts/pyproject.toml
     description: >-
-      Python for the project's own pipeline stages, locked apart from the
-      CLI's development environment so its dependency updates don't rerun
-      them.
+      Calkit from this repo, for the pipeline stages that use it, locked
+      apart from the CLI's development environment so its dependency updates
+      don't rerun them. The other scripts declare their own environments.
 
 pipeline:
   stages:
@@ -191,7 +191,6 @@ pipeline:
     latex-word-round-trip-figure:
       kind: python-script
       script_path: scripts/plot-latex-word-round-trip.py
-      environment: pipeline
       inputs:
         - results/latex-word-round-trip/original.pdf
         - results/latex-word-round-trip/review.pdf
@@ -202,7 +201,6 @@ pipeline:
     research-flow:
       kind: python-script
       script_path: scripts/research-flow.py
-      environment: pipeline
       description: >-
         Simulate a paper worked in small steps versus stage by stage, with
         manual and automated tooling.
@@ -214,7 +212,6 @@ pipeline:
     research-flow-figure:
       kind: python-script
       script_path: scripts/plot-research-flow.py
-      environment: pipeline
       inputs:
         - results/research-flow.json
       outputs:
@@ -224,7 +221,6 @@ pipeline:
     budget-2027:
       kind: python-script
       script_path: scripts/budget.py
-      environment: pipeline
       description: >-
         Total up the budget for the 2027 workshop tour that the one-pager
         asks for.
@@ -251,7 +247,6 @@ pipeline:
     budget-2027-figure:
       kind: python-script
       script_path: scripts/plot-budget.py
-      environment: pipeline
       inputs:
         - results/2027-budget.json
         - docs/one-pager/texgyreheros-regular.otf
@@ -260,7 +255,6 @@ pipeline:
     find-calkit-projects:
       kind: python-script
       script_path: scripts/find-calkit-projects.py
-      environment: pipeline
       description: >-
         Search GitHub, the Calkit hub, and DataCite for projects with a
         calkit.yaml, once a day.
@@ -273,7 +267,6 @@ pipeline:
     find-calkit-papers:
       kind: python-script
       script_path: scripts/find-calkit-papers.py
-      environment: pipeline
       description: >-
         Find papers built with those projects, from their calkit.yaml and
         DataCite.

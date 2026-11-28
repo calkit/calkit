@@ -2996,6 +2996,41 @@ def test_check_app_in_env(tmp_path, monkeypatch):
     assert check_app_in_env("myapp", "img", ck_info) is None
 
 
+def test_check_all_in_pipeline_inline_scripts(tmp_dir):
+    stages: dict = {
+        name: {"kind": "python-script", "script_path": f"{name}.py"}
+        for name in ["ok", "bad", "skipped", "frozen"]
+    }
+    stages["frozen"]["frozen"] = True
+    stages["iterated"] = {
+        "kind": "python-script",
+        "script_path": "ok.py",
+        "args": ["{n}"],
+        "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    for name in ["ok", "skipped", "frozen"]:
+        with open(f"{name}.py", "w") as f:
+            f.write("# /// script\n# dependencies = []\n# ///\n")
+    with open("bad.py", "w") as f:
+        f.write("print('no block')\n")
+    res = calkit.environments.check_all_in_pipeline(skip_stages=["skipped"])
+    assert set(res) == {"ok.py", "bad.py"}
+    assert res["ok.py"]["success"]
+    assert os.path.isfile("ok.py.lock")
+    assert not res["bad.py"]["success"]
+    assert "'# /// script' block" in res["bad.py"]["output"]
+    assert not os.path.exists("skipped.py.lock")
+    assert not os.path.exists("frozen.py.lock")
+    # Checked by path, as the failure says to
+    assert calkit.cli.check.check_environment("skipped.py") == (
+        "skipped.py.lock"
+    )
+    with pytest.raises(typer.Exit):
+        calkit.cli.check.check_environment("bad.py")
+
+
 def test_check_all_in_pipeline_quiet(tmp_dir, monkeypatch, capfd):
     # Behind a spinner, what the tools print isn't shown, but the end of it
     # is kept for a failure, and the check can say what it's doing

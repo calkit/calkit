@@ -1088,6 +1088,7 @@ def get_gated_stages(
     import sys
 
     import calkit.environments as envs_mod
+    import calkit.environments.inline
 
     if interactive is None:
         from calkit.core import is_tty
@@ -1321,6 +1322,10 @@ def get_gated_stages(
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )
+        # A script's own environment is checked by its path
+        script_path = calkit.environments.inline.get_stage_script_path(stage)
+        if script_path is not None:
+            env_names = [script_path]
         failed = [e for e in env_names if e in (failed_environments or {})]
         if failed:
             gated[name] = (failed_environments or {})[failed[0]]

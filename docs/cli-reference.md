@@ -3440,7 +3440,7 @@ Options:
 
 Update a project's GitHub Actions to match this version of Calkit's recommendations.
 
-An existing workflow that runs the Calkit action is updated in place, pinning the action to this version of Calkit, so this is safe to rerun after upgrading.
+Every existing workflow that uses a Calkit action is updated in place, pinning the action to this version of Calkit, so this is safe to rerun after upgrading. A project without one that runs the pipeline gets one.
 
 Usage:
 

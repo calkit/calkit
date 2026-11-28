@@ -1012,7 +1012,7 @@ class PipelineRuns(BaseModel):
     # Of all those recorded, for paging through them
     total: int = 0
     # The workflow that starting a run on GitHub Actions uses, if the project
-    # has one
+    # has one, or the first that runs the Calkit action if it's unclear which
     github_workflow: str | None = None
     # Whether it can be started from here, and if not, why
     can_start: bool = False
@@ -1186,11 +1186,9 @@ def get_project_pipeline_runs(
         read_only=True,
     )
     found = calkit.resources.find_run_workflows(str(repo.working_dir))
-    startable = [
-        fname
-        for fname, txt in found
-        if calkit.resources.can_start_workflow(txt)
-    ]
+    pipeline_fname = calkit.resources.get_pipeline_workflow_fname(
+        [f for f, _ in found]
+    )
     token = _github_token_for_repo(
         session,
         current_user,
@@ -1220,9 +1218,14 @@ def get_project_pipeline_runs(
     ).all()
     if token is None:
         reason: str | None = "No GitHub access to its runs"
-    elif found and not startable:
-        names = ", ".join(fname for fname, _ in found)
-        reason = f"No workflow_dispatch trigger in {names}"
+    elif found and pipeline_fname is None:
+        reason = calkit.resources.get_ambiguous_workflows_message(
+            [f for f, _ in found]
+        )
+    elif pipeline_fname and not calkit.resources.can_start_workflow(
+        dict(found)[pipeline_fname]
+    ):
+        reason = f"No workflow_dispatch trigger in {pipeline_fname}"
     else:
         # Starting one without a workflow adds it first
         reason = None
@@ -1232,16 +1235,16 @@ def get_project_pipeline_runs(
             for row in rows
         ],
         total=total,
-        github_workflow=(
-            startable[0] if startable else found[0][0] if found else None
-        ),
+        # Any, if it's ambiguous, so the project isn't taken as having none
+        github_workflow=pipeline_fname or (found[0][0] if found else None),
         can_start=reason is None,
         cannot_start_reason=reason,
     )
 
 
 class GitHubActionsRunOptions(BaseModel):
-    # By file name, else the first of the project's that can be started
+    # By file name, else the one that runs the pipeline: the one Calkit
+    # writes, else the only one that runs the Calkit action
     workflow: str | None = None
     # Its workflow_dispatch inputs
     inputs: dict[str, str] = {}
@@ -1293,7 +1296,9 @@ def post_project_pipeline_run(
     branch = get_default_branch(repo)
     found = calkit.resources.find_run_workflows(wdir)
     if not found:
-        rel_path = os.path.join(".github", "workflows", "run-calkit.yml")
+        rel_path = os.path.join(
+            ".github", "workflows", calkit.resources.RUN_WORKFLOW_FNAME
+        )
         if not _inside(wdir, os.path.join(wdir, os.path.dirname(rel_path))):
             raise HTTPException(
                 409, ".github/workflows links out of the project"
@@ -1303,17 +1308,19 @@ def post_project_pipeline_run(
                 409, f"{rel_path} doesn't run the Calkit action"
             )
         try:
-            subprocess.check_call(
-                [
-                    "calkit",
-                    "update",
-                    "github-actions",
-                    "--on",
-                    "workflow_dispatch",
-                    "--no-commit",
-                ],
-                cwd=wdir,
+            # Written directly, since updating the project's GitHub Actions
+            # would also repin its other workflows
+            os.makedirs(
+                os.path.join(wdir, ".github", "workflows"), exist_ok=True
             )
+            with open(
+                os.path.join(wdir, rel_path), "w", encoding="utf-8"
+            ) as f:
+                f.write(
+                    calkit.resources.render_github_actions_workflow(
+                        on=["workflow_dispatch"]
+                    )
+                )
             repo.git.add(rel_path)
             repo.git.commit(
                 [rel_path, "-m", "Add a workflow that runs the pipeline"]
@@ -1338,7 +1345,7 @@ def post_project_pipeline_run(
             else:
                 push_and_expire(project, repo, branch)
         except (
-            subprocess.CalledProcessError,
+            OSError,
             GitCommandError,
             HTTPException,
             app.github.GitHubAppNotConfigured,
@@ -1361,21 +1368,18 @@ def post_project_pipeline_run(
             )
         record_project_update(project, repo, session)
         found = calkit.resources.find_run_workflows(wdir)
-    startable = [
-        fname
-        for fname, txt in found
-        if calkit.resources.can_start_workflow(txt)
-    ]
-    names = ", ".join(fname for fname, _ in found)
-    if req.github_actions.workflow is not None:
-        if req.github_actions.workflow not in [f for f, _ in found]:
+    fnames = [f for f, _ in found]
+    fname = req.github_actions.workflow
+    if fname is None:
+        fname = calkit.resources.get_pipeline_workflow_fname(fnames)
+        if fname is None:
             raise HTTPException(
-                422, f"{req.github_actions.workflow} isn't one of {names}"
+                409, calkit.resources.get_ambiguous_workflows_message(fnames)
             )
-        startable = [f for f in startable if f == req.github_actions.workflow]
-    if not startable:
-        raise HTTPException(409, f"No workflow_dispatch trigger in {names}")
-    fname = startable[0]
+    elif fname not in fnames:
+        raise HTTPException(422, f"{fname} isn't one of {', '.join(fnames)}")
+    if not calkit.resources.can_start_workflow(dict(found)[fname]):
+        raise HTTPException(409, f"No workflow_dispatch trigger in {fname}")
     try:
         resp = requests.post(
             f"https://api.github.com/repos/{project.github_repo}"

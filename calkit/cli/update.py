@@ -405,41 +405,63 @@ def update_github_actions(
     """Update a project's GitHub Actions to match this version of Calkit's
     recommendations.
 
-    An existing workflow that runs the Calkit action is updated in place,
+    Every existing workflow that uses a Calkit action is updated in place,
     pinning the action to this version of Calkit, so this is safe to rerun
     after upgrading.
+    A project without one that runs the pipeline gets one.
     """
     from calkit import resources as calkit_resources
 
-    # First look for an existing workflow that runs the Calkit action, so
-    # rerunning this updates a project's workflow instead of writing a
-    # second one beside it
-    fname_out = "run-calkit.yml"
-    txt_out = None
+    # Each workflow using a Calkit action is updated in place, rather than
+    # writing another beside it, but only the pipeline's gets new triggers
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
+    found = calkit_resources.find_workflows(wdir)
+    run_fnames = [
+        fname for fname, txt in found if calkit_resources.uses_run_action(txt)
+    ]
+    workflows: list[tuple[str, str | None]] = list(found)
+    if not run_fnames:
+        fname = calkit_resources.RUN_WORKFLOW_FNAME
+        if os.path.lexists(os.path.join(out_dir, fname)):
+            raise_error(f"{fname} doesn't run the Calkit action")
+        workflows.append((fname, None))
+        run_fnames = [fname]
+    on_fname = calkit_resources.get_pipeline_workflow_fname(run_fnames)
+    if on is not None and on_fname is None:
+        raise_error(
+            calkit_resources.get_ambiguous_workflows_message(run_fnames)
+        )
     os.makedirs(out_dir, exist_ok=True)
-    existing = calkit_resources.find_run_workflows(wdir)
-    if existing:
-        fname_out, txt = existing[0]
-        # A workflow that's still the example gets replaced outright, picking
-        # up any other improvements to it, but one that's been customized
-        # only has its action ref updated
-        if not calkit_resources.is_default_github_actions_workflow(txt):
+    rel_paths = []
+    for fname, txt in workflows:
+        on_this = on if fname == on_fname else None
+        # A workflow that's still the example gets replaced outright,
+        # picking up any other improvements to it, but one that's been
+        # customized only has its action refs updated
+        if txt is None or calkit_resources.is_default_github_actions_workflow(
+            txt
+        ):
+            txt_out = calkit_resources.render_github_actions_workflow(
+                on=on_this
+            )
+        else:
             txt_out = calkit_resources.set_action_ref(txt)
-    if txt_out is None:
-        txt_out = calkit_resources.render_github_actions_workflow(on=on)
-    elif on is not None:
-        txt_out = calkit_resources.set_workflow_triggers(txt_out, on)
-    out_fpath = os.path.join(out_dir, fname_out)
-    typer.echo(f"Writing to {out_fpath}")
-    with open(out_fpath, "w", encoding="utf-8") as f:
-        f.write(txt_out)
+            if on_this is not None:
+                txt_out = calkit_resources.set_workflow_triggers(
+                    txt_out, on_this
+                )
+        out_fpath = os.path.join(out_dir, fname)
+        typer.echo(f"Writing to {out_fpath}")
+        with open(out_fpath, "w", encoding="utf-8") as f:
+            f.write(txt_out)
+        rel_paths.append(os.path.join(".github", "workflows", fname))
     if not no_commit:
-        rel_path = os.path.join(".github", "workflows", fname_out)
         repo = calkit.git.get_repo(wdir)
-        repo.git.add(rel_path)
-        if repo.git.diff(["--staged", "--", rel_path]):
-            repo.git.commit([rel_path, "-m", "Update GitHub Actions workflow"])
+        repo.git.add(rel_paths)
+        if repo.git.diff(["--staged", "--"] + rel_paths):
+            repo.git.commit(
+                rel_paths + ["-m", "Update GitHub Actions workflows"]
+            )
 
 
 @update_app.command(name="notebook")

@@ -18,6 +18,11 @@ so after upgrading Calkit, rerun the command to move the pin.
 If the workflow has been customized, only the action's version is updated,
 and everything else in it is left alone.
 
+<!-- TODO: needs human review -->
+
+If more than one workflow runs the action, e.g., one that also deploys a
+website, the Calkit Hub runs the pipeline with `run-calkit.yml`.
+
 Inside `.github/workflows/run-calkit.yml` you'll then see something like:
 
 ```yaml

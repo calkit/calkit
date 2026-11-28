@@ -233,7 +233,7 @@ def test_update_dataset(tmp_dir):
     assert info.datasets[0].imported_from.date == date(2026, 1, 2)
 
 
-def test_update_github_actions(tmp_dir):
+def test_update_github_actions(tmp_dir, monkeypatch):
     subprocess.check_call(["calkit", "init"])
     workflow_dir = os.path.join(".github", "workflows")
     ref = calkit.resources.get_action_ref()
@@ -321,6 +321,65 @@ def test_update_github_actions(tmp_dir):
         workflow = calkit.ryaml.load(f)
     assert workflow["on"] == {"push": None, "workflow_dispatch": None}
     assert workflow["jobs"]["main"]["steps"][-1] == {"run": "echo custom"}
+    # Every workflow that uses a Calkit action is repinned, not only the
+    # first by name, but triggers are only set on the one that runs the
+    # pipeline, which is the one Calkit writes
+    with open(out_fpath, "w") as f:
+        f.write(updated_txt.replace(ref, "calkit/calkit/actions/run@v0.1.0"))
+    pages_fpath = os.path.join(workflow_dir, "pages.yml")
+    pages_txt = custom_txt.replace("jobs:", "on: push\njobs:")
+    with open(pages_fpath, "w") as f:
+        f.write(pages_txt)
+    monkeypatch.setattr(calkit.resources, "ACTION_NAMES", ["run", "check"])
+    check_fpath = os.path.join(workflow_dir, "check.yml")
+    check_txt = (
+        "on: pull_request\n"
+        "jobs:\n"
+        "  check:\n"
+        "    steps:\n"
+        "      - uses: calkit/calkit/actions/check@v0.1.0\n"
+    )
+    with open(check_fpath, "w") as f:
+        f.write(check_txt)
+    assert (
+        runner.invoke(
+            update_app, ["github-actions", "--on", "workflow_dispatch"]
+        ).exit_code
+        == 0
+    )
+    with open(out_fpath) as f:
+        txt = f.read()
+    assert ref in txt
+    assert calkit.ryaml.load(txt)["on"] == {"workflow_dispatch": None}
+    with open(pages_fpath) as f:
+        assert f.read() == pages_txt.replace("calkit/run-action@v2", ref)
+    with open(check_fpath) as f:
+        assert f.read() == check_txt.replace(
+            "check@v0.1.0", "check@" + ref.partition("@")[2]
+        )
+    assert not repo.git.status(
+        "--porcelain", out_fpath, pages_fpath, check_fpath
+    )
+    # Without that one, which runs the pipeline is ambiguous, so triggers
+    # aren't set on either, but they're still repinned
+    os.rename(out_fpath, os.path.join(workflow_dir, "run.yml"))
+    result = runner.invoke(update_app, ["github-actions", "--on", "push"])
+    assert result.exit_code != 0
+    assert "(pages.yml, run.yml)" in result.output
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    assert not os.path.isfile(out_fpath)
+    # A run-calkit.yml that doesn't run the action isn't replaced by one
+    # that does
+    os.remove(os.path.join(workflow_dir, "run.yml"))
+    os.remove(pages_fpath)
+    with open(out_fpath, "w") as f:
+        f.write(check_txt)
+    result = runner.invoke(update_app, ["github-actions"])
+    assert result.exit_code != 0
+    assert "doesn't run the Calkit action" in result.output
+    assert "Writing" not in result.output
+    with open(out_fpath) as f:
+        assert f.read() == check_txt
 
 
 def test_update_uv_env(tmp_dir):

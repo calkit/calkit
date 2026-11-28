@@ -2863,6 +2863,43 @@ ALWAYS_REPORTED_APPS = (
     "julia",
 )
 
+# What each coding agent sets in the shells it runs commands in, read for
+# presence only, since some hold session IDs
+AGENT_ENV_VARS = {
+    "CLAUDECODE": "Claude Code",
+    "CODEX_THREAD_ID": "Codex",
+    "OPENCODE": "OpenCode",
+    "GEMINI_CLI": "Gemini CLI",
+}
+
+
+def get_agent_info() -> dict | None:
+    """The coding agent running this process, if it says so, e.g.,
+    ``{"name": "Claude Code"}``.
+
+    ``CALKIT_AGENT`` takes precedence: it names one Calkit can't detect, or,
+    set empty or to 'none', says there's none, e.g., for a person running a
+    command from an agent's shell. Otherwise it's read from what each agent
+    sets in its shells, then from ``AI_AGENT``, which some set and others
+    can. One agent running another, e.g., Claude Code running Codex, leaves
+    both's variables set, with nothing saying which is which, so then every
+    one found is listed in ``detected`` and ``name`` is the first. This is
+    only what the environment says, not proof, since anyone can set these.
+    """
+    override = os.environ.get("CALKIT_AGENT")
+    if override is not None:
+        override = override.strip()
+        if not override or override.lower() == "none":
+            return None
+        return {"name": override[:100]}
+    detected = [n for v, n in AGENT_ENV_VARS.items() if os.environ.get(v)]
+    if len(detected) > 1:
+        return {"name": detected[0], "detected": detected}
+    if detected:
+        return {"name": detected[0]}
+    generic = os.environ.get("AI_AGENT", "").strip()
+    return {"name": generic[:100]} if generic else None
+
 
 def get_system_info(
     apps: list[str] | None = None,

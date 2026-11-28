@@ -2837,7 +2837,12 @@ def test_status_reports_running_pipeline(tmp_dir):
         proc.wait()
 
 
-def test_run_writes_private_logs(tmp_dir):
+def test_run_writes_private_logs(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Whoever runs the tests, e.g., a coding agent, isn't the one recorded
+    for var in ["CALKIT_AGENT", *calkit.core.AGENT_ENV_VARS, "AI_AGENT"]:
+        monkeypatch.delenv(var, raising=False)
     subprocess.check_call(["calkit", "init"])
     dvc_yaml = {
         "stages": {
@@ -2878,6 +2883,8 @@ def test_run_writes_private_logs(tmp_dir):
     assert entry["system"]["os"] == platform.system()
     assert entry["system"]["machine_id"] == calkit.get_machine_id()
     assert entry["start_time"] <= entry["end_time"]
+    # No agent detected is no agent recorded, rather than a null
+    assert "agent" not in entry
     staged = subprocess.check_output(
         ["git", "diff", "--cached", "--name-only"], text=True
     )
@@ -2888,13 +2895,23 @@ def test_run_writes_private_logs(tmp_dir):
     with open(STAGE_RUNS_FPATH) as f:
         assert json.load(f) == stage_runs
     # With --log, the log is also saved to the tracked directory plus run info
+    # A run from a coding agent's shell records which agent it was, which
+    # doesn't stop the record matching dvc.lock
+    monkeypatch.setenv("CLAUDECODE", "1")
     subprocess.check_call(["calkit", "run", "--log", "--force"])
     tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
     assert len(tracked) == 1
     assert os.path.isdir(os.path.join(".calkit", "runs"))
     assert not os.path.exists(os.path.join(".calkit", "systems"))
     with open(STAGE_RUNS_FPATH) as f:
-        assert json.load(f)["s1"]["start_time"] > entry["start_time"]
+        rerun = json.load(f)["s1"]
+    assert rerun["start_time"] > entry["start_time"]
+    assert rerun["agent"] == {"name": "Claude Code"}
+    subprocess.check_call(["calkit", "check", "stage-runs"])
+    # The run's own record says so too
+    runs_dir = os.path.join(".calkit", "runs")
+    with open(os.path.join(runs_dir, os.listdir(runs_dir)[0])) as f:
+        assert json.load(f)["agent"] == {"name": "Claude Code"}
 
 
 def test_prune_run_logs(tmp_dir):

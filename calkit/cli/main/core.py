@@ -4997,6 +4997,10 @@ def run(
     }
     if skipped_stale:
         run_info["gated"] = skipped_stale
+    # The coding agent that ran it, if one says so
+    agent = calkit.get_agent_info()
+    if agent:
+        run_info["agent"] = agent
     if switch_picks:
         run_info["switches"] = switch_picks
         for stage_name, info in stage_run_info.items():
@@ -5084,6 +5088,8 @@ def run(
             entry["calkit_version"] = system_info.get("calkit_version")
             if system_info.get("calkit_git_rev"):
                 entry["calkit_git_rev"] = system_info["calkit_git_rev"]
+            if agent:
+                entry["agent"] = dict(agent)
             # The machine is the outer env's, as picked
             outer = env_name.split(calkit.environments.COMPOSITE_ENV_SEP)[0]
             outer = switch_picks.get(outer) or outer

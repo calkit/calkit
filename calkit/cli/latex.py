@@ -755,10 +755,9 @@ def build(
             "--as-stage",
             hidden=True,
             help=(
-                "Build as the pipeline's latex stage for the document does "
-                "(its environment, options, and working directory), or in "
-                "the project's only TeX Live environment if no stage builds "
-                "it. Other options are added to the stage's."
+                "Build in the project's only TeX Live environment if no "
+                "stage builds the document, for editors building every "
+                "document with one command."
             ),
         ),
     ] = False,
@@ -833,9 +832,11 @@ def build(
 ):
     """Build a PDF of a LaTeX document with latexmk.
 
-    If a Calkit environment is not specified, latexmk will be run in the
-    system environment if available. If not available, a TeX Live Docker
-    container will be used.
+    A document a pipeline stage builds is built as that stage does, i.e.,
+    in its environment, with its options, and from its working directory,
+    unless an environment, latexmkrc, or output or aux directory is given.
+    Otherwise, if no environment is given, latexmk runs with TeX installed
+    on this machine if available, or else in a TeX Live Docker container.
 
     Also available as `calkit doc build`.
     """
@@ -863,34 +864,28 @@ def build(
             n += 1
         return "/".join([".."] * (len(s) - n) + list(target.parts[n:])) or "."
 
-    # An editor builds every document with the same command, so each one
-    # finds its stage here and builds with the stage's own arguments
-    if as_stage:
+    # A document a pipeline stage builds builds as that stage does, unless
+    # an option the stage sets is given
+    stage_options = [environment, latexmk_rc_path, output_dir, aux_dir]
+    if as_stage and any(v is not None for v in stage_options):
+        raise_error(
+            "--as-stage takes the environment and directories from the stage"
+        )
+    if all(v is None for v in stage_options):
         from typing import cast
 
         import click
 
-        from calkit.environments import texlive as env_texlive
         from calkit.models.pipeline import LatexStage
         from calkit.pipeline import find_document_stages
 
-        if any(
-            v is not None
-            for v in [environment, latexmk_rc_path, output_dir, aux_dir]
-        ):
-            raise_error(
-                "--as-stage takes the environment and directories from "
-                "the stage"
-            )
         doc_path = os.path.realpath(tex_file)
         found_dir, ck_info, found = find_document_stages(
             tex_file, kinds=["latex"]
         )
-        if found_dir is None:
-            raise_error(f"{tex_file} isn't in a Calkit project")
-        project_dir = found_dir
         matches = [s for _, s in found if isinstance(s, LatexStage)]
-        if matches:
+        if found_dir is not None and matches:
+            project_dir = found_dir
             s = matches[0]
             if len(matches) > 1:
                 others = ", ".join(f"'{m.name}'" for m in matches[1:])
@@ -921,21 +916,28 @@ def build(
             finally:
                 os.chdir(wdir)
             return
-        # Otherwise the only TeX Live environment, or switch picking one
-        # here, unless they pick different ones
-        selected = {
-            name: env_texlive.get_selected_env(name, wdir=project_dir)
-            for name, env in (ck_info.get("environments") or {}).items()
-            if isinstance(env, dict)
-        }
-        names = [name for name, env in selected.items() if env is not None]
-        picked = {env[0] for env in selected.values() if env is not None}
-        if len(picked) == 1:
-            environment = next(
-                (name for name in names if name in picked), names[0]
-            )
-        tex_file = os.path.relpath(doc_path, project_dir)
-        os.chdir(project_dir)
+        # An editor builds every document with the same command, so one no
+        # stage builds gets the only TeX Live environment, or switch picking
+        # one here, unless they pick different ones
+        if as_stage:
+            from calkit.environments import texlive as env_texlive
+
+            if found_dir is None:
+                raise_error(f"{tex_file} isn't in a Calkit project")
+            project_dir = found_dir
+            selected = {
+                name: env_texlive.get_selected_env(name, wdir=project_dir)
+                for name, env in (ck_info.get("environments") or {}).items()
+                if isinstance(env, dict)
+            }
+            names = [n for n, env in selected.items() if env is not None]
+            picked = {env[0] for env in selected.values() if env is not None}
+            if len(picked) == 1:
+                environment = next(
+                    (name for name in names if name in picked), names[0]
+                )
+            tex_file = os.path.relpath(doc_path, project_dir)
+            os.chdir(project_dir)
     # latexmk records a failed run in its file database and then refuses
     # to try again, reporting "Nothing to do" and exiting non-zero with no
     # PDF. Running it again is the first thing anyone does after a

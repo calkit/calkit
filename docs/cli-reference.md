@@ -4724,7 +4724,7 @@ Options:
 
 Build a PDF of a LaTeX document with latexmk.
 
-If a Calkit environment is not specified, latexmk will be run in the system environment if available. If not available, a TeX Live Docker container will be used.
+A document a pipeline stage builds is built as that stage does, i.e., in its environment, with its options, and from its working directory, unless an environment, latexmkrc, or output or aux directory is given. Otherwise, if no environment is given, latexmk runs with TeX installed on this machine if available, or else in a TeX Live Docker container.
 
 Also available as `calkit doc build`.
 

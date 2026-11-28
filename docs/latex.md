@@ -17,7 +17,9 @@ project's [environments](environments.md):
 calkit latex build paper/main.tex --env tex
 ```
 
-Without `--env`, `latexmk` is called directly
+Without `--env`, a document a pipeline stage builds is built as that
+stage does, i.e., in its environment and with its options.
+Otherwise, `latexmk` is called directly
 if it's installed on the system, and in Calkit's TinyTeX/TeXlive
 container if it isn't.
 
@@ -123,7 +125,7 @@ Packages are only installed automatically in a
 [TeX Live environment](environments.md#tex-live),
 whose lock gains them,
 or a Docker environment built from Calkit's image.
-With no environment specified,
+With no environment specified and no stage building the document,
 `calkit latex build` uses the LaTeX installed on your machine if there is
 one, and otherwise a TeX Live environment Calkit keeps for the machine
 in `~/.calkit/texlive`.

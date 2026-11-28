@@ -205,7 +205,7 @@ def build(
     `calkit doc build paper.tex --help` lists them.
     """
     import calkit.pipeline
-    from calkit.models.pipeline import LatexStage, QuartoStage
+    from calkit.models.pipeline import QuartoStage
 
     args = list(tool_args or [])
     tool = _get_tool(path)
@@ -250,30 +250,6 @@ def build(
                 no_check=no_check,
             )
         return
-    # A LaTeX document a stage builds builds as that stage, unless an option
-    # the stage sets is given
-    if tool == "LaTeX":
-        _, _, found = calkit.pipeline.find_document_stages(
-            path, kinds=["latex"]
-        )
-        if any(isinstance(s, LatexStage) for _, s in found):
-            command = _get_command(latex_app, "build")
-            with command.make_context(
-                ctx.info_name, [path] + args, parent=ctx.parent
-            ) as sub_ctx:
-                p = sub_ctx.params
-                if all(
-                    p[k] is None
-                    for k in (
-                        "environment",
-                        "latexmk_rc_path",
-                        "output_dir",
-                        "aux_dir",
-                    )
-                ):
-                    p["as_stage"] = True
-                command.invoke(sub_ctx)
-            return
     # A notebook executed by a jupyter-notebook stage rather than rendered
     # by Quarto points the user to 'calkit run'
     if tool == "Quarto" and path.lower().endswith(".ipynb"):

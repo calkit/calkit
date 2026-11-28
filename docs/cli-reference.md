@@ -12,7 +12,7 @@
 | [`init`](#top-command-init)                      | Initialize the current working directory.                                                                    |
 | [`clone`](#top-command-clone)                    | Clone or download a copy of a project.                                                                       |
 | [`status\|st`](#top-command-status-st)           | View status (project, version control, and/or pipeline).                                                     |
-| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff.                                                                              |
+| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff, or summarize changed results.                                                |
 | [`add`](#top-command-add)                        | Add paths to the repo.                                                                                       |
 | [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                 |
 | [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
@@ -136,7 +136,9 @@ Options:
 
 ### `calkit diff`
 
-Get a unified Git and DVC diff.
+Get a unified Git and DVC diff, or summarize changed results.
+
+With --results, two revisions are compared for a reviewer, e.g., of a pull request. DVC-stored outputs are compared by hash, and their values are only read if they're in the local cache.
 
 Usage:
 
@@ -146,9 +148,14 @@ calkit diff [OPTIONS]
 
 Options:
 
-| Option     | Type    | Required | Default | Description                             |
-| ---------- | ------- | -------- | ------- | --------------------------------------- |
-| `--staged` | boolean | no       | False   | Show a diff from files staged with Git. |
+| Option            | Type      | Required | Default | Description                                                                                                                |
+| ----------------- | --------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `--staged`        | boolean   | no       | False   | Show a diff from files staged with Git.                                                                                    |
+| `--results`, `-r` | boolean   | no       | False   | Summarize changed results as Markdown: stages that reran or are stale, values, figures, tables, and questions citing them. |
+| `--base`          | str       | no       |         | Revision to compare results from. Defaults to the merge base with the default branch.                                      |
+| `--to`            | str       | no       |         | Revision to compare results to. Defaults to working tree.                                                                  |
+| `--max`           | int range | no       |         | Most items to list in each section. Defaults to 10.                                                                        |
+| `--json`          | boolean   | no       | False   | Print changed results as JSON.                                                                                             |
 
 <a id="top-command-add"></a>
 

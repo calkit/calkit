@@ -2727,8 +2727,14 @@ def check_all_in_pipeline(
             continue
         if not os.path.isfile(script_path):
             continue
+        current = calkit.environments.inline.lock_is_current(script_path)
+        if current and not force:
+            res[script_path] = {"success": True, "cached": True}
+            continue
+        if progress is not None:
+            progress(f"Locking environment of {script_path}")
         try:
-            calkit.environments.inline.lock(script_path, force=force)
+            calkit.environments.inline.lock(script_path, force=True)
             res[script_path] = {"success": True}
         except (ValueError, RuntimeError) as e:
             res[script_path] = {

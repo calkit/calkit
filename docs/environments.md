@@ -689,10 +689,17 @@ and keeps it up to date when the block changes.
 Only the stages whose scripts' blocks changed then rerun,
 unlike stages sharing one environment,
 which all rerun when anything in it changes.
-The Python version comes from the nearest `.python-version` file,
-in the script's folder or those above it.
-A stage with no `environment` whose script has no such block fails,
-rather than running in whatever Python this machine has.
+This needs [uv](https://docs.astral.sh/uv/) installed.
+
+The block has to say which Python it needs with `requires-python`,
+since otherwise the lock would only suit the version it was made with.
+Within that, the version comes from the nearest `.python-version` file,
+in the script's folder or those above it, up to the project's.
+A stage whose script has no block, or no `requires-python`,
+doesn't run, rather than running in whatever Python this machine has.
+Neither can a stage whose script another stage writes,
+since there's no lock for it until that stage has run,
+so give that one an `environment`.
 
 ### venv
 

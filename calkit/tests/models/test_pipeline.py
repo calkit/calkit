@@ -91,38 +91,28 @@ def test_pythonscriptstage_inline_environment(tmp_dir):
             "scripts/plot.py.lock",
             "data.csv",
         ]
-    # It must declare one, unless it isn't there yet
-    os.makedirs("scripts")
+    # The .python-version uv picks the interpreter with, nearest first, up
+    # to the project, as seen from the stage's wdir
     os.makedirs("sub/scripts")
-    s = PythonScriptStage(name="plot", script_path="scripts/plot.py")
-    s.preprocess(None, is_output=lambda p: False)
-    for wdir, project_dir in [(None, None), ("sub", None), (None, "sub")]:
-        script_dir = os.path.join(wdir or project_dir or "", "scripts")
-        with open(os.path.join(script_dir, "plot.py"), "w") as f:
-            f.write("import sys\n")
-        s = PythonScriptStage(name="plot", script_path="scripts/plot.py")
-        s.wdir = wdir
-        with pytest.raises(ValueError, match="'# /// script' block"):
-            s.preprocess(project_dir, is_output=lambda p: False)
-        with open(os.path.join(script_dir, "plot.py"), "w") as f:
-            f.write("# /// script\n# dependencies = []\n# ///\nimport sys\n")
-        s.preprocess(project_dir, is_output=lambda p: False)
-        os.remove(os.path.join(script_dir, "plot.py"))
-    # The .python-version uv picks the interpreter with, nearest first
-    with open("scripts/plot.py", "w") as f:
-        f.write("# /// script\n# dependencies = []\n# ///\n")
-    for pv_dirs, expected in [
-        ([], None),
-        ([""], ".python-version"),
-        (["", "scripts"], "scripts/.python-version"),
+    for pv_dirs, wdir, expected in [
+        ([], None, None),
+        ([""], None, ".python-version"),
+        ([""], "sub", "../.python-version"),
+        (["", "sub/scripts"], "sub", "scripts/.python-version"),
     ]:
         for d in pv_dirs:
             with open(os.path.join(d, ".python-version"), "w") as f:
                 f.write("3.12\n")
-        s = PythonScriptStage(name="plot", script_path="scripts/plot.py")
+        s = PythonScriptStage(
+            name="plot", script_path="scripts/plot.py", wdir=wdir
+        )
         s.preprocess(None, is_output=lambda p: False)
-        assert s._python_version_path == expected
-        assert (expected in s.dvc_deps) is (expected is not None)
+        deps = s.to_dvc()["deps"]
+        assert (expected in deps) is (expected is not None)
+        assert len(deps) == 2 + (expected is not None)
+    # A script another stage makes has no lock until that runs
+    with pytest.raises(ValueError, match="which another stage makes"):
+        s.preprocess(None, is_output=lambda p: p == "sub/scripts/plot.py")
     # Nothing runs setup commands for it
     pipeline = Pipeline.model_validate(
         dict(
@@ -137,6 +127,25 @@ def test_pythonscriptstage_inline_environment(tmp_dir):
     )
     with pytest.raises(ValueError, match="the environment its script"):
         pipeline.set_stage_scheduler_options(environments={})
+    # Nor submits it as a job
+    pipeline = Pipeline.model_validate(
+        dict(
+            stages=dict(
+                plot=dict(
+                    kind="python-script",
+                    script_path="scripts/plot.py",
+                    scheduler=dict(options=["--time=1:00"]),
+                )
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="'scheduler' options"):
+        pipeline.set_stage_scheduler_options(environments={})
+    # Null is allowed by the published schema, which doesn't show the
+    # internal default
+    schema = PythonScriptStage.model_json_schema()["properties"]["environment"]
+    assert {"type": "null"} in schema["anyOf"]
+    assert "default" not in schema
     # An environment named is used as before
     s = PythonScriptStage(
         name="plot", script_path="scripts/plot.py", environment="py1"

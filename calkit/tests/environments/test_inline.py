@@ -7,38 +7,65 @@ import pytest
 
 import calkit.environments.inline as inline
 
+BLOCK = (
+    '# /// script\n# requires-python = ">=3.12"\n# dependencies = []\n# ///\n'
+)
 
-def test_has_metadata(tmp_dir):
+
+def test_get_metadata(tmp_dir):
     for text, expected in [
-        ("# /// script\n# dependencies = []\n# ///\n", True),
+        (BLOCK, {"requires-python": ">=3.12", "dependencies": []}),
         (
-            '"""Doc."""\n\n# /// script\n#\n# requires-python = ">=3.12"\n'
+            '"""Doc."""\n\n# /// script\n#\n# dependencies = ["six"]\n'
+            "#\n# [tool.uv.sources]\n# six = { path = '../six' }\n"
             "# ///\nimport os\n",
-            True,
+            {
+                "dependencies": ["six"],
+                "tool": {"uv": {"sources": {"six": {"path": "../six"}}}},
+            },
         ),
-        ("import os\n", False),
+        ("import os\n", None),
         # Another kind of block, and one never closed
-        ("# /// pyproject\n# x = 1\n# ///\n", False),
-        ("# /// script\n# dependencies = []\nimport os\n", False),
+        ("# /// pyproject\n# x = 1\n# ///\n", None),
+        ("# /// script\n# dependencies = []\nimport os\n", None),
     ]:
         with open("s.py", "w") as f:
             f.write(text)
-        assert inline.has_metadata("s.py") is expected
+        assert inline.get_metadata("s.py") == expected
+
+
+def test_get_python_version_path(tmp_dir):
+    os.makedirs("sub/scripts")
+    assert inline.get_python_version_path("sub/scripts/a.py") is None
+    for path in [".python-version", "sub/.python-version"]:
+        with open(path, "w") as f:
+            f.write("3.12\n")
+        assert inline.get_python_version_path("sub/scripts/a.py") == path
+    assert inline.get_python_version_path("a.py") == ".python-version"
+    # From elsewhere
+    os.chdir("sub")
+    assert (
+        inline.get_python_version_path("a.py", project_dir="..")
+        == ".python-version"
+    )
 
 
 def test_lock(tmp_dir, monkeypatch):
     os.makedirs("scripts")
     script_path = os.path.join("scripts", "plot.py")
     with open(script_path, "w") as f:
-        f.write("# /// script\n# dependencies = []\n# ///\nprint('hi')\n")
+        f.write(BLOCK + "print('hi')\n")
     lock_path = inline.lock(script_path)
     assert lock_path == script_path + ".lock"
     assert os.path.isfile(lock_path)
+    assert inline.lock_is_current(script_path)
     # uv leaves a current lock as it is, so it's touched to skip next time
     os.utime(lock_path, (0, 0))
+    assert not inline.lock_is_current(script_path)
     inline.lock(script_path)
-    assert os.path.getmtime(lock_path) >= os.path.getmtime(script_path)
-    # Not again until the script changes, unless forced
+    assert inline.lock_is_current(script_path)
+    # Not again until the script or its .python-version changes, unless
+    # forced
     calls = []
 
     def run(*args, **kwargs):
@@ -61,20 +88,30 @@ def test_lock(tmp_dir, monkeypatch):
         os.utime(script_path, (future, future))
         inline.lock(script_path)
         assert len(calls) == 2
-    # A script that declares nothing, or what can't be resolved
-    with open(script_path, "w") as f:
-        f.write("print('hi')\n")
-    with pytest.raises(ValueError, match="no '# /// script' block"):
+        with open(".python-version", "w") as f:
+            f.write("3.12\n")
+        future += 10
+        os.utime(".python-version", (future, future))
         inline.lock(script_path)
-    with open(script_path, "w") as f:
-        f.write(
-            "# /// script\n"
-            '# requires-python = ">=99"\n'
-            "# dependencies = []\n"
-            "# ///\n"
-        )
-    with pytest.raises(RuntimeError, match="Failed to lock"):
-        inline.lock(script_path)
+        assert len(calls) == 3
+    # A script that declares nothing, no Python, or what can't be resolved
+    for text, error, match in [
+        ("print('hi')\n", ValueError, "no '# /// script' block"),
+        (
+            "# /// script\n# dependencies = []\n# ///\n",
+            ValueError,
+            "no 'requires-python'",
+        ),
+        (
+            '# /// script\n# requires-python = ">=99"\n# ///\n',
+            RuntimeError,
+            "Failed to lock",
+        ),
+    ]:
+        with open(script_path, "w") as f:
+            f.write(text)
+        with pytest.raises(error, match=match):
+            inline.lock(script_path)
 
 
 def test_get_stage_script_path():

@@ -47,9 +47,9 @@ from calkit.models.iteration import (
 )
 from calkit.models.requirements import RequirementType
 
-# The environment of a Python script stage that names none, which is the one
-# its script declares in inline metadata
-INLINE_ENVIRONMENT = "_inline"
+# Name for the environment of a Python script stage that names none, i.e.,
+# the one its script declares in inline metadata
+INLINE_ENVIRONMENT_NAME = "_inline"
 
 # What a stage's 'inputs' can list
 StageInput = (
@@ -437,6 +437,14 @@ def _allow_null(schema: dict[str, Any]) -> None:
     for key in inner:
         schema.pop(key)
     schema["anyOf"] = [inner, {"type": "null"}]
+
+
+def _allow_null_without_default(schema: dict[str, Any]) -> None:
+    """Let a field's published schema accept null, without showing its
+    default, which is an internal name.
+    """
+    _allow_null(schema)
+    schema.pop("default", None)
 
 
 def _unique_paths(paths: list[str]) -> list[str]:
@@ -1174,12 +1182,13 @@ class PythonScriptStage(Stage):
         description="Arguments passed to the script, each item one argument.",
     )
     environment: str = Field(
-        default=INLINE_ENVIRONMENT,
+        default=INLINE_ENVIRONMENT_NAME,
         description=(
             "Name of the environment in which to run this stage. Omit it to "
             "run the script with uv in the environment its '# /// script' "
             "block declares (PEP 723), locked in a '.lock' file beside it."
         ),
+        json_schema_extra=_allow_null_without_default,
     )
 
     # The .python-version uv reads for a script's own environment, as seen
@@ -1189,11 +1198,11 @@ class PythonScriptStage(Stage):
     @field_validator("environment", mode="before")
     @classmethod
     def default_null_environment(cls, value: Any) -> Any:
-        return INLINE_ENVIRONMENT if value is None else value
+        return INLINE_ENVIRONMENT_NAME if value is None else value
 
     @property
     def uses_inline_environment(self) -> bool:
-        return self.environment == INLINE_ENVIRONMENT
+        return self.environment == INLINE_ENVIRONMENT_NAME
 
     @property
     def dvc_cmd(self) -> str:
@@ -1213,7 +1222,7 @@ class PythonScriptStage(Stage):
 
             deps.append(get_lock_path(self.script_path))
             if self._python_version_path is not None:
-                deps.append(self._python_version_path)
+                deps.append(self.path_from_wdir(self._python_version_path))
         return deps + super().dvc_deps
 
     def preprocess(
@@ -1223,32 +1232,25 @@ class PythonScriptStage(Stage):
         write_files: bool = False,
         is_exact_output: Callable[[str], bool] | None = None,
     ) -> None:
-        """Check a script with no environment declares its own, and find
-        the ``.python-version`` uv picks its interpreter with, i.e., the
-        first in its directory or those above it, up to the stage's.
+        """Find the ``.python-version`` uv picks the interpreter for a
+        script's own environment with, checking another stage doesn't make
+        the script, since then there'd be no lock for it until that ran.
         """
-        from calkit.environments.inline import has_metadata
+        from calkit.environments.inline import get_python_version_path
 
         if not self.uses_inline_environment:
             return
-        run_dir = os.path.join(project_dir or "", self.wdir or "")
-        rel_dir = posixpath.dirname(posixpath.normpath(self.script_path))
-        while True:
-            pv_path = posixpath.join(rel_dir, ".python-version")
-            if os.path.isfile(os.path.join(run_dir, pv_path)):
-                self._python_version_path = pv_path
-                break
-            if not rel_dir:
-                break
-            rel_dir = posixpath.dirname(rel_dir)
-        path = os.path.join(run_dir, self.script_path)
-        # One a stage makes, or not written yet, is checked when it's locked
-        if not os.path.isfile(path) or has_metadata(path):
-            return
-        raise ValueError(
-            f"Stage '{self.name}' has no environment and {self.script_path} "
-            "declares none in a '# /// script' block; add one, or set the "
-            "stage's environment"
+        script_path = posixpath.normpath(
+            posixpath.join(self.wdir or "", self.script_path)
+        )
+        if is_output(script_path):
+            raise ValueError(
+                f"Stage '{self.name}' runs {script_path}, which another "
+                "stage makes, so it can't use the environment the script "
+                "declares; set the stage's environment"
+            )
+        self._python_version_path = get_python_version_path(
+            script_path, project_dir=project_dir or ""
         )
 
 
@@ -3912,13 +3914,23 @@ class Pipeline(Model):
                     )
                 continue
             if (
-                env_name not in ("_system", INLINE_ENVIRONMENT)
+                env_name not in ("_system", INLINE_ENVIRONMENT_NAME)
                 and env_name not in environments
             ):
                 raise ValueError(
                     f"Stage '{stage.name}' has outer environment "
                     f"'{stage.outer_environment}' which is not defined in "
                     "environments"
+                )
+            if (
+                env_name == INLINE_ENVIRONMENT_NAME
+                and stage.scheduler is not None
+            ):
+                raise ValueError(
+                    f"Stage '{stage.name}' sets 'scheduler' options but runs "
+                    "in the environment its script declares, which nothing "
+                    "submits as a job; run it in a 'slurm' or 'pbs' "
+                    "environment"
                 )
             env = environments.get(stage.outer_environment, {})
             kind = env.get("kind")
@@ -3948,7 +3960,7 @@ class Pipeline(Model):
             ):
                 if env_name == "_system":
                     described = "the built-in '_system' environment"
-                elif env_name == INLINE_ENVIRONMENT:
+                elif env_name == INLINE_ENVIRONMENT_NAME:
                     described = "the environment its script declares"
                 else:
                     described = f"environment '{env_name}' of kind '{kind}'"

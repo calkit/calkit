@@ -361,6 +361,12 @@ def test_github_actions_workflow(tmp_path):
     other = "      - uses: actions/checkout@v4\n# calkit/run-action@v2\n"
     assert not calkit.resources.uses_run_action(other)
     assert calkit.resources.set_action_ref(other, version="1.2.3") == other
+    # Calkit's other actions are repinned too, but don't run the pipeline
+    check = "      - uses: calkit/calkit/actions/check@v0.1.0\n"
+    assert not calkit.resources.uses_run_action(check)
+    assert calkit.resources.set_action_ref(
+        check, version="1.2.3"
+    ) == check.replace("v0.1.0", "v1.2.3")
     # Whether a project's workflow is still the example is what decides if
     # it gets replaced wholesale or only repinned, so the pin itself, and
     # line endings Git may have translated, can't affect that
@@ -430,10 +436,29 @@ def test_github_actions_workflow(tmp_path):
     (workflows_dir / "huge.yml").write_text(
         pinned + "#" * calkit.resources.MAX_WORKFLOW_BYTES
     )
+    (workflows_dir / "check.yml").write_text(check)
     assert calkit.resources.find_run_workflows(str(tmp_path)) == [
         ("on-demand.yml", on_demand),
         ("run.yaml", pinned),
     ]
+    # Workflows that use any of Calkit's actions are found for repinning
+    assert [f for f, _ in calkit.resources.find_workflows(str(tmp_path))] == [
+        "check.yml",
+        "on-demand.yml",
+        "run.yaml",
+    ]
+    # The one that runs the pipeline is the one Calkit writes, else the
+    # only one, since another might, e.g., deploy a website
+    for fnames, pipeline_fname in [
+        ([], None),
+        (["pages.yml"], "pages.yml"),
+        (["pages.yml", "run-calkit.yml"], "run-calkit.yml"),
+        (["pages.yml", "run.yml"], None),
+    ]:
+        assert (
+            calkit.resources.get_pipeline_workflow_fname(fnames)
+            == pipeline_fname
+        ), fnames
     # A workflows folder that's a symlink out of the project is skipped too
     other_project = tmp_path / "other"
     (other_project / ".github").mkdir(parents=True)

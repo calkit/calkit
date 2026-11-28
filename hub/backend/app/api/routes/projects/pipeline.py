@@ -1186,11 +1186,9 @@ def get_project_pipeline_runs(
         read_only=True,
     )
     found = calkit.resources.find_run_workflows(str(repo.working_dir))
-    startable = [
-        fname
-        for fname, txt in found
-        if calkit.resources.can_start_workflow(txt)
-    ]
+    pipeline_fname = calkit.resources.get_pipeline_workflow_fname(
+        [f for f, _ in found]
+    )
     token = _github_token_for_repo(
         session,
         current_user,
@@ -1220,9 +1218,12 @@ def get_project_pipeline_runs(
     ).all()
     if token is None:
         reason: str | None = "No GitHub access to its runs"
-    elif found and not startable:
-        names = ", ".join(fname for fname, _ in found)
-        reason = f"No workflow_dispatch trigger in {names}"
+    elif found and pipeline_fname is None:
+        reason = _get_ambiguous_workflows_reason(found)
+    elif pipeline_fname and not calkit.resources.can_start_workflow(
+        dict(found)[pipeline_fname]
+    ):
+        reason = f"No workflow_dispatch trigger in {pipeline_fname}"
     else:
         # Starting one without a workflow adds it first
         reason = None
@@ -1232,16 +1233,24 @@ def get_project_pipeline_runs(
             for row in rows
         ],
         total=total,
-        github_workflow=(
-            startable[0] if startable else found[0][0] if found else None
-        ),
+        # Any, if it's ambiguous, so the project isn't taken as having none
+        github_workflow=pipeline_fname or (found[0][0] if found else None),
         can_start=reason is None,
         cannot_start_reason=reason,
     )
 
 
+def _get_ambiguous_workflows_reason(found: list[tuple[str, str]]) -> str:
+    names = ", ".join(fname for fname, _ in found)
+    return (
+        f"Several workflows run Calkit action: {names}; "
+        f"rename the pipeline's {calkit.resources.RUN_WORKFLOW_FNAME}"
+    )
+
+
 class GitHubActionsRunOptions(BaseModel):
-    # By file name, else the first of the project's that can be started
+    # By file name, else the one that runs the pipeline: the one Calkit
+    # writes, else the only one that runs the Calkit action
     workflow: str | None = None
     # Its workflow_dispatch inputs
     inputs: dict[str, str] = {}
@@ -1293,7 +1302,9 @@ def post_project_pipeline_run(
     branch = get_default_branch(repo)
     found = calkit.resources.find_run_workflows(wdir)
     if not found:
-        rel_path = os.path.join(".github", "workflows", "run-calkit.yml")
+        rel_path = os.path.join(
+            ".github", "workflows", calkit.resources.RUN_WORKFLOW_FNAME
+        )
         if not _inside(wdir, os.path.join(wdir, os.path.dirname(rel_path))):
             raise HTTPException(
                 409, ".github/workflows links out of the project"
@@ -1361,21 +1372,18 @@ def post_project_pipeline_run(
             )
         record_project_update(project, repo, session)
         found = calkit.resources.find_run_workflows(wdir)
-    startable = [
-        fname
-        for fname, txt in found
-        if calkit.resources.can_start_workflow(txt)
-    ]
     names = ", ".join(fname for fname, _ in found)
-    if req.github_actions.workflow is not None:
-        if req.github_actions.workflow not in [f for f, _ in found]:
-            raise HTTPException(
-                422, f"{req.github_actions.workflow} isn't one of {names}"
-            )
-        startable = [f for f in startable if f == req.github_actions.workflow]
-    if not startable:
-        raise HTTPException(409, f"No workflow_dispatch trigger in {names}")
-    fname = startable[0]
+    fname = req.github_actions.workflow
+    if fname is None:
+        fname = calkit.resources.get_pipeline_workflow_fname(
+            [f for f, _ in found]
+        )
+        if fname is None:
+            raise HTTPException(409, _get_ambiguous_workflows_reason(found))
+    elif fname not in [f for f, _ in found]:
+        raise HTTPException(422, f"{fname} isn't one of {names}")
+    if not calkit.resources.can_start_workflow(dict(found)[fname]):
+        raise HTTPException(409, f"No workflow_dispatch trigger in {fname}")
     try:
         resp = requests.post(
             f"https://api.github.com/repos/{project.github_repo}"

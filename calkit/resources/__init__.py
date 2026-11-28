@@ -25,19 +25,26 @@ VSCODE_FNAMES = ["settings.json", "extensions.json"]
 GITHUB_ACTIONS_FNAME = "example.yml"
 # Bigger than any workflow, so a file this size isn't read as one
 MAX_WORKFLOW_BYTES = 1_000_000
-ACTION_PATH = "calkit/calkit/actions/run"
+ACTIONS_PATH = "calkit/calkit/actions"
+ACTION_PATH = f"{ACTIONS_PATH}/run"
 # The ref the example workflow ships with, which gets pinned to a released
 # version of Calkit when there is one to pin to
 ACTION_REF = f"{ACTION_PATH}@main"
-# The action used to live in its own repo, and workflows written before it
-# moved still point there
+# The run action used to live in its own repo, and workflows written before
+# it moved still point there
 LEGACY_ACTION_PATHS = ["calkit/run-action"]
+# Any of Calkit's actions, e.g., run or check, which share its release tags
 ACTION_USES_PATTERN = re.compile(
     r"(?m)^(?P<prefix>\s*(?:-\s+)?uses:\s*)(?P<quote>['\"]?)"
-    + r"(?:"
-    + "|".join(re.escape(p) for p in [ACTION_PATH] + LEGACY_ACTION_PATHS)
+    + r"(?P<path>"
+    + "|".join(
+        [re.escape(ACTIONS_PATH) + r"/[\w-]+"]
+        + [re.escape(p) for p in LEGACY_ACTION_PATHS]
+    )
     + r")@[^\s'\"#]+(?P=quote)"
 )
+# The workflow Calkit writes to run the pipeline
+RUN_WORKFLOW_FNAME = "run-calkit.yml"
 
 
 def get_dir() -> str:
@@ -287,23 +294,29 @@ def get_action_ref(version: str | None = None) -> str:
 
 def uses_run_action(workflow_txt: str) -> bool:
     """Return whether a workflow runs the Calkit action, at any ref."""
-    return ACTION_USES_PATTERN.search(workflow_txt) is not None
+    return any(
+        m.group("path") in [ACTION_PATH] + LEGACY_ACTION_PATHS
+        for m in ACTION_USES_PATTERN.finditer(workflow_txt)
+    )
 
 
 def set_action_ref(workflow_txt: str, version: str | None = None) -> str:
     """Point a workflow's Calkit action refs at a version of Calkit.
 
     Only the ``uses`` lines are touched, so a project that has customized
-    its workflow keeps those customizations. Refs to the action's previous
-    home get migrated in the process.
+    its workflow keeps those customizations. Refs to the run action's
+    previous home get migrated in the process.
     """
-    ref = get_action_ref(version)
-    return ACTION_USES_PATTERN.sub(
-        lambda m: (
-            m.group("prefix") + m.group("quote") + ref + m.group("quote")
-        ),
-        workflow_txt,
-    )
+
+    def replace(m: re.Match[str]) -> str:
+        path = m.group("path")
+        if path in LEGACY_ACTION_PATHS:
+            path = ACTION_PATH
+        quote = m.group("quote")
+        return f"{m.group('prefix')}{quote}{path}@{ref}{quote}"
+
+    _, _, ref = get_action_ref(version).partition("@")
+    return ACTION_USES_PATTERN.sub(replace, workflow_txt)
 
 
 def set_workflow_triggers(
@@ -354,9 +367,9 @@ def render_github_actions_workflow(
     return txt
 
 
-def find_run_workflows(wdir: str | None = None) -> list[tuple[str, str]]:
-    """Return the names and text of a project's workflows that run the
-    Calkit action.
+def find_workflows(wdir: str | None = None) -> list[tuple[str, str]]:
+    """Return the names and text of a project's workflows that use any of
+    Calkit's actions.
 
     Symlinks, anything that isn't a regular file, and files too big to be
     a workflow are skipped, since the hub reads these from repos anyone can
@@ -378,9 +391,32 @@ def find_run_workflows(wdir: str | None = None) -> list[tuple[str, str]]:
             continue
         with open(fpath, encoding="utf-8", errors="replace") as f:
             txt = f.read()
-        if uses_run_action(txt):
+        if ACTION_USES_PATTERN.search(txt):
             found.append((fname, txt))
     return found
+
+
+def find_run_workflows(wdir: str | None = None) -> list[tuple[str, str]]:
+    """Return the names and text of a project's workflows that run the
+    Calkit action.
+    """
+    return [
+        (f, txt) for f, txt in find_workflows(wdir) if uses_run_action(txt)
+    ]
+
+
+def get_pipeline_workflow_fname(fnames: list[str]) -> str | None:
+    """Return which of a project's workflows that run the Calkit action is
+    the one that runs its pipeline, or None if that's ambiguous.
+
+    That's the one Calkit writes, else the only one, since another might,
+    e.g., run the action to build and deploy a website.
+    """
+    if RUN_WORKFLOW_FNAME in fnames:
+        return RUN_WORKFLOW_FNAME
+    if len(fnames) == 1:
+        return fnames[0]
+    return None
 
 
 def can_start_workflow(workflow_txt: str) -> bool:
@@ -412,9 +448,7 @@ def is_default_github_actions_workflow(workflow_txt: str) -> bool:
     """
 
     def normalize(txt: str) -> str:
-        txt = ACTION_USES_PATTERN.sub(
-            lambda m: m.group("prefix") + ACTION_REF, txt
-        )
+        txt = set_action_ref(txt, version="main")
         return txt.replace("\r\n", "\n").strip()
 
     return normalize(workflow_txt) == normalize(

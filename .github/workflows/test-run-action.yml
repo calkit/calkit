@@ -79,6 +79,8 @@ jobs:
           save: "false"
           pull_dvc: "false"
           cache_dvc: "false"
+          # Off by default, so turned on to exercise it
+          cache_envs: "true"
           run_args: ${{ matrix.example.target }}
 
       - name: Verify expected tooling was installed

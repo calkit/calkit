@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -98,6 +99,57 @@ def test_describe_environments(tmp_dir):
     )
     assert proc.returncode != 0
     assert "not found" in proc.stderr
+
+
+def test_describe_env_cache(tmp_dir: Path) -> None:
+    ck_info = {
+        "environments": {
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+            "img": {"kind": "docker", "image": "alpine"},
+        },
+        "pipeline": {
+            "stages": {
+                "a": {
+                    "kind": "shell-command",
+                    "command": "echo",
+                    "environment": "py",
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    # The pipeline's environments by default
+    for cmd in ["environment-cache", "env-cache"]:
+        out = subprocess.check_output(
+            ["calkit", "describe", cmd, "--json"], text=True
+        )
+        spec = json.loads(out)
+        assert set(spec["environments"]) == {"py"}
+        assert spec["key"].startswith("calkit-envs-")
+        assert os.path.abspath(".venv") in spec["paths"]
+    # Or those named
+    out = subprocess.check_output(
+        ["calkit", "describe", "env-cache", "-n", "img", "--json"], text=True
+    )
+    spec = json.loads(out)
+    assert spec["key"] is None
+    assert spec["environments"]["img"]["cached"] is False
+    out = subprocess.check_output(
+        ["calkit", "describe", "env-cache"], text=True
+    )
+    assert "key: calkit-envs-" in out
+    assert f"path: {os.path.abspath('.venv')}" in out
+    assert "py:\n    kind: uv-venv" in out
+    proc = subprocess.run(
+        ["calkit", "describe", "env-cache", "-n", "nope"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "not defined" in proc.stderr
 
 
 def test_describe_subprojects(tmp_dir):

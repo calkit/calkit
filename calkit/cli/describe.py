@@ -109,6 +109,47 @@ def describe_envs(
         _echo_description(desc, indent="    ")
 
 
+@describe_app.command(name="environment-cache|env-cache")
+def describe_env_cache(
+    names: Annotated[
+        list[str],
+        typer.Option(
+            "--name",
+            "-n",
+            help="Environment to include. Repeat for more. Defaults to the "
+            "ones the pipeline uses.",
+        ),
+    ] = [],
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """Describe what to cache to restore environments, e.g., in CI.
+
+    Prints the paths to save and a key that changes when an environment's
+    definition, spec, lock, or inputs do, or the platform or those absolute
+    paths. Restore only a cache with exactly this key, since one built from
+    an older lock can keep packages the new one dropped.
+    """
+    from calkit.environments import get_env_cache_spec
+
+    try:
+        spec = get_env_cache_spec(env_names=names or None)
+    except ValueError as e:
+        raise_error(str(e))
+    if json_output:
+        echo_json(spec)
+        return
+    _echo_description({"key": spec["key"]})
+    for path in spec["paths"]:
+        typer.echo(f"path: {path}")
+    for env_name, desc in spec["environments"].items():
+        typer.echo(env_name + ":")
+        _echo_description(
+            {k: v for k, v in desc.items() if k != "paths"}, indent="    "
+        )
+
+
 @describe_app.command(name="subprojects")
 def describe_subprojects(
     json_output: Annotated[

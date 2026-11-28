@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 from datetime import timedelta
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -2200,6 +2201,140 @@ def test_get_cached_env_states(tmp_dir):
     )
     assert set(status.environment_states) == {"py", "other"}
     assert status.environment_checks == {}
+
+
+def test_get_env_prefix(tmp_dir: Path) -> None:
+    with open("environment.yml", "w") as f:
+        f.write("name: main\nprefix: .conda-envs/spec\ndependencies: []\n")
+    with open("named.yml", "w") as f:
+        f.write("name: named\ndependencies: []\n")
+    envs: dict = {
+        "conda": {"kind": "conda", "path": "environment.yml"},
+        "pinned": {
+            "kind": "conda",
+            "path": "environment.yml",
+            "prefix": ".conda-envs/pinned",
+        },
+        "named": {"kind": "conda", "path": "named.yml"},
+        "uv": {"kind": "uv", "path": os.path.join("sub", "pyproject.toml")},
+        "venv": {"kind": "uv-venv", "path": "requirements.txt"},
+        "pixi": {"kind": "pixi", "path": "pixi.toml", "name": "gpu"},
+        "img": {"kind": "docker", "image": "alpine"},
+    }
+    get_prefix = calkit.environments.get_env_prefix
+    # A conda env's own prefix wins over its spec's
+    assert get_prefix("conda", envs) == ".conda-envs/spec"
+    assert get_prefix("pinned", envs) == ".conda-envs/pinned"
+    # One kept by name has none of its own
+    assert get_prefix("named", envs) is None
+    assert get_prefix("uv", envs) == os.path.join("sub", ".venv")
+    assert get_prefix("venv", envs) == ".venv"
+    assert get_prefix("pixi", envs) == os.path.join(".pixi", "envs", "gpu")
+    assert get_prefix("img", envs) is None
+    with pytest.raises(ValueError, match="has no 'path'"):
+        get_prefix("nopath", {"nopath": {"kind": "venv"}})
+
+
+def test_get_env_cache_spec(tmp_dir: Path) -> None:
+    envs: dict = {
+        "main": {
+            "kind": "conda",
+            "path": "environment.yml",
+            "prefix": ".conda-envs/main",
+        },
+        "named": {"kind": "conda", "path": "named.yml"},
+        "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        "img": {"kind": "docker", "image": "alpine"},
+        "unused": {"kind": "uv", "path": "pyproject.toml"},
+    }
+    stages = {
+        name: {"kind": "shell-command", "command": "echo", "environment": name}
+        for name in ["main", "named", "py", "img"]
+    }
+    ck_info = {"environments": envs, "pipeline": {"stages": stages}}
+
+    def write_ck_info() -> None:
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+
+    write_ck_info()
+    with open("environment.yml", "w") as f:
+        f.write("name: main\ndependencies:\n  - python\n")
+    with open("named.yml", "w") as f:
+        f.write("name: named\ndependencies:\n  - python\n")
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    get_spec = calkit.environments.get_env_cache_spec
+    # Without conda here, a named conda env's location isn't known
+    with mock.patch("calkit.conda.find_conda_exe", return_value=None):
+        spec = get_spec()
+    descs = spec["environments"]
+    assert set(descs) == {"main", "named", "py", "img"}
+    assert not descs["img"]["cached"] and "docker" in descs["img"]["reason"]
+    assert not descs["named"]["cached"]
+    assert descs["named"]["reason"] == "conda not found"
+    prefix = os.path.abspath(os.path.join(".conda-envs", "main"))
+    assert descs["main"]["prefix"] == prefix
+    assert descs["main"]["paths"] == [prefix]
+    # Nested, since the uv env claims .venv, as when checking it
+    assert descs["py"]["prefix"] == os.path.abspath(
+        os.path.join(".calkit", "envs", "py", ".venv")
+    )
+    assert prefix in spec["paths"]
+    assert spec["key"].startswith("calkit-envs-")
+    # With conda, a named env is where conda creates it
+    conda_root = os.path.abspath("/conda")
+    conda_info = json.dumps({"root_prefix": conda_root})
+    with (
+        mock.patch("calkit.conda.find_conda_exe", return_value="conda"),
+        mock.patch(
+            "calkit.environments.core.subprocess.check_output",
+            side_effect=lambda cmd, **kw: (
+                conda_info if cmd[0] == "conda" else "/uv/python\n"
+            ),
+        ),
+    ):
+        named = get_spec(env_names=["named", "py"])
+    assert named["environments"]["named"]["prefix"] == os.path.join(
+        conda_root, "envs", "named"
+    )
+    # A uv venv's interpreter, which uv may have installed, is cached too
+    assert named["environments"]["py"]["paths"][1] == os.path.abspath(
+        "/uv/python"
+    )
+    # The same inputs give the same key
+    spec = get_spec(env_names=["main"])
+    assert get_spec(env_names=["main"])["key"] == spec["key"]
+    # A new lock changes it
+    lock = calkit.environments.get_env_lock_fpath(
+        env_name="main", env=envs["main"]
+    )
+    assert lock is not None
+    os.makedirs(os.path.dirname(lock), exist_ok=True)
+    with open(lock, "w") as f:
+        f.write("locked\n")
+    relocked = get_spec(env_names=["main"])
+    assert relocked["key"] != spec["key"]
+    # So do its spec and definition
+    with open("environment.yml", "w") as f:
+        f.write("name: main\ndependencies:\n  - python\n  - numpy\n")
+    respecced = get_spec(env_names=["main"])
+    assert respecced["key"] not in (spec["key"], relocked["key"])
+    envs["main"]["description"] = "Main."
+    write_ck_info()
+    redefined = get_spec(env_names=["main"])
+    assert redefined["key"] != respecced["key"]
+    # And where it's kept, since conda envs aren't relocatable
+    envs["main"]["prefix"] = ".conda-envs/other"
+    write_ck_info()
+    assert get_spec(env_names=["main"])["key"] != redefined["key"]
+    # A cache of other environments never matches
+    assert get_spec(env_names=["py"])["key"] != redefined["key"]
+    # Nothing to cache gives no key
+    nothing = get_spec(env_names=["img"])
+    assert nothing["key"] is None and nothing["paths"] == []
+    with pytest.raises(ValueError, match="not defined"):
+        get_spec(env_names=["nope"])
 
 
 def test_env_spec_hashes(tmp_dir):

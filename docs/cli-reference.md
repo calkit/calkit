@@ -2758,14 +2758,15 @@ Options:
 
 Describe things.
 
-| Command                                                             | Description                                                        |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
-| [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
-| [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
-| [`subprojects`](#subcommand-describe-desc-subprojects)              | Describe subprojects, including nested ones.                       |
-| [`storage`](#subcommand-describe-desc-storage)                      | Describe project's Git and DVC storage.                            |
-| [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
+| Command                                                                                 | Description                                                        |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [`system`](#subcommand-describe-desc-system)                                            | Describe the system.                                               |
+| [`environment\|env`](#subcommand-describe-desc-environment-env)                         | Describe a single environment, including spec and lock file paths. |
+| [`environments\|envs`](#subcommand-describe-desc-environments-envs)                     | Describe all environments, including spec and lock file paths.     |
+| [`environment-cache\|env-cache`](#subcommand-describe-desc-environment-cache-env-cache) | Describe what to cache to restore environments, e.g., in CI.       |
+| [`subprojects`](#subcommand-describe-desc-subprojects)                                  | Describe subprojects, including nested ones.                       |
+| [`storage`](#subcommand-describe-desc-storage)                                          | Describe project's Git and DVC storage.                            |
+| [`schema`](#subcommand-describe-desc-schema)                                            | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2822,6 +2823,27 @@ Options:
 | Option   | Type    | Required | Default | Description            |
 | -------- | ------- | -------- | ------- | ---------------------- |
 | `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-environment-cache-env-cache"></a>
+
+#### `calkit describe|desc environment-cache|env-cache`
+
+Describe what to cache to restore environments, e.g., in CI.
+
+Prints the paths to save and a key that changes when an environment's definition, spec, lock, or inputs do, or the platform or those absolute paths. Restore only a cache with exactly this key, since one built from an older lock can keep packages the new one dropped.
+
+Usage:
+
+```text
+calkit describe|desc environment-cache|env-cache [OPTIONS]
+```
+
+Options:
+
+| Option         | Type      | Required | Default | Description                                                                      |
+| -------------- | --------- | -------- | ------- | -------------------------------------------------------------------------------- |
+| `--name`, `-n` | list[str] | no       |         | Environment to include. Repeat for more. Defaults to the ones the pipeline uses. |
+| `--json`       | boolean   | no       | False   | Output result as JSON.                                                           |
 
 <a id="subcommand-describe-desc-subprojects"></a>
 

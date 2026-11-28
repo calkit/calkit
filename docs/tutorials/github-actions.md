@@ -82,3 +82,63 @@ just want to check that the pipeline can run without errors.
 See the
 [documentation](https://github.com/calkit/calkit/tree/main/actions/run)
 for all available options.
+
+<!-- TODO: needs human review -->
+
+## Caching environments
+
+The action can cache the environments the pipeline uses, e.g., conda
+environments and virtual environments, keyed by their spec and lock files,
+so a run whose environments haven't changed restores them instead of
+building them.
+After a lock changes, they're built from scratch, then cached again.
+This is off by default, and turned on with `cache_envs: "true"`.
+It only pays off when building the environments is slow, e.g., conda
+environments with large pip packages like PyTorch, and the cache shares the
+repository's
+[10 GB of cache storage](https://docs.github.com/en/actions/reference/dependency-caching-reference#usage-limits-and-eviction-policy)
+with others, e.g., for DVC and uv, so it can be evicted before it's used.
+`calkit describe env-cache` shows what's cached and the key.
+This makes it cheap to use the project's own environment in other
+workflows, e.g., to render a website with the version of Quarto the
+environment pins, rather than installing one separately,
+which may not be the version used by authors and the pipeline.
+For example, a workflow that publishes a Quarto site to GitHub Pages:
+
+```yaml
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # Restores the environments, building them only if what they're
+      # built from changed, and pulls or runs whatever the site shows
+      - name: Run pipeline
+        uses: calkit/calkit/actions/run@main
+        with:
+          save: "false"
+          cache_envs: "true"
+      - name: Render site
+        run: calkit xenv -n main -- quarto render
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
+```

@@ -22,6 +22,16 @@ inputs:
     description: Whether or not to cache DVC data.
     required: false
     default: "true"
+  cache_envs:
+    description: >-
+      Whether to cache the environments the pipeline uses, e.g., conda
+      environments and virtual environments, keyed by what they're built
+      from, so a run whose environments haven't changed restores them
+      instead of building them. Off by default, since it only pays off when
+      building them is slow, and the cache counts toward the repository's
+      Actions cache limit.
+    required: false
+    default: "false"
   run_args:
     description: Arguments passed to calkit run command.
     required: false
@@ -402,6 +412,78 @@ runs:
       env:
         CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
         CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+
+    # After pulling, since an environment's inputs can be DVC-tracked. The
+    # key changes with any environment's definition, spec, lock, or inputs,
+    # and with the absolute paths cached, since, e.g., conda environments
+    # aren't relocatable. An older Calkit without the command just builds
+    # them.
+    - name: Describe environments to cache
+      if: ${{ inputs.cache_envs == 'true' }}
+      id: env-cache
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! spec=$(calkit describe env-cache --json); then
+          echo "::warning::Couldn't describe environments to cache, so they'll be built"
+          exit 0
+        fi
+        key=$(jq -r '.key // empty' <<<"$spec")
+        if [ -z "$key" ]; then
+          echo "No environments to cache"
+          exit 0
+        fi
+        {
+          echo "key=$key"
+          echo "names=$(jq -r '[.environments | to_entries[] | select(.value.cached) | .key] | join(" ")' <<<"$spec")"
+          echo "paths<<CALKIT_ENV_CACHE_PATHS"
+          jq -r '.paths[]' <<<"$spec"
+          echo "CALKIT_ENV_CACHE_PATHS"
+        } >> "$GITHUB_OUTPUT"
+
+    # Only an exact match, since checking an environment built from an
+    # older lock doesn't always remove what the new one dropped, so it could
+    # pass for one built fresh
+    - name: Restore environments
+      if: ${{ steps.env-cache.outputs.key }}
+      id: env-cache-restore
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.env-cache.outputs.paths }}
+        key: ${{ steps.env-cache.outputs.key }}
+
+    # Built and saved before any stage runs, so nothing a stage installs
+    # into one is saved with it. A failed check isn't fatal here, since the
+    # pipeline's own check reports it.
+    - name: Build environments to cache
+      if: >-
+        ${{ steps.env-cache.outputs.key
+        && steps.env-cache-restore.outputs.cache-hit != 'true' }}
+      id: env-cache-build
+      shell: bash
+      env:
+        NAMES: ${{ steps.env-cache.outputs.names }}
+        CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+        CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+      run: |
+        set -uo pipefail
+        built=true
+        for name in $NAMES; do
+          if ! calkit check env -n "$name"; then
+            built=false
+          fi
+        done
+        if [ "$built" != true ]; then
+          echo "::notice::Not caching environments, since not all of them could be built"
+        fi
+        echo "built=$built" >> "$GITHUB_OUTPUT"
+
+    - name: Save environments
+      if: ${{ steps.env-cache-build.outputs.built == 'true' }}
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ steps.env-cache.outputs.paths }}
+        key: ${{ steps.env-cache.outputs.key }}
 
     - run: calkit run ${{ inputs.run_args }}
       shell: bash

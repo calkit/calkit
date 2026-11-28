@@ -2176,7 +2176,7 @@ class MystStage(Stage):
     Its outputs are what ``myst build`` writes with its arguments, e.g.,
     ``_build/site`` for a site, and its exports where ``myst.yml`` or a
     document's front matter puts them, or ``_build/exports``, stored as
-    ``build_storage`` says, unless ``outputs`` lists others.
+    ``output_storage`` says, unless ``outputs`` lists others.
     """
 
     kind: Literal["myst"] = "myst"
@@ -2189,7 +2189,7 @@ class MystStage(Stage):
         description="Extra arguments passed to 'myst build', e.g., "
         "['--site'].",
     )
-    build_storage: Literal["git", "dvc"] | None = Field(
+    output_storage: Literal["git", "dvc"] | None = Field(
         default="dvc",
         description="Where to store what it builds, unless outputs lists "
         "what it builds.",
@@ -2336,7 +2336,7 @@ class MystStage(Stage):
     def dvc_outs(self) -> list[str | dict]:
         built: list[str | dict] = [
             self.path_from_wdir(p)
-            if self.build_storage == "dvc"
+            if self.output_storage == "dvc"
             else {self.path_from_wdir(p): {"cache": False}}
             for p in self._built_paths
         ]

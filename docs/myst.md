@@ -46,10 +46,34 @@ or with arguments for `myst build` in `args`, e.g., `[--html]` or
 `[--pdf]`, what those build,
 with exports where `myst.yml` or a document's front matter puts them,
 or in `_build/exports`.
-They're stored with DVC, or in Git with `build_storage: git`.
+They're stored with DVC, or in Git with `output_storage: git`.
 Listing `outputs` replaces these.
 `calkit doc build site` with no `-e` builds it as the stage does,
 in its environment and with its arguments.
+
+<!-- TODO: needs human review -->
+
+For a PDF, MyST uses Typst, with `--typst` and a `typst` export,
+or LaTeX, with `--pdf` and a `pdf` export, which the environment has to
+provide too.
+Typst is a single program, e.g., `typst` in a Conda or Pixi environment,
+so it's the simpler choice unless you need the LaTeX itself,
+e.g., for a journal's template.
+For LaTeX, compose a [TeX Live environment](environments.md#tex-live)
+into the one with MyST with `with`, as for
+[TeX from Python](environments.md#using-tex-from-python-eg-for-matplotlib).
+An export without an `output` is written to `_build/exports`,
+which is then the stage's output, along with the files the PDF is made
+from, e.g., the `.typ` or `.tex`.
+To keep only the PDF, e.g., in Git, give the export an `output`:
+
+```yaml
+---
+exports:
+  - format: typst
+    output: paper.pdf
+---
+```
 
 <!-- TODO: needs human review -->
 

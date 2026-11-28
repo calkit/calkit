@@ -728,13 +728,13 @@ listed, and Calkit's MyST plugin is written then too.
 Its outputs are what `myst build` writes with its arguments, e.g.,
 `_build/site` for a site, and its exports where `myst.yml` or a
 document's front matter puts them, or `_build/exports`, stored as
-`build_storage` says, unless `outputs` lists others.
+`output_storage` says, unless `outputs` lists others.
 
 | Kind-specific parameter | Type                          | Required | Default | Description                                                                          |
 | ----------------------- | ----------------------------- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `target_path`           | str                           | yes      |         | Path to the MyST project's folder, its myst.yml, or a document in it to build alone. |
 | `args`                  | list[str]                     | no       |         | Extra arguments passed to 'myst build', e.g., ['--site'].                            |
-| `build_storage`         | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store what it builds, unless outputs lists what it builds.                  |
+| `output_storage`        | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store what it builds, unless outputs lists what it builds.                  |
 
 ### `procedure`
 

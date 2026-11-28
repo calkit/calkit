@@ -923,23 +923,31 @@ def get_build_outputs(
     # Exports, each from the file declaring it, and the project's only
     # when no document is given
     if formats or build_all or files:
-        declared = (
-            [] if files else [(e, myst_dir) for e in get_exports(project)]
-        )
-        paths = [
-            posixpath.normpath(posixpath.join(myst_dir, f)) for f in files
-        ] or find_documents(myst_dir, wdir=wdir)
-        for path in paths:
-            front_matter = get_front_matter(path)
-            declared += [
-                (e, posixpath.dirname(path)) for e in get_exports(front_matter)
-            ]
-        # A document given is exported in a format given, declared or not
-        to_default = bool(files and formats) or "--force" in flags
-        for export, base in declared:
+
+        def is_wanted(export: dict) -> bool:
             fmt = str(export.get("format") or "").split("+")[0]
-            if formats and not build_all and fmt not in formats:
-                continue
+            return build_all or not formats or fmt in formats
+
+        given = [
+            posixpath.normpath(posixpath.join(myst_dir, f)) for f in files
+        ]
+        declared = (
+            []
+            if given
+            else [(e, myst_dir) for e in get_exports(project) if is_wanted(e)]
+        )
+        to_default = "--force" in flags
+        for path in given or find_documents(myst_dir, wdir=wdir):
+            exports = [
+                e for e in get_exports(get_front_matter(path)) if is_wanted(e)
+            ]
+            declared += [(e, posixpath.dirname(path)) for e in exports]
+            # A document given is exported in each format given, declared
+            # or not
+            fmts = {str(e.get("format") or "").split("+")[0] for e in exports}
+            if path in given and formats - fmts:
+                to_default = True
+        for export, base in declared:
             output = export.get("output")
             if isinstance(output, str) and output:
                 outputs.append(

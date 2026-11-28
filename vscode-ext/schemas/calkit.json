@@ -6121,7 +6121,7 @@
     },
     "MystStage": {
       "additionalProperties": false,
-      "description": "A stage that builds a MyST project, or one document in it.\n\nIts target is the project's folder, i.e., where its ``myst.yml`` is,\nthe ``myst.yml`` itself, or a document in the project, which builds\nonly that document's exports, as ``myst build`` does given a file.\nIt builds with ``calkit doc myst build``, which checks MyST comes from the\nstage's environment, or is a declared requirement, and works out the\nvalues its documents show and where what they show came from first.\nIts documents, their ``myst.yml``, and the files they show or include\nare found when the pipeline compiles, so they're inputs without being\nlisted, and Calkit's MyST plugin is written then too.\n\nIts outputs are what ``myst build`` writes with its arguments, e.g.,\n``_build/site`` for a site, and its exports where ``myst.yml`` or a\ndocument's front matter puts them, or ``_build/exports``, stored as\n``build_storage`` says, unless ``outputs`` lists others.",
+      "description": "A stage that builds a MyST project, or one document in it.\n\nIts target is the project's folder, i.e., where its ``myst.yml`` is,\nthe ``myst.yml`` itself, or a document in the project, which builds\nonly that document's exports, as ``myst build`` does given a file.\nIt builds with ``calkit doc myst build``, which checks MyST comes from the\nstage's environment, or is a declared requirement, and works out the\nvalues its documents show and where what they show came from first.\nIts documents, their ``myst.yml``, and the files they show or include\nare found when the pipeline compiles, so they're inputs without being\nlisted, and Calkit's MyST plugin is written then too.\n\nIts outputs are what ``myst build`` writes with its arguments, e.g.,\n``_build/site`` for a site, and its exports where ``myst.yml`` or a\ndocument's front matter puts them, or ``_build/exports``, stored as\n``output_storage`` says, unless ``outputs`` lists others.",
       "properties": {
         "always_run": {
           "default": false,
@@ -6137,23 +6137,6 @@
           },
           "title": "Args",
           "type": "array"
-        },
-        "build_storage": {
-          "anyOf": [
-            {
-              "enum": [
-                "git",
-                "dvc"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": "dvc",
-          "description": "Where to store what it builds, unless outputs lists what it builds.",
-          "title": "Build Storage"
         },
         "description": {
           "anyOf": [
@@ -6256,6 +6239,23 @@
           "default": null,
           "description": "The stage's name, which must match its key if set.",
           "title": "Name"
+        },
+        "output_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store what it builds, unless outputs lists what it builds.",
+          "title": "Output Storage"
         },
         "outputs": {
           "anyOf": [

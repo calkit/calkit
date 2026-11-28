@@ -245,6 +245,9 @@ def test_directives(tmp_path: Path) -> None:
         "---\nexports:\n  - format: pdf\n---\n# Hi\n"
     )
     (tmp_path / "book" / "two.md").write_text("# Two\n")
+    (tmp_path / "book" / "three.md").write_text(
+        "---\nexports:\n  - format: pdf\n    output: paper.pdf\n---\n"
+    )
     site, html = "book/_build/site", "book/_build/html"
     exports, project_md = "book/_build/exports", "book/out/project.md"
     for document, args, expected in [
@@ -252,11 +255,14 @@ def test_directives(tmp_path: Path) -> None:
         (None, ["--site", "--ci"], [site]),
         (None, ["--html"], [html]),
         (None, ["--md"], [project_md]),
-        (None, ["--pdf"], [exports]),
-        (None, ["--all"], [site, project_md, exports]),
+        (None, ["--pdf"], ["book/paper.pdf", exports]),
+        (None, ["--all"], [site, project_md, "book/paper.pdf", exports]),
         ("book/index.md", [], [exports]),
         ("book/two.md", [], []),
         ("book/two.md", ["--md"], [exports]),
+        ("book/index.md", ["--pdf"], [exports]),
+        ("book/three.md", ["--pdf"], ["book/paper.pdf"]),
+        ("book/three.md", ["--pdf", "--md"], ["book/paper.pdf", exports]),
     ]:
         assert (
             calkit.myst.get_build_outputs(

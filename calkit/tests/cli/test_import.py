@@ -1,28 +1,181 @@
 """Tests for ``calkit.cli.import_``."""
 
+import os
 import subprocess
+from contextlib import nullcontext
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 
-@pytest.mark.skip(reason="Automated requests to Zenodo can be flaky")
-def test_import_zenodo(tmp_dir, monkeypatch):
+def test_import_zenodo(tmp_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    import requests
+    from typer.testing import CliRunner
+
+    import calkit
+    from calkit.cli.main import app
+
+    runner = CliRunner()
+    contents = {"a.csv": b"a,b\n1,2\n", "b.txt": b"corrupted"}
+    # Fetched by its concept ID, which resolves to the latest version
+    record: dict = {
+        "id": 124,
+        "metadata": {"title": "Some data"},
+        "doi": "10.5281/zenodo.124",
+        "files": [
+            {
+                "key": "a.csv",
+                "checksum": "md5:"
+                + hashlib.md5(contents["a.csv"]).hexdigest(),
+                "links": {"self": "https://zenodo.example/a.csv"},
+            },
+            {
+                "key": "b.txt",
+                "checksum": "md5:" + hashlib.md5(b"original").hexdigest(),
+                "links": {"self": "https://zenodo.example/b.txt"},
+            },
+        ],
+    }
+    record_paths = []
+    download_kwargs = []
+
+    # Mock Zenodo's API and its file downloads
+    def get_record(path: str, **kwargs: Any) -> dict:
+        record_paths.append(path)
+        return record
+
+    def get_file(url: str, **kwargs: Any) -> nullcontext:
+        download_kwargs.append(kwargs)
+        if url.endswith("/down"):
+            raise requests.ConnectionError("Connection refused")
+        content = contents[url.rsplit("/", 1)[1]]
+        return nullcontext(
+            SimpleNamespace(
+                raise_for_status=lambda: None,
+                iter_content=lambda chunk_size: [content],
+            )
+        )
+
+    monkeypatch.setattr(calkit.invenio, "get", get_record)
+    monkeypatch.setattr(requests, "get", get_file)
     subprocess.run(["calkit", "init"], check=True)
-    # Temporarily disable dev mode so we can download a real record
-    monkeypatch.setenv("CALKIT_USE_PROD_FOR_TESTS", "1")
-    subprocess.run(
+    # Anything that isn't a Zenodo record is turned away
+    for src in ["https://example.com/records/123", "10.1000/xyz"]:
+        res = runner.invoke(app, ["import", "zenodo", src, "data/x"])
+        assert res.exit_code != 0
+        assert "Source must be a Zenodo" in res.output
+    # So is a destination outside the project
+    for dest in ["../outside", "/"]:
+        res = runner.invoke(
+            app, ["import", "zenodo", "10.5281/zenodo.1", dest]
+        )
+        assert res.exit_code != 0
+        assert "project" in res.output
+    assert not os.path.exists("../outside")
+    assert not record_paths
+    # Records are linked as /records/ now, and small files go in Git
+    res = runner.invoke(
+        app,
         [
-            "calkit",
             "import",
             "zenodo",
-            "https://doi.org/10.5281/zenodo.18038227",
-            "data/imported",
+            "https://zenodo.org/records/123",
+            "data/a",
+            "--name-like",
+            "*.csv",
             "--kind",
             "dataset",
         ],
-        check=True,
     )
-    # TODO: Test more about this
+    assert res.exit_code == 0, res.output
+    assert record_paths[-1] == "/records/123"
+    assert download_kwargs[-1]["timeout"]
+    with open("data/a/a.csv", "rb") as f:
+        assert f.read() == contents["a.csv"]
+    assert not os.path.exists("data/a/b.txt")
+    dataset = calkit.load_calkit_info()["datasets"][0]
+    assert dataset["imported_from"] == {"doi": "10.5281/zenodo.124"}
+    lock = calkit.provenance.read_import_locks()["data/a"]
+    assert lock["record_id"] == 124
+    assert lock["api_url"] == calkit.invenio.get_base_url("zenodo")
+    assert lock["storage"] == "git"
+    assert "data/a/a.csv" in calkit.git.get_repo().git.ls_files()
+    # A download that doesn't match Zenodo's checksum isn't kept, nor are
+    # the files before it, so the import can be run again
+    res = runner.invoke(
+        app,
+        ["import", "zenodo", "10.5281/zenodo.123", "data/b"],
+    )
+    assert res.exit_code != 0
+    assert "MD5" in res.output
+    assert not os.path.exists("data/b")
+    # Neither is anything from a failed request, and a folder that was
+    # already there is left empty
+    files = record["files"]
+    record["files"] = [
+        files[0],
+        {"key": "c.txt", "links": {"self": "https://zenodo.example/down"}},
+    ]
+    os.makedirs("data/e")
+    res = runner.invoke(
+        app, ["import", "zenodo", "10.5281/zenodo.1", "data/e"]
+    )
+    assert res.exit_code != 0
+    assert "Connection refused" in res.output
+    assert os.listdir("data/e") == []
+    # A file named to land outside the destination is refused before
+    # anything is downloaded
+    for key in ["../escape.txt", "/abs.txt", "..\\x.txt", "C:x.txt", "a//b"]:
+        record["files"] = [
+            files[0],
+            {"key": key, "links": {"self": "https://zenodo.example/a.csv"}},
+        ]
+        n_downloads = len(download_kwargs)
+        res = runner.invoke(
+            app, ["import", "zenodo", "10.5281/zenodo.1", "data/u"]
+        )
+        assert res.exit_code != 0, key
+        assert "Unsafe file name" in res.output
+        assert len(download_kwargs) == n_downloads
+        assert not os.path.exists("data/u")
+    assert not os.path.exists("data/escape.txt")
+    record["files"] = []
+    res = runner.invoke(
+        app, ["import", "zenodo", "10.5281/zenodo.1", "data/u"]
+    )
+    assert res.exit_code != 0
+    assert "no public files" in res.output
+    record["files"] = files
+    # Large enough downloads go in DVC, even with a trailing slash, and
+    # without committing, everything is still staged
+    monkeypatch.setattr(calkit, "DVC_SIZE_THRESH_BYTES", 0)
+    res = runner.invoke(
+        app,
+        [
+            "import",
+            "zenodo",
+            "https://doi.org/10.5281/zenodo.123",
+            "data/c/",
+            "--name-like",
+            "a.csv",
+            "--kind",
+            "dataset",
+            "--no-commit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert os.path.isfile("data/c.dvc")
+    repo = calkit.git.get_repo()
+    assert set(repo.git.diff("--staged", "--name-only").split()) == {
+        "data/c.dvc",
+        "data/.gitignore",
+        "calkit.yaml",
+        ".calkit/imports.json",
+    }
+    assert calkit.provenance.read_import_locks()["data/c"]["storage"] == "dvc"
 
 
 def test_import_and_update_a_path(tmp_dir):

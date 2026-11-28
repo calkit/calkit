@@ -245,6 +245,9 @@ def test_check_env_locks_every_platform(tmp_dir, conda_env_name):
             return f.read()
 
     assert spec_is_recorded()
+    # Which status reads to know the spec hasn't changed without checking
+    env = calkit.load_calkit_info()["environments"][ENV_NAME]
+    assert not envs.spec_changed_since_lock(ENV_NAME, env)
     # Other platforms are solved up front with the versions installed here,
     # so moving to one doesn't add a lock and invalidate every stage
     others = [f for f in os.listdir(lock_dir) if f != here + ".yml"]
@@ -306,12 +309,14 @@ def test_check_env_locks_every_platform(tmp_dir, conda_env_name):
             "idna",
         ]
     )
+    assert envs.spec_changed_since_lock(ENV_NAME, env)
     delete_env(conda_env_name)
     subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
     subprocess.check_call(
         [CONDA, "run", "-n", conda_env_name, "python", "-c", "import idna"]
     )
     assert spec_is_recorded()
+    assert not envs.spec_changed_since_lock(ENV_NAME, env)
     assert os.path.isfile(sibling)
     for fname in os.listdir(lock_dir):
         assert "idna" in read(os.path.join(lock_dir, fname))

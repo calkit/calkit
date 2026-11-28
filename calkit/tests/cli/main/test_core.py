@@ -1854,6 +1854,89 @@ def test_status(tmp_dir):
     assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
 
 
+def test_status_with_edited_env_spec(tmp_dir):
+    def get_pipeline_status(*args: str, cwd: str = ".") -> dict:
+        out = subprocess.check_output(
+            ["calkit", "status", "-c", "pipeline", "--json", *args], cwd=cwd
+        )
+        status: dict = json.loads(out)["pipeline"]
+        return status
+
+    def append(fpath: str, text: str) -> None:
+        # As written, since Git checks it out with LF, which DVC hashes
+        with open(fpath, "a", newline="") as f:
+            f.write(text)
+
+    subprocess.check_call(["calkit", "init"])
+    # As a project does, so a clone on Windows hashes its files the same,
+    # and what the stage writes is LF on every platform too
+    append(".gitattributes", "* text=auto eol=lf\n")
+    append("write.py", "open('out.txt', 'wb').write(b'hi\\n')\n")
+    ck_info = {
+        "environments": {
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "pipeline": {
+            "stages": {
+                "write": {
+                    "kind": "python-script",
+                    "script_path": "write.py",
+                    "environment": "py",
+                    "outputs": [{"path": "out.txt", "storage": "git"}],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("# Nothing yet\n")
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["calkit", "save", "-am", "Run"])
+    # A fresh clone, e.g., in CI, has no record of checking the env, but the
+    # spec it was locked from is committed
+    clone_path = os.path.abspath(os.path.join("..", "clone"))
+    subprocess.check_call(["git", "clone", "-q", ".", clone_path])
+    status = get_pipeline_status("--no-env-check", cwd=clone_path)
+    assert not status["is_stale"], status["stale_stages"]
+    assert status["environment_states"]["py"]["changed"] is None
+    # A comment isn't a change
+    append(os.path.join(clone_path, "requirements.txt"), "# Still nothing\n")
+    assert not get_pipeline_status("--no-env-check", cwd=clone_path)[
+        "is_stale"
+    ]
+    # Edited without rerunning, what uses the env is stale
+    append(os.path.join(clone_path, "requirements.txt"), "idna\n")
+    status = get_pipeline_status("--no-env-check", cwd=clone_path)
+    assert status["is_stale"]
+    assert status["stale_stage_names"] == ["write"]
+    stage = status["stale_stages"]["write"]
+    assert stage["modified_inputs"] == ["requirements.txt"]
+    assert stage["stale_outputs"] == ["out.txt"]
+    assert status["environment_states"]["py"]["spec_changed"]
+    assert status["environment_states"]["py"]["changed"]
+    # Checking the env relocks it, which DVC sees instead
+    append("requirements.txt", "idna\n")
+    status = get_pipeline_status()
+    assert status["stale_stage_names"] == ["write"]
+    assert status["stale_stages"]["write"]["modified_inputs"] == [
+        ".calkit/env-locks/py"
+    ]
+    subprocess.check_call(["calkit", "run"])
+    assert not get_pipeline_status("--no-env-check")["is_stale"]
+    assert not get_pipeline_status()["is_stale"]
+    # A spec hash that doesn't match a consistent spec and lock, e.g., after
+    # a merge took the other side's, isn't taken as checked, so running
+    # fixes what status reports
+    subprocess.check_call(
+        ["git", "checkout", "HEAD", "--", ".calkit/env-spec-hashes.json"]
+    )
+    assert get_pipeline_status("--no-env-check")["is_stale"]
+    subprocess.check_call(["calkit", "run"])
+    assert not get_pipeline_status("--no-env-check")["is_stale"]
+    assert not get_pipeline_status()["is_stale"]
+
+
 def test_status_offers_requirements_for_failed_env_check(
     tmp_dir, monkeypatch: pytest.MonkeyPatch
 ):

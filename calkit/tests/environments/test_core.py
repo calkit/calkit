@@ -2169,6 +2169,7 @@ def test_get_cached_env_states(tmp_dir):
         "checked_at": None,
         "success": None,
         "changed": None,
+        "spec_changed": False,
     }
     # Checked and unchanged, which is reported without checking again
     calkit.environments.save_cache(env_name="py", env=env, success=True)
@@ -2200,6 +2201,27 @@ def test_get_cached_env_states(tmp_dir):
     )
     assert set(status.environment_states) == {"py", "other"}
     assert status.environment_checks == {}
+    # A spec changed since it was locked is known without a check record,
+    # and a check record doesn't make it current, e.g., after a merge took
+    # the other side's spec hashes
+    with open(lock, "w") as f:
+        f.write("locked\n")
+    calkit.environments.write_env_spec_hash(
+        lock, calkit.environments.env_spec_hash("environment.yml")
+    )
+    calkit.environments.save_cache(env_name="py", env=env, success=True)
+    with mock.patch("calkit.cli.check.check_environment") as check:
+        calkit.environments.check_all_in_pipeline(ck_info=ck_info)
+    assert mock.call("py", verbose=False) not in check.call_args_list
+    with open("environment.yml", "w") as f:
+        f.write("dependencies:\n  - python\n  - scipy\n")
+    calkit.environments.save_cache(env_name="py", env=env, success=True)
+    states = calkit.environments.get_cached_env_states()
+    assert states["py"]["spec_changed"] and states["py"]["changed"]
+    assert not states["other"]["spec_changed"]
+    with mock.patch("calkit.cli.check.check_environment") as check:
+        calkit.environments.check_all_in_pipeline(ck_info=ck_info)
+    assert mock.call("py", verbose=False) in check.call_args_list
 
 
 def test_env_spec_hashes(tmp_dir):
@@ -2279,6 +2301,63 @@ def test_env_spec_hashes(tmp_dir):
     assert envs.read_env_spec_hash(lock) is None
     envs.write_env_spec_hash(lock, envs.env_spec_hash(spec))
     assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
+
+
+def test_spec_changed_since_lock(tmp_dir):
+    import calkit.environments.core as envs
+
+    def write(fpath: str, text: str) -> None:
+        with open(fpath, "w", newline="") as f:
+            f.write(text)
+
+    def lock(env_name: str, env: dict, wdir: str | None = None) -> None:
+        spec_fpath = os.path.join(wdir or "", env["path"])
+        envs.write_env_spec_hash(
+            str(envs.get_env_lock_fpath(env=env, env_name=env_name)),
+            envs.env_spec_hash(spec_fpath, python=env.get("python")),
+            wdir=wdir,
+        )
+
+    conda = {"kind": "conda", "path": "env.yml"}
+    write("env.yml", "dependencies:\n  - python\n")
+    # A project locked before spec hashes were recorded hasn't changed
+    assert not envs.spec_changed_since_lock("main", conda)
+    write("env.yml", "dependencies:\n  - python\n  - scipy\n")
+    assert not envs.spec_changed_since_lock("main", conda)
+    lock("main", conda)
+    assert not envs.spec_changed_since_lock("main", conda)
+    # Checked out with CRLF, or with a comment added, it hasn't changed
+    write("env.yml", "# Deps\r\ndependencies:\r\n  - python\r\n  - scipy\r\n")
+    assert not envs.spec_changed_since_lock("main", conda)
+    write("env.yml", "dependencies:\n  - python\n")
+    assert envs.spec_changed_since_lock("main", conda)
+    # Nor is it what it was locked from once it's gone, or once it's YAML
+    # that can't be hashed, which is a change rather than an error
+    for text in ["- python\n- scipy\n", "name: 2024-01-01\n"]:
+        write("env.yml", text)
+        assert envs.spec_changed_since_lock("main", conda)
+    os.remove("env.yml")
+    assert envs.spec_changed_since_lock("main", conda)
+    # A venv's Python is part of its spec, as its check hashes it
+    venv = {"kind": "uv-venv", "path": "requirements.txt", "python": "3.12"}
+    write("requirements.txt", "idna\n")
+    lock("py", venv)
+    assert not envs.spec_changed_since_lock("py", venv)
+    assert envs.spec_changed_since_lock("py", venv | {"python": "3.13"})
+    # Read from the project it's in
+    os.makedirs("sub")
+    write(os.path.join("sub", "requirements.txt"), "idna\n")
+    lock("py", venv, wdir="sub")
+    assert not envs.spec_changed_since_lock("py", venv, wdir="sub")
+    write(os.path.join("sub", "requirements.txt"), "certifi\n")
+    assert envs.spec_changed_since_lock("py", venv, wdir="sub")
+    # Other kinds record what they're locked from elsewhere, if at all
+    for env in [
+        {"kind": "uv", "path": "pyproject.toml"},
+        {"kind": "docker", "image": "alpine"},
+        {"kind": "conda"},
+    ]:
+        assert not envs.spec_changed_since_lock("main", env)
 
 
 def test_cross_platform_venv_locks(tmp_dir, monkeypatch):

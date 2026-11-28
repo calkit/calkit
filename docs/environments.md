@@ -1566,6 +1566,11 @@ These settings decide what happens where:
   environment to match its lock the next time it's checked.
   Which spec the locks came from is recorded in
   `.calkit/env-spec-hashes.json`, which is committed along with them.
+  <!-- TODO: needs human review -->
+  So `calkit status` reports stages using the environment as stale when
+  its spec changed since, even with `--no-env-check`.
+  Comments, blank lines, and line endings aren't changes, but reordering
+  a list in the spec, e.g., its dependencies, is.
 
 `calkit status` says which stages can't run on the current machine and
 why.

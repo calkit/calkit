@@ -1718,6 +1718,19 @@ def get_status(
         from dvc.exceptions import NotDvcRepoError
         from dvc.lock import LockError
 
+        # Without checking an env, a spec edited since it was locked leaves
+        # the lock as it was, so DVC can't see it, but the stages using the
+        # env are stale all the same; a check relocks it, which DVC sees
+        changed_specs: dict[str, str] = {}
+        for env_name, state in result.get("environment_states", {}).items():
+            env = environments.get(env_name)
+            if state.get("spec_changed") and env is not None:
+                lock_path = calkit.environments.get_env_lock_fpath(
+                    env=env, env_name=env_name, for_dvc=True
+                )
+                changed_specs[Path(str(lock_path)).as_posix()] = Path(
+                    os.path.expandvars(env["path"])
+                ).as_posix()
         dvc_repo = None
         try:
             dvc_repo = calkit.dvc.get_dvc_repo()
@@ -1741,6 +1754,17 @@ def get_status(
                     Path(os.path.relpath(out.fs_path)).as_posix()
                     for out in dvc_repo.index.outs
                 ]
+                for stage in dvc_repo.index.stages if changed_specs else []:
+                    for dep in [] if stage.frozen else stage.deps:
+                        if not dep.is_in_repo:
+                            continue
+                        spec_path = changed_specs.get(
+                            Path(os.path.relpath(dep.fs_path)).as_posix()
+                        )
+                        if spec_path is not None:
+                            raw_status.setdefault(stage.addressing, []).append(
+                                {"changed deps": {spec_path: "modified"}}
+                            )
                 if with_storage_problems:
                     step("Checking where files are stored")
                     try:

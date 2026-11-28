@@ -143,6 +143,19 @@
           "title": "Git Remotes",
           "type": "object"
         },
+        "hub_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "URL of the project's page on a Calkit hub, if it names one, where '/files?path=PATH&ref=COMMIT_SHA' shows a file at a commit.",
+          "title": "Hub Url"
+        },
         "name": {
           "anyOf": [
             {

@@ -18,6 +18,7 @@ This writes `plot.calkit.png` in the current folder:
 a copy of the figure with its calkit inside.
 The original is left alone.
 The copy opens like any other PNG.
+Add `--to-clipboard` to copy it, as a file, to paste into a chat or email.
 
 The calkit holds the stage that makes the figure,
 every stage upstream of it,
@@ -85,7 +86,17 @@ calkit kit run plot.calkit.png
 ```
 
 This expands the calkit, pulls inputs left out of it,
+lists the commands its stages run and asks before running them,
 reruns every stage, and checks the figure comes out identical.
+
+```sh
+calkit kit open plot.calkit.png
+```
+
+This expands the calkit, unless that's been done already,
+and opens the project in your editor.
+With `--hub`, it opens the original project on the hub instead,
+at the commit the calkit came from.
 
 <!-- prettier-ignore -->
 !!! warning
@@ -121,22 +132,45 @@ It records:
 The ZIP's entries have fixed timestamps, so the same project state makes the
 same calkit.
 
+Readers should treat a calkit from someone else as untrusted:
+
+- Every path, in the ZIP and the manifest, is relative, uses `/`,
+  has no empty, `.`, or `..` parts, and has no part named `.git` in any
+  case.
+  `.dvc/config.local`, `.dvc/tmp/`, and the DVC cache, besides directory
+  listings, are left out.
+- Every file under `project/` must be listed in `files` as included,
+  once, with the same SHA-256, and every file listed as included must be
+  there.
+- A reader that finds a `kit_version` newer than it knows should refuse
+  the calkit.
+- Matching hashes show the file and the calkit agree with each other,
+  not who made them, since both came in the same file.
+
 A file carries its calkit in a way that leaves the rest of the file as it
 was, so removing the calkit gives back the original bytes,
 which must match the manifest's `artifact.sha256`:
 
 - **PNG:** a chunk of type `caLK` holding the ZIP, just before `IEND`.
 - **PDF:** an attached file named `calkit.zip`,
-  added in an incremental update,
+  added in one incremental update,
   so the original is the first `artifact.size` bytes.
+  A file with more than one `%%EOF` after those bytes was saved again after
+  the calkit was added, so it no longer matches.
 - **SVG:** the ZIP as base64 inside a `<metadata id="calkit">` element,
-  just before the last `</svg>`.
+  right before the last `</svg>`.
 - **HTML:** the ZIP as base64 inside a
   `<script type="application/vnd.calkit+zip;base64" id="calkit">` element,
-  just before `</body>`.
+  right before the last `</body>`, in any case,
+  or at the end of a fragment without one.
 
-In SVG and HTML, a comment linking here comes first,
-and removing the calkit removes everything from it through the closing tag.
+In SVG and HTML, the block is byte for byte the opening bytes,
+a newline, the base64 with a newline every 76 characters,
+then the closing bytes, with a comment linking here among the opening
+bytes.
+A file's own calkit is the block that ends right before that closing tag,
+so a nested figure's calkit, earlier in the file, isn't mistaken for it.
+Removing the calkit removes the whole block.
 See `MARKUP_BLOCKS` in
 [`calkit/kits.py`](https://github.com/calkit/calkit/blob/main/calkit/kits.py)
 for the exact bytes.
@@ -148,3 +182,6 @@ A PDF viewer lists the calkit with the document's attachments.
 
 Apps and websites that rewrite files, e.g., by compressing images,
 may remove the calkit.
+A file's `md5` is DVC's: the MD5 of its contents,
+stored in DVC's cache under `files/md5/` with the first two characters as
+a folder.

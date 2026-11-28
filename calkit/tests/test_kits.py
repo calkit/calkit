@@ -1,6 +1,7 @@
 """Tests for ``calkit.kits``."""
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -16,6 +17,7 @@ import pytest
 from PIL import Image
 
 import calkit
+import calkit.hub
 import calkit.kits
 from calkit.kits import MANIFEST_NAME, PROJECT_DIR, write_zip
 
@@ -46,9 +48,21 @@ def test_embed_extract():
     doc.close()
     pdf = buf.getvalue()
     assert calkit.kits.extract_pdf(pdf) is None
-    manifest = {"artifact": {"size": len(pdf)}}
+    pdf_manifest = calkit.kits.Manifest(
+        created_with="test",
+        artifact=calkit.kits.KitArtifact(
+            path="paper.pdf", size=len(pdf), sha256="0" * 64, stage="paper"
+        ),
+        source=calkit.kits.KitSource(up_to_date=True),
+        files=[],
+    )
     pdf_kit = write_zip(
-        {MANIFEST_NAME: (json.dumps(manifest).encode(), False)}
+        {
+            MANIFEST_NAME: (
+                pdf_manifest.model_dump_json(by_alias=True).encode(),
+                False,
+            )
+        }
     )
     data = calkit.kits.embed_pdf(pdf, pdf_kit)
     assert data.startswith(pdf)
@@ -122,6 +136,13 @@ def test_build_read_expand(kit_project, tmp_path):
         "origin": "https://github.com/someone/kit-test.git"
     }
     assert manifest.source.uncommitted_paths == []
+    hub_project_url = (
+        calkit.hub.get_hub_url().rstrip("/") + "/someone/kit-test"
+    )
+    assert manifest.source.hub_url == hub_project_url
+    assert calkit.kits.get_hub_file_url(manifest) == (
+        f"{hub_project_url}/files?path=figures%2Fpage.html&ref={commit_sha}"
+    )
     assert [g.path for g in manifest.provenance_gaps] == ["data/raw.csv"]
     files = {f.path: f for f in manifest.files}
     assert files["scripts/make.py"].included
@@ -223,9 +244,55 @@ def test_build_read_expand(kit_project, tmp_path):
     evil_path = str(tmp_path / "evil.html")
     with open(evil_path, "wb") as f:
         f.write(evil)
-    with pytest.raises(ValueError, match="outside the project"):
+    with pytest.raises(ValueError, match="unsafe path"):
         calkit.kits.expand(evil_path, str(tmp_path / "evil"))
     assert not (tmp_path / "evil.txt").exists()
+    # Environment specs Calkit keeps in .calkit go along, and data kept in
+    # Git obeys the size limit and leaving out data, as data in DVC does
+    os.makedirs(".calkit/envs/py")
+    with open(".calkit/envs/py/pyproject.toml", "w") as f:
+        f.write('[project]\nname = "py"\nversion = "0"\n')
+    with open(".calkit/envs/py/uv.lock", "w") as f:
+        f.write("version = 1\n")
+    with open("data/params.csv", "w") as f:
+        f.write("a,b\n1,2\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "py": {"kind": "uv", "path": ".calkit/envs/py/pyproject.toml"}
+    }
+    ck_info["pipeline"]["stages"]["make"]["environment"] = "py"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(
+        ["git", "add", "calkit.yaml", ".calkit/envs", "data/params.csv"]
+    )
+    subprocess.check_call(["git", "commit", "-qm", "Add env and params"])
+    with open("dvc.yaml") as f:
+        dvc_yaml = calkit.ryaml.load(f)
+    dvc_yaml["stages"]["make"]["deps"].append("data/params.csv")
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)
+    lock["stages"]["make"]["deps"].append(
+        {
+            "path": "data/params.csv",
+            "hash": "md5",
+            "md5": "0" * 32,
+            "size": 8,
+        }
+    )
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    _, manifest = calkit.kits.build(
+        "figures/fig.png", up_to_date=True, include_data=False
+    )
+    files = {f.path: f for f in manifest.files}
+    assert files[".calkit/envs/py/pyproject.toml"].included
+    assert files[".calkit/envs/py/uv.lock"].included
+    assert not files["data/params.csv"].included
+    _, manifest = calkit.kits.build("figures/fig.png", up_to_date=True)
+    assert {f.path: f for f in manifest.files}["data/params.csv"].included
 
 
 def test_generate_schema_json():
@@ -240,3 +307,232 @@ def test_generate_schema_json():
             f"{calkit.kits.SCHEMA_REPO_PATH} is out of date; regenerate it "
             "with 'make schema'"
         )
+
+
+def test_copy_to_clipboard(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs.get("input")))
+
+    monkeypatch.setattr("calkit.kits.subprocess.run", fake_run)
+    path = str(tmp_path / "it's.png")
+    # As a file, not its pixels, on each platform
+    calkit.kits.copy_to_clipboard(path, platform="darwin")
+    assert calls[-1][0][:3] == ["osascript", "-l", "JavaScript"]
+    assert calls[-1][0][-1] == path
+    assert "fileURLWithPath" in calls[-1][0][-2]
+    calkit.kits.copy_to_clipboard(path, platform="win32")
+    assert (
+        calls[-1][0][-1]
+        == f"Set-Clipboard -LiteralPath '{path.replace(chr(39), chr(39) * 2)}'"
+    )
+    monkeypatch.setattr("calkit.kits.shutil.which", lambda cmd: cmd == "xclip")
+    calkit.kits.copy_to_clipboard(path, platform="linux")
+    assert calls[-1][0][0] == "xclip"
+    assert calls[-1][1] == Path(path).as_uri().encode()
+    monkeypatch.setattr("calkit.kits.shutil.which", lambda cmd: None)
+    with pytest.raises(RuntimeError, match="wl-copy or xclip"):
+        calkit.kits.copy_to_clipboard(path, platform="linux")
+
+
+def test_untrusted_calkits(tmp_path):
+    import time
+
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), "red").save(buf, format="PNG")
+    png = buf.getvalue()
+
+    def make_manifest(files: dict[str, bytes], **kwargs) -> dict:
+        manifest = calkit.kits.Manifest(
+            created_with="test",
+            artifact=calkit.kits.KitArtifact(
+                path="fig.png",
+                size=len(png),
+                sha256=hashlib.sha256(png).hexdigest(),
+                stage="plot",
+            ),
+            source=calkit.kits.KitSource(name="../../evil", up_to_date=True),
+            files=[
+                calkit.kits.KitFile(
+                    path=p,
+                    size=len(c),
+                    storage="git",
+                    included=True,
+                    sha256=hashlib.sha256(c).hexdigest(),
+                )
+                for p, c in files.items()
+            ],
+        )
+        return manifest.model_dump(by_alias=True) | kwargs
+
+    def write_png(
+        files: dict[str, bytes],
+        manifest: dict | None = None,
+        name: str = "fig.png",
+    ) -> str:
+        entries = {
+            MANIFEST_NAME: (
+                json.dumps(manifest or make_manifest(files)).encode(),
+                False,
+            )
+        }
+        for p, c in files.items():
+            entries[PROJECT_DIR + p] = (c, False)
+        path = str(tmp_path / name)
+        with open(path, "wb") as f:
+            f.write(calkit.kits.embed_png(png, write_zip(entries)))
+        return path
+
+    # Git internals, e.g., hooks or config that run commands, are refused
+    # before anything is written, even if the manifest lists them
+    for evil_path in [".git/hooks/pre-commit", "sub/.GIT/config", "/etc/x"]:
+        files = {"run.py": b"print(1)\n", evil_path: b"#!/bin/sh\ntouch x\n"}
+        dest = tmp_path / "dest"
+        with pytest.raises(calkit.kits.KitError, match="unsafe path"):
+            calkit.kits.expand(write_png(files), str(dest))
+        assert not dest.exists()
+    # So are files the manifest doesn't list, or that don't match it, or
+    # that it lists but are missing
+    files = {"run.py": b"print(1)\n"}
+    manifest = make_manifest(files)
+    extra = {**files, "extra.py": b"print(2)\n"}
+    for path, match in [
+        (write_png(extra, manifest, "a.png"), "doesn't match"),
+        (
+            write_png({"run.py": b"print(2)\n"}, manifest, "b.png"),
+            "doesn't match",
+        ),
+        (write_png({}, manifest, "c.png"), "missing files"),
+    ]:
+        with pytest.raises(calkit.kits.KitError, match=match):
+            calkit.kits.expand(path, str(tmp_path / "dest"))
+    # A valid one expands, without its name choosing where
+    good = write_png(files)
+    calkit.kits.expand(good, str(tmp_path / "good"))
+    assert (tmp_path / "good/run.py").read_bytes() == b"print(1)\n"
+    # A newer format, a missing manifest, or a chunk that isn't a ZIP can't
+    # be read, but a broken PNG just has no calkit
+    newer = write_png(files, make_manifest(files, kit_version=2))
+    with pytest.raises(calkit.kits.KitError, match="upgrade Calkit"):
+        calkit.kits.read(newer)
+    not_zip = tmp_path / "not-zip.png"
+    not_zip.write_bytes(calkit.kits.embed_png(png, b"not a zip"))
+    with pytest.raises(calkit.kits.KitError, match="valid ZIP"):
+        calkit.kits.read(str(not_zip))
+    no_manifest = tmp_path / "no-manifest.png"
+    no_manifest.write_bytes(
+        calkit.kits.embed_png(png, write_zip({"x": (b"x", False)}))
+    )
+    with pytest.raises(calkit.kits.KitError, match="no calkit-kit.json"):
+        calkit.kits.read(str(no_manifest))
+    truncated = tmp_path / "truncated.png"
+    truncated.write_bytes(png[:20])
+    assert calkit.kits.read(str(truncated)) is None
+    # Many opening tags without a closing one don't make finding one slow
+    open_tag = calkit.kits.MARKUP_BLOCKS["svg"][0]
+    hostile = b"<svg>" + open_tag * 20_000 + b"</svg>"
+    start = time.perf_counter()
+    assert calkit.kits.extract_markup(hostile, "svg") is None
+    assert time.perf_counter() - start < 1
+    # A figure nested in an SVG keeps its own calkit when the outer one's
+    # is replaced
+    inner = calkit.kits.embed_markup(b"<svg><rect/></svg>", b"inner", "svg")
+    outer = b"<svg>" + inner + b"<circle/></svg>"
+    data = calkit.kits.embed(outer, "outer.svg", b"outer-1")
+    assert calkit.kits.extract_markup(data, "svg") == (b"outer-1", outer)
+    data = calkit.kits.embed(data, "outer.svg", b"outer-2")
+    assert calkit.kits.extract_markup(data, "svg") == (b"outer-2", outer)
+    assert calkit.kits.extract_markup(inner, "svg") == (
+        b"inner",
+        b"<svg><rect/></svg>",
+    )
+    # An HTML page with an inline SVG is HTML
+    page = b"<html><body><svg><path/></svg><p>Hi</p></body></html>"
+    assert calkit.kits.get_format(page, "page.html") == "html"
+    # A PDF saved again after its calkit was added no longer matches, and
+    # its calkit can't be replaced without losing that change
+    doc = pdfium.PdfDocument.new()
+    doc.new_page(100, 100)
+    doc.new_page(100, 100)
+    buf = io.BytesIO()
+    doc.save(buf)
+    doc.close()
+    pdf = buf.getvalue()
+    pdf_manifest = make_manifest({})
+    pdf_manifest["artifact"] |= {
+        "path": "paper.pdf",
+        "size": len(pdf),
+        "sha256": hashlib.sha256(pdf).hexdigest(),
+    }
+    pdf_kit = write_zip(
+        {MANIFEST_NAME: (json.dumps(pdf_manifest).encode(), False)}
+    )
+    with_kit = calkit.kits.embed_pdf(pdf, pdf_kit)
+    doc = pdfium.PdfDocument(with_kit)
+    doc.del_page(1)
+    buf = io.BytesIO()
+    doc.save(buf, flags=pdfium.raw.FPDF_INCREMENTAL)
+    doc.close()
+    edited = tmp_path / "edited.pdf"
+    edited.write_bytes(buf.getvalue())
+    assert calkit.kits.read(str(tmp_path / "edited.pdf")) is not None
+    edited_kit = calkit.kits.read(str(edited))
+    assert edited_kit is not None
+    assert not edited_kit.artifact_unchanged
+    with pytest.raises(calkit.kits.KitError, match="changed after"):
+        calkit.kits.embed(buf.getvalue(), "paper.pdf", pdf_kit)
+    unedited = tmp_path / "unedited.pdf"
+    unedited.write_bytes(with_kit)
+    unedited_kit = calkit.kits.read(str(unedited))
+    assert unedited_kit is not None
+    assert unedited_kit.artifact_unchanged
+
+
+def test_scrub():
+    assert calkit.kits.scrub_url("https://tok@github.com/a/b.git") == (
+        "https://github.com/a/b.git"
+    )
+    assert calkit.kits.scrub_url("https://u:p@host/x") == "https://host/x"
+    assert calkit.kits.scrub_url("ssh://git:pw@host/a/b") == (
+        "ssh://git@host/a/b"
+    )
+    assert calkit.kits.scrub_url("git@github.com:a/b.git") == (
+        "git@github.com:a/b.git"
+    )
+    config = (
+        "[core]\n    remote = storage\n"
+        "['remote \"storage\"']\n    url = s3://bucket/x\n"
+        "    access_key_id = AKIA\n    secret_access_key = shh\n"
+        "['remote \"web\"']\n    url = https://user:pw@host/dvc\n"
+        "[cache]\n    dir = /Users/me/cache\n"
+    )
+    scrubbed = calkit.kits.scrub_dvc_config(config)
+    assert "remote = storage" in scrubbed
+    assert "url = s3://bucket/x" in scrubbed
+    assert "url = https://host/dvc" in scrubbed
+    for secret in ["AKIA", "shh", "pw", "/Users/me"]:
+        assert secret not in scrubbed
+    # Paths in dvc.lock are relative to their stage's wdir
+    stage_io = calkit.kits.get_stage_io(
+        {
+            "stages": {
+                "plot": {
+                    "deps": [{"path": "plot.py", "md5": "a"}],
+                    "outs": [{"path": "../figs/f.png", "md5": "b"}],
+                },
+                "each@1": {"outs": [{"path": "out.txt", "md5": "c"}]},
+            }
+        },
+        {
+            "stages": {
+                "plot": {"wdir": "scripts"},
+                "each": {"foreach": [1], "do": {"wdir": "sub"}},
+            }
+        },
+    )
+    assert stage_io["plot"] == {
+        "deps": [("scripts/plot.py", "a")],
+        "outs": [("figs/f.png", "b")],
+    }
+    assert stage_io["each@1"]["outs"] == [("sub/out.txt", "c")]

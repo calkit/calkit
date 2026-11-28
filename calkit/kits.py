@@ -18,7 +18,9 @@ import json
 import os
 import posixpath
 import re
+import shutil
 import struct
+import subprocess
 import zipfile
 import zlib
 from collections.abc import Callable
@@ -40,6 +42,11 @@ SCHEMA_REPO_PATH = "docs/schemas/calkit-kit.json"
 DEFAULT_MAX_SIZE = 1_000_000
 # A fixed timestamp keeps a calkit's bytes the same for the same project state
 ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
+# What reading or expanding a calkit from someone else may unpack, so a ZIP
+# bomb can't fill the disk or memory
+MAX_MANIFEST_SIZE = 10_000_000
+MAX_EXPANDED_SIZE = 2_000_000_000
+MAX_COMPRESSION_RATIO = 1000
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Ancillary, private, and unsafe to copy, so an editor that changes the image
 # drops the calkit rather than carrying a claim that no longer holds
@@ -68,6 +75,141 @@ MARKUP_BLOCKS = {
 }
 
 
+class KitError(ValueError):
+    """A problem with a calkit itself, rather than the file carrying it."""
+
+
+def is_safe_path(path: str) -> bool:
+    """Whether a path from a calkit can be written in a project: relative,
+    POSIX, inside it, and not in its Git or DVC internals, which could run
+    code or point at someone else's storage.
+    """
+    parts = path.split("/")
+    if (
+        not path
+        or path.startswith("/")
+        or "\\" in path
+        or ":" in parts[0]
+        or any(p in ["", ".", ".."] for p in parts)
+        or ".git" in [p.lower() for p in parts]
+    ):
+        return False
+    if path.startswith(".dvc/cache/"):
+        return path.startswith(".dvc/cache/files/md5/") and path.endswith(
+            ".dir"
+        )
+    return path != ".dvc/config.local" and not path.startswith(".dvc/tmp/")
+
+
+def scrub_url(url: str) -> str:
+    """Remove credentials from a URL: all of the user info for HTTP(S),
+    where it's usually a token, and the password otherwise, e.g., keeping
+    the 'git@' an SSH URL needs.
+    """
+    match = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@]*)@(.*)$", url)
+    if match is None:
+        return url
+    scheme, user_info, rest = match.groups()
+    if scheme.lower().startswith("http"):
+        return scheme + rest
+    return f"{scheme}{user_info.split(':', 1)[0]}@{rest}"
+
+
+def scrub_dvc_config(text: str) -> str:
+    """Keep only what a copy of a project needs from its DVC config: the
+    core settings and each remote's URL, without credentials.
+    """
+    import configparser
+
+    config = configparser.ConfigParser(interpolation=None)
+    config.optionxform = str  # type: ignore[assignment,method-assign]
+    config.read_string(text)
+    scrubbed = configparser.ConfigParser(interpolation=None)
+    scrubbed.optionxform = str  # type: ignore[assignment,method-assign]
+    for section in config.sections():
+        if section == "core":
+            scrubbed[section] = dict(config[section])
+        elif section.startswith("'remote ") and "url" in config[section]:
+            scrubbed[section] = {"url": scrub_url(config[section]["url"])}
+    buf = io.StringIO()
+    scrubbed.write(buf)
+    return buf.getvalue()
+
+
+def get_stage_io(
+    dvc_lock: dict, dvc_yaml: dict
+) -> dict[str, dict[str, list[tuple[str, str | None]]]]:
+    """Get each locked stage's dependencies and outputs as project-relative
+    paths with their MD5s, since ``dvc.lock`` gives them relative to the
+    stage's ``wdir``.
+    """
+    yaml_stages = dvc_yaml.get("stages") or {}
+    result = {}
+    for name, stage_lock in (dvc_lock.get("stages") or {}).items():
+        yaml_stage = yaml_stages.get(name.split("@")[0]) or {}
+        wdir = (
+            yaml_stage.get("wdir") or (yaml_stage.get("do") or {}).get("wdir")
+        ) or ""
+        result[name] = {
+            key: [
+                (
+                    posixpath.normpath(posixpath.join(wdir, item["path"])),
+                    item.get("md5"),
+                )
+                for item in stage_lock.get(key) or []
+                if isinstance(item, dict) and item.get("path")
+            ]
+            for key in ["deps", "outs"]
+        }
+    return result
+
+
+def read_project_yaml(kit: bytes, name: str) -> dict:
+    """Read a YAML file at the root of a calkit's project, e.g., ``dvc.lock``,
+    or nothing if it has none.
+    """
+    import calkit
+
+    with zipfile.ZipFile(io.BytesIO(kit)) as z:
+        try:
+            info = z.getinfo(PROJECT_DIR + name)
+        except KeyError:
+            return {}
+        if info.file_size > MAX_MANIFEST_SIZE:
+            raise KitError(f"Calkit's {name} is too big")
+        return calkit.ryaml.load(z.read(info).decode()) or {}
+
+
+def read_manifest(kit: bytes) -> Manifest:
+    """Read and validate a calkit's manifest."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(kit)) as z:
+            info = z.getinfo(MANIFEST_NAME)
+            if info.file_size > MAX_MANIFEST_SIZE:
+                raise KitError("Calkit's manifest is too big")
+            manifest_json = json.loads(z.read(info))
+    except KitError:
+        raise
+    except KeyError:
+        raise KitError(f"Calkit has no {MANIFEST_NAME}")
+    except Exception as e:
+        raise KitError(f"Calkit isn't a valid ZIP: {e}")
+    version = (
+        manifest_json.get("kit_version")
+        if isinstance(manifest_json, dict)
+        else None
+    )
+    if isinstance(version, int) and version > KIT_VERSION:
+        raise KitError(
+            f"Calkit is format version {version}, newer than this Calkit "
+            f"reads ({KIT_VERSION}); upgrade Calkit"
+        )
+    try:
+        return Manifest.model_validate(manifest_json)
+    except Exception as e:
+        raise KitError(f"Calkit's manifest is invalid: {e}")
+
+
 class KitArtifact(BaseModel):
     path: str = Field(description="Path of the artifact in the project.")
     size: int = Field(description="Size in bytes, without the calkit.")
@@ -88,6 +230,14 @@ class KitSource(BaseModel):
     )
     commit_sha: str | None = Field(
         default=None, description="Git commit the calkit was made from."
+    )
+    hub_url: str | None = Field(
+        default=None,
+        description=(
+            "URL of the project's page on a Calkit hub, if it names one, "
+            "where '/files?path=PATH&ref=COMMIT_SHA' shows a file at a "
+            "commit."
+        ),
     )
     uncommitted_paths: list[str] = Field(
         default_factory=list,
@@ -183,20 +333,16 @@ class EmbeddedKit:
         """Whether the artifact is the output the calkit's ``dvc.lock``
         records, or None if it records none.
         """
-        import calkit
-
-        with zipfile.ZipFile(io.BytesIO(self.kit)) as z:
-            try:
-                lock = calkit.ryaml.load(
-                    z.read(PROJECT_DIR + "dvc.lock").decode()
-                )
-            except KeyError:
-                return None
-        stage = (lock.get("stages") or {}).get(self.manifest.artifact.stage)
-        for out in (stage or {}).get("outs") or []:
-            if out.get("path") == self.manifest.artifact.path:
+        stage_io = get_stage_io(
+            read_project_yaml(self.kit, "dvc.lock"),
+            read_project_yaml(self.kit, "dvc.yaml"),
+        )
+        for out_path, out_md5 in stage_io.get(
+            self.manifest.artifact.stage, {}
+        ).get("outs", []):
+            if out_path == self.manifest.artifact.path:
                 md5 = hashlib.md5(self.artifact).hexdigest()
-                return bool(out.get("md5") == md5)
+                return out_md5 == md5
         return None
 
 
@@ -262,7 +408,7 @@ def extract_png(data: bytes) -> tuple[bytes, bytes] | None:
         kit = data[start + 8 : end - 4]
         (crc,) = struct.unpack(">I", data[end - 4 : end])
         if crc != zlib.crc32(PNG_CHUNK_TYPE + kit):
-            raise ValueError("PNG's calkit chunk is corrupt")
+            raise KitError("PNG's calkit chunk is corrupt")
         return kit, data[:start] + data[end:]
     return None
 
@@ -295,7 +441,7 @@ def extract_pdf(data: bytes) -> tuple[bytes, bytes] | None:
     """Get a PDF's calkit and the PDF without it, or None if it has none.
 
     The PDF without its calkit is the prefix with the size the calkit's
-    manifest records.
+    manifest records, if nothing was saved after the calkit.
     """
     import pypdfium2 as pdfium
 
@@ -311,8 +457,12 @@ def extract_pdf(data: bytes) -> tuple[bytes, bytes] | None:
         pdf.close()
     if kit is None:
         return None
-    with zipfile.ZipFile(io.BytesIO(kit)) as z:
-        size = json.loads(z.read(MANIFEST_NAME))["artifact"]["size"]
+    size = read_manifest(kit).artifact.size
+    # Anything saved after the calkit, e.g., an annotation, is another
+    # update, so the PDF without the calkit is the whole file, which no
+    # longer matches
+    if data[size:].count(b"%%EOF") != 1:
+        return kit, data
     return kit, data[:size]
 
 
@@ -334,16 +484,28 @@ def embed_markup(data: bytes, kit: bytes, fmt: str) -> bytes:
 
 def extract_markup(data: bytes, fmt: str) -> tuple[bytes, bytes] | None:
     """Get an HTML or SVG file's calkit and the file without it, or None if
-    it has none.
+    it has none, i.e., no calkit block right before its last ``</body>`` or
+    ``</svg>``.
     """
-    open_tag, close_tag, _ = MARKUP_BLOCKS[fmt]
-    match = re.search(
-        re.escape(open_tag) + rb"(.*?)" + re.escape(close_tag), data, re.S
-    )
-    if match is None:
+    open_tag, close_tag, anchor = MARKUP_BLOCKS[fmt]
+    # The file's own block is right before its last closing tag, or at the
+    # end of an HTML fragment, where a nested figure's can't be
+    anchor_pos = data.lower().rfind(anchor)
+    if anchor_pos < 0:
+        if fmt == "svg":
+            return None
+        anchor_pos = len(data)
+    end = anchor_pos - len(close_tag)
+    if end < 0 or data[end:anchor_pos] != close_tag:
         return None
-    kit = base64.b64decode(match.group(1))
-    return kit, data[: match.start()] + data[match.end() :]
+    start = data.rfind(open_tag, 0, end)
+    if start < 0:
+        return None
+    try:
+        kit = base64.b64decode(data[start + len(open_tag) : end])
+    except ValueError as e:
+        raise KitError(f"Calkit's base64 is invalid: {e}")
+    return kit, data[:start] + data[end + len(close_tag) :]
 
 
 def get_format(data: bytes, path: str) -> str:
@@ -356,12 +518,15 @@ def get_format(data: bytes, path: str) -> str:
         return "png"
     if data.startswith(b"%PDF-"):
         return "pdf"
-    if ext == ".svg" or b"<svg" in head:
-        return "svg"
-    if ext in [".html", ".htm"] or head.startswith(
-        (b"<!doctype html", b"<html")
-    ):
+    # An HTML page can have an inline SVG, so its extension says first
+    if ext in [".html", ".htm"]:
         return "html"
+    if ext == ".svg":
+        return "svg"
+    if head.startswith((b"<!doctype html", b"<html")):
+        return "html"
+    if b"<svg" in head:
+        return "svg"
     raise ValueError(
         f"Can't embed a calkit in {path}; supported types: PNG, PDF, SVG, HTML"
     )
@@ -454,6 +619,7 @@ def build(
     import calkit
     import calkit.dvc
     import calkit.git
+    import calkit.hub
     import calkit.pipeline
     import calkit.provenance
     import calkit.releases
@@ -472,17 +638,30 @@ def build(
         copy.deepcopy(ck_info), stage
     )
     lock = calkit.ryaml.load(overrides.get("dvc.lock") or "{}") or {}
-    stage_locks = (lock.get("stages") or {}).values()
-    output_paths = [
-        Path(out["path"]).as_posix()
-        for stage_lock in stage_locks
-        for out in stage_lock.get("outs") or []
-    ]
-    dep_paths = {
-        Path(dep["path"]).as_posix()
-        for stage_lock in stage_locks
-        for dep in stage_lock.get("deps") or []
+    stage_io = get_stage_io(
+        lock, calkit.ryaml.load(overrides.get("dvc.yaml") or "{}") or {}
+    )
+    output_paths = [p for io_ in stage_io.values() for p, _ in io_["outs"]]
+    dep_paths = {p for io_ in stage_io.values() for p, _ in io_["deps"]}
+    # Environment specs Calkit generates, e.g., for 'calkit xr', live in
+    # .calkit/envs, beside their lock files
+    pruned_ck_info = calkit.ryaml.load(overrides["calkit.yaml"]) or {}
+    env_dirs = {
+        posixpath.dirname(Path(env["path"]).as_posix())
+        for env in (pruned_ck_info.get("environments") or {}).values()
+        if isinstance(env, dict)
+        and isinstance(env.get("path"), str)
+        and Path(env["path"]).as_posix().startswith(".calkit/")
     }
+    env_paths = {
+        Path(env["path"]).as_posix()
+        for env in (pruned_ck_info.get("environments") or {}).values()
+        if isinstance(env, dict) and isinstance(env.get("path"), str)
+    }
+    # Keep only DVC's core settings and remote URLs, without credentials
+    if os.path.isfile(".dvc/config"):
+        with open(".dvc/config") as dvc_config_file:
+            overrides[".dvc/config"] = scrub_dvc_config(dvc_config_file.read())
     # Keep the stage run records for the calkit's stages, without the ID of
     # the machine they ran on
     runs_path = ".calkit/stage-runs.json"
@@ -515,6 +694,7 @@ def build(
                 p in dep_paths
                 or p in overrides
                 or p.startswith(calkit_prefixes)
+                or any(p.startswith(d + "/") for d in env_dirs)
                 or any(p.startswith(d + "/") for d in dep_paths)
             )
         return True
@@ -543,8 +723,21 @@ def build(
         with open(p, "rb") as f:
             return f.read()
 
-    # Fill the calkit with what's always needed, then what fits
-    required = [p for p in paths if p in git_paths and not is_output(p)]
+    def is_data(p: str) -> bool:
+        # Code, config, and environment specs are the recipe, which a copy
+        # can't run without
+        if p in overrides or p in env_paths or p.startswith(".calkit/"):
+            return False
+        return calkit.provenance.is_data_path(
+            p, is_file=os.path.isfile, is_dir=os.path.isdir, listdir=os.listdir
+        )
+
+    # Fill the calkit with the recipe, then the data and outputs that fit
+    required = [
+        p
+        for p in paths
+        if p in git_paths and not is_output(p) and not is_data(p)
+    ]
     optional = [p for p in paths if p not in required]
     included = {p: read(p) for p in required}
     used = sum(len(zlib.compress(c)) for c in included.values())
@@ -582,10 +775,16 @@ def build(
         recorded_md5 = (dvc_files.get(p) or {}).get("md5")
         if recorded_md5 and hashlib.md5(content).hexdigest() != recorded_md5:
             uncommitted.add(p)
-    remotes = {
-        r.name: re.sub(r"^(https?://)[^/@]+@", r"\1", r.url)
-        for r in repo.remotes
-    }
+    remotes = {r.name: scrub_url(r.url) for r in repo.remotes}
+    # Where the project would be on its hub, from its owner and name
+    try:
+        hub_url: str | None = (
+            calkit.hub.get_hub_url().rstrip("/")
+            + "/"
+            + calkit.detect_project_name()
+        )
+    except Exception:
+        hub_url = None
     files = []
     for p in paths:
         dvc_file = dvc_files.get(p)
@@ -618,6 +817,7 @@ def build(
             commit_sha=repo.head.commit.hexsha
             if repo.head.is_valid()
             else None,
+            hub_url=hub_url,
             uncommitted_paths=sorted(uncommitted & (set(paths) | {path})),
             up_to_date=up_to_date,
         ),
@@ -650,9 +850,16 @@ def embed(data: bytes, path: str, kit: bytes) -> bytes:
     """Return a copy of an artifact's contents with a calkit embedded,
     replacing any it already has.
     """
-    embed_fmt, extract_fmt = get_format_functions(get_format(data, path))
+    fmt = get_format(data, path)
+    embed_fmt, extract_fmt = get_format_functions(fmt)
     existing = extract_fmt(data)
     if existing is not None:
+        # Dropping a PDF's calkit would drop anything saved after it too
+        if fmt == "pdf" and existing[1] == data:
+            raise KitError(
+                f"{path} was changed after its calkit was added, so it "
+                "can't be replaced"
+            )
         data = existing[1]
     return embed_fmt(data, kit)
 
@@ -666,6 +873,14 @@ def write_copy(
     ck_info: dict | None = None,
 ) -> Manifest:
     """Write a copy of an artifact with its calkit embedded."""
+    with open(path, "rb") as f:
+        data = f.read()
+    fmt = get_format(data, path)
+    # Base64 makes a calkit a third bigger in text formats
+    if max_size is None:
+        max_size = max(DEFAULT_MAX_SIZE, len(data))
+    if fmt in MARKUP_BLOCKS:
+        max_size = max_size * 3 // 4
     kit, manifest = build(
         path,
         up_to_date=up_to_date,
@@ -673,8 +888,6 @@ def write_copy(
         include_data=include_data,
         ck_info=ck_info,
     )
-    with open(path, "rb") as f:
-        data = f.read()
     os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
     with open(dest_path, "wb") as f:
         f.write(embed(data, path, kit))
@@ -682,7 +895,11 @@ def write_copy(
 
 
 def read(path: str) -> EmbeddedKit | None:
-    """Read the calkit embedded in a file, or None if it has none."""
+    """Read the calkit embedded in a file, or None if it has none.
+
+    A file that isn't valid for its format, e.g., a truncated PNG, has
+    none. Raises ``KitError`` for a calkit that can't be read.
+    """
     with open(path, "rb") as f:
         data = f.read()
     try:
@@ -690,39 +907,89 @@ def read(path: str) -> EmbeddedKit | None:
     except ValueError:
         return None
     _, extract_fmt = get_format_functions(fmt)
-    extracted = extract_fmt(data)
+    try:
+        extracted = extract_fmt(data)
+    except KitError:
+        raise
+    except Exception:
+        return None
     if extracted is None:
         return None
     kit, artifact = extracted
-    with zipfile.ZipFile(io.BytesIO(kit)) as z:
-        manifest = Manifest.model_validate(json.loads(z.read(MANIFEST_NAME)))
-    return EmbeddedKit(kit=kit, artifact=artifact, manifest=manifest)
+    return EmbeddedKit(kit=kit, artifact=artifact, manifest=read_manifest(kit))
 
 
 def expand(path: str, dest_dir: str) -> EmbeddedKit:
     """Expand the calkit embedded in a file into a new project in
     ``dest_dir``, with the artifact in place and everything committed.
 
-    The source project's remotes are added as Git remotes prefixed with
-    ``upstream``, so its history can be fetched.
+    The calkit may come from anyone, so it's checked before anything is
+    written: every file must be one its manifest lists as included, with
+    the same SHA-256, at a path that stays in the project and out of its
+    Git and DVC internals, and it must not unpack to more than
+    ``MAX_EXPANDED_SIZE``. The source project's remotes are added as Git
+    remotes prefixed with ``upstream``, so its history can be fetched.
     """
     import git
 
     kit = read(path)
     if kit is None:
-        raise ValueError(f"{path} has no calkit")
+        raise KitError(f"{path} has no calkit")
     if os.path.exists(dest_dir) and os.listdir(dest_dir):
         raise ValueError(f"{dest_dir} already exists and isn't empty")
-    root = Path(dest_dir).resolve()
-    dvc_paths = {f.path for f in kit.manifest.files if f.storage == "dvc"}
-    dvc_paths.add(kit.manifest.artifact.path)
-
-    def write(rel_path: str, content: bytes, executable: bool = False) -> None:
-        fpath = (root / rel_path).resolve()
-        if not fpath.is_relative_to(root):
-            raise ValueError(
-                f"Calkit has a path outside the project: {rel_path}"
+    manifest = kit.manifest
+    if not is_safe_path(manifest.artifact.path):
+        raise KitError(
+            f"Calkit's artifact path is unsafe: {manifest.artifact.path}"
+        )
+    included = {f.path: f for f in manifest.files if f.included}
+    # Check everything before writing anything
+    files: dict[str, tuple[bytes, bool]] = {}
+    total_size = 0
+    with zipfile.ZipFile(io.BytesIO(kit.kit)) as z:
+        for info in z.infolist():
+            if not info.filename.startswith(PROJECT_DIR) or info.is_dir():
+                continue
+            rel_path = info.filename[len(PROJECT_DIR) :]
+            if not is_safe_path(rel_path):
+                raise KitError(f"Calkit has an unsafe path: {rel_path}")
+            if rel_path in files:
+                raise KitError(f"Calkit has {rel_path} twice")
+            total_size += info.file_size
+            if total_size > MAX_EXPANDED_SIZE or (
+                info.file_size > 1_000_000
+                and info.file_size
+                > MAX_COMPRESSION_RATIO * max(info.compress_size, 1)
+            ):
+                raise KitError("Calkit unpacks to too much")
+            content = z.read(info)
+            entry = included.get(rel_path)
+            if (
+                entry is None
+                or hashlib.sha256(content).hexdigest() != entry.sha256
+            ):
+                raise KitError(
+                    f"Calkit's {rel_path} doesn't match its manifest"
+                )
+            files[rel_path] = (
+                content,
+                bool((info.external_attr >> 16) & 0o111),
             )
+    missing = set(included) - set(files)
+    if missing:
+        raise KitError(
+            "Calkit is missing files its manifest lists: "
+            + ", ".join(sorted(missing))
+        )
+    files[manifest.artifact.path] = (kit.artifact, False)
+    # Create the repo first, so its config and hooks are Git's own
+    root = Path(dest_dir).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    repo = git.Repo.init(root)
+    dvc_paths = {f.path for f in manifest.files if f.storage == "dvc"}
+    dvc_paths.add(manifest.artifact.path)
+    for rel_path, (content, executable) in files.items():
+        fpath = root / rel_path
         fpath.parent.mkdir(parents=True, exist_ok=True)
         fpath.write_bytes(content)
         if executable:
@@ -733,27 +1000,14 @@ def expand(path: str, dest_dir: str) -> EmbeddedKit:
             cache_path = root / ".dvc/cache/files/md5" / md5[:2] / md5[2:]
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_bytes(content)
-
-    # Write the project, then the artifact the calkit came in
-    with zipfile.ZipFile(io.BytesIO(kit.kit)) as z:
-        for info in z.infolist():
-            if not info.filename.startswith(PROJECT_DIR) or info.is_dir():
-                continue
-            write(
-                info.filename[len(PROJECT_DIR) :],
-                z.read(info),
-                executable=bool((info.external_attr >> 16) & 0o111),
-            )
-    write(kit.manifest.artifact.path, kit.artifact)
     # Commit it, linked to where it came from
-    repo = git.Repo.init(root)
-    for name, url in kit.manifest.source.git_remotes.items():
+    for name, url in manifest.source.git_remotes.items():
         remote_name = "upstream" if name == "origin" else f"upstream-{name}"
         repo.create_remote(remote_name, url)
     repo.git.add("--all")
     message = f"Expand calkit from {os.path.basename(path)}"
-    if kit.manifest.source.commit_sha:
-        message += f" ({kit.manifest.source.commit_sha[:7]})"
+    if manifest.source.commit_sha:
+        message += f" ({manifest.source.commit_sha[:7]})"
     try:
         repo.git.commit("-m", message)
     except git.GitCommandError:
@@ -766,18 +1020,11 @@ def get_missing_inputs(kit: EmbeddedKit, root: str) -> list[str]:
     """Get the files an expanded calkit's stages read that aren't there,
     i.e., inputs left out of it and not yet pulled.
     """
-    import calkit
-
-    with zipfile.ZipFile(io.BytesIO(kit.kit)) as z:
-        try:
-            lock = calkit.ryaml.load(z.read(PROJECT_DIR + "dvc.lock").decode())
-        except KeyError:
-            lock = {}
-    outputs = {
-        out["path"]
-        for stage in (lock.get("stages") or {}).values()
-        for out in stage.get("outs") or []
-    }
+    stage_io = get_stage_io(
+        read_project_yaml(kit.kit, "dvc.lock"),
+        read_project_yaml(kit.kit, "dvc.yaml"),
+    )
+    outputs = {p for io_ in stage_io.values() for p, _ in io_["outs"]}
     return [
         f.path
         for f in kit.manifest.files
@@ -785,3 +1032,61 @@ def get_missing_inputs(kit: EmbeddedKit, root: str) -> list[str]:
         and not any(f.path == o or f.path.startswith(o + "/") for o in outputs)
         and not os.path.exists(os.path.join(root, f.path))
     ]
+
+
+def copy_to_clipboard(path: str, platform: str | None = None) -> None:
+    """Put a file on the clipboard as a file, as copying it in a file
+    manager does, so pasting into a chat or email attaches it whole.
+
+    Copying an image's pixels instead would lose its calkit, since apps
+    re-encode them.
+    """
+    import sys
+
+    if platform is None:
+        platform = sys.platform
+    abs_path = os.path.abspath(path)
+    if platform == "darwin":
+        script = (
+            "function run(argv) {"
+            " ObjC.import('AppKit');"
+            " const pb = $.NSPasteboard.generalPasteboard;"
+            " pb.clearContents;"
+            " pb.writeObjects($([$.NSURL.fileURLWithPath(argv[0])]));"
+            " }"
+        )
+        cmd = ["osascript", "-l", "JavaScript", "-e", script, abs_path]
+        subprocess.run(cmd, check=True, capture_output=True)
+    elif platform == "win32":
+        quoted = abs_path.replace("'", "''")
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f"Set-Clipboard -LiteralPath '{quoted}'",
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+    else:
+        uri = Path(abs_path).as_uri()
+        for cmd in [
+            ["wl-copy", "--type", "text/uri-list"],
+            ["xclip", "-selection", "clipboard", "-t", "text/uri-list"],
+        ]:
+            if shutil.which(cmd[0]):
+                subprocess.run(cmd, input=uri.encode(), check=True)
+                return
+        raise RuntimeError("Copying to clipboard needs wl-copy or xclip")
+
+
+def get_hub_file_url(manifest: Manifest) -> str | None:
+    """Get the URL of a calkit's artifact on its project's hub, at the commit
+    it came from, or None if it names no hub.
+    """
+    from urllib.parse import urlencode
+
+    if manifest.source.hub_url is None:
+        return None
+    query = {"path": manifest.artifact.path}
+    if manifest.source.commit_sha:
+        query["ref"] = manifest.source.commit_sha
+    return f"{manifest.source.hub_url}/files?{urlencode(query)}"

@@ -3091,6 +3091,7 @@ Share figures and documents that carry what made them (calkits).
 | [`create`](#subcommand-kit-create) | Write a copy of a figure or document with a calkit embedded.                                     |
 | [`expand`](#subcommand-kit-expand) | Expand the calkit embedded in a file into a project.                                             |
 | [`run`](#subcommand-kit-run)       | Expand the calkit embedded in a file, rerun its pipeline, and check the file comes out the same. |
+| [`open`](#subcommand-kit-open)     | Open the project a file's calkit came from.                                                      |
 
 <a id="subcommand-kit-create"></a>
 
@@ -3114,12 +3115,13 @@ Arguments:
 
 Options:
 
-| Option           | Type    | Required | Default | Description                                                                                                                                   |
-| ---------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o` | str     | no       |         | Where to write the copy; defaults to NAME.calkit.EXT here.                                                                                    |
-| `--max-size`     | str     | no       |         | Largest the calkit may grow, e.g., 500KB or 20MB; data that doesn't fit is left out. Defaults to the file's size or 1MB, whichever is bigger. |
-| `--no-data`      | boolean | no       | False   | Leave out all data, so the calkit holds only the recipe.                                                                                      |
-| `--force`, `-f`  | boolean | no       | False   | Create it even if the pipeline is out of date.                                                                                                |
+| Option                 | Type    | Required | Default | Description                                                                                                                                   |
+| ---------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`       | str     | no       |         | Where to write the copy; defaults to NAME.calkit.EXT here.                                                                                    |
+| `--max-size`           | str     | no       |         | Largest the calkit may grow, e.g., 500KB or 20MB; data that doesn't fit is left out. Defaults to the file's size or 1MB, whichever is bigger. |
+| `--no-data`            | boolean | no       | False   | Leave out all data, so the calkit holds only the recipe.                                                                                      |
+| `--force`, `-f`        | boolean | no       | False   | Create it even if the pipeline is out of date.                                                                                                |
+| `--to-clipboard`, `-c` | boolean | no       | False   | Copy it to the clipboard, to paste into a chat or email.                                                                                      |
 
 <a id="subcommand-kit-expand"></a>
 
@@ -3153,7 +3155,7 @@ Inputs left out of the calkit are pulled from the original project's storage fir
 Usage:
 
 ```text
-calkit kit run PATH [DEST-DIR]
+calkit kit run [OPTIONS] PATH [DEST-DIR]
 ```
 
 Arguments:
@@ -3162,6 +3164,40 @@ Arguments:
 | ---------- | ---- | -------- | ------- | ---------------------------------------------------------- |
 | `path`     | str  | yes      |         | Path of a file with a calkit.                              |
 | `dest_dir` | str  | no       |         | Directory for the project; defaults to the project's name. |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                            |
+| ------------- | ------- | -------- | ------- | -------------------------------------- |
+| `--yes`, `-y` | boolean | no       | False   | Run without asking first what it runs. |
+
+<a id="subcommand-kit-open"></a>
+
+#### `calkit kit open`
+
+Open the project a file's calkit came from.
+
+Expands the calkit, unless that's been done already, and opens it in the default editor, or with '--hub', opens the original project on the hub at the commit the calkit came from.
+
+Usage:
+
+```text
+calkit kit open [OPTIONS] PATH [DEST-DIR]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                       |
+| ---------- | ---- | -------- | ------- | --------------------------------------------------------------------------------- |
+| `path`     | str  | yes      |         | Path of a file with a calkit.                                                     |
+| `dest_dir` | str  | no       |         | Directory to expand it into, if it isn't already; defaults to the project's name. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                              |
+| -------------- | ------- | -------- | ------- | -------------------------------------------------------- |
+| `--hub`        | boolean | no       | False   | Open its project on the hub, at the commit it came from. |
+| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default.           |
 
 <a id="command-group-office"></a>
 

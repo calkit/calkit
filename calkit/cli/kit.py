@@ -30,9 +30,10 @@ def get_default_dest_dir(path: str) -> str:
         raise_error(f"Can't read calkit: {e}")
     if kit is None:
         raise_error(f"{path} has no calkit")
-    return (
-        kit.manifest.source.name or os.path.splitext(os.path.basename(path))[0]
-    )
+    # The name comes from whoever made the calkit, so it only names a folder
+    # here
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", kit.manifest.source.name or "")
+    return name.strip(".-") or os.path.splitext(os.path.basename(path))[0]
 
 
 @kit_app.command(name="create")
@@ -72,6 +73,14 @@ def create(
             "--force",
             "-f",
             help="Create it even if the pipeline is out of date.",
+        ),
+    ] = False,
+    to_clipboard: Annotated[
+        bool,
+        typer.Option(
+            "--to-clipboard",
+            "-c",
+            help="Copy it to the clipboard, to paste into a chat or email.",
         ),
     ] = False,
 ) -> None:
@@ -155,6 +164,12 @@ def create(
         )
     if not manifest.source.git_remotes:
         warn("No Git remote, so history can't be fetched from the calkit")
+    if to_clipboard:
+        try:
+            calkit.kits.copy_to_clipboard(output)
+        except Exception as e:
+            raise_error(f"Couldn't copy to clipboard: {e}")
+        typer.echo(f"Copied {output} to clipboard")
 
 
 @kit_app.command(name="expand")
@@ -206,6 +221,12 @@ def run(
             help="Directory for the project; defaults to the project's name."
         ),
     ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes", "-y", help="Run without asking first what it runs."
+        ),
+    ] = False,
 ) -> None:
     """Expand the calkit embedded in a file, rerun its pipeline, and check
     the file comes out the same.
@@ -219,6 +240,7 @@ def run(
     import sys
 
     import calkit.kits
+    from calkit.core import is_tty
 
     if not os.path.isfile(path):
         raise_error(f"{path} doesn't exist")
@@ -243,6 +265,18 @@ def run(
                 + ", ".join(missing)
                 + "; pull them, or create calkit with a larger --max-size"
             )
+    # The pipeline is someone else's code, so say what it runs first
+    with open(os.path.join(dest_dir, "dvc.yaml")) as f:
+        dvc_stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+    typer.echo("Stages to run:")
+    for name, stage in dvc_stages.items():
+        cmd = stage.get("cmd") or (stage.get("do") or {}).get("cmd")
+        typer.echo(f"  {name}: {cmd}")
+    if not yes:
+        if not is_tty():
+            raise_error("Rerun with --yes to run these")
+        if not typer.confirm("Run them?", default=False):
+            raise typer.Exit(1)
     typer.echo("Rerunning pipeline")
     res = subprocess.run(
         [sys.executable, "-m", "calkit", "run", "--force"], cwd=dest_dir
@@ -258,3 +292,73 @@ def run(
             "shared file"
         )
     typer.echo(f"Reproduced {kit.manifest.artifact.path}: identical")
+
+
+@kit_app.command(name="open")
+def open_(
+    path: Annotated[str, typer.Argument(help="Path of a file with a calkit.")],
+    dest_dir: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Directory to expand it into, if it isn't already; defaults "
+                "to the project's name."
+            )
+        ),
+    ] = None,
+    hub: Annotated[
+        bool,
+        typer.Option(
+            "--hub",
+            help="Open its project on the hub, at the commit it came from.",
+        ),
+    ] = False,
+    with_editor: Annotated[
+        str | None,
+        typer.Option(
+            "--with",
+            "-w",
+            help="Editor to open it with instead of the default.",
+        ),
+    ] = None,
+) -> None:
+    """Open the project a file's calkit came from.
+
+    Expands the calkit, unless that's been done already, and opens it in
+    the default editor, or with '--hub', opens the original project on the
+    hub at the commit the calkit came from.
+    """
+    import calkit.kits
+    from calkit.cli.open_ import open_project
+
+    if not os.path.isfile(path):
+        raise_error(f"{path} doesn't exist")
+    try:
+        kit = calkit.kits.read(path)
+    except ValueError as e:
+        raise_error(f"Can't read calkit: {e}")
+    if kit is None:
+        raise_error(f"{path} has no calkit")
+    if hub:
+        url = calkit.kits.get_hub_file_url(kit.manifest)
+        if url is None:
+            raise_error("Calkit names no hub project")
+        typer.echo(f"Opening {url}")
+        typer.launch(url)
+        return
+    if dest_dir is None:
+        dest_dir = get_default_dest_dir(path)
+    if not os.path.isfile(os.path.join(dest_dir, "calkit.yaml")):
+        try:
+            calkit.kits.expand(path, dest_dir)
+        except ValueError as e:
+            raise_error(str(e))
+        typer.echo(f"Expanded into {dest_dir}")
+    open_project(
+        project=os.path.basename(os.path.abspath(dest_dir)),
+        file_path=kit.manifest.artifact.path,
+        checkout=dest_dir,
+        with_editor=with_editor,
+        yes=False,
+        hub=None,
+    )

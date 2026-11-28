@@ -7,13 +7,14 @@ import zipfile
 
 from typer.testing import CliRunner
 
+import calkit.hub
 import calkit.kits
 from calkit.cli.main import app
 
 runner = CliRunner()
 
 
-def test_create(kit_project):
+def test_create(kit_project, monkeypatch):
     # Written beside where it's run, leaving the original alone
     res = runner.invoke(app, ["kit", "create", "figures/fig.png"])
     assert res.exit_code == 0, res.stdout
@@ -56,13 +57,24 @@ def test_create(kit_project):
     assert not kit.manifest.source.up_to_date
     assert "Uncommitted changes" in res.stdout + str(res.stderr)
     subprocess.check_call(["dvc", "checkout", "-q", "--force", "data/raw.csv"])
+    # Copied to the clipboard as a file
+    copied = []
+    monkeypatch.setattr(
+        "calkit.kits.copy_to_clipboard", lambda path: copied.append(path)
+    )
+    res = runner.invoke(
+        app, ["kit", "create", "figures/fig.svg", "--to-clipboard"]
+    )
+    assert res.exit_code == 0, res.stdout
+    assert copied == ["fig.calkit.svg"]
+    assert "Copied fig.calkit.svg to clipboard" in res.stdout
     # Only what a stage makes can carry a calkit
     res = runner.invoke(app, ["kit", "create", "scripts/make.py"])
     assert res.exit_code != 0
     assert "No pipeline stage makes" in res.stdout + str(res.stderr)
 
 
-def test_expand_run(kit_project, tmp_path):
+def test_expand_run_open(kit_project, tmp_path, monkeypatch):
     kit_path = str(tmp_path / "fig.png")
     calkit.kits.write_copy("figures/fig.png", kit_path, up_to_date=True)
     small_path = str(tmp_path / "small.png")
@@ -84,12 +96,35 @@ def test_expand_run(kit_project, tmp_path):
     res = runner.invoke(app, ["kit", "expand", "kit-test/scripts/make.py"])
     assert res.exit_code != 0
     assert "has no calkit" in res.stdout + str(res.stderr)
+    # Opening opens the expanded project in an editor, or the original on
+    # the hub at the commit it came from
+    opened = []
+    monkeypatch.setattr(
+        "calkit.cli.open_.open_project",
+        lambda **kwargs: opened.append(kwargs),
+    )
+    res = runner.invoke(app, ["kit", "open", small_path])
+    assert res.exit_code == 0, res.stdout
+    assert opened[-1]["checkout"] == "kit-test"
+    assert opened[-1]["file_path"] == "figures/fig.png"
+    launched = []
+    monkeypatch.setattr(
+        "calkit.cli.kit.typer.launch", lambda url: launched.append(url)
+    )
+    res = runner.invoke(app, ["kit", "open", small_path, "--hub"])
+    assert res.exit_code == 0, res.stdout
+    assert launched[-1].startswith(
+        calkit.hub.get_hub_url().rstrip("/")
+        + "/someone/kit-test/files?path=figures%2Ffig.png&ref="
+    )
     # Running reruns the pipeline and checks the file comes out the same
-    res = runner.invoke(app, ["kit", "run", kit_path, "rerun"])
+    res = runner.invoke(app, ["kit", "run", kit_path, "rerun", "--yes"])
     assert res.exit_code == 0, res.stdout
     assert "Reproduced figures/fig.png: identical" in res.stdout
     # It can't without inputs that weren't included and can't be pulled
-    res = runner.invoke(app, ["kit", "run", small_path, "rerun-small"])
+    res = runner.invoke(
+        app, ["kit", "run", small_path, "rerun-small", "--yes"]
+    )
     assert res.exit_code != 0
     assert "Missing inputs: data/raw.csv" in res.stdout + str(res.stderr)
     # A file that comes out different from the shared one is reported
@@ -97,6 +132,7 @@ def test_expand_run(kit_project, tmp_path):
     assert kit is not None
     changed = kit.manifest.model_copy(deep=True)
     changed.artifact.sha256 = "0" * 64
+    changed.source.name = "../evil"
     with zipfile.ZipFile(io.BytesIO(kit.kit)) as z:
         entries = {name: (z.read(name), False) for name in z.namelist()}
     entries[calkit.kits.MANIFEST_NAME] = (
@@ -109,6 +145,8 @@ def test_expand_run(kit_project, tmp_path):
                 kit.artifact, "changed.png", calkit.kits.write_zip(entries)
             )
         )
-    res = runner.invoke(app, ["kit", "run", "changed.png", "rerun-changed"])
+    res = runner.invoke(app, ["kit", "run", "changed.png", "--yes"])
     assert res.exit_code != 0
+    # Its name, from whoever made it, only names a folder here
+    assert "Expanded into evil" in res.stdout
     assert "differs from the shared file" in res.stdout + str(res.stderr)

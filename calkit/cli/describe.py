@@ -301,6 +301,9 @@ def describe_artifact(
     import calkit.provenance
 
     if not os.path.isfile(path):
+        # Probably a mistyped subcommand, if it doesn't look like a path
+        if "/" not in path and "." not in path:
+            raise_error(f"No such command or file: {path}")
         raise_error(f"{path} doesn't exist")
     try:
         kit = calkit.kits.read(path)
@@ -332,6 +335,9 @@ def describe_artifact(
         if remote:
             where += f" ({remote})"
         typer.echo(f"{manifest.artifact.path} from {where}")
+        hub_url = calkit.kits.get_hub_file_url(manifest)
+        if hub_url:
+            typer.echo(f"On hub: {hub_url}")
         typer.echo(f"Made by stage: {manifest.artifact.stage}")
         if not kit.artifact_unchanged:
             typer.echo(

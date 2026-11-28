@@ -263,9 +263,11 @@ def test_describe_storage():
 
 
 def test_describe_artifact(kit_project, tmp_path):
+    import calkit.hub
     import calkit.kits
 
     runner = CliRunner()
+    hub_url = calkit.hub.get_hub_url().rstrip("/")
     kit_path = str(tmp_path / "fig.png")
     calkit.kits.write_copy(
         "figures/fig.png", kit_path, up_to_date=True, max_size=1000
@@ -277,6 +279,7 @@ def test_describe_artifact(kit_project, tmp_path):
         assert res.exit_code == 0, res.stdout
         assert "figures/fig.png from kit-test at" in res.stdout
         assert "https://github.com/someone/kit-test.git" in res.stdout
+        assert f"On hub: {hub_url}/someone/kit-test/files" in res.stdout
         assert "Made by stage: make" in res.stdout
         assert "Unchanged since calkit was created" in res.stdout
         assert "origin not defined for data/raw.csv" in res.stdout

@@ -54,16 +54,13 @@ class DefaultCommandGroup(AliasGroup):
 
     default_command = ""
 
-    def resolve_command(
-        self, ctx: Any, args: list[str]
-    ) -> tuple[str | None, Any, list[str]]:
-        if (
-            args
-            and not args[0].startswith("-")
-            and self.get_command(ctx, args[0]) is None
-        ):
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        # Before the group parses, since options for the default command,
+        # e.g., 'calkit describe --json PATH', aren't the group's
+        first = next((a for a in args if not a.startswith("-")), None)
+        if first is not None and self.get_command(ctx, first) is None:
             args = [self.default_command, *args]
-        return super().resolve_command(ctx, args)
+        return super().parse_args(ctx, args)
 
 
 class OptionalValueCommand(TyperCommand):

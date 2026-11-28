@@ -21,6 +21,7 @@ from calkit.models.pipeline import (
     Pipeline,
     ShellCommandStage,
     Stage,
+    compile_output_template,
     is_flag_and_value,
 )
 
@@ -2359,13 +2360,16 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any.
 
     A stage produces everything inside a directory it declares as an output
-    or writes into through ``map-paths``. A stage declaring the path itself
-    wins, then the one declaring the innermost directory that contains it.
+    or writes into through ``map-paths``, and an iterated stage produces
+    what its output templates match, e.g., ``results/{case}.csv``. A stage
+    declaring the path itself wins, then one whose template matches it,
+    then the one declaring the innermost directory that contains it.
     """
     target = posixpath.normpath(Path(path).as_posix())
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
         return None
+    templated: str | None = None
     containing: tuple[int, str] | None = None
     for name, stage in stages.items():
         if not isinstance(stage, dict):
@@ -2386,6 +2390,13 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
         for out in outs:
             if target == out:
                 return str(name)
+            if (
+                templated is None
+                and stage.get("iterate_over")
+                and "{" in out
+                and compile_output_template(out).match(target)
+            ):
+                templated = str(name)
             # Except the project root, which would claim every path
             if (
                 out != "."
@@ -2393,6 +2404,8 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
                 and (containing is None or len(out) > containing[0])
             ):
                 containing = (len(out), str(name))
+    if templated is not None:
+        return templated
     return containing[1] if containing else None
 
 
@@ -4318,12 +4331,7 @@ def annotate_artifacts(
     # An iterated stage's output template matches what each iteration
     # writes, the way preprocessing matches it
     templates = [
-        (
-            re.compile(
-                re.sub(r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)) + r"\Z"
-            ),
-            stages,
-        )
+        (compile_output_template(path), stages)
         for path, stages in by_output.items()
         if "{" in path
     ]

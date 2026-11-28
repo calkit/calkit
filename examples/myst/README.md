@@ -31,8 +31,10 @@ To see the site, start MyST's preview server in `paper/`, in the
 project's environment:
 
 ```sh
-calkit xenv -n py --wdir paper -- myst start
+make serve
 ```
+
+This runs `calkit xenv -n py --wdir paper -- myst start`.
 
 <!-- TODO: needs human review -->
 
@@ -44,3 +46,11 @@ Each value in the first paragraph is followed by a small mark linking to
 the same for it, at the end of the page.
 Change the decay rate in `scripts/generate.py` and run again:
 the site is built again with the new figure, table, and values.
+
+<!-- TODO: needs human review -->
+
+## Starting a project from this example
+
+```sh
+calkit new project my-project --from calkit/calkit/examples/myst
+```

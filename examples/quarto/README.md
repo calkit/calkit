@@ -52,3 +52,11 @@ selecting it shows the same for the value.
 Edit `scripts/simulate.jl` and render the report with
 `calkit doc build report.qmd`, without running the
 pipeline, to see them say they're out of date while collapsed.
+
+<!-- TODO: needs human review -->
+
+## Starting a project from this example
+
+```sh
+calkit new project my-project --from calkit/calkit/examples/quarto
+```

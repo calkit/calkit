@@ -30,3 +30,11 @@ the next real run reruns its stages,
 and so does a mocked run after a real one.
 That's also why `calkit status` lists the simulation as out of date
 after a mocked run.
+
+<!-- TODO: needs human review -->
+
+## Starting a project from this example
+
+```sh
+calkit new project my-project --from calkit/calkit/examples/multi-hpc
+```

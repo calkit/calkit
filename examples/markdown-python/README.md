@@ -99,3 +99,11 @@ calkit run
 
 That block carries no annotation, so it is not a stage---just an
 instruction for a reader. Only annotated blocks run.
+
+<!-- TODO: needs human review -->
+
+## Starting a project from this example
+
+```sh
+calkit new project my-project --from calkit/calkit/examples/markdown-python
+```

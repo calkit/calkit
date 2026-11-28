@@ -131,6 +131,7 @@ Options:
 | `--category`, `-c` | list[str] | no       |         | Status categories to show: project, questions, git, dvc, pipeline, or imports. By default, all but imports are shown, since checking imports asks each one's source. Can be specified multiple times. |
 | `--no-env-check`   | boolean   | no       | False   | Skip environment checks. Note that this may produce an inaccurate pipeline status if materialized environments have changed.                                                                          |
 | `--json`           | boolean   | no       | False   | Output status as JSON.                                                                                                                                                                                |
+| `--check`          | boolean   | no       | False   | Exit nonzero if the pipeline is stale or its status is unavailable, e.g., in CI. In GitHub Actions, also annotate the result and write it to the job summary.                                         |
 
 <a id="top-command-diff"></a>
 

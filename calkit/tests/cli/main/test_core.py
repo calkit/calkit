@@ -1852,6 +1852,162 @@ def test_status(tmp_dir):
         subprocess.check_output(["calkit", "status", "-c", "dvc", "--json"])
     )
     assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
+    # With --check, a stale pipeline fails, saying what changed and the fix,
+    # and in GitHub Actions, it's annotated and summarized too
+    check_cmd = ["calkit", "status", "-c", "pipeline", "--no-env-check"]
+    check_cmd += ["--check"]
+    summary_path = os.path.abspath(os.path.join("..", "summary.md"))
+    gh_env = dict(os.environ) | {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_STEP_SUMMARY": summary_path,
+    }
+    res = subprocess.run(check_cmd, capture_output=True, text=True, env=gh_env)
+    assert res.returncode == 0, res.stderr
+    assert "::error" not in res.stdout
+    with open(summary_path) as f:
+        assert f.read() == "### No pipeline\n"
+    # Outside the project, there's nothing to check, which fails
+    res = subprocess.run(
+        check_cmd, capture_output=True, text=True, cwd="figures"
+    )
+    assert res.returncode == 1
+    assert "No calkit.yaml" in res.stderr
+    assert f"Run from {os.getcwd()}." in res.stderr
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "copy-git": {
+                "kind": "shell-command",
+                "command": "cat in.txt > out-git.txt",
+                "environment": "_system",
+                "inputs": ["in.txt"],
+                "outputs": [{"path": "out-git.txt", "storage": "git"}],
+            },
+            "copy-dvc": {
+                "kind": "shell-command",
+                "command": "cat in.txt > out-dvc.txt",
+                "environment": "_system",
+                "inputs": ["in.txt"],
+                "outputs": [{"path": "out-dvc.txt", "storage": "dvc"}],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("in.txt", "w") as f:
+        f.write("a\n")
+    subprocess.check_call(["calkit", "run"])
+    res = subprocess.run(check_cmd, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    assert "Pipeline is up to date" in res.stdout
+    with open("in.txt", "w") as f:
+        f.write("b\n")
+    os.remove(summary_path)
+    res = subprocess.run(check_cmd, capture_output=True, text=True, env=gh_env)
+    assert res.returncode == 1
+    assert "Out of date:" in res.stderr
+    assert "copy-git: in.txt modified" in res.stderr
+    assert "copy-dvc: in.txt modified" in res.stderr
+    assert "Run 'calkit run' and commit." in res.stderr
+    assert (
+        "::error title=Calkit check::Out of date:%0A"
+        "  copy-git: in.txt modified%0A  copy-dvc: in.txt modified%0A"
+        "Run 'calkit run' and commit.\n"
+    ) in res.stdout
+    with open(summary_path) as f:
+        assert f.read() == (
+            "### Out of date\n\n- copy-git: in.txt modified\n"
+            "- copy-dvc: in.txt modified\n\nRun 'calkit run' and commit.\n"
+        )
+    # JSON stays parseable, with the result in it
+    res = subprocess.run(
+        check_cmd + ["--json"], capture_output=True, text=True, env=gh_env
+    )
+    assert res.returncode == 1
+    assert "::error" in res.stderr
+    check_json = json.loads(res.stdout)["check"]
+    assert not check_json["passed"]
+    assert check_json["summary"] == "Out of date"
+    assert sorted(check_json["problems"]) == [
+        "copy-dvc: in.txt modified",
+        "copy-git: in.txt modified",
+    ]
+    # Without --check, the result isn't in the JSON and status succeeds
+    res = subprocess.run(
+        check_cmd[:-1] + ["--json"], capture_output=True, text=True
+    )
+    assert res.returncode == 0
+    assert "check" not in json.loads(res.stdout)
+    # An output stored with DVC that wasn't pulled is missing, not modified
+    subprocess.check_call(["calkit", "run"])
+    os.remove("out-dvc.txt")
+    res = subprocess.run(check_cmd, capture_output=True, text=True)
+    assert res.returncode == 1
+    assert "copy-dvc: out-dvc.txt missing" in res.stderr
+    assert "copy-git" not in res.stderr
+    assert "'calkit pull' for missing outputs" in res.stderr
+    # A Git-stored one can't be pulled, a stage that hasn't run says so, and
+    # a missing input isn't modified
+    subprocess.check_call(["calkit", "run"])
+    os.remove("out-git.txt")
+    ck_info["pipeline"]["stages"]["new"] = {
+        "kind": "shell-command",
+        "command": "cat in.txt > new.txt",
+        "environment": "_system",
+        "inputs": ["in.txt"],
+        "outputs": [{"path": "new.txt", "storage": "git"}],
+    }
+    ck_info["pipeline"]["stages"]["copy-dvc"]["inputs"] = ["gone.txt"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(check_cmd, capture_output=True, text=True)
+    assert res.returncode == 1
+    assert "copy-git: out-git.txt missing" in res.stderr
+    assert "copy-dvc: gone.txt missing" in res.stderr
+    assert "new: never run" in res.stderr
+    assert "calkit pull" not in res.stderr
+    # Fails when the status is unavailable, e.g., for an invalid pipeline
+    ck_info["pipeline"]["stages"]["new"]["kind"] = "not-a-kind"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        check_cmd + ["--json"], capture_output=True, text=True
+    )
+    assert res.returncode == 1
+    check_json = json.loads(res.stdout)["check"]
+    assert check_json["summary"] == "Pipeline status unavailable"
+    assert check_json["problems"]
+    # Or a failed environment check
+    ck_info["environments"] = {
+        "py": {
+            "kind": "uv-venv",
+            "path": "nope/requirements.txt",
+            "prefix": ".venv",
+            "python": "3.12",
+        }
+    }
+    ck_info["pipeline"]["stages"]["new"] = {
+        "kind": "python-script",
+        "script_path": "new.py",
+        "environment": "py",
+        "outputs": [{"path": "new.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        check_cmd[:-2] + ["--check"], capture_output=True, text=True
+    )
+    assert res.returncode == 1
+    assert "py: environment check failed" in res.stderr
+    assert "Run 'calkit check env -n py' for details." in res.stderr
+    # Checking needs the pipeline's status
+    res = subprocess.run(
+        ["calkit", "status", "-c", "git", "--check"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 1
+    assert "--check needs pipeline or dvc category" in res.stderr
 
 
 def test_status_offers_requirements_for_failed_env_check(
@@ -2832,6 +2988,15 @@ def test_status_reports_running_pipeline(tmp_dir):
         data = json.loads(out)
         assert data["pipeline"]["running"] is True
         assert "train" in data["pipeline"]["running_stages"]
+        # Whether it'll be up to date can't be known yet, so a check fails
+        res = subprocess.run(
+            ["calkit", "status", "-c", "pipeline", "--check"],
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 1
+        assert "Run in progress" in res.stdout
+        assert "Pipeline running" in res.stderr
     finally:
         proc.terminate()
         proc.wait()

@@ -702,6 +702,17 @@ def get_status(
     as_json: Annotated[
         bool, typer.Option("--json", help="Output status as JSON.")
     ] = False,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help=(
+                "Exit nonzero if the pipeline is stale or its status is "
+                "unavailable, e.g., in CI. In GitHub Actions, also annotate "
+                "the result and write it to the job summary."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """View status (project, version control, and/or pipeline)."""
     from contextlib import AbstractContextManager, nullcontext
@@ -777,6 +788,136 @@ def get_status(
             return dict(pipeline_status.dvc_data_status)
         return dict(calkit.dvc.get_dvc_repo().data_status())
 
+    def get_check_result() -> dict[str, Any]:
+        # Whether the pipeline is up to date, and if not, why and what to do
+        lock_stages: dict[str, dict] = {}
+
+        def describe_changes(
+            name: str, stage: calkit.pipeline.StaleStage
+        ) -> tuple[str, list[str]]:
+            # What made a stage stale, briefly, and which of its missing
+            # outputs Git ignores, i.e., are stored with DVC, so pulling them
+            # would bring them back
+            lock_wdir, bare_name = ".", name
+            if stage.is_subproject and ":" in name:
+                lock_wdir, bare_name = name.split(":", 1)
+            if lock_wdir not in lock_stages:
+                lock_stages[lock_wdir] = calkit.dvc.read_lock_stages(
+                    wdir=lock_wdir
+                )
+            if (
+                not name.endswith(" (subproject)")
+                and bare_name not in lock_stages[lock_wdir]
+            ):
+                return "never run", []
+            changes = []
+            if stage.modified_command:
+                changes.append("command modified")
+            for path in stage.modified_inputs:
+                state = "modified" if os.path.exists(path) else "missing"
+                changes.append(f"{path} {state}")
+            for path in stage.modified_outputs:
+                changes.append(f"{path} modified")
+            missing_paths = []
+            # Outputs are only the cause when nothing upstream of them changed
+            if not changes:
+                for path in stage.stale_outputs:
+                    if os.path.exists(path):
+                        changes.append(f"{path} not in cache")
+                    else:
+                        changes.append(f"{path} missing")
+                        missing_paths.append(path)
+            pullable_paths = []
+            if missing_paths:
+                try:
+                    pullable_paths = calkit.git.get_repo().ignored(
+                        *missing_paths
+                    )
+                except Exception:
+                    pass
+            return ", ".join(changes) or "stale", pullable_paths
+
+        result: dict[str, Any] = {
+            "passed": False,
+            "summary": "Pipeline status unavailable",
+            "problems": [],
+            "fix": None,
+        }
+        if project_dir != os.path.abspath("."):
+            result["summary"] = "No calkit.yaml"
+            result["fix"] = (
+                "Run from project directory."
+                if project_dir is None
+                else f"Run from {project_dir}."
+            )
+        elif running_status is not None:
+            result["summary"] = "Pipeline running"
+        elif pipeline_status is None:
+            pass
+        elif pipeline_status.errors:
+            result["problems"] = pipeline_status.errors
+        elif pipeline_status.failed_environment_checks:
+            result["problems"] = [
+                f"{name}: environment check failed"
+                for name in pipeline_status.failed_environment_checks
+            ]
+            failed = pipeline_status.failed_environment_checks
+            env_name = failed[0] if len(failed) == 1 else "<name>"
+            result["fix"] = (
+                f"Run 'calkit check env -n {env_name}' for details."
+            )
+        elif pipeline_status.is_stale:
+            result["summary"] = "Out of date"
+            pullable_paths = []
+            for name in pipeline_status.stale_stage_names:
+                changes, stage_pullable_paths = describe_changes(
+                    name, pipeline_status.stale_stages[name]
+                )
+                result["problems"].append(f"{name}: {changes}")
+                pullable_paths += stage_pullable_paths
+            result["fix"] = "Run 'calkit run' and commit."
+            if pullable_paths:
+                result["fix"] = (
+                    "Run 'calkit run' and commit, or 'calkit pull' for "
+                    "missing outputs."
+                )
+        else:
+            result["passed"] = True
+            result["summary"] = (
+                "Up to date" if pipeline_status.has_pipeline else "No pipeline"
+            )
+        return result
+
+    def report_check_result() -> None:
+        # In GitHub Actions, the result is also annotated and summarized
+        if not check:
+            return
+        problems = check_result["problems"]
+        lines = [check_result["summary"] + (":" if problems else "")]
+        lines += ["  " + problem for problem in problems]
+        if check_result["fix"]:
+            lines.append(check_result["fix"])
+        in_github = os.environ.get("GITHUB_ACTIONS") == "true"
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if in_github and summary_path:
+            summary_lines = ["### " + check_result["summary"]]
+            if problems:
+                summary_lines += [""] + ["- " + p for p in problems]
+            if check_result["fix"]:
+                summary_lines += ["", check_result["fix"]]
+            with open(summary_path, "a", encoding="utf-8") as f:
+                f.write("\n".join(summary_lines) + "\n")
+        if check_result["passed"]:
+            return
+        if in_github:
+            # Workflow commands take newlines escaped
+            message = "\n".join(lines)
+            for char, code in [("%", "%25"), ("\r", "%0D"), ("\n", "%0A")]:
+                message = message.replace(char, code)
+            # On stderr with JSON, to keep stdout parseable
+            typer.echo(f"::error title=Calkit check::{message}", err=as_json)
+        raise_error("\n".join(lines))
+
     dotenv.load_dotenv(dotenv_path=".env")
     # Status only reads calkit.yaml, so skip the slower round-trip parser
     ck_info = calkit.load_calkit_info(read_only=True)
@@ -832,7 +973,7 @@ def get_status(
                 or ck_info.get("subprojects")
                 or os.path.isfile("dvc.yaml")
             ):
-                typer.echo("Initializing DVC repository")
+                typer.echo("Initializing DVC repository", err=as_json)
                 try:
                     result = calkit.dvc.init(quiet=True)
                     if result != 0:
@@ -855,12 +996,16 @@ def get_status(
                 )
     else:
         categories = default_categories
+    if check and not {"pipeline", "dvc"} & set(categories):
+        raise_error("--check needs pipeline or dvc category")
     # Without calkit.yaml, these would read as an empty project
-    if {"project", "questions", "pipeline", "imports"} & set(categories):
+    project_dir: str | None = os.path.abspath(".")
+    if check or {"project", "questions", "pipeline", "imports"} & set(
+        categories
+    ):
         # Stop at the Git top level, since a nested repo is its own project,
         # and before home, where a calkit.yaml is likely stray
         home_path = os.path.realpath(os.path.expanduser("~"))
-        project_dir: str | None = os.path.abspath(".")
         while project_dir is not None and not os.path.isfile(
             os.path.join(project_dir, "calkit.yaml")
         ):
@@ -1013,6 +1158,7 @@ def get_status(
                     storage_problems = calkit.dvc.get_storage_problems()
                 except Exception:
                     pass
+    check_result = get_check_result()
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:
@@ -1090,7 +1236,10 @@ def get_status(
                 )
         if import_statuses is not None:
             status_dict["imports"] = import_statuses
+        if check:
+            status_dict["check"] = check_result
         print(json.dumps(status_dict, indent=2, default=str))
+        report_check_result()
         return
     if "project" in categories:
         print_sep("Project")
@@ -1212,6 +1361,7 @@ def get_status(
         print_sep("Pipeline")
         if running_status is not None:
             _print_running_pipeline_status(running_status)
+            report_check_result()
             return
         for switch_name, picked in (
             pipeline_status.switches if pipeline_status else {}
@@ -1230,9 +1380,11 @@ def get_status(
             warn("Pipeline status unavailable due to errors:")
             for error in pipeline_status.errors:
                 warn(error)
+            report_check_result()
             return
         if pipeline_status and not pipeline_status.has_pipeline:
             typer.echo("This project has no pipeline.")
+            report_check_result()
             return
         # A failed environment check makes get_status bail out before computing
         # staleness, leaving stale_stages empty. Don't let that masquerade as an
@@ -1245,6 +1397,7 @@ def get_status(
                 "Pipeline status unavailable until the failed environment "
                 "checks above are resolved."
             )
+            report_check_result()
             return
         elif pipeline_status and pipeline_status.is_stale:
             typer.echo("Stale stages:")
@@ -1325,6 +1478,7 @@ def get_status(
                     warn(f"          {input_path}:", prefix="")
                     for path in files:
                         warn(f"            {path}", prefix="")
+    report_check_result()
 
 
 @app.command(name="diff")

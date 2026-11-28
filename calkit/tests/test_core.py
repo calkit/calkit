@@ -924,7 +924,7 @@ def test_check_app_version():
     assert all(kw["timeout"] for _, kw in calls)
 
 
-def test_check_dep_exists_conda_off_path(monkeypatch):
+def test_check_dep_exists_conda_off_path(monkeypatch, tmp_path):
     # Conda is frequently installed but not on the PATH (especially on
     # Windows). check_dep_exists should locate it via find_conda_exe rather
     # than relying on ``conda --version`` being directly runnable.
@@ -953,6 +953,21 @@ def test_check_dep_exists_conda_off_path(monkeypatch):
         )
         for app in ["word", "excel", "powerpoint", "libreoffice"]:
             assert calkit.check_dep_exists(app, "app") is found
+    # Julia runs through juliaup's launcher when its 'julia' isn't on the
+    # PATH, but not with neither there
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir))
+    assert not calkit.check_dep_exists("julia", "app")
+    for name in [
+        "juliaup",
+        "juliaup.exe",
+        "julialauncher",
+        "julialauncher.exe",
+    ]:
+        (bin_dir / name).write_text("")
+        (bin_dir / name).chmod(0o755)
+    assert calkit.check_dep_exists("julia", "app")
 
 
 def test_get_md5(tmp_dir):

@@ -16,7 +16,7 @@ that produced them, for fast iteration and full transparency.**
 - **<!-- ckvalue results/traction.json releases_per_week_last_90_days -->8.9<!-- /ckvalue -->**
   releases per week
 
-as of <!-- ckvalue results/traction.json date -->2026-11-27<!-- /ckvalue -->
+as of <!-- ckvalue results/traction.json date -->2026-11-28<!-- /ckvalue -->
 
 ## The problem
 

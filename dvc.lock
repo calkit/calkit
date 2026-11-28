@@ -181,13 +181,13 @@ stages:
       nfiles: 2
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 1f509d23548f197be23aa38ad742dfc5
-      size: 36372
+      md5: 5db2ebfcd9424f23f4451d24d10c39a7
+      size: 36982
     outs:
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: eb69efb3272abbc2c559116671059b7f
-      size: 125620
+      md5: 7eadc0462ee874f6125ede06cf56ad79
+      size: 125627
   one-pager/pdf:
     cmd: calkit latex from-markdown docs/one-pager/main.md -o 
       docs/one-pager/main.pdf -e tex --no-check --template 
@@ -376,8 +376,8 @@ stages:
     deps:
     - path: calkit/cli/latex.py
       hash: md5
-      md5: fdaa99804a7fdb596e9aebfd6b733609
-      size: 200162
+      md5: 0f83f032eda799f5aa29128aa144d53c
+      size: 200305
     - path: calkit/docx.py
       hash: md5
       md5: 83e04bd9da02144e6bcb80a5a749767d
@@ -425,31 +425,31 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
+      md5: 41bbf814bd2c3365f53b5ffae6969d1c
+      size: 173813
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
+      md5: 41bbf814bd2c3365f53b5ffae6969d1c
+      size: 173813
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 1f509d23548f197be23aa38ad742dfc5
-      size: 36372
+      md5: 5db2ebfcd9424f23f4451d24d10c39a7
+      size: 36982
   latex-word-round-trip-figure:
     cmd: uv run --locked --script scripts/plot-latex-word-round-trip.py
     deps:
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
+      md5: 41bbf814bd2c3365f53b5ffae6969d1c
+      size: 173813
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
+      md5: 41bbf814bd2c3365f53b5ffae6969d1c
+      size: 173813
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: eb69efb3272abbc2c559116671059b7f
-      size: 125620
+      md5: 7eadc0462ee874f6125ede06cf56ad79
+      size: 125627
     - path: scripts/.python-version
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
@@ -465,5 +465,5 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: 23db3ce252dbfe1055eccee73d1e6a56
-      size: 258447
+      md5: b143ef0cd472cee1c813bc55e1379ecb
+      size: 359262

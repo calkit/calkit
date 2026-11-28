@@ -368,7 +368,7 @@ changes.
 Unlike the display in `calkit show question`, a placeholder that can't be
 filled is an error here rather than being left in the text.
 The same output can be written without a stage with
-`calkit latex from-questions -o questions.tex`.
+`calkit doc latex from-questions -o questions.tex`.
 
 ## Pointing at the publication
 

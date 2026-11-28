@@ -1238,6 +1238,8 @@ def test_get_path_provenance():
     files = {
         "results/metrics.json": json.dumps({"rmse": 0.12, "fit": {"b": 1.2}}),
         "scripts/analyze.py": "",
+        "scripts/plot.py": "",
+        "results/plot.json": "{}",
         "data/raw.csv": "",
         "data/downloaded/a.csv": "",
         "paper/drawn.svg": "",
@@ -1275,6 +1277,11 @@ def test_get_path_provenance():
                         {"kind": "value", "cell_id": "a", "variable_name": "k"}
                     ],
                 },
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "scripts/plot.py",
+                    "outputs": ["results/plot.json"],
+                },
                 "copy-figs": {
                     "kind": "map-paths",
                     "paths": [
@@ -1299,6 +1306,16 @@ def test_get_path_provenance():
                     "data/downloaded",
                 ],
                 "outs": ["results/metrics.json", "figures/plot.png"],
+            },
+            "plot": {
+                "cmd": "uv run --locked --script scripts/plot.py",
+                "deps": [
+                    "scripts/plot.py",
+                    "scripts/plot.py.lock",
+                    ".python-version",
+                    "data/raw.csv",
+                ],
+                "outs": ["results/plot.json"],
             },
             "copy-figs": {
                 "cmd": "calkit map-paths",
@@ -1354,6 +1371,8 @@ def test_get_path_provenance():
     assert metrics["inputs"] == ["data/raw.csv", "data/downloaded"]
     assert metrics["stage_status"] == {"status": "up-to-date"}
     assert [g["path"] for g in metrics["gaps"]] == ["data/raw.csv"]
+    # Nor the environment a script declares
+    assert get("results/plot.json")["inputs"] == ["data/raw.csv"]
     assert get("results/metrics.json", key="nope")["value_error"] == (
         "nope isn't in results/metrics.json"
     )

@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "matplotlib>=3.11.2",
+#     "pypdfium2>=5.15.2",
+# ]
+# ///
 """Show the LaTeX/Word round trip: the PDF, its Word copy, and the PDF
 built again after merging the copy back."""
 

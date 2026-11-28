@@ -387,8 +387,10 @@ project's requirements, or, unless the stage runs on another machine,
 in its own or those of its environments,
 e.g., with a `version_spec` or `setup_command`,
 that's what's checked instead.
-One declared by another name for the same installer counts too,
-e.g., `R` for `Rscript` or `juliaup` for `julia`.
+Declaring `R` covers `Rscript` too, since R ships it,
+and declaring `juliaup` covers `julia`.
+`mamba` doesn't count for `conda`, since Calkit runs `conda` itself to
+check and build a Conda environment.
 `calkit run` and `calkit check reqs` count declarations the same way,
 so one on another stage doesn't count.
 Docker isn't on the list, since `calkit run` offers to install or start

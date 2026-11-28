@@ -466,8 +466,8 @@ def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert (
         "environment 'py': app 'conda' not found on this machine"
     ) in result.output
-    # Nor does one declared for another stage, as for 'calkit run', but one
-    # sharing its installer does
+    # Nor does one declared for another stage, as for 'calkit run', or Mamba,
+    # which doesn't provide Conda
     ck_info["environments"]["far"]["requirements"].remove("conda")
     ck_info["pipeline"]["stages"]["c"] = {
         "kind": "shell-command",
@@ -488,7 +488,7 @@ def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(calkit_app, ["check", "reqs"])
     assert result.exit_code != 0
     assert "the project: app 'mamba' not found" in result.output
-    assert "environment 'py'" not in result.output
+    assert "environment 'py': app 'conda' not found" in result.output
     # A script's own environment needs uv
     ck_info["requirements"].remove("mamba")
     del ck_info["pipeline"]["stages"]["c"]

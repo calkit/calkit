@@ -3151,10 +3151,9 @@ def test_get_implied_requirements() -> None:
     assert get(script_stage, [], []) == {"a.py": "uv"}
     assert get(script_stage | {"wdir": "sub"}, [], ["uv"]) == {}
     # One declared is what's checked instead, however it's written, and
-    # wherever it applies here, as is one sharing its installer
+    # wherever it applies here, as is one a declared app provides
     cases: list[tuple[list, list, str]] = [
         ([{"name": "conda", "setup_command": "echo"}], [], "conda"),
-        (["mamba"], [], "conda"),
         ([], ["uv>=0.5"], "uv"),
         ([], [{"kind": "app", "name": "juliaup"}], "julia"),
         (["R"], [], "Rscript"),
@@ -3167,6 +3166,8 @@ def test_get_implied_requirements() -> None:
         )
         assert left_out not in implied.values()
         assert len(set(implied.values())) == 5
+    # Mamba doesn't provide Conda, which the environment check runs
+    assert get(stage, used, ["mamba"])["conda"] == "conda"
     envs["here"]["requirements"] = ["pixi"]
     assert "pixi" not in get(stage, used, []).values()
     # Something other than an app of the same name doesn't count, and a

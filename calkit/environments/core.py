@@ -2460,12 +2460,11 @@ def get_implied_requirements(
     the stage runs, i.e., by the project, or by the stage or its
     environments unless one is another machine, is left out, so it's
     checked and offered as declared, e.g., with a ``version_spec``. So is
-    one sharing an installer with one declared, e.g., ``Rscript`` with
-    ``R``.
+    one a declared app provides, e.g., ``Rscript`` with ``R``.
     """
     from calkit.core import _normalize_requirement
     from calkit.environments.inline import get_stage_script_path
-    from calkit.install import INSTALLERS, NAME_ALIASES
+    from calkit.install import NAME_ALIASES, PROVIDES
 
     elsewhere = any(runs_elsewhere(env) for _, env in used)
     if elsewhere and stage.get("kind") in STAGE_KINDS_SENT_TO_OUTER_ENV:
@@ -2486,11 +2485,7 @@ def get_implied_requirements(
             continue
         name = NAME_ALIASES.get(req["name"], req["name"])
         declared_names.add(name)
-        installer = INSTALLERS.get(name)
-        if installer is not None:
-            declared_names.update(
-                n for n, e in INSTALLERS.items() if e is installer
-            )
+        declared_names.update(PROVIDES.get(name, []))
     # Those composed in with 'with' are TeX Live, which Calkit installs
     built = list(used)
     script_path = get_stage_script_path(stage)

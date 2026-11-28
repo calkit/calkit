@@ -5151,10 +5151,11 @@ def test_run_offers_requirements_of_stages_that_would_run(
 
 
 def test_run_offers_apps_environments_are_built_with(
-    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from typer.testing import CliRunner
 
+    import calkit.conda
     import calkit.core
     import calkit.install
 
@@ -5237,6 +5238,58 @@ def test_run_offers_apps_environments_are_built_with(
     assert res.exit_code == 0, res.output
     assert "couldn't run" not in res.output
     assert not os.path.exists("x.txt")
+    # Declaring Mamba doesn't cover Conda, which the environment check
+    # needs, so a machine with Mamba but no Conda is offered Conda
+    bin_path = tmp_path / "bin"
+    bin_path.mkdir()
+    if platform.system() == "Windows":
+        (bin_path / "mamba.bat").write_text("@exit /b 1\n")
+    else:
+        (bin_path / "mamba").write_text("#!/bin/sh\nexit 1\n")
+        (bin_path / "mamba").chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_path) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
+
+    def fake_check_conda_exists(name: str, *args: Any, **kwargs: Any) -> bool:
+        if name == "conda":
+            return "conda" in installed
+        return fake_check_dep_exists(name, *args, **kwargs)
+
+    monkeypatch.setattr(
+        calkit.core, "check_dep_exists", fake_check_conda_exists
+    )
+    with open("environment.yml", "w") as f:
+        f.write("name: ck-test-mamba\ndependencies: [python]\n")
+    ck_info = {
+        "requirements": ["mamba"],
+        "environments": {
+            "cpy": {"kind": "conda", "path": "environment.yml"},
+        },
+        "pipeline": {
+            "stages": {
+                "m": {
+                    "kind": "shell-command",
+                    "command": "echo m > m.txt",
+                    "environment": "cpy",
+                    "outputs": [{"path": "m.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = runner.invoke(calkit_app, ["run"])
+    assert res.exit_code != 0
+    assert "App 'conda' is not installed" in res.output
+    assert "built with conda, which isn't installed" in res.output
+    assert "Cannot find Conda executable" not in res.output
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    res = runner.invoke(calkit_app, ["run"], input="n\n")
+    assert res.exit_code != 0
+    assert res.output.count("Run this to install 'conda'?") == 1
+    assert "Run this to install 'mamba'?" not in res.output
+    assert "Cannot find Conda executable" not in res.output
+    assert not installed
 
 
 def test_run_reruns_when_an_env_var_input_changes(tmp_dir):

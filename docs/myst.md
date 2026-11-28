@@ -4,45 +4,45 @@
 
 [MyST](https://mystmd.org) builds websites and documents, e.g., a
 notebook publication, from Markdown and notebooks.
-Calkit builds a MyST project with `calkit myst build`,
-run where its `myst.yml` is, in one of the project's environments,
+Calkit builds a MyST project with `calkit doc build`,
+given the folder with its `myst.yml`, in one of the project's environments,
 with any arguments for `myst build` after `--`:
 
 ```sh
-calkit myst build -e _system -- --html
+calkit doc build site -e _system -- --html
 ```
+
+This runs `calkit doc myst build` in that folder.
 
 <!-- TODO: needs human review -->
 
-There's no MyST stage kind yet,
-so a site is built by a `command` stage running `calkit myst build`
-in the folder with its `myst.yml`,
-listing what it's built from as `inputs`,
-including the files and results files its documents show,
-which `calkit myst build` fails without, so the site is built again when
-they change:
+In the pipeline, a `myst` stage builds the project in its `wdir`,
+the folder with its `myst.yml`:
 
 ```yaml
 pipeline:
   stages:
     site:
-      kind: command
+      kind: myst
       wdir: site
-      command: calkit myst build -e _system -- --html
       environment: _system
-      inputs:
-        - index.md
-        - myst.yml
-        - ../figures/fit.png
+      args: [--html]
       outputs:
         - _build/html
 ```
+
+Its documents, their `myst.yml`, and the files and results files they
+show or include are found when the pipeline compiles,
+so they're inputs without being listed,
+and the site is built again when they change.
+`calkit doc build site` with no `-e` builds it as the stage does,
+in its environment and with its arguments.
 
 <!-- TODO: needs human review -->
 
 MyST is part of an environment, like any other tool a stage runs,
 e.g., `mystmd` in a Conda, Pixi, uv, or pip environment,
-and `calkit myst build` fails rather than quietly using one installed on
+and `calkit doc build` fails rather than quietly using one installed on
 this machine,
 unless the project lists `myst` as a [requirement](requirements.md)
 or the environment is `_system`.
@@ -100,15 +100,14 @@ as in {ckrefval}`liu2025 noise-sigma`.
 
 <!-- TODO: needs human review -->
 
-`calkit myst build` reads and formats the values, as Quarto and LaTeX
-documents format them, so MyST doesn't read results files itself.
-Everything shown this way has to be among the build stage's `inputs`,
+Calkit reads and formats the values when it builds the project,
+as Quarto and LaTeX documents format them,
+so MyST doesn't read results files itself.
+A `myst` stage depends on everything shown this way,
 including results files, and a notebook's saved values, e.g.,
-`.calkit/notebooks/outputs/fit.ipynb/values.json`;
-`calkit myst build` fails, naming what to add, when it isn't.
-That's checked when the stage runs,
-so a stage set up before an input was missing is caught the next time it
-runs.
+`.calkit/notebooks/outputs/fit.ipynb/values.json`.
+A `command` stage running `calkit doc myst build` has to list them as
+`inputs`, and the build fails, naming what to add, when it doesn't.
 Directives and roles in a file a document `{include}`s,
 or shows with `ckinclude`, count for the document,
 with an `{include}` inside an included file read relative to that file,
@@ -157,12 +156,12 @@ project:
     - _extensions/calkit/myst.mjs
 ```
 
-`calkit myst build` fails if it's not listed, saying so.
+The build fails if it's not listed, saying so.
 Keep the plugin in Git, as with Quarto's extension,
 since without it MyST builds the site anyway,
 without what the directives and roles show.
-It isn't checked to be among the build stage's inputs,
-since it's written by the build itself.
+It isn't an input of the build stage,
+since Calkit writes it when the pipeline compiles and when it builds.
 Calkit also writes `_extensions/calkit/myst.css`, which makes
 book-theme show each collapsed section as a small, muted line, as in
 Quarto, keeping what's wrong in a warning color, if `myst.yml` lists it:
@@ -176,8 +175,8 @@ site:
 Each time it builds, it works out where everything came from,
 and the values, and writes them to `.calkit/local/provenance`,
 which isn't kept in Git, for the plugin to read.
-The document's own outputs, i.e., those of the stage that runs
-`calkit myst build` in its folder, aren't checked,
+The document's own outputs, i.e., those of the stage that builds the
+project, aren't checked,
 since it can't say whether what's being built is up to date.
 Building with MyST directly, e.g., with `myst start`,
 shows what was recorded the last time Calkit built the project,

@@ -32,8 +32,8 @@ def build(
             "-e",
             help=(
                 "Environment to build in, which should provide MyST, or "
-                "`_system` for MyST installed on this machine. There's no "
-                "default."
+                "`_system` for MyST installed on this machine. Defaults to "
+                "the environment of the folder's myst stage, if any."
             ),
         ),
     ] = None,
@@ -89,8 +89,27 @@ def build(
             raise_error("This isn't in a Calkit project")
         project_dir = parent
     ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
-    # Named every time, since a default would change meaning as the project
-    # gains environments
+    myst_dir = Path(os.path.relpath(wdir, project_dir)).as_posix()
+    myst_dir = "" if myst_dir == "." else myst_dir
+    stage = calkit.myst.get_build_stage(myst_dir or ".", ck_info)
+    stage_info = (
+        ((ck_info.get("pipeline") or {}).get("stages") or {}).get(stage)
+        if stage is not None
+        else None
+    )
+    # A myst stage says how it builds, unless an environment is given
+    is_myst_stage = (
+        isinstance(stage_info, dict) and stage_info.get("kind") == "myst"
+    )
+    if environment is None and is_myst_stage:
+        from calkit.models.pipeline import MystStage
+
+        s = MystStage.model_validate(stage_info)
+        environment = s.inner_environment
+        allow_machine_myst = allow_machine_myst or s.allows_machine_myst
+        myst_args = s.args + (myst_args or [])
+    # Otherwise named every time, since a default would change meaning as
+    # the project gains environments
     if environment is None:
         names = list(ck_info.get("environments") or {}) + ["_system"]
         raise_error(
@@ -118,9 +137,6 @@ def build(
     # Where each document's components and values came from, and the
     # values, are worked out now, from the pipeline as it stands, for the
     # plugin to show, since MyST doesn't read results files
-    myst_dir = Path(os.path.relpath(wdir, project_dir)).as_posix()
-    myst_dir = "" if myst_dir == "." else myst_dir
-    stage = calkit.myst.get_build_stage(myst_dir or ".", ck_info)
     # Every document's, including what it includes, so a record can't
     # outlive what it was written for
     found = []
@@ -156,8 +172,8 @@ def build(
             if problem is not None:
                 raise_error(problem)
         # What they show is what the stage is built from, or it won't
-        # rebuild when that changes
-        if found and stage is not None:
+        # rebuild when that changes, which a myst stage finds itself
+        if found and stage is not None and not is_myst_stage:
             unlisted = calkit.myst.get_unlisted_paths(
                 [c.path for _, components, _, _ in found for c in components]
                 + [

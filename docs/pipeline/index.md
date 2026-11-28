@@ -709,6 +709,27 @@ Model class: `MatlabScriptStage`
 | `script_path`           | str         | yes      |         | Path to the MATLAB script to run.                |
 | `matlab_path`           | str \| None | no       | null    | Directory added to the MATLAB path, recursively. |
 
+### `myst`
+
+Model class: `MystStage`
+
+A stage that builds a MyST project, the one whose `myst.yml` is in
+its `wdir`, or the project's root without one.
+
+It builds with `calkit myst build`, which checks MyST comes from the
+stage's environment, or is a declared requirement, and works out the
+values its documents show and where what they show came from first.
+Its documents, their `myst.yml`, and the files they show or include
+are found when the pipeline compiles, so they're inputs without being
+listed, and Calkit's MyST plugin is written then too.
+
+Outputs are declared explicitly, e.g., `_build/site`, since what's
+built depends on the arguments.
+
+| Kind-specific parameter | Type      | Required | Default | Description                                               |
+| ----------------------- | --------- | -------- | ------- | --------------------------------------------------------- |
+| `args`                  | list[str] | no       |         | Extra arguments passed to 'myst build', e.g., ['--site']. |
+
 ### `procedure`
 
 Model class: `ProcedureStage`

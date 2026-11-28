@@ -292,10 +292,12 @@ def test_to_dvc_calkit_commands_exist(
     monkeypatch.chdir(tmp_path)
     subprocess.check_call(["git", "init", "-q"])
     os.makedirs("paper")
+    os.makedirs("site")
     nb = {"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
     for path, text in {
         "paper/main.tex": "\\documentclass{article}\n",
         "doc.qmd": "---\ntitle: x\n---\n",
+        "site/myst.yml": "version: 1\n",
         "nb.ipynb": json.dumps(nb),
         "app.py": "import marimo\n",
         "notes.md": "# Notes\n",
@@ -326,6 +328,7 @@ def test_to_dvc_calkit_commands_exist(
             "environment": "py",
             "target_path": "doc.qmd",
         },
+        "myst": {"kind": "myst", "environment": "py", "wdir": "site"},
         "map": {
             "kind": "map-paths",
             "paths": [{"kind": "file-to-file", "src": "a.txt", "dest": "b"}],

@@ -124,7 +124,7 @@ def test_build(tmp_path: Path) -> None:
                 "kind": "command",
                 "wdir": "site",
                 "command": (
-                    "calkit myst build -e _system -- "
+                    "calkit doc myst build -e _system -- "
                     "index.md page2.md --md --ci"
                 ),
                 "environment": "_system",

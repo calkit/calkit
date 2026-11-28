@@ -22,7 +22,7 @@ Run it with:
 calkit run
 ```
 
-The `paper` stage builds the site with `calkit myst build`,
+The `paper` stage, a `myst` stage, builds the site,
 which works out where each figure, table, and value came from,
 and writes the MyST plugin that shows them,
 in `paper/_extensions/calkit/`, kept in Git,

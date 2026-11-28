@@ -41,15 +41,9 @@ pipeline:
         - path: figures/fit.svg
           storage: git
     paper:
-      kind: command
+      kind: myst
       wdir: paper
-      command: calkit myst build -e py -- --site --ci
-      environment: _system
-      inputs:
-        - index.md
-        - myst.yml
-        - ../figures/fit.svg
-        - ../data/decay.csv
-        - ../results/fit.json
+      environment: py
+      args: [--site, --ci]
       outputs:
         - _build/site

@@ -476,8 +476,10 @@ const valueViews = {
         paths[role.key] = role.path;
       }
     }
-    const views = keys.map((key) => {
-      const value = records.values[key];
+    // A value with no record, e.g., one deleted since, gets no view
+    const recorded = records.values || {};
+    const views = keys.filter((key) => recorded[key]).map((key) => {
+      const value = recorded[key];
       const changed = getChanged(records, docPath, paths[key], value.sha1);
       const provenance = value.provenance;
       // Titled by what it is, e.g., its key in a file, which the recorded
@@ -652,11 +654,18 @@ def extract_document(
             stack.append((fence[0], len(fence), name in LITERAL_DIRECTIVES))
             arg = m.group("arg") or ""
             options = get_options(lines[i + 1 :])
-            # A file included as it's written, e.g., as code, shows nothing
-            if name == "include" and arg and not options.get("literal"):
+            # A file included as it's written, e.g., as code, shows nothing,
+            # with a bare ':literal:' flag meaning it is
+            literal = "literal" in options and options[
+                "literal"
+            ].strip().lower() not in ("false", "no", "off", "0")
+            if name == "include" and arg and not literal:
                 # Relative to the file including it, as MyST reads it
                 include(
-                    posixpath.join(posixpath.dirname(chain[-1]), arg), chain
+                    posixpath.join(
+                        posixpath.dirname(chain[-1]), arg.replace("\\", "/")
+                    ),
+                    chain,
                 )
                 continue
             component = get_component(name, arg, options, line=i + 1)
@@ -708,7 +717,18 @@ def find_documents(myst_dir: str, wdir: str | None = None) -> list[str]:
             if not isinstance(entry, dict):
                 continue
             if isinstance(entry.get("file"), str):
-                found.append(posixpath.normpath(entry["file"]))
+                rel = posixpath.normpath(entry["file"].replace("\\", "/"))
+                # Without an extension, the file MyST finds for it
+                if not rel.lower().endswith(DOCUMENT_EXTS):
+                    rel = next(
+                        (
+                            rel + ext
+                            for ext in DOCUMENT_EXTS
+                            if os.path.isfile(os.path.join(root, rel + ext))
+                        ),
+                        rel,
+                    )
+                found.append(rel)
             if isinstance(entry.get("pattern"), str):
                 found.extend(
                     sorted(
@@ -790,22 +810,28 @@ def get_plugin_problem(myst_dir: str, wdir: str | None = None) -> str | None:
 
 
 def get_build_stage(myst_dir: str, ck_info: dict) -> str | None:
-    """The pipeline stage that builds a MyST project, i.e., one whose
-    command runs ``calkit myst build`` in its folder.
+    """The pipeline stage that builds a MyST project, i.e., a ``myst`` stage
+    whose ``wdir`` is its folder, or else one whose command runs
+    ``calkit doc myst build`` there.
     """
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    myst_dir = posixpath.normpath(Path(myst_dir).as_posix())
+    stages = {
+        str(name): stage
+        for name, stage in (
+            (ck_info.get("pipeline") or {}).get("stages") or {}
+        ).items()
+        if isinstance(stage, dict)
+        and posixpath.normpath(stage.get("wdir") or ".")
+        == posixpath.normpath(Path(myst_dir).as_posix())
+    }
     for name, stage in stages.items():
-        if not isinstance(stage, dict):
-            continue
+        if stage.get("kind") == "myst":
+            return name
+    for name, stage in stages.items():
         command = stage.get("command")
-        wdir = posixpath.normpath(stage.get("wdir") or ".")
-        if (
-            isinstance(command, str)
-            and "calkit myst build" in command
-            and wdir == myst_dir
+        if isinstance(command, str) and re.search(
+            r"\bcalkit (doc |document )?myst build\b", command
         ):
-            return str(name)
+            return name
     return None
 
 

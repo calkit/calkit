@@ -429,8 +429,10 @@ const valueViews = {
         paths[role.key] = role.path;
       }
     }
-    const views = keys.map((key) => {
-      const value = records.values[key];
+    // A value with no record, e.g., one deleted since, gets no view
+    const recorded = records.values || {};
+    const views = keys.filter((key) => recorded[key]).map((key) => {
+      const value = recorded[key];
       const changed = getChanged(records, docPath, paths[key], value.sha1);
       const provenance = value.provenance;
       // Titled by what it is, e.g., its key in a file, which the recorded

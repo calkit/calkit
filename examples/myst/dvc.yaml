@@ -36,10 +36,11 @@ stages:
     desc: Automatically generated from the 'plot' stage in calkit.yaml. Changes
       made here will be overwritten.
   paper:
-    cmd: calkit myst build -e py -- --site --ci
+    cmd: calkit myst build -e py --no-check -- --site --ci
     deps:
-      - index.md
+      - ../pixi.lock
       - myst.yml
+      - index.md
       - ../figures/fit.svg
       - ../data/decay.csv
       - ../results/fit.json

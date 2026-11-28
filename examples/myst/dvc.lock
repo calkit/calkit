@@ -61,7 +61,7 @@ stages:
       md5: 3bec6190558a3ec3626e2c7d3d41c283
       size: 23951
   paper:
-    cmd: calkit myst build -e py -- --site --ci
+    cmd: calkit myst build -e py --no-check -- --site --ci
     deps:
     - path: ../data/decay.csv
       hash: md5
@@ -71,6 +71,10 @@ stages:
       hash: md5
       md5: 3bec6190558a3ec3626e2c7d3d41c283
       size: 23951
+    - path: ../pixi.lock
+      hash: md5
+      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
+      size: 168010
     - path: ../results/fit.json
       hash: md5
       md5: 5d4d1d64736943844e105dc8524cef90
@@ -86,6 +90,6 @@ stages:
     outs:
     - path: _build/site
       hash: md5
-      md5: be5c52a5a2cf3b02c0870a68c2a01434.dir
-      size: 74698
+      md5: 10db663666cc4eb8130d01ace8cae3dc.dir
+      size: 74662
       nfiles: 9

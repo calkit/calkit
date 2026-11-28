@@ -177,6 +177,31 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(app, ["doc", "build", "site", "--help"])
     assert result.exit_code == 0, result.output
     assert "--allow-machine-myst" in click.unstyle(result.output)
+    # Or as its myst stage does, from anywhere, with what's after '--'
+    # after the stage's arguments
+    calkit.save_calkit_info(
+        {
+            "name": "test",
+            "pipeline": {
+                "stages": {
+                    "site": {
+                        "kind": "myst",
+                        "environment": "_system",
+                        "wdir": "site",
+                        "args": ["--site"],
+                        "requirements": ["myst"],
+                    }
+                }
+            },
+        }
+    )
+    os.makedirs("sub")
+    monkeypatch.chdir("sub")
+    calls.clear()
+    result = CliRunner().invoke(app, ["doc", "build", "../site", "--", "--ci"])
+    assert result.exit_code == 0, result.output
+    assert calls == [("quarto", ["build", "--site", "--ci"])]
+    assert os.path.samefile(os.getcwd(), tmp_path / "sub")
 
 
 def test_build_as_stage(

@@ -121,7 +121,8 @@ def test_directives(tmp_path: Path) -> None:
         "<!-- {ckvalue}`results/html.json k`\nstill a comment -->\n"
         ":::{admonition} Slope is {ckvalue}`results/fit.json b`\n:::\n"
         ":::{include} notes.md\n:literal: true\n:::\n"
-        ":::{include} parts/a.md\n:::\n"
+        ":::{include} notes.md\n:literal:\n:::\n"
+        ":::{include} parts\\a.md\n---\nliteral: false\n---\n:::\n"
         ":::{ckinclude} notes/n.md\n:::\n"
     )
     parts = {
@@ -180,7 +181,7 @@ def test_directives(tmp_path: Path) -> None:
         "site/pages/b.md",
     ]
     (tmp_path / "site" / "myst.yml").write_text(
-        "project:\n  toc:\n    - file: index.md\n    - title: Pages\n"
+        "project:\n  toc:\n    - file: index\n    - title: Pages\n"
         "      children:\n        - pattern: pages/*.md\n"
         "  exclude: [pages/draft.md]\n"
     )
@@ -233,26 +234,31 @@ def test_directives(tmp_path: Path) -> None:
     assert plugin_path.read_text(encoding="utf-8") == calkit.myst.PLUGIN_JS
     css_path = tmp_path / "site" / calkit.myst.PLUGIN_CSS_PATH
     assert css_path.read_text(encoding="utf-8") == calkit.myst.PLUGIN_CSS
-    # The stage that builds it runs 'calkit myst build' in its folder
-    ck_info = {
-        "pipeline": {
-            "stages": {
-                "plot": {"kind": "python-script", "script_path": "p.py"},
-                "other": {
-                    "kind": "command",
-                    "command": "calkit myst build -e _system",
-                    "wdir": "elsewhere",
-                },
-                "site": {
-                    "kind": "command",
-                    "command": "calkit myst build -e _system -- --html",
-                    "wdir": "site/",
-                },
-            }
-        }
+    # The stage that builds it is a myst stage in its folder, or else one
+    # running 'calkit doc myst build' there
+    stages: dict = {
+        "plot": {"kind": "python-script", "script_path": "p.py"},
+        "other": {
+            "kind": "command",
+            "command": "calkit myst build -e _system",
+            "wdir": "elsewhere",
+        },
+        "site": {
+            "kind": "command",
+            "command": "calkit doc myst build -e _system -- --html",
+            "wdir": "site/",
+        },
+        "root": {"kind": "command", "command": "calkit mystx build"},
     }
+    ck_info = {"pipeline": {"stages": stages}}
     assert calkit.myst.get_build_stage("site", ck_info) == "site"
+    assert calkit.myst.get_build_stage("elsewhere", ck_info) == "other"
     assert calkit.myst.get_build_stage(".", ck_info) is None
+    stages["site-myst"] = {"kind": "myst", "environment": "e", "wdir": "site"}
+    stages["root-myst"] = {"kind": "myst", "environment": "e"}
+    assert calkit.myst.get_build_stage("site", ck_info) == "site-myst"
+    assert calkit.myst.get_build_stage(".", ck_info) == "root-myst"
+    del stages["site-myst"], stages["root-myst"]
     # What it shows has to be among its inputs, or in one, unless it makes
     # it, for it to rebuild when that changes
     paths = ["figures/plot.svg", "data/a.csv", "site/_build/x.png", "b.csv"]

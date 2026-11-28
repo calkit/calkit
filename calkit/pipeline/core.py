@@ -537,6 +537,10 @@ def stages_are_similar(stage1: dict, stage2: dict) -> bool:
     elif kind in ["latex", "quarto"]:
         if stage1.get("target_path") != stage2.get("target_path"):
             return False
+    # For MyST, the folder it builds
+    elif kind == "myst":
+        if stage1.get("wdir") != stage2.get("wdir"):
+            return False
     # For command stages, check the command
     elif kind in [
         "command",

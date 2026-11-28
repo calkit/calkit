@@ -4954,11 +4954,11 @@ Arguments:
 
 Options:
 
-| Option                 | Type    | Required | Default | Description                                                                                                              |
-| ---------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--environment`, `-e`  | str     | no       |         | Environment to build in, which should provide MyST, or `_system` for MyST installed on this machine. There's no default. |
-| `--allow-machine-myst` | boolean | no       | False   | Allow MyST installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.      |
-| `--no-check`           | boolean | no       | False   | Don't check the environment is valid before building.                                                                    |
+| Option                 | Type    | Required | Default | Description                                                                                                                                                          |
+| ---------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`  | str     | no       |         | Environment to build in, which should provide MyST, or `_system` for MyST installed on this machine. Defaults to the environment of the folder's myst stage, if any. |
+| `--allow-machine-myst` | boolean | no       | False   | Allow MyST installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.                                                  |
+| `--no-check`           | boolean | no       | False   | Don't check the environment is valid before building.                                                                                                                |
 
 <a id="command-group-overleaf-ol"></a>
 

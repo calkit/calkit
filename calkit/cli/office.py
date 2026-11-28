@@ -43,7 +43,11 @@ def excel_chart_to_image(
     )
 
 
-@office_app.command(name="word-to-pdf", help="Convert a Word document to PDF.")
+@office_app.command(
+    name="word-to-pdf",
+    help="Convert a Word document to PDF.\n\nAlso available as "
+    "`calkit doc build`.",
+)
 def word_to_pdf(
     input_fpath: Annotated[
         str, typer.Argument(help="Input Word document file path.")

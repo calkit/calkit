@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
+from typing import Any
 from unittest.mock import Mock, patch
 
 import click
@@ -5230,6 +5231,148 @@ def test_run_offers_requirements_of_stages_that_would_run(
     assert "Missing env var 'CK_TEST_DOC'" in res.output
     with open("one.txt") as f:
         assert f.read().strip() == "docs"
+
+
+def test_run_offers_apps_environments_are_built_with(
+    tmp_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    import calkit.conda
+    import calkit.core
+    import calkit.install
+
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("")
+    ck_info: dict = {
+        "environments": {
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "pipeline": {
+            "stages": {
+                "a": {
+                    "kind": "shell-command",
+                    "command": "echo a > a.txt",
+                    "environment": "py",
+                    "outputs": [{"path": "a.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # uv is missing until it's installed
+    installed: list[str] = []
+    check_dep_exists = calkit.core.check_dep_exists
+
+    def fake_check_dep_exists(name: str, *args: Any, **kwargs: Any) -> bool:
+        if name == "uv":
+            return "uv" in installed
+        return check_dep_exists(name, *args, **kwargs)
+
+    def fake_install(app: str, **kwargs: Any) -> bool:
+        installed.append(app)
+        return True
+
+    monkeypatch.setattr(calkit.core, "check_dep_exists", fake_check_dep_exists)
+    monkeypatch.setattr(calkit.install, "install", fake_install)
+    runner = CliRunner()
+    # Without a terminal nothing is asked, and the run fails, saying how to
+    # install it
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    res = runner.invoke(calkit_app, ["run"])
+    assert res.exit_code != 0
+    assert "App 'uv' is not installed" in res.output
+    assert "An installer is available" in res.output
+    assert (
+        "Stage 'a' is out of date and couldn't run: environment 'py' is "
+        "built with uv, which isn't installed"
+    ) in res.output
+    assert "Run this to install" not in res.output
+    # On a terminal it's offered, and declining still fails
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    res = runner.invoke(calkit_app, ["run"], input="n\n")
+    assert res.exit_code != 0
+    assert "Stage 'a' is out of date, but this machine" in res.output
+    assert res.output.count("Run this to install 'uv'?") == 1
+    assert "Stage 'a' can't run:" not in res.output
+    assert not installed
+    # Accepting installs it, and the stage runs
+    res = runner.invoke(calkit_app, ["run"], input="\n")
+    assert res.exit_code == 0, res.output
+    assert installed == ["uv"]
+    with open("a.txt") as f:
+        assert f.read().strip() == "a"
+    # One the project says needs it is still an expected skip, though
+    # another, which is up to date, needs it for its environment
+    installed.clear()
+    ck_info["pipeline"]["stages"]["x"] = {
+        "kind": "shell-command",
+        "command": "echo x > x.txt",
+        "environment": "_system",
+        "requirements": ["uv"],
+        "outputs": [{"path": "x.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    res = runner.invoke(calkit_app, ["run"])
+    assert res.exit_code == 0, res.output
+    assert "couldn't run" not in res.output
+    assert not os.path.exists("x.txt")
+    # Declaring Mamba doesn't cover Conda, which the environment check
+    # needs, so a machine with Mamba but no Conda is offered Conda
+    bin_path = tmp_path / "bin"
+    bin_path.mkdir()
+    if platform.system() == "Windows":
+        (bin_path / "mamba.bat").write_text("@exit /b 1\n")
+    else:
+        (bin_path / "mamba").write_text("#!/bin/sh\nexit 1\n")
+        (bin_path / "mamba").chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_path) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
+
+    def fake_check_conda_exists(name: str, *args: Any, **kwargs: Any) -> bool:
+        if name == "conda":
+            return "conda" in installed
+        return fake_check_dep_exists(name, *args, **kwargs)
+
+    monkeypatch.setattr(
+        calkit.core, "check_dep_exists", fake_check_conda_exists
+    )
+    with open("environment.yml", "w") as f:
+        f.write("name: ck-test-mamba\ndependencies: [python]\n")
+    ck_info = {
+        "requirements": ["mamba"],
+        "environments": {
+            "cpy": {"kind": "conda", "path": "environment.yml"},
+        },
+        "pipeline": {
+            "stages": {
+                "m": {
+                    "kind": "shell-command",
+                    "command": "echo m > m.txt",
+                    "environment": "cpy",
+                    "outputs": [{"path": "m.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = runner.invoke(calkit_app, ["run"])
+    assert res.exit_code != 0
+    assert "App 'conda' is not installed" in res.output
+    assert "built with conda, which isn't installed" in res.output
+    assert "Cannot find Conda executable" not in res.output
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    res = runner.invoke(calkit_app, ["run"], input="n\n")
+    assert res.exit_code != 0
+    assert res.output.count("Run this to install 'conda'?") == 1
+    assert "Run this to install 'mamba'?" not in res.output
+    assert "Cannot find Conda executable" not in res.output
+    assert not installed
 
 
 def test_run_reruns_when_an_env_var_input_changes(tmp_dir):

@@ -1,5 +1,6 @@
 """Tests for ``calkit.environments.core``."""
 
+import hashlib
 import json
 import os
 import platform
@@ -1637,18 +1638,35 @@ def test_machine_ids_match_ignores_how_the_id_was_written():
     # with dashes, systemd lowercase without -- and users paste back
     # whichever form they were shown
     assert calkit.machine_ids_match(
-        "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
-        "33c4dda774235b6ab86fea6859eb058e",
+        "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0",
+        "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
     )
-    assert calkit.machine_ids_match(" 33c4dda7 ", "33C4DDA7")
-    assert not calkit.machine_ids_match("33c4dda7", "0000ffff")
+    assert calkit.machine_ids_match(" 0f1e2d3c ", "0F1E2D3C")
+    assert not calkit.machine_ids_match("0f1e2d3c", "0000ffff")
     # Not knowing which machine this is is never evidence that it's the one
     # being asked about, so an unknown ID matches nothing -- not even
     # another unknown one
     assert not calkit.machine_ids_match(None, None)
-    assert not calkit.machine_ids_match("33c4dda7", None)
-    assert not calkit.machine_ids_match(None, "33c4dda7")
+    assert not calkit.machine_ids_match("0f1e2d3c", None)
+    assert not calkit.machine_ids_match(None, "0f1e2d3c")
     assert not calkit.machine_ids_match("", "")
+    # What's recorded is a hash of the normalized ID, so either way of
+    # writing it hashes the same, and a hash matches the ID it came from
+    hashed = calkit.hash_machine_id("0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0")
+    assert hashed == calkit.hash_machine_id("0f1e2d3c4b5a69788796a5b4c3d2e1f0")
+    assert hashed is not None and hashed.startswith("sha256:")
+    assert len(hashed) == len("sha256:") + 64
+    assert "0f1e2d3c" not in hashed
+    assert calkit.machine_ids_match(hashed, "0f1e2d3c4b5a69788796a5b4c3d2e1f0")
+    assert calkit.machine_ids_match(hashed.upper(), hashed)
+    assert calkit.hash_machine_id(hashed) == hashed
+    assert not calkit.machine_ids_match(hashed, "0000ffff")
+    assert calkit.hash_machine_id(None) is None
+    assert calkit.hash_machine_id("  ") is None
+    # Keyed to Calkit, so it can't be matched against another program's
+    # plain hash of the same ID
+    plain = hashlib.sha256(b"0f1e2d3c4b5a69788796a5b4c3d2e1f0").hexdigest()
+    assert plain not in hashed
 
 
 def test_env_is_local_prefers_the_machine_id_over_the_name():
@@ -1731,23 +1749,80 @@ def test_machine_id_can_be_overridden_in_config(monkeypatch):
         assert calkit.get_machine_id() == "from-platform"
 
 
-def test_machine_id_is_reported_and_lockable():
+def test_machine_id_is_reported_and_lockable(tmp_dir: str) -> None:
     import calkit.environments.core as envs
 
     # Pinning results to one machine is what 'hostname' was being used for,
     # badly: renaming the machine breaks that pin, and a machine elsewhere
     # with the same name satisfies it
-    assert envs.SYSTEM_LOCK_PROPERTIES["machine-id"] == "machine_id"
+    assert envs.SYSTEM_LOCK_PROPERTIES["machine-id"] == "machine_id_hash"
+    # Reported hashed, since what's locked is committed and often public
     with mock.patch.object(
-        calkit, "get_system_info", return_value={"machine_id": "abc-123"}
+        calkit.core, "get_machine_id", return_value="AB-CD"
+    ):
+        props = calkit.get_machine_properties()
+    assert props["machine_id_hash"] == calkit.hash_machine_id("abcd")
+    assert "machine_id" not in props
+    hashed = calkit.hash_machine_id("abc-123")
+    # A null in a lock file is no ID, not a hash of the word 'None'
+    assert envs.lock_value("machine-id", None) is None
+    env = {"kind": "system", "lock": ["machine-id"]}
+    with mock.patch.object(
+        calkit, "get_system_info", return_value={"machine_id_hash": hashed}
     ):
         assert envs.get_system_lock_data(["machine-id"]) == {
-            "machine-id": "abc-123"
+            "machine-id": hashed
         }
+        # A lock from before IDs were hashed holds the raw one, which still
+        # matches this machine, and is kept as written until it's relocked,
+        # so the stages depending on it don't rerun for nothing
+        lock_fpath = envs.get_env_lock_fpath(env=env, env_name="laptop")
+        assert lock_fpath is not None
+        os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+        with open(lock_fpath, "w") as f:
+            json.dump({"machine-id": "ABC123"}, f)
+        assert not envs.system_env_lock_mismatch(env_name="laptop", env=env)
+        envs.write_system_env_lock(env_name="laptop", env=env)
+        assert envs.read_system_env_lock("laptop", env) == {
+            "machine-id": "ABC123"
+        }
+        # unless it follows the machine, which takes the hash, leaving
+        # anything else that matches as written
+        auto = {"kind": "system", "lock": ["machine-id", "memory-gb"]} | {
+            "relock": "auto"
+        }
+        auto_fpath = envs.get_env_lock_fpath(env=auto, env_name="auto")
+        assert auto_fpath is not None
+        os.makedirs(os.path.dirname(auto_fpath), exist_ok=True)
+        with open(auto_fpath, "w") as f:
+            json.dump({"machine-id": "ABC123", "memory-gb": 15.49}, f)
+        envs.write_system_env_lock(
+            env_name="auto",
+            env=auto,
+            system_info={"machine_id_hash": hashed, "memory_gb": 15.4921},
+        )
+        assert envs.read_system_env_lock("auto", auto) == {
+            "machine-id": hashed,
+            "memory-gb": 15.49,
+        }
+        envs.write_system_env_lock(env_name="laptop", env=env, relock=True)
+        assert envs.read_system_env_lock("laptop", env) == {
+            "machine-id": hashed
+        }
+        # Another machine's is a mismatch, and both are shown hashed
+        with open(lock_fpath, "w") as f:
+            json.dump({"machine-id": "def-456"}, f)
+        mismatch = envs.system_env_lock_mismatch(env_name="laptop", env=env)
+    assert mismatch == {
+        "machine-id": {
+            "locked": calkit.hash_machine_id("def-456"),
+            "actual": hashed,
+        }
+    }
     # A machine that can't report one can't pin to one either, rather than
     # recording null and claiming a pin that isn't there
     with mock.patch.object(
-        calkit, "get_system_info", return_value={"machine_id": None}
+        calkit, "get_system_info", return_value={"machine_id_hash": None}
     ):
         with pytest.raises(ValueError, match="not available on this machine"):
             envs.get_system_lock_data(["machine-id"])
@@ -1761,9 +1836,10 @@ def test_declaring_a_machine_id_does_not_lock_it(tmp_dir):
     # updating 'machine_id' need not invalidate everything computed on the
     # old one. Whether it does is the project's call, made through 'lock'.
     env = {"kind": "system", "machine_id": "abc-123"}
+    hashed = calkit.hash_machine_id("abc-123")
     assert envs.get_env_lock_fpath(env=env, env_name="laptop") is None
     with mock.patch.object(
-        calkit, "get_system_info", return_value={"machine_id": "abc-123"}
+        calkit, "get_system_info", return_value={"machine_id_hash": hashed}
     ):
         assert envs.write_system_env_lock(env_name="laptop", env=env) is None
         # Saying so explicitly is what pins it
@@ -1773,7 +1849,7 @@ def test_declaring_a_machine_id_does_not_lock_it(tmp_dir):
         )
     assert lock_fpath is not None
     with open(lock_fpath) as f:
-        assert json.load(f) == {"machine-id": "abc-123"}
+        assert json.load(f) == {"machine-id": hashed}
 
 
 def test_locking_an_unreadable_machine_id_says_how_to_supply_one(tmp_dir):
@@ -1783,7 +1859,7 @@ def test_locking_an_unreadable_machine_id_says_how_to_supply_one(tmp_dir):
     # but this is the one lockable property a user can supply by hand, and
     # the way to is a config setting they have no reason to know about
     with mock.patch.object(
-        calkit, "get_system_info", return_value={"machine_id": None}
+        calkit, "get_system_info", return_value={"machine_id_hash": None}
     ):
         with pytest.raises(ValueError, match="calkit config set machine_id"):
             envs.write_system_env_lock(
@@ -1911,6 +1987,17 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
         "cpu-count": elsewhere["cpu_count"],
         "os": "SomeOtherOS",
     }
+    # and a broken lock is just replaced, since it would be rewritten anyway
+    for broken in ["{not json", "[1, 2]"]:
+        with open(lock_fpath, "w") as f:
+            f.write(broken)
+        envs.write_system_env_lock(
+            env_name="bench", env=auto, system_info=elsewhere
+        )
+        assert envs.read_system_env_lock(env_name="bench", env=auto) == {
+            "cpu-count": elsewhere["cpu_count"],
+            "os": "SomeOtherOS",
+        }
     assert (
         envs.switch_machine_lock_env({"lock": ["os"], "relock": "auto"})[
             "relock"

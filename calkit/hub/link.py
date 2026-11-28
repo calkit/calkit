@@ -386,7 +386,7 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
         json=dict(
             name=name,
             hostname=hostname,
-            machine_id=calkit.get_machine_id(),
+            machine_id=calkit.hash_machine_id(calkit.get_machine_id()),
             platform=platform.system().lower(),
             calkit_version=calkit.__version__,
             hosts=hosts or [hostname],
@@ -505,7 +505,7 @@ def install_remote(
             "/machines",
             json=dict(
                 hostname=hostname,
-                machine_id=info.get("machine_id"),
+                machine_id=info.get("machine_id_hash"),
                 platform=str(info.get("os", "")).lower() or None,
                 calkit_version=info.get("calkit_version"),
                 hosts=list(dict.fromkeys([host, hostname])),

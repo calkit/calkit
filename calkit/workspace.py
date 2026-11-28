@@ -755,6 +755,12 @@ def remote_system_info(
         info = {k.lower(): v for k, v in info.items()}
         if "python_version" in info and "calkit_python_version" not in info:
             info["calkit_python_version"] = info.pop("python_version")
+        # and the raw machine ID, which isn't to be recorded
+        if "machine_id" in info:
+            raw = info.pop("machine_id")
+            info.setdefault(
+                "machine_id_hash", calkit.hash_machine_id(raw and str(raw))
+            )
         return info
 
     # One read per machine per 'calkit run', rather than one per stage
@@ -815,7 +821,7 @@ def verify_machine_id(workspace: Workspace, system_info: dict) -> None:
     """
     if not workspace.machine_id:
         return
-    reported = system_info.get("machine_id")
+    reported = system_info.get("machine_id_hash")
     if reported is None:
         warnings.warn(
             f"'{workspace.host}' did not report a machine ID, so it could "
@@ -827,7 +833,8 @@ def verify_machine_id(workspace: Workspace, system_info: dict) -> None:
         return
     raise MachineMismatch(
         f"'{workspace.host}' is not the machine this environment names. "
-        f"It expects machine ID '{workspace.machine_id}', but that host "
+        "It expects machine ID "
+        f"'{calkit.hash_machine_id(workspace.machine_id)}', but that host "
         f"reports '{reported}'. If the name now points at a different "
         "machine, correct 'host'; if the machine itself was rebuilt or "
         "replaced, update 'machine_id' to the new value it reports."

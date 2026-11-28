@@ -371,7 +371,9 @@ function Machines() {
                     {machine.system_machine_id && (
                       <Tooltip label={machine.system_machine_id}>
                         <Code fontSize="xs">
-                          {machine.system_machine_id.slice(0, 12)}
+                          {machine.system_machine_id
+                            .replace(/^sha256:/, "")
+                            .slice(0, 12)}
                         </Code>
                       </Tooltip>
                     )}

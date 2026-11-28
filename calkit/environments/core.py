@@ -118,7 +118,7 @@ SYSTEM_LOCK_PROPERTIES = {
         "rscript-version",
         "brew-version",
     ]
-}
+} | {"machine-id": "machine_id_hash"}
 
 # What each lockable property means, for the published documentation. Kept
 # beside the table above so the two can be checked against each other; a
@@ -133,10 +133,14 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
     "but only by name: renaming the machine breaks the pin, and a machine "
     "elsewhere with the same name satisfies it. Prefer 'machine-id'.",
     "machine-id": "A stable identifier for the machine itself, read from "
-    "the platform. Pins results to one specific machine, and unlike "
-    "'hostname' survives renaming it. Declaring a 'machine_id' on the "
-    "environment says where to run, not that results depend on it, so "
-    "lock this to also keep results from mixing with another machine's.",
+    "the platform and recorded as a Calkit-specific hash, e.g., "
+    "'sha256:3f1c...', so the platform's own ID isn't published. A lock "
+    "written before IDs were hashed keeps the raw one until relocked, "
+    "which 'relock: auto' does the next time it's checked there. Pins "
+    "results to one specific machine, and unlike 'hostname' survives "
+    "renaming it. Declaring a 'machine_id' on the environment says where "
+    "to run, not that results depend on it, so lock this to also keep "
+    "results from mixing with another machine's.",
     "cpu-count": "Number of CPUs, which can change what a run produces "
     "where results depend on how work was divided.",
     "memory-gb": "Total memory in GB.",
@@ -193,6 +197,9 @@ def lock_value(prop: str, value: object) -> object:
     """
     if prop in SYSTEM_LOCK_PROPERTY_PRECISION:
         return SYSTEM_LOCK_PROPERTY_PRECISION[prop](value)
+    # A lock from before machine IDs were hashed records the raw one
+    if prop == "machine-id":
+        return calkit.hash_machine_id(None if value is None else str(value))
     source, part = split_version_lock(prop)
     if not source.endswith("-version"):
         return value
@@ -1884,6 +1891,8 @@ def write_system_env_lock(
     the file doesn't have is added from a machine matching the rest, as
     adding a dependency keeps the versions already locked, and otherwise
     waits for one, since this machine's value would describe no one machine.
+    With 'relock: auto', they're kept only while this machine matches them,
+    and a raw machine ID is rewritten as its hash.
 
     A non-default ``shell`` is recorded alongside the machine properties.
     It isn't a property of the machine, but it feeds the same question: a
@@ -1907,18 +1916,31 @@ def write_system_env_lock(
     lock_data = get_system_lock_data(
         env.get("lock") or [], system_info=system_info
     )
-    relock = relock or env.get("relock") == "auto"
-    existing = (
-        None
-        if relock
-        else read_system_env_lock(env_name=env_name, env=env, wdir=wdir)
-    )
+    auto = env.get("relock") == "auto"
+    existing = None
+    if not relock:
+        try:
+            existing = read_system_env_lock(
+                env_name=env_name, env=env, wdir=wdir
+            )
+        except ValueError:
+            # Following the machine, so a broken lock is just replaced
+            if not auto:
+                raise
     if existing:
         kept = {p: existing[p] for p in lock_data if p in existing}
         matches = all(
             lock_value(p, v) == lock_data[p] for p, v in kept.items()
         )
-        lock_data = lock_data | kept if matches else kept
+        # Kept as written where it still matches, so stages don't rerun for
+        # nothing, except that a lock following the machine takes the hash
+        # over a raw machine ID from before they were hashed
+        if auto:
+            kept.pop("machine-id", None)
+        if matches:
+            lock_data = lock_data | kept
+        elif not auto:
+            lock_data = kept
     # Named so it can't collide with a locked property, now or when the set
     # of them grows. The setup commands themselves are not recorded: they
     # go into the stage's command when the pipeline is compiled, so DVC

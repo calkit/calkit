@@ -2876,7 +2876,11 @@ def test_run_writes_private_logs(tmp_dir):
         calkit.dvc.read_lock_stages()["s1"]
     )
     assert entry["system"]["os"] == platform.system()
-    assert entry["system"]["machine_id"] == calkit.get_machine_id()
+    # The machine ID is recorded hashed, since run records are often public
+    assert entry["system"]["machine_id_hash"] == calkit.hash_machine_id(
+        calkit.get_machine_id()
+    )
+    assert "machine_id" not in entry["system"]
     assert entry["start_time"] <= entry["end_time"]
     staged = subprocess.check_output(
         ["git", "diff", "--cached", "--name-only"], text=True

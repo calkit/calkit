@@ -677,9 +677,10 @@ class Settings(BaseSettings):
     dvc_token: KeyringOptionalSecret | None = None
     # Overrides the machine ID Calkit reads from the platform. For a machine
     # that was rebuilt but should still count as the same one, and for
-    # platforms that supply no identifier of their own. Note that
+    # platforms that supply no identifier of their own. Raw or hashed, e.g.,
+    # the 'machine_id_hash' of the machine it stands in for. Note that
     # 'calkit config get machine_id' reports this override and nothing else;
-    # 'calkit describe system' reports the ID actually in effect.
+    # 'calkit describe system' reports the ID actually in effect, hashed.
     machine_id: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
     # Upgrade Calkit when a daily check finds a new version; when false,

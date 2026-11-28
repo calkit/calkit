@@ -257,7 +257,7 @@ def describe_schema(
     kit: Annotated[
         bool,
         typer.Option(
-            "--kit", help="Print the schema for kit manifests instead."
+            "--kit", help="Print the schema for calkit manifests instead."
         ),
     ] = False,
 ) -> None:
@@ -291,9 +291,10 @@ def describe_artifact(
     """Describe a file, what made it, and whether it's reproducible.
 
     Says what kind of artifact it is, which stage makes it, whether that's
-    up to date, and which inputs have no recorded origin. Reads the kit embedded in it, if it has one, so this works for a file
-    shared from another project; otherwise, describes it as part of this
-    project. 'calkit describe PATH' is short for this.
+    up to date, and which inputs have no recorded origin. Reads the calkit
+    embedded in it, if it has one, so this works for a file shared from
+    another project; otherwise, describes it as part of this project.
+    'calkit describe PATH' is short for this.
     """
     import calkit.kits
     import calkit.pipeline
@@ -304,16 +305,18 @@ def describe_artifact(
     try:
         kit = calkit.kits.read(path)
     except ValueError as e:
-        raise_error(f"Can't read kit: {e}")
-    # A file with a kit is described by it, wherever it is
+        raise_error(f"Can't read calkit: {e}")
+    # A file with a calkit is described by it, wherever it is
     if kit is not None:
         manifest = kit.manifest
         if as_json:
             echo_json(
                 {
                     "path": path,
-                    "kit": manifest.model_dump(exclude_none=True),
-                    "kit_size": len(kit.kit),
+                    "calkit": manifest.model_dump(
+                        exclude_none=True, by_alias=True
+                    ),
+                    "calkit_size": len(kit.kit),
                     "artifact_unchanged": kit.artifact_unchanged,
                     "matches_pipeline": kit.matches_pipeline,
                 }
@@ -331,13 +334,15 @@ def describe_artifact(
         typer.echo(f"{manifest.artifact.path} from {where}")
         typer.echo(f"Made by stage: {manifest.artifact.stage}")
         if not kit.artifact_unchanged:
-            typer.echo(typer.style("Modified since kit was made", fg="red"))
+            typer.echo(
+                typer.style("Modified since calkit was created", fg="red")
+            )
         elif kit.matches_pipeline is False:
             typer.echo(
                 typer.style("Doesn't match pipeline's output", fg="red")
             )
         else:
-            typer.echo("Unchanged since kit was made")
+            typer.echo("Unchanged since calkit was created")
         if not source.up_to_date:
             typer.echo(typer.style("Pipeline was out of date", fg="yellow"))
         if source.uncommitted_paths:
@@ -354,7 +359,7 @@ def describe_artifact(
             typer.echo("Provenance defined for all inputs")
         left_out = [f for f in manifest.files if not f.included]
         typer.echo(
-            f"Kit: {len(kit.kit) / 1e3:.0f} KB, "
+            f"Calkit: {len(kit.kit) / 1e3:.0f} KB, "
             f"{len(manifest.files) - len(left_out)} file"
             + "s" * (len(manifest.files) - len(left_out) != 1)
             + (f", {len(left_out)} left out" if left_out else "")
@@ -363,12 +368,14 @@ def describe_artifact(
             mark = " " if f.included else "-"
             typer.echo(f"  {mark} {f.path} ({f.size:,} bytes)")
         if left_out:
-            typer.echo("  (- left out; pull or remake after 'calkit expand')")
+            typer.echo(
+                "  (- left out; pull or remake after 'calkit kit expand')"
+            )
         return
     # Otherwise it has to be part of this project
     rel_path = pathlib.Path(os.path.relpath(path)).as_posix()
     if not os.path.isfile("calkit.yaml") or rel_path.startswith("../"):
-        raise_error(f"{path} has no kit and isn't in a Calkit project here")
+        raise_error(f"{path} has no calkit and isn't in a Calkit project here")
     ck_info = calkit.load_calkit_info()
     found = calkit.provenance.find_artifact(ck_info, rel_path)
     kind, artifact = found if found is not None else (None, {})
@@ -386,7 +393,7 @@ def describe_artifact(
         echo_json(
             {
                 "path": rel_path,
-                "kit": None,
+                "calkit": None,
                 "kind": kind,
                 "title": artifact.get("title"),
                 "stage": stage,
@@ -431,4 +438,6 @@ def describe_artifact(
     if not gaps:
         typer.echo("Provenance defined for all inputs")
     if stage is not None:
-        typer.echo(f"No kit; to share with one: calkit new kit {rel_path}")
+        typer.echo(
+            f"No calkit; to share with one: calkit kit create {rel_path}"
+        )

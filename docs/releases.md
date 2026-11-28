@@ -254,7 +254,8 @@ those are checked first, before anything is archived.
 <!-- TODO: needs human review -->
 
 To release the artifact as a single file that carries what makes it,
-use `--kit` instead, which embeds a [kit](kits.md) in the released copy.
+use `--kit` instead, which embeds a [calkit](calkits.md) in the released
+copy.
 
 ## Releasing to CaltechDATA
 

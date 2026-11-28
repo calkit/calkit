@@ -8,12 +8,12 @@
           "type": "string"
         },
         "sha256": {
-          "description": "SHA-256 of the artifact, without the kit.",
+          "description": "SHA-256 of the artifact, without the calkit.",
           "title": "Sha256",
           "type": "string"
         },
         "size": {
-          "description": "Size in bytes, without the kit.",
+          "description": "Size in bytes, without the calkit.",
           "title": "Size",
           "type": "integer"
         },
@@ -35,7 +35,7 @@
     "KitFile": {
       "properties": {
         "included": {
-          "description": "Whether the file is in the kit, under 'project/'. Files left out can be fetched from the project's DVC remote, or remade by running the pipeline.",
+          "description": "Whether the file is in the calkit, under 'project/'. Files left out can be fetched from the project's DVC remote, or remade by running the pipeline.",
           "title": "Included",
           "type": "boolean"
         },
@@ -67,7 +67,7 @@
             }
           ],
           "default": null,
-          "description": "SHA-256 of the file, if it's in the kit.",
+          "description": "SHA-256 of the file, if it's in the calkit.",
           "title": "Sha256"
         },
         "size": {
@@ -132,7 +132,7 @@
             }
           ],
           "default": null,
-          "description": "Git commit the kit was made from.",
+          "description": "Git commit the calkit was made from.",
           "title": "Commit Sha"
         },
         "git_remotes": {
@@ -170,7 +170,7 @@
           "title": "Title"
         },
         "uncommitted_paths": {
-          "description": "Files in the kit with changes not in that commit.",
+          "description": "Files in the calkit with changes not in that commit.",
           "items": {
             "type": "string"
           },
@@ -178,7 +178,7 @@
           "type": "array"
         },
         "up_to_date": {
-          "description": "Whether the artifact's stage, and every stage upstream of it, was up to date when the kit was made.",
+          "description": "Whether the artifact's stage, and every stage upstream of it, was up to date when the calkit was made.",
           "title": "Up To Date",
           "type": "boolean"
         }
@@ -192,8 +192,14 @@
   },
   "$id": "https://docs.calkit.org/schemas/calkit-kit.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "The calkit-kit.json at the root of a kit, the ZIP embedded in an artifact holding what made it. See https://docs.calkit.org/kits",
+  "description": "The calkit-kit.json at the root of a calkit, the ZIP embedded in an artifact holding what made it. See https://docs.calkit.org/calkits",
   "properties": {
+    "$schema": {
+      "default": "https://docs.calkit.org/schemas/calkit-kit.json",
+      "description": "URL of this schema, which says where to learn more.",
+      "title": "$Schema",
+      "type": "string"
+    },
     "artifact": {
       "$ref": "#/$defs/KitArtifact"
     },
@@ -203,7 +209,7 @@
       "type": "string"
     },
     "files": {
-      "description": "Files the artifact's pipeline uses, in the kit or not.",
+      "description": "Files the artifact's pipeline uses, in the calkit or not.",
       "items": {
         "$ref": "#/$defs/KitFile"
       },
@@ -212,7 +218,7 @@
     },
     "kit_version": {
       "default": 1,
-      "description": "Kit format version.",
+      "description": "Calkit format version.",
       "title": "Kit Version",
       "type": "integer"
     },
@@ -234,6 +240,6 @@
     "source",
     "files"
   ],
-  "title": "Calkit kit manifest",
+  "title": "Calkit manifest",
   "type": "object"
 }

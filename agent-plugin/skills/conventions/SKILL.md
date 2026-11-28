@@ -275,8 +275,9 @@ DVC handles:
 | `calkit show question <n>`      | Show a question with its answer rendered from evidence  |
 | `calkit check questions`        | Check answers against current evidence                  |
 | `calkit describe <file>`        | What made a file, whether it's reproducible             |
-| `calkit new kit <file>`         | Copy of a figure or document with a kit embedded        |
-| `calkit expand <file>`          | Expand a file's kit into a project                      |
+| `calkit kit create <file>`      | Copy of a figure or document with a calkit embedded     |
+| `calkit kit expand <file>`      | Expand a file's calkit into a project                   |
+| `calkit kit run <file>`         | Expand, rerun, and check the file comes out the same    |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 
@@ -371,12 +372,13 @@ though the human is considered the author and AI is noted with a `with_ai` field
 ## Sharing figures and documents
 
 When a figure, PDF, SVG, or HTML page is going to a person, e.g., pasted into
-a chat or emailed, offer to share a copy made with `calkit new kit <file>`
+a chat or emailed, offer to share a copy made with `calkit kit create <file>`
 rather than the bare file.
-The copy carries a kit: the stages, scripts, environments, and small data
+The copy carries a calkit: the stages, scripts, environments, and small data
 that make it, so the recipient can run `calkit describe` on it to see how it
-was made and `calkit expand` to get a runnable project.
-Ask before making one from a private project, since everything in the kit
-goes with the file; `calkit describe <copy>` lists what's in it.
+was made, `calkit kit expand` to get a project, and `calkit kit run` to check
+it reproduces.
+Ask before creating one from a private project, since everything in the
+calkit goes with the file; `calkit describe <copy>` lists what's in it.
 When given a file from someone else, run `calkit describe` on it before
 reasoning about where it came from.

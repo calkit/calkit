@@ -3854,8 +3854,8 @@ def new_release(
         typer.Option(
             "--kit",
             help=(
-                "Embed a kit in the released file (what makes it, so it can "
-                "be expanded into a project); see 'calkit new kit'."
+                "Embed a calkit in the released file (what makes it, so it "
+                "can be expanded into a project); see 'calkit kit create'."
             ),
         ),
     ] = False,
@@ -4046,7 +4046,7 @@ def new_release(
             targets = [stage_name]
             pipeline_stage = stage_name
     elif embed_kit:
-        raise_error("Only a file can carry a kit, not a project release")
+        raise_error("Only a file can carry a calkit, not a project release")
     elif include_pipeline:
         # A project release carries the whole pipeline already
         typer.echo("Project releases already include the pipeline")
@@ -4190,7 +4190,7 @@ def new_release(
                     except Exception as e:
                         raise_error(str(e))
             elif embed_kit:
-                typer.echo(f"Embedding kit in {stored_path_posix}")
+                typer.echo(f"Embedding calkit in {stored_path_posix}")
                 calkit.kits.write_copy(
                     path, stored_path, up_to_date=True, ck_info=ck_info
                 )
@@ -4257,7 +4257,7 @@ def new_release(
             if not os.path.isfile(path):
                 raise_error("Single artifact releases must be a single file")
             if embed_kit:
-                typer.echo(f"Embedding kit in copy in {release_files_dir}")
+                typer.echo(f"Embedding calkit in copy in {release_files_dir}")
                 calkit.kits.write_copy(
                     path,
                     os.path.join(release_files_dir, os.path.basename(path)),
@@ -4795,128 +4795,6 @@ def new_release(
             # TODO: Upload assets for GitHub release if they're not too big?
     typer.echo(f"New {release_kind} release {name} successfully created")
     return release
-
-
-@new_app.command(name="kit")
-def new_kit(
-    path: Annotated[
-        str, typer.Argument(help="Path of a figure or document to share.")
-    ],
-    output: Annotated[
-        str | None,
-        typer.Option(
-            "--output",
-            "-o",
-            help="Where to write the copy; defaults to NAME.kit.EXT here.",
-        ),
-    ] = None,
-    max_size: Annotated[
-        str | None,
-        typer.Option(
-            "--max-size",
-            help=(
-                "Largest the kit may grow, e.g., 500KB or 20MB; data that "
-                "doesn't fit is left out. Defaults to the file's size or "
-                "1MB, whichever is bigger."
-            ),
-        ),
-    ] = None,
-    no_data: Annotated[
-        bool,
-        typer.Option(
-            "--no-data",
-            help="Leave out all data, so the kit holds only the recipe.",
-        ),
-    ] = False,
-    force: Annotated[
-        bool,
-        typer.Option(
-            "--force",
-            "-f",
-            help="Make the kit even if the pipeline is out of date.",
-        ),
-    ] = False,
-) -> None:
-    """Write a copy of a figure or document with a kit embedded.
-
-    The kit holds what makes the file (stages, scripts, environments, and
-    data that fits) so anyone with the copy can inspect it with
-    'calkit describe' and expand it into a project with 'calkit expand'.
-    Works with PNG, PDF, SVG, and HTML files.
-    """
-    import calkit.kits
-    import calkit.pipeline
-
-    def parse_size(txt: str) -> int:
-        match = re.fullmatch(
-            r"\s*([\d.]+)\s*([kmg]?)b?\s*", txt, flags=re.IGNORECASE
-        )
-        if match is None:
-            raise_error(f"Invalid size: {txt}")
-        factor = {"": 1, "k": 1e3, "m": 1e6, "g": 1e9}[match.group(2).lower()]
-        return int(float(match.group(1)) * factor)
-
-    ck_info = calkit.load_calkit_info()
-    if not os.path.isfile(path):
-        raise_error(f"{path} doesn't exist")
-    stage = calkit.pipeline.get_stage_for_output(path, ck_info)
-    if stage is None:
-        raise_error(
-            f"No pipeline stage makes {path}, so there's nothing to put in "
-            "its kit"
-        )
-    typer.echo(f"Checking stage '{stage}' is up to date")
-    status = calkit.pipeline.get_status(
-        ck_info=ck_info,
-        targets=[stage],
-        check_environments=True,
-        clean_notebooks=True,
-        compile_to_dvc=True,
-    )
-    if status.errors:
-        raise_error("Pipeline checks failed: " + "; ".join(status.errors))
-    if status.is_stale and not force:
-        raise_error(
-            "Out of date: "
-            + ", ".join(status.stale_stage_names)
-            + "; run pipeline or use --force"
-        )
-    if output is None:
-        stem, ext = os.path.splitext(os.path.basename(path))
-        output = f"{stem}.kit{ext}"
-    if os.path.abspath(output) == os.path.abspath(path):
-        raise_error("Output would overwrite the original")
-    try:
-        manifest = calkit.kits.write_copy(
-            path,
-            output,
-            up_to_date=not status.is_stale,
-            max_size=None if max_size is None else parse_size(max_size),
-            include_data=not no_data,
-            ck_info=ck_info,
-        )
-    except ValueError as e:
-        raise_error(str(e))
-    included = [f for f in manifest.files if f.included]
-    left_out = [f for f in manifest.files if not f.included]
-    kit_size = os.path.getsize(output) - manifest.artifact.size
-    typer.echo(
-        f"Wrote {output} with kit ({kit_size / 1e3:.0f} KB, "
-        f"{len(included)} file" + "s" * (len(included) != 1) + ")"
-    )
-    if left_out:
-        typer.echo(
-            f"Left out {len(left_out)} file" + "s" * (len(left_out) != 1) + " "
-            f"({sum(f.size for f in left_out) / 1e6:.1f} MB); "
-            "an expanded copy can pull or remake them"
-        )
-    if manifest.source.uncommitted_paths:
-        warn(
-            "Uncommitted changes, so kit won't match any commit: "
-            + ", ".join(manifest.source.uncommitted_paths)
-        )
-    if not manifest.source.git_remotes:
-        warn("No Git remote, so history can't be fetched from the kit")
 
 
 @new_app.command(name="workspace")

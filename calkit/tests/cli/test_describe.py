@@ -278,7 +278,7 @@ def test_describe_artifact(kit_project, tmp_path):
         assert "figures/fig.png from kit-test at" in res.stdout
         assert "https://github.com/someone/kit-test.git" in res.stdout
         assert "Made by stage: make" in res.stdout
-        assert "Unchanged since kit was made" in res.stdout
+        assert "Unchanged since calkit was created" in res.stdout
         assert "origin not defined for data/raw.csv" in res.stdout
         assert "  - data/raw.csv" in res.stdout
         assert "    scripts/make.py" in res.stdout
@@ -287,8 +287,8 @@ def test_describe_artifact(kit_project, tmp_path):
     info = json.loads(res.stdout)
     assert info["artifact_unchanged"] is True
     assert info["matches_pipeline"] is True
-    assert info["kit"]["artifact"]["stage"] == "make"
-    assert info["kit"]["provenance_gaps"][0]["path"] == "data/raw.csv"
+    assert info["calkit"]["artifact"]["stage"] == "make"
+    assert info["calkit"]["provenance_gaps"][0]["path"] == "data/raw.csv"
     # A file in the project is described as part of it
     res = runner.invoke(app, ["describe", "figures/fig.png"])
     assert res.exit_code == 0, res.stdout
@@ -296,7 +296,7 @@ def test_describe_artifact(kit_project, tmp_path):
     assert "Made by stage: make" in res.stdout
     assert "Up to date" in res.stdout
     assert "origin not defined for data/raw.csv" in res.stdout
-    assert "calkit new kit figures/fig.png" in res.stdout
+    assert "calkit kit create figures/fig.png" in res.stdout
     # Defining the input's origin and declaring the figure fills the gaps
     ck_info = calkit.load_calkit_info()
     ck_info["figures"] = [{"path": "figures/fig.png", "title": "Squares"}]

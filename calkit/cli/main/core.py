@@ -67,6 +67,7 @@ from calkit.cli.fix import (
 )
 from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
+from calkit.cli.kit import kit_app
 from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
@@ -103,6 +104,11 @@ app.add_typer(
     help="Describe things, or a file with 'calkit describe PATH'.",
 )
 app.add_typer(import_app, name="import", help="Import objects.")
+app.add_typer(
+    kit_app,
+    name="kit",
+    help="Share figures and documents that carry what made them (calkits).",
+)
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(open_app, name="open", help="Open things.")
 app.add_typer(

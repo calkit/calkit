@@ -212,3 +212,39 @@ def test_cloud_login_device_code_not_found(monkeypatch):
     monkeypatch.setattr(hub_cli.calkit.hub.core.time, "sleep", lambda _s: None)
     with pytest.raises(typer.Exit):
         hub_cli.login()
+
+
+def test_git_credential(monkeypatch):
+    from typer.testing import CliRunner
+
+    calls = []
+
+    def get(path, **kwargs):
+        calls.append(path)
+        if token is None:
+            raise ValueError("No token found")
+        return {"access_token": token}
+
+    monkeypatch.setattr(calkit.hub, "get", get)
+
+    def ask(operation: str, host: str = "github.com") -> str:
+        result = CliRunner().invoke(
+            hub_cli.hub_app,
+            ["git-credential", operation],
+            input=f"protocol=https\nhost={host}\n\n",
+        )
+        assert result.exit_code == 0
+        return result.output
+
+    token = "ghu_from_hub"
+    assert ask("get") == "username=x-access-token\npassword=ghu_from_hub\n"
+    # Only GitHub's, and nothing to store or erase
+    calls.clear()
+    assert ask("get", host="gitlab.com") == ""
+    assert ask("store") == "" and ask("erase") == ""
+    assert calls == []
+    # Without a token, Git is told why and gets nothing
+    token = None
+    output = ask("get")
+    assert "Couldn't get GitHub token from hub" in output
+    assert "password=" not in output

@@ -195,6 +195,10 @@ def new_project(
     from calkit.cli.update import update_devcontainer
     from calkit.dvc import run_dvc_command
 
+    def _configure_identity(repo: git.Repo) -> None:
+        for key, value in calkit.git.configure_identity(repo).items():
+            typer.echo(f"Set Git {key} to {value} from your hub account")
+
     docs_url = "https://docs.calkit.org"
     success_message = (
         "\nCongrats on creating your new Calkit project!\n\n"
@@ -270,6 +274,8 @@ def new_project(
                 raise_error(f"Failed to initialize DVC repository: {e}")
             # Commit the DVC init changes
             if not no_commit:
+                if hub is not None:
+                    _configure_identity(repo)
                 repo.git.add(".dvc")
                 repo.git.commit(["-m", "Initialize DVC"])
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
@@ -337,14 +343,36 @@ def new_project(
                         "make sure the organization exists on the hub "
                         "and that you have write access to it."
                     )
+            elif "GitHub App not enabled" in str(e):
+                msg += (
+                    "\n\nInstall the Calkit GitHub App, or give it access to "
+                    "this repo, from "
+                    f"{calkit.hub.get_hub_url()}/settings?tab=connected-accounts"
+                )
             raise_error(msg)
         # Now clone here
+        # Git gets GitHub credentials from the hub, so this machine needs no
+        # sign-in to GitHub, which the browser extension can't ask for
         if not os.path.isdir(abs_path):
-            subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+            subprocess.run(
+                [
+                    "git",
+                    *calkit.git.get_github_credential_args(),
+                    "clone",
+                    resp["git_repo_url"],
+                    abs_path,
+                ]
+            )
+            if os.path.isdir(os.path.join(abs_path, ".git")):
+                cloned = calkit.git.get_repo(abs_path)
+                calkit.git.configure_github_credentials(cloned)
+                _configure_identity(cloned)
         elif repo is None:
             typer.echo("Fetching from newly created Git repo")
             repo = git.Repo.init(abs_path, initial_branch="main")
             repo.git.remote(["add", "origin", resp["git_repo_url"]])
+            calkit.git.configure_github_credentials(repo)
+            _configure_identity(repo)
             repo.git.fetch()
             checkout_cmd = ["-t", "origin/main"]
             if overwrite:
@@ -354,6 +382,7 @@ def new_project(
             except GitCommandError as e:
                 raise_error(f"Failed to check out main branch: {e}")
         else:
+            _configure_identity(repo)
             # Create a calkit.yaml file if one does not exist
             calkit_fpath = os.path.join(abs_path, "calkit.yaml")
             if not os.path.isfile(calkit_fpath):
@@ -417,6 +446,7 @@ def new_project(
             else:
                 typer.echo("Adding Git remote URL for hub repo")
                 repo.git.remote(["add", "origin", resp["git_repo_url"]])
+            calkit.git.configure_github_credentials(repo)
         try:
             remote_name = calkit.dvc.configure_remote(wdir=abs_path)
             calkit.dvc.set_remote_auth(remote_name=remote_name, wdir=abs_path)

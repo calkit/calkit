@@ -1051,8 +1051,14 @@ def post_project(
             logger.warning(f"Failed to create: {resp.json()}")
             try:
                 message = resp.json()["errors"][0]["message"].capitalize()
+                # One the app couldn't see a moment ago, so it has no
+                # access to it
                 if message.lower().startswith("name already exists"):
-                    message = not_installed_message
+                    message = (
+                        f"GitHub repo '{owner_name}/{repo_name}' exists, "
+                        "but Calkit GitHub App not enabled for it. "
+                        "Give the app access to it, or select another name."
+                    )
             except Exception:
                 try:
                     message = resp.json()["message"]

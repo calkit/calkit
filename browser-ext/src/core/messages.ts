@@ -225,6 +225,7 @@ export type Request =
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }
   | { type: "overleaf.connectSession" }
+  | { type: "overleaf.connected" }
   | { type: "overleaf.openTokenSettings" }
   | { type: "overleaf.tokenTab" }
   | { type: "overleaf.returnFromTokenTab" }
@@ -320,6 +321,12 @@ export type Request =
       path: string;
       kind: string;
       hubUrl: string;
+    }
+  | {
+      /** What creating a project on this machine is doing. */
+      type: "local.createProgress";
+      owner: string;
+      name: string;
     }
   | {
       /** Everything in a project's checkout here saved, as 'calkit save -a'. */
@@ -420,6 +427,7 @@ export interface ResponseMap {
   "overleaf.sync": OverleafSyncResponse;
   "overleaf.setToken": { message: string };
   "overleaf.connectSession": { message: string };
+  "overleaf.connected": boolean;
   "overleaf.openTokenSettings": null;
   "overleaf.tokenTab": { requested: boolean };
   "overleaf.returnFromTokenTab": { returned: boolean };
@@ -451,6 +459,7 @@ export interface ResponseMap {
     warning: string | null;
   };
   "local.createProject": { path: string; project: string };
+  "local.createProgress": string | null;
   "local.openOptions": null;
   "local.installEditor": null;
   /**

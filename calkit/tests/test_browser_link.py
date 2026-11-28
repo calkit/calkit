@@ -725,7 +725,33 @@ def test_start_job(tmp_path, monkeypatch):
         + ["paper", "--kind", "journal-article"],
         calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
     ]
+    # With what each is doing, for the extension to show
+    assert creating["steps"] == [
+        "Signing in",
+        "Creating project",
+        "Importing paper",
+        "Saving",
+    ]
     os.remove(calkit.browser_link.get_job_path(creating["id"]))
+    # Trying again where an earlier try made the project picks up where it
+    # stopped, e.g., before the paper could be imported
+    subprocess.check_call(["git", "init", "-q", str(analysis)])
+    (analysis / "calkit.yaml").write_text("owner: me\nname: dye\n")
+    resumed = start_job(create)
+    assert resumed["then"] == creating["then"][1:]
+    assert resumed["steps"] == ["Signing in", "Importing paper", "Saving"]
+    os.remove(calkit.browser_link.get_job_path(resumed["id"]))
+    (analysis / "calkit.yaml").write_text(
+        "owner: me\nname: dye\noverleaf_sync:\n  paper: {}\n"
+    )
+    resumed = start_job(create)
+    assert resumed["then"] == creating["then"][2:]
+    os.remove(calkit.browser_link.get_job_path(resumed["id"]))
+    # But not in a repo of another project
+    (analysis / "calkit.yaml").write_text("owner: me\nname: other\n")
+    with pytest.raises(ValueError, match="already a Git repo"):
+        start_job(create)
+    (analysis / "calkit.yaml").write_text("owner: me\nname: dye\n")
     for bad, error in [
         ({"location": str(project)}, "already a Git repo"),
         ({"location": str(analysis / "fit.py")}, "isn't a folder"),
@@ -801,6 +827,8 @@ def test_start_job(tmp_path, monkeypatch):
     )
     assert chained["status"] == "failed" and chained["returncode"] == 3
     assert chained["output"] == "One\nTwo"
+    # Which it stopped at
+    assert chained["step"] == 2
     done = run("print('Ran it')")
     assert done["status"] == "succeeded" and done["output"] == "Ran it"
     assert "progress" not in done and not done["log_path"]
@@ -845,6 +873,19 @@ def test_start_job(tmp_path, monkeypatch):
         "raise SystemExit(1)"
     )
     assert failed["error_status"] == 401
+    # One with several steps says which failed
+    with open(job_path) as f:
+        record = json.load(f)
+    with open(job_path, "w") as f:
+        json.dump(record | {"steps": ["Signing in", "Saving"]}, f)
+    failed = run(
+        "print('In')", then=["print('Error: No'); raise SystemExit(1)"]
+    )
+    assert failed["error"] == "Saving failed: No"
+    with open(job_path) as f:
+        record = json.load(f)
+    with open(job_path, "w") as f:
+        json.dump(record | {"steps": None}, f)
     # One whose process died without saying so has failed
     with open(job_path) as f:
         record = json.load(f)
@@ -1722,3 +1763,49 @@ def test_get_printed_numbers(tmp_path):
         {"notebook": "fit.ipynb", "stage": "fit"} | found,
         {"notebook": "clean.ipynb", "stage": "clean"} | found,
     ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Policies in registry")
+def test_get_policy_blocks(tmp_path, monkeypatch):
+    import getpass
+    import plistlib
+
+    from calkit.browser_link import get_policy_blocks
+
+    monkeypatch.setattr(
+        calkit.browser_link,
+        "POLICY_PATHS",
+        {
+            platform.system(): {
+                "chrome": [str(tmp_path / "chrome" / "*.json")],
+                "edge": [str(tmp_path / "{user}" / "edge.plist")],
+            }
+        },
+    )
+    (tmp_path / "chrome").mkdir()
+    # Nothing set, or hosts allowed, blocks nothing
+    assert get_policy_blocks() == {}
+    policy = tmp_path / "chrome" / "policy.json"
+    policy.write_text(json.dumps({"NativeMessagingBlocklist": ["other"]}))
+    assert get_policy_blocks() == {}
+    # Blocking every host, unless Calkit's is allowed
+    policy.write_text(json.dumps({"NativeMessagingBlocklist": ["*"]}))
+    assert "NativeMessagingAllowlist" in get_policy_blocks()["chrome"]
+    policy.write_text(
+        json.dumps(
+            {
+                "NativeMessagingBlocklist": ["*"],
+                "NativeMessagingAllowlist": ["io.calkit.native"],
+            }
+        )
+    )
+    assert get_policy_blocks() == {}
+    # Only allowing hosts installed for every user, from a Mac's managed
+    # preferences for this user
+    user_dir = tmp_path / getpass.getuser()
+    user_dir.mkdir()
+    with open(user_dir / "edge.plist", "wb") as f:
+        plistlib.dump({"NativeMessagingUserLevelHosts": False}, f)
+    assert get_policy_blocks() == {
+        "edge": "only hosts installed for all users allowed"
+    }

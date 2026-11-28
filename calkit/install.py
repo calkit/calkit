@@ -215,10 +215,16 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
         },
     },
     "git": {
+        # Apple's, which needs no Homebrew, waiting up to half an hour for
+        # the dialog it opens, which installs it after this returns, or one
+        # already open, checking without git, which would open another
         "mac": {
-            "script": "brew install git",
-            "path_add": _BREW_BINS,
-            "requires": ["brew"],
+            "script": (
+                "xcode-select --install; n=0; "
+                "until xcode-select -p >/dev/null 2>&1; do "
+                "n=$((n + 1)); [ $n -gt 360 ] && exit 1; sleep 5; done"
+            ),
+            "path_add": "/usr/bin",
         },
         "windows": {
             "script": _WINGET + "Git.Git --source winget",
@@ -304,12 +310,15 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "code": {
         # VS Code's own download, unzipped where its installer would put it,
-        # so it doesn't take Homebrew
+        # so it doesn't take Homebrew, or into the user's own Applications
+        # where they can't write to that, e.g., on a managed Mac
         "mac": {
             "script": (
+                "apps=/Applications; [ -w $apps ] || "
+                'apps="$HOME/Applications"; mkdir -p "$apps" && '
                 'zip="$(mktemp)" && curl -fsSL -o "$zip" '
                 "https://update.code.visualstudio.com/latest/darwin-universal/"
-                'stable && ditto -xk "$zip" /Applications && rm "$zip"'
+                'stable && ditto -xk "$zip" "$apps" && rm "$zip"'
             ),
             # Also where one dragged into the user's own Applications runs
             "path_add": [

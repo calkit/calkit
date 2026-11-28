@@ -147,6 +147,110 @@ WINDOWS_REGISTRY_KEYS = {
 }
 
 
+# Where organizations set Chrome's and Edge's policies, which can keep a
+# browser from starting a host installed for one user, by platform
+POLICY_PATHS = {
+    "Darwin": {
+        "chrome": [
+            "/Library/Managed Preferences/com.google.Chrome.plist",
+            "/Library/Managed Preferences/{user}/com.google.Chrome.plist",
+        ],
+        "edge": [
+            "/Library/Managed Preferences/com.microsoft.Edge.plist",
+            "/Library/Managed Preferences/{user}/com.microsoft.Edge.plist",
+        ],
+    },
+    "Linux": {
+        "chrome": ["/etc/opt/chrome/policies/managed/*.json"],
+        "chromium": ["/etc/chromium/policies/managed/*.json"],
+        "edge": ["/etc/opt/edge/policies/managed/*.json"],
+    },
+}
+WINDOWS_POLICY_KEYS = {
+    "chrome": r"SOFTWARE\Policies\Google\Chrome",
+    "edge": r"SOFTWARE\Policies\Microsoft\Edge",
+}
+
+
+def get_policy_blocks() -> dict[str, str]:
+    """Why a browser's policies, e.g., set by an organization on a laptop it
+    manages, keep it from starting the host, by browser.
+    """
+    import getpass
+    import glob
+    import platform
+    import plistlib
+
+    def read_policies(browser: str) -> dict:
+        policies: dict = {}
+        if sys.platform == "win32":
+            import winreg
+
+            key_path = WINDOWS_POLICY_KEYS.get(browser)
+            if key_path is None:
+                return policies
+            for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                try:
+                    with winreg.OpenKey(hive, key_path) as key:
+                        try:
+                            value = winreg.QueryValueEx(
+                                key, "NativeMessagingUserLevelHosts"
+                            )[0]
+                            policies["NativeMessagingUserLevelHosts"] = value
+                        except OSError:
+                            pass
+                        # Lists are subkeys of numbered values
+                        for name in (
+                            "NativeMessagingBlocklist",
+                            "NativeMessagingAllowlist",
+                        ):
+                            try:
+                                with winreg.OpenKey(key, name) as sub:
+                                    n_values = winreg.QueryInfoKey(sub)[1]
+                                    policies.setdefault(name, []).extend(
+                                        winreg.EnumValue(sub, i)[1]
+                                        for i in range(n_values)
+                                    )
+                            except OSError:
+                                pass
+                except OSError:
+                    continue
+            return policies
+        patterns = POLICY_PATHS.get(platform.system(), {}).get(browser, [])
+        for pattern in patterns:
+            for path in sorted(
+                glob.glob(pattern.format(user=getpass.getuser()))
+            ):
+                try:
+                    with open(path, "rb") as f:
+                        data = (
+                            plistlib.load(f)
+                            if path.endswith(".plist")
+                            else json.load(f)
+                        )
+                except (OSError, ValueError, plistlib.InvalidFileException):
+                    continue
+                if isinstance(data, dict):
+                    policies |= data
+        return policies
+
+    blocks = {}
+    browsers = set(WINDOWS_POLICY_KEYS)
+    for paths in POLICY_PATHS.values():
+        browsers |= set(paths)
+    for browser in sorted(browsers):
+        policies = read_policies(browser)
+        blocked = policies.get("NativeMessagingBlocklist") or []
+        allowed = policies.get("NativeMessagingAllowlist") or []
+        if policies.get("NativeMessagingUserLevelHosts") in (False, 0):
+            blocks[browser] = "only hosts installed for all users allowed"
+        elif ("*" in blocked or HOST_NAME in blocked) and (
+            HOST_NAME not in allowed
+        ):
+            blocks[browser] = f"{HOST_NAME} not in NativeMessagingAllowlist"
+    return blocks
+
+
 def read_message(stream: BinaryIO) -> dict | None:
     """Read a message from the browser, or None once it's gone."""
     header = stream.read(4)
@@ -1417,8 +1521,22 @@ def start_job(msg: dict) -> dict:
         check_clone_location(location)
         if not os.path.isdir(location):
             raise ValueError(f"{location} isn't a folder")
+        # A folder where an earlier try already made this project, e.g.,
+        # one that stopped before Overleaf was connected, picks up where it
+        # stopped
+        prior_info = {}
         if os.path.exists(os.path.join(location, ".git")):
-            raise ValueError(f"{location} is already a Git repo")
+            try:
+                prior_info = calkit.load_calkit_info(
+                    wdir=location, read_only=True
+                )
+            except Exception:
+                prior_info = {}
+            if (
+                prior_info.get("name") != name
+                or prior_info.get("owner") != owner
+            ):
+                raise ValueError(f"{location} is already a Git repo")
         hub = msg.get("hub")
         title = msg.get("title")
         overleaf_url = msg.get("overleafProjectUrl")
@@ -1444,15 +1562,28 @@ def start_job(msg: dict) -> dict:
             raise ValueError("A kind of document is needed")
         wdir = location
         cmd = calkit_cmd + ["hub", "login", "--hub", hub]
-        then = [
-            calkit_cmd
-            + ["new", "project", ".", "--hub", hub, "--name", name]
-            + ["--title", title.strip()]
-            + (["--public"] if msg.get("isPublic") else []),
-            calkit_cmd
-            + ["overleaf", "import", overleaf_url, path, "--kind", doc_kind],
-            calkit_cmd + ["save", "-a", "-m", "Add files from this machine"],
-        ]
+        then = []
+        # What each command is doing, for the extension to show
+        steps = ["Signing in"]
+        if not prior_info:
+            then.append(
+                calkit_cmd
+                + ["new", "project", ".", "--hub", hub, "--name", name]
+                + ["--title", title.strip()]
+                + (["--public"] if msg.get("isPublic") else [])
+            )
+            steps.append("Creating project")
+        if path not in (prior_info.get("overleaf_sync") or {}):
+            then.append(
+                calkit_cmd
+                + ["overleaf", "import", overleaf_url, path]
+                + ["--kind", doc_kind]
+            )
+            steps.append("Importing paper")
+        then.append(
+            calkit_cmd + ["save", "-a", "-m", "Add files from this machine"]
+        )
+        steps.append("Saving")
     elif kind == "clone":
         location = msg.get("location") or os.path.join(
             calkit.get_user_home(), "calkit", name
@@ -1529,6 +1660,7 @@ def start_job(msg: dict) -> dict:
         ),
         "cmd": cmd,
         "then": then if kind == "create" else [],
+        "steps": steps if kind == "create" else None,
         "status": "queued",
         "created": datetime.now(timezone.utc).isoformat(),
         "started": None,
@@ -1652,7 +1784,9 @@ def run_job(job_id: str) -> None:
 
     try:
         started = time.monotonic()
-        for cmd in [job["cmd"], *job.get("then", [])]:
+        for i, cmd in enumerate([job["cmd"], *job.get("then", [])]):
+            job["step"] = i
+            save(job)
             proc = subprocess.Popen(
                 cmd,
                 cwd=job["wdir"],
@@ -1699,6 +1833,9 @@ def run_job(job_id: str) -> None:
             (x for x in reversed(lines) if x.startswith("Error: ")),
             lines[-1] if lines else "It failed",
         ).removeprefix("Error: ")
+        # Which step, for a job with several, e.g., a create
+        if job.get("steps") and job["step"] < len(job["steps"]):
+            error = f"{job['steps'][job['step']]} failed: {error}"
         job |= {"status": "failed", "error": error}
         if re.search(r"overleaf_token|overleaf login", error):
             job |= {

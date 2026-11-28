@@ -6004,21 +6004,31 @@ def test_clone(monkeypatch):
     from typer.testing import CliRunner
 
     cloned = []
+    configs = []
     hubs = []
 
     def check_call(cmd, *args, **kwargs):
         # Stop at the clone, which is all that depends on the protocol
-        if cmd[:2] == ["git", "clone"]:
-            cloned.append(cmd[2])
+        if cmd[0] == "git" and "clone" in cmd:
+            i = cmd.index("clone")
+            cloned.append(cmd[i + 1])
+            configs.append(cmd[1:i])
             raise subprocess.CalledProcessError(1, cmd)
         raise AssertionError(cmd)
 
-    def get(path):
+    def get(path, **kwargs):
+        if path == "/user/github-token":
+            if not github_token:
+                raise ValueError("No token found")
+            return {"access_token": "ghu_token"}
         hubs.append(os.environ.get("CALKIT_HUB"))
         return {"git_repo_url": "https://github.com/me/proj"}
 
+    github_token = False
+
     def clone(*args, ssh_set_up=True):
         cloned.clear()
+        configs.clear()
         hubs.clear()
         monkeypatch.delenv("CALKIT_HUB", raising=False)
         monkeypatch.setattr(
@@ -6075,6 +6085,17 @@ def test_clone(monkeypatch):
         clone_url("me/proj", "--ssh", ssh_set_up=False)
         == "git@github.com:me/proj.git"
     )
+    # Over HTTPS, Git gets GitHub credentials for a hub's project from the
+    # hub, if it has them, but not for any other repo
+    assert configs == [[]]
+    github_token = True
+    clone("me/proj", "--https")
+    assert configs == [calkit.git.get_github_credential_args()]
+    clone("me/proj")
+    assert configs == [[]]
+    clone("https://github.com/me/proj.git", "--https")
+    assert configs == [[]]
+    github_token = False
     # Interactively, SSH where it isn't set up offers to set it up, which
     # can end early, e.g., once GitHub's host key is trusted, then checks
     # again, or falls back to HTTPS, unless SSH was asked for

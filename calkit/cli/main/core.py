@@ -465,6 +465,7 @@ def clone(
         url = "git@github.com:" + url.removeprefix("ssh://git@github.com/")
     # A project named by its owner and name, and maybe its hub, has its repo
     # URL fetched from that hub
+    from_hub = False
     parts = url.split("/")
     if url.startswith(("github.com/", "gitlab.com/")):
         url = "https://" + url
@@ -491,6 +492,7 @@ def clone(
         url = project["git_repo_url"]
         if not url.endswith(".git"):
             url += ".git"
+        from_hub = True
     # Set up the project for its hub, e.g., its DVC remote, even when it's
     # given by its repo URL
     if hub is not None:
@@ -537,8 +539,24 @@ def clone(
         if not ssh_ok and not ssh_given:
             typer.echo("Cloning over HTTPS")
             url = "https://github.com/" + url.removeprefix("git@github.com:")
+    # Over HTTPS, Git gets GitHub credentials for a hub's project from the
+    # hub, if it has them, so this machine needs no sign-in to GitHub, which
+    # the browser extension can't ask for; only for a hub's project, which
+    # its GitHub App can reach, since the user's own credentials are dropped
+    hub_credentials = False
+    if from_hub and url.startswith("https://github.com/"):
+        try:
+            calkit.hub.get(
+                "/user/github-token", allow_login=False, max_retries=2
+            )
+            hub_credentials = True
+        except Exception:
+            pass
     # Git clone
-    cmd = ["git", "clone", url]
+    cmd = ["git"]
+    if hub_credentials:
+        cmd += calkit.git.get_github_credential_args()
+    cmd += ["clone", url]
     if not non_recursive:
         cmd.append("--recursive")
     if location is not None:
@@ -551,6 +569,11 @@ def clone(
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")
     os.chdir(location)
+    if hub_credentials:
+        cloned = calkit.git.get_repo()
+        calkit.git.configure_github_credentials(cloned)
+        for key, value in calkit.git.configure_identity(cloned).items():
+            typer.echo(f"Set Git {key} to {value} from your hub account")
     calkit.record_project_path()
     # So Git merges dvc.lock and stage run records stage by stage
     calkit.merge.configure_driver()

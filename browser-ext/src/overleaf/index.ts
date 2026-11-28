@@ -2235,6 +2235,12 @@ async function renderAttachForm(
       );
       return;
     }
+    // Before the project's made, rather than when its paper is imported,
+    // which leaves it half done
+    if (!(await send({ type: "overleaf.connected" }))) {
+      renderTokenForm(clear(container), "", retry);
+      return;
+    }
   } catch (e) {
     // The hub's GitHub token can be expired or revoked even with a GitHub
     // username on the account, which reconnecting fixes
@@ -2418,18 +2424,41 @@ async function renderAttachForm(
       // Made on this machine, which signs in to the hub if it needs to
       if (analysisFolder) {
         clear(message).append(loading("Creating project"));
-        const made = await send({
-          type: "local.createProject",
-          owner: githubName,
-          name,
-          title: titleInput.value.trim() || name,
-          isPublic: isPublic.checked,
-          folder: analysisFolder,
-          overleafProjectUrl: `https://www.overleaf.com/project/${overleafProjectId}`,
-          path: doc.folder(),
-          kind: doc.kind.value,
-          hubUrl: hubWebUrl,
-        });
+        // Each step as it starts, since it can take minutes
+        const showStep = async () => {
+          const step = await send({
+            type: "local.createProgress",
+            owner: githubName,
+            name,
+          }).catch(() => null);
+          if (step && attach.disabled) {
+            clear(message).append(
+              loading(
+                step === "Signing in"
+                  ? "Signing in: authorize in the tab that opened"
+                  : step,
+              ),
+            );
+          }
+        };
+        const stepTimer = setInterval(() => void showStep(), 2000);
+        let made: { path: string; project: string };
+        try {
+          made = await send({
+            type: "local.createProject",
+            owner: githubName,
+            name,
+            title: titleInput.value.trim() || name,
+            isPublic: isPublic.checked,
+            folder: analysisFolder,
+            overleafProjectUrl: `https://www.overleaf.com/project/${overleafProjectId}`,
+            path: doc.folder(),
+            kind: doc.kind.value,
+            hubUrl: hubWebUrl,
+          });
+        } finally {
+          clearInterval(stepTimer);
+        }
         await send({
           type: "settings.set",
           update: { activeProject: made.project },

@@ -814,6 +814,11 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     repo = git.Repo()
     assert repo.remotes.origin.url == "https://github.com/test-user/my-project"
     assert not repo.is_dirty(untracked_files=True)
+    # Git gets GitHub credentials from the hub
+    helpers = repo.git.config(
+        "--local", "--get-all", calkit.git.GITHUB_CREDENTIAL_KEY
+    ).split("\n")
+    assert helpers[-1].endswith(" hub git-credential")
     # Test 403: remote owner is an org not in Calkit hub; error should
     # surface the detected org name and a helpful hint
     httpserver.expect_ordered_request(
@@ -846,6 +851,20 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     assert result.returncode != 0
     assert "some-org" in result.stderr
     assert "organization exists on the hub" in result.stderr
+    # Without the GitHub App, the error says where to install it
+    httpserver.expect_ordered_request(
+        "/projects", method="POST"
+    ).respond_with_json(
+        {"detail": "Calkit GitHub App not enabled for this account or repo."},
+        status=422,
+    )
+    result = subprocess.run(
+        ["calkit", "new", "project", ".", "--title", "My Project", "--cloud"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "settings?tab=connected-accounts" in result.stderr
     # Test that a non-'origin' remote name is handled correctly
     httpserver.expect_ordered_request(
         "/projects", method="POST"

@@ -77,16 +77,20 @@ export async function isLocalPermitted(): Promise<boolean> {
 
 /** What the browser's error means for someone who can fix it. */
 export function describeHostError(message: string): string {
+  // Either can also be a browser policy, e.g., on a managed laptop, which
+  // the status command checks for
   if (/not found/i.test(message)) {
     return (
       "Calkit isn't set up for the browser on this machine; install it, " +
-      "or run 'calkit browser-link install'"
+      "or run 'calkit browser-link install', or 'calkit browser-link " +
+      "status' to see why"
     );
   }
   if (/forbidden/i.test(message)) {
     return (
       "Calkit on this machine doesn't allow this extension; run " +
-      "'calkit browser-link install'"
+      "'calkit browser-link install', or 'calkit browser-link status' to " +
+      "see why"
     );
   }
   if (/exited/i.test(message)) {
@@ -132,6 +136,10 @@ export interface LocalJob {
   output: string | null;
   /** What it's doing, while it runs. */
   progress?: RunProgress;
+  /** What each of its commands does, for one with several, e.g., a create. */
+  steps?: string[] | null;
+  /** Which of them is running, or the last that ran. */
+  step?: number;
   error: string | null;
   /** The hub's status for the same failure, e.g., 401 for credentials. */
   error_status?: number;

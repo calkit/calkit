@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import git
 import pytest
@@ -785,3 +786,121 @@ def test_get_staged_files_for_a_deleted_path(tmp_dir):
         "gone.txt",
         "keep.txt",
     ]
+
+
+def test_configure_github_credentials(tmp_dir, monkeypatch, httpserver):
+    import calkit.git
+
+    httpserver.expect_request("/user/github-token").respond_with_json(
+        {"access_token": "ghu_from_hub"}
+    )
+    monkeypatch.setenv(
+        "CALKIT_HUB_API_BASE_URL", httpserver.url_for("").rstrip("/")
+    )
+    monkeypatch.setenv("CALKIT_TEST_TOKEN", "calkit-token")
+    # A helper the system came with, e.g., macOS's osxkeychain, which would
+    # otherwise answer first, and no Git config of the user's own
+    helper = '\thelper = "!f() { echo username=me; echo password=%s; }; f"\n'
+    # macOS's Git also reads a config of Apple's that GIT_CONFIG_SYSTEM
+    # doesn't replace, with osxkeychain in it, and Git for Windows one with
+    # its Credential Manager, neither of which may be asked here
+    fake_system = sys.platform not in ("darwin", "win32")
+    if not fake_system:
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    else:
+        system_config = os.path.join(tmp_dir, "system.gitconfig")
+        with open(system_config, "w") as f:
+            f.write("[credential]\n" + helper % "system")
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", system_config)
+    global_config = os.path.join(tmp_dir, "global.gitconfig")
+    open(global_config, "w").close()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", global_config)
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    for name in ("GIT_ASKPASS", "SSH_ASKPASS"):
+        monkeypatch.delenv(name, raising=False)
+    repo = git.Repo.init("repo")
+    # Running it again doesn't add more helpers
+    assert calkit.git.configure_github_credentials(repo)
+    assert calkit.git.configure_github_credentials(repo)
+    helpers = repo.git.config(
+        "--local", "--get-all", calkit.git.GITHUB_CREDENTIAL_KEY
+    ).split("\n")
+    assert helpers[0] == ""
+    assert helpers[1].endswith(" hub git-credential")
+    assert len(helpers) == 2
+
+    def fill(host: str, cwd: str = "repo") -> str:
+        return subprocess.run(
+            ["git", "credential", "fill"],
+            cwd=cwd,
+            input=f"protocol=https\nhost={host}\n\n",
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    # GitHub's come from the hub, and other hosts' from the system's helper
+    assert "password=ghu_from_hub" in fill("github.com")
+    if fake_system:
+        assert "password=system" in fill("gitlab.com")
+    # Credentials the user set up themselves are kept, e.g., with
+    # 'gh auth setup-git', which also resets the system's helpers
+    with open(global_config, "w") as f:
+        f.write(
+            '[credential "https://github.com"]\n\thelper =\n'
+            + helper % "users"
+        )
+    own = git.Repo.init("own")
+    assert calkit.git.get_github_credential_args() == []
+    assert not calkit.git.configure_github_credentials(own)
+    assert "password=users" in fill("github.com", cwd="own")
+    open(global_config, "w").close()
+    # Without a token from the hub, Git is told why and gets nothing
+    httpserver.clear()
+    httpserver.no_handler_status_code = 401
+    result = subprocess.run(
+        ["git", "credential", "fill"],
+        cwd="repo",
+        input="protocol=https\nhost=github.com\n\n",
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Couldn't get GitHub token from hub" in result.stderr
+
+
+def test_configure_identity(tmp_dir, monkeypatch):
+    import calkit.git
+
+    global_config = os.path.join(tmp_dir, "global.gitconfig")
+    open(global_config, "w").close()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", global_config)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    user = {"full_name": "Ada Lovelace", "email": "ada@example.com"}
+    monkeypatch.setattr(calkit.hub, "get", lambda *args, **kwargs: user)
+    repo = git.Repo.init("repo")
+    # Both from the hub account, then nothing once Git has them
+    assert calkit.git.configure_identity(repo) == {
+        "user.name": "Ada Lovelace",
+        "user.email": "ada@example.com",
+    }
+    assert repo.git.config("--local", "user.email") == "ada@example.com"
+    assert calkit.git.configure_identity(repo) == {}
+    # Only what's missing, e.g., not a name set for every repo
+    repo = git.Repo.init("other")
+    with open(global_config, "w") as f:
+        f.write("[user]\n\tname = Ada\n")
+    assert calkit.git.configure_identity(repo) == {
+        "user.email": "ada@example.com"
+    }
+    # A GitHub account's no-reply address without an email
+    repo = git.Repo.init("third")
+    user = {"full_name": None, "email": None, "github_username": "ada"}
+    assert calkit.git.configure_identity(repo) == {
+        "user.email": "ada@users.noreply.github.com"
+    }
+    # Nothing when the hub can't say, e.g., when not signed in
+    monkeypatch.setattr(
+        calkit.hub, "get", Mock(side_effect=ValueError("No token found"))
+    )
+    repo = git.Repo.init("fourth")
+    assert calkit.git.configure_identity(repo) == {}

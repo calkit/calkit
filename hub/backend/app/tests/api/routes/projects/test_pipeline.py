@@ -848,6 +848,7 @@ def test_project_pipeline_runs(
     normal_user_token_headers: dict[str, str],
     db,
     tmp_path,
+    monkeypatch,
 ) -> None:
     import uuid
     from datetime import datetime, timedelta, timezone
@@ -951,6 +952,16 @@ def test_project_pipeline_runs(
     def iso(dt: datetime) -> str:
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # A workflow using another of Calkit's actions isn't one that runs the
+    # pipeline, and isn't touched when one is added
+    check_path = tmp_path / "repo" / ".github" / "workflows" / "check.yml"
+    check_path.parent.mkdir(parents=True)
+    check_txt = "steps:\n  - uses: calkit/calkit/actions/check@v0.1.0\n"
+    check_path.write_text(check_txt)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Add check workflow")
+    repo.git.push("origin", branch)
+    monkeypatch.setattr(calkit.resources, "ACTION_NAMES", ["run", "check"])
     # Without a workflow, one can still be started, which adds it
     resp = call("get")
     assert resp.status_code == 200, resp.text
@@ -973,6 +984,8 @@ def test_project_pipeline_runs(
         on=["workflow_dispatch"]
     )
     assert origin.head.commit == repo.head.commit
+    assert check_path.read_text() == check_txt
+    assert not repo.is_dirty(untracked_files=True)
     assert github.minted[-1]["permissions"] == {
         "contents": "write",
         "workflows": "write",
@@ -1165,11 +1178,11 @@ def test_project_pipeline_runs(
     path.rename(run_path)
     resp = call("get")
     assert not resp.json()["can_start"]
-    assert "pages.yml, run.yml" in resp.json()["cannot_start_reason"]
+    assert "(pages.yml, run.yml)" in resp.json()["cannot_start_reason"]
     n_posts = len(github.post)
     resp = call("post")
     assert resp.status_code == 409
-    assert "pages.yml, run.yml" in resp.json()["detail"]
+    assert "(pages.yml, run.yml)" in resp.json()["detail"]
     assert len(github.post) == n_posts
     resp = call("post", json={"github_actions": {"workflow": "run.yml"}})
     assert resp.status_code == 200

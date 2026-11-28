@@ -233,7 +233,7 @@ def test_update_dataset(tmp_dir):
     assert info.datasets[0].imported_from.date == date(2026, 1, 2)
 
 
-def test_update_github_actions(tmp_dir):
+def test_update_github_actions(tmp_dir, monkeypatch):
     subprocess.check_call(["calkit", "init"])
     workflow_dir = os.path.join(".github", "workflows")
     ref = calkit.resources.get_action_ref()
@@ -330,6 +330,7 @@ def test_update_github_actions(tmp_dir):
     pages_txt = custom_txt.replace("jobs:", "on: push\njobs:")
     with open(pages_fpath, "w") as f:
         f.write(pages_txt)
+    monkeypatch.setattr(calkit.resources, "ACTION_NAMES", ["run", "check"])
     check_fpath = os.path.join(workflow_dir, "check.yml")
     check_txt = (
         "on: pull_request\n"
@@ -364,9 +365,21 @@ def test_update_github_actions(tmp_dir):
     os.rename(out_fpath, os.path.join(workflow_dir, "run.yml"))
     result = runner.invoke(update_app, ["github-actions", "--on", "push"])
     assert result.exit_code != 0
-    assert "pages.yml, run.yml" in result.output
+    assert "(pages.yml, run.yml)" in result.output
     assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     assert not os.path.isfile(out_fpath)
+    # A run-calkit.yml that doesn't run the action isn't replaced by one
+    # that does
+    os.remove(os.path.join(workflow_dir, "run.yml"))
+    os.remove(pages_fpath)
+    with open(out_fpath, "w") as f:
+        f.write(check_txt)
+    result = runner.invoke(update_app, ["github-actions"])
+    assert result.exit_code != 0
+    assert "doesn't run the Calkit action" in result.output
+    assert "Writing" not in result.output
+    with open(out_fpath) as f:
+        assert f.read() == check_txt
 
 
 def test_update_uv_env(tmp_dir):

@@ -33,18 +33,22 @@ ACTION_REF = f"{ACTION_PATH}@main"
 # The run action used to live in its own repo, and workflows written before
 # it moved still point there
 LEGACY_ACTION_PATHS = ["calkit/run-action"]
-# Any of Calkit's actions, e.g., run or check, which share its release tags
+# Calkit's actions as of this version, which share its release tags, so a
+# workflow's refs to them can be pinned to it
+ACTION_NAMES = ["run"]
 ACTION_USES_PATTERN = re.compile(
     r"(?m)^(?P<prefix>\s*(?:-\s+)?uses:\s*)(?P<quote>['\"]?)"
     + r"(?P<path>"
     + "|".join(
-        [re.escape(ACTIONS_PATH) + r"/[\w-]+"]
+        [re.escape(ACTIONS_PATH) + r"/(?P<name>[\w-]+)"]
         + [re.escape(p) for p in LEGACY_ACTION_PATHS]
     )
-    + r")@[^\s'\"#]+(?P=quote)"
+    + r")@(?P<ref>[^\s'\"#]+)(?P=quote)"
 )
-# The workflow Calkit writes to run the pipeline
+# The workflow Calkit writes to run the pipeline, and the other spelling
+# that's taken as it
 RUN_WORKFLOW_FNAME = "run-calkit.yml"
+RUN_WORKFLOW_FNAMES = [RUN_WORKFLOW_FNAME, "run-calkit.yaml"]
 
 
 def get_dir() -> str:
@@ -292,10 +296,21 @@ def get_action_ref(version: str | None = None) -> str:
     return f"{ACTION_PATH}@v{major}.{minor}.{patch}"
 
 
+def get_action_name(match: re.Match[str]) -> str | None:
+    """Return which of Calkit's actions a ``uses`` line matched by
+    ``ACTION_USES_PATTERN`` refers to, or None if it isn't one of this
+    version's.
+    """
+    if match.group("path") in LEGACY_ACTION_PATHS:
+        return "run"
+    name = match.group("name")
+    return name if name in ACTION_NAMES else None
+
+
 def uses_run_action(workflow_txt: str) -> bool:
     """Return whether a workflow runs the Calkit action, at any ref."""
     return any(
-        m.group("path") in [ACTION_PATH] + LEGACY_ACTION_PATHS
+        get_action_name(m) == "run"
         for m in ACTION_USES_PATTERN.finditer(workflow_txt)
     )
 
@@ -305,15 +320,16 @@ def set_action_ref(workflow_txt: str, version: str | None = None) -> str:
 
     Only the ``uses`` lines are touched, so a project that has customized
     its workflow keeps those customizations. Refs to the run action's
-    previous home get migrated in the process.
+    previous home get migrated in the process. Refs pinned to a commit are
+    left as they are, since that was chosen over a release.
     """
 
     def replace(m: re.Match[str]) -> str:
-        path = m.group("path")
-        if path in LEGACY_ACTION_PATHS:
-            path = ACTION_PATH
+        name = get_action_name(m)
+        if name is None or re.fullmatch(r"[0-9a-f]{40}", m.group("ref")):
+            return m.group(0)
         quote = m.group("quote")
-        return f"{m.group('prefix')}{quote}{path}@{ref}{quote}"
+        return f"{m.group('prefix')}{quote}{ACTIONS_PATH}/{name}@{ref}{quote}"
 
     _, _, ref = get_action_ref(version).partition("@")
     return ACTION_USES_PATTERN.sub(replace, workflow_txt)
@@ -391,7 +407,7 @@ def find_workflows(wdir: str | None = None) -> list[tuple[str, str]]:
             continue
         with open(fpath, encoding="utf-8", errors="replace") as f:
             txt = f.read()
-        if ACTION_USES_PATTERN.search(txt):
+        if any(get_action_name(m) for m in ACTION_USES_PATTERN.finditer(txt)):
             found.append((fname, txt))
     return found
 
@@ -412,11 +428,23 @@ def get_pipeline_workflow_fname(fnames: list[str]) -> str | None:
     That's the one Calkit writes, else the only one, since another might,
     e.g., run the action to build and deploy a website.
     """
-    if RUN_WORKFLOW_FNAME in fnames:
-        return RUN_WORKFLOW_FNAME
+    for fname in RUN_WORKFLOW_FNAMES:
+        if fname in fnames:
+            return fname
     if len(fnames) == 1:
         return fnames[0]
     return None
+
+
+def get_ambiguous_workflows_message(fnames: list[str]) -> str:
+    """Return the message for when it's unclear which of several workflows
+    that run the Calkit action runs the pipeline.
+    """
+    return (
+        f"Several workflows run the Calkit action ({', '.join(fnames)}), "
+        "so it's unclear which runs the pipeline; "
+        f"rename that one to {RUN_WORKFLOW_FNAME}"
+    )
 
 
 def can_start_workflow(workflow_txt: str) -> bool:

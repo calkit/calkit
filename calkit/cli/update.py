@@ -415,23 +415,23 @@ def update_github_actions(
     # Each workflow using a Calkit action is updated in place, rather than
     # writing another beside it, but only the pipeline's gets new triggers
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
-    os.makedirs(out_dir, exist_ok=True)
     found = calkit_resources.find_workflows(wdir)
     run_fnames = [
         fname for fname, txt in found if calkit_resources.uses_run_action(txt)
     ]
     workflows: list[tuple[str, str | None]] = list(found)
     if not run_fnames:
-        workflows.append((calkit_resources.RUN_WORKFLOW_FNAME, None))
-        run_fnames = [calkit_resources.RUN_WORKFLOW_FNAME]
+        fname = calkit_resources.RUN_WORKFLOW_FNAME
+        if os.path.lexists(os.path.join(out_dir, fname)):
+            raise_error(f"{fname} doesn't run the Calkit action")
+        workflows.append((fname, None))
+        run_fnames = [fname]
     on_fname = calkit_resources.get_pipeline_workflow_fname(run_fnames)
     if on is not None and on_fname is None:
         raise_error(
-            "Several workflows run the Calkit action: "
-            + ", ".join(run_fnames)
-            + "; rename the one that runs the pipeline "
-            + f"{calkit_resources.RUN_WORKFLOW_FNAME} to set its triggers"
+            calkit_resources.get_ambiguous_workflows_message(run_fnames)
         )
+    os.makedirs(out_dir, exist_ok=True)
     rel_paths = []
     for fname, txt in workflows:
         on_this = on if fname == on_fname else None

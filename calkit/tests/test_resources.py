@@ -301,7 +301,7 @@ def test_get_latex_workshop_settings(tmp_path):
         assert got["latex-workshop.docker.enabled"] is False
 
 
-def test_github_actions_workflow(tmp_path):
+def test_github_actions_workflow(tmp_path, monkeypatch):
     workflow = calkit.ryaml.load(
         calkit.resources.read_text(
             "github-actions", calkit.resources.GITHUB_ACTIONS_FNAME
@@ -361,12 +361,22 @@ def test_github_actions_workflow(tmp_path):
     other = "      - uses: actions/checkout@v4\n# calkit/run-action@v2\n"
     assert not calkit.resources.uses_run_action(other)
     assert calkit.resources.set_action_ref(other, version="1.2.3") == other
-    # Calkit's other actions are repinned too, but don't run the pipeline
+    # Calkit's other actions are only repinned if this version has them,
+    # since its release wouldn't otherwise, and they don't run the pipeline
     check = "      - uses: calkit/calkit/actions/check@v0.1.0\n"
+    assert calkit.resources.set_action_ref(check, version="1.2.3") == check
+    monkeypatch.setattr(calkit.resources, "ACTION_NAMES", ["run", "check"])
     assert not calkit.resources.uses_run_action(check)
     assert calkit.resources.set_action_ref(
         check, version="1.2.3"
     ) == check.replace("v0.1.0", "v1.2.3")
+    # Refs pinned to a commit are left as they are
+    sha_pinned = "      - uses: calkit/calkit/actions/run@" + "a1" * 20 + "\n"
+    assert calkit.resources.uses_run_action(sha_pinned)
+    assert (
+        calkit.resources.set_action_ref(sha_pinned, version="1.2.3")
+        == sha_pinned
+    )
     # Whether a project's workflow is still the example is what decides if
     # it gets replaced wholesale or only repinned, so the pin itself, and
     # line endings Git may have translated, can't affect that
@@ -453,6 +463,7 @@ def test_github_actions_workflow(tmp_path):
         ([], None),
         (["pages.yml"], "pages.yml"),
         (["pages.yml", "run-calkit.yml"], "run-calkit.yml"),
+        (["pages.yml", "run-calkit.yaml"], "run-calkit.yaml"),
         (["pages.yml", "run.yml"], None),
     ]:
         assert (

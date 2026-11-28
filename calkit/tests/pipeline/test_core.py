@@ -269,6 +269,148 @@ def test_to_dvc():
     )
 
 
+def test_to_dvc_calkit_commands_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import inspect
+    import re
+    import shlex
+    from typing import Any
+
+    import typer
+    import typer.main
+    from typer.core import TyperGroup
+
+    import calkit.models.pipeline as models
+    from calkit.cli.main.core import app
+
+    monkeypatch.chdir(tmp_path)
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("paper")
+    nb = {"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+    for path, text in {
+        "paper/main.tex": "\\documentclass{article}\n",
+        "doc.qmd": "---\ntitle: x\n---\n",
+        "nb.ipynb": json.dumps(nb),
+        "app.py": "import marimo\n",
+        "notes.md": "# Notes\n",
+        "script.py": "",
+        "requirements.txt": "",
+        "vals.json": "{}",
+        "a.txt": "",
+        "fig.svg": "<svg/>",
+        "img.xcf": "",
+        "deck.pptx": "",
+        "letter.docx": "",
+    }.items():
+        Path(path).write_text(text)
+    stages = {
+        "py": {
+            "kind": "python-script",
+            "environment": "py",
+            "script_path": "script.py",
+        },
+        "latex": {
+            "kind": "latex",
+            "environment": "tex",
+            "target_path": "paper/main.tex",
+            "diffs": ["main"],
+        },
+        "quarto": {
+            "kind": "quarto",
+            "environment": "py",
+            "target_path": "doc.qmd",
+        },
+        "map": {
+            "kind": "map-paths",
+            "paths": [{"kind": "file-to-file", "src": "a.txt", "dest": "b"}],
+        },
+        "j2l": {
+            "kind": "json-to-latex",
+            "inputs": ["vals.json"],
+            "outputs": ["vals.tex"],
+        },
+        "q2l": {"kind": "questions-to-latex", "outputs": ["questions.tex"]},
+        "refs": {"kind": "references-check", "target_path": "paper/main.tex"},
+        "nb": {
+            "kind": "jupyter-notebook",
+            "environment": "py",
+            "notebook_path": "nb.ipynb",
+        },
+        "word": {"kind": "word-to-pdf", "word_doc_path": "letter.docx"},
+        "manual": {"kind": "manual-step", "message": "Do it"},
+        "inkscape": {
+            "kind": "inkscape-export",
+            "source_path": "fig.svg",
+            "outputs": ["fig.pdf"],
+        },
+        "gimp": {
+            "kind": "gimp-export",
+            "source_path": "img.xcf",
+            "outputs": ["img.png"],
+        },
+        "pptx": {
+            "kind": "pptx-export",
+            "source_path": "deck.pptx",
+            "outputs": ["deck.pdf"],
+        },
+        "marimo": {
+            "kind": "marimo-html-wasm",
+            "environment": "py",
+            "notebook_path": "app.py",
+            "output_dir": "site",
+        },
+        "proc": {"kind": "procedure", "procedure_name": "prep"},
+        "mdpdf": {
+            "kind": "markdown-pdf",
+            "environment": "tex",
+            "target_path": "notes.md",
+            "pdf_path": "notes.pdf",
+        },
+    }
+    ck_info = {
+        "environments": {
+            "tex": {"kind": "texlive"},
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "procedures": {"prep": {"title": "Prep", "steps": [{"summary": "x"}]}},
+        "pipeline": {"stages": stages},
+    }
+    calkit.save_calkit_info(ck_info)
+    # Every stage kind compiling to a Calkit command is covered here, so a
+    # new one is too
+    kinds = set()
+    for cls in vars(models).values():
+        if not (inspect.isclass(cls) and issubclass(cls, models.Stage)):
+            continue
+        kind = cls.model_fields["kind"].default
+        if isinstance(kind, str) and re.search(
+            r'"calkit [a-z]', inspect.getsource(cls)
+        ):
+            kinds.add(kind)
+    assert kinds <= {s["kind"] for s in stages.values()}
+    # Each Calkit command in the compiled pipeline still exists, even if
+    # hidden, since renaming one would rerun users' stages
+    cli = typer.main.get_command(app)
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    n_checked = 0
+    for name, stage in dvc_stages.items():
+        for part in stage["cmd"].split(" -- "):
+            words = shlex.split(part)
+            if words[:1] != ["calkit"]:
+                continue
+            command: Any = cli
+            for word in words[1:]:
+                if not isinstance(command, TyperGroup) or word[0] == "-":
+                    break
+                sub = command.get_command(typer.Context(command), word)
+                assert sub is not None, (name, stage["cmd"])
+                command = sub
+            assert not isinstance(command, TyperGroup), (name, stage["cmd"])
+            n_checked += 1
+    assert n_checked > len(stages)
+
+
 def test_to_dvc_from_matrix_outs():
     # Test that we can define inputs from matrix stage outputs
     ck_info = {
@@ -5993,3 +6135,76 @@ def test_to_dvc_warns_on_system_env(tmp_dir, capsys):
     assert warned == ["plot", "fit", "explore"]
     assert "calkit new uv-env" in err
     assert "calkit new renv" in err
+
+
+def test_find_document_stages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from calkit.pipeline import find_document_stages
+
+    monkeypatch.chdir(tmp_path)
+    calkit.save_calkit_info(
+        {
+            "pipeline": {
+                "stages": {
+                    "paper": {
+                        "kind": "latex",
+                        "environment": "tex",
+                        "target_path": "paper/main.tex",
+                        "output_dir": "build",
+                    },
+                    "thesis": {
+                        "kind": "latex",
+                        "environment": "tex",
+                        "wdir": "thesis",
+                        "target_path": "main.tex",
+                    },
+                    "pub": {
+                        "kind": "quarto",
+                        "environment": "py",
+                        "target_path": "site/index.qmd",
+                    },
+                    "nb": {
+                        "kind": "jupyter-notebook",
+                        "environment": "py",
+                        "notebook_path": "nb.ipynb",
+                    },
+                    "plot": {
+                        "kind": "python-script",
+                        "environment": "py",
+                        "script_path": "plot.py",
+                    },
+                }
+            }
+        }
+    )
+    for d in ["paper", "thesis", "site", "build", "elsewhere"]:
+        os.makedirs(d)
+    # A document or a latex stage's PDF, from anywhere in the project,
+    # under the stage's wdir
+    for cwd, path, kinds, inside, expected in [
+        (".", "paper/main.tex", None, False, ["paper"]),
+        ("paper", "main.tex", None, False, ["paper"]),
+        ("paper", "../build/main.pdf", None, False, ["paper"]),
+        (".", "thesis/main.tex", None, False, ["thesis"]),
+        ("thesis", "main.pdf", None, False, ["thesis"]),
+        (".", "main.tex", None, False, []),
+        (".", "nb.ipynb", None, False, ["nb"]),
+        (".", "nb.ipynb", ["quarto"], False, []),
+        ("site", ".", ["quarto"], True, ["pub"]),
+        (".", "build", ["latex"], True, []),
+        (".", ".", ["quarto", "latex"], True, ["paper", "thesis", "pub"]),
+        (".", "plot.py", None, False, []),
+    ]:
+        monkeypatch.chdir(os.path.join(tmp_path, cwd))
+        project_dir, ck_info, found = find_document_stages(
+            path, **({"kinds": kinds} if kinds else {}), inside=inside
+        )
+        assert project_dir is not None
+        assert os.path.samefile(project_dir, tmp_path), (cwd, path)
+        assert "pipeline" in ck_info
+        assert [name for name, _ in found] == expected, (cwd, path)
+    # Outside a project there's none
+    monkeypatch.chdir(tmp_path)
+    os.remove("calkit.yaml")
+    assert find_document_stages("paper/main.tex") == (None, {}, [])

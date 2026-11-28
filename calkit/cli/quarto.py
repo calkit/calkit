@@ -7,11 +7,15 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from typing_extensions import Annotated
 
-from calkit.cli.core import raise_error
+from calkit.cli.core import raise_error, warn
+
+if TYPE_CHECKING:
+    from calkit.models.pipeline import QuartoStage
 
 # Runs a command in a directory, finding it on PATH as a shell would, e.g.,
 # a 'quarto.cmd' on Windows
@@ -22,6 +26,31 @@ _RUN_IN_DIR = (
 )
 
 quarto_app = typer.Typer(no_args_is_help=True)
+
+
+def render_stage(
+    stage_dir: str,
+    stage: QuartoStage,
+    quarto_args: list[str] | None = None,
+    allow_machine_quarto: bool = False,
+    no_check: bool = False,
+) -> None:
+    """Render a Quarto document as its pipeline stage does."""
+    wdir = os.getcwd()
+    os.chdir(os.path.join(stage_dir, stage.wdir or ""))
+    try:
+        render(
+            target_path=stage.target_path,
+            quarto_args=stage.args + (quarto_args or []),
+            environment=stage.inner_environment,
+            allow_machine_quarto=(
+                allow_machine_quarto or stage.allows_machine_quarto
+            ),
+            to=stage.to,
+            no_check=no_check,
+        )
+    finally:
+        os.chdir(wdir)
 
 
 @quarto_app.command(name="render")
@@ -43,8 +72,8 @@ def render(
             "-e",
             help=(
                 "Environment to render in, which should provide Quarto, or "
-                "`_system` for Quarto installed on this machine. There's no "
-                "default."
+                "`_system` for Quarto installed on this machine. Defaults to "
+                "the environment of the document's quarto stage, if any."
             ),
         ),
     ] = None,
@@ -75,9 +104,14 @@ def render(
     Quarto has to come from the environment, so every machine renders with
     the same version, unless the project lists 'quarto' as a requirement or
     the environment is `_system`, i.e., this machine.
+    If no environment or format is given and a pipeline `quarto` stage
+    renders the document, its environment, format, arguments, and working
+    directory are used.
     The values the document shows with the 'ckvalue' shortcode are checked
     first, and the Quarto extension that reads them from their results
     files is written.
+
+    Also available as `calkit doc build`.
     """
     import calkit
     import calkit.environments
@@ -85,6 +119,31 @@ def render(
     from calkit.cli.main.core import run_in_env
     from calkit.markdown import MarkdownParseError, results_by_name
 
+    # Without explicit environment or format, render as the document's stage
+    if environment is None and to is None:
+        import calkit.pipeline
+        from calkit.models.pipeline import QuartoStage
+
+        stage_dir, _, found = calkit.pipeline.find_document_stages(
+            target_path, kinds=["quarto"]
+        )
+        matches = [s for _, s in found if isinstance(s, QuartoStage)]
+        if stage_dir is not None and matches:
+            s = matches[0]
+            if len(matches) > 1:
+                others = ", ".join(f"'{m.name}'" for m in matches[1:])
+                warn(
+                    f"Stages '{s.name}' and {others} all render "
+                    f"{target_path}; rendering it as '{s.name}'"
+                )
+            render_stage(
+                stage_dir=stage_dir,
+                stage=s,
+                quarto_args=quarto_args,
+                allow_machine_quarto=allow_machine_quarto,
+                no_check=no_check,
+            )
+            return
     # The project is wherever calkit.yaml is above the document, since a
     # stage renders from its working directory
     doc_path = os.path.abspath(target_path)
